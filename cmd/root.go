@@ -12,6 +12,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/app"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/db"
+	"github.com/opencode-ai/opencode/internal/format"
 	"github.com/opencode-ai/opencode/internal/llm/agent"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/pubsub"
@@ -21,11 +22,30 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "OpenCode",
-	Short: "A terminal AI assistant for software development",
+	Use:   "opencode",
+	Short: "Terminal-based AI assistant for software development",
 	Long: `OpenCode is a powerful terminal-based AI assistant that helps with software development tasks.
 It provides an interactive chat interface with AI capabilities, code analysis, and LSP integration
 to assist developers in writing, debugging, and understanding code directly from the terminal.`,
+	Example: `
+  # Run in interactive mode
+  opencode
+
+  # Run with debug logging
+  opencode -d
+
+  # Run with debug logging in a specific directory
+  opencode -d -c /path/to/project
+
+  # Print version
+  opencode -v
+
+  # Run a single non-interactive prompt
+  opencode -p "Explain the use of context in Go"
+
+  # Run a single non-interactive prompt with JSON output format
+  opencode -p "Explain the use of context in Go" -f json
+  `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// If the help flag is set, show the help message
 		if cmd.Flag("help").Changed {
@@ -40,6 +60,15 @@ to assist developers in writing, debugging, and understanding code directly from
 		// Load the config
 		debug, _ := cmd.Flags().GetBool("debug")
 		cwd, _ := cmd.Flags().GetString("cwd")
+		prompt, _ := cmd.Flags().GetString("prompt")
+		outputFormat, _ := cmd.Flags().GetString("output-format")
+		quiet, _ := cmd.Flags().GetBool("quiet")
+
+		// Validate format option
+		if !format.IsValid(outputFormat) {
+			return fmt.Errorf("invalid format option: %s\n%s", outputFormat, format.GetHelpText())
+		}
+
 		if cwd != "" {
 			err := os.Chdir(cwd)
 			if err != nil {
@@ -73,16 +102,25 @@ to assist developers in writing, debugging, and understanding code directly from
 			logging.Error("Failed to create app: %v", err)
 			return err
 		}
+		// Defer shutdown here so it runs for both interactive and non-interactive modes
+		defer app.Shutdown()
 
+		// Initialize MCP tools early for both modes
+		initMCPTools(ctx, app)
+
+		// Non-interactive mode
+		if prompt != "" {
+			// Run non-interactive flow using the App method
+			return app.RunNonInteractive(ctx, prompt, outputFormat, quiet)
+		}
+
+		// Interactive mode
 		// Set up the TUI
 		zone.NewGlobal()
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
 		)
-
-		// Initialize MCP tools in the background
-		initMCPTools(ctx, app)
 
 		// Setup the subscriptions, this will send services events to the TUI
 		ch, cancelSubs := setupSubscriptions(app, ctx)
@@ -255,4 +293,17 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Version")
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().StringP("cwd", "c", "", "Current working directory")
+	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")
+
+	// Add format flag with validation logic
+	rootCmd.Flags().StringP("output-format", "f", format.Text.String(),
+		"Output format for non-interactive mode (text, json)")
+
+	// Add quiet flag to hide spinner in non-interactive mode
+	rootCmd.Flags().BoolP("quiet", "q", false, "Hide spinner in non-interactive mode")
+
+	// Register custom validation for the format flag
+	rootCmd.RegisterFlagCompletionFunc("output-format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return format.SupportedFormats, cobra.ShellCompDirectiveNoFileComp
+	})
 }

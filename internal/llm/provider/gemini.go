@@ -57,11 +57,16 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 	for _, msg := range messages {
 		switch msg.Role {
 		case message.User:
+			var parts []genai.Part
+			parts = append(parts, genai.Text(msg.Content().String()))
+			for _, binaryContent := range msg.BinaryContent() {
+				imageFormat := strings.Split(binaryContent.MIMEType, "/")
+				parts = append(parts, genai.ImageData(imageFormat[1], binaryContent.Data))
+			}
 			history = append(history, &genai.Content{
-				Parts: []genai.Part{genai.Text(msg.Content().String())},
+				Parts: parts,
 				Role:  "user",
 			})
-
 		case message.Assistant:
 			content := &genai.Content{
 				Role:  "model",

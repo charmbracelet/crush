@@ -8,5 +8,6 @@ func TitlePrompt(_ models.ModelProvider) string {
 - the title should be a summary of the user's message
 - it should be one line long
 - do not use quotes or colons
-- the entire text you return will be used as the title`
+- the entire text you return will be used as the title
+- never return anything that is more than one sentence (one line) long`
 }

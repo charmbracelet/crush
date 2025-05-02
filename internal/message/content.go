@@ -66,13 +66,17 @@ func (iuc ImageURLContent) String() string {
 func (ImageURLContent) isPart() {}
 
 type BinaryContent struct {
+	Path     string
 	MIMEType string
 	Data     []byte
 }
 
-func (bc BinaryContent) String() string {
+func (bc BinaryContent) String(provider models.ModelProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	return "data:" + bc.MIMEType + ";base64," + base64Encoded
+	if provider == models.ProviderOpenAI {
+		return "data:" + bc.MIMEType + ";base64," + base64Encoded
+	}
+	return base64Encoded
 }
 
 func (BinaryContent) isPart() {}
@@ -110,7 +114,6 @@ type Message struct {
 	SessionID string
 	Parts     []ContentPart
 	Model     models.ModelID
-
 	CreatedAt int64
 	UpdatedAt int64
 }

@@ -38,7 +38,7 @@ func (e *AgentEvent) Response() message.Message {
 }
 
 type Service interface {
-	Run(ctx context.Context, sessionID string, content string) (<-chan AgentEvent, error)
+	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -117,6 +117,9 @@ func (a *agent) IsSessionBusy(sessionID string) bool {
 }
 
 func (a *agent) generateTitle(ctx context.Context, sessionID string, content string) error {
+	if content == "" {
+		return nil
+	}
 	if a.titleProvider == nil {
 		return nil
 	}
@@ -124,16 +127,13 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 	if err != nil {
 		return err
 	}
+	parts := []message.ContentPart{message.TextContent{Text: content}}
 	response, err := a.titleProvider.SendMessages(
 		ctx,
 		[]message.Message{
 			{
-				Role: message.User,
-				Parts: []message.ContentPart{
-					message.TextContent{
-						Text: content,
-					},
-				},
+				Role:  message.User,
+				Parts: parts,
 			},
 		},
 		make([]tools.BaseTool, 0),
@@ -158,7 +158,10 @@ func (a *agent) err(err error) AgentEvent {
 	}
 }
 
-func (a *agent) Run(ctx context.Context, sessionID string, content string) (<-chan AgentEvent, error) {
+func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error) {
+	if !a.provider.Model().SupportsAttachments && attachments != nil {
+		attachments = nil
+	}
 	events := make(chan AgentEvent)
 	if a.IsSessionBusy(sessionID) {
 		return nil, ErrSessionBusy
@@ -172,10 +175,13 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string) (<-ch
 		defer logging.RecoverPanic("agent.Run", func() {
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
-
-		result := a.processGeneration(genCtx, sessionID, content)
+		var attachmentParts []message.ContentPart
+		for _, attachment := range attachments {
+			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
+		}
+		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
 		if result.Err() != nil && !errors.Is(result.Err(), ErrRequestCancelled) && !errors.Is(result.Err(), context.Canceled) {
-			logging.ErrorPersist(fmt.Sprintf("Generation error for session %s: %v", sessionID, result))
+			logging.ErrorPersist(result.Err().Error())
 		}
 		logging.Debug("Request completed", "sessionID", sessionID)
 		a.activeRequests.Delete(sessionID)
@@ -186,7 +192,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string) (<-ch
 	return events, nil
 }
 
-func (a *agent) processGeneration(ctx context.Context, sessionID, content string) AgentEvent {
+func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
 	// List existing messages; if none, start title generation asynchronously.
 	msgs, err := a.messages.List(ctx, sessionID)
 	if err != nil {
@@ -204,13 +210,13 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}()
 	}
 
-	userMsg, err := a.createUserMessage(ctx, sessionID, content)
+	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
 	}
-
 	// Append the new user message to the conversation history.
 	msgHistory := append(msgs, userMsg)
+
 	for {
 		// Check for cancellation before each iteration
 		select {
@@ -240,12 +246,12 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 	}
 }
 
-func (a *agent) createUserMessage(ctx context.Context, sessionID, content string) (message.Message, error) {
+func (a *agent) createUserMessage(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) (message.Message, error) {
+	parts := []message.ContentPart{message.TextContent{Text: content}}
+	parts = append(parts, attachmentParts...)
 	return a.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role: message.User,
-		Parts: []message.ContentPart{
-			message.TextContent{Text: content},
-		},
+		Role:  message.User,
+		Parts: parts,
 	})
 }
 
@@ -310,7 +316,6 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				}
 				continue
 			}
-
 			toolResult, toolErr := tool.Run(ctx, tools.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,

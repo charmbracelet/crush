@@ -270,18 +270,21 @@ func (m *modelDialogCmp) BindingKeys() []key.Binding {
 
 func (m *modelDialogCmp) setupModels() {
 	cfg := config.Get()
-
+	modelInfo := GetSelectedModel(cfg)
 	m.availableProviders = getEnabledProviders(cfg)
 	m.hScrollPossible = len(m.availableProviders) > 1
-
-	agentCfg := cfg.Agents[config.AgentCoder]
-	selectedModelId := agentCfg.Model
-	modelInfo := models.SupportedModels[selectedModelId]
 
 	m.provider = modelInfo.Provider
 	m.hScrollOffset = findProviderIndex(m.availableProviders, m.provider)
 
 	m.setupModelsForProvider(m.provider)
+}
+
+func GetSelectedModel(cfg *config.Config) models.Model {
+
+	agentCfg := cfg.Agents[config.AgentCoder]
+	selectedModelId := agentCfg.Model
+	return models.SupportedModels[selectedModelId]
 }
 
 func getEnabledProviders(cfg *config.Config) []models.ModelProvider {

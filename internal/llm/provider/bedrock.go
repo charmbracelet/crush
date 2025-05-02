@@ -55,7 +55,7 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 	if strings.Contains(string(opts.model.APIModel), "anthropic") {
 		// Create Anthropic client with Bedrock configuration
 		anthropicOpts := opts
-		anthropicOpts.anthropicOptions = append(anthropicOpts.anthropicOptions, 
+		anthropicOpts.anthropicOptions = append(anthropicOpts.anthropicOptions,
 			WithAnthropicBedrock(true),
 			WithAnthropicDisableCache(),
 		)
@@ -84,7 +84,7 @@ func (b *bedrockClient) send(ctx context.Context, messages []message.Message, to
 
 func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	eventChan := make(chan ProviderEvent)
-	
+
 	if b.childProvider == nil {
 		go func() {
 			eventChan <- ProviderEvent{
@@ -95,6 +95,7 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 		}()
 		return eventChan
 	}
-	
+
 	return b.childProvider.stream(ctx, messages, tools)
 }
+

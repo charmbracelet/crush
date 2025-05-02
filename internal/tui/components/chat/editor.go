@@ -1,14 +1,19 @@
 package chat
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
@@ -18,9 +23,13 @@ import (
 )
 
 type editorCmp struct {
-	app      *app.App
-	session  session.Session
-	textarea textarea.Model
+	width       int
+	height      int
+	app         *app.App
+	session     session.Session
+	textarea    textarea.Model
+	attachments []message.Attachment
+	deleteMode  bool
 }
 
 type EditorKeyMaps struct {
@@ -32,6 +41,11 @@ type bluredEditorKeyMaps struct {
 	Send       key.Binding
 	Focus      key.Binding
 	OpenEditor key.Binding
+}
+type DeleteAttachmentKeyMaps struct {
+	AttachmentDeleteMode key.Binding
+	Escape               key.Binding
+	DeleteAllAttachments key.Binding
 }
 
 var editorMaps = EditorKeyMaps{
@@ -45,7 +59,26 @@ var editorMaps = EditorKeyMaps{
 	),
 }
 
-func openEditor() tea.Cmd {
+var DeleteKeyMaps = DeleteAttachmentKeyMaps{
+	AttachmentDeleteMode: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
+	),
+	Escape: key.NewBinding(
+		key.WithKeys("esc"),
+		key.WithHelp("esc", "cancel delete mode"),
+	),
+	DeleteAllAttachments: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("ctrl+r+r", "delete all attchments"),
+	),
+}
+
+const (
+	maxAttachments = 5
+)
+
+func (m *editorCmp) openEditor() tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "nvim"
@@ -72,8 +105,11 @@ func openEditor() tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
+		attachments := m.attachments
+		m.attachments = nil
 		return SendMsg{
-			Text: string(content),
+			Text:        string(content),
+			Attachments: attachments,
 		}
 	})
 }
@@ -89,12 +125,16 @@ func (m *editorCmp) send() tea.Cmd {
 
 	value := m.textarea.Value()
 	m.textarea.Reset()
+	attachments := m.attachments
+
+	m.attachments = nil
 	if value == "" {
 		return nil
 	}
 	return tea.Batch(
 		util.CmdHandler(SendMsg{
-			Text: value,
+			Text:        value,
+			Attachments: attachments,
 		}),
 	)
 }
@@ -110,7 +150,34 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.session = msg
 		}
 		return m, nil
+	case dialog.AttachmentAddedMsg:
+		if len(m.attachments) >= maxAttachments {
+			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
+			return m, cmd
+		}
+		m.attachments = append(m.attachments, msg.Attachment)
 	case tea.KeyMsg:
+		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
+			m.deleteMode = true
+			return m, nil
+		}
+		if key.Matches(msg, DeleteKeyMaps.DeleteAllAttachments) && m.deleteMode {
+			m.deleteMode = false
+			m.attachments = nil
+			return m, nil
+		}
+		if m.deleteMode && len(msg.Runes) > 0 && unicode.IsDigit(msg.Runes[0]) {
+			num := int(msg.Runes[0] - '0')
+			m.deleteMode = false
+			if num < 10 && len(m.attachments) > num {
+				if num == 0 {
+					m.attachments = m.attachments[num+1:]
+				} else {
+					m.attachments = slices.Delete(m.attachments, num, num+1)
+				}
+				return m, nil
+			}
+		}
 		if key.Matches(msg, messageKeys.PageUp) || key.Matches(msg, messageKeys.PageDown) ||
 			key.Matches(msg, messageKeys.HalfPageUp) || key.Matches(msg, messageKeys.HalfPageDown) {
 			return m, nil
@@ -119,7 +186,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
-			return m, openEditor()
+			return m, m.openEditor()
+		}
+		if key.Matches(msg, DeleteKeyMaps.Escape) {
+			m.deleteMode = false
+			return m, nil
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, editorMaps.Send) {
@@ -133,6 +204,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.send()
 			}
 		}
+
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
@@ -147,12 +219,23 @@ func (m *editorCmp) View() string {
 		Bold(true).
 		Foreground(t.Primary())
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View())
+	if len(m.attachments) == 0 {
+		return lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View())
+	}
+	m.textarea.SetHeight(m.height - 1)
+	return lipgloss.JoinVertical(lipgloss.Top,
+		m.attachmentsContent(),
+		lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"),
+			m.textarea.View()),
+	)
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
+	m.width = width
+	m.height = height
 	m.textarea.SetWidth(width - 3) // account for the prompt and padding right
 	m.textarea.SetHeight(height)
+	m.textarea.SetWidth(width)
 	return nil
 }
 
@@ -160,9 +243,33 @@ func (m *editorCmp) GetSize() (int, int) {
 	return m.textarea.Width(), m.textarea.Height()
 }
 
+func (m *editorCmp) attachmentsContent() string {
+	var styledAttachments []string
+	t := theme.CurrentTheme()
+	attachmentStyles := styles.BaseStyle().
+		MarginLeft(1).
+		Background(t.TextMuted()).
+		Foreground(t.Text())
+	for i, attachment := range m.attachments {
+		var filename string
+		if len(attachment.FileName) > 10 {
+			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, attachment.FileName[0:7])
+		} else {
+			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, attachment.FileName)
+		}
+		if m.deleteMode {
+			filename = fmt.Sprintf("%d%s", i, filename)
+		}
+		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
+	}
+	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
+	return content
+}
+
 func (m *editorCmp) BindingKeys() []key.Binding {
 	bindings := []key.Binding{}
 	bindings = append(bindings, layout.KeyMapToSlice(editorMaps)...)
+	bindings = append(bindings, layout.KeyMapToSlice(DeleteKeyMaps)...)
 	return bindings
 }
 
@@ -198,10 +305,8 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 
 func NewEditorCmp(app *app.App) tea.Model {
 	ta := CreateTextArea(nil)
-
 	return &editorCmp{
 		app:      app,
 		textarea: ta,
 	}
 }
-

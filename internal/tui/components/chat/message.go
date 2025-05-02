@@ -80,7 +80,29 @@ func renderMessage(msg string, isUser bool, isFocused bool, width int, info ...s
 }
 
 func renderUserMessage(msg message.Message, isFocused bool, width int, position int) uiMessage {
-	content := renderMessage(msg.Content().String(), true, isFocused, width)
+	var styledAttachments []string
+	t := theme.CurrentTheme()
+	attachmentStyles := styles.BaseStyle().
+		MarginLeft(1).
+		Background(t.TextMuted()).
+		Foreground(t.Text())
+	for _, attachment := range msg.BinaryContent() {
+		file := filepath.Base(attachment.Path)
+		var filename string
+		if len(file) > 10 {
+			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, file[0:7])
+		} else {
+			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, file)
+		}
+		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
+	}
+	content := ""
+	if len(styledAttachments) > 0 {
+		attachmentContent := styles.BaseStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...))
+		content = renderMessage(msg.Content().String(), true, isFocused, width, attachmentContent)
+	} else {
+		content = renderMessage(msg.Content().String(), true, isFocused, width)
+	}
 	userMsg := uiMessage{
 		ID:          msg.ID,
 		messageType: userMessageType,

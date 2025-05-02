@@ -35,6 +35,7 @@ type messagesCmp struct {
 	cachedContent map[string]cacheItem
 	spinner       spinner.Model
 	rendering     bool
+	attachments   viewport.Model
 }
 type renderFinishedMsg struct{}
 
@@ -229,12 +230,15 @@ func (m *messagesCmp) renderView() {
 
 	messages := make([]string, 0)
 	for _, v := range m.uiMessages {
-		messages = append(messages, v.content,
+		messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, v.content),
 			baseStyle.
 				Width(m.width).
-				Render(""),
+				Render(
+					"",
+				),
 		)
 	}
+
 	m.viewport.SetContent(
 		baseStyle.
 			Width(m.width).
@@ -413,6 +417,8 @@ func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
 	m.height = height
 	m.viewport.Width = width
 	m.viewport.Height = height - 2
+	m.attachments.Width = width + 40
+	m.attachments.Height = 3
 	m.rerender()
 	return nil
 }
@@ -431,7 +437,9 @@ func (m *messagesCmp) SetSession(session session.Session) tea.Cmd {
 		return util.ReportError(err)
 	}
 	m.messages = messages
-	m.currentMsgID = m.messages[len(m.messages)-1].ID
+	if len(m.messages) > 0 {
+		m.currentMsgID = m.messages[len(m.messages)-1].ID
+	}
 	delete(m.cachedContent, m.currentMsgID)
 	m.rendering = true
 	return func() tea.Msg {
@@ -453,6 +461,7 @@ func NewMessagesCmp(app *app.App) tea.Model {
 	s := spinner.New()
 	s.Spinner = spinner.Pulse
 	vp := viewport.New(0, 0)
+	attachmets := viewport.New(0, 0)
 	vp.KeyMap.PageUp = messageKeys.PageUp
 	vp.KeyMap.PageDown = messageKeys.PageDown
 	vp.KeyMap.HalfPageUp = messageKeys.HalfPageUp
@@ -462,5 +471,6 @@ func NewMessagesCmp(app *app.App) tea.Model {
 		cachedContent: make(map[string]cacheItem),
 		viewport:      vp,
 		spinner:       s,
+		attachments:   attachmets,
 	}
 }

@@ -5,6 +5,10 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
+var (
+	ImageBakcground = "#212121"
+)
+
 // Style generation functions that use the current theme
 
 // BaseStyle returns the base style with background and foreground colors
@@ -149,4 +153,3 @@ func BorderFocusedColor() lipgloss.AdaptiveColor {
 func BorderDimColor() lipgloss.AdaptiveColor {
 	return theme.CurrentTheme().BorderDim()
 }
-

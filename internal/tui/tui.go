@@ -26,9 +26,14 @@ type keyMap struct {
 	Help          key.Binding
 	SwitchSession key.Binding
 	Commands      key.Binding
+	Filepicker    key.Binding
 	Models        key.Binding
 	SwitchTheme   key.Binding
 }
+
+const (
+	quitKey = "q"
+)
 
 var keys = keyMap{
 	Logs: key.NewBinding(
@@ -54,7 +59,10 @@ var keys = keyMap{
 		key.WithKeys("ctrl+k"),
 		key.WithHelp("ctrl+k", "commands"),
 	),
-
+	Filepicker: key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "select files to upload"),
+	),
 	Models: key.NewBinding(
 		key.WithKeys("ctrl+o"),
 		key.WithHelp("ctrl+o", "model selection"),
@@ -77,7 +85,7 @@ var returnKey = key.NewBinding(
 )
 
 var logsKeyReturnKey = key.NewBinding(
-	key.WithKeys("esc", "backspace", "q"),
+	key.WithKeys("esc", "backspace", quitKey),
 	key.WithHelp("esc/q", "go back"),
 )
 
@@ -112,6 +120,9 @@ type appModel struct {
 	showInitDialog bool
 	initDialog     dialog.InitDialogCmp
 
+	showFilepicker bool
+	filepicker     dialog.FilepickerCmp
+
 	showThemeDialog bool
 	themeDialog     dialog.ThemeDialog
 }
@@ -135,6 +146,7 @@ func (a appModel) Init() tea.Cmd {
 	cmds = append(cmds, cmd)
 	cmd = a.initDialog.Init()
 	cmds = append(cmds, cmd)
+	cmd = a.filepicker.Init()
 	cmd = a.themeDialog.Init()
 	cmds = append(cmds, cmd)
 
@@ -181,6 +193,10 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		command, commandCmd := a.commandDialog.Update(msg)
 		a.commandDialog = command.(dialog.CommandDialog)
 		cmds = append(cmds, commandCmd)
+
+		filepicker, filepickerCmd := a.filepicker.Update(msg)
+		a.filepicker = filepicker.(dialog.FilepickerCmp)
+		cmds = append(cmds, filepickerCmd)
 
 		a.initDialog.SetSize(msg.Width, msg.Height)
 
@@ -333,6 +349,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch {
+
 		case key.Matches(msg, keys.Quit):
 			a.showQuit = !a.showQuit
 			if a.showHelp {
@@ -343,6 +360,10 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if a.showCommandDialog {
 				a.showCommandDialog = false
+			}
+			if a.showFilepicker {
+				a.showFilepicker = false
+				a.filepicker.ToggleFilepicker(a.showFilepicker)
 			}
 			if a.showModelDialog {
 				a.showModelDialog = false
@@ -364,7 +385,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case key.Matches(msg, keys.Commands):
-			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog {
+			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
 				// Show commands dialog
 				if len(a.commands) == 0 {
 					return a, util.ReportWarn("No commands available")
@@ -392,26 +413,36 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.themeDialog.Init()
 			}
 			return a, nil
-		case key.Matches(msg, logsKeyReturnKey):
-			if a.currentPage == page.LogsPage {
-				return a, a.moveToPage(page.ChatPage)
-			}
-		case key.Matches(msg, returnKey):
-			if a.showQuit {
-				a.showQuit = !a.showQuit
-				return a, nil
-			}
-			if a.showHelp {
-				a.showHelp = !a.showHelp
-				return a, nil
-			}
-			if a.showInitDialog {
-				a.showInitDialog = false
-				// Mark the project as initialized without running the command
-				if err := config.MarkProjectInitialized(); err != nil {
-					return a, util.ReportError(err)
+		case key.Matches(msg, returnKey) || key.Matches(msg):
+			if msg.String() == quitKey {
+				if a.currentPage == page.LogsPage {
+					return a, a.moveToPage(page.ChatPage)
 				}
-				return a, nil
+			} else if !a.filepicker.IsCWDFocused() {
+				if a.showQuit {
+					a.showQuit = !a.showQuit
+					return a, nil
+				}
+				if a.showHelp {
+					a.showHelp = !a.showHelp
+					return a, nil
+				}
+				if a.showInitDialog {
+					a.showInitDialog = false
+					// Mark the project as initialized without running the command
+					if err := config.MarkProjectInitialized(); err != nil {
+						return a, util.ReportError(err)
+					}
+					return a, nil
+				}
+				if a.showFilepicker {
+					a.showFilepicker = false
+					a.filepicker.ToggleFilepicker(a.showFilepicker)
+					return a, nil
+				}
+				if a.currentPage == page.LogsPage {
+					return a, a.moveToPage(page.ChatPage)
+				}
 			}
 		case key.Matches(msg, keys.Logs):
 			return a, a.moveToPage(page.LogsPage)
@@ -429,8 +460,26 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.showHelp = !a.showHelp
 				return a, nil
 			}
+		case key.Matches(msg, keys.Filepicker):
+			a.showFilepicker = !a.showFilepicker
+			a.filepicker.ToggleFilepicker(a.showFilepicker)
+			return a, nil
 		}
+	default:
+		f, filepickerCmd := a.filepicker.Update(msg)
+		a.filepicker = f.(dialog.FilepickerCmp)
+		cmds = append(cmds, filepickerCmd)
 
+	}
+
+	if a.showFilepicker {
+		f, filepickerCmd := a.filepicker.Update(msg)
+		a.filepicker = f.(dialog.FilepickerCmp)
+		cmds = append(cmds, filepickerCmd)
+		// Only block key messages send all other messages down
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return a, tea.Batch(cmds...)
+		}
 	}
 
 	if a.showQuit {
@@ -519,6 +568,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 		// For now we don't move to any page if the agent is busy
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
+
 	var cmds []tea.Cmd
 	if _, ok := a.loadedPages[pageID]; !ok {
 		cmd := a.pages[pageID].Init()
@@ -557,6 +607,22 @@ func (a appModel) View() string {
 			appView,
 			true,
 		)
+	}
+
+	if a.showFilepicker {
+		overlay := a.filepicker.View()
+		row := lipgloss.Height(appView) / 2
+		row -= lipgloss.Height(overlay) / 2
+		col := lipgloss.Width(appView) / 2
+		col -= lipgloss.Width(overlay) / 2
+		appView = layout.PlaceOverlay(
+			col,
+			row,
+			overlay,
+			appView,
+			true,
+		)
+
 	}
 
 	if !a.app.CoderAgent.IsBusy() {
@@ -704,6 +770,7 @@ func New(app *app.App) tea.Model {
 			page.ChatPage: page.NewChatPage(app),
 			page.LogsPage: page.NewLogsPage(),
 		},
+		filepicker: dialog.NewFilepickerCmp(app),
 	}
 
 	model.RegisterCommand(dialog.Command{

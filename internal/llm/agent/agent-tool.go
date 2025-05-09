@@ -69,11 +69,11 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, fmt.Errorf("error generating agent: %s", err)
 	}
 	result := <-done
-	if result.Err() != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error generating agent: %s", result.Err())
+	if result.Error != nil {
+		return tools.ToolResponse{}, fmt.Errorf("error generating agent: %s", result.Error)
 	}
 
-	response := result.Response()
+	response := result.Message
 	if response.Role != message.Assistant {
 		return tools.NewTextErrorResponse("no response"), nil
 	}
@@ -88,8 +88,6 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 	}
 
 	parentSession.Cost += updatedSession.Cost
-	parentSession.PromptTokens += updatedSession.PromptTokens
-	parentSession.CompletionTokens += updatedSession.CompletionTokens
 
 	_, err = b.sessions.Save(ctx, parentSession)
 	if err != nil {

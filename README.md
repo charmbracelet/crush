@@ -62,12 +62,29 @@ OpenCode looks for configuration in the following locations:
 - `$XDG_CONFIG_HOME/opencode/.opencode.json`
 - `./.opencode.json` (local directory)
 
+### Auto Compact Feature
+
+OpenCode includes an auto compact feature that automatically summarizes your conversation when it approaches the model's context window limit. When enabled (default setting), this feature:
+
+- Monitors token usage during your conversation
+- Automatically triggers summarization when usage reaches 95% of the model's context window
+- Creates a new session with the summary, allowing you to continue your work without losing context
+- Helps prevent "out of context" errors that can occur with long conversations
+
+You can enable or disable this feature in your configuration file:
+
+```json
+{
+  "autoCompact": true // default is true
+}
+```
+
 ### Environment Variables
 
 You can configure OpenCode using environment variables:
 
 | Environment Variable       | Purpose                                                |
-|----------------------------|--------------------------------------------------------|
+| -------------------------- | ------------------------------------------------------ |
 | `ANTHROPIC_API_KEY`        | For Claude models                                      |
 | `OPENAI_API_KEY`           | For OpenAI models                                      |
 | `GEMINI_API_KEY`           | For Google Gemini models                               |
@@ -78,7 +95,6 @@ You can configure OpenCode using environment variables:
 | `AZURE_OPENAI_ENDPOINT`    | For Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | For Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | For Azure OpenAI models                                |
-
 
 ### Configuration File Structure
 
@@ -134,7 +150,8 @@ You can configure OpenCode using environment variables:
     }
   },
   "debug": false,
-  "debugLSP": false
+  "debugLSP": false,
+  "autoCompact": true
 }
 ```
 
@@ -327,9 +344,11 @@ OpenCode supports custom commands that can be created by users to quickly send p
 Custom commands are predefined prompts stored as Markdown files in one of three locations:
 
 1. **User Commands** (prefixed with `user:`):
+
    ```
    $XDG_CONFIG_HOME/opencode/commands/
    ```
+
    (typically `~/.config/opencode/commands/` on Linux/macOS)
 
    or
@@ -381,6 +400,15 @@ This creates a command with ID `user:git:commit`.
 3. Press Enter to execute the command
 
 The content of the command file will be sent as a message to the AI assistant.
+
+### Built-in Commands
+
+OpenCode includes several built-in commands:
+
+| Command            | Description                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| Initialize Project | Creates or updates the OpenCode.md memory file with project-specific information                    |
+| Compact Session    | Manually triggers the summarization of the current session, creating a new session with the summary |
 
 ## MCP (Model Context Protocol)
 

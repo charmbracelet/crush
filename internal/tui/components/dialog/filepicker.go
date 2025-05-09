@@ -302,11 +302,8 @@ func (f *filepickerCmp) View() string {
 		}
 		if file.IsDir() {
 			filename = filename + "/"
-		} else if isExtSupported(file.Name()) {
-			filename = filename
-		} else {
-			filename = filename
 		}
+		// No need to reassign filename if it's not changing
 
 		files = append(files, itemStyle.Padding(0, 1).Render(filename))
 	}

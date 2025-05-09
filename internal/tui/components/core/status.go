@@ -21,7 +21,6 @@ import (
 
 type StatusCmp interface {
 	tea.Model
-	SetHelpWidgetMsg(string)
 }
 
 type statusCmp struct {
@@ -74,11 +73,9 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 var helpWidget = ""
 
 // getHelpWidget returns the help widget with current theme colors
-func getHelpWidget(helpText string) string {
+func getHelpWidget() string {
 	t := theme.CurrentTheme()
-	if helpText == "" {
-		helpText = "ctrl+? help"
-	}
+	helpText := "ctrl+? help"
 
 	return styles.Padded().
 		Background(t.TextMuted()).
@@ -87,7 +84,7 @@ func getHelpWidget(helpText string) string {
 		Render(helpText)
 }
 
-func formatTokensAndCost(tokens int64, cost float64) string {
+func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 	// Format tokens in human-readable format (e.g., 110K, 1.2M)
 	var formattedTokens string
 	switch {
@@ -110,32 +107,48 @@ func formatTokensAndCost(tokens int64, cost float64) string {
 	// Format cost with $ symbol and 2 decimal places
 	formattedCost := fmt.Sprintf("$%.2f", cost)
 
-	return fmt.Sprintf("Tokens: %s, Cost: %s", formattedTokens, formattedCost)
+	percentage := (float64(tokens) / float64(contextWindow)) * 100
+	if percentage > 80 {
+		// add the warning icon and percentage
+		formattedTokens = fmt.Sprintf("%s(%d%%)", styles.WarningIcon, int(percentage))
+	}
+
+	return fmt.Sprintf("Context: %s, Cost: %s", formattedTokens, formattedCost)
 }
 
 func (m statusCmp) View() string {
 	t := theme.CurrentTheme()
+	modelID := config.Get().Agents[config.AgentCoder].Model
+	model := models.SupportedModels[modelID]
 
 	// Initialize the help widget
-	status := getHelpWidget("")
+	status := getHelpWidget()
 
+	tokenInfoWidth := 0
 	if m.session.ID != "" {
-		tokens := formatTokensAndCost(m.session.PromptTokens+m.session.CompletionTokens, m.session.Cost)
+		totalTokens := m.session.PromptTokens + m.session.CompletionTokens
+		tokens := formatTokensAndCost(totalTokens, model.ContextWindow, m.session.Cost)
 		tokensStyle := styles.Padded().
 			Background(t.Text()).
-			Foreground(t.BackgroundSecondary()).
-			Render(tokens)
-		status += tokensStyle
+			Foreground(t.BackgroundSecondary())
+		percentage := (float64(totalTokens) / float64(model.ContextWindow)) * 100
+		if percentage > 80 {
+			tokensStyle = tokensStyle.Background(t.Warning())
+		}
+		tokenInfoWidth = lipgloss.Width(tokens) + 2
+		status += tokensStyle.Render(tokens)
 	}
 
 	diagnostics := styles.Padded().
 		Background(t.BackgroundDarker()).
 		Render(m.projectDiagnostics())
 
+	availableWidht := max(0, m.width-lipgloss.Width(helpWidget)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokenInfoWidth)
+
 	if m.info.Msg != "" {
 		infoStyle := styles.Padded().
 			Foreground(t.Background()).
-			Width(m.availableFooterMsgWidth(diagnostics))
+			Width(availableWidht)
 
 		switch m.info.Type {
 		case util.InfoTypeInfo:
@@ -146,18 +159,18 @@ func (m statusCmp) View() string {
 			infoStyle = infoStyle.Background(t.Error())
 		}
 
+		infoWidth := availableWidht - 10
 		// Truncate message if it's longer than available width
 		msg := m.info.Msg
-		availWidth := m.availableFooterMsgWidth(diagnostics) - 10
-		if len(msg) > availWidth && availWidth > 0 {
-			msg = msg[:availWidth] + "..."
+		if len(msg) > infoWidth && infoWidth > 0 {
+			msg = msg[:infoWidth] + "..."
 		}
 		status += infoStyle.Render(msg)
 	} else {
 		status += styles.Padded().
 			Foreground(t.Text()).
 			Background(t.BackgroundSecondary()).
-			Width(m.availableFooterMsgWidth(diagnostics)).
+			Width(availableWidht).
 			Render("")
 	}
 
@@ -245,12 +258,10 @@ func (m *statusCmp) projectDiagnostics() string {
 	return strings.Join(diagnostics, " ")
 }
 
-func (m statusCmp) availableFooterMsgWidth(diagnostics string) int {
-	tokens := ""
+func (m statusCmp) availableFooterMsgWidth(diagnostics, tokenInfo string) int {
 	tokensWidth := 0
 	if m.session.ID != "" {
-		tokens = formatTokensAndCost(m.session.PromptTokens+m.session.CompletionTokens, m.session.Cost)
-		tokensWidth = lipgloss.Width(tokens) + 2
+		tokensWidth = lipgloss.Width(tokenInfo) + 2
 	}
 	return max(0, m.width-lipgloss.Width(helpWidget)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokensWidth)
 }
@@ -272,14 +283,8 @@ func (m statusCmp) model() string {
 		Render(model.Name)
 }
 
-func (m statusCmp) SetHelpWidgetMsg(s string) {
-	// Update the help widget text using the getHelpWidget function
-	helpWidget = getHelpWidget(s)
-}
-
 func NewStatusCmp(lspClients map[string]*lsp.Client) StatusCmp {
-	// Initialize the help widget with default text
-	helpWidget = getHelpWidget("")
+	helpWidget = getHelpWidget()
 
 	return &statusCmp{
 		messageTTL: 10 * time.Second,

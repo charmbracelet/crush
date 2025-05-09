@@ -15,6 +15,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/permission"
+	"github.com/opencode-ai/opencode/internal/pubsub"
 	"github.com/opencode-ai/opencode/internal/session"
 )
 
@@ -24,35 +25,46 @@ var (
 	ErrSessionBusy      = errors.New("session is currently processing another request")
 )
 
+type AgentEventType string
+
+const (
+	AgentEventTypeError     AgentEventType = "error"
+	AgentEventTypeResponse  AgentEventType = "response"
+	AgentEventTypeSummarize AgentEventType = "summarize"
+)
+
 type AgentEvent struct {
-	message message.Message
-	err     error
-}
+	Type    AgentEventType
+	Message message.Message
+	Error   error
 
-func (e *AgentEvent) Err() error {
-	return e.err
-}
-
-func (e *AgentEvent) Response() message.Message {
-	return e.message
+	// When summarizing
+	SessionID string
+	Progress  string
+	Done      bool
 }
 
 type Service interface {
+	pubsub.Suscriber[AgentEvent]
+	Model() models.Model
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	Update(agentName config.AgentName, modelID models.ModelID) (models.Model, error)
+	Summarize(ctx context.Context, sessionID string) error
 }
 
 type agent struct {
+	*pubsub.Broker[AgentEvent]
 	sessions session.Service
 	messages message.Service
 
 	tools    []tools.BaseTool
 	provider provider.Provider
 
-	titleProvider provider.Provider
+	titleProvider     provider.Provider
+	summarizeProvider provider.Provider
 
 	activeRequests sync.Map
 }
@@ -75,23 +87,45 @@ func NewAgent(
 			return nil, err
 		}
 	}
+	var summarizeProvider provider.Provider
+	if agentName == config.AgentCoder {
+		summarizeProvider, err = createAgentProvider(config.AgentSummarizer)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	agent := &agent{
-		provider:       agentProvider,
-		messages:       messages,
-		sessions:       sessions,
-		tools:          agentTools,
-		titleProvider:  titleProvider,
-		activeRequests: sync.Map{},
+		Broker:            pubsub.NewBroker[AgentEvent](),
+		provider:          agentProvider,
+		messages:          messages,
+		sessions:          sessions,
+		tools:             agentTools,
+		titleProvider:     titleProvider,
+		summarizeProvider: summarizeProvider,
+		activeRequests:    sync.Map{},
 	}
 
 	return agent, nil
 }
 
+func (a *agent) Model() models.Model {
+	return a.provider.Model()
+}
+
 func (a *agent) Cancel(sessionID string) {
+	// Cancel regular requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
 			logging.InfoPersist(fmt.Sprintf("Request cancellation initiated for session: %s", sessionID))
+			cancel()
+		}
+	}
+
+	// Also check for summarize requests
+	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID + "-summarize"); exists {
+		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
+			logging.InfoPersist(fmt.Sprintf("Summarize cancellation initiated for session: %s", sessionID))
 			cancel()
 		}
 	}
@@ -154,7 +188,8 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 
 func (a *agent) err(err error) AgentEvent {
 	return AgentEvent{
-		err: err,
+		Type:  AgentEventTypeError,
+		Error: err,
 	}
 }
 
@@ -180,12 +215,13 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
 		}
 		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
-		if result.Err() != nil && !errors.Is(result.Err(), ErrRequestCancelled) && !errors.Is(result.Err(), context.Canceled) {
-			logging.ErrorPersist(result.Err().Error())
+		if result.Error != nil && !errors.Is(result.Error, ErrRequestCancelled) && !errors.Is(result.Error, context.Canceled) {
+			logging.ErrorPersist(result.Error.Error())
 		}
 		logging.Debug("Request completed", "sessionID", sessionID)
 		a.activeRequests.Delete(sessionID)
 		cancel()
+		a.Publish(pubsub.CreatedEvent, result)
 		events <- result
 		close(events)
 	}()
@@ -241,7 +277,9 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			continue
 		}
 		return AgentEvent{
-			message: agentMessage,
+			Type:    AgentEventTypeResponse,
+			Message: agentMessage,
+			Done:    true,
 		}
 	}
 }
@@ -432,8 +470,8 @@ func (a *agent) TrackUsage(ctx context.Context, sessionID string, model models.M
 		model.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
 	sess.Cost += cost
-	sess.CompletionTokens += usage.OutputTokens
-	sess.PromptTokens += usage.InputTokens
+	sess.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens
+	sess.PromptTokens = usage.InputTokens + usage.CacheCreationTokens
 
 	_, err = a.sessions.Save(ctx, sess)
 	if err != nil {
@@ -459,6 +497,162 @@ func (a *agent) Update(agentName config.AgentName, modelID models.ModelID) (mode
 	a.provider = provider
 
 	return a.provider.Model(), nil
+}
+
+func (a *agent) Summarize(ctx context.Context, sessionID string) error {
+	if a.summarizeProvider == nil {
+		return fmt.Errorf("summarize provider not available")
+	}
+
+	// Check if session is busy
+	if a.IsSessionBusy(sessionID) {
+		return ErrSessionBusy
+	}
+
+	// Create a new context with cancellation
+	summarizeCtx, cancel := context.WithCancel(ctx)
+
+	// Store the cancel function in activeRequests to allow cancellation
+	a.activeRequests.Store(sessionID+"-summarize", cancel)
+
+	go func() {
+		defer a.activeRequests.Delete(sessionID + "-summarize")
+		defer cancel()
+		event := AgentEvent{
+			Type:     AgentEventTypeSummarize,
+			Progress: "Starting summarization...",
+		}
+
+		a.Publish(pubsub.CreatedEvent, event)
+		// Get all messages from the session
+		msgs, err := a.messages.List(summarizeCtx, sessionID)
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to list messages: %w", err),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+
+		if len(msgs) == 0 {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("no messages to summarize"),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+
+		event = AgentEvent{
+			Type:     AgentEventTypeSummarize,
+			Progress: "Analyzing conversation...",
+		}
+		a.Publish(pubsub.CreatedEvent, event)
+
+		// Add a system message to guide the summarization
+		summarizePrompt := "Provide a detailed but concise summary of our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next."
+
+		// Create a new message with the summarize prompt
+		promptMsg := message.Message{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: summarizePrompt}},
+		}
+
+		// Append the prompt to the messages
+		msgsWithPrompt := append(msgs, promptMsg)
+
+		event = AgentEvent{
+			Type:     AgentEventTypeSummarize,
+			Progress: "Generating summary...",
+		}
+
+		a.Publish(pubsub.CreatedEvent, event)
+
+		// Send the messages to the summarize provider
+		response, err := a.summarizeProvider.SendMessages(
+			summarizeCtx,
+			msgsWithPrompt,
+			make([]tools.BaseTool, 0),
+		)
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to summarize: %w", err),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+
+		summary := strings.TrimSpace(response.Content)
+		if summary == "" {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("empty summary returned"),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+		event = AgentEvent{
+			Type:     AgentEventTypeSummarize,
+			Progress: "Creating new session...",
+		}
+
+		a.Publish(pubsub.CreatedEvent, event)
+		oldSession, err := a.sessions.Get(summarizeCtx, sessionID)
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to get session: %w", err),
+				Done:  true,
+			}
+
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+		// Create a new session with the summary
+		newSession, err := a.sessions.Create(summarizeCtx, oldSession.Title+" - Continuation")
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to create new session: %w", err),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+
+		// Create a message in the new session with the summary
+		_, err = a.messages.Create(summarizeCtx, newSession.ID, message.CreateMessageParams{
+			Role:  message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: summary}},
+			Model: a.summarizeProvider.Model().ID,
+		})
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to create summary message: %w", err),
+				Done:  true,
+			}
+
+			a.Publish(pubsub.CreatedEvent, event)
+			return
+		}
+		event = AgentEvent{
+			Type:      AgentEventTypeSummarize,
+			SessionID: newSession.ID,
+			Progress:  "Summary complete",
+			Done:      true,
+		}
+		a.Publish(pubsub.CreatedEvent, event)
+		// Send final success event with the new session ID
+	}()
+
+	return nil
 }
 
 func createAgentProvider(agentName config.AgentName) (provider.Provider, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
 	"github.com/opencode-ai/opencode/internal/tui/components/chat"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
@@ -54,6 +55,16 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case chat.SendMsg:
 		cmd := p.sendMessage(msg.Text, msg.Attachments)
+		if cmd != nil {
+			return p, cmd
+		}
+	case dialog.CommandRunCustomMsg:
+		// Check if the agent is busy before executing custom commands
+		if p.app.CoderAgent.IsBusy() {
+			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
+		}
+		// Handle custom command execution
+		cmd := p.sendMessage(msg.Content)
 		if cmd != nil {
 			return p, cmd
 		}

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -125,6 +126,9 @@ type appModel struct {
 
 	showThemeDialog bool
 	themeDialog     dialog.ThemeDialog
+	
+	showArgumentsDialog bool
+	argumentsDialog     dialog.ArgumentsDialogCmp
 }
 
 func (a appModel) Init() tea.Cmd {
@@ -199,6 +203,13 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, filepickerCmd)
 
 		a.initDialog.SetSize(msg.Width, msg.Height)
+		
+		if a.showArgumentsDialog {
+			a.argumentsDialog.SetSize(msg.Width, msg.Height)
+			args, argsCmd := a.argumentsDialog.Update(msg)
+			a.argumentsDialog = args.(dialog.ArgumentsDialogCmp)
+			cmds = append(cmds, argsCmd, a.argumentsDialog.Init())
+		}
 
 		return a, tea.Batch(cmds...)
 	// Status
@@ -346,8 +357,37 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, msg.Command.Handler(msg.Command)
 		}
 		return a, util.ReportInfo("Command selected: " + msg.Command.Title)
+		
+	case dialog.ShowArgumentsDialogMsg:
+		// Show arguments dialog
+		a.argumentsDialog = dialog.NewArgumentsDialogCmp(msg.CommandID, msg.Content)
+		a.showArgumentsDialog = true
+		return a, a.argumentsDialog.Init()
+		
+	case dialog.CloseArgumentsDialogMsg:
+		// Close arguments dialog
+		a.showArgumentsDialog = false
+		
+		// If submitted, replace $ARGUMENTS and run the command
+		if msg.Submit {
+			// Replace $ARGUMENTS with the provided arguments
+			content := strings.ReplaceAll(msg.Content, "$ARGUMENTS", msg.Arguments)
+			
+			// Execute the command with arguments
+			return a, util.CmdHandler(dialog.CommandRunCustomMsg{
+				Content: content,
+			})
+		}
+		return a, nil
 
 	case tea.KeyMsg:
+		// If arguments dialog is open, let it handle the key press first
+		if a.showArgumentsDialog {
+			args, cmd := a.argumentsDialog.Update(msg)
+			a.argumentsDialog = args.(dialog.ArgumentsDialogCmp)
+			return a, cmd
+		}
+		
 		switch {
 
 		case key.Matches(msg, keys.Quit):
@@ -367,6 +407,9 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if a.showModelDialog {
 				a.showModelDialog = false
+			}
+			if a.showArgumentsDialog {
+				a.showArgumentsDialog = false
 			}
 			return a, nil
 		case key.Matches(msg, keys.SwitchSession):
@@ -746,6 +789,21 @@ func (a appModel) View() string {
 			true,
 		)
 	}
+	
+	if a.showArgumentsDialog {
+		overlay := a.argumentsDialog.View()
+		row := lipgloss.Height(appView) / 2
+		row -= lipgloss.Height(overlay) / 2
+		col := lipgloss.Width(appView) / 2
+		col -= lipgloss.Width(overlay) / 2
+		appView = layout.PlaceOverlay(
+			col,
+			row,
+			overlay,
+			appView,
+			true,
+		)
+	}
 
 	return appView
 }
@@ -792,5 +850,16 @@ If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (
 			)
 		},
 	})
+	
+	// Load custom commands
+	customCommands, err := dialog.LoadCustomCommands()
+	if err != nil {
+		logging.Warn("Failed to load custom commands", "error", err)
+	} else {
+		for _, cmd := range customCommands {
+			model.RegisterCommand(cmd)
+		}
+	}
+	
 	return model
 }

@@ -127,6 +127,9 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f.cursor = 0
 		f.getCurrentFileBelowCursor()
 	case tea.KeyMsg:
+		if f.cwd.Focused() {
+			f.cwd, cmd = f.cwd.Update(msg)
+		}
 		switch {
 		case key.Matches(msg, filePickerKeyMap.InsertCWD):
 			f.cwd.Focus()
@@ -165,7 +168,6 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isPathDir = f.dirs[f.cursor].IsDir()
 			}
 			if isPathDir {
-				path := filepath.Join(f.cwdDetails.directory, "/", f.dirs[f.cursor].Name())
 				newWorkingDir := DirNode{parent: f.cwdDetails, directory: path}
 				f.cwdDetails.child = &newWorkingDir
 				f.cwdDetails = f.cwdDetails.child
@@ -216,9 +218,6 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.getCurrentFileBelowCursor()
 		}
 	}
-	if f.cwd.Focused() {
-		f.cwd, cmd = f.cwd.Update(msg)
-	}
 	return f, cmd
 }
 
@@ -228,37 +227,35 @@ func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
 		logging.ErrorPersist(fmt.Sprintf("Model %s doesn't support attachments", modeInfo.Name))
 		return f, nil
 	}
-	if isExtSupported(f.dirs[f.cursor].Name()) {
-		f.selectedFile = f.dirs[f.cursor].Name()
-		selectedFilePath := filepath.Join(f.cwdDetails.directory, "/", f.selectedFile)
-		isFileLarge, err := image.ValidateFileSize(selectedFilePath, maxAttachmentSize)
-		if err != nil {
-			logging.ErrorPersist("unable to read the image")
-			return f, nil
-		}
-		if isFileLarge {
-			logging.ErrorPersist("file too large, max 5MB")
-			return f, nil
-		}
 
-		content, err := os.ReadFile(selectedFilePath)
-		if err != nil {
-			logging.ErrorPersist("Unable read selected file")
-			return f, nil
-		}
-
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := f.selectedFile
-		attachment := message.Attachment{FilePath: selectedFilePath, FileName: fileName, MimeType: mimeType, Content: content}
-		f.selectedFile = ""
-		return f, util.CmdHandler(AttachmentAddedMsg{attachment})
-	}
-	if !isExtSupported(f.selectedFile) {
+	selectedFilePath := f.selectedFile
+	if !isExtSupported(selectedFilePath) {
 		logging.ErrorPersist("Unsupported file")
 		return f, nil
 	}
-	return f, nil
+
+	isFileLarge, err := image.ValidateFileSize(selectedFilePath, maxAttachmentSize)
+	if err != nil {
+		logging.ErrorPersist("unable to read the image")
+		return f, nil
+	}
+	if isFileLarge {
+		logging.ErrorPersist("file too large, max 5MB")
+		return f, nil
+	}
+
+	content, err := os.ReadFile(selectedFilePath)
+	if err != nil {
+		logging.ErrorPersist("Unable read selected file")
+		return f, nil
+	}
+
+	mimeBufferSize := min(512, len(content))
+	mimeType := http.DetectContentType(content[:mimeBufferSize])
+	fileName := filepath.Base(selectedFilePath)
+	attachment := message.Attachment{FilePath: selectedFilePath, FileName: fileName, MimeType: mimeType, Content: content}
+	f.selectedFile = ""
+	return f, util.CmdHandler(AttachmentAddedMsg{attachment})
 }
 
 func (f *filepickerCmp) View() string {

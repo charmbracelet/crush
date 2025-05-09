@@ -64,7 +64,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 		// Handle custom command execution
-		cmd := p.sendMessage(msg.Content)
+		cmd := p.sendMessage(msg.Content, nil)
 		if cmd != nil {
 			return p, cmd
 		}

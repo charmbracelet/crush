@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/opencode-ai/opencode/internal/llm/models"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
@@ -145,7 +146,14 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
 		}, nil
-
+	case models.ProviderLocal:
+		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
+			WithOpenAIBaseURL(os.Getenv("LOCAL_ENDPOINT")),
+		)
+		return &baseProvider[OpenAIClient]{
+			options: clientOptions,
+			client:  newOpenAIClient(clientOptions),
+		}, nil
 	case models.ProviderMock:
 		// TODO: implement mock client for test
 		panic("not implemented")

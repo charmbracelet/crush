@@ -526,7 +526,7 @@ func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 	}
 
 	// Validate reasoning effort for models that support reasoning
-	if model.CanReason && provider == models.ProviderOpenAI {
+	if model.CanReason && provider == models.ProviderOpenAI || provider == models.ProviderLocal {
 		if agent.ReasoningEffort == "" {
 			// Set default reasoning effort for models that support it
 			logging.Info("setting default reasoning effort for model that supports reasoning",

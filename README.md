@@ -38,6 +38,16 @@ curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/mai
 brew install opencode-ai/tap/opencode
 ```
 
+### Using AUR (Arch Linux)
+
+```bash
+# Using yay
+yay -S opencode-ai-bin
+
+# Using paru
+paru -S opencode-ai-bin
+```
+
 ### Using Go
 
 ```bash

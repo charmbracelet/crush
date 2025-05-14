@@ -34,14 +34,14 @@ checksum:
 snapshot:
   name_template: "0.0.0-{{ .Timestamp }}"
 aurs:
-  - name: opencode
+  - name: opencode-ai
     homepage: "https://github.com/opencode-ai/opencode"
     description: "terminal based agent that can build anything"
     maintainers:
       - "kujtimiihoxha <kujtimii.h@gmail.com>"
     license: "MIT"
     private_key: "{{ .Env.AUR_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/opencode-ai.git"
+    git_url: "ssh://aur@aur.archlinux.org/opencode-ai-bin.git"
     provides:
       - opencode
     conflicts:

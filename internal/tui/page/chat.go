@@ -2,6 +2,7 @@ package page
 
 import (
 	"context"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,8 +64,19 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.app.CoderAgent.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
+		
+		// Process the command content with arguments if any
+		content := msg.Content
+		if msg.Args != nil {
+			// Replace all named arguments with their values
+			for name, value := range msg.Args {
+				placeholder := "$" + name
+				content = strings.ReplaceAll(content, placeholder, value)
+			}
+		}
+		
 		// Handle custom command execution
-		cmd := p.sendMessage(msg.Content, nil)
+		cmd := p.sendMessage(content, nil)
 		if cmd != nil {
 			return p, cmd
 		}

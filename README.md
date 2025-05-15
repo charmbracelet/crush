@@ -19,6 +19,7 @@ OpenCode is a Go-based CLI application that brings AI assistance to your termina
 - **LSP Integration**: Language Server Protocol support for code intelligence
 - **File Change Tracking**: Track and visualize file changes during sessions
 - **External Editor Support**: Open your preferred editor for composing messages
+- **Named Arguments for Custom Commands**: Create powerful custom commands with multiple named placeholders
 
 ## Installation
 
@@ -375,13 +376,22 @@ This creates a command called `user:prime-context`.
 
 ### Command Arguments
 
-You can create commands that accept arguments by including the `$ARGUMENTS` placeholder in your command file:
+OpenCode supports named arguments in custom commands using placeholders in the format `$NAME` (where NAME consists of uppercase letters, numbers, and underscores, and must start with a letter).
+
+For example:
 
 ```markdown
-RUN git show $ARGUMENTS
+# Fetch Context for Issue $ISSUE_NUMBER
+
+RUN gh issue view $ISSUE_NUMBER --json title,body,comments
+RUN git grep --author="$AUTHOR_NAME" -n .
+RUN grep -R "$SEARCH_PATTERN" $DIRECTORY
 ```
 
-When you run this command, OpenCode will prompt you to enter the text that should replace `$ARGUMENTS`.
+When you run a command with arguments, OpenCode will prompt you to enter values for each unique placeholder. Named arguments provide several benefits:
+- Clear identification of what each argument represents
+- Ability to use the same argument multiple times
+- Better organization for commands with multiple inputs
 
 ### Organizing Commands
 

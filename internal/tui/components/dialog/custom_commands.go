@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,9 @@ const (
 	UserCommandPrefix    = "user:"
 	ProjectCommandPrefix = "project:"
 )
+
+// namedArgPattern is a regex pattern to find named arguments in the format $NAME
+var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
 
 // LoadCustomCommands loads custom commands from both XDG_CONFIG_HOME and project data directory
 func LoadCustomCommands() ([]Command, error) {
@@ -133,18 +137,33 @@ func loadCommandsFromDir(commandsDir string, prefix string) ([]Command, error) {
 			Handler: func(cmd Command) tea.Cmd {
 				commandContent := string(content)
 
-				// Check if the command contains $ARGUMENTS placeholder
-				if strings.Contains(commandContent, "$ARGUMENTS") {
-					// Show arguments dialog
-					return util.CmdHandler(ShowArgumentsDialogMsg{
+				// Check for named arguments
+				matches := namedArgPattern.FindAllStringSubmatch(commandContent, -1)
+				if len(matches) > 0 {
+					// Extract unique argument names
+					argNames := make([]string, 0)
+					argMap := make(map[string]bool)
+
+					for _, match := range matches {
+						argName := match[1] // Group 1 is the name without $
+						if !argMap[argName] {
+							argMap[argName] = true
+							argNames = append(argNames, argName)
+						}
+					}
+
+					// Show multi-arguments dialog for all named arguments
+					return util.CmdHandler(ShowMultiArgumentsDialogMsg{
 						CommandID: cmd.ID,
 						Content:   commandContent,
+						ArgNames:  argNames,
 					})
 				}
 
 				// No arguments needed, run command directly
 				return util.CmdHandler(CommandRunCustomMsg{
 					Content: commandContent,
+					Args:    nil, // No arguments
 				})
 			},
 		}
@@ -163,4 +182,5 @@ func loadCommandsFromDir(commandsDir string, prefix string) ([]Command, error) {
 // CommandRunCustomMsg is sent when a custom command is executed
 type CommandRunCustomMsg struct {
 	Content string
+	Args    map[string]string // Map of argument names to values
 }

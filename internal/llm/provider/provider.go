@@ -120,6 +120,11 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 			options: clientOptions,
 			client:  newAzureClient(clientOptions),
 		}, nil
+	case models.ProviderVertexAI:
+		return &baseProvider[VertexAIClient]{
+			options: clientOptions,
+			client:  newVertexAIClient(clientOptions),
+		}, nil
 	case models.ProviderOpenRouter:
 		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
 			WithOpenAIBaseURL("https://openrouter.ai/api/v1"),

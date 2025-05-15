@@ -175,13 +175,16 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
-	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.APIModel, &genai.GenerateContentConfig{
+	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(g.providerOptions.maxTokens),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
-		Tools: g.convertTools(tools),
-	}, history)
+	}
+	if len(tools) > 0 {
+		config.Tools = g.convertTools(tools)
+	}
+	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.APIModel, config, history)
 
 	attempts := 0
 	for {
@@ -260,13 +263,16 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
-	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.APIModel, &genai.GenerateContentConfig{
+	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(g.providerOptions.maxTokens),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
-		Tools: g.convertTools(tools),
-	}, history)
+	}
+	if len(tools) > 0 {
+		config.Tools = g.convertTools(tools)
+	}
+	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.APIModel, config, history)
 
 	attempts := 0
 	eventChan := make(chan ProviderEvent)

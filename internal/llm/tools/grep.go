@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/opencode-ai/opencode/internal/fileutil"
 )
 
 type GrepParams struct {
@@ -288,7 +289,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil // Skip directories
 		}
 
-		if skipHidden(path) {
+		if fileutil.SkipHidden(path) {
 			return nil
 		}
 

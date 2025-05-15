@@ -5,16 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/opencode-ai/opencode/internal/fileutil"
+	"github.com/opencode-ai/opencode/internal/logging"
 )
 
 const (
@@ -54,11 +52,6 @@ TIPS:
 - When doing iterative exploration that may require multiple rounds of searching, consider using the Agent tool instead
 - Always check if results are truncated and refine your search pattern if needed`
 )
-
-type fileInfo struct {
-	path    string
-	modTime time.Time
-}
 
 type GlobParams struct {
 	Pattern string `json:"pattern"`
@@ -134,41 +127,20 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 }
 
 func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
-	matches, err := globWithRipgrep(pattern, searchPath, limit)
-	if err == nil {
-		return matches, len(matches) >= limit, nil
+	cmdRg := fileutil.GetRgCmd(pattern)
+	if cmdRg != nil {
+		cmdRg.Dir = searchPath
+		matches, err := runRipgrep(cmdRg, searchPath, limit)
+		if err == nil {
+			return matches, len(matches) >= limit && limit > 0, nil
+		}
+		logging.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
 	}
 
-	return globWithDoublestar(pattern, searchPath, limit)
+	return fileutil.GlobWithDoublestar(pattern, searchPath, limit)
 }
 
-func globWithRipgrep(
-	pattern, searchRoot string,
-	limit int,
-) ([]string, error) {
-	if searchRoot == "" {
-		searchRoot = "."
-	}
-
-	rgBin, err := exec.LookPath("rg")
-	if err != nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH: %w", err)
-	}
-
-	if !filepath.IsAbs(pattern) && !strings.HasPrefix(pattern, "/") {
-		pattern = "/" + pattern
-	}
-
-	args := []string{
-		"--files",
-		"--null",
-		"--glob", pattern,
-		"-L",
-	}
-
-	cmd := exec.Command(rgBin, args...)
-	cmd.Dir = searchRoot
-
+func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
@@ -182,117 +154,22 @@ func globWithRipgrep(
 		if len(p) == 0 {
 			continue
 		}
-		abs := filepath.Join(searchRoot, string(p))
-		if skipHidden(abs) {
+		absPath := string(p)
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(searchRoot, absPath)
+		}
+		if fileutil.SkipHidden(absPath) {
 			continue
 		}
-		matches = append(matches, abs)
+		matches = append(matches, absPath)
 	}
 
 	sort.SliceStable(matches, func(i, j int) bool {
 		return len(matches[i]) < len(matches[j])
 	})
 
-	if len(matches) > limit {
+	if limit > 0 && len(matches) > limit {
 		matches = matches[:limit]
 	}
 	return matches, nil
-}
-
-func globWithDoublestar(pattern, searchPath string, limit int) ([]string, bool, error) {
-	fsys := os.DirFS(searchPath)
-
-	relPattern := strings.TrimPrefix(pattern, "/")
-
-	var matches []fileInfo
-
-	err := doublestar.GlobWalk(fsys, relPattern, func(path string, d fs.DirEntry) error {
-		if d.IsDir() {
-			return nil
-		}
-		if skipHidden(path) {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return nil // Skip files we can't access
-		}
-
-		absPath := path // Restore absolute path
-		if !strings.HasPrefix(absPath, searchPath) {
-			absPath = filepath.Join(searchPath, absPath)
-		}
-
-		matches = append(matches, fileInfo{
-			path:    absPath,
-			modTime: info.ModTime(),
-		})
-
-		if len(matches) >= limit*2 { // Collect more than needed for sorting
-			return fs.SkipAll
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("glob walk error: %w", err)
-	}
-
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].modTime.After(matches[j].modTime)
-	})
-
-	truncated := len(matches) > limit
-	if truncated {
-		matches = matches[:limit]
-	}
-
-	results := make([]string, len(matches))
-	for i, m := range matches {
-		results[i] = m.path
-	}
-
-	return results, truncated, nil
-}
-
-func skipHidden(path string) bool {
-	// Check for hidden files (starting with a dot)
-	base := filepath.Base(path)
-	if base != "." && strings.HasPrefix(base, ".") {
-		return true
-	}
-
-	// List of commonly ignored directories in development projects
-	commonIgnoredDirs := map[string]bool{
-		"node_modules":     true,
-		"vendor":           true,
-		"dist":             true,
-		"build":            true,
-		"target":           true,
-		".git":             true,
-		".idea":            true,
-		".vscode":          true,
-		"__pycache__":      true,
-		"bin":              true,
-		"obj":              true,
-		"out":              true,
-		"coverage":         true,
-		"tmp":              true,
-		"temp":             true,
-		"logs":             true,
-		"generated":        true,
-		"bower_components": true,
-		"jspm_packages":    true,
-	}
-
-	// Check if any path component is in our ignore list
-	parts := strings.SplitSeq(path, string(os.PathSeparator))
-	for part := range parts {
-		if commonIgnoredDirs[part] {
-			return true
-		}
-	}
-
-	return false
 }

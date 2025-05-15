@@ -73,6 +73,12 @@ type TUIConfig struct {
 	Theme string `json:"theme,omitempty"`
 }
 
+// ShellConfig defines the configuration for the shell used by the bash tool.
+type ShellConfig struct {
+	Path string   `json:"path,omitempty"`
+	Args []string `json:"args,omitempty"`
+}
+
 // Config is the main configuration structure for the application.
 type Config struct {
 	Data         Data                              `json:"data"`
@@ -85,6 +91,7 @@ type Config struct {
 	DebugLSP     bool                              `json:"debugLSP,omitempty"`
 	ContextPaths []string                          `json:"contextPaths,omitempty"`
 	TUI          TUIConfig                         `json:"tui"`
+	Shell        ShellConfig                       `json:"shell,omitempty"`
 	AutoCompact  bool                              `json:"autoCompact,omitempty"`
 }
 
@@ -216,6 +223,14 @@ func setDefaults(debug bool) {
 	viper.SetDefault("contextPaths", defaultContextPaths)
 	viper.SetDefault("tui.theme", "opencode")
 	viper.SetDefault("autoCompact", true)
+
+	// Set default shell from environment or fallback to /bin/bash
+	shellPath := os.Getenv("SHELL")
+	if shellPath == "" {
+		shellPath = "/bin/bash"
+	}
+	viper.SetDefault("shell.path", shellPath)
+	viper.SetDefault("shell.args", []string{"-l"})
 
 	if debug {
 		viper.SetDefault("debug", true)

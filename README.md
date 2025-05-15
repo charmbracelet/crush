@@ -96,6 +96,24 @@ You can configure OpenCode using environment variables:
 | `AZURE_OPENAI_ENDPOINT`    | For Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | For Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | For Azure OpenAI models                                |
+| `SHELL`                    | Default shell to use (if not specified in config)      |
+
+### Shell Configuration
+
+OpenCode allows you to configure the shell used by the bash tool. By default, it uses the shell specified in the `SHELL` environment variable, or falls back to `/bin/bash` if not set.
+
+You can override this in your configuration file:
+
+```json
+{
+  "shell": {
+    "path": "/bin/zsh",
+    "args": ["-l"]
+  }
+}
+```
+
+This is useful if you want to use a different shell than your default system shell, or if you need to pass specific arguments to the shell.
 
 ### Configuration File Structure
 
@@ -135,6 +153,10 @@ You can configure OpenCode using environment variables:
       "model": "claude-3.7-sonnet",
       "maxTokens": 80
     }
+  },
+  "shell": {
+    "path": "/bin/bash",
+    "args": ["-l"]
   },
   "mcpServers": {
     "example": {

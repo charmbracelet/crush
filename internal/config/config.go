@@ -57,7 +57,7 @@ type Provider struct {
 
 // Data defines storage configuration.
 type Data struct {
-	Directory string `json:"directory"`
+	Directory string `json:"directory,omitempty"`
 }
 
 // LSPConfig defines configuration for Language Server Protocol integration.
@@ -86,7 +86,7 @@ type Config struct {
 	MCPServers   map[string]MCPServer              `json:"mcpServers,omitempty"`
 	Providers    map[models.ModelProvider]Provider `json:"providers,omitempty"`
 	LSP          map[string]LSPConfig              `json:"lsp,omitempty"`
-	Agents       map[AgentName]Agent               `json:"agents"`
+	Agents       map[AgentName]Agent               `json:"agents,omitempty"`
 	Debug        bool                              `json:"debug,omitempty"`
 	DebugLSP     bool                              `json:"debugLSP,omitempty"`
 	ContextPaths []string                          `json:"contextPaths,omitempty"`
@@ -721,6 +721,52 @@ func setDefaultModelForAgent(agent AgentName) bool {
 	return false
 }
 
+func updateCfgFile(updateCfg func(config *Config)) error {
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	// Get the config file path
+	configFile := viper.ConfigFileUsed()
+	var configData []byte
+	if configFile == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		configFile = filepath.Join(homeDir, fmt.Sprintf(".%s.json", appName))
+		logging.Info("config file not found, creating new one", "path", configFile)
+		configData = []byte(`{}`)
+	} else {
+		// Read the existing config file
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+		configData = data
+	}
+
+	// Parse the JSON
+	var userCfg *Config
+	if err := json.Unmarshal(configData, &userCfg); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	updateCfg(userCfg)
+
+	// Write the updated config back to file
+	updatedData, err := json.MarshalIndent(userCfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, updatedData, 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
 // Get returns the current configuration.
 // It's safe to call this function multiple times.
 func Get() *Config {
@@ -765,7 +811,12 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 		return fmt.Errorf("failed to update agent model: %w", err)
 	}
 
-	return nil
+	return updateCfgFile(func(config *Config) {
+		if config.Agents == nil {
+			config.Agents = make(map[AgentName]Agent)
+		}
+		config.Agents[agentName] = newAgentCfg
+	})
 }
 
 // UpdateTheme updates the theme in the configuration and writes it to the config file.
@@ -777,52 +828,8 @@ func UpdateTheme(themeName string) error {
 	// Update the in-memory config
 	cfg.TUI.Theme = themeName
 
-	// Get the config file path
-	configFile := viper.ConfigFileUsed()
-	var configData []byte
-	if configFile == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-		configFile = filepath.Join(homeDir, fmt.Sprintf(".%s.json", appName))
-		logging.Info("config file not found, creating new one", "path", configFile)
-		configData = []byte(`{}`)
-	} else {
-		// Read the existing config file
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-		configData = data
-	}
-
-	// Parse the JSON
-	var configMap map[string]interface{}
-	if err := json.Unmarshal(configData, &configMap); err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	// Update just the theme value
-	tuiConfig, ok := configMap["tui"].(map[string]interface{})
-	if !ok {
-		// TUI config doesn't exist yet, create it
-		configMap["tui"] = map[string]interface{}{"theme": themeName}
-	} else {
-		// Update existing TUI config
-		tuiConfig["theme"] = themeName
-		configMap["tui"] = tuiConfig
-	}
-
-	// Write the updated config back to file
-	updatedData, err := json.MarshalIndent(configMap, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(configFile, updatedData, 0o644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
+	// Update the file config
+	return updateCfgFile(func(config *Config) {
+		config.TUI.Theme = themeName
+	})
 }

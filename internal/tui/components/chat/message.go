@@ -120,6 +120,7 @@ func renderAssistantMessage(
 	allMessages []message.Message, // we need this to get tool results and the user message
 	messagesService message.Service, // We need this to get the task tool messages
 	focusedUIMessageId string,
+	isSummary bool,
 	width int,
 	position int,
 ) []uiMessage {
@@ -167,6 +168,9 @@ func renderAssistantMessage(
 	if content != "" || (finished && finishData.Reason == message.FinishReasonEndTurn) {
 		if content == "" {
 			content = "*Finished without output*"
+		}
+		if isSummary {
+			info = append(info, baseStyle.Width(width-1).Foreground(t.TextMuted()).Render(" (summary)"))
 		}
 
 		content = renderMessage(content, false, true, width, info...)

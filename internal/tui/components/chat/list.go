@@ -99,6 +99,14 @@ func (m *messagesCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case renderFinishedMsg:
 		m.rendering = false
 		m.viewport.GotoBottom()
+	case pubsub.Event[session.Session]:
+		if msg.Type == pubsub.UpdatedEvent && msg.Payload.ID == m.session.ID {
+			m.session = msg.Payload
+			if m.session.SummaryMessageID == m.currentMsgID {
+				delete(m.cachedContent, m.currentMsgID)
+				m.renderView()
+			}
+		}
 	case pubsub.Event[message.Message]:
 		needsRerender := false
 		if msg.Type == pubsub.CreatedEvent {
@@ -208,12 +216,15 @@ func (m *messagesCmp) renderView() {
 				m.uiMessages = append(m.uiMessages, cache.content...)
 				continue
 			}
+			isSummary := m.session.SummaryMessageID == msg.ID
+
 			assistantMessages := renderAssistantMessage(
 				msg,
 				inx,
 				m.messages,
 				m.app.Messages,
 				m.currentMsgID,
+				isSummary,
 				m.width,
 				pos,
 			)

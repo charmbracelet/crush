@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -244,6 +245,23 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 				logging.ErrorPersist(fmt.Sprintf("failed to generate title: %v", titleErr))
 			}
 		}()
+	}
+	session, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return a.err(fmt.Errorf("failed to get session: %w", err))
+	}
+	if session.SummaryMessageID != "" {
+		summaryMsgInex := -1
+		for i, msg := range msgs {
+			if msg.ID == session.SummaryMessageID {
+				summaryMsgInex = i
+				break
+			}
+		}
+		if summaryMsgInex != -1 {
+			msgs = msgs[summaryMsgInex:]
+			msgs[0].Role = message.User
+		}
 	}
 
 	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
@@ -614,22 +632,16 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
-		// Create a new session with the summary
-		newSession, err := a.sessions.Create(summarizeCtx, oldSession.Title+" - Continuation")
-		if err != nil {
-			event = AgentEvent{
-				Type:  AgentEventTypeError,
-				Error: fmt.Errorf("failed to create new session: %w", err),
-				Done:  true,
-			}
-			a.Publish(pubsub.CreatedEvent, event)
-			return
-		}
-
 		// Create a message in the new session with the summary
-		_, err = a.messages.Create(summarizeCtx, newSession.ID, message.CreateMessageParams{
-			Role:  message.Assistant,
-			Parts: []message.ContentPart{message.TextContent{Text: summary}},
+		msg, err := a.messages.Create(summarizeCtx, oldSession.ID, message.CreateMessageParams{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: summary},
+				message.Finish{
+					Reason: message.FinishReasonEndTurn,
+					Time:   time.Now().Unix(),
+				},
+			},
 			Model: a.summarizeProvider.Model().ID,
 		})
 		if err != nil {
@@ -642,9 +654,29 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
+		oldSession.SummaryMessageID = msg.ID
+		oldSession.CompletionTokens = response.Usage.OutputTokens
+		oldSession.PromptTokens = 0
+		model := a.summarizeProvider.Model()
+		usage := response.Usage
+		cost := model.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
+			model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
+			model.CostPer1MIn/1e6*float64(usage.InputTokens) +
+			model.CostPer1MOut/1e6*float64(usage.OutputTokens)
+		oldSession.Cost += cost
+		_, err = a.sessions.Save(summarizeCtx, oldSession)
+		if err != nil {
+			event = AgentEvent{
+				Type:  AgentEventTypeError,
+				Error: fmt.Errorf("failed to save session: %w", err),
+				Done:  true,
+			}
+			a.Publish(pubsub.CreatedEvent, event)
+		}
+
 		event = AgentEvent{
 			Type:      AgentEventTypeSummarize,
-			SessionID: newSession.ID,
+			SessionID: oldSession.ID,
 			Progress:  "Summary complete",
 			Done:      true,
 		}

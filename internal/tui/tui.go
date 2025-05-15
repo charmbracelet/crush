@@ -331,30 +331,6 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if payload.Done && payload.Type == agent.AgentEventTypeSummarize {
 			a.isCompacting = false
-
-			if payload.SessionID != "" {
-				// Switch to the new session
-				return a, func() tea.Msg {
-					sessions, err := a.app.Sessions.List(context.Background())
-					if err != nil {
-						return util.InfoMsg{
-							Type: util.InfoTypeError,
-							Msg:  "Failed to list sessions: " + err.Error(),
-						}
-					}
-
-					for _, s := range sessions {
-						if s.ID == payload.SessionID {
-							return dialog.SessionSelectedMsg{Session: s}
-						}
-					}
-
-					return util.InfoMsg{
-						Type: util.InfoTypeError,
-						Msg:  "Failed to find new session",
-					}
-				}
-			}
 			return a, util.ReportInfo("Session summarization complete")
 		} else if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSession.ID != "" {
 			model := a.app.CoderAgent.Model()

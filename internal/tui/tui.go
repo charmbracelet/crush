@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/llm/agent"
@@ -99,7 +99,7 @@ type appModel struct {
 	width, height   int
 	currentPage     page.PageID
 	previousPage    page.PageID
-	pages           map[page.PageID]tea.Model
+	pages           map[page.PageID]util.Model
 	loadedPages     map[page.PageID]bool
 	status          core.StatusCmp
 	app             *app.App
@@ -143,6 +143,8 @@ type appModel struct {
 func (a appModel) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmd := a.pages[a.currentPage].Init()
+	t := theme.CurrentTheme()
+	cmds = append(cmds, tea.SetBackgroundColor(t.Background()))
 	a.loadedPages[a.currentPage] = true
 	cmds = append(cmds, cmd)
 	cmd = a.status.Init()
@@ -189,7 +191,8 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		s, _ := a.status.Update(msg)
 		a.status = s.(core.StatusCmp)
-		a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, cmd)
 
 		prm, permCmd := a.permissions.Update(msg)
@@ -348,9 +351,11 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case dialog.ThemeChangedMsg:
-		a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
 		a.showThemeDialog = false
-		return a, tea.Batch(cmd, util.ReportInfo("Theme changed to: "+msg.ThemeName))
+		t := theme.CurrentTheme()
+		return a, tea.Batch(cmd, util.ReportInfo("Theme changed to: "+msg.ThemeName), tea.SetBackgroundColor(t.Background()))
 
 	case dialog.CloseModelDialogMsg:
 		a.showModelDialog = false
@@ -427,7 +432,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// If submitted, replace all named arguments and run the command
 		if msg.Submit {
 			content := msg.Content
-			
+
 			// Replace each named argument with its value
 			for name, value := range msg.Args {
 				placeholder := "$" + name
@@ -658,7 +663,8 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	s, _ := a.status.Update(msg)
 	a.status = s.(core.StatusCmp)
-	a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
+	updated, cmd := a.pages[a.currentPage].Update(msg)
+	a.pages[a.currentPage] = updated.(util.Model)
 	cmds = append(cmds, cmd)
 	return a, tea.Batch(cmds...)
 }
@@ -914,7 +920,7 @@ func New(app *app.App) tea.Model {
 		themeDialog:   dialog.NewThemeDialogCmp(),
 		app:           app,
 		commands:      []dialog.Command{},
-		pages: map[page.PageID]tea.Model{
+		pages: map[page.PageID]util.Model{
 			page.ChatPage: page.NewChatPage(app),
 			page.LogsPage: page.NewLogsPage(),
 		},

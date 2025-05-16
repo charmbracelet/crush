@@ -5,18 +5,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/viewport"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 type DetailComponent interface {
-	tea.Model
+	util.Model
 	layout.Sizeable
 	layout.Bindings
 }
@@ -99,7 +99,7 @@ func (i *detailCmp) updateContent() {
 func getLevelStyle(level string) lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
 	t := theme.CurrentTheme()
-	
+
 	switch strings.ToLower(level) {
 	case "info":
 		return style.Foreground(t.Info())
@@ -115,8 +115,7 @@ func getLevelStyle(level string) lipgloss.Style {
 }
 
 func (i *detailCmp) View() string {
-	t := theme.CurrentTheme()
-	return styles.ForceReplaceBackgroundWithLipgloss(i.viewport.View(), t.Background())
+	return i.viewport.View()
 }
 
 func (i *detailCmp) GetSize() (int, int) {
@@ -126,8 +125,8 @@ func (i *detailCmp) GetSize() (int, int) {
 func (i *detailCmp) SetSize(width int, height int) tea.Cmd {
 	i.width = width
 	i.height = height
-	i.viewport.Width = i.width
-	i.viewport.Height = i.height
+	i.viewport.SetWidth(i.width)
+	i.viewport.SetHeight(i.height)
 	i.updateContent()
 	return nil
 }
@@ -138,6 +137,6 @@ func (i *detailCmp) BindingKeys() []key.Binding {
 
 func NewLogsDetails() DetailComponent {
 	return &detailCmp{
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 	}
 }

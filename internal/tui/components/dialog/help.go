@@ -3,11 +3,12 @@ package dialog
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 type helpCmp struct {
@@ -134,7 +135,7 @@ func (h *helpCmp) render() string {
 		pairs = append(pairs, pair)
 	}
 
-	// https://github.com/charmbracelet/lipgloss/issues/209
+	// https://github.com/charmbracelet/lipgloss/v2/issues/209
 	if len(pairs) > 1 {
 		prefix := pairs[:len(pairs)-1]
 		lastPair := pairs[len(pairs)-1]
@@ -144,7 +145,7 @@ func (h *helpCmp) render() string {
 			lipgloss.Left,              // x
 			lipgloss.Top,               // y
 			lastPair,                   // content
-			lipgloss.WithWhitespaceBackground(t.Background()),
+			lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Background())),
 		))
 		content := baseStyle.Width(h.width).Render(
 			lipgloss.JoinHorizontal(
@@ -191,7 +192,7 @@ func (h *helpCmp) View() string {
 }
 
 type HelpCmp interface {
-	tea.Model
+	util.Model
 	SetBindings([]key.Binding)
 }
 

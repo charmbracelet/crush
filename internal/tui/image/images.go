@@ -3,10 +3,11 @@ package image
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/disintegration/imaging"
 	"github.com/lucasb-eyer/go-colorful"
 )
@@ -36,7 +37,7 @@ func ToString(width int, img image.Image) string {
 			c1, _ := colorful.MakeColor(img.At(x, heightCounter))
 			color1 := lipgloss.Color(c1.Hex())
 
-			var color2 lipgloss.Color
+			var color2 color.Color
 			if heightCounter+1 < h {
 				c2, _ := colorful.MakeColor(img.At(x, heightCounter+1))
 				color2 = lipgloss.Color(c2.Hex())

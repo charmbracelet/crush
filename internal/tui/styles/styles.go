@@ -1,13 +1,13 @@
 package styles
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
-var (
-	ImageBakcground = "#212121"
-)
+var ImageBakcground = "#212121"
 
 // Style generation functions that use the current theme
 
@@ -75,81 +75,81 @@ func DimBorder() lipgloss.Style {
 }
 
 // PrimaryColor returns the primary color from the current theme
-func PrimaryColor() lipgloss.AdaptiveColor {
+func PrimaryColor() color.Color {
 	return theme.CurrentTheme().Primary()
 }
 
 // SecondaryColor returns the secondary color from the current theme
-func SecondaryColor() lipgloss.AdaptiveColor {
+func SecondaryColor() color.Color {
 	return theme.CurrentTheme().Secondary()
 }
 
 // AccentColor returns the accent color from the current theme
-func AccentColor() lipgloss.AdaptiveColor {
+func AccentColor() color.Color {
 	return theme.CurrentTheme().Accent()
 }
 
 // ErrorColor returns the error color from the current theme
-func ErrorColor() lipgloss.AdaptiveColor {
+func ErrorColor() color.Color {
 	return theme.CurrentTheme().Error()
 }
 
 // WarningColor returns the warning color from the current theme
-func WarningColor() lipgloss.AdaptiveColor {
+func WarningColor() color.Color {
 	return theme.CurrentTheme().Warning()
 }
 
 // SuccessColor returns the success color from the current theme
-func SuccessColor() lipgloss.AdaptiveColor {
+func SuccessColor() color.Color {
 	return theme.CurrentTheme().Success()
 }
 
 // InfoColor returns the info color from the current theme
-func InfoColor() lipgloss.AdaptiveColor {
+func InfoColor() color.Color {
 	return theme.CurrentTheme().Info()
 }
 
 // TextColor returns the text color from the current theme
-func TextColor() lipgloss.AdaptiveColor {
+func TextColor() color.Color {
 	return theme.CurrentTheme().Text()
 }
 
 // TextMutedColor returns the muted text color from the current theme
-func TextMutedColor() lipgloss.AdaptiveColor {
+func TextMutedColor() color.Color {
 	return theme.CurrentTheme().TextMuted()
 }
 
 // TextEmphasizedColor returns the emphasized text color from the current theme
-func TextEmphasizedColor() lipgloss.AdaptiveColor {
+func TextEmphasizedColor() color.Color {
 	return theme.CurrentTheme().TextEmphasized()
 }
 
 // BackgroundColor returns the background color from the current theme
-func BackgroundColor() lipgloss.AdaptiveColor {
+func BackgroundColor() color.Color {
 	return theme.CurrentTheme().Background()
 }
 
 // BackgroundSecondaryColor returns the secondary background color from the current theme
-func BackgroundSecondaryColor() lipgloss.AdaptiveColor {
+func BackgroundSecondaryColor() color.Color {
 	return theme.CurrentTheme().BackgroundSecondary()
 }
 
 // BackgroundDarkerColor returns the darker background color from the current theme
-func BackgroundDarkerColor() lipgloss.AdaptiveColor {
+func BackgroundDarkerColor() color.Color {
 	return theme.CurrentTheme().BackgroundDarker()
 }
 
 // BorderNormalColor returns the normal border color from the current theme
-func BorderNormalColor() lipgloss.AdaptiveColor {
+func BorderNormalColor() color.Color {
 	return theme.CurrentTheme().BorderNormal()
 }
 
 // BorderFocusedColor returns the focused border color from the current theme
-func BorderFocusedColor() lipgloss.AdaptiveColor {
+func BorderFocusedColor() color.Color {
 	return theme.CurrentTheme().BorderFocused()
 }
 
 // BorderDimColor returns the dim border color from the current theme
-func BorderDimColor() lipgloss.AdaptiveColor {
+func BorderDimColor() color.Color {
 	return theme.CurrentTheme().BorderDim()
 }

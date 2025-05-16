@@ -2,7 +2,7 @@ package theme
 
 import (
 	catppuccin "github.com/catppuccin/go"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 // CatppuccinTheme implements the Theme interface with Catppuccin colors.
@@ -11,238 +11,162 @@ type CatppuccinTheme struct {
 	BaseTheme
 }
 
-// NewCatppuccinTheme creates a new instance of the Catppuccin theme.
-func NewCatppuccinTheme() *CatppuccinTheme {
-	// Get the Catppuccin palettes
+// NewCatppuccinMochaTheme creates a new instance of the Catppuccin Mocha theme.
+func NewCatppuccinMochaTheme() *CatppuccinTheme {
+	// Get the Catppuccin palette
 	mocha := catppuccin.Mocha
+
+	theme := &CatppuccinTheme{}
+
+	// Base colors
+	theme.PrimaryColor = lipgloss.Color(mocha.Blue().Hex)
+	theme.SecondaryColor = lipgloss.Color(mocha.Mauve().Hex)
+	theme.AccentColor = lipgloss.Color(mocha.Peach().Hex)
+
+	// Status colors
+	theme.ErrorColor = lipgloss.Color(mocha.Red().Hex)
+	theme.WarningColor = lipgloss.Color(mocha.Peach().Hex)
+	theme.SuccessColor = lipgloss.Color(mocha.Green().Hex)
+	theme.InfoColor = lipgloss.Color(mocha.Blue().Hex)
+
+	// Text colors
+	theme.TextColor = lipgloss.Color(mocha.Text().Hex)
+	theme.TextMutedColor = lipgloss.Color(mocha.Subtext0().Hex)
+	theme.TextEmphasizedColor = lipgloss.Color(mocha.Lavender().Hex)
+
+	// Background colors
+	theme.BackgroundColor = lipgloss.Color("#212121")          // From existing styles
+	theme.BackgroundSecondaryColor = lipgloss.Color("#2c2c2c") // From existing styles
+	theme.BackgroundDarkerColor = lipgloss.Color("#181818")    // From existing styles
+
+	// Border colors
+	theme.BorderNormalColor = lipgloss.Color("#4b4c5c") // From existing styles
+	theme.BorderFocusedColor = lipgloss.Color(mocha.Blue().Hex)
+	theme.BorderDimColor = lipgloss.Color(mocha.Surface0().Hex)
+
+	// Diff view colors
+	theme.DiffAddedColor = lipgloss.Color("#478247")               // From existing diff.go
+	theme.DiffRemovedColor = lipgloss.Color("#7C4444")             // From existing diff.go
+	theme.DiffContextColor = lipgloss.Color("#a0a0a0")             // From existing diff.go
+	theme.DiffHunkHeaderColor = lipgloss.Color("#a0a0a0")          // From existing diff.go
+	theme.DiffHighlightAddedColor = lipgloss.Color("#DAFADA")      // From existing diff.go
+	theme.DiffHighlightRemovedColor = lipgloss.Color("#FADADD")    // From existing diff.go
+	theme.DiffAddedBgColor = lipgloss.Color("#303A30")             // From existing diff.go
+	theme.DiffRemovedBgColor = lipgloss.Color("#3A3030")           // From existing diff.go
+	theme.DiffContextBgColor = lipgloss.Color("#212121")           // From existing diff.go
+	theme.DiffLineNumberColor = lipgloss.Color("#888888")          // From existing diff.go
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#293229")   // From existing diff.go
+	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#332929") // From existing diff.go
+
+	// Markdown colors
+	theme.MarkdownTextColor = lipgloss.Color(mocha.Text().Hex)
+	theme.MarkdownHeadingColor = lipgloss.Color(mocha.Mauve().Hex)
+	theme.MarkdownLinkColor = lipgloss.Color(mocha.Sky().Hex)
+	theme.MarkdownLinkTextColor = lipgloss.Color(mocha.Pink().Hex)
+	theme.MarkdownCodeColor = lipgloss.Color(mocha.Green().Hex)
+	theme.MarkdownBlockQuoteColor = lipgloss.Color(mocha.Yellow().Hex)
+	theme.MarkdownEmphColor = lipgloss.Color(mocha.Yellow().Hex)
+	theme.MarkdownStrongColor = lipgloss.Color(mocha.Peach().Hex)
+	theme.MarkdownHorizontalRuleColor = lipgloss.Color(mocha.Overlay0().Hex)
+	theme.MarkdownListItemColor = lipgloss.Color(mocha.Blue().Hex)
+	theme.MarkdownListEnumerationColor = lipgloss.Color(mocha.Sky().Hex)
+	theme.MarkdownImageColor = lipgloss.Color(mocha.Sapphire().Hex)
+	theme.MarkdownImageTextColor = lipgloss.Color(mocha.Pink().Hex)
+	theme.MarkdownCodeBlockColor = lipgloss.Color(mocha.Text().Hex)
+
+	// Syntax highlighting colors
+	theme.SyntaxCommentColor = lipgloss.Color(mocha.Overlay1().Hex)
+	theme.SyntaxKeywordColor = lipgloss.Color(mocha.Pink().Hex)
+	theme.SyntaxFunctionColor = lipgloss.Color(mocha.Green().Hex)
+	theme.SyntaxVariableColor = lipgloss.Color(mocha.Sky().Hex)
+	theme.SyntaxStringColor = lipgloss.Color(mocha.Yellow().Hex)
+	theme.SyntaxNumberColor = lipgloss.Color(mocha.Teal().Hex)
+	theme.SyntaxTypeColor = lipgloss.Color(mocha.Sky().Hex)
+	theme.SyntaxOperatorColor = lipgloss.Color(mocha.Pink().Hex)
+	theme.SyntaxPunctuationColor = lipgloss.Color(mocha.Text().Hex)
+
+	return theme
+}
+
+// NewCatppuccinLatteTheme creates a new instance of the Catppuccin Latte theme.
+func NewCatppuccinLatteTheme() *CatppuccinTheme {
+	// Get the Catppuccin palette
 	latte := catppuccin.Latte
 
 	theme := &CatppuccinTheme{}
 
 	// Base colors
-	theme.PrimaryColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Blue().Hex,
-		Light: latte.Blue().Hex,
-	}
-	theme.SecondaryColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Mauve().Hex,
-		Light: latte.Mauve().Hex,
-	}
-	theme.AccentColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Peach().Hex,
-		Light: latte.Peach().Hex,
-	}
+	theme.PrimaryColor = lipgloss.Color(latte.Blue().Hex)
+	theme.SecondaryColor = lipgloss.Color(latte.Mauve().Hex)
+	theme.AccentColor = lipgloss.Color(latte.Peach().Hex)
 
 	// Status colors
-	theme.ErrorColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Red().Hex,
-		Light: latte.Red().Hex,
-	}
-	theme.WarningColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Peach().Hex,
-		Light: latte.Peach().Hex,
-	}
-	theme.SuccessColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Green().Hex,
-		Light: latte.Green().Hex,
-	}
-	theme.InfoColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Blue().Hex,
-		Light: latte.Blue().Hex,
-	}
+	theme.ErrorColor = lipgloss.Color(latte.Red().Hex)
+	theme.WarningColor = lipgloss.Color(latte.Peach().Hex)
+	theme.SuccessColor = lipgloss.Color(latte.Green().Hex)
+	theme.InfoColor = lipgloss.Color(latte.Blue().Hex)
 
 	// Text colors
-	theme.TextColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Text().Hex,
-		Light: latte.Text().Hex,
-	}
-	theme.TextMutedColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Subtext0().Hex,
-		Light: latte.Subtext0().Hex,
-	}
-	theme.TextEmphasizedColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Lavender().Hex,
-		Light: latte.Lavender().Hex,
-	}
+	theme.TextColor = lipgloss.Color(latte.Text().Hex)
+	theme.TextMutedColor = lipgloss.Color(latte.Subtext0().Hex)
+	theme.TextEmphasizedColor = lipgloss.Color(latte.Lavender().Hex)
 
 	// Background colors
-	theme.BackgroundColor = lipgloss.AdaptiveColor{
-		Dark:  "#212121", // From existing styles
-		Light: "#EEEEEE", // Light equivalent
-	}
-	theme.BackgroundSecondaryColor = lipgloss.AdaptiveColor{
-		Dark:  "#2c2c2c", // From existing styles
-		Light: "#E0E0E0", // Light equivalent
-	}
-	theme.BackgroundDarkerColor = lipgloss.AdaptiveColor{
-		Dark:  "#181818", // From existing styles
-		Light: "#F5F5F5", // Light equivalent
-	}
+	theme.BackgroundColor = lipgloss.Color("#EEEEEE")          // Light equivalent
+	theme.BackgroundSecondaryColor = lipgloss.Color("#E0E0E0") // Light equivalent
+	theme.BackgroundDarkerColor = lipgloss.Color("#F5F5F5")    // Light equivalent
 
 	// Border colors
-	theme.BorderNormalColor = lipgloss.AdaptiveColor{
-		Dark:  "#4b4c5c", // From existing styles
-		Light: "#BDBDBD", // Light equivalent
-	}
-	theme.BorderFocusedColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Blue().Hex,
-		Light: latte.Blue().Hex,
-	}
-	theme.BorderDimColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Surface0().Hex,
-		Light: latte.Surface0().Hex,
-	}
+	theme.BorderNormalColor = lipgloss.Color("#BDBDBD") // Light equivalent
+	theme.BorderFocusedColor = lipgloss.Color(latte.Blue().Hex)
+	theme.BorderDimColor = lipgloss.Color(latte.Surface0().Hex)
 
 	// Diff view colors
-	theme.DiffAddedColor = lipgloss.AdaptiveColor{
-		Dark:  "#478247", // From existing diff.go
-		Light: "#2E7D32", // Light equivalent
-	}
-	theme.DiffRemovedColor = lipgloss.AdaptiveColor{
-		Dark:  "#7C4444", // From existing diff.go
-		Light: "#C62828", // Light equivalent
-	}
-	theme.DiffContextColor = lipgloss.AdaptiveColor{
-		Dark:  "#a0a0a0", // From existing diff.go
-		Light: "#757575", // Light equivalent
-	}
-	theme.DiffHunkHeaderColor = lipgloss.AdaptiveColor{
-		Dark:  "#a0a0a0", // From existing diff.go
-		Light: "#757575", // Light equivalent
-	}
-	theme.DiffHighlightAddedColor = lipgloss.AdaptiveColor{
-		Dark:  "#DAFADA", // From existing diff.go
-		Light: "#A5D6A7", // Light equivalent
-	}
-	theme.DiffHighlightRemovedColor = lipgloss.AdaptiveColor{
-		Dark:  "#FADADD", // From existing diff.go
-		Light: "#EF9A9A", // Light equivalent
-	}
-	theme.DiffAddedBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#303A30", // From existing diff.go
-		Light: "#E8F5E9", // Light equivalent
-	}
-	theme.DiffRemovedBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#3A3030", // From existing diff.go
-		Light: "#FFEBEE", // Light equivalent
-	}
-	theme.DiffContextBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#212121", // From existing diff.go
-		Light: "#F5F5F5", // Light equivalent
-	}
-	theme.DiffLineNumberColor = lipgloss.AdaptiveColor{
-		Dark:  "#888888", // From existing diff.go
-		Light: "#9E9E9E", // Light equivalent
-	}
-	theme.DiffAddedLineNumberBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#293229", // From existing diff.go
-		Light: "#C8E6C9", // Light equivalent
-	}
-	theme.DiffRemovedLineNumberBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#332929", // From existing diff.go
-		Light: "#FFCDD2", // Light equivalent
-	}
+	theme.DiffAddedColor = lipgloss.Color("#2E7D32")               // Light equivalent
+	theme.DiffRemovedColor = lipgloss.Color("#C62828")             // Light equivalent
+	theme.DiffContextColor = lipgloss.Color("#757575")             // Light equivalent
+	theme.DiffHunkHeaderColor = lipgloss.Color("#757575")          // Light equivalent
+	theme.DiffHighlightAddedColor = lipgloss.Color("#A5D6A7")      // Light equivalent
+	theme.DiffHighlightRemovedColor = lipgloss.Color("#EF9A9A")    // Light equivalent
+	theme.DiffAddedBgColor = lipgloss.Color("#E8F5E9")             // Light equivalent
+	theme.DiffRemovedBgColor = lipgloss.Color("#FFEBEE")           // Light equivalent
+	theme.DiffContextBgColor = lipgloss.Color("#F5F5F5")           // Light equivalent
+	theme.DiffLineNumberColor = lipgloss.Color("#9E9E9E")          // Light equivalent
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#C8E6C9")   // Light equivalent
+	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#FFCDD2") // Light equivalent
 
 	// Markdown colors
-	theme.MarkdownTextColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Text().Hex,
-		Light: latte.Text().Hex,
-	}
-	theme.MarkdownHeadingColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Mauve().Hex,
-		Light: latte.Mauve().Hex,
-	}
-	theme.MarkdownLinkColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Sky().Hex,
-		Light: latte.Sky().Hex,
-	}
-	theme.MarkdownLinkTextColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Pink().Hex,
-		Light: latte.Pink().Hex,
-	}
-	theme.MarkdownCodeColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Green().Hex,
-		Light: latte.Green().Hex,
-	}
-	theme.MarkdownBlockQuoteColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Yellow().Hex,
-		Light: latte.Yellow().Hex,
-	}
-	theme.MarkdownEmphColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Yellow().Hex,
-		Light: latte.Yellow().Hex,
-	}
-	theme.MarkdownStrongColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Peach().Hex,
-		Light: latte.Peach().Hex,
-	}
-	theme.MarkdownHorizontalRuleColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Overlay0().Hex,
-		Light: latte.Overlay0().Hex,
-	}
-	theme.MarkdownListItemColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Blue().Hex,
-		Light: latte.Blue().Hex,
-	}
-	theme.MarkdownListEnumerationColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Sky().Hex,
-		Light: latte.Sky().Hex,
-	}
-	theme.MarkdownImageColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Sapphire().Hex,
-		Light: latte.Sapphire().Hex,
-	}
-	theme.MarkdownImageTextColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Pink().Hex,
-		Light: latte.Pink().Hex,
-	}
-	theme.MarkdownCodeBlockColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Text().Hex,
-		Light: latte.Text().Hex,
-	}
+	theme.MarkdownTextColor = lipgloss.Color(latte.Text().Hex)
+	theme.MarkdownHeadingColor = lipgloss.Color(latte.Mauve().Hex)
+	theme.MarkdownLinkColor = lipgloss.Color(latte.Sky().Hex)
+	theme.MarkdownLinkTextColor = lipgloss.Color(latte.Pink().Hex)
+	theme.MarkdownCodeColor = lipgloss.Color(latte.Green().Hex)
+	theme.MarkdownBlockQuoteColor = lipgloss.Color(latte.Yellow().Hex)
+	theme.MarkdownEmphColor = lipgloss.Color(latte.Yellow().Hex)
+	theme.MarkdownStrongColor = lipgloss.Color(latte.Peach().Hex)
+	theme.MarkdownHorizontalRuleColor = lipgloss.Color(latte.Overlay0().Hex)
+	theme.MarkdownListItemColor = lipgloss.Color(latte.Blue().Hex)
+	theme.MarkdownListEnumerationColor = lipgloss.Color(latte.Sky().Hex)
+	theme.MarkdownImageColor = lipgloss.Color(latte.Sapphire().Hex)
+	theme.MarkdownImageTextColor = lipgloss.Color(latte.Pink().Hex)
+	theme.MarkdownCodeBlockColor = lipgloss.Color(latte.Text().Hex)
 
 	// Syntax highlighting colors
-	theme.SyntaxCommentColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Overlay1().Hex,
-		Light: latte.Overlay1().Hex,
-	}
-	theme.SyntaxKeywordColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Pink().Hex,
-		Light: latte.Pink().Hex,
-	}
-	theme.SyntaxFunctionColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Green().Hex,
-		Light: latte.Green().Hex,
-	}
-	theme.SyntaxVariableColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Sky().Hex,
-		Light: latte.Sky().Hex,
-	}
-	theme.SyntaxStringColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Yellow().Hex,
-		Light: latte.Yellow().Hex,
-	}
-	theme.SyntaxNumberColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Teal().Hex,
-		Light: latte.Teal().Hex,
-	}
-	theme.SyntaxTypeColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Sky().Hex,
-		Light: latte.Sky().Hex,
-	}
-	theme.SyntaxOperatorColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Pink().Hex,
-		Light: latte.Pink().Hex,
-	}
-	theme.SyntaxPunctuationColor = lipgloss.AdaptiveColor{
-		Dark:  mocha.Text().Hex,
-		Light: latte.Text().Hex,
-	}
+	theme.SyntaxCommentColor = lipgloss.Color(latte.Overlay1().Hex)
+	theme.SyntaxKeywordColor = lipgloss.Color(latte.Pink().Hex)
+	theme.SyntaxFunctionColor = lipgloss.Color(latte.Green().Hex)
+	theme.SyntaxVariableColor = lipgloss.Color(latte.Sky().Hex)
+	theme.SyntaxStringColor = lipgloss.Color(latte.Yellow().Hex)
+	theme.SyntaxNumberColor = lipgloss.Color(latte.Teal().Hex)
+	theme.SyntaxTypeColor = lipgloss.Color(latte.Sky().Hex)
+	theme.SyntaxOperatorColor = lipgloss.Color(latte.Pink().Hex)
+	theme.SyntaxPunctuationColor = lipgloss.Color(latte.Text().Hex)
 
 	return theme
 }
 
 func init() {
-	// Register the Catppuccin theme with the theme manager
-	RegisterTheme("catppuccin", NewCatppuccinTheme())
+	// Register the Catppuccin themes with the theme manager
+	RegisterTheme("catppuccin-mocha", NewCatppuccinMochaTheme())
+	RegisterTheme("catppuccin-latte", NewCatppuccinLatteTheme())
 }

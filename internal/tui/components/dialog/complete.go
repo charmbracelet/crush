@@ -1,10 +1,10 @@
 package dialog
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/textarea"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/logging"
 	utilComponents "github.com/opencode-ai/opencode/internal/tui/components/util"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
@@ -77,7 +77,7 @@ type CompletionDialogCompleteItemMsg struct {
 type CompletionDialogCloseMsg struct{}
 
 type CompletionDialog interface {
-	tea.Model
+	util.Model
 	layout.Bindings
 	SetWidth(width int)
 }

@@ -1,12 +1,13 @@
 package utilComponents
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 type SimpleListItem interface {
@@ -14,7 +15,7 @@ type SimpleListItem interface {
 }
 
 type SimpleList[T SimpleListItem] interface {
-	tea.Model
+	util.Model
 	layout.Bindings
 	SetMaxWidth(maxWidth int)
 	GetSelectedItem() (item T, idx int)

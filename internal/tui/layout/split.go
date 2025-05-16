@@ -1,14 +1,15 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 type SplitPaneLayout interface {
-	tea.Model
+	util.Model
 	Sizeable
 	Bindings
 	SetLeftPanel(panel Container) tea.Cmd
@@ -241,7 +242,6 @@ func (s *splitPaneLayout) BindingKeys() []key.Binding {
 }
 
 func NewSplitPane(options ...SplitPaneOption) SplitPaneLayout {
-
 	layout := &splitPaneLayout{
 		ratio:         0.7,
 		verticalRatio: 0.9, // Default 90% for top section, 10% for bottom

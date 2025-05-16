@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
+	"github.com/charmbracelet/bubbles/v2/viewport"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/pubsub"
@@ -426,10 +426,10 @@ func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
 	}
 	m.width = width
 	m.height = height
-	m.viewport.Width = width
-	m.viewport.Height = height - 2
-	m.attachments.Width = width + 40
-	m.attachments.Height = 3
+	m.viewport.SetWidth(width)
+	m.viewport.SetHeight(height - 2)
+	m.attachments.SetWidth(width + 40)
+	m.attachments.SetHeight(3)
 	m.rerender()
 	return nil
 }
@@ -468,11 +468,11 @@ func (m *messagesCmp) BindingKeys() []key.Binding {
 	}
 }
 
-func NewMessagesCmp(app *app.App) tea.Model {
+func NewMessagesCmp(app *app.App) util.Model {
 	s := spinner.New()
 	s.Spinner = spinner.Pulse
-	vp := viewport.New(0, 0)
-	attachmets := viewport.New(0, 0)
+	vp := viewport.New()
+	attachmets := viewport.New()
 	vp.KeyMap.PageUp = messageKeys.PageUp
 	vp.KeyMap.PageDown = messageKeys.PageDown
 	vp.KeyMap.HalfPageUp = messageKeys.HalfPageUp

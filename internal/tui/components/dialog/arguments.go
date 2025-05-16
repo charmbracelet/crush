@@ -2,10 +2,11 @@ package dialog
 
 import (
 	"fmt"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/textinput"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -70,17 +71,18 @@ func NewMultiArgumentsDialogCmp(commandID, content string, argNames []string) Mu
 	for i, name := range argNames {
 		ti := textinput.New()
 		ti.Placeholder = fmt.Sprintf("Enter value for %s...", name)
-		ti.Width = 40
+		ti.SetWidth(40)
 		ti.Prompt = ""
-		ti.PlaceholderStyle = ti.PlaceholderStyle.Background(t.Background())
-		ti.PromptStyle = ti.PromptStyle.Background(t.Background())
-		ti.TextStyle = ti.TextStyle.Background(t.Background())
-		
+		ti.Styles.Focused.Placeholder = ti.Styles.Focused.Placeholder.Background(t.Background())
+		ti.Styles.Blurred.Placeholder = ti.Styles.Blurred.Placeholder.Background(t.Background())
+		ti.Styles.Focused.Suggestion = ti.Styles.Focused.Suggestion.Background(t.Background()).Foreground(t.Primary())
+		ti.Styles.Blurred.Suggestion = ti.Styles.Blurred.Suggestion.Background(t.Background())
+		ti.Styles.Focused.Text = ti.Styles.Focused.Text.Background(t.Background()).Foreground(t.Primary())
+		ti.Styles.Blurred.Text = ti.Styles.Blurred.Text.Background(t.Background())
+
 		// Only focus the first input initially
 		if i == 0 {
 			ti.Focus()
-			ti.PromptStyle = ti.PromptStyle.Foreground(t.Primary())
-			ti.TextStyle = ti.TextStyle.Foreground(t.Primary())
 		} else {
 			ti.Blur()
 		}
@@ -89,11 +91,11 @@ func NewMultiArgumentsDialogCmp(commandID, content string, argNames []string) Mu
 	}
 
 	return MultiArgumentsDialogCmp{
-		inputs:    inputs,
-		keys:      argumentsDialogKeyMap{},
-		commandID: commandID,
-		content:   content,
-		argNames:  argNames,
+		inputs:     inputs,
+		keys:       argumentsDialogKeyMap{},
+		commandID:  commandID,
+		content:    content,
+		argNames:   argNames,
 		focusIndex: 0,
 	}
 }
@@ -108,15 +110,13 @@ func (m MultiArgumentsDialogCmp) Init() tea.Cmd {
 			m.inputs[i].Blur()
 		}
 	}
-	
+
 	return textinput.Blink
 }
 
 // Update implements tea.Model.
 func (m MultiArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	t := theme.CurrentTheme()
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -145,22 +145,16 @@ func (m MultiArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.focusIndex].Blur()
 			m.focusIndex++
 			m.inputs[m.focusIndex].Focus()
-			m.inputs[m.focusIndex].PromptStyle = m.inputs[m.focusIndex].PromptStyle.Foreground(t.Primary())
-			m.inputs[m.focusIndex].TextStyle = m.inputs[m.focusIndex].TextStyle.Foreground(t.Primary())
 		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
 			// Move to the next input
 			m.inputs[m.focusIndex].Blur()
 			m.focusIndex = (m.focusIndex + 1) % len(m.inputs)
 			m.inputs[m.focusIndex].Focus()
-			m.inputs[m.focusIndex].PromptStyle = m.inputs[m.focusIndex].PromptStyle.Foreground(t.Primary())
-			m.inputs[m.focusIndex].TextStyle = m.inputs[m.focusIndex].TextStyle.Foreground(t.Primary())
 		case key.Matches(msg, key.NewBinding(key.WithKeys("shift+tab"))):
 			// Move to the previous input
 			m.inputs[m.focusIndex].Blur()
 			m.focusIndex = (m.focusIndex - 1 + len(m.inputs)) % len(m.inputs)
 			m.inputs[m.focusIndex].Focus()
-			m.inputs[m.focusIndex].PromptStyle = m.inputs[m.focusIndex].PromptStyle.Foreground(t.Primary())
-			m.inputs[m.focusIndex].TextStyle = m.inputs[m.focusIndex].TextStyle.Foreground(t.Primary())
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -206,13 +200,13 @@ func (m MultiArgumentsDialogCmp) View() string {
 			Width(maxWidth).
 			Padding(1, 1, 0, 1).
 			Background(t.Background())
-			
+
 		if i == m.focusIndex {
 			labelStyle = labelStyle.Foreground(t.Primary()).Bold(true)
 		} else {
 			labelStyle = labelStyle.Foreground(t.TextMuted())
 		}
-		
+
 		label := labelStyle.Render(m.argNames[i] + ":")
 
 		field := lipgloss.NewStyle().

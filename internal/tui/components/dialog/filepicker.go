@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/textinput"
+	"github.com/charmbracelet/bubbles/v2/viewport"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/logging"
@@ -122,8 +122,8 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		f.width = 60
 		f.height = 20
-		f.viewport.Width = 80
-		f.viewport.Height = 22
+		f.viewport.SetWidth(80)
+		f.viewport.SetHeight(22)
 		f.cursor = 0
 		f.getCurrentFileBelowCursor()
 	case tea.KeyMsg:
@@ -319,7 +319,7 @@ func (f *filepickerCmp) View() string {
 		Render(f.cwd.View())
 
 	viewportstyle := lipgloss.NewStyle().
-		Width(f.viewport.Width).
+		Width(f.viewport.Width()).
 		Background(t.Background()).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.TextMuted()).
@@ -353,7 +353,7 @@ func (f *filepickerCmp) View() string {
 }
 
 type FilepickerCmp interface {
-	tea.Model
+	util.Model
 	ToggleFilepicker(showFilepicker bool)
 	IsCWDFocused() bool
 }
@@ -374,11 +374,11 @@ func NewFilepickerCmp(app *app.App) FilepickerCmp {
 	}
 	baseDir := DirNode{parent: nil, directory: homepath}
 	dirs := readDir(homepath, false)
-	viewport := viewport.New(0, 0)
+	viewport := viewport.New()
 	currentDirectory := textinput.New()
 	currentDirectory.CharLimit = 200
-	currentDirectory.Width = 44
-	currentDirectory.Cursor.Blink = true
+	currentDirectory.SetWidth(44)
+	currentDirectory.Cursor().Blink = true
 	currentDirectory.SetValue(baseDir.directory)
 	return &filepickerCmp{cwdDetails: &baseDir, dirs: dirs, cursorChain: make(stack, 0), viewport: viewport, cwd: currentDirectory, app: app}
 }
@@ -396,7 +396,7 @@ func (f *filepickerCmp) getCurrentFileBelowCursor() {
 		fullPath := f.cwdDetails.directory + "/" + dir.Name()
 
 		go func() {
-			imageString, err := image.ImagePreview(f.viewport.Width-4, fullPath)
+			imageString, err := image.ImagePreview(f.viewport.Width()-4, fullPath)
 			if err != nil {
 				logging.Error(err.Error())
 				f.viewport.SetContent("Preview unavailable")

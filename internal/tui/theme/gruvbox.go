@@ -1,7 +1,7 @@
 package theme
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 // Gruvbox color palette constants
@@ -74,229 +74,151 @@ func NewGruvboxTheme() *GruvboxTheme {
 	theme := &GruvboxTheme{}
 
 	// Base colors
-	theme.PrimaryColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.SecondaryColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkPurpleBright,
-		Light: gruvboxLightPurpleBright,
-	}
-	theme.AccentColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkOrangeBright,
-		Light: gruvboxLightOrangeBright,
-	}
+	theme.PrimaryColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.SecondaryColor = lipgloss.Color(gruvboxDarkPurpleBright)
+	theme.AccentColor = lipgloss.Color(gruvboxDarkOrangeBright)
 
 	// Status colors
-	theme.ErrorColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkRedBright,
-		Light: gruvboxLightRedBright,
-	}
-	theme.WarningColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellowBright,
-		Light: gruvboxLightYellowBright,
-	}
-	theme.SuccessColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGreenBright,
-		Light: gruvboxLightGreenBright,
-	}
-	theme.InfoColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
+	theme.ErrorColor = lipgloss.Color(gruvboxDarkRedBright)
+	theme.WarningColor = lipgloss.Color(gruvboxDarkYellowBright)
+	theme.SuccessColor = lipgloss.Color(gruvboxDarkGreenBright)
+	theme.InfoColor = lipgloss.Color(gruvboxDarkBlueBright)
 
 	// Text colors
-	theme.TextColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg1,
-		Light: gruvboxLightFg1,
-	}
-	theme.TextMutedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg4,
-		Light: gruvboxLightFg4,
-	}
-	theme.TextEmphasizedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellowBright,
-		Light: gruvboxLightYellowBright,
-	}
+	theme.TextColor = lipgloss.Color(gruvboxDarkFg1)
+	theme.TextMutedColor = lipgloss.Color(gruvboxDarkFg4)
+	theme.TextEmphasizedColor = lipgloss.Color(gruvboxDarkYellowBright)
 
 	// Background colors
-	theme.BackgroundColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg0,
-		Light: gruvboxLightBg0,
-	}
-	theme.BackgroundSecondaryColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg1,
-		Light: gruvboxLightBg1,
-	}
-	theme.BackgroundDarkerColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg0Soft,
-		Light: gruvboxLightBg0Soft,
-	}
+	theme.BackgroundColor = lipgloss.Color(gruvboxDarkBg0)
+	theme.BackgroundSecondaryColor = lipgloss.Color(gruvboxDarkBg1)
+	theme.BackgroundDarkerColor = lipgloss.Color(gruvboxDarkBg0Soft)
 
 	// Border colors
-	theme.BorderNormalColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg2,
-		Light: gruvboxLightBg2,
-	}
-	theme.BorderFocusedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.BorderDimColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg1,
-		Light: gruvboxLightBg1,
-	}
+	theme.BorderNormalColor = lipgloss.Color(gruvboxDarkBg2)
+	theme.BorderFocusedColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.BorderDimColor = lipgloss.Color(gruvboxDarkBg1)
 
 	// Diff view colors
-	theme.DiffAddedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGreenBright,
-		Light: gruvboxLightGreenBright,
-	}
-	theme.DiffRemovedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkRedBright,
-		Light: gruvboxLightRedBright,
-	}
-	theme.DiffContextColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg4,
-		Light: gruvboxLightFg4,
-	}
-	theme.DiffHunkHeaderColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg3,
-		Light: gruvboxLightFg3,
-	}
-	theme.DiffHighlightAddedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGreenBright,
-		Light: gruvboxLightGreenBright,
-	}
-	theme.DiffHighlightRemovedColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkRedBright,
-		Light: gruvboxLightRedBright,
-	}
-	theme.DiffAddedBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#3C4C3C",  // Darker green background
-		Light: "#E8F5E9", // Light green background
-	}
-	theme.DiffRemovedBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#4C3C3C",  // Darker red background
-		Light: "#FFEBEE", // Light red background
-	}
-	theme.DiffContextBgColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg0,
-		Light: gruvboxLightBg0,
-	}
-	theme.DiffLineNumberColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg4,
-		Light: gruvboxLightFg4,
-	}
-	theme.DiffAddedLineNumberBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#32432F",   // Slightly darker green
-		Light: "#C8E6C9", // Light green
-	}
-	theme.DiffRemovedLineNumberBgColor = lipgloss.AdaptiveColor{
-		Dark:  "#43322F",   // Slightly darker red
-		Light: "#FFCDD2", // Light red
-	}
+	theme.DiffAddedColor = lipgloss.Color(gruvboxDarkGreenBright)
+	theme.DiffRemovedColor = lipgloss.Color(gruvboxDarkRedBright)
+	theme.DiffContextColor = lipgloss.Color(gruvboxDarkFg4)
+	theme.DiffHunkHeaderColor = lipgloss.Color(gruvboxDarkFg3)
+	theme.DiffHighlightAddedColor = lipgloss.Color(gruvboxDarkGreenBright)
+	theme.DiffHighlightRemovedColor = lipgloss.Color(gruvboxDarkRedBright)
+	theme.DiffAddedBgColor = lipgloss.Color("#3C4C3C")  // Darker green background
+	theme.DiffRemovedBgColor = lipgloss.Color("#4C3C3C")  // Darker red background
+	theme.DiffContextBgColor = lipgloss.Color(gruvboxDarkBg0)
+	theme.DiffLineNumberColor = lipgloss.Color(gruvboxDarkFg4)
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#32432F")   // Slightly darker green
+	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#43322F")   // Slightly darker red
 
 	// Markdown colors
-	theme.MarkdownTextColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg1,
-		Light: gruvboxLightFg1,
-	}
-	theme.MarkdownHeadingColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellowBright,
-		Light: gruvboxLightYellowBright,
-	}
-	theme.MarkdownLinkColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.MarkdownLinkTextColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkAquaBright,
-		Light: gruvboxLightAquaBright,
-	}
-	theme.MarkdownCodeColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGreenBright,
-		Light: gruvboxLightGreenBright,
-	}
-	theme.MarkdownBlockQuoteColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkAquaBright,
-		Light: gruvboxLightAquaBright,
-	}
-	theme.MarkdownEmphColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellowBright,
-		Light: gruvboxLightYellowBright,
-	}
-	theme.MarkdownStrongColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkOrangeBright,
-		Light: gruvboxLightOrangeBright,
-	}
-	theme.MarkdownHorizontalRuleColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBg3,
-		Light: gruvboxLightBg3,
-	}
-	theme.MarkdownListItemColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.MarkdownListEnumerationColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.MarkdownImageColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkPurpleBright,
-		Light: gruvboxLightPurpleBright,
-	}
-	theme.MarkdownImageTextColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkAquaBright,
-		Light: gruvboxLightAquaBright,
-	}
-	theme.MarkdownCodeBlockColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg1,
-		Light: gruvboxLightFg1,
-	}
+	theme.MarkdownTextColor = lipgloss.Color(gruvboxDarkFg1)
+	theme.MarkdownHeadingColor = lipgloss.Color(gruvboxDarkYellowBright)
+	theme.MarkdownLinkColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.MarkdownLinkTextColor = lipgloss.Color(gruvboxDarkAquaBright)
+	theme.MarkdownCodeColor = lipgloss.Color(gruvboxDarkGreenBright)
+	theme.MarkdownBlockQuoteColor = lipgloss.Color(gruvboxDarkAquaBright)
+	theme.MarkdownEmphColor = lipgloss.Color(gruvboxDarkYellowBright)
+	theme.MarkdownStrongColor = lipgloss.Color(gruvboxDarkOrangeBright)
+	theme.MarkdownHorizontalRuleColor = lipgloss.Color(gruvboxDarkBg3)
+	theme.MarkdownListItemColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.MarkdownListEnumerationColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.MarkdownImageColor = lipgloss.Color(gruvboxDarkPurpleBright)
+	theme.MarkdownImageTextColor = lipgloss.Color(gruvboxDarkAquaBright)
+	theme.MarkdownCodeBlockColor = lipgloss.Color(gruvboxDarkFg1)
 
 	// Syntax highlighting colors
-	theme.SyntaxCommentColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGray,
-		Light: gruvboxLightGray,
-	}
-	theme.SyntaxKeywordColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkRedBright,
-		Light: gruvboxLightRedBright,
-	}
-	theme.SyntaxFunctionColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkGreenBright,
-		Light: gruvboxLightGreenBright,
-	}
-	theme.SyntaxVariableColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkBlueBright,
-		Light: gruvboxLightBlueBright,
-	}
-	theme.SyntaxStringColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellowBright,
-		Light: gruvboxLightYellowBright,
-	}
-	theme.SyntaxNumberColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkPurpleBright,
-		Light: gruvboxLightPurpleBright,
-	}
-	theme.SyntaxTypeColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkYellow,
-		Light: gruvboxLightYellow,
-	}
-	theme.SyntaxOperatorColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkAquaBright,
-		Light: gruvboxLightAquaBright,
-	}
-	theme.SyntaxPunctuationColor = lipgloss.AdaptiveColor{
-		Dark:  gruvboxDarkFg1,
-		Light: gruvboxLightFg1,
-	}
+	theme.SyntaxCommentColor = lipgloss.Color(gruvboxDarkGray)
+	theme.SyntaxKeywordColor = lipgloss.Color(gruvboxDarkRedBright)
+	theme.SyntaxFunctionColor = lipgloss.Color(gruvboxDarkGreenBright)
+	theme.SyntaxVariableColor = lipgloss.Color(gruvboxDarkBlueBright)
+	theme.SyntaxStringColor = lipgloss.Color(gruvboxDarkYellowBright)
+	theme.SyntaxNumberColor = lipgloss.Color(gruvboxDarkPurpleBright)
+	theme.SyntaxTypeColor = lipgloss.Color(gruvboxDarkYellow)
+	theme.SyntaxOperatorColor = lipgloss.Color(gruvboxDarkAquaBright)
+	theme.SyntaxPunctuationColor = lipgloss.Color(gruvboxDarkFg1)
+
+	return theme
+}
+
+// NewGruvboxLightTheme creates a new instance of the Gruvbox Light theme.
+func NewGruvboxLightTheme() *GruvboxTheme {
+	theme := &GruvboxTheme{}
+
+	// Base colors
+	theme.PrimaryColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.SecondaryColor = lipgloss.Color(gruvboxLightPurpleBright)
+	theme.AccentColor = lipgloss.Color(gruvboxLightOrangeBright)
+
+	// Status colors
+	theme.ErrorColor = lipgloss.Color(gruvboxLightRedBright)
+	theme.WarningColor = lipgloss.Color(gruvboxLightYellowBright)
+	theme.SuccessColor = lipgloss.Color(gruvboxLightGreenBright)
+	theme.InfoColor = lipgloss.Color(gruvboxLightBlueBright)
+
+	// Text colors
+	theme.TextColor = lipgloss.Color(gruvboxLightFg1)
+	theme.TextMutedColor = lipgloss.Color(gruvboxLightFg4)
+	theme.TextEmphasizedColor = lipgloss.Color(gruvboxLightYellowBright)
+
+	// Background colors
+	theme.BackgroundColor = lipgloss.Color(gruvboxLightBg0)
+	theme.BackgroundSecondaryColor = lipgloss.Color(gruvboxLightBg1)
+	theme.BackgroundDarkerColor = lipgloss.Color(gruvboxLightBg0Soft)
+
+	// Border colors
+	theme.BorderNormalColor = lipgloss.Color(gruvboxLightBg2)
+	theme.BorderFocusedColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.BorderDimColor = lipgloss.Color(gruvboxLightBg1)
+
+	// Diff view colors
+	theme.DiffAddedColor = lipgloss.Color(gruvboxLightGreenBright)
+	theme.DiffRemovedColor = lipgloss.Color(gruvboxLightRedBright)
+	theme.DiffContextColor = lipgloss.Color(gruvboxLightFg4)
+	theme.DiffHunkHeaderColor = lipgloss.Color(gruvboxLightFg3)
+	theme.DiffHighlightAddedColor = lipgloss.Color(gruvboxLightGreenBright)
+	theme.DiffHighlightRemovedColor = lipgloss.Color(gruvboxLightRedBright)
+	theme.DiffAddedBgColor = lipgloss.Color("#E8F5E9") // Light green background
+	theme.DiffRemovedBgColor = lipgloss.Color("#FFEBEE") // Light red background
+	theme.DiffContextBgColor = lipgloss.Color(gruvboxLightBg0)
+	theme.DiffLineNumberColor = lipgloss.Color(gruvboxLightFg4)
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#C8E6C9") // Light green
+	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#FFCDD2") // Light red
+
+	// Markdown colors
+	theme.MarkdownTextColor = lipgloss.Color(gruvboxLightFg1)
+	theme.MarkdownHeadingColor = lipgloss.Color(gruvboxLightYellowBright)
+	theme.MarkdownLinkColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.MarkdownLinkTextColor = lipgloss.Color(gruvboxLightAquaBright)
+	theme.MarkdownCodeColor = lipgloss.Color(gruvboxLightGreenBright)
+	theme.MarkdownBlockQuoteColor = lipgloss.Color(gruvboxLightAquaBright)
+	theme.MarkdownEmphColor = lipgloss.Color(gruvboxLightYellowBright)
+	theme.MarkdownStrongColor = lipgloss.Color(gruvboxLightOrangeBright)
+	theme.MarkdownHorizontalRuleColor = lipgloss.Color(gruvboxLightBg3)
+	theme.MarkdownListItemColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.MarkdownListEnumerationColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.MarkdownImageColor = lipgloss.Color(gruvboxLightPurpleBright)
+	theme.MarkdownImageTextColor = lipgloss.Color(gruvboxLightAquaBright)
+	theme.MarkdownCodeBlockColor = lipgloss.Color(gruvboxLightFg1)
+
+	// Syntax highlighting colors
+	theme.SyntaxCommentColor = lipgloss.Color(gruvboxLightGray)
+	theme.SyntaxKeywordColor = lipgloss.Color(gruvboxLightRedBright)
+	theme.SyntaxFunctionColor = lipgloss.Color(gruvboxLightGreenBright)
+	theme.SyntaxVariableColor = lipgloss.Color(gruvboxLightBlueBright)
+	theme.SyntaxStringColor = lipgloss.Color(gruvboxLightYellowBright)
+	theme.SyntaxNumberColor = lipgloss.Color(gruvboxLightPurpleBright)
+	theme.SyntaxTypeColor = lipgloss.Color(gruvboxLightYellow)
+	theme.SyntaxOperatorColor = lipgloss.Color(gruvboxLightAquaBright)
+	theme.SyntaxPunctuationColor = lipgloss.Color(gruvboxLightFg1)
 
 	return theme
 }
 
 func init() {
-	// Register the Gruvbox theme with the theme manager
+	// Register the Gruvbox themes with the theme manager
 	RegisterTheme("gruvbox", NewGruvboxTheme())
+	RegisterTheme("gruvbox-light", NewGruvboxLightTheme())
 }

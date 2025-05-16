@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/viewport"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/diff"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/permission"
@@ -34,7 +34,7 @@ type PermissionResponseMsg struct {
 
 // PermissionDialogCmp interface for permission dialog component
 type PermissionDialogCmp interface {
-	tea.Model
+	util.Model
 	layout.Bindings
 	SetPermissions(permission permission.PermissionRequest) tea.Cmd
 }
@@ -268,7 +268,6 @@ func (p *permissionDialogCmp) renderHeader() string {
 }
 
 func (p *permissionDialogCmp) renderBashContent() string {
-	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	if pr, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
@@ -278,11 +277,11 @@ func (p *permissionDialogCmp) renderBashContent() string {
 		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 			r := styles.GetMarkdownRenderer(p.width - 10)
 			s, err := r.Render(content)
-			return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
+			return s, err
 		})
 
 		finalContent := baseStyle.
-			Width(p.contentViewPort.Width).
+			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
 		p.contentViewPort.SetContent(finalContent)
 		return p.styleViewport()
@@ -293,7 +292,7 @@ func (p *permissionDialogCmp) renderBashContent() string {
 func (p *permissionDialogCmp) renderEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
 		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width))
+			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
 		})
 
 		p.contentViewPort.SetContent(diff)
@@ -305,7 +304,7 @@ func (p *permissionDialogCmp) renderEditContent() string {
 func (p *permissionDialogCmp) renderPatchContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
 		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width))
+			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
 		})
 
 		p.contentViewPort.SetContent(diff)
@@ -318,7 +317,7 @@ func (p *permissionDialogCmp) renderWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
 		// Use the cache for diff rendering
 		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width))
+			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
 		})
 
 		p.contentViewPort.SetContent(diff)
@@ -328,7 +327,6 @@ func (p *permissionDialogCmp) renderWriteContent() string {
 }
 
 func (p *permissionDialogCmp) renderFetchContent() string {
-	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
@@ -338,11 +336,11 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 			r := styles.GetMarkdownRenderer(p.width - 10)
 			s, err := r.Render(content)
-			return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
+			return s, err
 		})
 
 		finalContent := baseStyle.
-			Width(p.contentViewPort.Width).
+			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
 		p.contentViewPort.SetContent(finalContent)
 		return p.styleViewport()
@@ -351,7 +349,6 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 }
 
 func (p *permissionDialogCmp) renderDefaultContent() string {
-	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	content := p.permission.Description
@@ -360,11 +357,11 @@ func (p *permissionDialogCmp) renderDefaultContent() string {
 	renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
 		r := styles.GetMarkdownRenderer(p.width - 10)
 		s, err := r.Render(content)
-		return styles.ForceReplaceBackgroundWithLipgloss(s, t.Background()), err
+		return s, err
 	})
 
 	finalContent := baseStyle.
-		Width(p.contentViewPort.Width).
+		Width(p.contentViewPort.Width()).
 		Render(renderedContent)
 	p.contentViewPort.SetContent(finalContent)
 
@@ -398,8 +395,8 @@ func (p *permissionDialogCmp) render() string {
 	buttons := p.renderButtons()
 
 	// Calculate content height dynamically based on window size
-	p.contentViewPort.Height = p.height - lipgloss.Height(headerContent) - lipgloss.Height(buttons) - 2 - lipgloss.Height(title)
-	p.contentViewPort.Width = p.width - 4
+	p.contentViewPort.SetHeight(p.height - lipgloss.Height(headerContent) - lipgloss.Height(buttons) - 2 - lipgloss.Height(title))
+	p.contentViewPort.SetWidth(p.width - 4)
 
 	// Render content based on tool type
 	var contentFinal string
@@ -511,7 +508,7 @@ func (c *permissionDialogCmp) GetOrSetMarkdown(key string, generator func() (str
 
 func NewPermissionDialogCmp() PermissionDialogCmp {
 	// Create viewport for content
-	contentViewport := viewport.New(0, 0)
+	contentViewport := viewport.New()
 
 	return &permissionDialogCmp{
 		contentViewPort: contentViewport,

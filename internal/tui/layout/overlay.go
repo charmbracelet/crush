@@ -3,7 +3,7 @@ package layout
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/v2"
 	chAnsi "github.com/charmbracelet/x/ansi"
 	"github.com/muesli/ansi"
 	"github.com/muesli/reflow/truncate"
@@ -14,7 +14,7 @@ import (
 )
 
 // Most of this code is borrowed from
-// https://github.com/charmbracelet/lipgloss/pull/102
+// https://github.com/charmbracelet/lipgloss/v2/pull/102
 // as well as the lipgloss library, with some modification for what I needed.
 
 // Split a string into lines, additionally returning the size of the widest

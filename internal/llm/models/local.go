@@ -3,7 +3,6 @@ package models
 import (
 	"cmp"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/spf13/viper"
 )
 
@@ -25,7 +25,7 @@ func init() {
 	if endpoint := os.Getenv("LOCAL_ENDPOINT"); endpoint != "" {
 		localEndpoint, err := url.Parse(endpoint)
 		if err != nil {
-			slog.Debug("Failed to parse local endpoint",
+			logging.Debug("Failed to parse local endpoint",
 				"error", err,
 				"endpoint", endpoint,
 			)
@@ -44,7 +44,7 @@ func init() {
 		}
 
 		if len(models) == 0 {
-			slog.Debug("No local models found",
+			logging.Debug("No local models found",
 				"endpoint", endpoint,
 			)
 			return
@@ -77,7 +77,7 @@ type localModel struct {
 func listLocalModels(modelsEndpoint string) []localModel {
 	res, err := http.Get(modelsEndpoint)
 	if err != nil {
-		slog.Debug("Failed to list local models",
+		logging.Debug("Failed to list local models",
 			"error", err,
 			"endpoint", modelsEndpoint,
 		)
@@ -85,7 +85,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		slog.Debug("Failed to list local models",
+		logging.Debug("Failed to list local models",
 			"status", res.StatusCode,
 			"endpoint", modelsEndpoint,
 		)
@@ -93,7 +93,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 
 	var modelList localModelList
 	if err = json.NewDecoder(res.Body).Decode(&modelList); err != nil {
-		slog.Debug("Failed to list local models",
+		logging.Debug("Failed to list local models",
 			"error", err,
 			"endpoint", modelsEndpoint,
 		)
@@ -103,7 +103,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 	for _, model := range modelList.Data {
 		if strings.HasSuffix(modelsEndpoint, lmStudioBetaModelsPath) {
 			if model.Object != "model" || model.Type != "llm" {
-				slog.Debug("Skipping unsupported LMStudio model",
+				logging.Debug("Skipping unsupported LMStudio model",
 					"endpoint", modelsEndpoint,
 					"id", model.ID,
 					"object", model.Object,
@@ -125,7 +125,7 @@ func loadLocalModels(models []localModel) {
 		model := convertLocalModel(m)
 		SupportedModels[model.ID] = model
 
-		if i == 1 || m.State == "loaded" {
+		if i == 0 || m.State == "loaded" {
 			viper.SetDefault("agents.coder.model", model.ID)
 			viper.SetDefault("agents.summarizer.model", model.ID)
 			viper.SetDefault("agents.task.model", model.ID)
@@ -150,7 +150,19 @@ func convertLocalModel(model localModel) Model {
 var modelInfoRegex = regexp.MustCompile(`(?i)^([a-z0-9]+)(?:[-_]?([rv]?\d[\.\d]*))?(?:[-_]?([a-z]+))?.*`)
 
 func friendlyModelName(modelID string) string {
-	match := modelInfoRegex.FindStringSubmatch(modelID)
+	mainID := modelID
+	tag := ""
+
+	if slash := strings.LastIndex(mainID, "/"); slash != -1 {
+		mainID = mainID[slash+1:]
+	}
+
+	if at := strings.Index(modelID, "@"); at != -1 {
+		mainID = modelID[:at]
+		tag = modelID[at+1:]
+	}
+
+	match := modelInfoRegex.FindStringSubmatch(mainID)
 	if match == nil {
 		return modelID
 	}
@@ -185,6 +197,9 @@ func friendlyModelName(modelID string) string {
 	}
 	if label != "" {
 		parts = append(parts, label)
+	}
+	if tag != "" {
+		parts = append(parts, tag)
 	}
 
 	return strings.Join(parts, " ")

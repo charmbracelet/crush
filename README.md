@@ -100,6 +100,7 @@ You can configure OpenCode using environment variables:
 | `AZURE_OPENAI_ENDPOINT`    | For Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | For Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | For Azure OpenAI models                                |
+| `LOCAL_ENDPOINT`           | For self-hosted models                                 |
 | `SHELL`                    | Default shell to use (if not specified in config)      |
 
 ### Shell Configuration
@@ -565,6 +566,35 @@ The AI assistant can access LSP features through the `diagnostics` tool, allowin
 - Suggest fixes based on diagnostics
 
 While the LSP client implementation supports the full LSP protocol (including completions, hover, definition, etc.), currently only diagnostics are exposed to the AI assistant.
+
+## Using a self-hosted model provider
+
+OpenCode can also load and use models from a self-hosted (OpenAI-like) provider.
+This is useful for developers who want to experiment with custom models.
+
+### Configuring a self-hosted provider 
+
+You can use a self-hosted model by setting the `LOCAL_ENDPOINT` environment variable.
+This will cause OpenCode to load and use the models from the specified endpoint.
+
+```bash
+LOCAL_ENDPOINT=http://localhost:1235/v1
+```
+
+### Configuring a self-hosted model
+
+You can also configure a self-hosted model in the configuration file under the `agents` section:
+
+```json
+{
+  "agents": {
+    "coder": {
+      "model": "local.granite-3.3-2b-instruct@q8_0",
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
 
 ## Development
 

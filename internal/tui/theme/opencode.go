@@ -62,8 +62,9 @@ func NewOpenCodeDarkTheme() *OpenCodeTheme {
 	theme.DiffRemovedColor = lipgloss.Color("#7C4444")
 	theme.DiffContextColor = lipgloss.Color("#a0a0a0")
 	theme.DiffHunkHeaderColor = lipgloss.Color("#a0a0a0")
-	theme.DiffHighlightAddedColor = lipgloss.Color("#DAFADA")
-	theme.DiffHighlightRemovedColor = lipgloss.Color("#FADADD")
+	// TODO: change these colors to be what we want
+	theme.DiffHighlightAddedColor = lipgloss.Color("#256125")
+	theme.DiffHighlightRemovedColor = lipgloss.Color("#612726")
 	theme.DiffAddedBgColor = lipgloss.Color("#303A30")
 	theme.DiffRemovedBgColor = lipgloss.Color("#3A3030")
 	theme.DiffContextBgColor = lipgloss.Color(darkBackground)

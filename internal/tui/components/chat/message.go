@@ -10,7 +10,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/diff"
 	"github.com/opencode-ai/opencode/internal/llm/agent"
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -272,66 +271,6 @@ func getToolAction(name string) string {
 	return "Working..."
 }
 
-// renders params, params[0] (params[1]=params[2] ....)
-func renderParams(paramsWidth int, params ...string) string {
-	if len(params) == 0 {
-		return ""
-	}
-	mainParam := params[0]
-	if len(mainParam) > paramsWidth {
-		mainParam = mainParam[:paramsWidth-3] + "..."
-	}
-
-	if len(params) == 1 {
-		return mainParam
-	}
-	otherParams := params[1:]
-	// create pairs of key/value
-	// if odd number of params, the last one is a key without value
-	if len(otherParams)%2 != 0 {
-		otherParams = append(otherParams, "")
-	}
-	parts := make([]string, 0, len(otherParams)/2)
-	for i := 0; i < len(otherParams); i += 2 {
-		key := otherParams[i]
-		value := otherParams[i+1]
-		if value == "" {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s", key, value))
-	}
-
-	partsRendered := strings.Join(parts, ", ")
-	remainingWidth := paramsWidth - lipgloss.Width(partsRendered) - 5 // for the space
-	if remainingWidth < 30 {
-		// No space for the params, just show the main
-		return mainParam
-	}
-
-	if len(parts) > 0 {
-		mainParam = fmt.Sprintf("%s (%s)", mainParam, strings.Join(parts, ", "))
-	}
-
-	return ansi.Truncate(mainParam, paramsWidth, "...")
-}
-
-func removeWorkingDirPrefix(path string) string {
-	wd := config.WorkingDirectory()
-	if strings.HasPrefix(path, wd) {
-		path = strings.TrimPrefix(path, wd)
-	}
-	if strings.HasPrefix(path, "/") {
-		path = strings.TrimPrefix(path, "/")
-	}
-	if strings.HasPrefix(path, "./") {
-		path = strings.TrimPrefix(path, "./")
-	}
-	if strings.HasPrefix(path, "../") {
-		path = strings.TrimPrefix(path, "../")
-	}
-	return path
-}
-
 func renderToolParams(paramWidth int, toolCall message.ToolCall) string {
 	params := ""
 	switch toolCall.Name {
@@ -428,14 +367,6 @@ func renderToolParams(paramWidth int, toolCall message.ToolCall) string {
 		params = renderParams(paramWidth, input)
 	}
 	return params
-}
-
-func truncateHeight(content string, height int) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) > height {
-		return strings.Join(lines[:height], "\n")
-	}
-	return content
 }
 
 func renderToolResponse(toolCall message.ToolCall, response message.ToolResult, width int) string {

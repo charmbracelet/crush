@@ -33,9 +33,7 @@ func generateMarkdownStyleConfig() ansi.StyleConfig {
 	return ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				BlockPrefix: "",
-				BlockSuffix: "",
-				Color:       stringPtr(colorToString(t.MarkdownText())),
+				Color: stringPtr(colorToString(t.MarkdownText())),
 			},
 			Margin: uintPtr(defaultMargin),
 		},

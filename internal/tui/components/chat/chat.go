@@ -138,4 +138,3 @@ func cwd(width int) string {
 		Width(width).
 		Render(cwd)
 }
-

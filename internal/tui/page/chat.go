@@ -217,7 +217,7 @@ func NewChatPage(app *app.App) util.Model {
 	completionDialog := dialog.NewCompletionDialogCmp(cg)
 
 	messagesContainer := layout.NewContainer(
-		chat.NewMessagesCmp(app),
+		chat.NewMessagesListCmp(app),
 		layout.WithPadding(1, 1, 0, 1),
 	)
 	editorContainer := layout.NewContainer(

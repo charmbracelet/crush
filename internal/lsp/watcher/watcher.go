@@ -401,7 +401,6 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 					"watched", matched,
 					"kind", kind,
 				)
-
 			}
 
 			// Check if this path should be watched according to server registrations

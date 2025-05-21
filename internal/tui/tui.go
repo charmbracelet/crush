@@ -457,7 +457,6 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-
 		case key.Matches(msg, keys.Quit):
 			a.showQuit = !a.showQuit
 			if a.showHelp {
@@ -580,7 +579,6 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f, filepickerCmd := a.filepicker.Update(msg)
 		a.filepicker = f.(dialog.FilepickerCmp)
 		cmds = append(cmds, filepickerCmd)
-
 	}
 
 	if a.showFilepicker {
@@ -733,7 +731,6 @@ func (a appModel) View() string {
 			appView,
 			true,
 		)
-
 	}
 
 	// Show compacting status overlay

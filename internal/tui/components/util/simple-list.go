@@ -66,7 +66,7 @@ func (c *simpleListCmp[T]) Init() tea.Cmd {
 
 func (c *simpleListCmp[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, simpleListKeys.Up) || (c.useAlphaNumericKeys && key.Matches(msg, simpleListKeys.UpAlpha)):
 			if c.selectedIdx > 0 {

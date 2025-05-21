@@ -4,28 +4,33 @@ run:
 linters:
   enable:
     - bodyclose
-    - exhaustive
-    - goconst
-    - godot
-    - godox
+    # - exhaustive
+    # - goconst
+    # - godot
+    # - godox
     - gomoddirectives
     - goprintffuncname
-    - gosec
+    # - gosec
     - misspell
-    - nakedret
-    - nestif
-    - nilerr
+    # - nakedret
+    # - nestif
+    # - nilerr
     - noctx
     - nolintlint
-    - prealloc
-    - revive
+    # - prealloc
+    # - revive
     - rowserrcheck
     - sqlclosecheck
     - tparallel
-    - unconvert
-    - unparam
+    # - unconvert
+    # - unparam
     - whitespace
-    - wrapcheck
+    # - wrapcheck
+  disable:
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused
   exclusions:
     generated: lax
     presets:

@@ -77,7 +77,7 @@ func (s *sessionDialogCmp) Init() tea.Cmd {
 
 func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, sessionKeys.Up) || key.Matches(msg, sessionKeys.K):
 			if s.selectedIdx > 0 {

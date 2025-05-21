@@ -111,7 +111,7 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 
 func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, modelKeys.Up) || key.Matches(msg, modelKeys.K):
 			m.moveSelectionUp()

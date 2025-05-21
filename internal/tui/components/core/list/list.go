@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -22,6 +21,7 @@ type ListModel interface {
 	PrependItem(util.Model)
 	DeleteItem(int)
 	UpdateItem(int, util.Model)
+	ResetView()
 }
 
 type renderedItem struct {
@@ -72,11 +72,17 @@ func WithPadding(padding ...int) listOptions {
 	}
 }
 
-func New(items []util.Model, opts ...listOptions) ListModel {
+func WithItems(items []util.Model) listOptions {
+	return func(m *model) {
+		m.items = items
+	}
+}
+
+func New(opts ...listOptions) ListModel {
 	m := &model{
 		help:            help.New(),
 		keymap:          defaultKeymap(),
-		items:           items,
+		items:           []util.Model{},
 		needsRerender:   true,
 		gapSize:         0,
 		padding:         []int{},
@@ -93,11 +99,8 @@ func New(items []util.Model, opts ...listOptions) ListModel {
 
 // Init implements List.
 func (m *model) Init() tea.Cmd {
-	// TODO: remove after testing
-	t := theme.CurrentTheme()
 	cmds := []tea.Cmd{
 		m.SetItems(m.items),
-		tea.SetBackgroundColor(t.Background()),
 	}
 	return tea.Batch(cmds...)
 }
@@ -105,14 +108,7 @@ func (m *model) Init() tea.Cmd {
 // Update implements List.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		// TODO: remove after testing
-		m.SetSize(msg.Width, msg.Height)
 	case tea.KeyMsg:
-		// TODO: remove after testing
-		if msg.String() == "q" {
-			return m, tea.Quit
-		}
 		switch {
 		case key.Matches(msg, m.keymap.Down) || key.Matches(msg, m.keymap.NDown):
 			if m.reverse {
@@ -383,11 +379,11 @@ func (m *model) goToBottom() tea.Cmd {
 	m.selectedItemInx = len(m.items) - 1
 	cmd = m.focusSelected()
 	cmds = append(cmds, cmd)
-	m.resetView()
+	m.ResetView()
 	return tea.Batch(cmds...)
 }
 
-func (m *model) resetView() {
+func (m *model) ResetView() {
 	m.renderedItems.Clear()
 	m.renderedLines = []string{}
 	m.offset = 0
@@ -404,7 +400,7 @@ func (m *model) goToTop() tea.Cmd {
 	m.selectedItemInx = 0
 	cmd = m.focusSelected()
 	cmds = append(cmds, cmd)
-	m.resetView()
+	m.ResetView()
 	return tea.Batch(cmds...)
 }
 
@@ -525,7 +521,7 @@ func (m *model) SetSize(width int, height int) tea.Cmd {
 		m.height = height
 	}
 	m.width = width
-	m.resetView()
+	m.ResetView()
 	return m.setItemsSize()
 }
 
@@ -611,8 +607,6 @@ func (m *model) setReverse(reverse bool) {
 // SetItems implements List.
 func (m *model) SetItems(items []util.Model) tea.Cmd {
 	m.items = items
-	m.renderedItems.Clear()
-	m.renderedLines = []string{}
 	var cmds []tea.Cmd
 	cmd := m.setItemsSize()
 	cmds = append(cmds, cmd)
@@ -626,5 +620,6 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	m.needsRerender = true
+	m.ResetView()
 	return tea.Batch(cmds...)
 }

@@ -117,11 +117,14 @@ func (q *quitDialogCmp) View() string {
 		),
 	)
 
-	return baseStyle.Padding(1, 2).
+	quitDialogStyle := baseStyle.
+		Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
 		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
-		Width(lipgloss.Width(content) + 4).
+		BorderForeground(t.TextMuted())
+
+	return quitDialogStyle.
+		Width(lipgloss.Width(content) + quitDialogStyle.GetHorizontalFrameSize()).
 		Render(content)
 }
 

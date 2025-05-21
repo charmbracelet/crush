@@ -232,10 +232,7 @@ func HighlightIntralineChanges(h *Hunk) {
 
 	for i := 0; i < len(h.Lines); i++ {
 		// Look for removed line followed by added line
-		if i+1 < len(h.Lines) &&
-			h.Lines[i].Kind == LineRemoved &&
-			h.Lines[i+1].Kind == LineAdded {
-
+		if i+1 < len(h.Lines) && h.Lines[i].Kind == LineRemoved && h.Lines[i+1].Kind == LineAdded {
 			oldLine := h.Lines[i]
 			newLine := h.Lines[i+1]
 

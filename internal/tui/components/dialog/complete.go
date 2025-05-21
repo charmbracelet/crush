@@ -138,9 +138,7 @@ func (c *completionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if c.pseudoSearchTextArea.Focused() {
-
 			if !key.Matches(msg, completionDialogKeys.Complete) {
-
 				var cmd tea.Cmd
 				c.pseudoSearchTextArea, cmd = c.pseudoSearchTextArea.Update(msg)
 				cmds = append(cmds, cmd)

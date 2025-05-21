@@ -126,7 +126,7 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f.viewport.SetHeight(22)
 		f.cursor = 0
 		f.getCurrentFileBelowCursor()
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if f.cwd.Focused() {
 			f.cwd, cmd = f.cwd.Update(msg)
 		}

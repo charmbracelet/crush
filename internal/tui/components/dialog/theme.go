@@ -86,7 +86,7 @@ func (t *themeDialogCmp) Init() tea.Cmd {
 
 func (t *themeDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, themeKeys.Up) || key.Matches(msg, themeKeys.K):
 			if t.selectedIdx > 0 {

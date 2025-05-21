@@ -102,7 +102,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		p.session = msg
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, keyMap.ShowCompletionDialog):
 			p.showCompletionDialog = true
@@ -128,7 +128,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, contextCmd)
 
 		// Doesn't forward event if enter key is pressed
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 			if keyMsg.String() == "enter" {
 				return p, tea.Batch(cmds...)
 			}

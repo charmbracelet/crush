@@ -130,7 +130,7 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
 			WithOpenAIBaseURL("https://openrouter.ai/api/v1"),
 			WithOpenAIExtraHeaders(map[string]string{
-				"HTTP-Referer": "crush.ai",
+				"HTTP-Referer": "crush.charm.land",
 				"X-Title":      "Crush",
 			}),
 		)

@@ -90,7 +90,7 @@ func (m *editorCmp) openEditor() tea.Cmd {
 		return util.ReportError(err)
 	}
 	tmpfile.Close()
-	c := exec.Command(editor, tmpfile.Name()) //nolint:gosec
+	c := exec.Command(editor, tmpfile.Name())
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

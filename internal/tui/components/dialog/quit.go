@@ -62,7 +62,7 @@ func (q *quitDialogCmp) Init() tea.Cmd {
 
 func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, helpKeys.LeftRight) || key.Matches(msg, helpKeys.Tab):
 			q.selectedNo = !q.selectedNo

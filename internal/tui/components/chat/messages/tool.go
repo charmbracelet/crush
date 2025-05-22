@@ -19,6 +19,8 @@ type ToolCallCmp interface {
 	util.Model
 	layout.Sizeable
 	layout.Focusable
+	GetToolCall() message.ToolCall
+	GetToolResult() message.ToolResult
 }
 
 type toolCallCmp struct {
@@ -73,14 +75,24 @@ func (m *toolCallCmp) View() string {
 	return box.PaddingLeft(1).Render(r.Render(m))
 }
 
-func (v *toolCallCmp) renderPending() string {
-	return fmt.Sprintf("%s: %s", prettifyToolName(v.call.Name), toolAction(v.call.Name))
+// GetToolCall implements ToolCallCmp.
+func (m *toolCallCmp) GetToolCall() message.ToolCall {
+	return m.call
 }
 
-func (msg *toolCallCmp) style() lipgloss.Style {
+// GetToolResult implements ToolCallCmp.
+func (m *toolCallCmp) GetToolResult() message.ToolResult {
+	return m.result
+}
+
+func (m *toolCallCmp) renderPending() string {
+	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), toolAction(m.call.Name))
+}
+
+func (m *toolCallCmp) style() lipgloss.Style {
 	t := theme.CurrentTheme()
 	borderStyle := lipgloss.NormalBorder()
-	if msg.focused {
+	if m.focused {
 		borderStyle = lipgloss.DoubleBorder()
 	}
 	return styles.BaseStyle().

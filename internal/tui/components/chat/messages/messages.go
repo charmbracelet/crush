@@ -12,6 +12,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/llm/models"
 
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -22,6 +23,8 @@ type MessageCmp interface {
 	util.Model
 	layout.Sizeable
 	layout.Focusable
+	GetMessage() message.Message
+	Spinning() bool
 }
 
 type messageCmp struct {
@@ -30,9 +33,10 @@ type messageCmp struct {
 
 	// Used for agent and user messages
 	message             message.Message
+	spinning            bool
+	anim                util.Model
 	lastUserMessageTime time.Time
 }
-
 type MessageOption func(*messageCmp)
 
 func WithLastUserMessageTime(t time.Time) MessageOption {
@@ -44,6 +48,7 @@ func WithLastUserMessageTime(t time.Time) MessageOption {
 func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
 	m := &messageCmp{
 		message: msg,
+		anim:    anim.New(15, ""),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -52,14 +57,23 @@ func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
 }
 
 func (m *messageCmp) Init() tea.Cmd {
+	m.spinning = m.shouldSpin()
+	if m.spinning {
+		return m.anim.Init()
+	}
 	return nil
 }
 
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return m, nil
+	u, cmd := m.anim.Update(msg)
+	m.anim = u.(util.Model)
+	return m, cmd
 }
 
 func (m *messageCmp) View() string {
+	if m.spinning {
+		return m.style().PaddingLeft(1).Render(m.anim.View())
+	}
 	if m.message.ID != "" {
 		// this is a user or assistant message
 		switch m.message.Role {
@@ -70,6 +84,11 @@ func (m *messageCmp) View() string {
 		}
 	}
 	return "Unknown Message"
+}
+
+// GetMessage implements MessageCmp.
+func (m *messageCmp) GetMessage() message.Message {
+	return m.message
 }
 
 func (m *messageCmp) textWidth() int {
@@ -184,6 +203,21 @@ func (m *messageCmp) markdownContent() string {
 	return m.toMarkdown(content)
 }
 
+func (m *messageCmp) shouldSpin() bool {
+	if m.message.Role != message.Assistant {
+		return false
+	}
+
+	if m.message.IsFinished() {
+		return false
+	}
+
+	if m.message.Content().Text != "" {
+		return false
+	}
+	return true
+}
+
 // Blur implements MessageModel.
 func (m *messageCmp) Blur() tea.Cmd {
 	m.focused = false
@@ -208,4 +242,9 @@ func (m *messageCmp) GetSize() (int, int) {
 func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	return nil
+}
+
+// Spinning implements MessageCmp.
+func (m *messageCmp) Spinning() bool {
+	return m.spinning
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
@@ -17,11 +19,17 @@ type ListModel interface {
 	util.Model
 	layout.Sizeable
 	SetItems([]util.Model) tea.Cmd
-	AppendItem(util.Model)
-	PrependItem(util.Model)
+	AppendItem(util.Model) tea.Cmd
+	PrependItem(util.Model) tea.Cmd
 	DeleteItem(int)
 	UpdateItem(int, util.Model)
 	ResetView()
+	Items() []util.Model
+}
+
+type HasAnim interface {
+	util.Model
+	Spinning() bool
 }
 
 type renderedItem struct {
@@ -107,6 +115,7 @@ func (m *model) Init() tea.Cmd {
 
 // Update implements List.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -151,11 +160,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.goToBottom()
 			return m, nil
 		}
+	case anim.ColorCycleMsg:
+		logging.Info("ColorCycleMsg", "msg", msg)
+		for inx, item := range m.items {
+			if i, ok := item.(HasAnim); ok {
+				if i.Spinning() {
+					updated, cmd := i.Update(msg)
+					cmds = append(cmds, cmd)
+					m.UpdateItem(inx, updated.(util.Model))
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
+	case anim.StepCharsMsg:
+		logging.Info("ColorCycleMsg", "msg", msg)
+		for inx, item := range m.items {
+			if i, ok := item.(HasAnim); ok {
+				if i.Spinning() {
+					updated, cmd := i.Update(msg)
+					cmds = append(cmds, cmd)
+					m.UpdateItem(inx, updated.(util.Model))
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 	}
 	if m.selectedItemInx > -1 {
 		u, cmd := m.items[m.selectedItemInx].Update(msg)
+		cmds = append(cmds, cmd)
 		m.UpdateItem(m.selectedItemInx, u.(util.Model))
-		return m, cmd
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
 	}
 
 	return m, nil
@@ -170,6 +205,11 @@ func (m *model) View() string {
 		m.renderVisible()
 	}
 	return lipgloss.NewStyle().Padding(m.padding...).Height(m.height).Render(m.content)
+}
+
+// Items implements ListModel.
+func (m *model) Items() []util.Model {
+	return m.items
 }
 
 func (m *model) renderVisibleReverse() {
@@ -464,7 +504,6 @@ func (m *model) rerenderItem(inx int) {
 	}
 	// TODO: if hight changed do something
 	if cachedItem.height != len(rerenderedLines) && inx != len(m.items)-1 {
-		panic("not handled")
 	}
 	m.renderedItems.Store(inx, renderedItem{
 		lines:  rerenderedLines,
@@ -563,10 +602,12 @@ func (m *model) listHeight() int {
 }
 
 // AppendItem implements List.
-func (m *model) AppendItem(item util.Model) {
+func (m *model) AppendItem(item util.Model) tea.Cmd {
+	cmd := item.Init()
 	m.items = append(m.items, item)
 	m.goToBottom()
 	m.needsRerender = true
+	return cmd
 }
 
 // DeleteItem implements List.
@@ -577,7 +618,8 @@ func (m *model) DeleteItem(i int) {
 }
 
 // PrependItem implements List.
-func (m *model) PrependItem(item util.Model) {
+func (m *model) PrependItem(item util.Model) tea.Cmd {
+	cmd := item.Init()
 	m.items = append([]util.Model{item}, m.items...)
 	// update the indices of the rendered items
 	newRenderedItems := make(map[int]renderedItem)
@@ -594,6 +636,7 @@ func (m *model) PrependItem(item util.Model) {
 	}
 	m.goToTop()
 	m.needsRerender = true
+	return cmd
 }
 
 func (m *model) setReverse(reverse bool) {
@@ -610,6 +653,9 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 	var cmds []tea.Cmd
 	cmd := m.setItemsSize()
 	cmds = append(cmds, cmd)
+	for _, item := range m.items {
+		cmds = append(cmds, item.Init())
+	}
 	if m.reverse {
 		m.selectedItemInx = len(m.items) - 1
 		cmd := m.focusSelected()

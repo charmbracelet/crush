@@ -169,7 +169,7 @@ func (m *model) View() string {
 	if m.needsRerender {
 		m.renderVisible()
 	}
-	return lipgloss.NewStyle().Padding(m.padding...).Render(m.content)
+	return lipgloss.NewStyle().Padding(m.padding...).Height(m.height).Render(m.content)
 }
 
 func (m *model) renderVisibleReverse() {

@@ -57,11 +57,11 @@ func NewTokyoNightTheme() *TokyoNightTheme {
 	theme.BorderDimColor = lipgloss.Color(darkSelection)
 
 	// Diff view colors
-	theme.DiffAddedColor = lipgloss.Color("#4fd6be") // teal from palette
-	theme.DiffRemovedColor = lipgloss.Color("#c53b53") // red1 from palette
-	theme.DiffContextColor = lipgloss.Color("#828bb8") // fg_dark from palette
-	theme.DiffHunkHeaderColor = lipgloss.Color("#828bb8") // fg_dark from palette
-	theme.DiffHighlightAddedColor = lipgloss.Color("#b8db87") // git.add from palette
+	theme.DiffAddedColor = lipgloss.Color("#4fd6be")            // teal from palette
+	theme.DiffRemovedColor = lipgloss.Color("#c53b53")          // red1 from palette
+	theme.DiffContextColor = lipgloss.Color("#828bb8")          // fg_dark from palette
+	theme.DiffHunkHeaderColor = lipgloss.Color("#828bb8")       // fg_dark from palette
+	theme.DiffHighlightAddedColor = lipgloss.Color("#b8db87")   // git.add from palette
 	theme.DiffHighlightRemovedColor = lipgloss.Color("#e26a75") // git.delete from palette
 	theme.DiffAddedBgColor = lipgloss.Color("#20303b")
 	theme.DiffRemovedBgColor = lipgloss.Color("#37222c")

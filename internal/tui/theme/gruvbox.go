@@ -106,12 +106,12 @@ func NewGruvboxTheme() *GruvboxTheme {
 	theme.DiffHunkHeaderColor = lipgloss.Color(gruvboxDarkFg3)
 	theme.DiffHighlightAddedColor = lipgloss.Color(gruvboxDarkGreenBright)
 	theme.DiffHighlightRemovedColor = lipgloss.Color(gruvboxDarkRedBright)
-	theme.DiffAddedBgColor = lipgloss.Color("#3C4C3C")  // Darker green background
-	theme.DiffRemovedBgColor = lipgloss.Color("#4C3C3C")  // Darker red background
+	theme.DiffAddedBgColor = lipgloss.Color("#3C4C3C")   // Darker green background
+	theme.DiffRemovedBgColor = lipgloss.Color("#4C3C3C") // Darker red background
 	theme.DiffContextBgColor = lipgloss.Color(gruvboxDarkBg0)
 	theme.DiffLineNumberColor = lipgloss.Color(gruvboxDarkFg4)
 	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#32432F")   // Slightly darker green
-	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#43322F")   // Slightly darker red
+	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#43322F") // Slightly darker red
 
 	// Markdown colors
 	theme.MarkdownTextColor = lipgloss.Color(gruvboxDarkFg1)
@@ -180,11 +180,11 @@ func NewGruvboxLightTheme() *GruvboxTheme {
 	theme.DiffHunkHeaderColor = lipgloss.Color(gruvboxLightFg3)
 	theme.DiffHighlightAddedColor = lipgloss.Color(gruvboxLightGreenBright)
 	theme.DiffHighlightRemovedColor = lipgloss.Color(gruvboxLightRedBright)
-	theme.DiffAddedBgColor = lipgloss.Color("#E8F5E9") // Light green background
+	theme.DiffAddedBgColor = lipgloss.Color("#E8F5E9")   // Light green background
 	theme.DiffRemovedBgColor = lipgloss.Color("#FFEBEE") // Light red background
 	theme.DiffContextBgColor = lipgloss.Color(gruvboxLightBg0)
 	theme.DiffLineNumberColor = lipgloss.Color(gruvboxLightFg4)
-	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#C8E6C9") // Light green
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#C8E6C9")   // Light green
 	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#FFCDD2") // Light red
 
 	// Markdown colors

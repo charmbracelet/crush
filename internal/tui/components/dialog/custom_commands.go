@@ -82,7 +82,7 @@ func loadCommandsFromDir(commandsDir string, prefix string) ([]Command, error) {
 	// Check if the commands directory exists
 	if _, err := os.Stat(commandsDir); os.IsNotExist(err) {
 		// Create the commands directory if it doesn't exist
-		if err := os.MkdirAll(commandsDir, 0755); err != nil {
+		if err := os.MkdirAll(commandsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create commands directory %s: %w", commandsDir, err)
 		}
 		// Return empty list since we just created the directory
@@ -171,7 +171,6 @@ func loadCommandsFromDir(commandsDir string, prefix string) ([]Command, error) {
 		commands = append(commands, command)
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to load custom commands from %s: %w", commandsDir, err)
 	}

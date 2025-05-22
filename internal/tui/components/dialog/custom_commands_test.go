@@ -1,8 +1,8 @@
 package dialog
 
 import (
-	"testing"
 	"regexp"
+	"testing"
 )
 
 func TestNamedArgPattern(t *testing.T) {
@@ -38,11 +38,11 @@ func TestNamedArgPattern(t *testing.T) {
 
 	for _, tc := range testCases {
 		matches := namedArgPattern.FindAllStringSubmatch(tc.input, -1)
-		
+
 		// Extract unique argument names
 		argNames := make([]string, 0)
 		argMap := make(map[string]bool)
-		
+
 		for _, match := range matches {
 			argName := match[1] // Group 1 is the name without $
 			if !argMap[argName] {
@@ -50,13 +50,13 @@ func TestNamedArgPattern(t *testing.T) {
 				argNames = append(argNames, argName)
 			}
 		}
-		
+
 		// Check if we got the expected number of arguments
 		if len(argNames) != len(tc.expected) {
 			t.Errorf("Expected %d arguments, got %d for input: %s", len(tc.expected), len(argNames), tc.input)
 			continue
 		}
-		
+
 		// Check if we got the expected argument names
 		for _, expectedArg := range tc.expected {
 			found := false
@@ -75,7 +75,7 @@ func TestNamedArgPattern(t *testing.T) {
 
 func TestRegexPattern(t *testing.T) {
 	pattern := regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
-	
+
 	validMatches := []string{
 		"$FOO",
 		"$BAR",
@@ -83,7 +83,7 @@ func TestRegexPattern(t *testing.T) {
 		"$BAZ123",
 		"$ARGUMENTS",
 	}
-	
+
 	invalidMatches := []string{
 		"$foo",
 		"$1BAR",
@@ -91,13 +91,13 @@ func TestRegexPattern(t *testing.T) {
 		"FOO",
 		"$",
 	}
-	
+
 	for _, valid := range validMatches {
 		if !pattern.MatchString(valid) {
 			t.Errorf("Expected %s to match, but it didn't", valid)
 		}
 	}
-	
+
 	for _, invalid := range invalidMatches {
 		if pattern.MatchString(invalid) {
 			t.Errorf("Expected %s not to match, but it did", invalid)

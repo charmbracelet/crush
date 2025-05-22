@@ -7,20 +7,20 @@ import (
 // Flexoki color palette constants
 const (
 	// Base colors
-	flexokiPaper    = "#FFFCF0" // Paper (lightest)
-	flexokiBase50   = "#F2F0E5" // bg-2 (light)
-	flexokiBase100  = "#E6E4D9" // ui (light)
-	flexokiBase150  = "#DAD8CE" // ui-2 (light)
-	flexokiBase200  = "#CECDC3" // ui-3 (light)
-	flexokiBase300  = "#B7B5AC" // tx-3 (light)
-	flexokiBase500  = "#878580" // tx-2 (light)
-	flexokiBase600  = "#6F6E69" // tx (light)
-	flexokiBase700  = "#575653" // tx-3 (dark)
-	flexokiBase800  = "#403E3C" // ui-3 (dark)
-	flexokiBase850  = "#343331" // ui-2 (dark)
-	flexokiBase900  = "#282726" // ui (dark)
-	flexokiBase950  = "#1C1B1A" // bg-2 (dark)
-	flexokiBlack    = "#100F0F" // bg (darkest)
+	flexokiPaper   = "#FFFCF0" // Paper (lightest)
+	flexokiBase50  = "#F2F0E5" // bg-2 (light)
+	flexokiBase100 = "#E6E4D9" // ui (light)
+	flexokiBase150 = "#DAD8CE" // ui-2 (light)
+	flexokiBase200 = "#CECDC3" // ui-3 (light)
+	flexokiBase300 = "#B7B5AC" // tx-3 (light)
+	flexokiBase500 = "#878580" // tx-2 (light)
+	flexokiBase600 = "#6F6E69" // tx (light)
+	flexokiBase700 = "#575653" // tx-3 (dark)
+	flexokiBase800 = "#403E3C" // ui-3 (dark)
+	flexokiBase850 = "#343331" // ui-2 (dark)
+	flexokiBase900 = "#282726" // ui (dark)
+	flexokiBase950 = "#1C1B1A" // bg-2 (dark)
+	flexokiBlack   = "#100F0F" // bg (darkest)
 
 	// Accent colors - Light theme (600)
 	flexokiRed600     = "#AF3029"
@@ -86,11 +86,11 @@ func NewFlexokiDarkTheme() *FlexokiTheme {
 	theme.DiffHunkHeaderColor = lipgloss.Color(flexokiBase700)
 	theme.DiffHighlightAddedColor = lipgloss.Color(flexokiGreen400)
 	theme.DiffHighlightRemovedColor = lipgloss.Color(flexokiRed400)
-	theme.DiffAddedBgColor = lipgloss.Color("#1D2419") // Darker green background
+	theme.DiffAddedBgColor = lipgloss.Color("#1D2419")   // Darker green background
 	theme.DiffRemovedBgColor = lipgloss.Color("#241919") // Darker red background
 	theme.DiffContextBgColor = lipgloss.Color(flexokiBlack)
 	theme.DiffLineNumberColor = lipgloss.Color(flexokiBase700)
-	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#1A2017") // Slightly darker green
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#1A2017")   // Slightly darker green
 	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#201717") // Slightly darker red
 
 	// Markdown colors
@@ -110,14 +110,14 @@ func NewFlexokiDarkTheme() *FlexokiTheme {
 	theme.MarkdownCodeBlockColor = lipgloss.Color(flexokiBase300)
 
 	// Syntax highlighting colors (based on Flexoki's mappings)
-	theme.SyntaxCommentColor = lipgloss.Color(flexokiBase700) // tx-3
-	theme.SyntaxKeywordColor = lipgloss.Color(flexokiGreen400) // gr
-	theme.SyntaxFunctionColor = lipgloss.Color(flexokiOrange400) // or
-	theme.SyntaxVariableColor = lipgloss.Color(flexokiBlue400) // bl
-	theme.SyntaxStringColor = lipgloss.Color(flexokiCyan400) // cy
-	theme.SyntaxNumberColor = lipgloss.Color(flexokiPurple400) // pu
-	theme.SyntaxTypeColor = lipgloss.Color(flexokiYellow400) // ye
-	theme.SyntaxOperatorColor = lipgloss.Color(flexokiBase500) // tx-2
+	theme.SyntaxCommentColor = lipgloss.Color(flexokiBase700)     // tx-3
+	theme.SyntaxKeywordColor = lipgloss.Color(flexokiGreen400)    // gr
+	theme.SyntaxFunctionColor = lipgloss.Color(flexokiOrange400)  // or
+	theme.SyntaxVariableColor = lipgloss.Color(flexokiBlue400)    // bl
+	theme.SyntaxStringColor = lipgloss.Color(flexokiCyan400)      // cy
+	theme.SyntaxNumberColor = lipgloss.Color(flexokiPurple400)    // pu
+	theme.SyntaxTypeColor = lipgloss.Color(flexokiYellow400)      // ye
+	theme.SyntaxOperatorColor = lipgloss.Color(flexokiBase500)    // tx-2
 	theme.SyntaxPunctuationColor = lipgloss.Color(flexokiBase500) // tx-2
 
 	return theme
@@ -160,11 +160,11 @@ func NewFlexokiLightTheme() *FlexokiTheme {
 	theme.DiffHunkHeaderColor = lipgloss.Color(flexokiBase500)
 	theme.DiffHighlightAddedColor = lipgloss.Color(flexokiGreen600)
 	theme.DiffHighlightRemovedColor = lipgloss.Color(flexokiRed600)
-	theme.DiffAddedBgColor = lipgloss.Color("#EFF2E2") // Light green background
+	theme.DiffAddedBgColor = lipgloss.Color("#EFF2E2")   // Light green background
 	theme.DiffRemovedBgColor = lipgloss.Color("#F2E2E2") // Light red background
 	theme.DiffContextBgColor = lipgloss.Color(flexokiPaper)
 	theme.DiffLineNumberColor = lipgloss.Color(flexokiBase500)
-	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#E5EBD9") // Light green
+	theme.DiffAddedLineNumberBgColor = lipgloss.Color("#E5EBD9")   // Light green
 	theme.DiffRemovedLineNumberBgColor = lipgloss.Color("#EBD9D9") // Light red
 
 	// Markdown colors
@@ -184,14 +184,14 @@ func NewFlexokiLightTheme() *FlexokiTheme {
 	theme.MarkdownCodeBlockColor = lipgloss.Color(flexokiBase600)
 
 	// Syntax highlighting colors (based on Flexoki's mappings)
-	theme.SyntaxCommentColor = lipgloss.Color(flexokiBase300) // tx-3
-	theme.SyntaxKeywordColor = lipgloss.Color(flexokiGreen600) // gr
-	theme.SyntaxFunctionColor = lipgloss.Color(flexokiOrange600) // or
-	theme.SyntaxVariableColor = lipgloss.Color(flexokiBlue600) // bl
-	theme.SyntaxStringColor = lipgloss.Color(flexokiCyan600) // cy
-	theme.SyntaxNumberColor = lipgloss.Color(flexokiPurple600) // pu
-	theme.SyntaxTypeColor = lipgloss.Color(flexokiYellow600) // ye
-	theme.SyntaxOperatorColor = lipgloss.Color(flexokiBase500) // tx-2
+	theme.SyntaxCommentColor = lipgloss.Color(flexokiBase300)     // tx-3
+	theme.SyntaxKeywordColor = lipgloss.Color(flexokiGreen600)    // gr
+	theme.SyntaxFunctionColor = lipgloss.Color(flexokiOrange600)  // or
+	theme.SyntaxVariableColor = lipgloss.Color(flexokiBlue600)    // bl
+	theme.SyntaxStringColor = lipgloss.Color(flexokiCyan600)      // cy
+	theme.SyntaxNumberColor = lipgloss.Color(flexokiPurple600)    // pu
+	theme.SyntaxTypeColor = lipgloss.Color(flexokiYellow600)      // ye
+	theme.SyntaxOperatorColor = lipgloss.Color(flexokiBase500)    // tx-2
 	theme.SyntaxPunctuationColor = lipgloss.Color(flexokiBase500) // tx-2
 
 	return theme

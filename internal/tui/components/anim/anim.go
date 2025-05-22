@@ -216,16 +216,18 @@ func (a anim) View() string {
 		b.WriteRune(c.currentValue)
 	}
 
-	textStyle := styles.BaseStyle().
-		Foreground(t.Text())
-
-	for _, c := range a.labelChars {
-		b.WriteString(
-			textStyle.Render(string(c.currentValue)),
-		)
+	if len(a.label) > 1 {
+		textStyle := styles.BaseStyle().
+			Foreground(t.Text())
+		for _, c := range a.labelChars {
+			b.WriteString(
+				textStyle.Render(string(c.currentValue)),
+			)
+		}
+		return b.String() + textStyle.Render(a.ellipsis.View())
 	}
 
-	return b.String() + textStyle.Render(a.ellipsis.View())
+	return b.String()
 }
 
 func makeGradientRamp(length int) []color.Color {

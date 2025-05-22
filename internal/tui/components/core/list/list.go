@@ -492,6 +492,7 @@ func (m *model) rerenderItem(inx int) {
 	}
 	// check if the item is in the content
 	start := cachedItem.start
+	logging.Info("rerenderItem", "inx", inx, "start", start, "cachedItem.start", cachedItem.start, "cachedItem.height", cachedItem.height)
 	end := start + cachedItem.height
 	totalLines := len(m.renderedLines)
 	if m.reverse {
@@ -504,6 +505,9 @@ func (m *model) rerenderItem(inx int) {
 	}
 	// TODO: if hight changed do something
 	if cachedItem.height != len(rerenderedLines) && inx != len(m.items)-1 {
+		if inx == len(m.items)-1 {
+			m.finalHight = max(0, start+len(rerenderedLines)-m.listHeight())
+		}
 	}
 	m.renderedItems.Store(inx, renderedItem{
 		lines:  rerenderedLines,
@@ -541,7 +545,12 @@ func (m *model) decreaseOffset(n int) {
 // UpdateItem implements List.
 func (m *model) UpdateItem(inx int, item util.Model) {
 	m.items[inx] = item
-	m.rerenderItem(inx)
+	if m.selectedItemInx == inx {
+		if i, ok := m.items[m.selectedItemInx].(layout.Focusable); ok {
+			i.Focus()
+		}
+	}
+	m.ResetView()
 	m.needsRerender = true
 }
 
@@ -614,6 +623,10 @@ func (m *model) AppendItem(item util.Model) tea.Cmd {
 func (m *model) DeleteItem(i int) {
 	m.items = slices.Delete(m.items, i, i+1)
 	m.renderedItems.Delete(i)
+	if m.selectedItemInx == i {
+		m.selectedItemInx--
+	}
+	m.ResetView()
 	m.needsRerender = true
 }
 

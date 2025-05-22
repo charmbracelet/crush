@@ -211,7 +211,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.send()
 			}
 		}
-
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
@@ -233,7 +232,8 @@ func (m *editorCmp) View() string {
 	return lipgloss.JoinVertical(lipgloss.Top,
 		m.attachmentsContent(),
 		lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"),
-			m.textarea.View()),
+			m.textarea.View(),
+		),
 	)
 }
 

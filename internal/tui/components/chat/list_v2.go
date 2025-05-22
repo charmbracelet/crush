@@ -106,6 +106,8 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 			return m.handleNewUserMessage(event.Payload)
 		case message.Assistant:
 			return m.handleNewAssistantMessage(event.Payload)
+		case message.Tool:
+			return m.handleToolMessage(event.Payload)
 		}
 		// TODO: handle tools
 	case pubsub.UpdatedEvent:
@@ -117,6 +119,10 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 func (m *messageListCmp) handleNewUserMessage(msg message.Message) tea.Cmd {
 	m.lastUserMessageTime = msg.CreatedAt
 	return m.listCmp.AppendItem(messages.NewMessageCmp(msg))
+}
+
+func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
+	return nil
 }
 
 func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.Cmd {
@@ -136,6 +142,8 @@ func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.C
 				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
+	} else if len(msg.ToolCalls()) > 0 && msg.Content().Text == "" {
+		m.listCmp.DeleteItem(len(items) - 1)
 	}
 	return nil
 }

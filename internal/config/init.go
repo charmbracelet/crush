@@ -58,4 +58,3 @@ func MarkProjectInitialized() error {
 
 	return nil
 }
-

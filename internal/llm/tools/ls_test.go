@@ -56,14 +56,14 @@ func TestLsTool_Run(t *testing.T) {
 	// Create directories
 	for _, dir := range testDirs {
 		dirPath := filepath.Join(tempDir, dir)
-		err := os.MkdirAll(dirPath, 0755)
+		err := os.MkdirAll(dirPath, 0o755)
 		require.NoError(t, err)
 	}
 
 	// Create files
 	for _, file := range testFiles {
 		filePath := filepath.Join(tempDir, file)
-		err := os.WriteFile(filePath, []byte("test content"), 0644)
+		err := os.WriteFile(filePath, []byte("test content"), 0o644)
 		require.NoError(t, err)
 	}
 
@@ -83,19 +83,19 @@ func TestLsTool_Run(t *testing.T) {
 
 		response, err := tool.Run(context.Background(), call)
 		require.NoError(t, err)
-		
+
 		// Check that visible directories and files are included
 		assert.Contains(t, response.Content, "dir1")
 		assert.Contains(t, response.Content, "dir2")
 		assert.Contains(t, response.Content, "dir3")
 		assert.Contains(t, response.Content, "file1.txt")
 		assert.Contains(t, response.Content, "file2.txt")
-		
+
 		// Check that hidden files and directories are not included
 		assert.NotContains(t, response.Content, ".hidden_dir")
 		assert.NotContains(t, response.Content, ".hidden_file.txt")
 		assert.NotContains(t, response.Content, ".hidden_root_file.txt")
-		
+
 		// Check that __pycache__ is not included
 		assert.NotContains(t, response.Content, "__pycache__")
 	})
@@ -122,7 +122,7 @@ func TestLsTool_Run(t *testing.T) {
 	t.Run("handles empty path parameter", func(t *testing.T) {
 		// For this test, we need to mock the config.WorkingDirectory function
 		// Since we can't easily do that, we'll just check that the response doesn't contain an error message
-		
+
 		tool := NewLsTool()
 		params := LSParams{
 			Path: "",
@@ -138,7 +138,7 @@ func TestLsTool_Run(t *testing.T) {
 
 		response, err := tool.Run(context.Background(), call)
 		require.NoError(t, err)
-		
+
 		// The response should either contain a valid directory listing or an error
 		// We'll just check that it's not empty
 		assert.NotEmpty(t, response.Content)
@@ -173,11 +173,11 @@ func TestLsTool_Run(t *testing.T) {
 
 		response, err := tool.Run(context.Background(), call)
 		require.NoError(t, err)
-		
+
 		// The output format is a tree, so we need to check for specific patterns
 		// Check that file1.txt is not directly mentioned
 		assert.NotContains(t, response.Content, "- file1.txt")
-		
+
 		// Check that dir1/ is not directly mentioned
 		assert.NotContains(t, response.Content, "- dir1/")
 	})
@@ -189,12 +189,12 @@ func TestLsTool_Run(t *testing.T) {
 		defer func() {
 			os.Chdir(origWd)
 		}()
-		
+
 		// Change to a directory above the temp directory
 		parentDir := filepath.Dir(tempDir)
 		err = os.Chdir(parentDir)
 		require.NoError(t, err)
-		
+
 		tool := NewLsTool()
 		params := LSParams{
 			Path: filepath.Base(tempDir),
@@ -210,7 +210,7 @@ func TestLsTool_Run(t *testing.T) {
 
 		response, err := tool.Run(context.Background(), call)
 		require.NoError(t, err)
-		
+
 		// Should list the temp directory contents
 		assert.Contains(t, response.Content, "dir1")
 		assert.Contains(t, response.Content, "file1.txt")
@@ -291,22 +291,22 @@ func TestCreateFileTree(t *testing.T) {
 	}
 
 	tree := createFileTree(paths)
-	
+
 	// Check the structure of the tree
 	assert.Len(t, tree, 1) // Should have one root node
-	
+
 	// Check the root node
 	rootNode := tree[0]
 	assert.Equal(t, "path", rootNode.Name)
 	assert.Equal(t, "directory", rootNode.Type)
 	assert.Len(t, rootNode.Children, 1)
-	
+
 	// Check the "to" node
 	toNode := rootNode.Children[0]
 	assert.Equal(t, "to", toNode.Name)
 	assert.Equal(t, "directory", toNode.Type)
 	assert.Len(t, toNode.Children, 3) // file1.txt, dir1, dir2
-	
+
 	// Find the dir1 node
 	var dir1Node *TreeNode
 	for _, child := range toNode.Children {
@@ -315,7 +315,7 @@ func TestCreateFileTree(t *testing.T) {
 			break
 		}
 	}
-	
+
 	require.NotNil(t, dir1Node)
 	assert.Equal(t, "directory", dir1Node.Type)
 	assert.Len(t, dir1Node.Children, 2) // file2.txt and subdir
@@ -354,9 +354,9 @@ func TestPrintTree(t *testing.T) {
 			Type: "file",
 		},
 	}
-	
+
 	result := printTree(tree, "/root")
-	
+
 	// Check the output format
 	assert.Contains(t, result, "- /root/")
 	assert.Contains(t, result, "  - dir1/")
@@ -390,14 +390,14 @@ func TestListDirectory(t *testing.T) {
 	// Create directories
 	for _, dir := range testDirs {
 		dirPath := filepath.Join(tempDir, dir)
-		err := os.MkdirAll(dirPath, 0755)
+		err := os.MkdirAll(dirPath, 0o755)
 		require.NoError(t, err)
 	}
 
 	// Create files
 	for _, file := range testFiles {
 		filePath := filepath.Join(tempDir, file)
-		err := os.WriteFile(filePath, []byte("test content"), 0644)
+		err := os.WriteFile(filePath, []byte("test content"), 0o644)
 		require.NoError(t, err)
 	}
 
@@ -405,7 +405,7 @@ func TestListDirectory(t *testing.T) {
 		files, truncated, err := listDirectory(tempDir, []string{}, 1000)
 		require.NoError(t, err)
 		assert.False(t, truncated)
-		
+
 		// Check that visible files and directories are included
 		containsPath := func(paths []string, target string) bool {
 			targetPath := filepath.Join(tempDir, target)
@@ -416,12 +416,12 @@ func TestListDirectory(t *testing.T) {
 			}
 			return false
 		}
-		
+
 		assert.True(t, containsPath(files, "dir1"))
 		assert.True(t, containsPath(files, "file1.txt"))
 		assert.True(t, containsPath(files, "file2.txt"))
 		assert.True(t, containsPath(files, "dir1/file3.txt"))
-		
+
 		// Check that hidden files and directories are not included
 		assert.False(t, containsPath(files, ".hidden_dir"))
 		assert.False(t, containsPath(files, ".hidden_file.txt"))
@@ -438,12 +438,12 @@ func TestListDirectory(t *testing.T) {
 		files, truncated, err := listDirectory(tempDir, []string{"*.txt"}, 1000)
 		require.NoError(t, err)
 		assert.False(t, truncated)
-		
+
 		// Check that no .txt files are included
 		for _, file := range files {
 			assert.False(t, strings.HasSuffix(file, ".txt"), "Found .txt file: %s", file)
 		}
-		
+
 		// But directories should still be included
 		containsDir := false
 		for _, file := range files {

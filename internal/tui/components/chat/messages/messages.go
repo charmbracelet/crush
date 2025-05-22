@@ -1,4 +1,4 @@
-package chat
+package messages
 
 import (
 	"fmt"
@@ -31,11 +31,6 @@ type messageCmp struct {
 	// Used for agent and user messages
 	message             message.Message
 	lastUserMessageTime time.Time
-
-	// Used for tool calls
-	toolCall          message.ToolCall
-	toolResult        message.ToolResult
-	cancelledToolCall bool
 }
 
 type MessageOption func(*messageCmp)
@@ -46,32 +41,10 @@ func WithLastUserMessageTime(t time.Time) MessageOption {
 	}
 }
 
-func WithToolCall(tc message.ToolCall) MessageOption {
-	return func(m *messageCmp) {
-		m.toolCall = tc
+func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
+	m := &messageCmp{
+		message: msg,
 	}
-}
-
-func WithToolResult(tr message.ToolResult) MessageOption {
-	return func(m *messageCmp) {
-		m.toolResult = tr
-	}
-}
-
-func WithMessage(msg message.Message) MessageOption {
-	return func(m *messageCmp) {
-		m.message = msg
-	}
-}
-
-func WithCancelledToolCall(cancelled bool) MessageOption {
-	return func(m *messageCmp) {
-		m.cancelledToolCall = cancelled
-	}
-}
-
-func NewMessageCmp(opts ...MessageOption) MessageCmp {
-	m := &messageCmp{}
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -95,17 +68,11 @@ func (m *messageCmp) View() string {
 		default:
 			return m.renderAssistantMessage()
 		}
-	} else if m.toolCall.ID != "" {
-		// this is a tool call message
-		return m.renderToolCallMessage()
 	}
 	return "Unknown Message"
 }
 
 func (m *messageCmp) textWidth() int {
-	if m.toolCall.ID != "" {
-		return m.width - 2 // take into account the border and PaddingLeft
-	}
 	return m.width - 1 // take into account the border
 }
 

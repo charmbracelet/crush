@@ -186,6 +186,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		logging.Info("Window size changed main: ", "Width", msg.Width, "Height", msg.Height)
 		msg.Height -= 1 // Make space for the status bar
 		a.width, a.height = msg.Width, msg.Height
 
@@ -674,15 +675,6 @@ func (a *appModel) RegisterCommand(cmd dialog.Command) {
 	a.commands = append(a.commands, cmd)
 }
 
-func (a *appModel) findCommand(id string) (dialog.Command, bool) {
-	for _, cmd := range a.commands {
-		if cmd.ID == id {
-			return cmd, true
-		}
-	}
-	return dialog.Command{}, false
-}
-
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	if a.app.CoderAgent.IsBusy() {
 		// For now we don't move to any page if the agent is busy
@@ -709,7 +701,6 @@ func (a appModel) View() string {
 	components := []string{
 		a.pages[a.currentPage].View(),
 	}
-
 	components = append(components, a.status.View())
 
 	appView := lipgloss.JoinVertical(lipgloss.Top, components...)

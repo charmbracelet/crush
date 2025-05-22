@@ -2,6 +2,7 @@ package theme
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 	"sync"
@@ -72,6 +73,11 @@ func CurrentTheme() Theme {
 	}
 
 	return globalManager.themes[globalManager.currentName]
+}
+
+func GetColor(c color.Color) string {
+	rgba := color.RGBAModel.Convert(c).(color.RGBA)
+	return fmt.Sprintf("#%02x%02x%02x", rgba.R, rgba.G, rgba.B)
 }
 
 // CurrentThemeName returns the name of the currently active theme.

@@ -242,7 +242,6 @@ func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.height = height
 	m.textarea.SetWidth(width - 3) // account for the prompt and padding right
 	m.textarea.SetHeight(height)
-	m.textarea.SetWidth(width)
 	return nil
 }
 

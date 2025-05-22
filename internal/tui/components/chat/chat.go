@@ -5,7 +5,6 @@ import (
 	"sort"
 
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
@@ -25,26 +24,24 @@ type SessionClearedMsg struct{}
 
 type EditorFocusMsg bool
 
-func header(width int) string {
+func header() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Top,
-		logo(width),
-		repo(width),
+		logo(),
+		repo(),
 		"",
-		cwd(width),
+		cwd(),
 	)
 }
 
-func lspsConfigured(width int) string {
+func lspsConfigured() string {
 	cfg := config.Get()
 	title := "LSP Configuration"
-	title = ansi.Truncate(title, width, "…")
 
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	lsps := baseStyle.
-		Width(width).
 		Foreground(t.Primary()).
 		Bold(true).
 		Render(title)
@@ -64,7 +61,6 @@ func lspsConfigured(width int) string {
 			Render(fmt.Sprintf("• %s", name))
 
 		cmd := lsp.Command
-		cmd = ansi.Truncate(cmd, width-lipgloss.Width(lspName)-3, "…")
 
 		lspPath := baseStyle.
 			Foreground(t.TextMuted()).
@@ -72,7 +68,6 @@ func lspsConfigured(width int) string {
 
 		lspViews = append(lspViews,
 			baseStyle.
-				Width(width).
 				Render(
 					lipgloss.JoinHorizontal(
 						lipgloss.Left,
@@ -84,7 +79,6 @@ func lspsConfigured(width int) string {
 	}
 
 	return baseStyle.
-		Width(width).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -97,7 +91,7 @@ func lspsConfigured(width int) string {
 		)
 }
 
-func logo(width int) string {
+func logo() string {
 	logo := fmt.Sprintf("%s %s", styles.OpenCodeIcon, "OpenCode")
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
@@ -108,7 +102,6 @@ func logo(width int) string {
 
 	return baseStyle.
 		Bold(true).
-		Width(width).
 		Render(
 			lipgloss.JoinHorizontal(
 				lipgloss.Left,
@@ -119,22 +112,33 @@ func logo(width int) string {
 		)
 }
 
-func repo(width int) string {
+func repo() string {
 	repo := "https://github.com/opencode-ai/opencode"
 	t := theme.CurrentTheme()
 
 	return styles.BaseStyle().
 		Foreground(t.TextMuted()).
-		Width(width).
 		Render(repo)
 }
 
-func cwd(width int) string {
+func cwd() string {
 	cwd := fmt.Sprintf("cwd: %s", config.WorkingDirectory())
 	t := theme.CurrentTheme()
 
 	return styles.BaseStyle().
 		Foreground(t.TextMuted()).
-		Width(width).
 		Render(cwd)
+}
+
+func initialScreen() string {
+	baseStyle := styles.BaseStyle()
+
+	return baseStyle.Render(
+		lipgloss.JoinVertical(
+			lipgloss.Top,
+			header(),
+			"",
+			lspsConfigured(),
+		),
+	)
 }

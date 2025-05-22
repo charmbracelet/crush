@@ -93,11 +93,11 @@ func (m *sidebarCmp) View() string {
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Top,
-				header(m.width),
+				header(),
 				" ",
 				m.sessionSection(),
 				" ",
-				lspsConfigured(m.width),
+				lspsConfigured(),
 				" ",
 				m.modifiedFiles(),
 			),

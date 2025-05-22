@@ -282,7 +282,7 @@ func (m *messagesCmp) View() string {
 			Width(m.width).
 			Height(m.height - 1).
 			Render(
-				m.initialScreen(),
+				initialScreen(),
 			)
 
 		return baseStyle.
@@ -398,19 +398,6 @@ func (m *messagesCmp) help() string {
 	return baseStyle.
 		Width(m.width).
 		Render(text)
-}
-
-func (m *messagesCmp) initialScreen() string {
-	baseStyle := styles.BaseStyle()
-
-	return baseStyle.Width(m.width).Render(
-		lipgloss.JoinVertical(
-			lipgloss.Top,
-			header(m.width),
-			"",
-			lspsConfigured(m.width),
-		),
-	)
 }
 
 func (m *messagesCmp) rerender() {

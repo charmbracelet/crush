@@ -25,7 +25,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 func (app *App) createAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
 	// Create a specific context for initialization with a timeout
 	logging.Info("Creating LSP client", "name", name, "command", command, "args", args)
-	
+
 	// Create the LSP client
 	lspClient, err := lsp.NewClient(ctx, command, args...)
 	if err != nil {
@@ -36,7 +36,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	// Create a longer timeout for initialization (some servers take time to start)
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	
+
 	// Initialize with the initialization context
 	_, err = lspClient.InitializeLSPClient(initCtx, config.WorkingDirectory())
 	if err != nil {
@@ -57,13 +57,13 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	}
 
 	logging.Info("LSP client initialized", "name", name)
-	
+
 	// Create a child context that can be canceled when the app is shutting down
 	watchCtx, cancelFunc := context.WithCancel(ctx)
-	
+
 	// Create a context with the server name for better identification
 	watchCtx = context.WithValue(watchCtx, "serverName", name)
-	
+
 	// Create the workspace watcher
 	workspaceWatcher := watcher.NewWorkspaceWatcher(lspClient)
 

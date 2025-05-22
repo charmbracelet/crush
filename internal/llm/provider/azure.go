@@ -16,7 +16,6 @@ type azureClient struct {
 type AzureClient ProviderClient
 
 func newAzureClient(opts providerClientOptions) AzureClient {
-
 	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")      // ex: https://foo.openai.azure.com
 	apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION") // ex: 2025-04-01-preview
 

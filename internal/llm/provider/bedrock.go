@@ -98,4 +98,3 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 
 	return b.childProvider.stream(ctx, messages, tools)
 }
-

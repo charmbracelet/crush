@@ -19,32 +19,42 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
+// MessageCmp defines the interface for message components in the chat interface.
+// It combines standard UI model interfaces with message-specific functionality.
 type MessageCmp interface {
-	util.Model
-	layout.Sizeable
-	layout.Focusable
-	GetMessage() message.Message
-	Spinning() bool
+	util.Model                   // Basic Bubble Tea model interface
+	layout.Sizeable              // Width/height management
+	layout.Focusable             // Focus state management
+	GetMessage() message.Message // Access to underlying message data
+	Spinning() bool              // Animation state for loading messages
 }
 
+// messageCmp implements the MessageCmp interface for displaying chat messages.
+// It handles rendering of user and assistant messages with proper styling,
+// animations, and state management.
 type messageCmp struct {
-	width   int
-	focused bool
+	width   int  // Component width for text wrapping
+	focused bool // Focus state for border styling
 
-	// Used for agent and user messages
-	message             message.Message
-	spinning            bool
-	anim                util.Model
-	lastUserMessageTime time.Time
+	// Core message data and state
+	message             message.Message // The underlying message content
+	spinning            bool            // Whether to show loading animation
+	anim                util.Model      // Animation component for loading states
+	lastUserMessageTime time.Time       // Used for calculating response duration
 }
+
+// MessageOption provides functional options for configuring message components
 type MessageOption func(*messageCmp)
 
+// WithLastUserMessageTime sets the timestamp of the last user message
+// for calculating assistant response duration
 func WithLastUserMessageTime(t time.Time) MessageOption {
 	return func(m *messageCmp) {
 		m.lastUserMessageTime = t
 	}
 }
 
+// NewMessageCmp creates a new message component with the given message and options
 func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
 	m := &messageCmp{
 		message: msg,
@@ -56,6 +66,8 @@ func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
 	return m
 }
 
+// Init initializes the message component and starts animations if needed.
+// Returns a command to start the animation for spinning messages.
 func (m *messageCmp) Init() tea.Cmd {
 	m.spinning = m.shouldSpin()
 	if m.spinning {
@@ -64,6 +76,8 @@ func (m *messageCmp) Init() tea.Cmd {
 	return nil
 }
 
+// Update handles incoming messages and updates the component state.
+// Manages animation updates for spinning messages and stops animation when appropriate.
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.ColorCycleMsg, anim.StepCharsMsg:
@@ -77,6 +91,8 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the message component based on its current state.
+// Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
 	if m.spinning {
 		return m.style().PaddingLeft(1).Render(m.anim.View())
@@ -93,15 +109,19 @@ func (m *messageCmp) View() string {
 	return "Unknown Message"
 }
 
-// GetMessage implements MessageCmp.
+// GetMessage returns the underlying message data
 func (m *messageCmp) GetMessage() message.Message {
 	return m.message
 }
 
+// textWidth calculates the available width for text content,
+// accounting for borders and padding
 func (m *messageCmp) textWidth() int {
 	return m.width - 1 // take into account the border
 }
 
+// style returns the lipgloss style for the message component.
+// Applies different border colors and styles based on message role and focus state.
 func (msg *messageCmp) style() lipgloss.Style {
 	t := theme.CurrentTheme()
 	var borderColor color.Color
@@ -127,6 +147,8 @@ func (msg *messageCmp) style() lipgloss.Style {
 		BorderStyle(borderStyle)
 }
 
+// renderAssistantMessage renders assistant messages with optional footer information.
+// Shows model name, response time, and finish reason when the message is complete.
 func (m *messageCmp) renderAssistantMessage() string {
 	parts := []string{
 		m.markdownContent(),
@@ -156,6 +178,8 @@ func (m *messageCmp) renderAssistantMessage() string {
 	return m.style().Render(joined)
 }
 
+// renderUserMessage renders user messages with file attachments.
+// Displays message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := theme.CurrentTheme()
 	parts := []string{
@@ -183,12 +207,15 @@ func (m *messageCmp) renderUserMessage() string {
 	return m.style().Render(joined)
 }
 
+// toMarkdown converts text content to rendered markdown using the configured renderer
 func (m *messageCmp) toMarkdown(content string) string {
 	r := styles.GetMarkdownRenderer(m.textWidth())
 	rendered, _ := r.Render(content)
 	return strings.TrimSuffix(rendered, "\n")
 }
 
+// markdownContent processes the message content and handles special states.
+// Returns appropriate content for thinking, finished, and error states.
 func (m *messageCmp) markdownContent() string {
 	content := m.message.Content().String()
 	if m.message.Role == message.Assistant {
@@ -210,6 +237,8 @@ func (m *messageCmp) markdownContent() string {
 	return m.toMarkdown(content)
 }
 
+// shouldSpin determines whether the message should show a loading animation.
+// Only assistant messages without content that aren't finished should spin.
 func (m *messageCmp) shouldSpin() bool {
 	if m.message.Role != message.Assistant {
 		return false
@@ -225,33 +254,39 @@ func (m *messageCmp) shouldSpin() bool {
 	return true
 }
 
-// Blur implements MessageModel.
+// Focus management methods
+
+// Blur removes focus from the message component
 func (m *messageCmp) Blur() tea.Cmd {
 	m.focused = false
 	return nil
 }
 
-// Focus implements MessageModel.
+// Focus sets focus on the message component
 func (m *messageCmp) Focus() tea.Cmd {
 	m.focused = true
 	return nil
 }
 
-// IsFocused implements MessageModel.
+// IsFocused returns whether the message component is currently focused
 func (m *messageCmp) IsFocused() bool {
 	return m.focused
 }
 
+// Size management methods
+
+// GetSize returns the current dimensions of the message component
 func (m *messageCmp) GetSize() (int, int) {
 	return m.width, 0
 }
 
+// SetSize updates the width of the message component for text wrapping
 func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	return nil
 }
 
-// Spinning implements MessageCmp.
+// Spinning returns whether the message is currently showing a loading animation
 func (m *messageCmp) Spinning() bool {
 	return m.spinning
 }

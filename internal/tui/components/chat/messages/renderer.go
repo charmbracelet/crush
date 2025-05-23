@@ -17,19 +17,26 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
+// responseContextHeight limits the number of lines displayed in tool output
 const responseContextHeight = 10
 
+// renderer defines the interface for tool-specific rendering implementations
 type renderer interface {
 	// Render returns the complete (already styled) tool‑call view, not
 	// including the outer border.
 	Render(v *toolCallCmp) string
 }
 
+// rendererFactory creates new renderer instances
 type rendererFactory func() renderer
 
+// renderRegistry manages the mapping of tool names to their renderers
 type renderRegistry map[string]rendererFactory
 
+// register adds a new renderer factory to the registry
 func (rr renderRegistry) register(name string, f rendererFactory) { rr[name] = f }
+
+// lookup retrieves a renderer for the given tool name, falling back to generic renderer
 func (rr renderRegistry) lookup(name string) renderer {
 	if f, ok := rr[name]; ok {
 		return f()
@@ -37,9 +44,67 @@ func (rr renderRegistry) lookup(name string) renderer {
 	return genericRenderer{} // sensible fallback
 }
 
+// registry holds all registered tool renderers
 var registry = renderRegistry{}
 
-// Registger tool renderers
+// baseRenderer provides common functionality for all tool renderers
+type baseRenderer struct{}
+
+// paramBuilder helps construct parameter lists for tool headers
+type paramBuilder struct {
+	args []string
+}
+
+// newParamBuilder creates a new parameter builder
+func newParamBuilder() *paramBuilder {
+	return &paramBuilder{args: make([]string, 0)}
+}
+
+// addMain adds the main parameter (first argument)
+func (pb *paramBuilder) addMain(value string) *paramBuilder {
+	if value != "" {
+		pb.args = append(pb.args, value)
+	}
+	return pb
+}
+
+// addKeyValue adds a key-value pair parameter
+func (pb *paramBuilder) addKeyValue(key, value string) *paramBuilder {
+	if value != "" {
+		pb.args = append(pb.args, key, value)
+	}
+	return pb
+}
+
+// addFlag adds a boolean flag parameter
+func (pb *paramBuilder) addFlag(key string, value bool) *paramBuilder {
+	if value {
+		pb.args = append(pb.args, key, "true")
+	}
+	return pb
+}
+
+// build returns the final parameter list
+func (pb *paramBuilder) build() []string {
+	return pb.args
+}
+
+// renderWithParams provides a common rendering pattern for tools with parameters
+func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
+	header := makeHeader(toolName, v.textWidth(), args...)
+	if res, done := earlyState(header, v); done {
+		return res
+	}
+	body := contentRenderer()
+	return joinHeaderBody(header, body)
+}
+
+// unmarshalParams safely unmarshals JSON parameters
+func (br baseRenderer) unmarshalParams(input string, target any) error {
+	return json.Unmarshal([]byte(input), target)
+}
+
+// Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
@@ -58,304 +123,358 @@ func init() {
 //  Generic renderer
 // -----------------------------------------------------------------------------
 
-type genericRenderer struct{}
+// genericRenderer handles unknown tool types with basic parameter display
+type genericRenderer struct {
+	baseRenderer
+}
 
-func (genericRenderer) Render(v *toolCallCmp) string {
-	header := makeHeader(prettifyToolName(v.call.Name), v.textWidth(), v.call.Input)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+// Render displays the tool call with its raw input and plain content output
+func (gr genericRenderer) Render(v *toolCallCmp) string {
+	return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Bash renderer
 // -----------------------------------------------------------------------------
 
-type bashRenderer struct{}
+// bashRenderer handles bash command execution display
+type bashRenderer struct {
+	baseRenderer
+}
 
-func (bashRenderer) Render(v *toolCallCmp) string {
-	var p tools.BashParams
-	_ = json.Unmarshal([]byte(v.call.Input), &p)
-
-	cmd := strings.ReplaceAll(p.Command, "\n", " ")
-	header := makeHeader("Bash", v.textWidth(), cmd)
-	if res, done := earlyState(header, v); done {
-		return res
+// Render displays the bash command with sanitized newlines and plain output
+func (br bashRenderer) Render(v *toolCallCmp) string {
+	var params tools.BashParams
+	if err := br.unmarshalParams(v.call.Input, &params); err != nil {
+		return br.renderError(v, "Invalid bash parameters")
 	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+
+	cmd := strings.ReplaceAll(params.Command, "\n", " ")
+	args := newParamBuilder().addMain(cmd).build()
+
+	return br.renderWithParams(v, "Bash", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
+}
+
+// renderError provides consistent error rendering
+func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
+	header := makeHeader("Error", v.textWidth(), message)
+	return joinHeaderBody(header, "")
 }
 
 // -----------------------------------------------------------------------------
 //  View renderer
 // -----------------------------------------------------------------------------
 
-type viewRenderer struct{}
+// viewRenderer handles file viewing with syntax highlighting and line numbers
+type viewRenderer struct {
+	baseRenderer
+}
 
-func (viewRenderer) Render(v *toolCallCmp) string {
+// Render displays file content with optional limit and offset parameters
+func (vr viewRenderer) Render(v *toolCallCmp) string {
 	var params tools.ViewParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
+	if err := vr.unmarshalParams(v.call.Input, &params); err != nil {
+		return vr.renderError(v, "Invalid view parameters")
+	}
 
 	file := removeWorkingDirPrefix(params.FilePath)
-	args := []string{file}
-	if params.Limit != 0 {
-		args = append(args, "limit", fmt.Sprintf("%d", params.Limit))
-	}
-	if params.Offset != 0 {
-		args = append(args, "offset", fmt.Sprintf("%d", params.Offset))
-	}
+	args := newParamBuilder().
+		addMain(file).
+		addKeyValue("limit", formatNonZero(params.Limit)).
+		addKeyValue("offset", formatNonZero(params.Offset)).
+		build()
 
-	header := makeHeader("View", v.textWidth(), args...)
-	if res, done := earlyState(header, v); done {
-		return res
+	return vr.renderWithParams(v, "View", args, func() string {
+		var meta tools.ViewResponseMetadata
+		if err := vr.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+		return renderCodeContent(v, meta.FilePath, meta.Content, params.Offset)
+	})
+}
+
+// formatNonZero returns string representation of non-zero integers, empty string for zero
+func formatNonZero(value int) string {
+	if value == 0 {
+		return ""
 	}
-
-	var meta tools.ViewResponseMetadata
-	_ = json.Unmarshal([]byte(v.result.Metadata), &meta)
-
-	body := renderCodeContent(v, meta.FilePath, meta.Content, params.Offset)
-	return joinHeaderBody(header, body)
+	return fmt.Sprintf("%d", value)
 }
 
 // -----------------------------------------------------------------------------
 //  Edit renderer
 // -----------------------------------------------------------------------------
 
-type editRenderer struct{}
+// editRenderer handles file editing with diff visualization
+type editRenderer struct {
+	baseRenderer
+}
 
-func (editRenderer) Render(v *toolCallCmp) string {
+// Render displays the edited file with a formatted diff of changes
+func (er editRenderer) Render(v *toolCallCmp) string {
 	var params tools.EditParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	file := removeWorkingDirPrefix(params.FilePath)
-	header := makeHeader("Edit", v.textWidth(), file)
-	if res, done := earlyState(header, v); done {
-		return res
+	if err := er.unmarshalParams(v.call.Input, &params); err != nil {
+		return er.renderError(v, "Invalid edit parameters")
 	}
 
-	var meta tools.EditResponseMetadata
-	_ = json.Unmarshal([]byte(v.result.Metadata), &meta)
+	file := removeWorkingDirPrefix(params.FilePath)
+	args := newParamBuilder().addMain(file).build()
 
-	trunc := truncateHeight(meta.Diff, responseContextHeight)
-	diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()))
-	return joinHeaderBody(header, diffView)
+	return er.renderWithParams(v, "Edit", args, func() string {
+		var meta tools.EditResponseMetadata
+		if err := er.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		trunc := truncateHeight(meta.Diff, responseContextHeight)
+		diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()))
+		return diffView
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Write renderer
 // -----------------------------------------------------------------------------
 
-type writeRenderer struct{}
+// writeRenderer handles file writing with syntax-highlighted content preview
+type writeRenderer struct {
+	baseRenderer
+}
 
-func (writeRenderer) Render(v *toolCallCmp) string {
+// Render displays the file being written with syntax highlighting
+func (wr writeRenderer) Render(v *toolCallCmp) string {
 	var params tools.WriteParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	file := removeWorkingDirPrefix(params.FilePath)
-	header := makeHeader("Write", v.textWidth(), file)
-	if res, done := earlyState(header, v); done {
-		return res
+	if err := wr.unmarshalParams(v.call.Input, &params); err != nil {
+		return wr.renderError(v, "Invalid write parameters")
 	}
 
-	body := renderCodeContent(v, file, params.Content, 0)
-	return joinHeaderBody(header, body)
+	file := removeWorkingDirPrefix(params.FilePath)
+	args := newParamBuilder().addMain(file).build()
+
+	return wr.renderWithParams(v, "Write", args, func() string {
+		return renderCodeContent(v, file, params.Content, 0)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Fetch renderer
 // -----------------------------------------------------------------------------
 
-type fetchRenderer struct{}
+// fetchRenderer handles URL fetching with format-specific content display
+type fetchRenderer struct {
+	baseRenderer
+}
 
-func (fetchRenderer) Render(v *toolCallCmp) string {
+// Render displays the fetched URL with format and timeout parameters
+func (fr fetchRenderer) Render(v *toolCallCmp) string {
 	var params tools.FetchParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	args := []string{params.URL}
-	if params.Format != "" {
-		args = append(args, "format", params.Format)
-	}
-	if params.Timeout != 0 {
-		args = append(args, "timeout", (time.Duration(params.Timeout) * time.Second).String())
+	if err := fr.unmarshalParams(v.call.Input, &params); err != nil {
+		return fr.renderError(v, "Invalid fetch parameters")
 	}
 
-	header := makeHeader("Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+	args := newParamBuilder().
+		addMain(params.URL).
+		addKeyValue("format", params.Format).
+		addKeyValue("timeout", formatTimeout(params.Timeout)).
+		build()
 
-	file := "fetch.md"
-	switch params.Format {
+	return fr.renderWithParams(v, "Fetch", args, func() string {
+		file := fr.getFileExtension(params.Format)
+		return renderCodeContent(v, file, v.result.Content, 0)
+	})
+}
+
+// getFileExtension returns appropriate file extension for syntax highlighting
+func (fr fetchRenderer) getFileExtension(format string) string {
+	switch format {
 	case "text":
-		file = "fetch.txt"
+		return "fetch.txt"
 	case "html":
-		file = "fetch.html"
+		return "fetch.html"
+	default:
+		return "fetch.md"
 	}
+}
 
-	body := renderCodeContent(v, file, v.result.Content, 0)
-	return joinHeaderBody(header, body)
+// formatTimeout converts timeout seconds to duration string
+func formatTimeout(timeout int) string {
+	if timeout == 0 {
+		return ""
+	}
+	return (time.Duration(timeout) * time.Second).String()
 }
 
 // -----------------------------------------------------------------------------
 //  Glob renderer
 // -----------------------------------------------------------------------------
 
-type globRenderer struct{}
+// globRenderer handles file pattern matching with path filtering
+type globRenderer struct {
+	baseRenderer
+}
 
-func (globRenderer) Render(v *toolCallCmp) string {
+// Render displays the glob pattern with optional path parameter
+func (gr globRenderer) Render(v *toolCallCmp) string {
 	var params tools.GlobParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	args := []string{params.Pattern}
-	if params.Path != "" {
-		args = append(args, "path", params.Path)
+	if err := gr.unmarshalParams(v.call.Input, &params); err != nil {
+		return gr.renderError(v, "Invalid glob parameters")
 	}
 
-	header := makeHeader("Glob", v.textWidth(), args...)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+	args := newParamBuilder().
+		addMain(params.Pattern).
+		addKeyValue("path", params.Path).
+		build()
 
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return gr.renderWithParams(v, "Glob", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Grep renderer
 // -----------------------------------------------------------------------------
 
-type grepRenderer struct{}
+// grepRenderer handles content searching with pattern matching options
+type grepRenderer struct {
+	baseRenderer
+}
 
-func (grepRenderer) Render(v *toolCallCmp) string {
+// Render displays the search pattern with path, include, and literal text options
+func (gr grepRenderer) Render(v *toolCallCmp) string {
 	var params tools.GrepParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	args := []string{params.Pattern}
-	if params.Path != "" {
-		args = append(args, "path", params.Path)
-	}
-	if params.Include != "" {
-		args = append(args, "include", params.Include)
-	}
-	if params.LiteralText {
-		args = append(args, "literal", "true")
+	if err := gr.unmarshalParams(v.call.Input, &params); err != nil {
+		return gr.renderError(v, "Invalid grep parameters")
 	}
 
-	header := makeHeader("Grep", v.textWidth(), args...)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+	args := newParamBuilder().
+		addMain(params.Pattern).
+		addKeyValue("path", params.Path).
+		addKeyValue("include", params.Include).
+		addFlag("literal", params.LiteralText).
+		build()
 
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return gr.renderWithParams(v, "Grep", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  LS renderer
 // -----------------------------------------------------------------------------
 
-type lsRenderer struct{}
+// lsRenderer handles directory listing with default path handling
+type lsRenderer struct {
+	baseRenderer
+}
 
-func (lsRenderer) Render(v *toolCallCmp) string {
+// Render displays the directory path, defaulting to current directory
+func (lr lsRenderer) Render(v *toolCallCmp) string {
 	var params tools.LSParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
+	if err := lr.unmarshalParams(v.call.Input, &params); err != nil {
+		return lr.renderError(v, "Invalid ls parameters")
+	}
 
 	path := params.Path
 	if path == "" {
 		path = "."
 	}
 
-	header := makeHeader("List", v.textWidth(), path)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+	args := newParamBuilder().addMain(path).build()
 
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return lr.renderWithParams(v, "List", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Sourcegraph renderer
 // -----------------------------------------------------------------------------
 
-type sourcegraphRenderer struct{}
+// sourcegraphRenderer handles code search with count and context options
+type sourcegraphRenderer struct {
+	baseRenderer
+}
 
-func (sourcegraphRenderer) Render(v *toolCallCmp) string {
+// Render displays the search query with optional count and context window parameters
+func (sr sourcegraphRenderer) Render(v *toolCallCmp) string {
 	var params tools.SourcegraphParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	args := []string{params.Query}
-	if params.Count != 0 {
-		args = append(args, "count", fmt.Sprintf("%d", params.Count))
-	}
-	if params.ContextWindow != 0 {
-		args = append(args, "context", fmt.Sprintf("%d", params.ContextWindow))
+	if err := sr.unmarshalParams(v.call.Input, &params); err != nil {
+		return sr.renderError(v, "Invalid sourcegraph parameters")
 	}
 
-	header := makeHeader("Sourcegraph", v.textWidth(), args...)
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+	args := newParamBuilder().
+		addMain(params.Query).
+		addKeyValue("count", formatNonZero(params.Count)).
+		addKeyValue("context", formatNonZero(params.ContextWindow)).
+		build()
 
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return sr.renderWithParams(v, "Sourcegraph", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Patch renderer
 // -----------------------------------------------------------------------------
 
-type patchRenderer struct{}
+// patchRenderer handles multi-file patches with change summaries
+type patchRenderer struct {
+	baseRenderer
+}
 
-func (patchRenderer) Render(v *toolCallCmp) string {
+// Render displays patch summary with file count and change statistics
+func (pr patchRenderer) Render(v *toolCallCmp) string {
 	var params tools.PatchParams
-	_ = json.Unmarshal([]byte(v.call.Input), &params)
-
-	header := makeHeader("Patch", v.textWidth(), "multiple files")
-	if res, done := earlyState(header, v); done {
-		return res
+	if err := pr.unmarshalParams(v.call.Input, &params); err != nil {
+		return pr.renderError(v, "Invalid patch parameters")
 	}
 
-	var meta tools.PatchResponseMetadata
-	_ = json.Unmarshal([]byte(v.result.Metadata), &meta)
+	args := newParamBuilder().addMain("multiple files").build()
 
-	// Format the result as a summary of changes
-	summary := fmt.Sprintf("Changed %d files (%d+ %d-)",
-		len(meta.FilesChanged), meta.Additions, meta.Removals)
+	return pr.renderWithParams(v, "Patch", args, func() string {
+		var meta tools.PatchResponseMetadata
+		if err := pr.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
 
-	// List the changed files
-	filesList := strings.Join(meta.FilesChanged, "\n")
+		summary := fmt.Sprintf("Changed %d files (%d+ %d-)",
+			len(meta.FilesChanged), meta.Additions, meta.Removals)
+		filesList := strings.Join(meta.FilesChanged, "\n")
 
-	body := renderPlainContent(v, summary+"\n\n"+filesList)
-	return joinHeaderBody(header, body)
+		return renderPlainContent(v, summary+"\n\n"+filesList)
+	})
 }
 
 // -----------------------------------------------------------------------------
 //  Diagnostics renderer
 // -----------------------------------------------------------------------------
 
-type diagnosticsRenderer struct{}
+// diagnosticsRenderer handles project-wide diagnostic information
+type diagnosticsRenderer struct {
+	baseRenderer
+}
 
-func (diagnosticsRenderer) Render(v *toolCallCmp) string {
-	header := makeHeader("Diagnostics", v.textWidth(), "project")
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+// Render displays project diagnostics with plain content formatting
+func (dr diagnosticsRenderer) Render(v *toolCallCmp) string {
+	args := newParamBuilder().addMain("project").build()
 
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return dr.renderWithParams(v, "Diagnostics", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
 func makeHeader(tool string, width int, params ...string) string {
 	prefix := tool + ": "
-	return prefix + renderParams(width-lipgloss.Width(prefix), params...)
+	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
-// renders params, params[0] (params[1]=params[2] ....)
-func renderParams(paramsWidth int, params ...string) string {
+// renderParamList renders params, params[0] (params[1]=params[2] ....)
+func renderParamList(paramsWidth int, params ...string) string {
 	if len(params) == 0 {
 		return ""
 	}

@@ -65,9 +65,16 @@ func (m *messageCmp) Init() tea.Cmd {
 }
 
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	u, cmd := m.anim.Update(msg)
-	m.anim = u.(util.Model)
-	return m, cmd
+	switch msg := msg.(type) {
+	case anim.ColorCycleMsg, anim.StepCharsMsg:
+		m.spinning = m.shouldSpin()
+		if m.spinning {
+			u, cmd := m.anim.Update(msg)
+			m.anim = u.(util.Model)
+			return m, cmd
+		}
+	}
+	return m, nil
 }
 
 func (m *messageCmp) View() string {

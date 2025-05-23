@@ -16,7 +16,7 @@ type KeyMap struct {
 	Submit key.Binding
 }
 
-func defaultKeymap() KeyMap {
+func DefaultKeymap() KeyMap {
 	return KeyMap{
 		Down: key.NewBinding(
 			key.WithKeys("down", "ctrl+j", "ctrl+n"),

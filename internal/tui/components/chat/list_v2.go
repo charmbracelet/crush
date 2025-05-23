@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/pubsub"
 	"github.com/opencode-ai/opencode/internal/session"
@@ -61,7 +62,8 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.listCmp.SetItems([]util.Model{})
 
 	case pubsub.Event[message.Message]:
-		return m, m.handleMessageEvent(msg)
+		cmd := m.handleMessageEvent(msg)
+		return m, cmd
 	default:
 		var cmds []tea.Cmd
 		u, cmd := m.listCmp.Update(msg)
@@ -92,8 +94,8 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 		// more likely to be at the end of the list
 		items := m.listCmp.Items()
 		for i := len(items) - 1; i >= 0; i-- {
-			msg := items[i].(messages.MessageCmp)
-			if msg.GetMessage().ID == event.Payload.ID {
+			msg, ok := items[i].(messages.MessageCmp)
+			if ok && msg.GetMessage().ID == event.Payload.ID {
 				messageExists = true
 				break
 			}
@@ -109,7 +111,6 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 		case message.Tool:
 			return m.handleToolMessage(event.Payload)
 		}
-		// TODO: handle tools
 	case pubsub.UpdatedEvent:
 		return m.handleUpdateAssistantMessage(event.Payload)
 	}
@@ -122,30 +123,79 @@ func (m *messageListCmp) handleNewUserMessage(msg message.Message) tea.Cmd {
 }
 
 func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
+	items := m.listCmp.Items()
+	for _, tr := range msg.ToolResults() {
+		for i := len(items) - 1; i >= 0; i-- {
+			message := items[i]
+			if toolCall, ok := message.(messages.ToolCallCmp); ok {
+				if toolCall.GetToolCall().ID == tr.ToolCallID {
+					toolCall.SetToolResult(tr)
+					m.listCmp.UpdateItem(
+						i,
+						toolCall,
+					)
+					break
+				}
+			}
+		}
+	}
 	return nil
 }
 
 func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.Cmd {
+	var cmds []tea.Cmd
 	// Simple update the content
 	items := m.listCmp.Items()
-	lastItem := items[len(items)-1].(messages.MessageCmp)
-	// TODO:handle tool calls
-	if lastItem.GetMessage().ID != msg.ID {
-		return nil
+	assistantMessageInx := -1
+	toolCalls := map[int]messages.ToolCallCmp{}
+
+	// we go backwards because the messages are most likely at the end of the list
+	for i := len(items) - 1; i >= 0; i-- {
+		message := items[i]
+		if asMsg, ok := message.(messages.MessageCmp); ok {
+			if asMsg.GetMessage().ID == msg.ID {
+				assistantMessageInx = i
+			}
+		} else if tc, ok := message.(messages.ToolCallCmp); ok {
+			if tc.ParentMessageId() == msg.ID {
+				toolCalls[i] = tc
+			}
+		}
 	}
-	// for now just updet the last message
-	if len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.IsThinking() {
+
+	logging.Info("Update Assistant Message", "msg", msg, "assistantMessageInx", assistantMessageInx, "toolCalls", toolCalls)
+
+	if assistantMessageInx > -1 && (len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.IsThinking()) {
 		m.listCmp.UpdateItem(
-			len(items)-1,
+			assistantMessageInx,
 			messages.NewMessageCmp(
 				msg,
 				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
-	} else if len(msg.ToolCalls()) > 0 && msg.Content().Text == "" {
-		m.listCmp.DeleteItem(len(items) - 1)
+	} else if assistantMessageInx > -1 && len(msg.ToolCalls()) > 0 && msg.Content().Text == "" {
+		m.listCmp.DeleteItem(assistantMessageInx)
 	}
-	return nil
+	for _, tc := range msg.ToolCalls() {
+		found := false
+		for inx, tcc := range toolCalls {
+			if tc.ID == tcc.GetToolCall().ID {
+				tcc.SetToolCall(tc)
+				m.listCmp.UpdateItem(
+					inx,
+					tcc,
+				)
+				found = true
+				break
+			}
+		}
+		if !found {
+			cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd {
@@ -161,7 +211,7 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 		cmds = append(cmds, cmd)
 	}
 	for _, tc := range msg.ToolCalls() {
-		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(tc))
+		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
@@ -206,10 +256,10 @@ func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
 				if tr, ok := toolResultMap[tc.ID]; ok {
 					options = append(options, messages.WithToolCallResult(tr))
 				}
-				if msg.FinishPart().Reason == message.FinishReasonCanceled {
+				if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
 					options = append(options, messages.WithToolCallCancelled())
 				}
-				uiMessages = append(uiMessages, messages.NewToolCallCmp(tc, options...))
+				uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, options...))
 			}
 		}
 	}

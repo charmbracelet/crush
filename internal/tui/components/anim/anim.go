@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/google/uuid"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -54,19 +55,23 @@ func (c cyclingChar) state(start time.Time) charState {
 	return charCyclingState
 }
 
-type StepCharsMsg struct{}
+type StepCharsMsg struct {
+	id string
+}
 
-func stepChars() tea.Cmd {
+func stepChars(id string) tea.Cmd {
 	return tea.Tick(charCyclingFPS, func(time.Time) tea.Msg {
-		return StepCharsMsg{}
+		return StepCharsMsg{id}
 	})
 }
 
-type ColorCycleMsg struct{}
+type ColorCycleMsg struct {
+	id string
+}
 
-func cycleColors() tea.Cmd {
+func cycleColors(id string) tea.Cmd {
 	return tea.Tick(colorCycleFPS, func(time.Time) tea.Msg {
-		return ColorCycleMsg{}
+		return ColorCycleMsg{id}
 	})
 }
 
@@ -80,6 +85,7 @@ type anim struct {
 	label           []rune
 	ellipsis        spinner.Model
 	ellipsisStarted bool
+	id              string
 }
 
 func New(cyclingCharsSize uint, label string) util.Model {
@@ -91,10 +97,12 @@ func New(cyclingCharsSize uint, label string) util.Model {
 		gap = ""
 	}
 
+	id := uuid.New()
 	c := anim{
 		start:    time.Now(),
 		label:    []rune(gap + label),
 		ellipsis: spinner.New(spinner.WithSpinner(spinner.Ellipsis)),
+		id:       id.String(),
 	}
 
 	// If we're in truecolor mode (and there are enough cycling characters)
@@ -144,15 +152,18 @@ func New(cyclingCharsSize uint, label string) util.Model {
 }
 
 // Init initializes the animation.
-func (anim) Init() tea.Cmd {
-	return tea.Batch(stepChars(), cycleColors())
+func (a anim) Init() tea.Cmd {
+	return tea.Batch(stepChars(a.id), cycleColors(a.id))
 }
 
 // Update handles messages.
 func (a anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case StepCharsMsg:
+		if msg.id != a.id {
+			return a, nil
+		}
 		a.updateChars(&a.cyclingChars)
 		a.updateChars(&a.labelChars)
 
@@ -173,14 +184,17 @@ func (a anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		return a, tea.Batch(stepChars(), cmd)
+		return a, tea.Batch(stepChars(a.id), cmd)
 	case ColorCycleMsg:
+		if msg.id != a.id {
+			return a, nil
+		}
 		const minColorCycleSize = 2
 		if len(a.ramp) < minColorCycleSize {
 			return a, nil
 		}
 		a.ramp = append(a.ramp[1:], a.ramp[0])
-		return a, cycleColors()
+		return a, cycleColors(a.id)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		a.ellipsis, cmd = a.ellipsis.Update(msg)
@@ -216,7 +230,7 @@ func (a anim) View() string {
 		b.WriteRune(c.currentValue)
 	}
 
-	if len(a.label) > 1 {
+	if len(a.labelChars) > 1 {
 		textStyle := styles.BaseStyle().
 			Foreground(t.Text())
 		for _, c := range a.labelChars {

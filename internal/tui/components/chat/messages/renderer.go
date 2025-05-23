@@ -524,32 +524,3 @@ func prettifyToolName(name string) string {
 		return name
 	}
 }
-
-func toolAction(name string) string {
-	switch name {
-	case agent.AgentToolName:
-		return "Preparing prompt..."
-	case tools.BashToolName:
-		return "Building command..."
-	case tools.EditToolName:
-		return "Preparing edit..."
-	case tools.FetchToolName:
-		return "Writing fetch..."
-	case tools.GlobToolName:
-		return "Finding files..."
-	case tools.GrepToolName:
-		return "Searching content..."
-	case tools.LSToolName:
-		return "Listing directory..."
-	case tools.SourcegraphToolName:
-		return "Searching code..."
-	case tools.ViewToolName:
-		return "Reading file..."
-	case tools.WriteToolName:
-		return "Preparing write..."
-	case tools.PatchToolName:
-		return "Preparing patch..."
-	default:
-		return "Working..."
-	}
-}

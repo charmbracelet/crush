@@ -310,7 +310,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 								ToolCall: &message.ToolCall{
 									ID:       currentToolCallID,
 									Finished: false,
-									Input:    event.Delta.JSON.PartialJSON.Raw(),
+									Input:    event.Delta.PartialJSON,
 								},
 							}
 						}

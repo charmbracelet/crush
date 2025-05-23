@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/util"
@@ -39,7 +38,7 @@ type renderedItem struct {
 }
 type model struct {
 	width, height, offset int
-	finalHight            int // this gets set when the last item is rendered to mark the max offset
+	finalHeight           int // this gets set when the last item is rendered to mark the max offset
 	reverse               bool
 	help                  help.Model
 	keymap                KeyMap
@@ -95,7 +94,7 @@ func New(opts ...listOptions) ListModel {
 		gapSize:         0,
 		padding:         []int{},
 		selectedItemInx: -1,
-		finalHight:      -1,
+		finalHeight:     -1,
 		lastRenderedInx: -1,
 		renderedItems:   new(sync.Map),
 	}
@@ -160,20 +159,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.goToBottom()
 			return m, nil
 		}
-	case anim.ColorCycleMsg:
-		logging.Info("ColorCycleMsg", "msg", msg)
-		for inx, item := range m.items {
-			if i, ok := item.(HasAnim); ok {
-				if i.Spinning() {
-					updated, cmd := i.Update(msg)
-					cmds = append(cmds, cmd)
-					m.UpdateItem(inx, updated.(util.Model))
-				}
-			}
-		}
-		return m, tea.Batch(cmds...)
-	case anim.StepCharsMsg:
-		logging.Info("ColorCycleMsg", "msg", msg)
+	case anim.ColorCycleMsg, anim.StepCharsMsg:
 		for inx, item := range m.items {
 			if i, ok := item.(HasAnim); ok {
 				if i.Spinning() {
@@ -189,7 +175,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := m.items[m.selectedItemInx].Update(msg)
 		cmds = append(cmds, cmd)
 		m.UpdateItem(m.selectedItemInx, u.(util.Model))
-		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
 
@@ -232,7 +217,7 @@ func (m *model) renderVisibleReverse() {
 			itemLines = cachedContent.(renderedItem).lines
 		} else {
 			itemLines = strings.Split(items[i].View(), "\n")
-			if m.gapSize > 0 && realIndex != len(m.items)-1 {
+			if m.gapSize > 0 {
 				for range m.gapSize {
 					itemLines = append(itemLines, "")
 				}
@@ -245,7 +230,7 @@ func (m *model) renderVisibleReverse() {
 		}
 
 		if realIndex == 0 {
-			m.finalHight = max(0, start+len(itemLines)-m.listHeight())
+			m.finalHeight = max(0, start+len(itemLines)-m.listHeight())
 		}
 		m.renderedLines = append(itemLines, m.renderedLines...)
 		m.lastRenderedInx = realIndex
@@ -256,9 +241,9 @@ func (m *model) renderVisibleReverse() {
 		start += len(itemLines)
 	}
 	m.needsRerender = false
-	if m.finalHight > -1 {
+	if m.finalHeight > -1 {
 		// make sure we don't go over the final height, this can happen if we did not render the last item and we overshot the offset
-		m.offset = min(m.offset, m.finalHight)
+		m.offset = min(m.offset, m.finalHeight)
 	}
 	maxHeight := min(m.listHeight(), len(m.renderedLines))
 	if m.offset < len(m.renderedLines) {
@@ -293,7 +278,7 @@ func (m *model) renderVisible() {
 			itemLines = cachedContent.(renderedItem).lines
 		} else {
 			itemLines = strings.Split(item.View(), "\n")
-			if m.gapSize > 0 && realIndex != len(m.items)-1 {
+			if m.gapSize > 0 {
 				for range m.gapSize {
 					itemLines = append(itemLines, "")
 				}
@@ -310,7 +295,7 @@ func (m *model) renderVisible() {
 		}
 
 		if realIndex == len(m.items)-1 {
-			m.finalHight = max(0, start+len(itemLines)-m.listHeight())
+			m.finalHeight = max(0, start+len(itemLines)-m.listHeight())
 		}
 
 		m.renderedLines = append(m.renderedLines, itemLines...)
@@ -319,9 +304,9 @@ func (m *model) renderVisible() {
 	}
 	m.needsRerender = false
 	maxHeight := min(m.listHeight(), len(m.renderedLines))
-	if m.finalHight > -1 {
+	if m.finalHeight > -1 {
 		// make sure we don't go over the final height, this can happen if we did not render the last item and we overshot the offset
-		m.offset = min(m.offset, m.finalHight)
+		m.offset = min(m.offset, m.finalHeight)
 	}
 	if m.offset < len(m.renderedLines) {
 		m.content = strings.Join(m.renderedLines[m.offset:maxHeight+m.offset], "\n")
@@ -412,6 +397,9 @@ func (m *model) downOneItem() tea.Cmd {
 }
 
 func (m *model) goToBottom() tea.Cmd {
+	if len(m.items) == 0 {
+		return nil
+	}
 	var cmds []tea.Cmd
 	m.reverse = true
 	cmd := m.blurSelected()
@@ -428,11 +416,14 @@ func (m *model) ResetView() {
 	m.renderedLines = []string{}
 	m.offset = 0
 	m.lastRenderedInx = -1
-	m.finalHight = -1
+	m.finalHeight = -1
 	m.needsRerender = true
 }
 
 func (m *model) goToTop() tea.Cmd {
+	if len(m.items) == 0 {
+		return nil
+	}
 	var cmds []tea.Cmd
 	m.reverse = false
 	cmd := m.blurSelected()
@@ -480,7 +471,7 @@ func (m *model) rerenderItem(inx int) {
 	}
 	rerenderedItem := m.items[inx].View()
 	rerenderedLines := strings.Split(rerenderedItem, "\n")
-	if m.gapSize > 0 && inx != len(m.items)-1 {
+	if m.gapSize > 0 {
 		for range m.gapSize {
 			rerenderedLines = append(rerenderedLines, "")
 		}
@@ -492,7 +483,6 @@ func (m *model) rerenderItem(inx int) {
 	}
 	// check if the item is in the content
 	start := cachedItem.start
-	logging.Info("rerenderItem", "inx", inx, "start", start, "cachedItem.start", cachedItem.start, "cachedItem.height", cachedItem.height)
 	end := start + cachedItem.height
 	totalLines := len(m.renderedLines)
 	if m.reverse {
@@ -504,9 +494,35 @@ func (m *model) rerenderItem(inx int) {
 		m.renderedLines = slices.Insert(m.renderedLines, start, rerenderedLines...)
 	}
 	// TODO: if hight changed do something
-	if cachedItem.height != len(rerenderedLines) && inx != len(m.items)-1 {
+	if cachedItem.height != len(rerenderedLines) {
 		if inx == len(m.items)-1 {
-			m.finalHight = max(0, start+len(rerenderedLines)-m.listHeight())
+			m.finalHeight = max(0, start+len(rerenderedLines)-m.listHeight())
+		}
+
+		// update the start of the other cached items
+		currentStart := cachedItem.start + len(rerenderedLines)
+		if m.reverse {
+			for i := inx - 1; i < len(m.items); i-- {
+				if existing, ok := m.renderedItems.Load(i); ok {
+					cached := existing.(renderedItem)
+					cached.start = currentStart
+					currentStart += cached.height
+					m.renderedItems.Store(i, cached)
+				} else {
+					break
+				}
+			}
+		} else {
+			for i := inx + 1; i < len(m.items); i++ {
+				if existing, ok := m.renderedItems.Load(i); ok {
+					cached := existing.(renderedItem)
+					cached.start = currentStart
+					currentStart += cached.height
+					m.renderedItems.Store(i, cached)
+				} else {
+					break
+				}
+			}
 		}
 	}
 	m.renderedItems.Store(inx, renderedItem{
@@ -518,11 +534,11 @@ func (m *model) rerenderItem(inx int) {
 }
 
 func (m *model) increaseOffset(n int) {
-	if m.finalHight > -1 {
-		if m.offset < m.finalHight {
+	if m.finalHeight > -1 {
+		if m.offset < m.finalHeight {
 			m.offset += n
-			if m.offset > m.finalHight {
-				m.offset = m.finalHight
+			if m.offset > m.finalHeight {
+				m.offset = m.finalHeight
 			}
 			m.needsRerender = true
 		}
@@ -550,7 +566,8 @@ func (m *model) UpdateItem(inx int, item util.Model) {
 			i.Focus()
 		}
 	}
-	m.ResetView()
+	m.setItemSize(inx)
+	m.rerenderItem(inx)
 	m.needsRerender = true
 }
 
@@ -565,16 +582,15 @@ func (m *model) SetSize(width int, height int) tea.Cmd {
 		return nil
 	}
 	if m.height != height {
-		m.finalHight = -1
+		m.finalHeight = -1
 		m.height = height
 	}
 	m.width = width
 	m.ResetView()
-	return m.setItemsSize()
+	return m.setAllItemsSize()
 }
 
-func (m *model) setItemsSize() tea.Cmd {
-	var cmds []tea.Cmd
+func (m *model) getItemSize() int {
 	width := m.width
 	if m.padding != nil {
 		if len(m.padding) == 1 {
@@ -585,11 +601,22 @@ func (m *model) setItemsSize() tea.Cmd {
 			width -= m.padding[1] + m.padding[3]
 		}
 	}
-	for _, item := range m.items {
-		if i, ok := item.(layout.Sizeable); ok {
-			cmd := i.SetSize(width, 0) // height is not limited
-			cmds = append(cmds, cmd)
-		}
+	return width
+}
+
+func (m *model) setItemSize(inx int) tea.Cmd {
+	if i, ok := m.items[inx].(layout.Sizeable); ok {
+		cmd := i.SetSize(m.getItemSize(), 0) // height is not limited
+		return cmd
+	}
+	return nil
+}
+
+func (m *model) setAllItemsSize() tea.Cmd {
+	var cmds []tea.Cmd
+	for i := range m.items {
+		cmd := m.setItemSize(i)
+		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
 }
@@ -612,11 +639,16 @@ func (m *model) listHeight() int {
 
 // AppendItem implements List.
 func (m *model) AppendItem(item util.Model) tea.Cmd {
+	var cmds []tea.Cmd
 	cmd := item.Init()
+	cmds = append(cmds, cmd)
 	m.items = append(m.items, item)
-	m.goToBottom()
+	cmd = m.setItemSize(len(m.items) - 1)
+	cmds = append(cmds, cmd)
+	cmd = m.goToBottom()
+	cmds = append(cmds, cmd)
 	m.needsRerender = true
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 // DeleteItem implements List.
@@ -632,7 +664,9 @@ func (m *model) DeleteItem(i int) {
 
 // PrependItem implements List.
 func (m *model) PrependItem(item util.Model) tea.Cmd {
+	var cmds []tea.Cmd
 	cmd := item.Init()
+	cmds = append(cmds, cmd)
 	m.items = append([]util.Model{item}, m.items...)
 	// update the indices of the rendered items
 	newRenderedItems := make(map[int]renderedItem)
@@ -647,9 +681,12 @@ func (m *model) PrependItem(item util.Model) tea.Cmd {
 	for k, v := range newRenderedItems {
 		m.renderedItems.Store(k, v)
 	}
-	m.goToTop()
+	cmd = m.goToTop()
+	cmds = append(cmds, cmd)
+	cmd = m.setItemSize(0)
+	cmds = append(cmds, cmd)
 	m.needsRerender = true
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 func (m *model) setReverse(reverse bool) {
@@ -664,7 +701,7 @@ func (m *model) setReverse(reverse bool) {
 func (m *model) SetItems(items []util.Model) tea.Cmd {
 	m.items = items
 	var cmds []tea.Cmd
-	cmd := m.setItemsSize()
+	cmd := m.setAllItemsSize()
 	cmds = append(cmds, cmd)
 	for _, item := range m.items {
 		cmds = append(cmds, item.Init())
@@ -678,7 +715,6 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 		cmd := m.focusSelected()
 		cmds = append(cmds, cmd)
 	}
-	m.needsRerender = true
 	m.ResetView()
 	return tea.Batch(cmds...)
 }

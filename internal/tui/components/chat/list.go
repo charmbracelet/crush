@@ -119,11 +119,11 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 			m.handleChildSession(event)
 			return nil
 		}
-		
+
 		if m.messageExists(event.Payload.ID) {
 			return nil
 		}
-		
+
 		return m.handleNewMessage(event.Payload)
 	case pubsub.UpdatedEvent:
 		return m.handleUpdateAssistantMessage(event.Payload)
@@ -192,22 +192,22 @@ func (m *messageListCmp) findToolCallByID(items []util.Model, toolCallID string)
 func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	items := m.listCmp.Items()
-	
+
 	// Find existing assistant message and tool calls for this message
 	assistantIndex, existingToolCalls := m.findAssistantMessageAndToolCalls(items, msg.ID)
-	
+
 	logging.Info("Update Assistant Message", "msg", msg, "assistantMessageInx", assistantIndex, "toolCalls", existingToolCalls)
-	
+
 	// Handle assistant message content
 	if cmd := m.updateAssistantMessageContent(msg, assistantIndex); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	
+
 	// Handle tool calls
 	if cmd := m.updateToolCalls(msg, existingToolCalls); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
@@ -215,7 +215,7 @@ func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.C
 func (m *messageListCmp) findAssistantMessageAndToolCalls(items []util.Model, messageID string) (int, map[int]messages.ToolCallCmp) {
 	assistantIndex := NotFound
 	toolCalls := make(map[int]messages.ToolCallCmp)
-	
+
 	// Search backwards as messages are more likely to be at the end
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
@@ -229,7 +229,7 @@ func (m *messageListCmp) findAssistantMessageAndToolCalls(items []util.Model, me
 			}
 		}
 	}
-	
+
 	return assistantIndex, toolCalls
 }
 
@@ -238,10 +238,10 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 	if assistantIndex == NotFound {
 		return nil
 	}
-	
+
 	shouldShowMessage := m.shouldShowAssistantMessage(msg)
 	hasToolCallsOnly := len(msg.ToolCalls()) > 0 && msg.Content().Text == ""
-	
+
 	if shouldShowMessage {
 		m.listCmp.UpdateItem(
 			assistantIndex,
@@ -253,7 +253,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 	} else if hasToolCallsOnly {
 		m.listCmp.DeleteItem(assistantIndex)
 	}
-	
+
 	return nil
 }
 
@@ -265,13 +265,13 @@ func (m *messageListCmp) shouldShowAssistantMessage(msg message.Message) bool {
 // updateToolCalls handles updates to tool calls, updating existing ones and adding new ones.
 func (m *messageListCmp) updateToolCalls(msg message.Message, existingToolCalls map[int]messages.ToolCallCmp) tea.Cmd {
 	var cmds []tea.Cmd
-	
+
 	for _, tc := range msg.ToolCalls() {
 		if cmd := m.updateOrAddToolCall(tc, existingToolCalls, msg.ID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
@@ -285,7 +285,7 @@ func (m *messageListCmp) updateOrAddToolCall(tc message.ToolCall, existingToolCa
 			return nil
 		}
 	}
-	
+
 	// Add new tool call if not found
 	return m.listCmp.AppendItem(messages.NewToolCallCmp(messageID, tc))
 }
@@ -293,7 +293,7 @@ func (m *messageListCmp) updateOrAddToolCall(tc message.ToolCall, existingToolCa
 // handleNewAssistantMessage processes new assistant messages and their tool calls.
 func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
-	
+
 	// Add assistant message if it should be displayed
 	if m.shouldShowAssistantMessage(msg) {
 		cmd := m.listCmp.AppendItem(
@@ -304,13 +304,13 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 		)
 		cmds = append(cmds, cmd)
 	}
-	
+
 	// Add tool calls
 	for _, tc := range msg.ToolCalls() {
 		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
 		cmds = append(cmds, cmd)
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
@@ -319,26 +319,26 @@ func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
 	if m.session.ID == session.ID {
 		return nil
 	}
-	
+
 	m.session = session
 	sessionMessages, err := m.app.Messages.List(context.Background(), session.ID)
 	if err != nil {
 		return util.ReportError(err)
 	}
-	
+
 	if len(sessionMessages) == 0 {
 		return m.listCmp.SetItems([]util.Model{})
 	}
-	
+
 	// Initialize with first message timestamp
 	m.lastUserMessageTime = sessionMessages[0].CreatedAt
-	
+
 	// Build tool result map for efficient lookup
 	toolResultMap := m.buildToolResultMap(sessionMessages)
-	
+
 	// Convert messages to UI components
 	uiMessages := m.convertMessagesToUI(sessionMessages, toolResultMap)
-	
+
 	return m.listCmp.SetItems(uiMessages)
 }
 
@@ -356,7 +356,7 @@ func (m *messageListCmp) buildToolResultMap(messages []message.Message) map[stri
 // convertMessagesToUI converts database messages to UI components.
 func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
 	uiMessages := make([]util.Model, 0)
-	
+
 	for _, msg := range sessionMessages {
 		switch msg.Role {
 		case message.User:
@@ -366,14 +366,14 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
 		}
 	}
-	
+
 	return uiMessages
 }
 
 // convertAssistantMessage converts an assistant message and its tool calls to UI components.
 func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
 	var uiMessages []util.Model
-	
+
 	// Add assistant message if it should be displayed
 	if m.shouldShowAssistantMessage(msg) {
 		uiMessages = append(
@@ -384,30 +384,30 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 			),
 		)
 	}
-	
+
 	// Add tool calls with their results and status
 	for _, tc := range msg.ToolCalls() {
 		options := m.buildToolCallOptions(tc, msg, toolResultMap)
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, options...))
 	}
-	
+
 	return uiMessages
 }
 
 // buildToolCallOptions creates options for tool call components based on results and status.
 func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.Message, toolResultMap map[string]message.ToolResult) []messages.ToolCallOption {
 	var options []messages.ToolCallOption
-	
+
 	// Add tool result if available
 	if tr, ok := toolResultMap[tc.ID]; ok {
 		options = append(options, messages.WithToolCallResult(tr))
 	}
-	
+
 	// Add cancelled status if applicable
 	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
 		options = append(options, messages.WithToolCallCancelled())
 	}
-	
+
 	return options
 }
 

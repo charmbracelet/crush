@@ -6,9 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/llm/agent"
-	"github.com/opencode-ai/opencode/internal/llm/tools"
+	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -21,15 +21,24 @@ type ToolCallCmp interface {
 	layout.Focusable
 	GetToolCall() message.ToolCall
 	GetToolResult() message.ToolResult
+	SetToolResult(message.ToolResult)
+	SetToolCall(message.ToolCall)
+	SetCancelled()
+	ParentMessageId() string
+	Spinning() bool
 }
 
 type toolCallCmp struct {
 	width   int
 	focused bool
 
-	call      message.ToolCall
-	result    message.ToolResult
-	cancelled bool
+	parentMessageId string
+	call            message.ToolCall
+	result          message.ToolResult
+	cancelled       bool
+
+	spinning bool
+	anim     util.Model
 }
 
 type ToolCallOption func(*toolCallCmp)
@@ -46,9 +55,11 @@ func WithToolCallResult(result message.ToolResult) ToolCallOption {
 	}
 }
 
-func NewToolCallCmp(tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
+func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
-		call: tc,
+		call:            tc,
+		parentMessageId: parentMessageId,
+		anim:            anim.New(15, "Working"),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -57,10 +68,24 @@ func NewToolCallCmp(tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 }
 
 func (m *toolCallCmp) Init() tea.Cmd {
+	m.spinning = m.shouldSpin()
+	logging.Info("Initializing tool call spinner", "tool_call", m.call.Name, "spinning", m.spinning)
+	if m.spinning {
+		return m.anim.Init()
+	}
 	return nil
 }
 
 func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	logging.Debug("Tool call update", "msg", msg)
+	switch msg := msg.(type) {
+	case anim.ColorCycleMsg, anim.StepCharsMsg:
+		if m.spinning {
+			u, cmd := m.anim.Update(msg)
+			m.anim = u.(util.Model)
+			return m, cmd
+		}
+	}
 	return m, nil
 }
 
@@ -75,6 +100,30 @@ func (m *toolCallCmp) View() string {
 	return box.PaddingLeft(1).Render(r.Render(m))
 }
 
+// SetCancelled implements ToolCallCmp.
+func (m *toolCallCmp) SetCancelled() {
+	m.cancelled = true
+}
+
+// SetToolCall implements ToolCallCmp.
+func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
+	m.call = call
+	if m.call.Finished {
+		m.spinning = false
+	}
+}
+
+// ParentMessageId implements ToolCallCmp.
+func (m *toolCallCmp) ParentMessageId() string {
+	return m.parentMessageId
+}
+
+// SetToolResult implements ToolCallCmp.
+func (m *toolCallCmp) SetToolResult(result message.ToolResult) {
+	m.result = result
+	m.spinning = false
+}
+
 // GetToolCall implements ToolCallCmp.
 func (m *toolCallCmp) GetToolCall() message.ToolCall {
 	return m.call
@@ -86,7 +135,7 @@ func (m *toolCallCmp) GetToolResult() message.ToolResult {
 }
 
 func (m *toolCallCmp) renderPending() string {
-	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), toolAction(m.call.Name))
+	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), m.anim.View())
 }
 
 func (m *toolCallCmp) style() lipgloss.Style {
@@ -113,35 +162,6 @@ func (m *toolCallCmp) fit(content string, width int) string {
 	return ansi.Truncate(content, width, dots)
 }
 
-func (m *toolCallCmp) toolName() string {
-	switch m.call.Name {
-	case agent.AgentToolName:
-		return "Task"
-	case tools.BashToolName:
-		return "Bash"
-	case tools.EditToolName:
-		return "Edit"
-	case tools.FetchToolName:
-		return "Fetch"
-	case tools.GlobToolName:
-		return "Glob"
-	case tools.GrepToolName:
-		return "Grep"
-	case tools.LSToolName:
-		return "List"
-	case tools.SourcegraphToolName:
-		return "Sourcegraph"
-	case tools.ViewToolName:
-		return "View"
-	case tools.WriteToolName:
-		return "Write"
-	case tools.PatchToolName:
-		return "Patch"
-	default:
-		return m.call.Name
-	}
-}
-
 func (m *toolCallCmp) Blur() tea.Cmd {
 	m.focused = false
 	return nil
@@ -164,4 +184,17 @@ func (m *toolCallCmp) GetSize() (int, int) {
 func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	return nil
+}
+
+func (m *toolCallCmp) shouldSpin() bool {
+	if !m.call.Finished {
+		return true
+	} else if m.result.ToolCallID != m.call.ID {
+		return true
+	}
+	return false
+}
+
+func (m *toolCallCmp) Spinning() bool {
+	return m.spinning
 }

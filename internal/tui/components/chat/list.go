@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/opencode-ai/opencode/internal/llm/agent"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/pubsub"
 	"github.com/opencode-ai/opencode/internal/session"
@@ -106,9 +106,54 @@ func (m *messageListCmp) View() string {
 }
 
 // handleChildSession handles messages from child sessions (agent tools).
-// TODO: update the agent tool message with the changes
-func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message]) {
-	// Implementation pending
+func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message]) tea.Cmd {
+	var cmds []tea.Cmd
+	if len(event.Payload.ToolCalls()) == 0 {
+		return nil
+	}
+	items := m.listCmp.Items()
+	toolCallInx := NotFound
+	var toolCall messages.ToolCallCmp
+	for i := len(items) - 1; i >= 0; i-- {
+		if msg, ok := items[i].(messages.ToolCallCmp); ok {
+			if msg.GetToolCall().ID == event.Payload.SessionID {
+				toolCallInx = i
+				toolCall = msg
+			}
+		}
+	}
+	if toolCallInx == NotFound {
+		return nil
+	}
+	nestedToolCalls := toolCall.GetNestedToolCalls()
+	for _, tc := range event.Payload.ToolCalls() {
+		found := false
+		for existingInx, existingTC := range nestedToolCalls {
+			if existingTC.GetToolCall().ID == tc.ID {
+				nestedToolCalls[existingInx].SetToolCall(tc)
+				found = true
+				break
+			}
+		}
+		if !found {
+			nestedCall := messages.NewToolCallCmp(
+				event.Payload.ID,
+				tc,
+				messages.WithToolCallNested(true),
+			)
+			cmds = append(cmds, nestedCall.Init())
+			nestedToolCalls = append(
+				nestedToolCalls,
+				nestedCall,
+			)
+		}
+	}
+	toolCall.SetNestedToolCalls(nestedToolCalls)
+	m.listCmp.UpdateItem(
+		toolCallInx,
+		toolCall,
+	)
+	return tea.Batch(cmds...)
 }
 
 // handleMessageEvent processes different types of message events (created/updated).
@@ -116,16 +161,16 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 	switch event.Type {
 	case pubsub.CreatedEvent:
 		if event.Payload.SessionID != m.session.ID {
-			m.handleChildSession(event)
-			return nil
+			return m.handleChildSession(event)
 		}
-
 		if m.messageExists(event.Payload.ID) {
 			return nil
 		}
-
 		return m.handleNewMessage(event.Payload)
 	case pubsub.UpdatedEvent:
+		if event.Payload.SessionID != m.session.ID {
+			return m.handleChildSession(event)
+		}
 		return m.handleUpdateAssistantMessage(event.Payload)
 	}
 	return nil
@@ -195,8 +240,6 @@ func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.C
 
 	// Find existing assistant message and tool calls for this message
 	assistantIndex, existingToolCalls := m.findAssistantMessageAndToolCalls(items, msg.ID)
-
-	logging.Info("Update Assistant Message", "msg", msg, "assistantMessageInx", assistantIndex, "toolCalls", existingToolCalls)
 
 	// Handle assistant message content
 	if cmd := m.updateAssistantMessageContent(msg, assistantIndex); cmd != nil {
@@ -389,6 +432,19 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 	for _, tc := range msg.ToolCalls() {
 		options := m.buildToolCallOptions(tc, msg, toolResultMap)
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, options...))
+		// If this tool call is the agent tool, fetch nested tool calls
+		if tc.Name == agent.AgentToolName {
+			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)
+			nestedUIMessages := m.convertMessagesToUI(nestedMessages, make(map[string]message.ToolResult))
+			nestedToolCalls := make([]messages.ToolCallCmp, 0, len(nestedUIMessages))
+			for _, nestedMsg := range nestedUIMessages {
+				if toolCall, ok := nestedMsg.(messages.ToolCallCmp); ok {
+					toolCall.SetIsNested(true)
+					nestedToolCalls = append(nestedToolCalls, toolCall)
+				}
+			}
+			uiMessages[len(uiMessages)-1].(messages.ToolCallCmp).SetNestedToolCalls(nestedToolCalls)
+		}
 	}
 
 	return uiMessages

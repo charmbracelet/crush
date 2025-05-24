@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
@@ -182,7 +183,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
-	case anim.ColorCycleMsg, anim.StepCharsMsg:
+	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
 		return m.handleAnimationMsg(msg)
 	}
 

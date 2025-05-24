@@ -91,7 +91,14 @@ func (pb *paramBuilder) build() []string {
 
 // renderWithParams provides a common rendering pattern for tools with parameters
 func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
-	header := makeHeader(toolName, v.textWidth(), args...)
+	width := v.textWidth()
+	if v.isNested {
+		width -= 3 // Adjust for nested tool call indentation
+	}
+	header := makeHeader(toolName, width, args...)
+	if v.isNested {
+		return v.style().Render(header)
+	}
 	if res, done := earlyState(header, v); done {
 		return res
 	}
@@ -117,6 +124,7 @@ func init() {
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
 	registry.register(tools.PatchToolName, func() renderer { return patchRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
+	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
 
 // -----------------------------------------------------------------------------
@@ -465,6 +473,51 @@ func (dr diagnosticsRenderer) Render(v *toolCallCmp) string {
 	return dr.renderWithParams(v, "Diagnostics", args, func() string {
 		return renderPlainContent(v, v.result.Content)
 	})
+}
+
+// -----------------------------------------------------------------------------
+//  Task renderer
+// -----------------------------------------------------------------------------
+
+// agentRenderer handles project-wide diagnostic information
+type agentRenderer struct {
+	baseRenderer
+}
+
+// Render displays agent task parameters and result content
+func (tr agentRenderer) Render(v *toolCallCmp) string {
+	var params agent.AgentParams
+	if err := tr.unmarshalParams(v.call.Input, &params); err != nil {
+		return tr.renderError(v, "Invalid task parameters")
+	}
+	prompt := params.Prompt
+	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	args := newParamBuilder().addMain(prompt).build()
+
+	header := makeHeader("Task", v.textWidth(), args...)
+	parts := []string{header}
+	for _, call := range v.nestedToolCalls {
+		parts = append(parts, call.View())
+	}
+
+	if v.result.ToolCallID == "" {
+		v.spinning = true
+		parts = append(parts, v.anim.View())
+	} else {
+		v.spinning = false
+	}
+
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
+	)
+
+	if v.result.ToolCallID == "" {
+		return header
+	}
+
+	body := renderPlainContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.

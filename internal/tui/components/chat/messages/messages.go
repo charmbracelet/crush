@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -80,7 +81,7 @@ func (m *messageCmp) Init() tea.Cmd {
 // Manages animation updates for spinning messages and stops animation when appropriate.
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case anim.ColorCycleMsg, anim.StepCharsMsg:
+	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)

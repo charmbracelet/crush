@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/diff"
@@ -93,7 +94,7 @@ func (pb *paramBuilder) build() []string {
 func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
 	width := v.textWidth()
 	if v.isNested {
-		width -= 3 // Adjust for nested tool call indentation
+		width -= 4 // Adjust for nested tool call indentation
 	}
 	header := makeHeader(toolName, width, args...)
 	if v.isNested {
@@ -495,11 +496,15 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	args := newParamBuilder().addMain(prompt).build()
 
 	header := makeHeader("Task", v.textWidth(), args...)
-	parts := []string{header}
+	t := tree.Root(header)
+
 	for _, call := range v.nestedToolCalls {
-		parts = append(parts, call.View())
+		t.Child(call.View())
 	}
 
+	parts := []string{
+		t.Enumerator(tree.RoundedEnumerator).String(),
+	}
 	if v.result.ToolCallID == "" {
 		v.spinning = true
 		parts = append(parts, v.anim.View())

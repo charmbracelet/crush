@@ -46,13 +46,19 @@ type messageListCmp struct {
 // and reverse ordering (newest messages at bottom).
 func NewMessagesListCmp(app *app.App) MessageListCmp {
 	defaultKeymaps := list.DefaultKeymap()
-	defaultKeymaps.NDown.SetEnabled(false)
-	defaultKeymaps.NUp.SetEnabled(false)
+	defaultKeymaps.Up.SetEnabled(false)
+	defaultKeymaps.Down.SetEnabled(false)
+	defaultKeymaps.NDown = key.NewBinding(
+		key.WithKeys("ctrl+j"),
+	)
+	defaultKeymaps.NUp = key.NewBinding(
+		key.WithKeys("ctrl+k"),
+	)
 	defaultKeymaps.Home = key.NewBinding(
-		key.WithKeys("ctrl+g"),
+		key.WithKeys("ctrl+shift+up"),
 	)
 	defaultKeymaps.End = key.NewBinding(
-		key.WithKeys("ctrl+G"),
+		key.WithKeys("ctrl+shift+down"),
 	)
 	return &messageListCmp{
 		app: app,

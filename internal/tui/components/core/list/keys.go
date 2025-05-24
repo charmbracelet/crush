@@ -1,6 +1,9 @@
 package list
 
-import "github.com/charmbracelet/bubbles/v2/key"
+import (
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/opencode-ai/opencode/internal/tui/layout"
+)
 
 type KeyMap struct {
 	Down,
@@ -12,8 +15,7 @@ type KeyMap struct {
 	HalfPageDown,
 	HalfPageUp,
 	Home,
-	End,
-	Submit key.Binding
+	End key.Binding
 }
 
 func DefaultKeymap() KeyMap {
@@ -48,23 +50,24 @@ func DefaultKeymap() KeyMap {
 		End: key.NewBinding(
 			key.WithKeys("shift+g", "end"),
 		),
-		Submit: key.NewBinding(
-			key.WithKeys("enter", "space"),
-			key.WithHelp("enter/space", "select"),
-		),
 	}
 }
 
 // FullHelp implements help.KeyMap.
-func (k KeyMap) FullHelp() [][]key.Binding { return nil }
+func (k KeyMap) FullHelp() [][]key.Binding {
+	m := [][]key.Binding{}
+	slice := layout.KeyMapToSlice(k)
+	for i := 0; i < len(slice); i += 4 {
+		end := min(i+4, len(slice))
+		m = append(m, slice[i:end])
+	}
+	return m
+}
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↓↑", "navigate"),
-		),
-		k.Submit,
+		k.Up,
+		k.Down,
 	}
 }

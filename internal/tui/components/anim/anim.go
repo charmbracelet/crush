@@ -75,6 +75,11 @@ func cycleColors(id string) tea.Cmd {
 	})
 }
 
+type Animation interface {
+	util.Model
+	ID() string
+}
+
 // anim is the model that manages the animation that displays while the
 // output is being generated.
 type anim struct {
@@ -88,7 +93,15 @@ type anim struct {
 	id              string
 }
 
-func New(cyclingCharsSize uint, label string) util.Model {
+type animOption func(*anim)
+
+func WithId(id string) animOption {
+	return func(a *anim) {
+		a.id = id
+	}
+}
+
+func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	// #nosec G115
 	n := min(int(cyclingCharsSize), maxCyclingChars)
 
@@ -103,6 +116,10 @@ func New(cyclingCharsSize uint, label string) util.Model {
 		label:    []rune(gap + label),
 		ellipsis: spinner.New(spinner.WithSpinner(spinner.Ellipsis)),
 		id:       id.String(),
+	}
+
+	for _, opt := range opts {
+		opt(&c)
 	}
 
 	// If we're in truecolor mode (and there are enough cycling characters)
@@ -202,6 +219,10 @@ func (a anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		return a, nil
 	}
+}
+
+func (a anim) ID() string {
+	return a.id
 }
 
 func (a *anim) updateChars(chars *[]cyclingChar) {

@@ -3,10 +3,10 @@ package messages
 import (
 	"fmt"
 
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
@@ -28,13 +28,17 @@ type ToolCallCmp interface {
 	SetCancelled()                     // Mark as cancelled
 	ParentMessageId() string           // Get parent message ID
 	Spinning() bool                    // Animation state for pending tools
+	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
+	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
+	SetIsNested(bool)                  // Set whether this tool call is nested
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
 // It handles rendering of tool execution states including pending, completed, and error states.
 type toolCallCmp struct {
-	width   int  // Component width for text wrapping
-	focused bool // Focus state for border styling
+	width    int  // Component width for text wrapping
+	focused  bool // Focus state for border styling
+	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
 	parentMessageId string             // ID of the message that initiated this tool call
@@ -45,6 +49,8 @@ type toolCallCmp struct {
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
 	anim     util.Model // Animation component for pending states
+
+	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
 }
 
 // ToolCallOption provides functional options for configuring tool call components
@@ -64,16 +70,31 @@ func WithToolCallResult(result message.ToolResult) ToolCallOption {
 	}
 }
 
+func WithToolCallNested(isNested bool) ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.isNested = isNested
+	}
+}
+
+func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.nestedToolCalls = calls
+	}
+}
+
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
 func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
 		parentMessageId: parentMessageId,
-		anim:            anim.New(15, "Working"),
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	m.anim = anim.New(15, "Working")
+	if m.isNested {
+		m.anim = anim.New(10, "")
 	}
 	return m
 }
@@ -82,7 +103,6 @@ func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCal
 // Returns a command to start the animation for pending tool calls.
 func (m *toolCallCmp) Init() tea.Cmd {
 	m.spinning = m.shouldSpin()
-	logging.Info("Initializing tool call spinner", "tool_call", m.call.Name, "spinning", m.spinning)
 	if m.spinning {
 		return m.anim.Init()
 	}
@@ -92,14 +112,22 @@ func (m *toolCallCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 // Manages animation updates for pending tool calls.
 func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	logging.Debug("Tool call update", "msg", msg)
 	switch msg := msg.(type) {
-	case anim.ColorCycleMsg, anim.StepCharsMsg:
+	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
+		var cmds []tea.Cmd
+		for i, nested := range m.nestedToolCalls {
+			if nested.Spinning() {
+				u, cmd := nested.Update(msg)
+				m.nestedToolCalls[i] = u.(ToolCallCmp)
+				cmds = append(cmds, cmd)
+			}
+		}
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u.(util.Model)
-			return m, cmd
+			cmds = append(cmds, cmd)
 		}
+		return m, tea.Batch(cmds...)
 	}
 	return m, nil
 }
@@ -114,6 +142,15 @@ func (m *toolCallCmp) View() string {
 	}
 
 	r := registry.lookup(m.call.Name)
+
+	if m.isNested {
+		return box.Render(
+			lipgloss.JoinHorizontal(lipgloss.Left,
+				" └ ",
+				r.Render(m),
+			),
+		)
+	}
 	return box.PaddingLeft(1).Render(r.Render(m))
 }
 
@@ -153,10 +190,31 @@ func (m *toolCallCmp) GetToolResult() message.ToolResult {
 	return m.result
 }
 
+// GetNestedToolCalls returns the nested tool calls
+func (m *toolCallCmp) GetNestedToolCalls() []ToolCallCmp {
+	return m.nestedToolCalls
+}
+
+// SetNestedToolCalls sets the nested tool calls
+func (m *toolCallCmp) SetNestedToolCalls(calls []ToolCallCmp) {
+	m.nestedToolCalls = calls
+	for _, nested := range m.nestedToolCalls {
+		nested.SetSize(m.width, 0)
+	}
+}
+
+// SetIsNested sets whether this tool call is nested within another
+func (m *toolCallCmp) SetIsNested(isNested bool) {
+	m.isNested = isNested
+}
+
 // Rendering methods
 
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
+	if m.isNested {
+		return fmt.Sprintf("└ %s: %s", prettifyToolName(m.call.Name), m.anim.View())
+	}
 	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), m.anim.View())
 }
 
@@ -164,6 +222,10 @@ func (m *toolCallCmp) renderPending() string {
 // Applies muted colors and focus-dependent border styles.
 func (m *toolCallCmp) style() lipgloss.Style {
 	t := theme.CurrentTheme()
+	if m.isNested {
+		return styles.BaseStyle().
+			Foreground(t.TextMuted())
+	}
 	borderStyle := lipgloss.NormalBorder()
 	if m.focused {
 		borderStyle = lipgloss.DoubleBorder()
@@ -218,6 +280,9 @@ func (m *toolCallCmp) GetSize() (int, int) {
 // SetSize updates the width of the tool call component for text wrapping
 func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
+	for _, nested := range m.nestedToolCalls {
+		nested.SetSize(width, height)
+	}
 	return nil
 }
 
@@ -234,5 +299,13 @@ func (m *toolCallCmp) shouldSpin() bool {
 
 // Spinning returns whether the tool call is currently showing a loading animation
 func (m *toolCallCmp) Spinning() bool {
+	if m.spinning {
+		return true
+	}
+	for _, nested := range m.nestedToolCalls {
+		if nested.Spinning() {
+			return true
+		}
+	}
 	return m.spinning
 }

@@ -138,18 +138,16 @@ func (m *toolCallCmp) View() string {
 	box := m.style()
 
 	if !m.call.Finished && !m.cancelled {
+		if m.isNested {
+			return box.Render(m.renderPending())
+		}
 		return box.PaddingLeft(1).Render(m.renderPending())
 	}
 
 	r := registry.lookup(m.call.Name)
 
 	if m.isNested {
-		return box.Render(
-			lipgloss.JoinHorizontal(lipgloss.Left,
-				" └ ",
-				r.Render(m),
-			),
-		)
+		return box.Render(r.Render(m))
 	}
 	return box.PaddingLeft(1).Render(r.Render(m))
 }
@@ -212,9 +210,6 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
-	if m.isNested {
-		return fmt.Sprintf("└ %s: %s", prettifyToolName(m.call.Name), m.anim.View())
-	}
 	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), m.anim.View())
 }
 

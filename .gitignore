@@ -44,3 +44,8 @@ Thumbs.db
 .opencode/
 
 opencode
+
+
+# Added by cargo
+
+/target

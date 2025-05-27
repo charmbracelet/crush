@@ -26,6 +26,7 @@ import (
 type editorCmp struct {
 	width       int
 	height      int
+	x, y        int
 	app         *app.App
 	session     session.Session
 	textarea    textarea.Model
@@ -116,7 +117,7 @@ func (m *editorCmp) openEditor() tea.Cmd {
 }
 
 func (m *editorCmp) Init() tea.Cmd {
-	return textarea.Blink
+	return nil
 }
 
 func (m *editorCmp) send() tea.Cmd {
@@ -212,7 +213,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *editorCmp) View() string {
+func (m *editorCmp) View() tea.View {
 	t := theme.CurrentTheme()
 
 	// Style the prompt with theme colors
@@ -221,16 +222,23 @@ func (m *editorCmp) View() string {
 		Bold(true).
 		Foreground(t.Primary())
 
+	cursor := m.textarea.Cursor()
+	cursor.X = m.textarea.Cursor().X + m.x + 2
+	cursor.Y = m.textarea.Cursor().Y + m.y + 1
 	if len(m.attachments) == 0 {
-		return lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View())
+		view := tea.NewView(lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View()))
+		view.SetCursor(cursor)
+		return view
 	}
 	m.textarea.SetHeight(m.height - 1)
-	return lipgloss.JoinVertical(lipgloss.Top,
+	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Top,
 		m.attachmentsContent(),
 		lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"),
 			m.textarea.View(),
 		),
-	)
+	))
+	view.SetCursor(cursor)
+	return view
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
@@ -275,6 +283,12 @@ func (m *editorCmp) BindingKeys() []key.Binding {
 	return bindings
 }
 
+func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
+	m.x = x
+	m.y = y
+	return nil
+}
+
 func CreateTextArea(existing *textarea.Model) textarea.Model {
 	t := theme.CurrentTheme()
 	bgColor := t.Background()
@@ -297,11 +311,12 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 
 	s.Focused = f
 	s.Blurred = b
-	ta.Styles = s
+	ta.SetStyles(s)
 
 	ta.Prompt = " "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
+	ta.SetVirtualCursor(false)
 
 	if existing != nil {
 		ta.SetValue(existing.Value())

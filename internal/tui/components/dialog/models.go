@@ -185,7 +185,7 @@ func (m *modelDialogCmp) switchProvider(offset int) {
 	m.setupModelsForProvider(m.provider)
 }
 
-func (m *modelDialogCmp) View() string {
+func (m *modelDialogCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
@@ -220,12 +220,14 @@ func (m *modelDialogCmp) View() string {
 		scrollIndicator,
 	)
 
-	return baseStyle.Padding(1, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
-		Width(lipgloss.Width(content) + 4).
-		Render(content)
+	return tea.NewView(
+		baseStyle.Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderBackground(t.Background()).
+			BorderForeground(t.TextMuted()).
+			Width(lipgloss.Width(content) + 4).
+			Render(content),
+	)
 }
 
 func (m *modelDialogCmp) getScrollIndicators(maxWidth int) string {

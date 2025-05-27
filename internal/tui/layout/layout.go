@@ -22,6 +22,10 @@ type Bindings interface {
 	BindingKeys() []key.Binding
 }
 
+type Positionable interface {
+	SetPosition(x, y int) tea.Cmd
+}
+
 func KeyMapToSlice(t any) (bindings []key.Binding) {
 	typ := reflect.TypeOf(t)
 	if typ.Kind() != reflect.Struct {

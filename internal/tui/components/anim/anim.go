@@ -239,7 +239,7 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 }
 
 // View renders the animation.
-func (a anim) View() string {
+func (a anim) View() tea.View {
 	t := theme.CurrentTheme()
 	var b strings.Builder
 
@@ -259,10 +259,10 @@ func (a anim) View() string {
 				textStyle.Render(string(c.currentValue)),
 			)
 		}
-		return b.String() + textStyle.Render(a.ellipsis.View())
+		return tea.NewView(b.String() + textStyle.Render(a.ellipsis.View()))
 	}
 
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 func makeGradientRamp(length int) []color.Color {

@@ -185,7 +185,7 @@ func (p *chatPage) GetSize() (int, int) {
 	return p.layout.GetSize()
 }
 
-func (p *chatPage) View() string {
+func (p *chatPage) View() tea.View {
 	layoutView := p.layout.View()
 
 	if p.showCompletionDialog {
@@ -195,15 +195,20 @@ func (p *chatPage) View() string {
 		p.completionDialog.SetWidth(editorWidth)
 		overlay := p.completionDialog.View()
 
-		layoutView = layout.PlaceOverlay(
+		viewStr := layout.PlaceOverlay(
 			0,
-			layoutHeight-editorHeight-lipgloss.Height(overlay),
-			overlay,
-			layoutView,
+			layoutHeight-editorHeight-lipgloss.Height(overlay.String()),
+			overlay.String(),
+			layoutView.String(),
 			false,
 		)
+
+		view := tea.NewView(viewStr)
+		view.SetCursor(overlay.Cursor())
+		return view
 	}
 
+	logging.Info("Cursor in page", "c", layoutView.Cursor())
 	return layoutView
 }
 

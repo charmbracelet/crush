@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/llm/models"
+	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/lsp"
 	"github.com/opencode-ai/opencode/internal/lsp/protocol"
 	"github.com/opencode-ai/opencode/internal/pubsub"
@@ -47,6 +48,8 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		return m, nil
+
+		// Handle sesson messages
 	case chat.SessionSelectedMsg:
 		m.session = msg
 	case chat.SessionClearedMsg:
@@ -57,6 +60,8 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.session = msg.Payload
 			}
 		}
+
+	// Handle status info
 	case util.InfoMsg:
 		m.info = msg
 		ttl := msg.TTL
@@ -66,6 +71,37 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clearMessageCmd(ttl)
 	case util.ClearStatusMsg:
 		m.info = util.InfoMsg{}
+
+	// Handle persistant logs
+	case pubsub.Event[logging.LogMessage]:
+		if msg.Payload.Persist {
+			switch msg.Payload.Level {
+			case "error":
+				m.info = util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  msg.Payload.Message,
+					TTL:  msg.Payload.PersistTime,
+				}
+			case "info":
+				m.info = util.InfoMsg{
+					Type: util.InfoTypeInfo,
+					Msg:  msg.Payload.Message,
+					TTL:  msg.Payload.PersistTime,
+				}
+			case "warn":
+				m.info = util.InfoMsg{
+					Type: util.InfoTypeWarn,
+					Msg:  msg.Payload.Message,
+					TTL:  msg.Payload.PersistTime,
+				}
+			default:
+				m.info = util.InfoMsg{
+					Type: util.InfoTypeInfo,
+					Msg:  msg.Payload.Message,
+					TTL:  msg.Payload.PersistTime,
+				}
+			}
+		}
 	}
 	return m, nil
 }
@@ -116,7 +152,7 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 	return fmt.Sprintf("Context: %s, Cost: %s", formattedTokens, formattedCost)
 }
 
-func (m statusCmp) View() string {
+func (m statusCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	modelID := config.Get().Agents[config.AgentCoder].Model
 	model := models.SupportedModels[modelID]
@@ -176,7 +212,7 @@ func (m statusCmp) View() string {
 
 	status += diagnostics
 	status += m.model()
-	return status
+	return tea.NewView(status)
 }
 
 func (m *statusCmp) projectDiagnostics() string {

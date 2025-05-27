@@ -12,10 +12,13 @@ type Container interface {
 	util.Model
 	Sizeable
 	Bindings
+	Positionable
 }
 type container struct {
 	width  int
 	height int
+
+	x, y int
 
 	content util.Model
 
@@ -42,7 +45,7 @@ func (c *container) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return c, cmd
 }
 
-func (c *container) View() string {
+func (c *container) View() tea.View {
 	t := theme.CurrentTheme()
 	style := lipgloss.NewStyle()
 	width := c.width
@@ -76,7 +79,10 @@ func (c *container) View() string {
 		PaddingBottom(c.paddingBottom).
 		PaddingLeft(c.paddingLeft)
 
-	return style.Render(c.content.View())
+	contentView := c.content.View()
+	view := tea.NewView(style.Render(contentView.String()))
+	view.SetCursor(contentView.Cursor())
+	return view
 }
 
 func (c *container) SetSize(width, height int) tea.Cmd {
@@ -113,6 +119,15 @@ func (c *container) SetSize(width, height int) tea.Cmd {
 
 func (c *container) GetSize() (int, int) {
 	return c.width, c.height
+}
+
+func (c *container) SetPosition(x, y int) tea.Cmd {
+	c.x = x
+	c.y = y
+	if positionable, ok := c.content.(Positionable); ok {
+		return positionable.SetPosition(x, y)
+	}
+	return nil
 }
 
 func (c *container) BindingKeys() []key.Binding {

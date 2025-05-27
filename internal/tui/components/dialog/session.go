@@ -105,17 +105,19 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s *sessionDialogCmp) View() string {
+func (s *sessionDialogCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	if len(s.sessions) == 0 {
-		return baseStyle.Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderBackground(t.Background()).
-			BorderForeground(t.TextMuted()).
-			Width(40).
-			Render("No sessions available")
+		return tea.NewView(
+			baseStyle.Padding(1, 2).
+				Border(lipgloss.RoundedBorder()).
+				BorderBackground(t.Background()).
+				BorderForeground(t.TextMuted()).
+				Width(40).
+				Render("No sessions available"),
+		)
 	}
 
 	// Calculate max width needed for session titles
@@ -177,11 +179,13 @@ func (s *sessionDialogCmp) View() string {
 		baseStyle.Width(maxWidth).Render(""),
 	)
 
-	return baseStyle.Padding(1, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
-		Render(content)
+	return tea.NewView(
+		baseStyle.Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderBackground(t.Background()).
+			BorderForeground(t.TextMuted()).
+			Render(content),
+	)
 }
 
 func (s *sessionDialogCmp) BindingKeys() []key.Binding {

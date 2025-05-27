@@ -82,26 +82,28 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *sidebarCmp) View() string {
+func (m *sidebarCmp) View() tea.View {
 	baseStyle := styles.BaseStyle()
 
-	return baseStyle.
-		Width(m.width).
-		PaddingLeft(4).
-		PaddingRight(2).
-		Height(m.height - 1).
-		Render(
-			lipgloss.JoinVertical(
-				lipgloss.Top,
-				header(),
-				" ",
-				m.sessionSection(),
-				" ",
-				lspsConfigured(),
-				" ",
-				m.modifiedFiles(),
+	return tea.NewView(
+		baseStyle.
+			Width(m.width).
+			PaddingLeft(4).
+			PaddingRight(2).
+			Height(m.height - 1).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Top,
+					header(),
+					" ",
+					m.sessionSection(),
+					" ",
+					lspsConfigured(),
+					" ",
+					m.modifiedFiles(),
+				),
 			),
-		)
+	)
 }
 
 func (m *sidebarCmp) sessionSection() string {

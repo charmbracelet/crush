@@ -110,7 +110,7 @@ func (c *simpleListCmp[T]) SetMaxWidth(width int) {
 	c.maxWidth = width
 }
 
-func (c *simpleListCmp[T]) View() string {
+func (c *simpleListCmp[T]) View() tea.View {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
@@ -120,11 +120,13 @@ func (c *simpleListCmp[T]) View() string {
 	startIdx := 0
 
 	if len(items) <= 0 {
-		return baseStyle.
-			Background(t.Background()).
-			Padding(0, 1).
-			Width(maxWidth).
-			Render(c.fallbackMsg)
+		return tea.NewView(
+			baseStyle.
+				Background(t.Background()).
+				Padding(0, 1).
+				Width(maxWidth).
+				Render(c.fallbackMsg),
+		)
 	}
 
 	if len(items) > maxVisibleItems {
@@ -146,7 +148,9 @@ func (c *simpleListCmp[T]) View() string {
 		listItems = append(listItems, title)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, listItems...)
+	return tea.NewView(
+		lipgloss.JoinVertical(lipgloss.Left, listItems...),
+	)
 }
 
 func NewSimpleList[T SimpleListItem](items []T, maxVisibleItems int, fallbackMsg string, useAlphaNumericKeys bool) SimpleList[T] {

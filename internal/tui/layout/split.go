@@ -86,17 +86,17 @@ func (s *splitPaneLayout) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, tea.Batch(cmds...)
 }
 
-func (s *splitPaneLayout) View() string {
+func (s *splitPaneLayout) View() tea.View {
 	var topSection string
 
 	if s.leftPanel != nil && s.rightPanel != nil {
 		leftView := s.leftPanel.View()
 		rightView := s.rightPanel.View()
-		topSection = lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
+		topSection = lipgloss.JoinHorizontal(lipgloss.Top, leftView.String(), rightView.String())
 	} else if s.leftPanel != nil {
-		topSection = s.leftPanel.View()
+		topSection = s.leftPanel.View().String()
 	} else if s.rightPanel != nil {
-		topSection = s.rightPanel.View()
+		topSection = s.rightPanel.View().String()
 	} else {
 		topSection = ""
 	}
@@ -105,25 +105,33 @@ func (s *splitPaneLayout) View() string {
 
 	if s.bottomPanel != nil && topSection != "" {
 		bottomView := s.bottomPanel.View()
-		finalView = lipgloss.JoinVertical(lipgloss.Left, topSection, bottomView)
+		finalView = lipgloss.JoinVertical(lipgloss.Left, topSection, bottomView.String())
 	} else if s.bottomPanel != nil {
-		finalView = s.bottomPanel.View()
+		finalView = s.bottomPanel.View().String()
 	} else {
 		finalView = topSection
 	}
 
-	if finalView != "" {
-		t := theme.CurrentTheme()
-
-		style := lipgloss.NewStyle().
-			Width(s.width).
-			Height(s.height).
-			Background(t.Background())
-
-		return style.Render(finalView)
+	// TODO: think of a better way to handle multiple cursors
+	var cursor *tea.Cursor
+	if s.bottomPanel != nil {
+		cursor = s.bottomPanel.View().Cursor()
+	} else if s.rightPanel != nil {
+		cursor = s.rightPanel.View().Cursor()
+	} else if s.leftPanel != nil {
+		cursor = s.leftPanel.View().Cursor()
 	}
 
-	return finalView
+	t := theme.CurrentTheme()
+
+	style := lipgloss.NewStyle().
+		Width(s.width).
+		Height(s.height).
+		Background(t.Background())
+
+	view := tea.NewView(style.Render(finalView))
+	view.SetCursor(cursor)
+	return view
 }
 
 func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
@@ -131,6 +139,7 @@ func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	s.height = height
 
 	var topHeight, bottomHeight int
+	var cmds []tea.Cmd
 	if s.bottomPanel != nil {
 		topHeight = int(float64(height) * s.verticalRatio)
 		bottomHeight = height - topHeight
@@ -151,20 +160,28 @@ func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 		rightWidth = width
 	}
 
-	var cmds []tea.Cmd
 	if s.leftPanel != nil {
 		cmd := s.leftPanel.SetSize(leftWidth, topHeight)
 		cmds = append(cmds, cmd)
+		if positionable, ok := s.leftPanel.(Positionable); ok {
+			cmds = append(cmds, positionable.SetPosition(0, 0))
+		}
 	}
 
 	if s.rightPanel != nil {
 		cmd := s.rightPanel.SetSize(rightWidth, topHeight)
 		cmds = append(cmds, cmd)
+		if positionable, ok := s.rightPanel.(Positionable); ok {
+			cmds = append(cmds, positionable.SetPosition(leftWidth, 0))
+		}
 	}
 
 	if s.bottomPanel != nil {
 		cmd := s.bottomPanel.SetSize(width, bottomHeight)
 		cmds = append(cmds, cmd)
+		if positionable, ok := s.bottomPanel.(Positionable); ok {
+			cmds = append(cmds, positionable.SetPosition(0, topHeight))
+		}
 	}
 	return tea.Batch(cmds...)
 }

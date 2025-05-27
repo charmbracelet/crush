@@ -8,7 +8,7 @@ import (
 
 type Model interface {
 	tea.Model
-	tea.ViewModel
+	tea.Viewable
 }
 
 func CmdHandler(msg tea.Msg) tea.Cmd {

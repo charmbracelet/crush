@@ -9,3 +9,4 @@ name = "opencode"
 path = "wrapper/main.rs"
 
 [dependencies]
+libc = "0.2.172"

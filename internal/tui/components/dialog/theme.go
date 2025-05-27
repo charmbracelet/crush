@@ -122,17 +122,19 @@ func (t *themeDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t, nil
 }
 
-func (t *themeDialogCmp) View() string {
+func (t *themeDialogCmp) View() tea.View {
 	currentTheme := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
 	if len(t.themes) == 0 {
-		return baseStyle.Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderBackground(currentTheme.Background()).
-			BorderForeground(currentTheme.TextMuted()).
-			Width(40).
-			Render("No themes available")
+		return tea.NewView(
+			baseStyle.Padding(1, 2).
+				Border(lipgloss.RoundedBorder()).
+				BorderBackground(currentTheme.Background()).
+				BorderForeground(currentTheme.TextMuted()).
+				Width(40).
+				Render("No themes available"),
+		)
 	}
 
 	// Calculate max width needed for theme names
@@ -175,12 +177,14 @@ func (t *themeDialogCmp) View() string {
 		baseStyle.Width(maxWidth).Render(""),
 	)
 
-	return baseStyle.Padding(1, 2).
-		Border(lipgloss.RoundedBorder()).
-		BorderBackground(currentTheme.Background()).
-		BorderForeground(currentTheme.TextMuted()).
-		Width(lipgloss.Width(content) + 4).
-		Render(content)
+	return tea.NewView(
+		baseStyle.Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderBackground(currentTheme.Background()).
+			BorderForeground(currentTheme.TextMuted()).
+			Width(lipgloss.Width(content) + 4).
+			Render(content),
+	)
 }
 
 func (t *themeDialogCmp) BindingKeys() []key.Binding {

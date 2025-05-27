@@ -42,12 +42,16 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, tea.Batch(cmds...)
 }
 
-func (p *logsPage) View() string {
+func (p *logsPage) View() tea.View {
 	style := styles.BaseStyle().Width(p.width).Height(p.height)
-	return style.Render(lipgloss.JoinVertical(lipgloss.Top,
-		p.table.View(),
-		p.details.View(),
-	))
+	return tea.NewView(
+		style.Render(
+			lipgloss.JoinVertical(lipgloss.Top,
+				p.table.View().String(),
+				p.details.View().String(),
+			),
+		),
+	)
 }
 
 func (p *logsPage) BindingKeys() []key.Binding {

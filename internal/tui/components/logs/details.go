@@ -114,8 +114,8 @@ func getLevelStyle(level string) lipgloss.Style {
 	}
 }
 
-func (i *detailCmp) View() string {
-	return i.viewport.View()
+func (i *detailCmp) View() tea.View {
+	return tea.NewView(i.viewport.View())
 }
 
 func (i *detailCmp) GetSize() (int, int) {

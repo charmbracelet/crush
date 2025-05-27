@@ -166,7 +166,7 @@ func (h *helpCmp) render() string {
 	return content
 }
 
-func (h *helpCmp) View() string {
+func (h *helpCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
@@ -177,18 +177,20 @@ func (h *helpCmp) View() string {
 		Foreground(t.Primary()).
 		Render("Keyboard Shortcuts")
 
-	return baseStyle.Padding(1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.TextMuted()).
-		Width(h.width).
-		BorderBackground(t.Background()).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Center,
-				header,
-				baseStyle.Render(strings.Repeat(" ", lipgloss.Width(header))),
-				content,
+	return tea.NewView(
+		baseStyle.Padding(1).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.TextMuted()).
+			Width(h.width).
+			BorderBackground(t.Background()).
+			Render(
+				lipgloss.JoinVertical(lipgloss.Center,
+					header,
+					baseStyle.Render(strings.Repeat(" ", lipgloss.Width(header))),
+					content,
+				),
 			),
-		)
+	)
 }
 
 type HelpCmp interface {

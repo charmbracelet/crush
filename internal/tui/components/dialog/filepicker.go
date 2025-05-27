@@ -258,7 +258,7 @@ func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
 	return f, util.CmdHandler(AttachmentAddedMsg{attachment})
 }
 
-func (f *filepickerCmp) View() string {
+func (f *filepickerCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	const maxVisibleDirs = 20
 	const maxWidth = 80
@@ -349,7 +349,9 @@ func (f *filepickerCmp) View() string {
 		BorderForeground(t.TextMuted()).
 		Width(lipgloss.Width(content) + 4)
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, contentStyle.Render(content), viewportstyle)
+	return tea.NewView(
+		lipgloss.JoinHorizontal(lipgloss.Center, contentStyle.Render(content), viewportstyle),
+	)
 }
 
 type FilepickerCmp interface {

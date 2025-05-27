@@ -269,14 +269,19 @@ func (m *model) scrollUp(amount int) {
 // View renders the list to a string for display.
 // Returns empty string if the list has no dimensions.
 // Triggers re-rendering if needed before returning content.
-func (m *model) View() string {
+func (m *model) View() tea.View {
 	if m.viewState.height == 0 || m.viewState.width == 0 {
-		return ""
+		return tea.NewView("") // No content to display
 	}
 	if m.renderState.needsRerender {
 		m.renderVisible()
 	}
-	return lipgloss.NewStyle().Padding(m.padding...).Height(m.viewState.height).Render(m.viewState.content)
+	return tea.NewView(
+		lipgloss.NewStyle().
+			Padding(m.padding...).
+			Height(m.viewState.height).
+			Render(m.viewState.content),
+	)
 }
 
 // Items returns a copy of all items in the list.
@@ -642,7 +647,7 @@ func (m *model) rerenderItem(inx int) {
 
 // getItemLines converts an item to its rendered lines, including any gap spacing.
 func (m *model) getItemLines(item util.Model) []string {
-	itemLines := strings.Split(item.View(), "\n")
+	itemLines := strings.Split(item.View().String(), "\n")
 	if m.gapSize > 0 {
 		gap := make([]string, m.gapSize)
 		itemLines = append(itemLines, gap...)

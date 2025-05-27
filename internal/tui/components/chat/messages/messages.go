@@ -94,20 +94,20 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
-func (m *messageCmp) View() string {
+func (m *messageCmp) View() tea.View {
 	if m.spinning {
-		return m.style().PaddingLeft(1).Render(m.anim.View())
+		return tea.NewView(m.style().PaddingLeft(1).Render(m.anim.View().String()))
 	}
 	if m.message.ID != "" {
 		// this is a user or assistant message
 		switch m.message.Role {
 		case message.User:
-			return m.renderUserMessage()
+			return tea.NewView(m.renderUserMessage())
 		default:
-			return m.renderAssistantMessage()
+			return tea.NewView(m.renderAssistantMessage())
 		}
 	}
-	return "Unknown Message"
+	return tea.NewView(m.style().Render("No message content"))
 }
 
 // GetMessage returns the underlying message data

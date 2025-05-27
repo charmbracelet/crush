@@ -1,0 +1,75 @@
+package tui
+
+import (
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/opencode-ai/opencode/internal/tui/layout"
+)
+
+type KeyMap struct {
+	Logs          key.Binding
+	Quit          key.Binding
+	Help          key.Binding
+	SwitchSession key.Binding
+	Commands      key.Binding
+	FilePicker    key.Binding
+	Models        key.Binding
+	SwitchTheme   key.Binding
+}
+
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		Logs: key.NewBinding(
+			key.WithKeys("ctrl+l"),
+			key.WithHelp("ctrl+l", "logs"),
+		),
+
+		Quit: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit"),
+		),
+
+		Help: key.NewBinding(
+			key.WithKeys("ctrl+_"),
+			key.WithHelp("ctrl+?", "toggle help"),
+		),
+
+		SwitchSession: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "switch session"),
+		),
+
+		Commands: key.NewBinding(
+			key.WithKeys("ctrl+k"),
+			key.WithHelp("ctrl+k", "commands"),
+		),
+		FilePicker: key.NewBinding(
+			key.WithKeys("ctrl+f"),
+			key.WithHelp("ctrl+f", "select files to upload"),
+		),
+		Models: key.NewBinding(
+			key.WithKeys("ctrl+o"),
+			key.WithHelp("ctrl+o", "model selection"),
+		),
+
+		SwitchTheme: key.NewBinding(
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("ctrl+t", "switch theme"),
+		),
+	}
+}
+
+// FullHelp implements help.KeyMap.
+func (k KeyMap) FullHelp() [][]key.Binding {
+	m := [][]key.Binding{}
+	slice := layout.KeyMapToSlice(k)
+	for i := 0; i < len(slice); i += 4 {
+		end := min(i+4, len(slice))
+		m = append(m, slice[i:end])
+	}
+	return m
+}
+
+// ShortHelp implements help.KeyMap.
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{}
+}

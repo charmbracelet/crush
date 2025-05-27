@@ -202,7 +202,7 @@ func (c *completionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return c, tea.Batch(cmds...)
 }
 
-func (c *completionDialogCmp) View() string {
+func (c *completionDialogCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
@@ -219,15 +219,17 @@ func (c *completionDialogCmp) View() string {
 
 	c.listView.SetMaxWidth(maxWidth)
 
-	return baseStyle.Padding(0, 0).
-		Border(lipgloss.NormalBorder()).
-		BorderBottom(false).
-		BorderRight(false).
-		BorderLeft(false).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
-		Width(c.width).
-		Render(c.listView.View())
+	return tea.NewView(
+		baseStyle.Padding(0, 0).
+			Border(lipgloss.NormalBorder()).
+			BorderBottom(false).
+			BorderRight(false).
+			BorderLeft(false).
+			BorderBackground(t.Background()).
+			BorderForeground(t.TextMuted()).
+			Width(c.width).
+			Render(c.listView.View().String()),
+	)
 }
 
 func (c *completionDialogCmp) SetWidth(width int) {

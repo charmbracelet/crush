@@ -60,12 +60,12 @@ func (i *tableCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return i, tea.Batch(cmds...)
 }
 
-func (i *tableCmp) View() string {
+func (i *tableCmp) View() tea.View {
 	t := theme.CurrentTheme()
 	defaultStyles := table.DefaultStyles()
 	defaultStyles.Selected = defaultStyles.Selected.Foreground(t.Primary())
 	i.table.SetStyles(defaultStyles)
-	return i.table.View()
+	return tea.NewView(i.table.View())
 }
 
 func (i *tableCmp) GetSize() (int, int) {

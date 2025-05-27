@@ -104,11 +104,11 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the message list or an initial screen if empty.
-func (m *messageListCmp) View() string {
+func (m *messageListCmp) View() tea.View {
 	if len(m.listCmp.Items()) == 0 {
-		return initialScreen()
+		return tea.NewView(initialScreen())
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, m.listCmp.View())
+	return tea.NewView(lipgloss.JoinVertical(lipgloss.Left, m.listCmp.View().String()))
 }
 
 // handleChildSession handles messages from child sessions (agent tools).

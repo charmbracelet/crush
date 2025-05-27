@@ -73,12 +73,13 @@ func NewMultiArgumentsDialogCmp(commandID, content string, argNames []string) Mu
 		ti.Placeholder = fmt.Sprintf("Enter value for %s...", name)
 		ti.SetWidth(40)
 		ti.Prompt = ""
-		ti.Styles.Focused.Placeholder = ti.Styles.Focused.Placeholder.Background(t.Background())
-		ti.Styles.Blurred.Placeholder = ti.Styles.Blurred.Placeholder.Background(t.Background())
-		ti.Styles.Focused.Suggestion = ti.Styles.Focused.Suggestion.Background(t.Background()).Foreground(t.Primary())
-		ti.Styles.Blurred.Suggestion = ti.Styles.Blurred.Suggestion.Background(t.Background())
-		ti.Styles.Focused.Text = ti.Styles.Focused.Text.Background(t.Background()).Foreground(t.Primary())
-		ti.Styles.Blurred.Text = ti.Styles.Blurred.Text.Background(t.Background())
+		styles := ti.Styles()
+		styles.Focused.Placeholder = styles.Focused.Placeholder.Background(t.Background())
+		styles.Blurred.Placeholder = styles.Blurred.Placeholder.Background(t.Background())
+		styles.Focused.Suggestion = styles.Focused.Suggestion.Background(t.Background()).Foreground(t.Primary())
+		styles.Blurred.Suggestion = styles.Blurred.Suggestion.Background(t.Background())
+		styles.Focused.Text = styles.Focused.Text.Background(t.Background()).Foreground(t.Primary())
+		styles.Blurred.Text = styles.Blurred.Text.Background(t.Background())
 
 		// Only focus the first input initially
 		if i == 0 {

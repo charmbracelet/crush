@@ -18,7 +18,7 @@ type KeyMap struct {
 	End key.Binding
 }
 
-func DefaultKeymap() KeyMap {
+func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Down: key.NewBinding(
 			key.WithKeys("down", "ctrl+j", "ctrl+n"),
@@ -45,10 +45,10 @@ func DefaultKeymap() KeyMap {
 			key.WithKeys("ctrl+u"),
 		),
 		Home: key.NewBinding(
-			key.WithKeys("g", "home"),
+			key.WithKeys("ctrl+g", "home"),
 		),
 		End: key.NewBinding(
-			key.WithKeys("shift+g", "end"),
+			key.WithKeys("ctrl+shift+g", "end"),
 		),
 	}
 }

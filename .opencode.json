@@ -4,5 +4,8 @@
     "gopls": {
       "command": "gopls"
     }
+  },
+  "tui": {
+    "theme": "opencode-dark"
   }
 }

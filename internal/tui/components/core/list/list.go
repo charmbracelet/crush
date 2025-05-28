@@ -2,16 +2,21 @@ package list
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
+	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
+	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
+	"github.com/sahilm/fuzzy"
 )
 
 // Constants for special index values and defaults
@@ -41,6 +46,18 @@ type ListModel interface {
 type HasAnim interface {
 	util.Model
 	Spinning() bool // Returns true if the item is currently animating
+}
+
+// HasFilterValue interface allows items to provide a filter value for searching.
+type HasFilterValue interface {
+	util.Model
+	FilterValue() string // Returns a string value used for filtering/searching
+}
+
+// HasMatchIndexes interface allows items to set matched character indexes.
+type HasMatchIndexes interface {
+	util.Model
+	MatchIndexes([]int) // Sets the indexes of matched characters in the item's content
 }
 
 // renderedItem represents a cached rendered item with its position and content.
@@ -105,10 +122,15 @@ type model struct {
 	renderState    *renderState   // Rendering cache and state
 	selectionState selectionState // Item selection state
 	help           help.Model     // Help system for keyboard shortcuts
-	keymap         KeyMap         // Key bindings for navigation
-	items          []util.Model   // The actual list items
+	keyMap         KeyMap         // Key bindings for navigation
+	allItems       []util.Model   // The actual list items
 	gapSize        int            // Number of empty lines between items
 	padding        []int          // Padding around the list content
+
+	filterable    bool            // Whether items can be filtered
+	filteredItems []util.Model    // Filtered items based on current search
+	input         textinput.Model // Input field for filtering items
+	currentSearch string          // Current search term for filtering
 }
 
 // listOptions is a function type for configuring list options.
@@ -117,7 +139,7 @@ type listOptions func(*model)
 // WithKeyMap sets custom key bindings for the list.
 func WithKeyMap(k KeyMap) listOptions {
 	return func(m *model) {
-		m.keymap = k
+		m.keyMap = k
 	}
 }
 
@@ -147,7 +169,15 @@ func WithPadding(padding ...int) listOptions {
 // WithItems sets the initial items for the list.
 func WithItems(items []util.Model) listOptions {
 	return func(m *model) {
-		m.items = items
+		m.allItems = items
+		m.filteredItems = items // Initially, all items are visible
+	}
+}
+
+// WithFilterable enables filtering of items based on their FilterValue.
+func WithFilterable(filterable bool) listOptions {
+	return func(m *model) {
+		m.filterable = filterable
 	}
 }
 
@@ -157,8 +187,9 @@ func WithItems(items []util.Model) listOptions {
 func New(opts ...listOptions) ListModel {
 	m := &model{
 		help:           help.New(),
-		keymap:         DefaultKeymap(),
-		items:          []util.Model{},
+		keyMap:         DefaultKeyMap(),
+		allItems:       []util.Model{},
+		filteredItems:  []util.Model{},
 		renderState:    newRenderState(),
 		gapSize:        DefaultGapSize,
 		padding:        []int{},
@@ -167,13 +198,25 @@ func New(opts ...listOptions) ListModel {
 	for _, opt := range opts {
 		opt(m)
 	}
+
+	if m.filterable {
+		ti := textinput.New()
+		ti.Placeholder = "Type to filter..."
+		ti.SetVirtualCursor(false)
+		ti.Focus()
+		m.input = ti
+
+		// disable j,k movements
+		m.keyMap.NDown.SetEnabled(false)
+		m.keyMap.NUp.SetEnabled(false)
+	}
 	return m
 }
 
 // Init initializes the list component and sets up the initial items.
 // This is called automatically by the Bubble Tea framework.
 func (m *model) Init() tea.Cmd {
-	return m.SetItems(m.items)
+	return m.SetItems(m.filteredItems)
 }
 
 // Update handles incoming messages and updates the list state accordingly.
@@ -186,34 +229,78 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
 		return m.handleAnimationMsg(msg)
 	}
-
-	if m.selectionState.isValidIndex(len(m.items)) {
+	if m.selectionState.isValidIndex(len(m.filteredItems)) {
 		return m.updateSelectedItem(msg)
 	}
 
 	return m, nil
 }
 
+// View renders the list to a string for display.
+// Returns empty string if the list has no dimensions.
+// Triggers re-rendering if needed before returning content.
+func (m *model) View() tea.View {
+	if m.viewState.height == 0 || m.viewState.width == 0 {
+		return tea.NewView("") // No content to display
+	}
+	if m.renderState.needsRerender {
+		m.renderVisible()
+	}
+
+	content := lipgloss.NewStyle().
+		Padding(m.padding...).
+		Height(m.viewState.height).
+		Render(m.viewState.content)
+
+	if m.filterable {
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			m.inputStyle().Render(m.input.View()),
+			content,
+		)
+	}
+	view := tea.NewView(content)
+	if m.filterable {
+		view.SetCursor(m.input.Cursor())
+	}
+	return view
+}
+
 // handleKeyPress processes keyboard input for list navigation.
 // Supports scrolling, item selection, and navigation to top/bottom.
 func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keymap.Down) || key.Matches(msg, m.keymap.NDown):
+	case key.Matches(msg, m.keyMap.Down) || key.Matches(msg, m.keyMap.NDown):
 		m.scrollDown(1)
-	case key.Matches(msg, m.keymap.Up) || key.Matches(msg, m.keymap.NUp):
+	case key.Matches(msg, m.keyMap.Up) || key.Matches(msg, m.keyMap.NUp):
 		m.scrollUp(1)
-	case key.Matches(msg, m.keymap.DownOneItem):
+	case key.Matches(msg, m.keyMap.DownOneItem):
 		return m, m.selectNextItem()
-	case key.Matches(msg, m.keymap.UpOneItem):
+	case key.Matches(msg, m.keyMap.UpOneItem):
 		return m, m.selectPreviousItem()
-	case key.Matches(msg, m.keymap.HalfPageDown):
+	case key.Matches(msg, m.keyMap.HalfPageDown):
 		m.scrollDown(m.listHeight() / 2)
-	case key.Matches(msg, m.keymap.HalfPageUp):
+	case key.Matches(msg, m.keyMap.HalfPageUp):
 		m.scrollUp(m.listHeight() / 2)
-	case key.Matches(msg, m.keymap.Home):
+	case key.Matches(msg, m.keyMap.Home):
 		return m, m.goToTop()
-	case key.Matches(msg, m.keymap.End):
+	case key.Matches(msg, m.keyMap.End):
 		return m, m.goToBottom()
+	default:
+		if !m.filterable {
+			return m, nil // Ignore other keys if not filterable
+		}
+		var cmds []tea.Cmd
+		u, cmd := m.input.Update(msg)
+		m.input = u
+		cmds = append(cmds, cmd)
+		if m.currentSearch != m.input.Value() {
+			cmd = m.filter(m.input.Value())
+			cmds = append(cmds, cmd)
+		}
+		m.currentSearch = m.input.Value()
+		return m, tea.Batch(cmds...)
+
 	}
 	return m, nil
 }
@@ -222,7 +309,7 @@ func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // Only items implementing HasAnim and currently spinning receive these messages.
 func (m *model) handleAnimationMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	for inx, item := range m.items {
+	for inx, item := range m.filteredItems {
 		if i, ok := item.(HasAnim); ok && i.Spinning() {
 			updated, cmd := i.Update(msg)
 			cmds = append(cmds, cmd)
@@ -238,7 +325,7 @@ func (m *model) handleAnimationMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 // This allows the selected item to handle its own input and state changes.
 func (m *model) updateSelectedItem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	u, cmd := m.items[m.selectionState.selectedIndex].Update(msg)
+	u, cmd := m.filteredItems[m.selectionState.selectedIndex].Update(msg)
 	cmds = append(cmds, cmd)
 	if updated, ok := u.(util.Model); ok {
 		m.UpdateItem(m.selectionState.selectedIndex, updated)
@@ -266,27 +353,9 @@ func (m *model) scrollUp(amount int) {
 	}
 }
 
-// View renders the list to a string for display.
-// Returns empty string if the list has no dimensions.
-// Triggers re-rendering if needed before returning content.
-func (m *model) View() tea.View {
-	if m.viewState.height == 0 || m.viewState.width == 0 {
-		return tea.NewView("") // No content to display
-	}
-	if m.renderState.needsRerender {
-		m.renderVisible()
-	}
-	return tea.NewView(
-		lipgloss.NewStyle().
-			Padding(m.padding...).
-			Height(m.viewState.height).
-			Render(m.viewState.content),
-	)
-}
-
 // Items returns a copy of all items in the list.
 func (m *model) Items() []util.Model {
-	return m.items
+	return m.filteredItems
 }
 
 // renderVisible determines which rendering strategy to use and triggers rendering.
@@ -306,12 +375,12 @@ func (m *model) renderVisibleForward() {
 		model:   m,
 		start:   0,
 		cutoff:  m.viewState.offset + m.listHeight(),
-		items:   m.items,
+		items:   m.filteredItems,
 		realIdx: m.renderState.lastIndex,
 	}
 
 	if m.renderState.lastIndex > NotRendered {
-		renderer.items = m.items[m.renderState.lastIndex+1:]
+		renderer.items = m.filteredItems[m.renderState.lastIndex+1:]
 		renderer.start = len(m.renderState.lines)
 	}
 
@@ -326,16 +395,16 @@ func (m *model) renderVisibleReverse() {
 		model:   m,
 		start:   0,
 		cutoff:  m.viewState.offset + m.listHeight(),
-		items:   m.items,
+		items:   m.filteredItems,
 		realIdx: m.renderState.lastIndex,
 	}
 
 	if m.renderState.lastIndex > NotRendered {
-		renderer.items = m.items[:m.renderState.lastIndex]
+		renderer.items = m.filteredItems[:m.renderState.lastIndex]
 		renderer.start = len(m.renderState.lines)
 	} else {
-		m.renderState.lastIndex = len(m.items)
-		renderer.realIdx = len(m.items)
+		m.renderState.lastIndex = len(m.filteredItems)
+		renderer.realIdx = len(m.filteredItems)
 	}
 
 	renderer.render()
@@ -389,7 +458,7 @@ func (r *forwardRenderer) render() {
 		}
 
 		itemLines := r.getOrRenderItem(item)
-		if r.realIdx == len(r.model.items)-1 {
+		if r.realIdx == len(r.model.filteredItems)-1 {
 			r.model.renderState.finalHeight = max(0, r.start+len(itemLines)-r.model.listHeight())
 		}
 
@@ -485,7 +554,7 @@ func (m *model) selectPreviousItem() tea.Cmd {
 // selectNextItem moves selection to the next item in the list.
 // Handles focus management and ensures the selected item remains visible.
 func (m *model) selectNextItem() tea.Cmd {
-	if m.selectionState.selectedIndex >= len(m.items)-1 || m.selectionState.selectedIndex < 0 {
+	if m.selectionState.selectedIndex >= len(m.filteredItems)-1 || m.selectionState.selectedIndex < 0 {
 		return nil
 	}
 
@@ -543,7 +612,7 @@ func (m *model) ensureVisibleForward(cachedItem renderedItem) {
 // Handles both large items (taller than viewport) and normal items.
 func (m *model) ensureVisibleReverse(cachedItem renderedItem) {
 	if cachedItem.height >= m.listHeight() {
-		if m.selectionState.selectedIndex < len(m.items)-1 {
+		if m.selectionState.selectedIndex < len(m.filteredItems)-1 {
 			changeNeeded := m.viewState.offset - (cachedItem.start + cachedItem.height - m.listHeight())
 			m.decreaseOffset(changeNeeded)
 		} else {
@@ -567,7 +636,7 @@ func (m *model) ensureVisibleReverse(cachedItem renderedItem) {
 func (m *model) goToBottom() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = true
-	m.selectionState.selectedIndex = len(m.items) - 1
+	m.selectionState.selectedIndex = len(m.filteredItems) - 1
 	cmds = append(cmds, m.focusSelected())
 	m.ResetView()
 	return tea.Batch(cmds...)
@@ -578,7 +647,7 @@ func (m *model) goToBottom() tea.Cmd {
 func (m *model) goToTop() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = false
-	if len(m.items) > 0 {
+	if len(m.filteredItems) > 0 {
 		m.selectionState.selectedIndex = 0
 	}
 	cmds = append(cmds, m.focusSelected())
@@ -596,10 +665,10 @@ func (m *model) ResetView() {
 // focusSelected gives focus to the currently selected item if it supports focus.
 // Triggers a re-render of the item to show its focused state.
 func (m *model) focusSelected() tea.Cmd {
-	if !m.selectionState.isValidIndex(len(m.items)) {
+	if !m.selectionState.isValidIndex(len(m.filteredItems)) {
 		return nil
 	}
-	if i, ok := m.items[m.selectionState.selectedIndex].(layout.Focusable); ok {
+	if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
 		cmd := i.Focus()
 		m.rerenderItem(m.selectionState.selectedIndex)
 		return cmd
@@ -610,10 +679,10 @@ func (m *model) focusSelected() tea.Cmd {
 // blurSelected removes focus from the currently selected item if it supports focus.
 // Triggers a re-render of the item to show its unfocused state.
 func (m *model) blurSelected() tea.Cmd {
-	if !m.selectionState.isValidIndex(len(m.items)) {
+	if !m.selectionState.isValidIndex(len(m.filteredItems)) {
 		return nil
 	}
-	if i, ok := m.items[m.selectionState.selectedIndex].(layout.Focusable); ok {
+	if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
 		cmd := i.Blur()
 		m.rerenderItem(m.selectionState.selectedIndex)
 		return cmd
@@ -625,7 +694,7 @@ func (m *model) blurSelected() tea.Cmd {
 // This is called when an item's state changes (e.g., focus/blur) and needs to be re-displayed.
 // It efficiently updates only the changed item and adjusts positions of subsequent items if needed.
 func (m *model) rerenderItem(inx int) {
-	if inx < 0 || inx >= len(m.items) || len(m.renderState.lines) == 0 {
+	if inx < 0 || inx >= len(m.filteredItems) || len(m.renderState.lines) == 0 {
 		return
 	}
 
@@ -634,7 +703,7 @@ func (m *model) rerenderItem(inx int) {
 		return
 	}
 
-	rerenderedLines := m.getItemLines(m.items[inx])
+	rerenderedLines := m.getItemLines(m.filteredItems[inx])
 	if slices.Equal(cachedItem.lines, rerenderedLines) {
 		return
 	}
@@ -687,7 +756,7 @@ func (m *model) updateItemPositions(inx int, cachedItem renderedItem, newHeight 
 		return
 	}
 
-	if inx == len(m.items)-1 {
+	if inx == len(m.filteredItems)-1 {
 		m.renderState.finalHeight = max(0, cachedItem.start+newHeight-m.listHeight())
 	}
 
@@ -701,7 +770,7 @@ func (m *model) updateItemPositions(inx int, cachedItem renderedItem, newHeight 
 
 // updatePositionsForward updates positions for items after the changed item in forward mode.
 func (m *model) updatePositionsForward(inx int, currentStart int) {
-	for i := inx + 1; i < len(m.items); i++ {
+	for i := inx + 1; i < len(m.filteredItems); i++ {
 		if existing, ok := m.renderState.items[i]; ok {
 			existing.start = currentStart
 			currentStart += existing.height
@@ -766,12 +835,12 @@ func (m *model) decreaseOffset(n int) {
 // UpdateItem replaces an item at the specified index with a new item.
 // Handles focus management and triggers re-rendering as needed.
 func (m *model) UpdateItem(inx int, item util.Model) {
-	if inx < 0 || inx >= len(m.items) {
+	if inx < 0 || inx >= len(m.filteredItems) {
 		return
 	}
-	m.items[inx] = item
+	m.filteredItems[inx] = item
 	if m.selectionState.selectedIndex == inx {
-		if i, ok := m.items[m.selectionState.selectedIndex].(layout.Focusable); ok {
+		if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
 			i.Focus()
 		}
 	}
@@ -788,6 +857,10 @@ func (m *model) GetSize() (int, int) {
 // SetSize updates the list dimensions and triggers a complete re-render.
 // Also updates the size of all items that support sizing.
 func (m *model) SetSize(width int, height int) tea.Cmd {
+	if m.filterable {
+		height -= 2 // adjust for input field height and border
+	}
+
 	if m.viewState.width == width && m.viewState.height == height {
 		return nil
 	}
@@ -797,11 +870,14 @@ func (m *model) SetSize(width int, height int) tea.Cmd {
 	}
 	m.viewState.width = width
 	m.ResetView()
+	if m.filterable {
+		m.input.SetWidth(m.getItemWidth() - 3)
+	}
 	return m.setAllItemsSize()
 }
 
-// getItemSize calculates the available width for items, accounting for padding.
-func (m *model) getItemSize() int {
+// getItemWidth calculates the available width for items, accounting for padding.
+func (m *model) getItemWidth() int {
 	width := m.viewState.width
 	switch len(m.padding) {
 	case 1:
@@ -816,11 +892,11 @@ func (m *model) getItemSize() int {
 
 // setItemSize updates the size of a specific item if it supports sizing.
 func (m *model) setItemSize(inx int) tea.Cmd {
-	if inx < 0 || inx >= len(m.items) {
+	if inx < 0 || inx >= len(m.filteredItems) {
 		return nil
 	}
-	if i, ok := m.items[inx].(layout.Sizeable); ok {
-		return i.SetSize(m.getItemSize(), 0)
+	if i, ok := m.filteredItems[inx].(layout.Sizeable); ok {
+		return i.SetSize(m.getItemWidth(), 0)
 	}
 	return nil
 }
@@ -828,7 +904,7 @@ func (m *model) setItemSize(inx int) tea.Cmd {
 // setAllItemsSize updates the size of all items that support sizing.
 func (m *model) setAllItemsSize() tea.Cmd {
 	var cmds []tea.Cmd
-	for i := range m.items {
+	for i := range m.filteredItems {
 		if cmd := m.setItemSize(i); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -856,8 +932,9 @@ func (m *model) AppendItem(item util.Model) tea.Cmd {
 	cmds := []tea.Cmd{
 		item.Init(),
 	}
-	m.items = append(m.items, item)
-	cmds = append(cmds, m.setItemSize(len(m.items)-1))
+	m.allItems = append(m.allItems, item)
+	m.filteredItems = m.allItems
+	cmds = append(cmds, m.setItemSize(len(m.filteredItems)-1))
 	cmds = append(cmds, m.goToBottom())
 	m.renderState.needsRerender = true
 	return tea.Batch(cmds...)
@@ -866,11 +943,12 @@ func (m *model) AppendItem(item util.Model) tea.Cmd {
 // DeleteItem removes an item at the specified index.
 // Adjusts selection if necessary and triggers a complete re-render.
 func (m *model) DeleteItem(i int) {
-	if i < 0 || i >= len(m.items) {
+	if i < 0 || i >= len(m.filteredItems) {
 		return
 	}
-	m.items = slices.Delete(m.items, i, i+1)
+	m.allItems = slices.Delete(m.allItems, i, i+1)
 	delete(m.renderState.items, i)
+	m.filteredItems = m.allItems
 
 	if m.selectionState.selectedIndex == i && m.selectionState.selectedIndex > 0 {
 		m.selectionState.selectedIndex--
@@ -886,7 +964,8 @@ func (m *model) DeleteItem(i int) {
 // Adjusts cached positions and selection index, then switches to forward mode.
 func (m *model) PrependItem(item util.Model) tea.Cmd {
 	cmds := []tea.Cmd{item.Init()}
-	m.items = append([]util.Model{item}, m.items...)
+	m.allItems = append([]util.Model{item}, m.allItems...)
+	m.filteredItems = m.allItems
 
 	// Shift all cached item indices by 1
 	newItems := make(map[int]renderedItem, len(m.renderState.items))
@@ -917,16 +996,78 @@ func (m *model) setReverse(reverse bool) {
 // SetItems replaces all items in the list with a new set.
 // Initializes all items, sets their sizes, and establishes initial selection.
 func (m *model) SetItems(items []util.Model) tea.Cmd {
-	m.items = items
+	m.allItems = items
+	m.filteredItems = items
 	cmds := []tea.Cmd{m.setAllItemsSize()}
 
-	for _, item := range m.items {
+	for _, item := range m.filteredItems {
 		cmds = append(cmds, item.Init())
 	}
 
-	if len(m.items) > 0 {
+	if len(m.filteredItems) > 0 {
 		if m.viewState.reverse {
-			m.selectionState.selectedIndex = len(m.items) - 1
+			m.selectionState.selectedIndex = len(m.filteredItems) - 1
+		} else {
+			m.selectionState.selectedIndex = 0
+		}
+		if cmd := m.focusSelected(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	} else {
+		m.selectionState.selectedIndex = NoSelection
+	}
+
+	m.ResetView()
+	return tea.Batch(cmds...)
+}
+
+func (c *model) inputStyle() lipgloss.Style {
+	t := theme.CurrentTheme()
+	return styles.BaseStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(t.TextMuted()).
+		BorderBackground(t.Background()).
+		BorderBottom(true)
+}
+
+func (m *model) filter(search string) tea.Cmd {
+	var cmds []tea.Cmd
+	search = strings.TrimSpace(search)
+	search = strings.ToLower(search)
+	for _, item := range m.allItems {
+		if i, ok := item.(layout.Focusable); ok {
+			cmds = append(cmds, i.Blur())
+		}
+		if i, ok := item.(HasMatchIndexes); ok {
+			i.MatchIndexes(make([]int, 0))
+		}
+	}
+	if search == "" {
+		cmds = append(cmds, m.SetItems(m.allItems)) // Reset to all items if search is empty
+		return tea.Batch(cmds...)
+	}
+	words := make([]string, 0, len(m.allItems))
+	for _, cmd := range m.allItems {
+		if f, ok := cmd.(HasFilterValue); ok {
+			words = append(words, strings.ToLower(f.FilterValue()))
+		} else {
+			words = append(words, strings.ToLower(""))
+		}
+	}
+	matches := fuzzy.Find(search, words)
+	sort.Sort(matches)
+	filteredItems := make([]util.Model, 0, len(matches))
+	for _, match := range matches {
+		item := m.allItems[match.Index]
+		if i, ok := item.(HasMatchIndexes); ok {
+			i.MatchIndexes(match.MatchedIndexes)
+		}
+		filteredItems = append(filteredItems, item)
+	}
+	m.filteredItems = filteredItems
+	if len(filteredItems) > 0 {
+		if m.viewState.reverse {
+			m.selectionState.selectedIndex = len(filteredItems) - 1
 		} else {
 			m.selectionState.selectedIndex = 0
 		}

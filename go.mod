@@ -32,6 +32,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 )
 
+require github.com/sahilm/fuzzy v0.1.1
+
 require (
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.13.0 // indirect

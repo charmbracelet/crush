@@ -2,23 +2,32 @@ package commands
 
 import (
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
+	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
+	"github.com/rivo/uniseg"
 )
 
 type CommandItem interface {
 	util.Model
 	layout.Focusable
+	layout.Sizeable
 }
 
 type commandItem struct {
-	command Command
-	focus   bool
+	width        int
+	command      Command
+	focus        bool
+	matchIndexes []int
 }
 
 func NewCommandItem(command Command) CommandItem {
 	return &commandItem{
-		command: command,
+		command:      command,
+		matchIndexes: make([]int, 0),
 	}
 }
 
@@ -34,7 +43,30 @@ func (c *commandItem) Update(tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements CommandItem.
 func (c *commandItem) View() tea.View {
-	return tea.NewView(c.command.Title)
+	t := theme.CurrentTheme()
+
+	baseStyle := styles.BaseStyle()
+	titleStyle := baseStyle.Width(c.width).Foreground(t.Text())
+	titleMatchStyle := baseStyle.Foreground(t.Text()).Underline(true)
+
+	if c.focus {
+		titleStyle = titleStyle.Foreground(t.Background()).Background(t.Primary()).Bold(true)
+		titleMatchStyle = titleMatchStyle.Foreground(t.Background()).Background(t.Primary()).Bold(true)
+	}
+	var ranges []lipgloss.Range
+	truncatedTitle := ansi.Truncate(c.command.Title, c.width-2, "…")
+	text := titleStyle.Padding(0, 1).Render(truncatedTitle)
+	if len(c.matchIndexes) > 0 {
+		for _, rng := range matchedRanges(c.matchIndexes) {
+			// ansi.Cut is grapheme and ansi sequence aware, we match against a ansi.Stripped string, but we might still have graphemes.
+			// all that to say that rng is byte positions, but we need to pass it down to ansi.Cut as char positions.
+			// so we need to adjust it here:
+			start, stop := bytePosToVisibleCharPos(text, rng)
+			ranges = append(ranges, lipgloss.NewRange(start+1, stop+2, titleMatchStyle))
+		}
+		text = lipgloss.StyleRanges(text, ranges...)
+	}
+	return tea.NewView(text)
 }
 
 // Blur implements CommandItem.
@@ -52,4 +84,67 @@ func (c *commandItem) Focus() tea.Cmd {
 // IsFocused implements CommandItem.
 func (c *commandItem) IsFocused() bool {
 	return c.focus
+}
+
+// GetSize implements CommandItem.
+func (c *commandItem) GetSize() (int, int) {
+	return c.width, 2
+}
+
+// SetSize implements CommandItem.
+func (c *commandItem) SetSize(width int, height int) tea.Cmd {
+	c.width = width
+	return nil
+}
+
+func (c *commandItem) FilterValue() string {
+	return c.command.Title
+}
+
+func (c *commandItem) MatchIndexes(indexes []int) {
+	c.matchIndexes = indexes
+}
+
+func matchedRanges(in []int) [][2]int {
+	if len(in) == 0 {
+		return [][2]int{}
+	}
+	current := [2]int{in[0], in[0]}
+	if len(in) == 1 {
+		return [][2]int{current}
+	}
+	var out [][2]int
+	for i := 1; i < len(in); i++ {
+		if in[i] == current[1]+1 {
+			current[1] = in[i]
+		} else {
+			out = append(out, current)
+			current = [2]int{in[i], in[i]}
+		}
+	}
+	out = append(out, current)
+	return out
+}
+
+func bytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
+	bytePos, byteStart, byteStop := 0, rng[0], rng[1]
+	pos, start, stop := 0, 0, 0
+	gr := uniseg.NewGraphemes(str)
+	for byteStart > bytePos {
+		if !gr.Next() {
+			break
+		}
+		bytePos += len(gr.Str())
+		pos += max(1, gr.Width())
+	}
+	start = pos
+	for byteStop > bytePos {
+		if !gr.Next() {
+			break
+		}
+		bytePos += len(gr.Str())
+		pos += max(1, gr.Width())
+	}
+	stop = pos
+	return start, stop
 }

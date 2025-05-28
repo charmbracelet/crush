@@ -10,7 +10,7 @@ type KeyMap struct {
 	Close key.Binding
 }
 
-func DefaultKeymap() KeyMap {
+func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Close: key.NewBinding(
 			key.WithKeys("esc"),

@@ -162,7 +162,6 @@ func createCommandHandler(id string, content string) func(Command) tea.Cmd {
 
 		return util.CmdHandler(CommandRunCustomMsg{
 			Content: content,
-			Args:    nil,
 		})
 	}
 }
@@ -189,7 +188,7 @@ func extractArgNames(content string) []string {
 
 func ensureDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return os.MkdirAll(path, 0755)
+		return os.MkdirAll(path, 0o755)
 	}
 	return nil
 }
@@ -200,5 +199,4 @@ func isMarkdownFile(name string) bool {
 
 type CommandRunCustomMsg struct {
 	Content string
-	Args    map[string]string
 }

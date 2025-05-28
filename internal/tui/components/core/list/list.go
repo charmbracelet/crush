@@ -14,7 +14,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 	"github.com/sahilm/fuzzy"
 )
@@ -58,6 +57,13 @@ type HasFilterValue interface {
 type HasMatchIndexes interface {
 	util.Model
 	MatchIndexes([]int) // Sets the indexes of matched characters in the item's content
+}
+
+// SectionHeader interface identifies items that are section headers.
+// Section headers are rendered differently and are skipped during navigation.
+type SectionHeader interface {
+	util.Model
+	IsSectionHeader() bool // Returns true if this item is a section header
 }
 
 // renderedItem represents a cached rendered item with its position and content.
@@ -539,6 +545,7 @@ func (r *reverseRenderer) renderItemLines(item util.Model) []string {
 
 // selectPreviousItem moves selection to the previous item in the list.
 // Handles focus management and ensures the selected item remains visible.
+// Skips section headers during navigation.
 func (m *model) selectPreviousItem() tea.Cmd {
 	if m.selectionState.selectedIndex <= 0 {
 		return nil
@@ -546,6 +553,17 @@ func (m *model) selectPreviousItem() tea.Cmd {
 
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.selectionState.selectedIndex--
+
+	// Skip section headers
+	for m.selectionState.selectedIndex >= 0 && m.isSectionHeader(m.selectionState.selectedIndex) {
+		m.selectionState.selectedIndex--
+	}
+
+	// If we went past the beginning, stay at the first non-header item
+	if m.selectionState.selectedIndex < 0 {
+		m.selectionState.selectedIndex = m.findFirstSelectableItem()
+	}
+
 	cmds = append(cmds, m.focusSelected())
 	m.ensureSelectedItemVisible()
 	return tea.Batch(cmds...)
@@ -553,6 +571,7 @@ func (m *model) selectPreviousItem() tea.Cmd {
 
 // selectNextItem moves selection to the next item in the list.
 // Handles focus management and ensures the selected item remains visible.
+// Skips section headers during navigation.
 func (m *model) selectNextItem() tea.Cmd {
 	if m.selectionState.selectedIndex >= len(m.filteredItems)-1 || m.selectionState.selectedIndex < 0 {
 		return nil
@@ -560,9 +579,51 @@ func (m *model) selectNextItem() tea.Cmd {
 
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.selectionState.selectedIndex++
+
+	// Skip section headers
+	for m.selectionState.selectedIndex < len(m.filteredItems) && m.isSectionHeader(m.selectionState.selectedIndex) {
+		m.selectionState.selectedIndex++
+	}
+
+	// If we went past the end, stay at the last non-header item
+	if m.selectionState.selectedIndex >= len(m.filteredItems) {
+		m.selectionState.selectedIndex = m.findLastSelectableItem()
+	}
+
 	cmds = append(cmds, m.focusSelected())
 	m.ensureSelectedItemVisible()
 	return tea.Batch(cmds...)
+}
+
+// isSectionHeader checks if the item at the given index is a section header.
+func (m *model) isSectionHeader(index int) bool {
+	if index < 0 || index >= len(m.filteredItems) {
+		return false
+	}
+	if header, ok := m.filteredItems[index].(SectionHeader); ok {
+		return header.IsSectionHeader()
+	}
+	return false
+}
+
+// findFirstSelectableItem finds the first item that is not a section header.
+func (m *model) findFirstSelectableItem() int {
+	for i := 0; i < len(m.filteredItems); i++ {
+		if !m.isSectionHeader(i) {
+			return i
+		}
+	}
+	return NoSelection
+}
+
+// findLastSelectableItem finds the last item that is not a section header.
+func (m *model) findLastSelectableItem() int {
+	for i := len(m.filteredItems) - 1; i >= 0; i-- {
+		if !m.isSectionHeader(i) {
+			return i
+		}
+	}
+	return NoSelection
 }
 
 // ensureSelectedItemVisible scrolls the list to make the selected item visible.
@@ -631,25 +692,25 @@ func (m *model) ensureVisibleReverse(cachedItem renderedItem) {
 	}
 }
 
-// goToBottom switches to reverse mode and selects the last item.
+// goToBottom switches to reverse mode and selects the last selectable item.
 // Commonly used for chat-like interfaces where new content appears at the bottom.
+// Skips section headers when selecting the last item.
 func (m *model) goToBottom() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = true
-	m.selectionState.selectedIndex = len(m.filteredItems) - 1
+	m.selectionState.selectedIndex = m.findLastSelectableItem()
 	cmds = append(cmds, m.focusSelected())
 	m.ResetView()
 	return tea.Batch(cmds...)
 }
 
-// goToTop switches to forward mode and selects the first item.
+// goToTop switches to forward mode and selects the first selectable item.
 // Standard behavior for most list interfaces.
+// Skips section headers when selecting the first item.
 func (m *model) goToTop() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = false
-	if len(m.filteredItems) > 0 {
-		m.selectionState.selectedIndex = 0
-	}
+	m.selectionState.selectedIndex = m.findFirstSelectableItem()
 	cmds = append(cmds, m.focusSelected())
 	m.ResetView()
 	return tea.Batch(cmds...)
@@ -715,8 +776,12 @@ func (m *model) rerenderItem(inx int) {
 }
 
 // getItemLines converts an item to its rendered lines, including any gap spacing.
+// Handles section headers with special styling.
 func (m *model) getItemLines(item util.Model) []string {
-	itemLines := strings.Split(item.View().String(), "\n")
+	var itemLines []string
+
+	itemLines = strings.Split(item.View().String(), "\n")
+
 	if m.gapSize > 0 {
 		gap := make([]string, m.gapSize)
 		itemLines = append(itemLines, gap...)
@@ -995,6 +1060,7 @@ func (m *model) setReverse(reverse bool) {
 
 // SetItems replaces all items in the list with a new set.
 // Initializes all items, sets their sizes, and establishes initial selection.
+// Ensures the initial selection skips section headers.
 func (m *model) SetItems(items []util.Model) tea.Cmd {
 	m.allItems = items
 	m.filteredItems = items
@@ -1006,9 +1072,9 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 
 	if len(m.filteredItems) > 0 {
 		if m.viewState.reverse {
-			m.selectionState.selectedIndex = len(m.filteredItems) - 1
+			m.selectionState.selectedIndex = m.findLastSelectableItem()
 		} else {
-			m.selectionState.selectedIndex = 0
+			m.selectionState.selectedIndex = m.findFirstSelectableItem()
 		}
 		if cmd := m.focusSelected(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1022,18 +1088,75 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 }
 
 func (c *model) inputStyle() lipgloss.Style {
-	t := theme.CurrentTheme()
-	return styles.BaseStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(t.TextMuted()).
-		BorderBackground(t.Background()).
-		BorderBottom(true)
+	return styles.BaseStyle()
+}
+
+// section represents a group of items under a section header.
+type section struct {
+	header SectionHeader
+	items  []util.Model
+}
+
+// parseSections parses the flat item list into sections.
+func (m *model) parseSections() []section {
+	var sections []section
+	var currentSection *section
+
+	for _, item := range m.allItems {
+		if header, ok := item.(SectionHeader); ok && header.IsSectionHeader() {
+			// Start a new section
+			if currentSection != nil {
+				sections = append(sections, *currentSection)
+			}
+			currentSection = &section{
+				header: header,
+				items:  []util.Model{},
+			}
+		} else if currentSection != nil {
+			// Add item to current section
+			currentSection.items = append(currentSection.items, item)
+		} else {
+			// Item without a section header - create an implicit section
+			if len(sections) == 0 || sections[len(sections)-1].header != nil {
+				sections = append(sections, section{
+					header: nil,
+					items:  []util.Model{item},
+				})
+			} else {
+				// Add to the last implicit section
+				sections[len(sections)-1].items = append(sections[len(sections)-1].items, item)
+			}
+		}
+	}
+
+	// Don't forget the last section
+	if currentSection != nil {
+		sections = append(sections, *currentSection)
+	}
+
+	return sections
+}
+
+// flattenSections converts sections back to a flat list.
+func (m *model) flattenSections(sections []section) []util.Model {
+	var result []util.Model
+
+	for _, sect := range sections {
+		if sect.header != nil {
+			result = append(result, sect.header)
+		}
+		result = append(result, sect.items...)
+	}
+
+	return result
 }
 
 func (m *model) filter(search string) tea.Cmd {
 	var cmds []tea.Cmd
 	search = strings.TrimSpace(search)
 	search = strings.ToLower(search)
+
+	// Clear focus and match indexes from all items
 	for _, item := range m.allItems {
 		if i, ok := item.(layout.Focusable); ok {
 			cmds = append(cmds, i.Blur())
@@ -1042,34 +1165,32 @@ func (m *model) filter(search string) tea.Cmd {
 			i.MatchIndexes(make([]int, 0))
 		}
 	}
+
 	if search == "" {
-		cmds = append(cmds, m.SetItems(m.allItems)) // Reset to all items if search is empty
+		cmds = append(cmds, m.SetItems(m.allItems))
 		return tea.Batch(cmds...)
 	}
-	words := make([]string, 0, len(m.allItems))
-	for _, cmd := range m.allItems {
-		if f, ok := cmd.(HasFilterValue); ok {
-			words = append(words, strings.ToLower(f.FilterValue()))
-		} else {
-			words = append(words, strings.ToLower(""))
+
+	// Parse items into sections
+	sections := m.parseSections()
+	var filteredSections []section
+
+	for _, sect := range sections {
+		filteredSection := m.filterSection(sect, search)
+		if filteredSection != nil {
+			filteredSections = append(filteredSections, *filteredSection)
 		}
 	}
-	matches := fuzzy.Find(search, words)
-	sort.Sort(matches)
-	filteredItems := make([]util.Model, 0, len(matches))
-	for _, match := range matches {
-		item := m.allItems[match.Index]
-		if i, ok := item.(HasMatchIndexes); ok {
-			i.MatchIndexes(match.MatchedIndexes)
-		}
-		filteredItems = append(filteredItems, item)
-	}
-	m.filteredItems = filteredItems
-	if len(filteredItems) > 0 {
+
+	// Rebuild flat list from filtered sections
+	m.filteredItems = m.flattenSections(filteredSections)
+
+	// Set initial selection
+	if len(m.filteredItems) > 0 {
 		if m.viewState.reverse {
-			m.selectionState.selectedIndex = len(filteredItems) - 1
+			m.selectionState.selectedIndex = m.findLastSelectableItem()
 		} else {
-			m.selectionState.selectedIndex = 0
+			m.selectionState.selectedIndex = m.findFirstSelectableItem()
 		}
 		if cmd := m.focusSelected(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1080,4 +1201,60 @@ func (m *model) filter(search string) tea.Cmd {
 
 	m.ResetView()
 	return tea.Batch(cmds...)
+}
+
+// filterSection filters items within a section and returns the section if it has matches.
+func (m *model) filterSection(sect section, search string) *section {
+	var matchedItems []util.Model
+	var hasHeaderMatch bool
+
+	// Check if section header itself matches
+	if sect.header != nil {
+		headerText := strings.ToLower(sect.header.View().String())
+		if strings.Contains(headerText, search) {
+			hasHeaderMatch = true
+			// If header matches, include all items in the section
+			matchedItems = sect.items
+		}
+	}
+
+	// If header didn't match, filter items within the section
+	if !hasHeaderMatch && len(sect.items) > 0 {
+		// Create words array for items in this section
+		words := make([]string, len(sect.items))
+		for i, item := range sect.items {
+			if f, ok := item.(HasFilterValue); ok {
+				words[i] = strings.ToLower(f.FilterValue())
+			} else {
+				words[i] = ""
+			}
+		}
+
+		// Find matches within this section
+		matches := fuzzy.Find(search, words)
+
+		// Sort matches by score but preserve relative order for equal scores
+		sort.SliceStable(matches, func(i, j int) bool {
+			return matches[i].Score > matches[j].Score
+		})
+
+		// Build matched items list
+		for _, match := range matches {
+			item := sect.items[match.Index]
+			if i, ok := item.(HasMatchIndexes); ok {
+				i.MatchIndexes(match.MatchedIndexes)
+			}
+			matchedItems = append(matchedItems, item)
+		}
+	}
+
+	// Return section only if it has matches
+	if len(matchedItems) > 0 {
+		return &section{
+			header: sect.header,
+			items:  matchedItems,
+		}
+	}
+
+	return nil
 }

@@ -17,7 +17,6 @@ use std::io::{stdout, Stdout};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-
 // Define memfd_create syscall manually for Linux
 #[cfg(target_os = "linux")]
 const SYS_MEMFD_CREATE: libc::c_long = 319;
@@ -31,8 +30,8 @@ unsafe fn memfd_create(name: *const libc::c_char, flags: libc::c_uint) -> libc::
 
 #[derive(Debug, Clone)]
 enum PanelType {
-    Manual,
     BinaryProcess,
+    ShellProcess,
 }
 
 #[derive(Debug, Clone)]
@@ -48,19 +47,6 @@ struct Panel {
 }
 
 impl Panel {
-    fn new(id: usize, title: String) -> Self {
-        Panel {
-            id,
-            title,
-            content: Vec::new(),
-            process: None,
-            is_active: false,
-            cursor_line: 0,
-            scroll_offset: 0,
-            panel_type: PanelType::Manual,
-        }
-    }
-
     fn new_binary(id: usize, title: String) -> Self {
         Panel {
             id,
@@ -71,6 +57,19 @@ impl Panel {
             cursor_line: 0,
             scroll_offset: 0,
             panel_type: PanelType::BinaryProcess,
+        }
+    }
+
+    fn new_shell(id: usize, title: String) -> Self {
+        Panel {
+            id,
+            title,
+            content: Vec::new(),
+            process: None,
+            is_active: false,
+            cursor_line: 0,
+            scroll_offset: 0,
+            panel_type: PanelType::ShellProcess,
         }
     }
 
@@ -102,27 +101,29 @@ impl Multiplexer {
             should_quit: false,
         };
 
-        // Create the first panel with the embedded Go binary
-        mux.create_binary_panel()?;
+        // Create the first panel with the embedded Go binary and start it immediately
+        mux.create_and_start_binary_panel()?;
 
         Ok(mux)
     }
 
-    fn create_binary_panel(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut panel = Panel::new_binary(self.next_panel_id, "Welcome to OpenCode".to_string());
+    fn create_and_start_binary_panel(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut panel = Panel::new_binary(self.next_panel_id, "OpenCode".to_string());
         panel.is_active = true;
-        panel.add_line("Press Enter to start OpenCode, Ctrl+C to switch panels".to_string());
-        panel.add_line("When binary is running, it will take full terminal control".to_string());
+        panel.add_line("OpenCode is starting...".to_string());
 
         self.panels.insert(self.next_panel_id, panel);
         self.active_panel = self.next_panel_id;
         self.next_panel_id += 1;
 
+        // Immediately start the Go binary
+        self.execute_opencode_with_fullscreen()?;
+
         Ok(())
     }
 
-    fn execute_go_binary_fullscreen(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let go_binary_data = include_bytes!("../joy");
+    fn execute_opencode_with_fullscreen(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let go_binary_data = include_bytes!("../opencode");
         let args: Vec<String> = env::args().skip(1).collect();
         let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
@@ -133,7 +134,7 @@ impl Multiplexer {
         execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
         stdout.flush()?;
 
-        let result = self.run_binary_with_terminal_control(go_binary_data, &args_str);
+        let result = self.run_opencode(go_binary_data, &args_str);
 
         terminal::enable_raw_mode()?;
 
@@ -143,7 +144,37 @@ impl Multiplexer {
         }
     }
 
-    fn run_binary_with_terminal_control(&self, binary_data: &[u8], args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_shell_fullscreen(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Disable raw mode to give control back to shell
+        terminal::disable_raw_mode()?;
+        
+        let mut stdout = stdout();
+        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        stdout.flush()?;
+
+        let result = self.run_shell_with_terminal_control();
+
+        terminal::enable_raw_mode()?;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Failed to execute shell: {}", e).into())
+        }
+    }
+
+    fn run_shell_with_terminal_control(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Execute shell with inherited stdin/stdout/stderr for full terminal control
+        let status = Command::new("nvim")
+            .status()?;
+
+        if !status.success() {
+            return Err("shell exited with error".into());
+        }
+
+        Ok(())
+    }
+
+    fn run_opencode(&self, binary_data: &[u8], args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
         let temp_path = self.create_temp_executable(binary_data)?;
         
         // Execute with inherited stdin/stdout/stderr for full terminal control
@@ -153,7 +184,7 @@ impl Multiplexer {
 
         let _ = fs::remove_file(&temp_path);
         if !status.success() {
-            return Err("Go binary exited with error".into());
+            return Err("OpenCode exited with error".into());
         }
 
         Ok(())
@@ -161,7 +192,7 @@ impl Multiplexer {
 
     fn create_temp_executable(&self, binary_data: &[u8]) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let temp_dir = env::temp_dir();
-        let temp_path = temp_dir.join(format!("embedded_go_binary_{}", std::process::id()));
+        let temp_path = temp_dir.join(format!("opencode_{}", std::process::id()));
         
         let mut file = fs::File::create(&temp_path)?;
         file.write_all(binary_data)?;
@@ -177,16 +208,38 @@ impl Multiplexer {
         Ok(temp_path)
     }
 
-    fn create_manual_panel(&mut self, title: String) {
-        let mut panel = Panel::new(self.next_panel_id, title);
-        panel.add_line("Manual panel created. Type commands or notes here.".to_string());
-        panel.add_line("Use Ctrl+C to switch panels, Ctrl+N for new panel, Ctrl+Q to quit.".to_string());
+    fn create_shell_panel(&mut self, title: String) {
+        let mut panel = Panel::new_shell(self.next_panel_id, title);
+        panel.add_line("shell panel created. Press Enter to launch shell.".to_string());
+        panel.add_line("Use Ctrl+C to switch panels, Ctrl+N for new panel, Ctrl+B for shell panel, Ctrl+Q to quit.".to_string());
         
         self.panels.insert(self.next_panel_id, panel);
         self.next_panel_id += 1;
     }
 
-    fn switch_to_next_panel(&mut self) {
+    fn create_and_focus_shell_panel(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Deactivate current panel
+        if let Some(current) = self.panels.get_mut(&self.active_panel) {
+            current.is_active = false;
+        }
+
+        // Create new shell panel
+        let panel_name = format!("shell {}", self.next_panel_id);
+        let new_panel_id = self.next_panel_id;
+        
+        let mut panel = Panel::new_shell(new_panel_id, panel_name);
+        panel.is_active = true;
+        panel.add_line("shell panel created and focused. Press Enter to launch shell.".to_string());
+        panel.add_line("Use Ctrl+C to switch panels, Ctrl+N for new panel, Ctrl+B for shell panel, Ctrl+Q to quit.".to_string());
+        
+        self.panels.insert(new_panel_id, panel);
+        self.active_panel = new_panel_id;
+        self.next_panel_id += 1;
+
+        Ok(())
+    }
+
+    fn switch_to_next_panel(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(current) = self.panels.get_mut(&self.active_panel) {
             current.is_active = false;
         }
@@ -200,6 +253,24 @@ impl Multiplexer {
         if let Some(next) = self.panels.get_mut(&self.active_panel) {
             next.is_active = true;
         }
+
+        // Auto-execute binary panel when switching to it
+        if let Some(panel) = self.panels.get(&self.active_panel) {
+            if matches!(panel.panel_type, PanelType::BinaryProcess) {
+                if let Err(e) = self.execute_opencode_with_fullscreen() {
+                    // Add error to panel content
+                    if let Some(panel) = self.panels.get_mut(&self.active_panel) {
+                        panel.add_line(format!("Error: {}", e));
+                    }
+                } else {
+                    if let Some(panel) = self.panels.get_mut(&self.active_panel) {
+                        panel.add_line("Go binary executed successfully!".to_string());
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn draw(&mut self, stdout: &mut Stdout) -> Result<(), Box<dyn std::error::Error>> {
@@ -264,11 +335,11 @@ impl Multiplexer {
 
         let status_text = if let Some(panel) = self.panels.get(&self.active_panel) {
             match panel.panel_type {
-                PanelType::BinaryProcess => "Enter: Run Go Binary | Ctrl+C: Switch Panel | Ctrl+N: New Panel | Ctrl+Q: Quit",
-                PanelType::Manual => "Ctrl+C: Switch Panel | Ctrl+N: New Panel | Ctrl+Q: Quit",
+                PanelType::BinaryProcess => "Auto-launches OpenCode | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit",
+                PanelType::ShellProcess => "Enter: Launch shell | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit",
             }
         } else {
-            "Ctrl+C: Switch Panel | Ctrl+N: New Panel | Ctrl+Q: Quit"
+            "Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit"
         };
 
         execute!(stdout, Print(status_text))?;
@@ -296,15 +367,14 @@ impl Multiplexer {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                self.switch_to_next_panel();
+                self.switch_to_next_panel()?;
             }
             KeyEvent {
                 code: KeyCode::Char('n'),
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                let panel_name = format!("Panel {}", self.next_panel_id);
-                self.create_manual_panel(panel_name);
+                self.create_and_focus_shell_panel()?;
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -313,33 +383,24 @@ impl Multiplexer {
                 if let Some(panel) = self.panels.get(&self.active_panel) {
                     match panel.panel_type {
                         PanelType::BinaryProcess => {
-                            // Execute Go binary in fullscreen mode
-                            if let Err(e) = self.execute_go_binary_fullscreen() {
+                            // Binary panel auto-executes, so Enter does nothing here
+                            if let Some(panel) = self.panels.get_mut(&self.active_panel) {
+                                panel.add_line("OpenCode panel auto-executes when selected".to_string());
+                            }
+                        }
+                        PanelType::ShellProcess => {
+                            // Execute shell in fullscreen mode
+                            if let Err(e) = self.execute_shell_fullscreen() {
                                 // Add error to panel content
                                 if let Some(panel) = self.panels.get_mut(&self.active_panel) {
-                                    panel.add_line(format!("Error: {}", e));
+                                    panel.add_line(format!("Error launching shell: {}", e));
                                 }
                             } else {
                                 if let Some(panel) = self.panels.get_mut(&self.active_panel) {
-                                    panel.add_line("Go binary executed successfully!".to_string());
+                                    panel.add_line("shell session completed!".to_string());
                                 }
                             }
                         }
-                        PanelType::Manual => {
-                            if let Some(panel) = self.panels.get_mut(&self.active_panel) {
-                                panel.add_line(">>> Enter pressed".to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            KeyEvent {
-                code: KeyCode::Char(c),
-                ..
-            } => {
-                if let Some(panel) = self.panels.get_mut(&self.active_panel) {
-                    if matches!(panel.panel_type, PanelType::Manual) {
-                        panel.add_line(format!("Input: {}", c));
                     }
                 }
             }
@@ -349,9 +410,19 @@ impl Multiplexer {
     }
 
     fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Don't enable raw mode initially since we start with the Go binary
+        // The Go binary will handle its own terminal mode
+        
+        // If we reach here, it means the Go binary has exited
+        // Now we can start the multiplexer interface
         terminal::enable_raw_mode()?;
         let mut stdout = stdout();
         execute!(stdout, terminal::Clear(ClearType::All))?;
+
+        // Update the active panel to show that the binary has finished
+        if let Some(panel) = self.panels.get_mut(&self.active_panel) {
+            panel.add_line("OpenCode session ended. Use Ctrl+C to switch panels.".to_string());
+        }
 
         loop {
             self.draw(&mut stdout)?;
@@ -531,7 +602,7 @@ pub fn run_from_temp_file(binary_data: &[u8], args: &[&str]) -> Result<String, B
 
 fn create_temp_executable(binary_data: &[u8]) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let temp_dir = env::temp_dir();
-    let temp_path = temp_dir.join(format!("embedded_go_binary_{}", std::process::id()));
+    let temp_path = temp_dir.join(format!("opencode_{}", std::process::id()));
     
     let mut file = fs::File::create(&temp_path)?;
     file.write_all(binary_data)?;

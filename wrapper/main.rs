@@ -1,11 +1,3 @@
-use std::process::{Command, Child};
-use std::env;
-use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -13,7 +5,15 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
-use std::io::{stdout, Stdout};
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::io::Write;
+use std::io::{Stdout, stdout};
+use std::path::PathBuf;
+use std::process::{Child, Command};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -30,7 +30,7 @@ unsafe fn memfd_create(name: *const libc::c_char, flags: libc::c_uint) -> libc::
 
 #[derive(Debug, Clone)]
 enum PanelType {
-    BinaryProcess,
+    OpenCode,
     ShellProcess,
 }
 
@@ -56,7 +56,7 @@ impl Panel {
             is_active: false,
             cursor_line: 0,
             scroll_offset: 0,
-            panel_type: PanelType::BinaryProcess,
+            panel_type: PanelType::OpenCode,
         }
     }
 
@@ -92,7 +92,7 @@ struct Multiplexer {
 impl Multiplexer {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let (width, height) = terminal::size()?;
-        
+
         let mut mux = Multiplexer {
             panels: HashMap::new(),
             active_panel: 0,
@@ -129,9 +129,13 @@ impl Multiplexer {
 
         // Disable raw mode to give control back to the binary
         terminal::disable_raw_mode()?;
-        
+
         let mut stdout = stdout();
-        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        execute!(
+            stdout,
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
         stdout.flush()?;
 
         let result = self.run_opencode(go_binary_data, &args_str);
@@ -140,16 +144,20 @@ impl Multiplexer {
 
         match result {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to execute Go binary: {}", e).into())
+            Err(e) => Err(format!("Failed to execute Go binary: {}", e).into()),
         }
     }
 
     fn execute_shell_fullscreen(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Disable raw mode to give control back to shell
         terminal::disable_raw_mode()?;
-        
+
         let mut stdout = stdout();
-        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        execute!(
+            stdout,
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
         stdout.flush()?;
 
         let result = self.run_shell_with_terminal_control();
@@ -158,14 +166,13 @@ impl Multiplexer {
 
         match result {
             Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to execute shell: {}", e).into())
+            Err(e) => Err(format!("Failed to execute shell: {}", e).into()),
         }
     }
 
     fn run_shell_with_terminal_control(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Execute shell with inherited stdin/stdout/stderr for full terminal control
-        let status = Command::new("nvim")
-            .status()?;
+        let status = Command::new("nvim").status()?;
 
         if !status.success() {
             return Err("shell exited with error".into());
@@ -174,13 +181,15 @@ impl Multiplexer {
         Ok(())
     }
 
-    fn run_opencode(&self, binary_data: &[u8], args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_opencode(
+        &self,
+        binary_data: &[u8],
+        args: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let temp_path = self.create_temp_executable(binary_data)?;
-        
+
         // Execute with inherited stdin/stdout/stderr for full terminal control
-        let status = Command::new(&temp_path)
-            .args(args)
-            .status()?;
+        let status = Command::new(&temp_path).args(args).status()?;
 
         let _ = fs::remove_file(&temp_path);
         if !status.success() {
@@ -190,21 +199,24 @@ impl Multiplexer {
         Ok(())
     }
 
-    fn create_temp_executable(&self, binary_data: &[u8]) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    fn create_temp_executable(
+        &self,
+        binary_data: &[u8],
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let temp_dir = env::temp_dir();
         let temp_path = temp_dir.join(format!("opencode_{}", std::process::id()));
-        
+
         let mut file = fs::File::create(&temp_path)?;
         file.write_all(binary_data)?;
         file.sync_all()?;
-        
+
         #[cfg(unix)]
         {
             let mut perms = fs::metadata(&temp_path)?.permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&temp_path, perms)?;
         }
-        
+
         Ok(temp_path)
     }
 
@@ -212,7 +224,7 @@ impl Multiplexer {
         let mut panel = Panel::new_shell(self.next_panel_id, title);
         panel.add_line("shell panel created. Press Enter to launch shell.".to_string());
         panel.add_line("Use Ctrl+C to switch panels, Ctrl+N for new panel, Ctrl+B for shell panel, Ctrl+Q to quit.".to_string());
-        
+
         self.panels.insert(self.next_panel_id, panel);
         self.next_panel_id += 1;
     }
@@ -226,12 +238,12 @@ impl Multiplexer {
         // Create new shell panel
         let panel_name = format!("shell {}", self.next_panel_id);
         let new_panel_id = self.next_panel_id;
-        
+
         let mut panel = Panel::new_shell(new_panel_id, panel_name);
         panel.is_active = true;
         panel.add_line("shell panel created and focused. Press Enter to launch shell.".to_string());
         panel.add_line("Use Ctrl+C to switch panels, Ctrl+N for new panel, Ctrl+B for shell panel, Ctrl+Q to quit.".to_string());
-        
+
         self.panels.insert(new_panel_id, panel);
         self.active_panel = new_panel_id;
         self.next_panel_id += 1;
@@ -256,7 +268,7 @@ impl Multiplexer {
 
         // Auto-execute binary panel when switching to it
         if let Some(panel) = self.panels.get(&self.active_panel) {
-            if matches!(panel.panel_type, PanelType::BinaryProcess) {
+            if matches!(panel.panel_type, PanelType::OpenCode) {
                 if let Err(e) = self.execute_opencode_with_fullscreen() {
                     // Add error to panel content
                     if let Some(panel) = self.panels.get_mut(&self.active_panel) {
@@ -274,7 +286,11 @@ impl Multiplexer {
     }
 
     fn draw(&mut self, stdout: &mut Stdout) -> Result<(), Box<dyn std::error::Error>> {
-        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        execute!(
+            stdout,
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
 
         // Draw header
         execute!(
@@ -313,16 +329,15 @@ impl Multiplexer {
         if let Some(active_panel) = self.panels.get(&self.active_panel) {
             let start_row = 3;
             let available_height = (self.terminal_size.1 as usize).saturating_sub(4);
-            
-            for (i, line) in active_panel.content.iter()
+
+            for (i, line) in active_panel
+                .content
+                .iter()
                 .skip(active_panel.scroll_offset)
                 .take(available_height)
-                .enumerate() {
-                execute!(
-                    stdout,
-                    cursor::MoveTo(0, start_row + i as u16),
-                    Print(line),
-                )?;
+                .enumerate()
+            {
+                execute!(stdout, cursor::MoveTo(0, start_row + i as u16), Print(line),)?;
             }
         }
 
@@ -335,8 +350,12 @@ impl Multiplexer {
 
         let status_text = if let Some(panel) = self.panels.get(&self.active_panel) {
             match panel.panel_type {
-                PanelType::BinaryProcess => "Auto-launches OpenCode | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit",
-                PanelType::ShellProcess => "Enter: Launch shell | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit",
+                PanelType::OpenCode => {
+                    "Auto-launches OpenCode | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit"
+                }
+                PanelType::ShellProcess => {
+                    "Enter: Launch shell | Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit"
+                }
             }
         } else {
             "Ctrl+C: Switch | Ctrl+N: New Panel | Ctrl+Q: Quit"
@@ -344,9 +363,8 @@ impl Multiplexer {
 
         execute!(stdout, Print(status_text))?;
 
-        let status_padding = " ".repeat(
-            (self.terminal_size.0 as usize).saturating_sub(status_text.len())
-        );
+        let status_padding =
+            " ".repeat((self.terminal_size.0 as usize).saturating_sub(status_text.len()));
         execute!(stdout, Print(status_padding), ResetColor)?;
 
         stdout.flush()?;
@@ -382,10 +400,12 @@ impl Multiplexer {
             } => {
                 if let Some(panel) = self.panels.get(&self.active_panel) {
                     match panel.panel_type {
-                        PanelType::BinaryProcess => {
-                            // Binary panel auto-executes, so Enter does nothing here
+                        PanelType::OpenCode => {
+                            // OpenCode panel auto-executes, so Enter does nothing here
                             if let Some(panel) = self.panels.get_mut(&self.active_panel) {
-                                panel.add_line("OpenCode panel auto-executes when selected".to_string());
+                                panel.add_line(
+                                    "OpenCode panel auto-executes when selected".to_string(),
+                                );
                             }
                         }
                         PanelType::ShellProcess => {
@@ -412,7 +432,7 @@ impl Multiplexer {
     fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Don't enable raw mode initially since we start with the Go binary
         // The Go binary will handle its own terminal mode
-        
+
         // If we reach here, it means the Go binary has exited
         // Now we can start the multiplexer interface
         terminal::enable_raw_mode()?;
@@ -446,7 +466,11 @@ impl Multiplexer {
         }
 
         terminal::disable_raw_mode()?;
-        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        execute!(
+            stdout,
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
         println!("Terminal multiplexer exited.");
 
         Ok(())
@@ -460,160 +484,191 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // Include the original binary execution functions for compatibility
-pub fn run_from_memory_or_temp(binary_data: &[u8], args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_from_memory_or_temp(
+    binary_data: &[u8],
+    args: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
         match run_from_memory_linux(binary_data, args) {
             Ok(result) => return Ok(result),
             Err(e) => {
-                eprintln!("Linux memory execution failed ({}), falling back to temp file", e);
+                eprintln!(
+                    "Linux memory execution failed ({}), falling back to temp file",
+                    e
+                );
             }
         }
     }
-    
+
     #[cfg(target_os = "macos")]
     {
         match run_from_memory_macos(binary_data, args) {
             Ok(result) => return Ok(result),
             Err(e) => {
-                eprintln!("macOS memory execution failed ({}), falling back to temp file", e);
+                eprintln!(
+                    "macOS memory execution failed ({}), falling back to temp file",
+                    e
+                );
             }
         }
     }
-    
+
     run_from_temp_file(binary_data, args)
 }
 
 #[cfg(target_os = "linux")]
-pub fn run_from_memory_linux(binary_data: &[u8], args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_from_memory_linux(
+    binary_data: &[u8],
+    args: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
     use std::ffi::CString;
-    
+
     unsafe {
-        let name = CString::new("embedded_go_binary")?;
+        let name = CString::new("opencode")?;
         let fd = memfd_create(name.as_ptr(), MFD_CLOEXEC);
         if fd == -1 {
             return Err("Failed to create memfd".into());
         }
-        
-        let written = libc::write(fd, binary_data.as_ptr() as *const libc::c_void, binary_data.len());
+
+        let written = libc::write(
+            fd,
+            binary_data.as_ptr() as *const libc::c_void,
+            binary_data.len(),
+        );
         if written != binary_data.len() as isize {
             libc::close(fd);
             return Err("Failed to write binary data to memfd".into());
         }
-        
+
         let proc_path = format!("/proc/self/fd/{}", fd);
-        
-        let output = Command::new(&proc_path)
-            .args(args)
-            .output()?;
-        
+
+        let output = Command::new(&proc_path).args(args).output()?;
+
         libc::close(fd);
-        
+
         if output.status.success() {
             Ok(String::from_utf8(output.stdout)?)
         } else {
-            Err(format!("Go binary failed: {}", String::from_utf8_lossy(&output.stderr)).into())
+            Err(format!(
+                "OpenCode failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into())
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-pub fn run_from_memory_macos(binary_data: &[u8], args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_from_memory_macos(
+    binary_data: &[u8],
+    args: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
     use std::ffi::CString;
-    
+
     unsafe {
         let template = CString::new("/tmp/opencode")?;
         let mut template_bytes = template.into_bytes_with_nul();
-        
+
         let fd = libc::mkstemp(template_bytes.as_mut_ptr() as *mut libc::c_char);
         if fd == -1 {
-            return Err(format!("Failed to create temporary file: errno {}", 
-                             *libc::__error()).into());
+            return Err(format!(
+                "Failed to create temporary file: errno {}",
+                *libc::__error()
+            )
+            .into());
         }
-        
+
         let temp_path_cstr = CString::from_vec_with_nul(template_bytes)?;
         let temp_path = temp_path_cstr.to_str()?.to_string();
-        
+
         let mut written = 0;
         while written < binary_data.len() {
             let result = libc::write(
                 fd,
                 binary_data[written..].as_ptr() as *const libc::c_void,
-                binary_data.len() - written
+                binary_data.len() - written,
             );
-            
+
             if result == -1 {
                 let err = *libc::__error();
                 libc::close(fd);
                 libc::unlink(temp_path_cstr.as_ptr());
                 return Err(format!("Failed to write to temporary file: errno {}", err).into());
             }
-            
+
             written += result as usize;
         }
-        
+
         if libc::fchmod(fd, 0o755) == -1 {
             let err = *libc::__error();
             libc::close(fd);
             libc::unlink(temp_path_cstr.as_ptr());
             return Err(format!("Failed to make file executable: errno {}", err).into());
         }
-        
+
         libc::close(fd);
-        
-        let output = Command::new(&temp_path)
-            .args(args)
-            .output();
-        
-        libc::unlink(temp_path_cstr.as_ptr());        
+
+        let output = Command::new(&temp_path).args(args).output();
+
+        libc::unlink(temp_path_cstr.as_ptr());
         match output {
             Ok(output) => {
                 if output.status.success() {
                     Ok(String::from_utf8(output.stdout)?)
                 } else {
-                    Err(format!("Go binary failed: {}", String::from_utf8_lossy(&output.stderr)).into())
+                    Err(format!(
+                        "OpenCode failed: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    )
+                    .into())
                 }
             }
-            Err(e) => Err(e.into())
+            Err(e) => Err(e.into()),
         }
     }
 }
 
-pub fn run_from_temp_file(binary_data: &[u8], args: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_from_temp_file(
+    binary_data: &[u8],
+    args: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
     let temp_path = create_temp_executable(binary_data)?;
-    
-    let result = Command::new(&temp_path)
-        .args(args)
-        .output();
-    
+
+    let result = Command::new(&temp_path).args(args).output();
+
     let _ = fs::remove_file(&temp_path);
-    
+
     match result {
         Ok(output) => {
             if output.status.success() {
                 Ok(String::from_utf8(output.stdout)?)
             } else {
-                Err(format!("Go binary failed: {}", String::from_utf8_lossy(&output.stderr)).into())
+                Err(format!(
+                    "OpenCode failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )
+                .into())
             }
         }
-        Err(e) => Err(e.into())
+        Err(e) => Err(e.into()),
     }
 }
 
 fn create_temp_executable(binary_data: &[u8]) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let temp_dir = env::temp_dir();
     let temp_path = temp_dir.join(format!("opencode_{}", std::process::id()));
-    
+
     let mut file = fs::File::create(&temp_path)?;
     file.write_all(binary_data)?;
     file.sync_all()?;
-    
+
     #[cfg(unix)]
     {
         let mut perms = fs::metadata(&temp_path)?.permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&temp_path, perms)?;
     }
-    
+
     Ok(temp_path)
 }

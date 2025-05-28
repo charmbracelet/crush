@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
@@ -54,15 +57,15 @@ func (c *commandItem) View() tea.View {
 		titleMatchStyle = titleMatchStyle.Foreground(t.Background()).Background(t.Primary()).Bold(true)
 	}
 	var ranges []lipgloss.Range
-	truncatedTitle := ansi.Truncate(c.command.Title, c.width-2, "…")
-	text := titleStyle.Padding(0, 1).Render(truncatedTitle)
+	truncatedTitle := ansi.Truncate(c.command.Title, c.width, "…")
+	text := titleStyle.Render(truncatedTitle)
 	if len(c.matchIndexes) > 0 {
 		for _, rng := range matchedRanges(c.matchIndexes) {
 			// ansi.Cut is grapheme and ansi sequence aware, we match against a ansi.Stripped string, but we might still have graphemes.
 			// all that to say that rng is byte positions, but we need to pass it down to ansi.Cut as char positions.
 			// so we need to adjust it here:
 			start, stop := bytePosToVisibleCharPos(text, rng)
-			ranges = append(ranges, lipgloss.NewRange(start+1, stop+2, titleMatchStyle))
+			ranges = append(ranges, lipgloss.NewRange(start, stop+1, titleMatchStyle))
 		}
 		text = lipgloss.StyleRanges(text, ranges...)
 	}
@@ -147,4 +150,54 @@ func bytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 	}
 	stop = pos
 	return start, stop
+}
+
+type ItemSection interface {
+	util.Model
+	layout.Sizeable
+	list.SectionHeader
+}
+type itemSectionModel struct {
+	width int
+	title string
+}
+
+func NewItemSection(title string) ItemSection {
+	return &itemSectionModel{
+		title: title,
+	}
+}
+
+func (m *itemSectionModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m *itemSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+	return m, nil
+}
+
+func (m *itemSectionModel) View() tea.View {
+	t := theme.CurrentTheme()
+	title := ansi.Truncate(m.title, m.width-1, "…")
+	style := styles.BaseStyle().Padding(1, 0, 0, 0).Width(m.width).Foreground(t.TextMuted()).Bold(true)
+	if len(title) < m.width {
+		remainingWidth := m.width - lipgloss.Width(title)
+		if remainingWidth > 0 {
+			title += " " + strings.Repeat("─", remainingWidth-1)
+		}
+	}
+	return tea.NewView(style.Render(title))
+}
+
+func (m *itemSectionModel) GetSize() (int, int) {
+	return m.width, 1
+}
+
+func (m *itemSectionModel) SetSize(width int, height int) tea.Cmd {
+	m.width = width
+	return nil
+}
+
+func (m *itemSectionModel) IsSectionHeader() bool {
+	return true
 }

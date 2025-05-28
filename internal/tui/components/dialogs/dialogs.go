@@ -23,11 +23,6 @@ type CloseCallback interface {
 	Close() tea.Cmd
 }
 
-// AbsolutePositionable is an interface for components that can set their position
-type AbsolutePositionable interface {
-	SetPosition(x, y int)
-}
-
 // OpenDialogMsg is sent to open a new dialog with specified dimensions.
 type OpenDialogMsg struct {
 	Model DialogModel
@@ -50,14 +45,14 @@ type dialogCmp struct {
 	width, height int
 	dialogs       []DialogModel
 	idMap         map[DialogID]int
-	keymap        KeyMap
+	keyMap        KeyMap
 }
 
 // NewDialogCmp creates a new dialog manager.
 func NewDialogCmp() DialogCmp {
 	return dialogCmp{
 		dialogs: []DialogModel{},
-		keymap:  DefaultKeymap(),
+		keyMap:  DefaultKeyMap(),
 		idMap:   make(map[DialogID]int),
 	}
 }
@@ -94,7 +89,7 @@ func (d dialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return d, nil
 	case tea.KeyPressMsg:
-		if key.Matches(msg, d.keymap.Close) {
+		if key.Matches(msg, d.keyMap.Close) {
 			return d, util.CmdHandler(CloseDialogMsg{})
 		}
 	}
@@ -114,10 +109,10 @@ func (d dialogCmp) handleOpen(msg OpenDialogMsg) (tea.Model, tea.Cmd) {
 			return d, nil // Do not open a dialog if it's already the topmost one
 		}
 		if dialog.ID() == "quit" {
-			return d, nil // Do not open dialogs ontop of quit
+			return d, nil // Do not open dialogs on top of quit
 		}
 	}
-	// if the dialog is already in thel stack make it the last item
+	// if the dialog is already in the stack make it the last item
 	if _, ok := d.idMap[msg.Model.ID()]; ok {
 		existing := d.dialogs[d.idMap[msg.Model.ID()]]
 		// Reuse the model so we keep the state

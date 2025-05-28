@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	id dialogs.DialogID = "commands"
+	commandsDialogID dialogs.DialogID = "commands"
 
 	defaultWidth int = 60
 )
@@ -54,11 +54,17 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 		return util.ReportError(err)
 	}
 
-	commands = append(commands, c.defaultCommands()...)
+	commandItems := []util.Model{}
+	if len(commands) > 0 {
+		commandItems = append(commandItems, NewItemSection("Custom"))
+		for _, cmd := range commands {
+			commandItems = append(commandItems, NewCommandItem(cmd))
+		}
+	}
 
-	commandItems := make([]util.Model, 0, len(commands))
+	commandItems = append(commandItems, NewItemSection("Default"))
 
-	for _, cmd := range commands {
+	for _, cmd := range c.defaultCommands() {
 		commandItems = append(commandItems, NewCommandItem(cmd))
 	}
 
@@ -93,7 +99,7 @@ func (c *commandDialogCmp) listWidth() int {
 }
 
 func (c *commandDialogCmp) listHeight() int {
-	listHeigh := len(c.commandList.Items()) + 2 // height based on items + 2 for the input
+	listHeigh := len(c.commandList.Items()) + 2 + 4 // height based on items + 2 for the input + 4 for the sections
 	return min(listHeigh, c.wHeight/2)
 }
 
@@ -158,5 +164,5 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 }
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {
-	return id
+	return commandsDialogID
 }

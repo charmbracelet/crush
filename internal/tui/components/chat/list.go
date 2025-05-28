@@ -45,7 +45,7 @@ type messageListCmp struct {
 // NewMessagesListCmp creates a new message list component with custom keybindings
 // and reverse ordering (newest messages at bottom).
 func NewMessagesListCmp(app *app.App) MessageListCmp {
-	defaultKeymaps := list.DefaultKeymap()
+	defaultKeymaps := list.DefaultKeyMap()
 	defaultKeymaps.Up.SetEnabled(false)
 	defaultKeymaps.Down.SetEnabled(false)
 	defaultKeymaps.NDown = key.NewBinding(

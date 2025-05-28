@@ -1,11 +1,10 @@
 package commands
 
 import (
-	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
@@ -15,6 +14,8 @@ import (
 
 const (
 	id dialogs.DialogID = "commands"
+
+	defaultWidth int = 60
 )
 
 // Command represents a command that can be executed
@@ -36,37 +37,31 @@ type commandDialogCmp struct {
 	wHeight int // Height of the terminal window
 
 	commandList list.ListModel
-	input       textinput.Model
-	oldCursor   tea.Cursor
 }
 
 func NewCommandDialog() CommandsDialog {
-	ti := textinput.New()
-	ti.Placeholder = "Type a command or search..."
-	ti.SetVirtualCursor(false)
-	ti.Focus()
-	ti.SetWidth(60 - 7)
-	commandList := list.New()
+	commandList := list.New(list.WithFilterable(true))
+
 	return &commandDialogCmp{
 		commandList: commandList,
-		width:       60,
-		input:       ti,
+		width:       defaultWidth,
 	}
 }
 
 func (c *commandDialogCmp) Init() tea.Cmd {
-	logging.Info("Initializing commands dialog")
 	commands, err := LoadCustomCommands()
 	if err != nil {
 		return util.ReportError(err)
 	}
-	logging.Info("Commands loaded", "count", len(commands))
+
+	commands = append(commands, c.defaultCommands()...)
 
 	commandItems := make([]util.Model, 0, len(commands))
 
 	for _, cmd := range commands {
 		commandItems = append(commandItems, NewCommandItem(cmd))
 	}
+
 	c.commandList.SetItems(commandItems)
 	return c.commandList.Init()
 }
@@ -76,41 +71,38 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
-		return c, c.commandList.SetSize(60, min(len(c.commandList.Items())*2, c.wHeight/2))
+		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
 	}
-	u, cmd := c.input.Update(msg)
-	c.input = u
+	u, cmd := c.commandList.Update(msg)
+	c.commandList = u.(list.ListModel)
 	return c, cmd
 }
 
 func (c *commandDialogCmp) View() tea.View {
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		c.inputStyle().Render(c.input.View()),
-		c.commandList.View().String(),
-	)
-
-	v := tea.NewView(c.style().Render(content))
-	v.SetCursor(c.getCursor())
+	listView := c.commandList.View()
+	v := tea.NewView(c.style().Render(listView.String()))
+	if listView.Cursor() != nil {
+		c := c.moveCursor(listView.Cursor())
+		v.SetCursor(c)
+	}
 	return v
 }
 
-func (c *commandDialogCmp) getCursor() *tea.Cursor {
-	cursor := c.input.Cursor()
+func (c *commandDialogCmp) listWidth() int {
+	return defaultWidth - 4 // 4 for padding
+}
+
+func (c *commandDialogCmp) listHeight() int {
+	listHeigh := len(c.commandList.Items()) + 2 // height based on items + 2 for the input
+	return min(listHeigh, c.wHeight/2)
+}
+
+func (c *commandDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	offset := 10 + 1
 	cursor.Y += offset
 	_, col := c.Position()
-	cursor.X = c.input.Cursor().X + col + 2
+	cursor.X = cursor.X + col + 2
 	return cursor
-}
-
-func (c *commandDialogCmp) inputStyle() lipgloss.Style {
-	t := theme.CurrentTheme()
-	return styles.BaseStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(t.TextMuted()).
-		BorderBackground(t.Background()).
-		BorderBottom(true)
 }
 
 func (c *commandDialogCmp) style() lipgloss.Style {
@@ -128,6 +120,41 @@ func (q *commandDialogCmp) Position() (int, int) {
 	col := q.wWidth / 2
 	col -= q.width / 2
 	return row, col
+}
+
+func (c *commandDialogCmp) defaultCommands() []Command {
+	return []Command{
+		{
+			ID:          "init",
+			Title:       "Initialize Project",
+			Description: "Create/Update the OpenCode.md memory file",
+			Handler: func(cmd Command) tea.Cmd {
+				prompt := `Please analyze this codebase and create a OpenCode.md file containing:
+	1. Build/lint/test commands - especially for running a single test
+	2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+
+	The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
+	If there's already a opencode.md, improve it.
+	If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
+				return tea.Batch(
+					util.CmdHandler(chat.SendMsg{
+						Text: prompt,
+					}),
+				)
+			},
+		},
+		{
+			ID:          "compact",
+			Title:       "Compact Session",
+			Description: "Summarize the current session and create a new one with the summary",
+			Handler: func(cmd Command) tea.Cmd {
+				return func() tea.Msg {
+					// TODO: implement compact message
+					return ""
+				}
+			},
+		},
+	}
 }
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {

@@ -103,9 +103,6 @@ func (a appModel) Init() tea.Cmd {
 	// 	}
 	// 	return dialog.ShowInitDialogMsg{Show: shouldShow}
 	// })
-
-	t := theme.CurrentTheme()
-	cmds = append(cmds, tea.SetBackgroundColor(t.Background()))
 	return tea.Batch(cmds...)
 }
 

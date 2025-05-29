@@ -58,7 +58,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dialog = u.(dialogs.DialogCmp)
 		return a, dialogCmd
 	case commands.ShowArgumentsDialogMsg:
-
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: commands.NewCommandArgumentsDialog(
+					msg.CommandID,
+					msg.Content,
+					msg.ArgNames,
+				),
+			},
+		)
 	// Page change messages
 	case page.PageChangeMsg:
 		return a, a.moveToPage(msg.ID)

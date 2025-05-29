@@ -18,6 +18,7 @@ type CommandItem interface {
 	util.Model
 	layout.Focusable
 	layout.Sizeable
+	Command() Command
 }
 
 type commandItem struct {
@@ -70,6 +71,11 @@ func (c *commandItem) View() tea.View {
 		text = lipgloss.StyleRanges(text, ranges...)
 	}
 	return tea.NewView(text)
+}
+
+// Command implements CommandItem.
+func (c *commandItem) Command() Command {
+	return c.command
 }
 
 // Blur implements CommandItem.

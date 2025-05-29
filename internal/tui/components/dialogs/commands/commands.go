@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
@@ -37,14 +38,31 @@ type commandDialogCmp struct {
 	wHeight int // Height of the terminal window
 
 	commandList list.ListModel
+	commands    []Command
+	keyMap      CommandsDialogKeyMap
 }
 
 func NewCommandDialog() CommandsDialog {
-	commandList := list.New(list.WithFilterable(true))
+	listKeyMap := list.DefaultKeyMap()
+	keyMap := DefaultCommandsDialogKeyMap()
 
+	listKeyMap.Down.SetEnabled(false)
+	listKeyMap.Up.SetEnabled(false)
+	listKeyMap.NDown.SetEnabled(false)
+	listKeyMap.NUp.SetEnabled(false)
+	listKeyMap.HalfPageDown.SetEnabled(false)
+	listKeyMap.HalfPageUp.SetEnabled(false)
+	listKeyMap.Home.SetEnabled(false)
+	listKeyMap.End.SetEnabled(false)
+
+	listKeyMap.DownOneItem = keyMap.Next
+	listKeyMap.UpOneItem = keyMap.Previous
+
+	commandList := list.New(list.WithFilterable(true), list.WithKeyMap(listKeyMap))
 	return &commandDialogCmp{
 		commandList: commandList,
 		width:       defaultWidth,
+		keyMap:      DefaultCommandsDialogKeyMap(),
 	}
 }
 
@@ -53,6 +71,7 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
+	c.commands = commands
 
 	commandItems := []util.Model{}
 	if len(commands) > 0 {
@@ -65,6 +84,7 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	commandItems = append(commandItems, NewItemSection("Default"))
 
 	for _, cmd := range c.defaultCommands() {
+		c.commands = append(c.commands, cmd)
 		commandItems = append(commandItems, NewCommandItem(cmd))
 	}
 
@@ -78,10 +98,26 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
 		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
+	case tea.KeyPressMsg:
+		switch {
+		case key.Matches(msg, c.keyMap.Select):
+			selectedItemInx := c.commandList.SelectedIndex()
+			if selectedItemInx == list.NoSelection {
+				return c, nil // No item selected, do nothing
+			}
+			items := c.commandList.Items()
+			selectedItem := items[selectedItemInx].(CommandItem).Command()
+			return c, tea.Sequence(
+				util.CmdHandler(dialogs.CloseDialogMsg{}),
+				selectedItem.Handler(selectedItem),
+			)
+		default:
+			u, cmd := c.commandList.Update(msg)
+			c.commandList = u.(list.ListModel)
+			return c, cmd
+		}
 	}
-	u, cmd := c.commandList.Update(msg)
-	c.commandList = u.(list.ListModel)
-	return c, cmd
+	return c, nil
 }
 
 func (c *commandDialogCmp) View() tea.View {

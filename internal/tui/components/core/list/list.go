@@ -38,6 +38,7 @@ type ListModel interface {
 	UpdateItem(int, util.Model)     // Replace an item at the specified index
 	ResetView()                     // Clear rendering cache and reset scroll position
 	Items() []util.Model            // Get all items in the list
+	SelectedIndex() int             // Get the index of the currently selected item
 }
 
 // HasAnim interface identifies items that support animation.
@@ -1257,4 +1258,12 @@ func (m *model) filterSection(sect section, search string) *section {
 	}
 
 	return nil
+}
+
+// SelectedIndex returns the index of the currently selected item.
+func (m *model) SelectedIndex() int {
+	if m.selectionState.selectedIndex < 0 || m.selectionState.selectedIndex >= len(m.filteredItems) {
+		return NoSelection
+	}
+	return m.selectionState.selectedIndex
 }

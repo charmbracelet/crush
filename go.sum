@@ -84,8 +84,8 @@ github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa/go.mod h1:xBlh2Yi3DL3zy/2n15kITpg0YZardf/aa/hgUaIM6Rk=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a h1:FsHEJ52OC4VuTzU8t+n5frMjLvpYWEznSr/u8tnkCYw=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a/go.mod h1:wDlXFlCrmJ8J+swcL/MnGUuYnqgQdW9rhSD61oNMb6U=
-github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf h1:rLG0Yb6MQSDKdB52aGX55JT1oi0P0Kuaj7wi1bLUpnI=
-github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf/go.mod h1:B3UgsnsBZS/eX42BlaNiJkD1pPOUa+oF1IYC6Yd2CEU=
+github.com/charmbracelet/x/exp/slice v0.0.0-20250528180458-2d5d6cb84620 h1:/PN4jqP3ki9NvtHRrYZ9ewCutKZB6DK8frTW+Dj/MWs=
+github.com/charmbracelet/x/exp/slice v0.0.0-20250528180458-2d5d6cb84620/go.mod h1:vI5nDVMWi6veaYH+0Fmvpbe/+cv/iJfMntdh+N0+Tms=
 github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86 h1:BxAEmOBIDajkgao3EsbBxKQCYvgYPGdT62WASLvtf4Y=
 github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86/go.mod h1:62Rp/6EtTxoeJDSdtpA3tJp3y3ZRpsiekBSje+K8htA=
 github.com/charmbracelet/x/term v0.2.1 h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=

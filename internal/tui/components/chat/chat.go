@@ -8,6 +8,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
+	"github.com/opencode-ai/opencode/internal/tui/components/logo"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/version"
@@ -27,7 +28,7 @@ type EditorFocusMsg bool
 func header() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Top,
-		logo(),
+		logoBlock(),
 		repo(),
 		"",
 		cwd(),
@@ -91,25 +92,15 @@ func lspsConfigured() string {
 		)
 }
 
-func logo() string {
-	logo := fmt.Sprintf("%s %s", styles.OpenCodeIcon, "OpenCode")
+func logoBlock() string {
 	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
-
-	versionText := baseStyle.
-		Foreground(t.TextMuted()).
-		Render(version.Version)
-
-	return baseStyle.
-		Bold(true).
-		Render(
-			lipgloss.JoinHorizontal(
-				lipgloss.Left,
-				logo,
-				" ",
-				versionText,
-			),
-		)
+	return logo.Render(version.Version, true, logo.Opts{
+		FieldColor:   t.Accent(),
+		TitleColorA:  t.Primary(),
+		TitleColorB:  t.Secondary(),
+		CharmColor:   t.Primary(),
+		VersionColor: t.Secondary(),
+	})
 }
 
 func repo() string {

@@ -1,4 +1,4 @@
-package chat
+package editor
 
 import (
 	"fmt"
@@ -13,15 +13,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/fileutil"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
+	"github.com/opencode-ai/opencode/internal/tui/components/chat"
+	"github.com/opencode-ai/opencode/internal/tui/components/completions"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
+
+type FileCompletionItem struct {
+	Path string // The file path
+}
 
 type editorCmp struct {
 	width       int
@@ -32,33 +39,19 @@ type editorCmp struct {
 	textarea    textarea.Model
 	attachments []message.Attachment
 	deleteMode  bool
+
+	keyMap EditorKeyMap
+
+	// File path completions
+	currentQuery          string
+	completionsStartIndex int
+	isCompletionsOpen     bool
 }
 
-type EditorKeyMaps struct {
-	Send       key.Binding
-	OpenEditor key.Binding
-}
-
-type bluredEditorKeyMaps struct {
-	Send       key.Binding
-	Focus      key.Binding
-	OpenEditor key.Binding
-}
 type DeleteAttachmentKeyMaps struct {
 	AttachmentDeleteMode key.Binding
 	Escape               key.Binding
 	DeleteAllAttachments key.Binding
-}
-
-var editorMaps = EditorKeyMaps{
-	Send: key.NewBinding(
-		key.WithKeys("enter", "ctrl+s"),
-		key.WithHelp("enter", "send message"),
-	),
-	OpenEditor: key.NewBinding(
-		key.WithKeys("ctrl+e"),
-		key.WithHelp("ctrl+e", "open editor"),
-	),
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -109,7 +102,7 @@ func (m *editorCmp) openEditor() tea.Cmd {
 		os.Remove(tmpfile.Name())
 		attachments := m.attachments
 		m.attachments = nil
-		return SendMsg{
+		return chat.SendMsg{
 			Text:        string(content),
 			Attachments: attachments,
 		}
@@ -134,7 +127,7 @@ func (m *editorCmp) send() tea.Cmd {
 		return nil
 	}
 	return tea.Batch(
-		util.CmdHandler(SendMsg{
+		util.CmdHandler(chat.SendMsg{
 			Text:        value,
 			Attachments: attachments,
 		}),
@@ -143,16 +136,12 @@ func (m *editorCmp) send() tea.Cmd {
 
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case dialog.ThemeChangedMsg:
 		m.textarea = CreateTextArea(&m.textarea)
-	case dialog.CompletionSelectedMsg:
-		existingValue := m.textarea.Value()
-		modifiedValue := strings.Replace(existingValue, msg.SearchString, msg.CompletionValue, 1)
-
-		m.textarea.SetValue(modifiedValue)
-		return m, nil
-	case SessionSelectedMsg:
+		return m, cmd
+	case chat.SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			m.session = msg
 		}
@@ -163,7 +152,64 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
+		return m, nil
+	case completions.CompletionsClosedMsg:
+		m.isCompletionsOpen = false
+		m.currentQuery = ""
+		m.completionsStartIndex = 0
+	case completions.SelectCompletionMsg:
+		if !m.isCompletionsOpen {
+			return m, nil
+		}
+		if item, ok := msg.Value.(FileCompletionItem); ok {
+			// If the selected item is a file, insert its path into the textarea
+			value := m.textarea.Value()
+			value = value[:m.completionsStartIndex]
+			if len(value) > 0 && value[len(value)-1] != ' ' {
+				value += " "
+			}
+			value += item.Path
+			m.textarea.SetValue(value)
+			m.isCompletionsOpen = false
+			m.currentQuery = ""
+			m.completionsStartIndex = 0
+			return m, nil
+		}
 	case tea.KeyPressMsg:
+		switch {
+		// Completions
+		case msg.String() == "/" && !m.isCompletionsOpen:
+			m.isCompletionsOpen = true
+			m.currentQuery = ""
+			cmds = append(cmds, m.startCompletions)
+			m.completionsStartIndex = len(m.textarea.Value())
+		case msg.String() == "space" && m.isCompletionsOpen:
+			m.isCompletionsOpen = false
+			m.currentQuery = ""
+			m.completionsStartIndex = 0
+			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
+			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+		case msg.String() == "backspace" && m.isCompletionsOpen:
+			if len(m.currentQuery) > 0 {
+				m.currentQuery = m.currentQuery[:len(m.currentQuery)-1]
+				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+					Query: m.currentQuery,
+				}))
+			} else {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+			}
+		default:
+			if m.isCompletionsOpen {
+				m.currentQuery += msg.String()
+				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+					Query: m.currentQuery,
+				}))
+			}
+		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
 			return m, nil
@@ -186,7 +232,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if key.Matches(msg, editorMaps.OpenEditor) {
+		if key.Matches(msg, m.keyMap.OpenEditor) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
@@ -197,7 +243,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Hanlde Enter key
-		if m.textarea.Focused() && key.Matches(msg, editorMaps.Send) {
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Send) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {
 				// If the last character is a backslash, remove it and add a newline
@@ -210,7 +256,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.textarea, cmd = m.textarea.Update(msg)
-	return m, cmd
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
 func (m *editorCmp) View() tea.View {
@@ -223,8 +270,8 @@ func (m *editorCmp) View() tea.View {
 		Foreground(t.Primary())
 
 	cursor := m.textarea.Cursor()
-	cursor.X = m.textarea.Cursor().X + m.x + 2
-	cursor.Y = m.textarea.Cursor().Y + m.y + 1
+	cursor.X = cursor.X + m.x + 2
+	cursor.Y = cursor.Y + m.y + 1
 	if len(m.attachments) == 0 {
 		view := tea.NewView(lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View()))
 		view.SetCursor(cursor)
@@ -278,7 +325,7 @@ func (m *editorCmp) attachmentsContent() string {
 
 func (m *editorCmp) BindingKeys() []key.Binding {
 	bindings := []key.Binding{}
-	bindings = append(bindings, layout.KeyMapToSlice(editorMaps)...)
+	bindings = append(bindings, layout.KeyMapToSlice(m.keyMap)...)
 	bindings = append(bindings, layout.KeyMapToSlice(DeleteKeyMaps)...)
 	return bindings
 }
@@ -287,6 +334,28 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 	m.x = x
 	m.y = y
 	return nil
+}
+
+func (m *editorCmp) startCompletions() tea.Msg {
+	files, _, _ := fileutil.ListDirectory(".", []string{}, 0)
+	completionItems := make([]completions.Completion, 0, len(files))
+	for _, file := range files {
+		file = strings.TrimPrefix(file, "./")
+		completionItems = append(completionItems, completions.Completion{
+			Title: file,
+			Value: FileCompletionItem{
+				Path: file,
+			},
+		})
+	}
+
+	x := m.textarea.Cursor().X + m.x + 1
+	y := m.textarea.Cursor().Y + m.y + 1
+	return completions.OpenCompletionsMsg{
+		Completions: completionItems,
+		X:           x,
+		Y:           y,
+	}
 }
 
 func CreateTextArea(existing *textarea.Model) textarea.Model {
@@ -333,5 +402,6 @@ func NewEditorCmp(app *app.App) util.Model {
 	return &editorCmp{
 		app:      app,
 		textarea: ta,
+		keyMap:   DefaultEditorKeyMap(),
 	}
 }

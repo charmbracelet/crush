@@ -1,4 +1,4 @@
-package title
+package logo
 
 import (
 	"fmt"

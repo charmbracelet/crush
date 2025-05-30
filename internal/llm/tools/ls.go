@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/opencode-ai/opencode/internal/fileutil"
 )
 
 type LSParams struct {
@@ -107,7 +108,7 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		return NewTextErrorResponse(fmt.Sprintf("path does not exist: %s", searchPath)), nil
 	}
 
-	files, truncated, err := listDirectory(searchPath, params.Ignore, MaxLSFiles)
+	files, truncated, err := fileutil.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error listing directory: %w", err)
 	}
@@ -126,101 +127,6 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 			Truncated:     truncated,
 		},
 	), nil
-}
-
-func listDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
-	var results []string
-	truncated := false
-
-	err := filepath.Walk(initialPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip files we don't have permission to access
-		}
-
-		if shouldSkip(path, ignorePatterns) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if path != initialPath {
-			if info.IsDir() {
-				path = path + string(filepath.Separator)
-			}
-			results = append(results, path)
-		}
-
-		if len(results) >= limit {
-			truncated = true
-			return filepath.SkipAll
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, truncated, err
-	}
-
-	return results, truncated, nil
-}
-
-func shouldSkip(path string, ignorePatterns []string) bool {
-	base := filepath.Base(path)
-
-	if base != "." && strings.HasPrefix(base, ".") {
-		return true
-	}
-
-	commonIgnored := []string{
-		"__pycache__",
-		"node_modules",
-		"dist",
-		"build",
-		"target",
-		"vendor",
-		"bin",
-		"obj",
-		".git",
-		".idea",
-		".vscode",
-		".DS_Store",
-		"*.pyc",
-		"*.pyo",
-		"*.pyd",
-		"*.so",
-		"*.dll",
-		"*.exe",
-	}
-
-	if strings.Contains(path, filepath.Join("__pycache__", "")) {
-		return true
-	}
-
-	for _, ignored := range commonIgnored {
-		if strings.HasSuffix(ignored, "/") {
-			if strings.Contains(path, filepath.Join(ignored[:len(ignored)-1], "")) {
-				return true
-			}
-		} else if strings.HasPrefix(ignored, "*.") {
-			if strings.HasSuffix(base, ignored[1:]) {
-				return true
-			}
-		} else {
-			if base == ignored {
-				return true
-			}
-		}
-	}
-
-	for _, pattern := range ignorePatterns {
-		matched, err := filepath.Match(pattern, base)
-		if err == nil && matched {
-			return true
-		}
-	}
-
-	return false
 }
 
 func createFileTree(sortedPaths []string) []*TreeNode {

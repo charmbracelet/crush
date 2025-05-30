@@ -29,10 +29,10 @@ type Opts struct {
 	VersionColor color.Color // Version text color
 }
 
-// Render renders the Crush title art. Set the argument to true to render the
-// narrow version, intended for use in a sidebar.
+// Render renders the Crush logo. Set the argument to true to render the narrow
+// version, intended for use in a sidebar.
 //
-// The compact argument determins whether it renders compact for the sidebar
+// The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(version string, compact bool, o Opts) string {
 	const charm = "Charm™"

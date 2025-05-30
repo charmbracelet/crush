@@ -39,6 +39,7 @@ type ListModel interface {
 	ResetView()                     // Clear rendering cache and reset scroll position
 	Items() []util.Model            // Get all items in the list
 	SelectedIndex() int             // Get the index of the currently selected item
+	Filter(string) tea.Cmd          // Filter items based on a search term
 }
 
 // HasAnim interface identifies items that support animation.
@@ -50,13 +51,11 @@ type HasAnim interface {
 
 // HasFilterValue interface allows items to provide a filter value for searching.
 type HasFilterValue interface {
-	util.Model
 	FilterValue() string // Returns a string value used for filtering/searching
 }
 
 // HasMatchIndexes interface allows items to set matched character indexes.
 type HasMatchIndexes interface {
-	util.Model
 	MatchIndexes([]int) // Sets the indexes of matched characters in the item's content
 }
 
@@ -134,10 +133,11 @@ type model struct {
 	gapSize        int            // Number of empty lines between items
 	padding        []int          // Padding around the list content
 
-	filterable    bool            // Whether items can be filtered
-	filteredItems []util.Model    // Filtered items based on current search
-	input         textinput.Model // Input field for filtering items
-	currentSearch string          // Current search term for filtering
+	filterable      bool            // Whether items can be filtered
+	filteredItems   []util.Model    // Filtered items based on current search
+	input           textinput.Model // Input field for filtering items
+	hideFilterInput bool            // Whether to hide the filter input field
+	currentSearch   string          // Current search term for filtering
 }
 
 // listOptions is a function type for configuring list options.
@@ -188,6 +188,13 @@ func WithFilterable(filterable bool) listOptions {
 	}
 }
 
+// WithHideFilterInput hides the filter input field.
+func WithHideFilterInput(hide bool) listOptions {
+	return func(m *model) {
+		m.hideFilterInput = hide
+	}
+}
+
 // New creates a new list model with the specified options.
 // The list starts with no items selected and requires SetItems to be called
 // or items to be provided via WithItems option.
@@ -206,7 +213,7 @@ func New(opts ...listOptions) ListModel {
 		opt(m)
 	}
 
-	if m.filterable {
+	if m.filterable && !m.hideFilterInput {
 		ti := textinput.New()
 		ti.Placeholder = "Type to filter..."
 		ti.SetVirtualCursor(false)
@@ -259,7 +266,7 @@ func (m *model) View() tea.View {
 		Height(m.viewState.height).
 		Render(m.viewState.content)
 
-	if m.filterable {
+	if m.filterable && !m.hideFilterInput {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			m.inputStyle().Render(m.input.View()),
@@ -267,7 +274,7 @@ func (m *model) View() tea.View {
 		)
 	}
 	view := tea.NewView(content)
-	if m.filterable {
+	if m.filterable && !m.hideFilterInput {
 		view.SetCursor(m.input.Cursor())
 	}
 	return view
@@ -294,15 +301,15 @@ func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keyMap.End):
 		return m, m.goToBottom()
 	default:
-		if !m.filterable {
-			return m, nil // Ignore other keys if not filterable
+		if !m.filterable || m.hideFilterInput {
+			return m, nil // Ignore other keys if not filterable or input is hidden
 		}
 		var cmds []tea.Cmd
 		u, cmd := m.input.Update(msg)
 		m.input = u
 		cmds = append(cmds, cmd)
 		if m.currentSearch != m.input.Value() {
-			cmd = m.filter(m.input.Value())
+			cmd = m.Filter(m.input.Value())
 			cmds = append(cmds, cmd)
 		}
 		m.currentSearch = m.input.Value()
@@ -923,7 +930,7 @@ func (m *model) GetSize() (int, int) {
 // SetSize updates the list dimensions and triggers a complete re-render.
 // Also updates the size of all items that support sizing.
 func (m *model) SetSize(width int, height int) tea.Cmd {
-	if m.filterable {
+	if m.filterable && !m.hideFilterInput {
 		height -= 2 // adjust for input field height and border
 	}
 
@@ -936,7 +943,7 @@ func (m *model) SetSize(width int, height int) tea.Cmd {
 	}
 	m.viewState.width = width
 	m.ResetView()
-	if m.filterable {
+	if m.filterable && !m.hideFilterInput {
 		m.input.SetWidth(m.getItemWidth() - 3)
 	}
 	return m.setAllItemsSize()
@@ -1152,7 +1159,7 @@ func (m *model) flattenSections(sections []section) []util.Model {
 	return result
 }
 
-func (m *model) filter(search string) tea.Cmd {
+func (m *model) Filter(search string) tea.Cmd {
 	var cmds []tea.Cmd
 	search = strings.TrimSpace(search)
 	search = strings.ToLower(search)
@@ -1189,6 +1196,7 @@ func (m *model) filter(search string) tea.Cmd {
 	// Set initial selection
 	if len(m.filteredItems) > 0 {
 		if m.viewState.reverse {
+			slices.Reverse(m.filteredItems)
 			m.selectionState.selectedIndex = m.findLastSelectableItem()
 		} else {
 			m.selectionState.selectedIndex = m.findFirstSelectableItem()

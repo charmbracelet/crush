@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/opencode-ai/opencode/internal/tui/components/chat"
+	"github.com/opencode-ai/opencode/internal/tui/components/completions"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
@@ -75,9 +76,9 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 
 	commandItems := []util.Model{}
 	if len(commands) > 0 {
-		commandItems = append(commandItems, NewItemSection("Custom"))
+		commandItems = append(commandItems, NewItemSection("Custom Commands"))
 		for _, cmd := range commands {
-			commandItems = append(commandItems, NewCommandItem(cmd))
+			commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
 		}
 	}
 
@@ -85,7 +86,7 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 
 	for _, cmd := range c.defaultCommands() {
 		c.commands = append(c.commands, cmd)
-		commandItems = append(commandItems, NewCommandItem(cmd))
+		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
 	}
 
 	c.commandList.SetItems(commandItems)
@@ -106,7 +107,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return c, nil // No item selected, do nothing
 			}
 			items := c.commandList.Items()
-			selectedItem := items[selectedItemInx].(CommandItem).Command()
+			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(Command)
 			return c, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				selectedItem.Handler(selectedItem),

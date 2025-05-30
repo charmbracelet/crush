@@ -12,6 +12,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.2.0
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/catppuccin/go v0.3.0
+	github.com/charlievieth/fastwalk v1.0.11
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250526131538-b3f0c9e42318
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250526132317-434f93986a5c
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
@@ -27,6 +28,7 @@ require (
 	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/openai/openai-go v0.1.0-beta.2
 	github.com/pressly/goose/v3 v3.24.2
+	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3
 	github.com/spf13/cobra v1.9.1
@@ -81,7 +83,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/lithammer/fuzzysearch v1.1.8
 	github.com/lucasb-eyer/go-colorful v1.2.0
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect

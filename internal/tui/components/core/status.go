@@ -72,7 +72,7 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case util.ClearStatusMsg:
 		m.info = util.InfoMsg{}
 
-	// Handle persistant logs
+	// Handle persistent logs
 	case pubsub.Event[logging.LogMessage]:
 		if msg.Payload.Persist {
 			switch msg.Payload.Level {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/slice"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/rivo/uniseg"
@@ -50,6 +51,9 @@ func Render(version string, compact bool, o Opts) string {
 	crush = b.String()
 
 	// Charm and version.
+	metaRowGap := 1
+	maxVersionWidth := crushWidth - lipgloss.Width(charm) - metaRowGap
+	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
 	gap := max(0, crushWidth-lipgloss.Width(charm)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 

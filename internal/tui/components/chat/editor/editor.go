@@ -261,29 +261,25 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *editorCmp) View() tea.View {
-	t := theme.CurrentTheme()
-
-	// Style the prompt with theme colors
-	style := lipgloss.NewStyle().
-		Padding(0, 0, 0, 1).
-		Bold(true).
-		Foreground(t.Primary())
-
+	t := styles.CurrentTheme()
 	cursor := m.textarea.Cursor()
-	cursor.X = cursor.X + m.x + 2
-	cursor.Y = cursor.Y + m.y + 1
+	cursor.X = cursor.X + m.x + 1
+	cursor.Y = cursor.Y + m.y + 1 // adjust for padding
 	if len(m.attachments) == 0 {
-		view := tea.NewView(lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View()))
+		content := t.S().Base.Padding(1).Render(
+			m.textarea.View(),
+		)
+		view := tea.NewView(content)
 		view.SetCursor(cursor)
 		return view
 	}
-	m.textarea.SetHeight(m.height - 1)
-	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Top,
-		m.attachmentsContent(),
-		lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"),
+	content := t.S().Base.Padding(0, 1, 1, 1).Render(
+		lipgloss.JoinVertical(lipgloss.Top,
+			m.attachmentsContent(),
 			m.textarea.View(),
 		),
-	))
+	)
+	view := tea.NewView(content)
 	view.SetCursor(cursor)
 	return view
 }
@@ -291,8 +287,8 @@ func (m *editorCmp) View() tea.View {
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	m.textarea.SetWidth(width - 3) // account for the prompt and padding right
-	m.textarea.SetHeight(height)
+	m.textarea.SetWidth(width - 2)   // adjust for padding
+	m.textarea.SetHeight(height - 2) // adjust for padding
 	return nil
 }
 
@@ -359,32 +355,18 @@ func (m *editorCmp) startCompletions() tea.Msg {
 }
 
 func CreateTextArea(existing *textarea.Model) textarea.Model {
-	t := theme.CurrentTheme()
-	bgColor := t.Background()
-	textColor := t.Text()
-	textMutedColor := t.TextMuted()
-
+	t := styles.CurrentTheme()
 	ta := textarea.New()
-	s := textarea.DefaultDarkStyles()
-	b := s.Blurred
-	b.Base = styles.BaseStyle().Background(bgColor).Foreground(textColor)
-	b.CursorLine = styles.BaseStyle().Background(bgColor)
-	b.Placeholder = styles.BaseStyle().Background(bgColor).Foreground(textMutedColor)
-	b.Text = styles.BaseStyle().Background(bgColor).Foreground(textColor)
-
-	f := s.Focused
-	f.Base = styles.BaseStyle().Background(bgColor).Foreground(textColor)
-	f.CursorLine = styles.BaseStyle().Background(bgColor)
-	f.Placeholder = styles.BaseStyle().Background(bgColor).Foreground(textMutedColor)
-	f.Text = styles.BaseStyle().Background(bgColor).Foreground(textColor)
-
-	s.Focused = f
-	s.Blurred = b
-	ta.SetStyles(s)
-
-	ta.Prompt = " "
+	ta.SetStyles(t.S().TextArea)
+	ta.SetPromptFunc(2, func(lineIndex int) string {
+		if lineIndex == 0 {
+			return "> "
+		}
+		return t.S().Muted.Render(": ")
+	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
+	ta.Placeholder = "Tell me more about this project..."
 	ta.SetVirtualCursor(false)
 
 	if existing != nil {

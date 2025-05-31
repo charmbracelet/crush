@@ -63,7 +63,7 @@ func Render(version string, compact bool, o Opts) string {
 	// Narrow version.
 	if compact {
 		field := fg(o.FieldColor, strings.Repeat(diag, crushWidth))
-		return strings.Join([]string{field, field, crush, field}, "\n")
+		return strings.Join([]string{field, field, crush, field, ""}, "\n")
 	}
 
 	fieldHeight := lipgloss.Height(crush)

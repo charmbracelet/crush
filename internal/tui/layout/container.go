@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -46,12 +46,11 @@ func (c *container) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (c *container) View() tea.View {
-	t := theme.CurrentTheme()
-	style := lipgloss.NewStyle()
+	t := styles.CurrentTheme()
 	width := c.width
 	height := c.height
 
-	style = style.Background(t.Background())
+	style := t.S().Base
 
 	// Apply border if any side is enabled
 	if c.borderTop || c.borderRight || c.borderBottom || c.borderLeft {
@@ -69,7 +68,7 @@ func (c *container) View() tea.View {
 			width--
 		}
 		style = style.Border(c.borderStyle, c.borderTop, c.borderRight, c.borderBottom, c.borderLeft)
-		style = style.BorderBackground(t.Background()).BorderForeground(t.BorderNormal())
+		style = style.BorderBackground(t.BgBase).BorderForeground(t.Border)
 	}
 	style = style.
 		Width(width).

@@ -18,6 +18,7 @@ require (
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c
 	github.com/charmbracelet/x/ansi v0.9.3-0.20250516160309-24eee56f89fa
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250530202730-6ba1785cd7b9
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0

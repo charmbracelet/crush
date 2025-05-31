@@ -1,0 +1,124 @@
+diff --git a/.opencode.json b/.opencode.json
+index 75e357d..59be1e8 100644
+--- a/.opencode.json
++++ b/.opencode.json
+@@ -6,6 +6,6 @@
+     }
+   },
+   "tui": {
+-    "theme": "opencode-dark"
++    "theme": "charm"
+   }
+ }
+diff --git a/go.mod b/go.mod
+index 18ad042..940a8e8 100644
+--- a/go.mod
++++ b/go.mod
+@@ -36,6 +36,8 @@ require (
+ 	github.com/stretchr/testify v1.10.0
+ )
+ 
++require github.com/charmbracelet/x/exp/charmtone v0.0.0-20250530202730-6ba1785cd7b9 // indirect
++
+ require (
+ 	cloud.google.com/go v0.116.0 // indirect
+ 	cloud.google.com/go/auth v0.13.0 // indirect
+diff --git a/go.sum b/go.sum
+index f6e08b7..8f347ed 100644
+--- a/go.sum
++++ b/go.sum
+@@ -84,6 +84,8 @@ github.com/charmbracelet/x/ansi v0.9.3-0.20250516160309-24eee56f89fa h1:JU05TLAB
+ github.com/charmbracelet/x/ansi v0.9.3-0.20250516160309-24eee56f89fa/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
+ github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz0Z3rsiOtMYiz8axkT24i9yFiueDhJbzyNUADmME=
+ github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa/go.mod h1:xBlh2Yi3DL3zy/2n15kITpg0YZardf/aa/hgUaIM6Rk=
++github.com/charmbracelet/x/exp/charmtone v0.0.0-20250530202730-6ba1785cd7b9 h1:f6tG7ApqIvXTpgF6MZ+C4Ga7669eiW9BsMkXEjDFHfY=
++github.com/charmbracelet/x/exp/charmtone v0.0.0-20250530202730-6ba1785cd7b9/go.mod h1:vr+xCFylsPYq2qSz+n5/jItjcK2/PgrKFMTI7VRR6CI=
+ github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a h1:FsHEJ52OC4VuTzU8t+n5frMjLvpYWEznSr/u8tnkCYw=
+ github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a/go.mod h1:wDlXFlCrmJ8J+swcL/MnGUuYnqgQdW9rhSD61oNMb6U=
+ github.com/charmbracelet/x/exp/slice v0.0.0-20250528180458-2d5d6cb84620 h1:/PN4jqP3ki9NvtHRrYZ9ewCutKZB6DK8frTW+Dj/MWs=
+diff --git a/internal/tui/components/chat/chat.go b/internal/tui/components/chat/chat.go
+index 2ee0b04..52c4dae 100644
+--- a/internal/tui/components/chat/chat.go
++++ b/internal/tui/components/chat/chat.go
+@@ -95,7 +95,7 @@ func lspsConfigured() string {
+ func logoBlock() string {
+ 	t := theme.CurrentTheme()
+ 	return logo.Render(version.Version, true, logo.Opts{
+-		FieldColor:   t.Accent(),
++		FieldColor:   t.Secondary(),
+ 		TitleColorA:  t.Primary(),
+ 		TitleColorB:  t.Secondary(),
+ 		CharmColor:   t.Primary(),
+diff --git a/internal/tui/tui.go b/internal/tui/tui.go
+index 9e8a62a..3f07956 100644
+--- a/internal/tui/tui.go
++++ b/internal/tui/tui.go
+@@ -18,6 +18,7 @@ import (
+ 	"github.com/opencode-ai/opencode/internal/tui/util"
+ )
+ 
++// appModel represents the main application model that manages pages, dialogs, and UI state.
+ type appModel struct {
+ 	width, height int
+ 	keyMap        KeyMap
+@@ -35,6 +36,7 @@ type appModel struct {
+ 	completions completions.Completions
+ }
+ 
++// Init initializes the application model and returns initial commands.
+ func (a appModel) Init() tea.Cmd {
+ 	var cmds []tea.Cmd
+ 	cmd := a.pages[a.currentPage].Init()
+@@ -46,6 +48,7 @@ func (a appModel) Init() tea.Cmd {
+ 	return tea.Batch(cmds...)
+ }
+ 
++// Update handles incoming messages and updates the application state.
+ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 	var cmds []tea.Cmd
+ 	var cmd tea.Cmd
+@@ -111,6 +114,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+ 	return a, tea.Batch(cmds...)
+ }
+ 
++// handleWindowResize processes window resize events and updates all components.
+ func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
+ 	var cmds []tea.Cmd
+ 	msg.Height -= 1 // Make space for the status bar
+@@ -134,6 +138,7 @@ func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
+ 	return tea.Batch(cmds...)
+ }
+ 
++// handleKeyPressMsg processes keyboard input and routes to appropriate handlers.
+ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
+ 	switch {
+ 	// completions
+@@ -182,11 +187,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
+ 	}
+ }
+ 
+-// RegisterCommand adds a command to the command dialog
+-// func (a *appModel) RegisterCommand(cmd dialog.Command) {
+-// 	a.commands = append(a.commands, cmd)
+-// }
+-
++// moveToPage handles navigation between different pages in the application.
+ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
+ 	if a.app.CoderAgent.IsBusy() {
+ 		// For now we don't move to any page if the agent is busy
+@@ -209,6 +210,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
+ 	return tea.Batch(cmds...)
+ }
+ 
++// View renders the complete application interface including pages, dialogs, and overlays.
+ func (a *appModel) View() tea.View {
+ 	pageView := a.pages[a.currentPage].View()
+ 	components := []string{
+@@ -252,6 +254,7 @@ func (a *appModel) View() tea.View {
+ 	return view
+ }
+ 
++// New creates and initializes a new TUI application model.
+ func New(app *app.App) tea.Model {
+ 	startPage := page.ChatPage
+ 	model := &appModel{

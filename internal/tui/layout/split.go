@@ -22,14 +22,18 @@ type SplitPaneLayout interface {
 }
 
 type splitPaneLayout struct {
-	width         int
-	height        int
+	width  int
+	height int
+
 	ratio         float64
 	verticalRatio float64
 
 	rightPanel  Container
 	leftPanel   Container
 	bottomPanel Container
+
+	fixedBottomHeight int // Fixed height for the bottom panel, if any
+	fixedRightWidth   int // Fixed width for the right panel, if any
 }
 
 type SplitPaneOption func(*splitPaneLayout)
@@ -141,8 +145,17 @@ func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	var topHeight, bottomHeight int
 	var cmds []tea.Cmd
 	if s.bottomPanel != nil {
-		topHeight = int(float64(height) * s.verticalRatio)
-		bottomHeight = height - topHeight
+		if s.fixedBottomHeight > 0 {
+			bottomHeight = s.fixedBottomHeight
+			topHeight = height - bottomHeight
+		} else {
+			topHeight = int(float64(height) * s.verticalRatio)
+			bottomHeight = height - topHeight
+			if bottomHeight <= 0 {
+				bottomHeight = 2
+				topHeight = height - bottomHeight
+			}
+		}
 	} else {
 		topHeight = height
 		bottomHeight = 0
@@ -150,8 +163,17 @@ func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 
 	var leftWidth, rightWidth int
 	if s.leftPanel != nil && s.rightPanel != nil {
-		leftWidth = int(float64(width) * s.ratio)
-		rightWidth = width - leftWidth
+		if s.fixedRightWidth > 0 {
+			rightWidth = s.fixedRightWidth
+			leftWidth = width - rightWidth
+		} else {
+			leftWidth = int(float64(width) * s.ratio)
+			rightWidth = width - leftWidth
+			if rightWidth <= 0 {
+				rightWidth = 2
+				leftWidth = width - rightWidth
+			}
+		}
 	} else if s.leftPanel != nil {
 		leftWidth = width
 		rightWidth = 0
@@ -260,8 +282,8 @@ func (s *splitPaneLayout) BindingKeys() []key.Binding {
 
 func NewSplitPane(options ...SplitPaneOption) SplitPaneLayout {
 	layout := &splitPaneLayout{
-		ratio:         0.7,
-		verticalRatio: 0.9, // Default 90% for top section, 10% for bottom
+		ratio:         0.8,
+		verticalRatio: 0.92, // Default 90% for top section, 10% for bottom
 	}
 	for _, option := range options {
 		option(layout)
@@ -296,5 +318,17 @@ func WithBottomPanel(panel Container) SplitPaneOption {
 func WithVerticalRatio(ratio float64) SplitPaneOption {
 	return func(s *splitPaneLayout) {
 		s.verticalRatio = ratio
+	}
+}
+
+func WithFixedBottomHeight(height int) SplitPaneOption {
+	return func(s *splitPaneLayout) {
+		s.fixedBottomHeight = height
+	}
+}
+
+func WithFixedRightWidth(width int) SplitPaneOption {
+	return func(s *splitPaneLayout) {
+		s.fixedRightWidth = width
 	}
 }

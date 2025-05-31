@@ -14,10 +14,12 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/quit"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/page"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/page/chat"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
+// appModel represents the main application model that manages pages, dialogs, and UI state.
 type appModel struct {
 	width, height int
 	keyMap        KeyMap
@@ -35,6 +37,7 @@ type appModel struct {
 	completions completions.Completions
 }
 
+// Init initializes the application model and returns initial commands.
 func (a appModel) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmd := a.pages[a.currentPage].Init()
@@ -46,6 +49,7 @@ func (a appModel) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
@@ -111,6 +115,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
+// handleWindowResize processes window resize events and updates all components.
 func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	msg.Height -= 1 // Make space for the status bar
@@ -134,6 +139,7 @@ func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// handleKeyPressMsg processes keyboard input and routes to appropriate handlers.
 func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	// completions
@@ -182,11 +188,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-// RegisterCommand adds a command to the command dialog
-// func (a *appModel) RegisterCommand(cmd dialog.Command) {
-// 	a.commands = append(a.commands, cmd)
-// }
-
+// moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	if a.app.CoderAgent.IsBusy() {
 		// For now we don't move to any page if the agent is busy
@@ -209,6 +211,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	pageView := a.pages[a.currentPage].View()
 	components := []string{
@@ -220,7 +223,6 @@ func (a *appModel) View() tea.View {
 	layers := []*lipgloss.Layer{
 		lipgloss.NewLayer(appView),
 	}
-	t := theme.CurrentTheme()
 	if a.dialog.HasDialogs() {
 		layers = append(
 			layers,
@@ -246,12 +248,15 @@ func (a *appModel) View() tea.View {
 	canvas := lipgloss.NewCanvas(
 		layers...,
 	)
+
+	t := styles.CurrentTheme()
 	view := tea.NewView(canvas.Render())
-	view.SetBackgroundColor(t.Background())
+	view.SetBackgroundColor(t.BgBase)
 	view.SetCursor(cursor)
 	return view
 }
 
+// New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
 	startPage := page.ChatPage
 	model := &appModel{
@@ -262,7 +267,7 @@ func New(app *app.App) tea.Model {
 		keyMap:      DefaultKeyMap(),
 
 		pages: map[page.PageID]util.Model{
-			page.ChatPage: page.NewChatPage(app),
+			page.ChatPage: chat.NewChatPage(app),
 			page.LogsPage: page.NewLogsPage(),
 		},
 

@@ -95,7 +95,7 @@ func lspsConfigured() string {
 func logoBlock() string {
 	t := theme.CurrentTheme()
 	return logo.Render(version.Version, true, logo.Opts{
-		FieldColor:   t.Accent(),
+		FieldColor:   t.Secondary(),
 		TitleColorA:  t.Primary(),
 		TitleColorB:  t.Secondary(),
 		CharmColor:   t.Primary(),

@@ -115,7 +115,7 @@ func (m *sidebarCmp) lspBlock() string {
 	t := styles.CurrentTheme()
 
 	section := t.S().Muted.Render(
-		core.Section("Configured LSPs", maxWidth),
+		core.Section("LSPs", maxWidth),
 	)
 
 	lspList := []string{section, ""}
@@ -126,7 +126,7 @@ func (m *sidebarCmp) lspBlock() string {
 			lipgloss.Left,
 			section,
 			"",
-			t.S().Muted.Render("No LSPs configured."),
+			t.S().Base.Foreground(t.Border).Render("None"),
 		)
 	}
 
@@ -158,7 +158,7 @@ func (m *sidebarCmp) mcpBlock() string {
 	t := styles.CurrentTheme()
 
 	section := t.S().Muted.Render(
-		core.Section("Configured MCPs", maxWidth),
+		core.Section("MCPs", maxWidth),
 	)
 
 	mcpList := []string{section, ""}
@@ -169,7 +169,7 @@ func (m *sidebarCmp) mcpBlock() string {
 			lipgloss.Left,
 			section,
 			"",
-			t.S().Muted.Render("No MCPs configured."),
+			t.S().Base.Foreground(t.Border).Render("None"),
 		)
 	}
 

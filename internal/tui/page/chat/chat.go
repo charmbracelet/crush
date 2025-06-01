@@ -166,7 +166,7 @@ func NewChatPage(app *app.App) util.Model {
 		layout: layout.NewSplitPane(
 			layout.WithRightPanel(sidebarContainer),
 			layout.WithBottomPanel(editorContainer),
-			layout.WithFixedBottomHeight(3),
+			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),
 		),
 	}

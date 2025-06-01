@@ -15,7 +15,7 @@ func Section(title string, width int) string {
 	length := len(title) + 1
 	remainingWidth := width - length
 	if remainingWidth > 0 {
-		title = title + " " + t.S().Subtle.Render(strings.Repeat(char, remainingWidth))
+		title = title + " " + t.S().Base.Foreground(t.Border).Render(strings.Repeat(char, remainingWidth))
 	}
 	return title
 }

@@ -133,8 +133,9 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.x = msg.X
 		c.y = msg.Y
 		items := []util.Model{}
+		t := styles.CurrentTheme()
 		for _, completion := range msg.Completions {
-			item := NewCompletionItem(completion.Title, completion.Value)
+			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
 			items = append(items, item)
 		}
 		c.height = max(min(10, len(items)), 1) // Ensure at least 1 item height

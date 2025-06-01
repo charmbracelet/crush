@@ -14,16 +14,16 @@ type CommandsDialogKeyMap struct {
 func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 	return CommandsDialogKeyMap{
 		Select: key.NewBinding(
-			key.WithKeys("enter"),
+			key.WithKeys("enter", "tab", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
 		),
 		Next: key.NewBinding(
-			key.WithKeys("tab", "down"),
-			key.WithHelp("tab/↓", "next"),
+			key.WithKeys("down", "ctrl+n"),
+			key.WithHelp("↓", "next item"),
 		),
 		Previous: key.NewBinding(
-			key.WithKeys("shift+tab", "up"),
-			key.WithHelp("shift+tab/↑", "previous"),
+			key.WithKeys("up", "ctrl+p"),
+			key.WithHelp("↑", "previous item"),
 		),
 	}
 }

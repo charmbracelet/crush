@@ -9,13 +9,26 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 )
 
-func Section(title string, width int) string {
+func Section(text string, width int) string {
 	t := styles.CurrentTheme()
 	char := "─"
-	length := len(title) + 1
+	length := len(text) + 1
 	remainingWidth := width - length
 	if remainingWidth > 0 {
-		title = title + " " + t.S().Base.Foreground(t.Border).Render(strings.Repeat(char, remainingWidth))
+		text = text + " " + t.S().Base.Foreground(t.Border).Render(strings.Repeat(char, remainingWidth))
+	}
+	return text
+}
+
+func Title(title string, width int) string {
+	t := styles.CurrentTheme()
+	char := "╱"
+	length := len(title) + 1
+	remainingWidth := width - length
+	lineStyle := t.S().Base.Foreground(t.Primary)
+	titleStyle := t.S().Base.Foreground(t.Secondary)
+	if remainingWidth > 0 {
+		title = titleStyle.Render(title) + " " + lineStyle.Render(strings.Repeat(char, remainingWidth))
 	}
 	return title
 }

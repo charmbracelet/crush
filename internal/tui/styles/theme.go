@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"image/color"
 
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/textarea"
+	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/glamour/v2/ansi"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -25,13 +27,16 @@ type Theme struct {
 	Tertiary  color.Color
 	Accent    color.Color
 
+	PrimaryLight color.Color
+
 	BgBase    color.Color
 	BgSubtle  color.Color
 	BgOverlay color.Color
 
-	FgBase   color.Color
-	FgMuted  color.Color
-	FgSubtle color.Color
+	FgBase     color.Color
+	FgMuted    color.Color
+	FgSubtle   color.Color
+	FgSelected color.Color
 
 	Border      color.Color
 	BorderFocus color.Color
@@ -51,24 +56,30 @@ type Theme struct {
 }
 
 type Styles struct {
-	Base lipgloss.Style
+	Base         lipgloss.Style
+	SelectedBase lipgloss.Style
 
-	Title    lipgloss.Style
-	Subtitle lipgloss.Style
-	Text     lipgloss.Style
-	Muted    lipgloss.Style
-	Subtle   lipgloss.Style
+	Title        lipgloss.Style
+	Subtitle     lipgloss.Style
+	Text         lipgloss.Style
+	TextSelected lipgloss.Style
+	Muted        lipgloss.Style
+	Subtle       lipgloss.Style
 
 	Success lipgloss.Style
 	Error   lipgloss.Style
 	Warning lipgloss.Style
 	Info    lipgloss.Style
-	// Markdown & Chroma
 
+	// Markdown & Chroma
 	Markdown ansi.StyleConfig
 
 	// Inputs
-	TextArea textarea.Styles
+	TextInput textinput.Styles
+	TextArea  textarea.Styles
+
+	// Help
+	Help help.Styles
 }
 
 func (t *Theme) S() *Styles {
@@ -84,6 +95,8 @@ func (t *Theme) buildStyles() *Styles {
 	return &Styles{
 		Base: base,
 
+		SelectedBase: base.Background(t.Primary),
+
 		Title: base.
 			Foreground(t.Accent).
 			Bold(true),
@@ -92,7 +105,8 @@ func (t *Theme) buildStyles() *Styles {
 			Foreground(t.Secondary).
 			Bold(true),
 
-		Text: base,
+		Text:         base,
+		TextSelected: base.Background(t.Primary).Foreground(t.FgSelected),
 
 		Muted: base.Foreground(t.FgMuted),
 
@@ -106,6 +120,25 @@ func (t *Theme) buildStyles() *Styles {
 
 		Info: base.Foreground(t.Info),
 
+		TextInput: textinput.Styles{
+			Focused: textinput.StyleState{
+				Text:        base,
+				Placeholder: base.Foreground(t.FgMuted),
+				Prompt:      base.Foreground(t.Tertiary),
+				Suggestion:  base.Foreground(t.FgMuted),
+			},
+			Blurred: textinput.StyleState{
+				Text:        base.Foreground(t.FgMuted),
+				Placeholder: base.Foreground(t.FgMuted),
+				Prompt:      base.Foreground(t.FgMuted),
+				Suggestion:  base.Foreground(t.FgMuted),
+			},
+			Cursor: textinput.CursorStyle{
+				Color: t.Secondary,
+				Shape: tea.CursorBar,
+				Blink: true,
+			},
+		},
 		TextArea: textarea.Styles{
 			Focused: textarea.StyleState{
 				Base:             base,
@@ -340,6 +373,16 @@ func (t *Theme) buildStyles() *Styles {
 			DefinitionDescription: ansi.StylePrimitive{
 				BlockPrefix: "\n ",
 			},
+		},
+
+		Help: help.Styles{
+			ShortKey:       base.Foreground(t.FgMuted),
+			ShortDesc:      base.Foreground(t.FgSubtle),
+			ShortSeparator: base.Foreground(t.Border),
+			Ellipsis:       base.Foreground(t.Border),
+			FullKey:        base.Foreground(t.FgMuted),
+			FullDesc:       base.Foreground(t.FgSubtle),
+			FullSeparator:  base.Foreground(t.Border),
 		},
 	}
 }

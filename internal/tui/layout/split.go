@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -126,12 +126,11 @@ func (s *splitPaneLayout) View() tea.View {
 		cursor = s.leftPanel.View().Cursor()
 	}
 
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 
-	style := lipgloss.NewStyle().
+	style := t.S().Base.
 		Width(s.width).
-		Height(s.height).
-		Background(t.Background())
+		Height(s.height)
 
 	view := tea.NewView(style.Render(finalView))
 	view.SetCursor(cursor)

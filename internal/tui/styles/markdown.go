@@ -9,8 +9,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
-const defaultMargin = 1
-
 // Helper functions for style pointers
 func boolPtr(b bool) *bool       { return &b }
 func stringPtr(s string) *string { return &s }

@@ -220,9 +220,9 @@ func (c *commandArgumentsDialogCmp) View() tea.View {
 }
 
 func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
-	offset := 13 + (1+c.focusIndex)*3
+	row, col := c.Position()
+	offset := row + 3 + (1+c.focusIndex)*3
 	cursor.Y += offset
-	_, col := c.Position()
 	cursor.X = cursor.X + col + 3
 	return cursor
 }
@@ -237,10 +237,11 @@ func (c *commandArgumentsDialogCmp) style() lipgloss.Style {
 		BorderForeground(t.TextMuted())
 }
 
-func (q *commandArgumentsDialogCmp) Position() (int, int) {
-	row := 10
-	col := q.wWidth / 2
-	col -= q.width / 2
+func (c *commandArgumentsDialogCmp) Position() (int, int) {
+	row := c.wHeight / 2
+	row -= c.wHeight / 2
+	col := c.wWidth / 2
+	col -= c.width / 2
 	return row, col
 }
 

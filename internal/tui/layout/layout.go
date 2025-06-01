@@ -3,6 +3,7 @@ package layout
 import (
 	"reflect"
 
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
@@ -24,6 +25,10 @@ type Bindings interface {
 
 type Positionable interface {
 	SetPosition(x, y int) tea.Cmd
+}
+
+type Help interface {
+	Help() help.KeyMap
 }
 
 func KeyMapToSlice(t any) (bindings []key.Binding) {

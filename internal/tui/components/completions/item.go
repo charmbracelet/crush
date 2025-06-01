@@ -1,13 +1,14 @@
 package completions
 
 import (
+	"image/color"
+
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 	"github.com/rivo/uniseg"
 )
@@ -27,14 +28,33 @@ type completionItemCmp struct {
 	value        any
 	focus        bool
 	matchIndexes []int
+	bgColor      color.Color
 }
 
-func NewCompletionItem(text string, value any, matchIndexes ...int) CompletionItem {
-	return &completionItemCmp{
-		text:         text,
-		value:        value,
-		matchIndexes: matchIndexes,
+type completionOptions func(*completionItemCmp)
+
+func WithBackgroundColor(c color.Color) completionOptions {
+	return func(cmp *completionItemCmp) {
+		cmp.bgColor = c
 	}
+}
+
+func WithMatchIndexes(indexes ...int) completionOptions {
+	return func(cmp *completionItemCmp) {
+		cmp.matchIndexes = indexes
+	}
+}
+
+func NewCompletionItem(text string, value any, opts ...completionOptions) CompletionItem {
+	c := &completionItemCmp{
+		text:  text,
+		value: value,
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // Init implements CommandItem.
@@ -49,15 +69,18 @@ func (c *completionItemCmp) Update(tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements CommandItem.
 func (c *completionItemCmp) View() tea.View {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 
-	baseStyle := styles.BaseStyle().Background(t.BackgroundSecondary())
-	titleStyle := baseStyle.Padding(0, 1).Width(c.width).Foreground(t.Text())
-	titleMatchStyle := baseStyle.Foreground(t.Text()).Underline(true)
+	titleStyle := t.S().Text.Padding(0, 1).Width(c.width)
+	titleMatchStyle := t.S().Text.Underline(true)
+	if c.bgColor != nil {
+		titleStyle = titleStyle.Background(c.bgColor)
+		titleMatchStyle = titleMatchStyle.Background(c.bgColor)
+	}
 
 	if c.focus {
-		titleStyle = titleStyle.Foreground(t.Background()).Background(t.Primary()).Bold(true)
-		titleMatchStyle = titleMatchStyle.Foreground(t.Background()).Background(t.Primary()).Bold(true)
+		titleStyle = t.S().TextSelected.Padding(0, 1).Width(c.width)
+		titleMatchStyle = t.S().TextSelected.Underline(true)
 	}
 
 	var truncatedTitle string

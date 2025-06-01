@@ -1,17 +1,21 @@
 package tui
 
 import (
+	"context"
+
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/app"
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/pubsub"
+	cmpChat "github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/completions"
 	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/commands"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/quit"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/sessions"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/page"
 	"github.com/opencode-ai/opencode/internal/tui/page/chat"
@@ -35,6 +39,9 @@ type appModel struct {
 
 	dialog      dialogs.DialogCmp
 	completions completions.Completions
+
+	// Session
+	selectedSessionID string // The ID of the currently selected session
 }
 
 // Init initializes the application model and returns initial commands.
@@ -90,6 +97,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, statusCmd)
 		return a, tea.Batch(cmds...)
 
+	// Session
+	case cmpChat.SessionSelectedMsg:
+		a.selectedSessionID = msg.ID
 	// Logs
 	case pubsub.Event[logging.LogMessage]:
 		// Send to the status component
@@ -170,7 +180,13 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(),
 		})
-
+	case key.Matches(msg, a.keyMap.SwitchSession):
+		return func() tea.Msg {
+			allSessions, _ := a.app.Sessions.List(context.Background())
+			return dialogs.OpenDialogMsg{
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+			}
+		}
 	// Page navigation
 	case key.Matches(msg, a.keyMap.Logs):
 		return a.moveToPage(page.LogsPage)

@@ -39,6 +39,7 @@ type ListModel interface {
 	ResetView()                     // Clear rendering cache and reset scroll position
 	Items() []util.Model            // Get all items in the list
 	SelectedIndex() int             // Get the index of the currently selected item
+	SetSelected(int) tea.Cmd        // Set the selected item by index and scroll to it
 	Filter(string) tea.Cmd          // Filter items based on a search term
 }
 
@@ -133,11 +134,12 @@ type model struct {
 	gapSize        int            // Number of empty lines between items
 	padding        []int          // Padding around the list content
 
-	filterable      bool            // Whether items can be filtered
-	filteredItems   []util.Model    // Filtered items based on current search
-	input           textinput.Model // Input field for filtering items
-	hideFilterInput bool            // Whether to hide the filter input field
-	currentSearch   string          // Current search term for filtering
+	filterable        bool            // Whether items can be filtered
+	filterPlaceholder string          // Placeholder text for filter input
+	filteredItems     []util.Model    // Filtered items based on current search
+	input             textinput.Model // Input field for filtering items
+	hideFilterInput   bool            // Whether to hide the filter input field
+	currentSearch     string          // Current search term for filtering
 }
 
 // listOptions is a function type for configuring list options.
@@ -195,29 +197,39 @@ func WithHideFilterInput(hide bool) listOptions {
 	}
 }
 
+// WithFilterPlaceholder sets the placeholder text for the filter input field.
+func WithFilterPlaceholder(placeholder string) listOptions {
+	return func(m *model) {
+		m.filterPlaceholder = placeholder
+	}
+}
+
 // New creates a new list model with the specified options.
 // The list starts with no items selected and requires SetItems to be called
 // or items to be provided via WithItems option.
 func New(opts ...listOptions) ListModel {
 	m := &model{
-		help:           help.New(),
-		keyMap:         DefaultKeyMap(),
-		allItems:       []util.Model{},
-		filteredItems:  []util.Model{},
-		renderState:    newRenderState(),
-		gapSize:        DefaultGapSize,
-		padding:        []int{},
-		selectionState: selectionState{selectedIndex: NoSelection},
+		help:              help.New(),
+		keyMap:            DefaultKeyMap(),
+		allItems:          []util.Model{},
+		filteredItems:     []util.Model{},
+		renderState:       newRenderState(),
+		gapSize:           DefaultGapSize,
+		padding:           []int{},
+		selectionState:    selectionState{selectedIndex: NoSelection},
+		filterPlaceholder: "Type to filter...",
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
 
 	if m.filterable && !m.hideFilterInput {
+		t := styles.CurrentTheme()
 		ti := textinput.New()
-		ti.Placeholder = "Type to filter..."
+		ti.Placeholder = m.filterPlaceholder
 		ti.SetVirtualCursor(false)
 		ti.Focus()
+		ti.SetStyles(t.S().TextInput)
 		m.input = ti
 
 		// disable j,k movements
@@ -616,7 +628,7 @@ func (m *model) isSectionHeader(index int) bool {
 
 // findFirstSelectableItem finds the first item that is not a section header.
 func (m *model) findFirstSelectableItem() int {
-	for i := 0; i < len(m.filteredItems); i++ {
+	for i := range m.filteredItems {
 		if !m.isSectionHeader(i) {
 			return i
 		}
@@ -944,7 +956,7 @@ func (m *model) SetSize(width int, height int) tea.Cmd {
 	m.viewState.width = width
 	m.ResetView()
 	if m.filterable && !m.hideFilterInput {
-		m.input.SetWidth(m.getItemWidth() - 3)
+		m.input.SetWidth(m.getItemWidth() - 5)
 	}
 	return m.setAllItemsSize()
 }
@@ -1096,7 +1108,7 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 }
 
 func (c *model) inputStyle() lipgloss.Style {
-	return styles.BaseStyle()
+	return styles.BaseStyle().Padding(0, 1, 1, 1)
 }
 
 // section represents a group of items under a section header.
@@ -1274,4 +1286,23 @@ func (m *model) SelectedIndex() int {
 		return NoSelection
 	}
 	return m.selectionState.selectedIndex
+}
+
+// SetSelected sets the selected item by index and automatically scrolls to make it visible.
+// If the index is invalid or points to a section header, it finds the nearest selectable item.
+func (m *model) SetSelected(index int) tea.Cmd {
+	changeNeeded := m.selectionState.selectedIndex - index
+	cmds := []tea.Cmd{}
+	if changeNeeded < 0 {
+		for range -changeNeeded {
+			cmds = append(cmds, m.selectNextItem())
+			m.renderVisible()
+		}
+	} else if changeNeeded > 0 {
+		for range changeNeeded {
+			cmds = append(cmds, m.selectPreviousItem())
+			m.renderVisible()
+		}
+	}
+	return tea.Batch(cmds...)
 }

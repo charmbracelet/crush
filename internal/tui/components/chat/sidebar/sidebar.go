@@ -50,6 +50,8 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.ID != m.session.ID {
 			m.session = msg
 		}
+	case chat.SessionClearedMsg:
+		m.session = session.Session{}
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
 			if m.session.ID == msg.Payload.ID {

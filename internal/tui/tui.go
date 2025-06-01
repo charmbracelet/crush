@@ -100,6 +100,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Session
 	case cmpChat.SessionSelectedMsg:
 		a.selectedSessionID = msg.ID
+	case cmpChat.SessionClearedMsg:
+		a.selectedSessionID = ""
 	// Logs
 	case pubsub.Event[logging.LogMessage]:
 		// Send to the status component

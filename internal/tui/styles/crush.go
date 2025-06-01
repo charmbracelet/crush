@@ -10,30 +10,33 @@ func NewCrushTheme() *Theme {
 		Name:   "crush",
 		IsDark: true,
 
-		Primary:   charmtone.Charple,
-		Secondary: charmtone.Dolly,
-		Tertiary:  charmtone.Bok,
-		Accent:    charmtone.Zest,
+		Primary:   lipgloss.Color(charmtone.Charple.Hex()),
+		Secondary: lipgloss.Color(charmtone.Dolly.Hex()),
+		Tertiary:  lipgloss.Color(charmtone.Bok.Hex()),
+		Accent:    lipgloss.Color(charmtone.Zest.Hex()),
+
+		PrimaryLight: lipgloss.Color(charmtone.Hazy.Hex()),
 
 		// Backgrounds
-		BgBase:    charmtone.Pepper,
-		BgSubtle:  charmtone.Charcoal,
-		BgOverlay: charmtone.Iron,
+		BgBase:    lipgloss.Color(charmtone.Pepper.Hex()),
+		BgSubtle:  lipgloss.Color(charmtone.Charcoal.Hex()),
+		BgOverlay: lipgloss.Color(charmtone.Iron.Hex()),
 
 		// Foregrounds
-		FgBase:   charmtone.Ash,
-		FgMuted:  charmtone.Squid,
-		FgSubtle: charmtone.Oyster,
+		FgBase:     lipgloss.Color(charmtone.Ash.Hex()),
+		FgMuted:    lipgloss.Color(charmtone.Squid.Hex()),
+		FgSubtle:   lipgloss.Color(charmtone.Oyster.Hex()),
+		FgSelected: lipgloss.Color(charmtone.Salt.Hex()),
 
 		// Borders
-		Border:      charmtone.Charcoal,
-		BorderFocus: charmtone.Charple,
+		Border:      lipgloss.Color(charmtone.Charcoal.Hex()),
+		BorderFocus: lipgloss.Color(charmtone.Charple.Hex()),
 
 		// Status
-		Success: charmtone.Guac,
-		Error:   charmtone.Sriracha,
-		Warning: charmtone.Uni,
-		Info:    charmtone.Malibu,
+		Success: lipgloss.Color(charmtone.Guac.Hex()),
+		Error:   lipgloss.Color(charmtone.Sriracha.Hex()),
+		Warning: lipgloss.Color(charmtone.Uni.Hex()),
+		Info:    lipgloss.Color(charmtone.Malibu.Hex()),
 
 		// TODO: fix this.
 		SyntaxBg:      lipgloss.Color("#1C1C1F"),

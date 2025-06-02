@@ -42,7 +42,7 @@ func Render(version string, compact bool, o Opts) string {
 	}
 
 	// Title.
-	crush := renderWord(1, !compact, letterC, letterR, letterU, LetterS, letterH)
+	crush := renderWord(1, !compact, letterC, letterR, letterU, letterS, letterH)
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
@@ -216,10 +216,10 @@ func letterR(stretch bool) string {
 	)
 }
 
-// LetterS renders the letter S in a stylized way. It takes an integer that
+// letterS renders the letter S in a stylized way. It takes an integer that
 // determines how many cells to stretch the letter. If the stretch is less than
 // 1, it defaults to no stretching.
-func LetterS(stretch bool) string {
+func letterS(stretch bool) string {
 	// Here's what we're making:
 	//
 	// ▄▀▀▀▀
@@ -374,7 +374,10 @@ func blendColors(size int, stops ...color.Color) []color.Color {
 		segmentSize := segmentSizes[i]
 
 		for j := range segmentSize {
-			t := float64(j) / float64(segmentSize)
+			var t float64
+			if segmentSize > 1 {
+				t = float64(j) / float64(segmentSize-1)
+			}
 			c := c1.BlendHcl(c2, t)
 			blended = append(blended, c)
 		}

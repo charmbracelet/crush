@@ -374,7 +374,10 @@ func blendColors(size int, stops ...color.Color) []color.Color {
 		segmentSize := segmentSizes[i]
 
 		for j := range segmentSize {
-			t := float64(j) / float64(segmentSize)
+			var t float64
+			if segmentSize > 1 {
+				t = float64(j) / float64(segmentSize-1)
+			}
 			c := c1.BlendHcl(c2, t)
 			blended = append(blended, c)
 		}

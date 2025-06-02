@@ -124,7 +124,7 @@ func (s *sessionDialogCmp) View() tea.View {
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Session", s.width-4)),
 		listView.String(),
 		"",
-		t.S().Base.Width(s.width-2).PaddingRight(2).AlignHorizontal(lipgloss.Right).Render(s.help.View(s.keyMap)),
+		t.S().Base.Width(s.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(s.help.View(s.keyMap)),
 	)
 
 	v := tea.NewView(s.style().Render(content))

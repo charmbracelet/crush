@@ -27,7 +27,9 @@ type Theme struct {
 	Tertiary  color.Color
 	Accent    color.Color
 
-	PrimaryLight color.Color
+	// Colors
+	Blue color.Color
+	// TODO: add any others needed
 
 	BgBase    color.Color
 	BgSubtle  color.Color

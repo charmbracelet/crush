@@ -26,7 +26,7 @@ func Title(title string, width int) string {
 	length := len(title) + 1
 	remainingWidth := width - length
 	lineStyle := t.S().Base.Foreground(t.Primary)
-	titleStyle := t.S().Base.Foreground(t.Secondary)
+	titleStyle := t.S().Base.Foreground(t.Primary)
 	if remainingWidth > 0 {
 		title = titleStyle.Render(title) + " " + lineStyle.Render(strings.Repeat(char, remainingWidth))
 	}

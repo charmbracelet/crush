@@ -358,11 +358,11 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(2, func(lineIndex int) string {
+	ta.SetPromptFunc(4, func(lineIndex int) string {
 		if lineIndex == 0 {
-			return "> "
+			return "  > "
 		}
-		return t.S().Muted.Render(": ")
+		return t.S().Base.Foreground(t.Blue).Render("::: ")
 	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1

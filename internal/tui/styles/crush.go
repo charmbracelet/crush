@@ -15,7 +15,7 @@ func NewCrushTheme() *Theme {
 		Tertiary:  lipgloss.Color(charmtone.Bok.Hex()),
 		Accent:    lipgloss.Color(charmtone.Zest.Hex()),
 
-		PrimaryLight: lipgloss.Color(charmtone.Hazy.Hex()),
+		Blue: lipgloss.Color(charmtone.Malibu.Hex()),
 
 		// Backgrounds
 		BgBase:    lipgloss.Color(charmtone.Pepper.Hex()),

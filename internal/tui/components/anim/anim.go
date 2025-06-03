@@ -231,8 +231,20 @@ func (a anim) ID() string {
 }
 
 func (a *anim) updateChars(chars *[]cyclingChar) {
+	// Cache time calculation to avoid repeated time.Now() calls.
+	now := time.Now()
+
 	for i, c := range *chars {
-		switch c.state(a.start) {
+		var state charState
+		if now.Before(a.start.Add(c.initialDelay)) {
+			state = charInitialState
+		} else if c.finalValue > 0 && now.After(a.start.Add(c.initialDelay)) {
+			state = charEndOfLifeState
+		} else {
+			state = charCyclingState
+		}
+
+		switch state {
 		case charInitialState:
 			(*chars)[i].currentValue = '.'
 		case charCyclingState:

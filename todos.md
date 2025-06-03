@@ -9,7 +9,7 @@
 
 ## Dialogs
 
-- [ ] Move sessions and modal dialog to the commands
+- [x] Cleanup Commands
 - [x] Sessions dialog
-- [ ] Commands
 - [ ] Models
+- [~] Move sessions and model dialog to the commands

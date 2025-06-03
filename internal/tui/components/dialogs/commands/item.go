@@ -1,15 +1,12 @@
 package commands
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -19,8 +16,9 @@ type ItemSection interface {
 	list.SectionHeader
 }
 type itemSectionModel struct {
-	width int
-	title string
+	width     int
+	title     string
+	noPadding bool // No padding for the section header
 }
 
 func NewItemSection(title string) ItemSection {
@@ -38,16 +36,11 @@ func (m *itemSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *itemSectionModel) View() tea.View {
-	t := theme.CurrentTheme()
-	title := ansi.Truncate(m.title, m.width-1, "…")
-	style := styles.BaseStyle().Padding(1, 0, 0, 0).Width(m.width).Foreground(t.TextMuted()).Bold(true)
-	if len(title) < m.width {
-		remainingWidth := m.width - lipgloss.Width(title)
-		if remainingWidth > 0 {
-			title += " " + strings.Repeat("─", remainingWidth-1)
-		}
-	}
-	return tea.NewView(style.Render(title))
+	t := styles.CurrentTheme()
+	title := ansi.Truncate(m.title, m.width-2, "…")
+	style := t.S().Base.Padding(1, 1, 0, 1)
+	title = t.S().Muted.Render(title)
+	return tea.NewView(style.Render(core.Section(title, m.width-2)))
 }
 
 func (m *itemSectionModel) GetSize() (int, int) {

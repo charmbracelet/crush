@@ -63,7 +63,13 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 		}
 	}
 
-	sessionsList := list.New(list.WithFilterable(true), list.WithFilterPlaceholder("Enter a session name"), list.WithKeyMap(listKeyMap), list.WithItems(items))
+	sessionsList := list.New(
+		list.WithFilterable(true),
+		list.WithFilterPlaceholder("Enter a session name"),
+		list.WithKeyMap(listKeyMap),
+		list.WithItems(items),
+		list.WithWrapNavigation(true),
+	)
 	help := help.New()
 	help.Styles = t.S().Help
 	s := &sessionDialogCmp{

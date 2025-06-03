@@ -93,6 +93,7 @@ type anim struct {
 	id              string
 	cachedTheme     theme.Theme
 	cachedTextStyle lipgloss.Style
+	cachedDot       string
 }
 
 type animOption func(*anim)
@@ -121,6 +122,7 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 		id:              id.String(),
 		cachedTheme:     t,
 		cachedTextStyle: styles.BaseStyle().Foreground(t.Text()),
+		cachedDot:       styles.BaseStyle().Foreground(t.Text()).Render("."),
 	}
 
 	for _, opt := range opts {
@@ -273,7 +275,11 @@ func (a anim) View() tea.View {
 			b.WriteString(a.ramp[i].Render(string(c.currentValue)))
 			continue
 		}
-		b.WriteRune(c.currentValue)
+		if c.currentValue == '.' {
+			b.WriteString(a.cachedDot)
+		} else {
+			b.WriteRune(c.currentValue)
+		}
 	}
 
 	if len(a.labelChars) > 1 {

@@ -1,4 +1,4 @@
-package diff_test
+package diffview_test
 
 import (
 	"bytes"

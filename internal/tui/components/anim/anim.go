@@ -91,6 +91,8 @@ type anim struct {
 	ellipsis        spinner.Model
 	ellipsisStarted bool
 	id              string
+	cachedTheme     theme.Theme
+	cachedTextStyle lipgloss.Style
 }
 
 type animOption func(*anim)
@@ -111,11 +113,14 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	}
 
 	id := uuid.New()
+	t := theme.CurrentTheme()
 	c := anim{
-		start:    time.Now(),
-		label:    []rune(gap + label),
-		ellipsis: spinner.New(spinner.WithSpinner(spinner.Ellipsis)),
-		id:       id.String(),
+		start:           time.Now(),
+		label:           []rune(gap + label),
+		ellipsis:        spinner.New(spinner.WithSpinner(spinner.Ellipsis)),
+		id:              id.String(),
+		cachedTheme:     t,
+		cachedTextStyle: styles.BaseStyle().Foreground(t.Text()),
 	}
 
 	for _, opt := range opts {
@@ -129,7 +134,7 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 		// Note: double capacity for color cycling as we'll need to reverse and
 		// append the ramp for seamless transitions.
 		c.ramp = make([]lipgloss.Style, n, n*2) //nolint:mnd
-		ramp := makeGradientRamp(n)
+		ramp := makeGradientRamp(n, t)
 		for i, color := range ramp {
 			c.ramp[i] = lipgloss.NewStyle().Foreground(color)
 		}
@@ -240,7 +245,6 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 
 // View renders the animation.
 func (a anim) View() tea.View {
-	t := theme.CurrentTheme()
 	var b strings.Builder
 
 	for i, c := range a.cyclingChars {
@@ -252,21 +256,18 @@ func (a anim) View() tea.View {
 	}
 
 	if len(a.labelChars) > 1 {
-		textStyle := styles.BaseStyle().
-			Foreground(t.Text())
 		for _, c := range a.labelChars {
 			b.WriteString(
-				textStyle.Render(string(c.currentValue)),
+				a.cachedTextStyle.Render(string(c.currentValue)),
 			)
 		}
-		return tea.NewView(b.String() + textStyle.Render(a.ellipsis.View()))
+		return tea.NewView(b.String() + a.cachedTextStyle.Render(a.ellipsis.View()))
 	}
 
 	return tea.NewView(b.String())
 }
 
-func makeGradientRamp(length int) []color.Color {
-	t := theme.CurrentTheme()
+func makeGradientRamp(length int, t theme.Theme) []color.Color {
 	startColor := theme.GetColor(t.Primary())
 	endColor := theme.GetColor(t.Secondary())
 	var (

@@ -345,7 +345,6 @@ func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.currentSearch = m.input.Value()
 		return m, tea.Batch(cmds...)
-
 	}
 	return m, nil
 }

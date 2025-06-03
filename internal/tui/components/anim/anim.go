@@ -233,8 +233,9 @@ func (a anim) ID() string {
 func (a *anim) updateChars(chars *[]cyclingChar) {
 	// Cache time calculation to avoid repeated time.Now() calls.
 	now := time.Now()
+	charSlice := *chars // dereference once to avoid repeated pointer access
 
-	for i, c := range *chars {
+	for i, c := range charSlice {
 		var state charState
 		if now.Before(a.start.Add(c.initialDelay)) {
 			state = charInitialState
@@ -246,11 +247,11 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 
 		switch state {
 		case charInitialState:
-			(*chars)[i].currentValue = '.'
+			charSlice[i].currentValue = '.'
 		case charCyclingState:
-			(*chars)[i].currentValue = c.randomRune()
+			charSlice[i].currentValue = c.randomRune()
 		case charEndOfLifeState:
-			(*chars)[i].currentValue = c.finalValue
+			charSlice[i].currentValue = c.finalValue
 		}
 	}
 }

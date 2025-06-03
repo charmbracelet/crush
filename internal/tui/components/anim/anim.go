@@ -245,7 +245,15 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 
 // View renders the animation.
 func (a anim) View() tea.View {
+	// Pre-allocate builder capacity to avoid reallocations.
+	// Estimate: cycling chars + label chars + ellipsis + style overhead.
+	const (
+		bytesPerChar = 20 // accounts for ANSI color codes and styling
+		bufferSize   = 50 // ellipsis and safety margin
+	)
+	estimatedCap := len(a.cyclingChars)*bytesPerChar + len(a.labelChars)*bytesPerChar + bufferSize
 	var b strings.Builder
+	b.Grow(estimatedCap)
 
 	for i, c := range a.cyclingChars {
 		if len(a.ramp) > i {

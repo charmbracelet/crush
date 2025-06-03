@@ -1,0 +1,7 @@
+--- test.txt
++++ test.txt
+@@ -1 +1 @@
+-This is the original content.
+\ No newline at end of file
++This is the modified content.
+\ No newline at end of file

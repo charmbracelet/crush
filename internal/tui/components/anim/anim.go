@@ -269,7 +269,7 @@ func (a anim) View() tea.View {
 				a.cachedTextStyle.Render(string(c.currentValue)),
 			)
 		}
-		return tea.NewView(b.String() + a.cachedTextStyle.Render(a.ellipsis.View()))
+		b.WriteString(a.cachedTextStyle.Render(a.ellipsis.View()))
 	}
 
 	return tea.NewView(b.String())

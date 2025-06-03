@@ -9,12 +9,13 @@ type CommandsDialogKeyMap struct {
 	Select   key.Binding
 	Next     key.Binding
 	Previous key.Binding
+	Tab      key.Binding
 }
 
 func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 	return CommandsDialogKeyMap{
 		Select: key.NewBinding(
-			key.WithKeys("enter", "tab", "ctrl+y"),
+			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
 		),
 		Next: key.NewBinding(
@@ -24,6 +25,10 @@ func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 		Previous: key.NewBinding(
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
+		),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch selection"),
 		),
 	}
 }
@@ -42,9 +47,16 @@ func (k CommandsDialogKeyMap) FullHelp() [][]key.Binding {
 // ShortHelp implements help.KeyMap.
 func (k CommandsDialogKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
+		k.Tab,
+		key.NewBinding(
+			key.WithKeys("down", "up"),
+			key.WithHelp("↑↓", "choose"),
+		),
 		k.Select,
-		k.Next,
-		k.Previous,
+		key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
 	}
 }
 

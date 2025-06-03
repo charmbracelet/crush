@@ -14,6 +14,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/commands"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/models"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/quit"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/sessions"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
@@ -116,6 +117,20 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, pageCmd)
 		}
 		return a, tea.Batch(cmds...)
+	// Commands
+	case commands.SwitchSessionsMsg:
+		return a, func() tea.Msg {
+			allSessions, _ := a.app.Sessions.List(context.Background())
+			return dialogs.OpenDialogMsg{
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+			}
+		}
+	case commands.SwitchModelMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: models.NewModelDialogCmp(),
+			},
+		)
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 	}
@@ -182,13 +197,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(),
 		})
-	case key.Matches(msg, a.keyMap.SwitchSession):
-		return func() tea.Msg {
-			allSessions, _ := a.app.Sessions.List(context.Background())
-			return dialogs.OpenDialogMsg{
-				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
-			}
-		}
 	// Page navigation
 	case key.Matches(msg, a.keyMap.Logs):
 		return a.moveToPage(page.LogsPage)

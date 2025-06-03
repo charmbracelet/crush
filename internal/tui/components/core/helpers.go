@@ -12,10 +12,11 @@ import (
 func Section(text string, width int) string {
 	t := styles.CurrentTheme()
 	char := "─"
-	length := len(text) + 1
+	length := lipgloss.Width(text) + 1
 	remainingWidth := width - length
+	lineStyle := t.S().Base.Foreground(t.Border)
 	if remainingWidth > 0 {
-		text = text + " " + t.S().Base.Foreground(t.Border).Render(strings.Repeat(char, remainingWidth))
+		text = text + " " + lineStyle.Render(strings.Repeat(char, remainingWidth))
 	}
 	return text
 }
@@ -23,7 +24,7 @@ func Section(text string, width int) string {
 func Title(title string, width int) string {
 	t := styles.CurrentTheme()
 	char := "╱"
-	length := len(title) + 1
+	length := lipgloss.Width(title) + 1
 	remainingWidth := width - length
 	lineStyle := t.S().Base.Foreground(t.Primary)
 	titleStyle := t.S().Base.Foreground(t.Primary)

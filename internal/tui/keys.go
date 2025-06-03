@@ -6,14 +6,13 @@ import (
 )
 
 type KeyMap struct {
-	Logs          key.Binding
-	Quit          key.Binding
-	Help          key.Binding
-	SwitchSession key.Binding
-	Commands      key.Binding
-	FilePicker    key.Binding
-	Models        key.Binding
-	SwitchTheme   key.Binding
+	Logs        key.Binding
+	Quit        key.Binding
+	Help        key.Binding
+	Commands    key.Binding
+	FilePicker  key.Binding
+	Models      key.Binding
+	SwitchTheme key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -31,11 +30,6 @@ func DefaultKeyMap() KeyMap {
 		Help: key.NewBinding(
 			key.WithKeys("ctrl+_"),
 			key.WithHelp("ctrl+?", "toggle help"),
-		),
-
-		SwitchSession: key.NewBinding(
-			key.WithKeys("ctrl+s"),
-			key.WithHelp("ctrl+s", "switch session"),
 		),
 
 		Commands: key.NewBinding(

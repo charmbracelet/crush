@@ -133,11 +133,13 @@ type model struct {
 	allItems       []util.Model   // The actual list items
 	gapSize        int            // Number of empty lines between items
 	padding        []int          // Padding around the list content
+	wrapNavigation bool           // Whether to wrap navigation at the ends
 
 	filterable        bool            // Whether items can be filtered
 	filterPlaceholder string          // Placeholder text for filter input
 	filteredItems     []util.Model    // Filtered items based on current search
 	input             textinput.Model // Input field for filtering items
+	inputStyle        lipgloss.Style  // Style for the input field
 	hideFilterInput   bool            // Whether to hide the filter input field
 	currentSearch     string          // Current search term for filtering
 }
@@ -204,10 +206,26 @@ func WithFilterPlaceholder(placeholder string) listOptions {
 	}
 }
 
+// WithInputStyle sets the style for the filter input field.
+func WithInputStyle(style lipgloss.Style) listOptions {
+	return func(m *model) {
+		m.inputStyle = style
+	}
+}
+
+// WithWrapNavigation enables wrapping navigation at the ends of the list.
+func WithWrapNavigation(wrap bool) listOptions {
+	return func(m *model) {
+		m.wrapNavigation = wrap
+	}
+}
+
 // New creates a new list model with the specified options.
 // The list starts with no items selected and requires SetItems to be called
 // or items to be provided via WithItems option.
 func New(opts ...listOptions) ListModel {
+	t := styles.CurrentTheme()
+
 	m := &model{
 		help:              help.New(),
 		keyMap:            DefaultKeyMap(),
@@ -218,6 +236,7 @@ func New(opts ...listOptions) ListModel {
 		padding:           []int{},
 		selectionState:    selectionState{selectedIndex: NoSelection},
 		filterPlaceholder: "Type to filter...",
+		inputStyle:        t.S().Base.Padding(0, 1, 1, 1),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -281,7 +300,7 @@ func (m *model) View() tea.View {
 	if m.filterable && !m.hideFilterInput {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
-			m.inputStyle().Render(m.input.View()),
+			m.inputStyle.Render(m.input.View()),
 			content,
 		)
 	}
@@ -400,7 +419,7 @@ func (m *model) renderVisibleForward() {
 	renderer := &forwardRenderer{
 		model:   m,
 		start:   0,
-		cutoff:  m.viewState.offset + m.listHeight(),
+		cutoff:  m.viewState.offset + m.listHeight() + m.listHeight()/2, // We render a bit more so we make sure we have smooth movementsd
 		items:   m.filteredItems,
 		realIdx: m.renderState.lastIndex,
 	}
@@ -420,7 +439,7 @@ func (m *model) renderVisibleReverse() {
 	renderer := &reverseRenderer{
 		model:   m,
 		start:   0,
-		cutoff:  m.viewState.offset + m.listHeight(),
+		cutoff:  m.viewState.offset + m.listHeight() + m.listHeight()/2,
 		items:   m.filteredItems,
 		realIdx: m.renderState.lastIndex,
 	}
@@ -567,6 +586,10 @@ func (r *reverseRenderer) renderItemLines(item util.Model) []string {
 // Handles focus management and ensures the selected item remains visible.
 // Skips section headers during navigation.
 func (m *model) selectPreviousItem() tea.Cmd {
+	if m.selectionState.selectedIndex == m.findFirstSelectableItem() && m.wrapNavigation {
+		// If at the beginning and wrapping is enabled, go to the last item
+		return m.goToBottom()
+	}
 	if m.selectionState.selectedIndex <= 0 {
 		return nil
 	}
@@ -580,8 +603,9 @@ func (m *model) selectPreviousItem() tea.Cmd {
 	}
 
 	// If we went past the beginning, stay at the first non-header item
-	if m.selectionState.selectedIndex < 0 {
-		m.selectionState.selectedIndex = m.findFirstSelectableItem()
+	if m.selectionState.selectedIndex <= 0 {
+		cmds = append(cmds, m.goToTop()) // Ensure we scroll to the top if needed
+		return tea.Batch(cmds...)
 	}
 
 	cmds = append(cmds, m.focusSelected())
@@ -593,6 +617,10 @@ func (m *model) selectPreviousItem() tea.Cmd {
 // Handles focus management and ensures the selected item remains visible.
 // Skips section headers during navigation.
 func (m *model) selectNextItem() tea.Cmd {
+	if m.selectionState.selectedIndex >= m.findLastSelectableItem() && m.wrapNavigation {
+		// If at the end and wrapping is enabled, go to the first item
+		return m.goToTop()
+	}
 	if m.selectionState.selectedIndex >= len(m.filteredItems)-1 || m.selectionState.selectedIndex < 0 {
 		return nil
 	}
@@ -1008,6 +1036,9 @@ func (m *model) listHeight() int {
 	case 3, 4:
 		height -= m.padding[0] + m.padding[2]
 	}
+	if m.filterable && !m.hideFilterInput {
+		height -= lipgloss.Height(m.inputStyle.Render("dummy"))
+	}
 	return max(0, height)
 }
 
@@ -1105,10 +1136,6 @@ func (m *model) SetItems(items []util.Model) tea.Cmd {
 
 	m.ResetView()
 	return tea.Batch(cmds...)
-}
-
-func (c *model) inputStyle() lipgloss.Style {
-	return styles.BaseStyle().Padding(0, 1, 1, 1)
 }
 
 // section represents a group of items under a section header.

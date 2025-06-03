@@ -1,23 +1,29 @@
 package commands
 
 import (
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/completions"
+	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 const (
 	commandsDialogID dialogs.DialogID = "commands"
 
-	defaultWidth int = 60
+	defaultWidth int = 70
+)
+
+const (
+	SystemCommands int = iota
+	UserCommands
 )
 
 // Command represents a command that can be executed
@@ -38,10 +44,17 @@ type commandDialogCmp struct {
 	wWidth  int // Width of the terminal window
 	wHeight int // Height of the terminal window
 
-	commandList list.ListModel
-	commands    []Command
-	keyMap      CommandsDialogKeyMap
+	commandList  list.ListModel
+	keyMap       CommandsDialogKeyMap
+	help         help.Model
+	commandType  int       // SystemCommands or UserCommands
+	userCommands []Command // User-defined commands
 }
+
+type (
+	SwitchSessionsMsg struct{}
+	SwitchModelMsg    struct{}
+)
 
 func NewCommandDialog() CommandsDialog {
 	listKeyMap := list.DefaultKeyMap()
@@ -59,11 +72,20 @@ func NewCommandDialog() CommandsDialog {
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	commandList := list.New(list.WithFilterable(true), list.WithKeyMap(listKeyMap))
+	t := styles.CurrentTheme()
+	commandList := list.New(
+		list.WithFilterable(true),
+		list.WithKeyMap(listKeyMap),
+		list.WithWrapNavigation(true),
+	)
+	help := help.New()
+	help.Styles = t.S().Help
 	return &commandDialogCmp{
 		commandList: commandList,
 		width:       defaultWidth,
 		keyMap:      DefaultCommandsDialogKeyMap(),
+		help:        help,
+		commandType: SystemCommands,
 	}
 }
 
@@ -72,24 +94,9 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	c.commands = commands
 
-	commandItems := []util.Model{}
-	if len(commands) > 0 {
-		commandItems = append(commandItems, NewItemSection("Custom Commands"))
-		for _, cmd := range commands {
-			commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
-		}
-	}
-
-	commandItems = append(commandItems, NewItemSection("Default"))
-
-	for _, cmd := range c.defaultCommands() {
-		c.commands = append(c.commands, cmd)
-		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
-	}
-
-	c.commandList.SetItems(commandItems)
+	c.userCommands = commands
+	c.SetCommandType(c.commandType)
 	return c.commandList.Init()
 }
 
@@ -112,6 +119,13 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				selectedItem.Handler(selectedItem),
 			)
+		case key.Matches(msg, c.keyMap.Tab):
+			// Toggle command type between System and User commands
+			if c.commandType == SystemCommands {
+				return c, c.SetCommandType(UserCommands)
+			} else {
+				return c, c.SetCommandType(SystemCommands)
+			}
 		default:
 			u, cmd := c.commandList.Update(msg)
 			c.commandList = u.(list.ListModel)
@@ -122,8 +136,17 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (c *commandDialogCmp) View() tea.View {
+	t := styles.CurrentTheme()
 	listView := c.commandList.View()
-	v := tea.NewView(c.style().Render(listView.String()))
+	radio := c.commandTypeRadio()
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5)+" "+radio),
+		listView.String(),
+		"",
+		t.S().Base.Width(c.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(c.help.View(c.keyMap)),
+	)
+	v := tea.NewView(c.style().Render(content))
 	if listView.Cursor() != nil {
 		c := c.moveCursor(listView.Cursor())
 		v.SetCursor(c)
@@ -131,8 +154,36 @@ func (c *commandDialogCmp) View() tea.View {
 	return v
 }
 
+func (c *commandDialogCmp) commandTypeRadio() string {
+	t := styles.CurrentTheme()
+	choices := []string{"System", "User"}
+	iconSelected := "◉"
+	iconUnselected := "○"
+	if c.commandType == SystemCommands {
+		return t.S().Text.Render(iconSelected + " " + choices[0] + " " + iconUnselected + " " + choices[1])
+	}
+	return t.S().Text.Render(iconUnselected + " " + choices[0] + " " + iconSelected + " " + choices[1])
+}
+
 func (c *commandDialogCmp) listWidth() int {
-	return defaultWidth - 4 // 4 for padding
+	return defaultWidth - 2 // 4 for padding
+}
+
+func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
+	c.commandType = commandType
+
+	var commands []Command
+	if c.commandType == SystemCommands {
+		commands = c.defaultCommands()
+	} else {
+		commands = c.userCommands
+	}
+
+	commandItems := []util.Model{}
+	for _, cmd := range commands {
+		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
+	}
+	return c.commandList.SetItems(commandItems)
 }
 
 func (c *commandDialogCmp) listHeight() int {
@@ -141,27 +192,25 @@ func (c *commandDialogCmp) listHeight() int {
 }
 
 func (c *commandDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
-	offset := 10 + 1
+	row, col := c.Position()
+	offset := row + 3
 	cursor.Y += offset
-	_, col := c.Position()
 	cursor.X = cursor.X + col + 2
 	return cursor
 }
 
 func (c *commandDialogCmp) style() lipgloss.Style {
-	t := theme.CurrentTheme()
-	return styles.BaseStyle().
+	t := styles.CurrentTheme()
+	return t.S().Base.
 		Width(c.width).
-		Padding(0, 1, 1, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted())
+		BorderForeground(t.BorderFocus)
 }
 
-func (q *commandDialogCmp) Position() (int, int) {
-	row := 10
-	col := q.wWidth / 2
-	col -= q.width / 2
+func (c *commandDialogCmp) Position() (int, int) {
+	row := c.wHeight/4 - 2 // just a bit above the center
+	col := c.wWidth / 2
+	col -= c.width / 2
 	return row, col
 }
 
@@ -194,6 +243,26 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 				return func() tea.Msg {
 					// TODO: implement compact message
 					return ""
+				}
+			},
+		},
+		{
+			ID:          "switch_session",
+			Title:       "Switch Session",
+			Description: "Switch to a different session",
+			Handler: func(cmd Command) tea.Cmd {
+				return func() tea.Msg {
+					return SwitchSessionsMsg{}
+				}
+			},
+		},
+		{
+			ID:          "switch_model",
+			Title:       "Switch Model",
+			Description: "Switch to a different model",
+			Handler: func(cmd Command) tea.Cmd {
+				return func() tea.Msg {
+					return SwitchModelMsg{}
 				}
 			},
 		},

@@ -22,6 +22,7 @@ const (
 	OpenRouterClaude37Sonnet ModelID = "openrouter.claude-3.7-sonnet"
 	OpenRouterClaude35Haiku  ModelID = "openrouter.claude-3.5-haiku"
 	OpenRouterClaude3Opus    ModelID = "openrouter.claude-3-opus"
+	OpenRouterDeepSeekR1Free ModelID = "openrouter.deepseek-r1-free"
 )
 
 var OpenRouterModels = map[ModelID]Model{
@@ -258,5 +259,18 @@ var OpenRouterModels = map[ModelID]Model{
 		CostPer1MOutCached: AnthropicModels[Claude3Opus].CostPer1MOutCached,
 		ContextWindow:      AnthropicModels[Claude3Opus].ContextWindow,
 		DefaultMaxTokens:   AnthropicModels[Claude3Opus].DefaultMaxTokens,
+	},
+
+	OpenRouterDeepSeekR1Free: {
+		ID:                 OpenRouterDeepSeekR1Free,
+		Name:               "OpenRouter – DeepSeek R1 Free",
+		Provider:           ProviderOpenRouter,
+		APIModel:           "deepseek/deepseek-r1-0528:free",
+		CostPer1MIn:        0,
+		CostPer1MInCached:  0,
+		CostPer1MOut:       0,
+		CostPer1MOutCached: 0,
+		ContextWindow:      163_840,
+		DefaultMaxTokens:   10000,
 	},
 }

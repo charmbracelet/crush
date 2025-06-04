@@ -8,6 +8,7 @@ import (
 type KeyMap struct {
 	Tab,
 	Commands,
+	Sessions,
 	Help key.Binding
 }
 
@@ -20,6 +21,10 @@ func DefaultKeyMap(tabHelp string) KeyMap {
 		Commands: key.NewBinding(
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
+		),
+		Sessions: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "sessions"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("ctrl+?", "ctrl+_", "ctrl+/"),
@@ -44,6 +49,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Tab,
 		k.Commands,
+		k.Sessions,
 		k.Help,
 	}
 }

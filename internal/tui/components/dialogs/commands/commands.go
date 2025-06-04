@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	commandsDialogID dialogs.DialogID = "commands"
+	CommandsDialogID dialogs.DialogID = "commands"
 
 	defaultWidth int = 70
 )
@@ -31,6 +31,7 @@ type Command struct {
 	ID          string
 	Title       string
 	Description string
+	Shortcut    string // Optional shortcut for the command
 	Handler     func(cmd Command) tea.Cmd
 }
 
@@ -126,6 +127,8 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return c, c.SetCommandType(SystemCommands)
 			}
+		case key.Matches(msg, c.keyMap.Close):
+			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := c.commandList.Update(msg)
 			c.commandList = u.(list.ListModel)
@@ -181,7 +184,11 @@ func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
 
 	commandItems := []util.Model{}
 	for _, cmd := range commands {
-		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd))
+		opts := []completions.CompletionOption{}
+		if cmd.Shortcut != "" {
+			opts = append(opts, completions.WithShortcut(cmd.Shortcut))
+		}
+		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd, opts...))
 	}
 	return c.commandList.SetItems(commandItems)
 }
@@ -250,6 +257,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_session",
 			Title:       "Switch Session",
 			Description: "Switch to a different session",
+			Shortcut:    "ctrl+s",
 			Handler: func(cmd Command) tea.Cmd {
 				return func() tea.Msg {
 					return SwitchSessionsMsg{}
@@ -270,5 +278,5 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 }
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {
-	return commandsDialogID
+	return CommandsDialogID
 }

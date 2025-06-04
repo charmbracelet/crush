@@ -3,7 +3,6 @@ package dialogs
 import (
 	"slices"
 
-	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/util"
@@ -39,6 +38,7 @@ type DialogCmp interface {
 	HasDialogs() bool
 	GetLayers() []*lipgloss.Layer
 	ActiveView() *tea.View
+	ActiveDialogId() DialogID
 }
 
 type dialogCmp struct {
@@ -88,10 +88,6 @@ func (d dialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, closeable.Close()
 		}
 		return d, nil
-	case tea.KeyPressMsg:
-		if key.Matches(msg, d.keyMap.Close) {
-			return d, util.CmdHandler(CloseDialogMsg{})
-		}
 	}
 	if d.HasDialogs() {
 		lastIndex := len(d.dialogs) - 1
@@ -142,6 +138,13 @@ func (d dialogCmp) ActiveView() *tea.View {
 	}
 	view := d.dialogs[len(d.dialogs)-1].View()
 	return &view
+}
+
+func (d dialogCmp) ActiveDialogId() DialogID {
+	if len(d.dialogs) == 0 {
+		return ""
+	}
+	return d.dialogs[len(d.dialogs)-1].ID()
 }
 
 func (d dialogCmp) GetLayers() []*lipgloss.Layer {

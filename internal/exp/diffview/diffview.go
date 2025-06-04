@@ -25,48 +25,63 @@ const (
 	layoutSplit
 )
 
+type LineStyle struct {
+	Symbol lipgloss.Style
+	Code   lipgloss.Style
+}
+
 type Style struct {
-	Base          lipgloss.Style
-	InsertLine    lipgloss.Style
-	InsertSymbols lipgloss.Style
-	DeleteLine    lipgloss.Style
-	DeleteSymbols lipgloss.Style
+	EqualLine  LineStyle
+	InsertLine LineStyle
+	DeleteLine LineStyle
 }
 
 var DefaultLightStyle = Style{
-	Base: lipgloss.NewStyle().
-		Foreground(charmtone.Pepper).
-		Background(charmtone.Salt),
-	InsertLine: lipgloss.NewStyle().
-		Foreground(charmtone.Pepper).
-		Background(lipgloss.Color("#e8f5e9")),
-	InsertSymbols: lipgloss.NewStyle().
-		Foreground(charmtone.Turtle).
-		Background(lipgloss.Color("#e8f5e9")),
-	DeleteLine: lipgloss.NewStyle().
-		Foreground(charmtone.Pepper).
-		Background(lipgloss.Color("#ffebee")),
-	DeleteSymbols: lipgloss.NewStyle().
-		Foreground(charmtone.Cherry).
-		Background(lipgloss.Color("#ffebee")),
+	EqualLine: LineStyle{
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Pepper).
+			Background(charmtone.Salt),
+	},
+	InsertLine: LineStyle{
+		Symbol: lipgloss.NewStyle().
+			Foreground(charmtone.Turtle).
+			Background(lipgloss.Color("#e8f5e9")),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Pepper).
+			Background(lipgloss.Color("#e8f5e9")),
+	},
+	DeleteLine: LineStyle{
+		Symbol: lipgloss.NewStyle().
+			Foreground(charmtone.Cherry).
+			Background(lipgloss.Color("#ffebee")),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Pepper).
+			Background(lipgloss.Color("#ffebee")),
+	},
 }
 
 var DefaultDarkStyle = Style{
-	Base: lipgloss.NewStyle().
-		Foreground(charmtone.Salt).
-		Background(charmtone.Pepper),
-	InsertLine: lipgloss.NewStyle().
-		Foreground(charmtone.Salt).
-		Background(lipgloss.Color("#303a30")),
-	InsertSymbols: lipgloss.NewStyle().
-		Foreground(charmtone.Turtle).
-		Background(lipgloss.Color("#303a30")),
-	DeleteLine: lipgloss.NewStyle().
-		Foreground(charmtone.Salt).
-		Background(lipgloss.Color("#3a3030")),
-	DeleteSymbols: lipgloss.NewStyle().
-		Foreground(charmtone.Cherry).
-		Background(lipgloss.Color("#3a3030")),
+	EqualLine: LineStyle{
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Salt).
+			Background(charmtone.Pepper),
+	},
+	InsertLine: LineStyle{
+		Symbol: lipgloss.NewStyle().
+			Foreground(charmtone.Turtle).
+			Background(lipgloss.Color("#303a30")),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Salt).
+			Background(lipgloss.Color("#303a30")),
+	},
+	DeleteLine: LineStyle{
+		Symbol: lipgloss.NewStyle().
+			Foreground(charmtone.Cherry).
+			Background(lipgloss.Color("#3a3030")),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Salt).
+			Background(lipgloss.Color("#3a3030")),
+	},
 }
 
 // DiffView represents a view for displaying differences between two files.
@@ -170,13 +185,13 @@ func (dv *DiffView) String() string {
 
 			switch l.Kind {
 			case udiff.Insert:
-				b.WriteString(dv.style.InsertSymbols.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Width(width).Render(content))
+				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
+				b.WriteString(dv.style.InsertLine.Code.Width(width).Render(content))
 			case udiff.Delete:
-				b.WriteString(dv.style.DeleteSymbols.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Width(width).Render(content))
+				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
+				b.WriteString(dv.style.DeleteLine.Code.Width(width).Render(content))
 			case udiff.Equal:
-				b.WriteString(dv.style.Base.Width(width + leadingSymbolsSize).Render("  " + content))
+				b.WriteString(dv.style.EqualLine.Code.Width(width + leadingSymbolsSize).Render("  " + content))
 			}
 			b.WriteRune('\n')
 		}

@@ -22,7 +22,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -138,9 +137,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case dialog.ThemeChangedMsg:
-		m.textarea = CreateTextArea(&m.textarea)
-		return m, cmd
 	case chat.SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			m.session = msg
@@ -300,11 +296,11 @@ func (m *editorCmp) GetSize() (int, int) {
 
 func (m *editorCmp) attachmentsContent() string {
 	var styledAttachments []string
-	t := theme.CurrentTheme()
-	attachmentStyles := styles.BaseStyle().
+	t := styles.CurrentTheme()
+	attachmentStyles := t.S().Base.
 		MarginLeft(1).
-		Background(t.TextMuted()).
-		Foreground(t.Text())
+		Background(t.FgMuted).
+		Foreground(t.FgBase)
 	for i, attachment := range m.attachments {
 		var filename string
 		if len(attachment.FileName) > 10 {

@@ -7,7 +7,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -69,26 +68,24 @@ func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the quit dialog with Yes/No buttons.
 func (q *quitDialogCmp) View() tea.View {
-	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
-
-	yesStyle := baseStyle
-	noStyle := baseStyle
-	spacerStyle := baseStyle.Background(t.Background())
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base
+	yesStyle := t.S().Text
+	noStyle := yesStyle
 
 	if q.selectedNo {
-		noStyle = noStyle.Background(t.Primary()).Foreground(t.Background())
-		yesStyle = yesStyle.Background(t.Background()).Foreground(t.Primary())
+		noStyle = noStyle.Background(t.Primary)
+		yesStyle = yesStyle.Background(t.BgSubtle)
 	} else {
-		yesStyle = yesStyle.Background(t.Primary()).Foreground(t.Background())
-		noStyle = noStyle.Background(t.Background()).Foreground(t.Primary())
+		yesStyle = yesStyle.Background(t.Primary)
+		noStyle = noStyle.Background(t.BgSubtle)
 	}
 
 	yesButton := yesStyle.Padding(0, 1).Render("Yes")
 	noButton := noStyle.Padding(0, 1).Render("No")
 
 	buttons := baseStyle.Width(lipgloss.Width(question)).Align(lipgloss.Right).Render(
-		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, spacerStyle.Render("  "), noButton),
+		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, "  ", noButton),
 	)
 
 	content := baseStyle.Render(
@@ -103,8 +100,7 @@ func (q *quitDialogCmp) View() tea.View {
 	quitDialogStyle := baseStyle.
 		Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted())
+		BorderForeground(t.BorderFocus)
 
 	return tea.NewView(
 		quitDialogStyle.Render(content),

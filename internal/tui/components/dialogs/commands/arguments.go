@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -54,7 +53,7 @@ type commandArgumentsDialogCmp struct {
 }
 
 func NewCommandArgumentsDialog(commandID, content string, argNames []string) CommandArgumentsDialog {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	inputs := make([]textinput.Model, len(argNames))
 
 	for i, name := range argNames {
@@ -63,15 +62,8 @@ func NewCommandArgumentsDialog(commandID, content string, argNames []string) Com
 		ti.SetWidth(40)
 		ti.SetVirtualCursor(false)
 		ti.Prompt = ""
-		ds := ti.Styles()
 
-		ds.Blurred.Placeholder = ds.Blurred.Placeholder.Background(t.Background()).Foreground(t.TextMuted())
-		ds.Blurred.Prompt = ds.Blurred.Prompt.Background(t.Background()).Foreground(t.TextMuted())
-		ds.Blurred.Text = ds.Blurred.Text.Background(t.Background()).Foreground(t.TextMuted())
-		ds.Focused.Placeholder = ds.Blurred.Placeholder.Background(t.Background()).Foreground(t.TextMuted())
-		ds.Focused.Prompt = ds.Blurred.Prompt.Background(t.Background()).Foreground(t.Text())
-		ds.Focused.Text = ds.Blurred.Text.Background(t.Background()).Foreground(t.Text())
-		ti.SetStyles(ds)
+		ti.SetStyles(t.S().TextInput)
 		// Only focus the first input initially
 		if i == 0 {
 			ti.Focus()
@@ -148,42 +140,36 @@ func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements CommandArgumentsDialog.
 func (c *commandArgumentsDialogCmp) View() tea.View {
-	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base
 
 	title := lipgloss.NewStyle().
-		Foreground(t.Primary()).
+		Foreground(t.Primary).
 		Bold(true).
 		Padding(0, 1).
-		Background(t.Background()).
 		Render("Command Arguments")
 
-	explanation := lipgloss.NewStyle().
-		Foreground(t.Text()).
+	explanation := t.S().Text.
 		Padding(0, 1).
-		Background(t.Background()).
 		Render("This command requires arguments.")
 
 	// Create input fields for each argument
 	inputFields := make([]string, len(c.inputs))
 	for i, input := range c.inputs {
 		// Highlight the label of the focused input
-		labelStyle := lipgloss.NewStyle().
-			Padding(1, 1, 0, 1).
-			Background(t.Background())
+		labelStyle := baseStyle.
+			Padding(1, 1, 0, 1)
 
 		if i == c.focusIndex {
-			labelStyle = labelStyle.Foreground(t.Text()).Bold(true)
+			labelStyle = labelStyle.Foreground(t.FgBase).Bold(true)
 		} else {
-			labelStyle = labelStyle.Foreground(t.TextMuted())
+			labelStyle = labelStyle.Foreground(t.FgMuted)
 		}
 
 		label := labelStyle.Render(c.argNames[i] + ":")
 
-		field := lipgloss.NewStyle().
-			Foreground(t.Text()).
+		field := t.S().Text.
 			Padding(0, 1).
-			Background(t.Background()).
 			Render(input.View())
 
 		inputFields[i] = lipgloss.JoinVertical(lipgloss.Left, label, field)
@@ -205,9 +191,7 @@ func (c *commandArgumentsDialogCmp) View() tea.View {
 	view := tea.NewView(
 		baseStyle.Padding(1, 1, 0, 1).
 			Border(lipgloss.RoundedBorder()).
-			BorderBackground(t.Background()).
-			BorderForeground(t.TextMuted()).
-			Background(t.Background()).
+			BorderForeground(t.BorderFocus).
 			Width(c.width).
 			Render(content),
 	)
@@ -228,13 +212,12 @@ func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 }
 
 func (c *commandArgumentsDialogCmp) style() lipgloss.Style {
-	t := theme.CurrentTheme()
-	return styles.BaseStyle().
+	t := styles.CurrentTheme()
+	return t.S().Base.
 		Width(c.width).
 		Padding(1).
 		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted())
+		BorderForeground(t.BorderFocus)
 }
 
 func (c *commandArgumentsDialogCmp) Position() (int, int) {

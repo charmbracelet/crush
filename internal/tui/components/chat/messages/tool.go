@@ -11,7 +11,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -216,19 +215,17 @@ func (m *toolCallCmp) renderPending() string {
 // style returns the lipgloss style for the tool call component.
 // Applies muted colors and focus-dependent border styles.
 func (m *toolCallCmp) style() lipgloss.Style {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	if m.isNested {
-		return styles.BaseStyle().
-			Foreground(t.TextMuted())
+		return t.S().Muted
 	}
 	borderStyle := lipgloss.NormalBorder()
 	if m.focused {
 		borderStyle = lipgloss.DoubleBorder()
 	}
-	return styles.BaseStyle().
+	return t.S().Muted.
 		BorderLeft(true).
-		Foreground(t.TextMuted()).
-		BorderForeground(t.TextMuted()).
+		BorderForeground(t.Border).
 		BorderStyle(borderStyle)
 }
 
@@ -240,8 +237,8 @@ func (m *toolCallCmp) textWidth() int {
 
 // fit truncates content to fit within the specified width with ellipsis
 func (m *toolCallCmp) fit(content string, width int) string {
-	t := theme.CurrentTheme()
-	lineStyle := lipgloss.NewStyle().Background(t.BackgroundSecondary()).Foreground(t.TextMuted())
+	t := styles.CurrentTheme()
+	lineStyle := t.S().Muted.Background(t.BgSubtle)
 	dots := lineStyle.Render("...")
 	return ansi.Truncate(content, width, dots)
 }

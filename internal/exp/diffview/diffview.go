@@ -1,10 +1,17 @@
 package diffview
 
 import (
+	"os"
+	"strings"
+
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
+
+const leadingSymbolsSize = 2
 
 type file struct {
 	path    string
@@ -18,16 +25,60 @@ const (
 	layoutSplit
 )
 
+type Style struct {
+	Base          lipgloss.Style
+	InsertLine    lipgloss.Style
+	InsertSymbols lipgloss.Style
+	DeleteLine    lipgloss.Style
+	DeleteSymbols lipgloss.Style
+}
+
+var DefaultLightStyle = Style{
+	Base: lipgloss.NewStyle().
+		Foreground(charmtone.Pepper).
+		Background(charmtone.Salt),
+	InsertLine: lipgloss.NewStyle().
+		Foreground(charmtone.Pepper).
+		Background(lipgloss.Color("#e8f5e9")),
+	InsertSymbols: lipgloss.NewStyle().
+		Foreground(charmtone.Turtle).
+		Background(lipgloss.Color("#e8f5e9")),
+	DeleteLine: lipgloss.NewStyle().
+		Foreground(charmtone.Pepper).
+		Background(lipgloss.Color("#ffebee")),
+	DeleteSymbols: lipgloss.NewStyle().
+		Foreground(charmtone.Cherry).
+		Background(lipgloss.Color("#ffebee")),
+}
+
+var DefaultDarkStyle = Style{
+	Base: lipgloss.NewStyle().
+		Foreground(charmtone.Salt).
+		Background(charmtone.Pepper),
+	InsertLine: lipgloss.NewStyle().
+		Foreground(charmtone.Salt).
+		Background(lipgloss.Color("#303a30")),
+	InsertSymbols: lipgloss.NewStyle().
+		Foreground(charmtone.Turtle).
+		Background(lipgloss.Color("#303a30")),
+	DeleteLine: lipgloss.NewStyle().
+		Foreground(charmtone.Salt).
+		Background(lipgloss.Color("#3a3030")),
+	DeleteSymbols: lipgloss.NewStyle().
+		Foreground(charmtone.Cherry).
+		Background(lipgloss.Color("#3a3030")),
+}
+
 // DiffView represents a view for displaying differences between two files.
 type DiffView struct {
 	layout       layout
 	before       file
 	after        file
 	contextLines int
-	baseStyle    lipgloss.Style
 	highlight    bool
 	height       int
 	width        int
+	style        Style
 
 	isComputed bool
 	err        error
@@ -37,10 +88,16 @@ type DiffView struct {
 
 // New creates a new DiffView with default settings.
 func New() *DiffView {
-	return &DiffView{
+	dv := &DiffView{
 		layout:       layoutUnified,
 		contextLines: udiff.DefaultContextLines,
 	}
+	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
+		dv.style = DefaultDarkStyle
+	} else {
+		dv.style = DefaultLightStyle
+	}
+	return dv
 }
 
 // Unified sets the layout of the DiffView to unified.
@@ -73,10 +130,9 @@ func (dv *DiffView) ContextLines(contextLines int) *DiffView {
 	return dv
 }
 
-// BaseStyle sets the base style for the DiffView.
-// This is useful for setting a custom background color, for example.
-func (dv *DiffView) BaseStyle(baseStyle lipgloss.Style) *DiffView {
-	dv.baseStyle = baseStyle
+// Style sets the style for the DiffView.
+func (dv *DiffView) Style(style Style) *DiffView {
+	dv.style = style
 	return dv
 }
 
@@ -100,16 +156,39 @@ func (dv *DiffView) Width(width int) *DiffView {
 
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
-	if !dv.isComputed {
-		dv.compute()
+	if err := dv.computeDiff(); err != nil {
+		return err.Error()
 	}
-	if dv.err != nil {
-		return dv.err.Error()
+	dv.detectWidth()
+
+	var b strings.Builder
+
+	for _, h := range dv.unified.Hunks {
+		for _, l := range h.Lines {
+			content := strings.TrimSuffix(l.Content, "\n")
+			width := dv.width - leadingSymbolsSize
+
+			switch l.Kind {
+			case udiff.Insert:
+				b.WriteString(dv.style.InsertSymbols.Render("+ "))
+				b.WriteString(dv.style.InsertLine.Width(width).Render(content))
+			case udiff.Delete:
+				b.WriteString(dv.style.DeleteSymbols.Render("- "))
+				b.WriteString(dv.style.DeleteLine.Width(width).Render(content))
+			case udiff.Equal:
+				b.WriteString(dv.style.Base.Width(width + leadingSymbolsSize).Render("  " + content))
+			}
+			b.WriteRune('\n')
+		}
 	}
-	return dv.unified.String()
+
+	return b.String()
 }
 
-func (dv *DiffView) compute() {
+func (dv *DiffView) computeDiff() error {
+	if dv.isComputed {
+		return dv.err
+	}
 	dv.isComputed = true
 	dv.edits = myers.ComputeEdits(
 		dv.before.content,
@@ -122,4 +201,19 @@ func (dv *DiffView) compute() {
 		dv.edits,
 		dv.contextLines,
 	)
+	return dv.err
+}
+
+func (dv *DiffView) detectWidth() {
+	if dv.width > 0 {
+		return
+	}
+
+	for _, h := range dv.unified.Hunks {
+		for _, l := range h.Lines {
+			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n"))
+			lineWidth += leadingSymbolsSize
+			dv.width = max(dv.width, lineWidth)
+		}
+	}
 }

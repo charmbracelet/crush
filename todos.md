@@ -13,3 +13,8 @@
 - [x] Sessions dialog
 - [ ] Models
 - [~] Move sessions and model dialog to the commands
+
+## Investigate
+
+- [ ] Events when tool error
+- [ ] Fancy Spinner

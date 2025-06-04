@@ -24,10 +24,11 @@ func NewCrushTheme() *Theme {
 		BgOverlay: charmtone.Iron,
 
 		// Foregrounds
-		FgBase:     charmtone.Ash,
-		FgMuted:    charmtone.Squid,
-		FgSubtle:   charmtone.Oyster,
-		FgSelected: charmtone.Salt,
+		FgBase:      charmtone.Ash,
+		FgMuted:     charmtone.Squid,
+		FgHalfMuted: charmtone.Smoke,
+		FgSubtle:    charmtone.Oyster,
+		FgSelected:  charmtone.Salt,
 
 		// Borders
 		Border:      charmtone.Charcoal,

@@ -26,10 +26,11 @@ func Title(title string, width int) string {
 	char := "╱"
 	length := lipgloss.Width(title) + 1
 	remainingWidth := width - length
-	lineStyle := t.S().Base.Foreground(t.Primary)
 	titleStyle := t.S().Base.Foreground(t.Primary)
 	if remainingWidth > 0 {
-		title = titleStyle.Render(title) + " " + lineStyle.Render(strings.Repeat(char, remainingWidth))
+		lines := strings.Repeat(char, remainingWidth)
+		lines = styles.ApplyForegroundGrad(lines, t.Primary, t.Secondary)
+		title = titleStyle.Render(title) + " " + lines
 	}
 	return title
 }

@@ -12,6 +12,7 @@ import (
 	cmpChat "github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/completions"
 	"github.com/opencode-ai/opencode/internal/tui/components/core"
+	"github.com/opencode-ai/opencode/internal/tui/components/core/status"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/commands"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/models"
@@ -34,7 +35,7 @@ type appModel struct {
 	pages        map[page.PageID]util.Model
 	loadedPages  map[page.PageID]bool
 
-	status core.StatusCmp
+	status status.StatusCmp
 
 	app *app.App
 
@@ -288,7 +289,7 @@ func New(app *app.App) tea.Model {
 	model := &appModel{
 		currentPage: startPage,
 		app:         app,
-		status:      core.NewStatusCmp(app.LSPClients),
+		status:      status.NewStatusCmp(),
 		loadedPages: make(map[page.PageID]bool),
 		keyMap:      DefaultKeyMap(),
 

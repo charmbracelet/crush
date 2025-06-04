@@ -263,8 +263,10 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *editorCmp) View() tea.View {
 	t := styles.CurrentTheme()
 	cursor := m.textarea.Cursor()
-	cursor.X = cursor.X + m.x + 1
-	cursor.Y = cursor.Y + m.y + 1 // adjust for padding
+	if cursor != nil {
+		cursor.X = cursor.X + m.x + 1
+		cursor.Y = cursor.Y + m.y + 1 // adjust for padding
+	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),
@@ -358,11 +360,15 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(lineIndex int) string {
+	ta.SetPromptFunc(4, func(lineIndex int, focused bool) string {
 		if lineIndex == 0 {
 			return "  > "
 		}
-		return t.S().Base.Foreground(t.Blue).Render("::: ")
+		if focused {
+			return t.S().Base.Foreground(t.Blue).Render("::: ")
+		} else {
+			return t.S().Muted.Render("::: ")
+		}
 	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
@@ -377,6 +383,23 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 
 	ta.Focus()
 	return ta
+}
+
+// Blur implements Container.
+func (c *editorCmp) Blur() tea.Cmd {
+	c.textarea.Blur()
+	return nil
+}
+
+// Focus implements Container.
+func (c *editorCmp) Focus() tea.Cmd {
+	logging.Info("Focusing editor textarea")
+	return c.textarea.Focus()
+}
+
+// IsFocused implements Container.
+func (c *editorCmp) IsFocused() bool {
+	return c.textarea.Focused()
 }
 
 func NewEditorCmp(app *app.App) util.Model {

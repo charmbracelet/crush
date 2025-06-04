@@ -2,13 +2,13 @@ package diffview
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const leadingSymbolsSize = 2
@@ -25,71 +25,13 @@ const (
 	layoutSplit
 )
 
-type LineStyle struct {
-	Symbol lipgloss.Style
-	Code   lipgloss.Style
-}
-
-type Style struct {
-	EqualLine  LineStyle
-	InsertLine LineStyle
-	DeleteLine LineStyle
-}
-
-var DefaultLightStyle = Style{
-	EqualLine: LineStyle{
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Pepper).
-			Background(charmtone.Salt),
-	},
-	InsertLine: LineStyle{
-		Symbol: lipgloss.NewStyle().
-			Foreground(charmtone.Turtle).
-			Background(lipgloss.Color("#e8f5e9")),
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Pepper).
-			Background(lipgloss.Color("#e8f5e9")),
-	},
-	DeleteLine: LineStyle{
-		Symbol: lipgloss.NewStyle().
-			Foreground(charmtone.Cherry).
-			Background(lipgloss.Color("#ffebee")),
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Pepper).
-			Background(lipgloss.Color("#ffebee")),
-	},
-}
-
-var DefaultDarkStyle = Style{
-	EqualLine: LineStyle{
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Salt).
-			Background(charmtone.Pepper),
-	},
-	InsertLine: LineStyle{
-		Symbol: lipgloss.NewStyle().
-			Foreground(charmtone.Turtle).
-			Background(lipgloss.Color("#303a30")),
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Salt).
-			Background(lipgloss.Color("#303a30")),
-	},
-	DeleteLine: LineStyle{
-		Symbol: lipgloss.NewStyle().
-			Foreground(charmtone.Cherry).
-			Background(lipgloss.Color("#3a3030")),
-		Code: lipgloss.NewStyle().
-			Foreground(charmtone.Salt).
-			Background(lipgloss.Color("#3a3030")),
-	},
-}
-
 // DiffView represents a view for displaying differences between two files.
 type DiffView struct {
 	layout       layout
 	before       file
 	after        file
 	contextLines int
+	lineNumbers  bool
 	highlight    bool
 	height       int
 	width        int
@@ -106,6 +48,7 @@ func New() *DiffView {
 	dv := &DiffView{
 		layout:       layoutUnified,
 		contextLines: udiff.DefaultContextLines,
+		lineNumbers:  true,
 	}
 	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
 		dv.style = DefaultDarkStyle
@@ -151,8 +94,14 @@ func (dv *DiffView) Style(style Style) *DiffView {
 	return dv
 }
 
-// SyntaxHighlight sets whether to enable syntax highlighting in the DiffView.
-func (dv *DiffView) SyntaxHighlight(highlight bool) *DiffView {
+// LineNumbers sets whether to display line numbers in the DiffView.
+func (dv *DiffView) LineNumbers(lineNumbers bool) *DiffView {
+	dv.lineNumbers = lineNumbers
+	return dv
+}
+
+// SyntaxHightlight sets whether to enable syntax highlighting in the DiffView.
+func (dv *DiffView) SyntaxHightlight(highlight bool) *DiffView {
 	dv.highlight = highlight
 	return dv
 }
@@ -176,22 +125,48 @@ func (dv *DiffView) String() string {
 	}
 	dv.detectWidth()
 
+	lineNumberWidth := func(start, num int) int {
+		return len(strconv.Itoa(start + num))
+	}
+
 	var b strings.Builder
 
 	for _, h := range dv.unified.Hunks {
+		beforeLine := h.FromLine
+		afterLine := h.ToLine
+
+		beforeNumDigits := lineNumberWidth(h.FromLine, len(h.Lines))
+		afterNumDigits := lineNumberWidth(h.ToLine, len(h.Lines))
+
 		for _, l := range h.Lines {
 			content := strings.TrimSuffix(l.Content, "\n")
-			width := dv.width - leadingSymbolsSize
+			codeWidth := dv.width - leadingSymbolsSize
 
 			switch l.Kind {
-			case udiff.Insert:
-				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(width).Render(content))
-			case udiff.Delete:
-				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Code.Width(width).Render(content))
 			case udiff.Equal:
-				b.WriteString(dv.style.EqualLine.Code.Width(width + leadingSymbolsSize).Render("  " + content))
+				if dv.lineNumbers {
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+				}
+				b.WriteString(dv.style.EqualLine.Code.Width(codeWidth + leadingSymbolsSize).Render("  " + content))
+				beforeLine++
+				afterLine++
+			case udiff.Insert:
+				if dv.lineNumbers {
+					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(" ", beforeNumDigits)))
+					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+				}
+				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
+				b.WriteString(dv.style.InsertLine.Code.Width(codeWidth).Render(content))
+				afterLine++
+			case udiff.Delete:
+				if dv.lineNumbers {
+					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
+					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", afterNumDigits)))
+				}
+				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
+				b.WriteString(dv.style.DeleteLine.Code.Width(codeWidth).Render(content))
+				beforeLine++
 			}
 			b.WriteRune('\n')
 		}

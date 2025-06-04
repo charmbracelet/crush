@@ -29,3 +29,20 @@ func TestDefault(t *testing.T) {
 		golden.RequireEqual(t, []byte(dv.String()))
 	})
 }
+
+func TestNoLineNumbers(t *testing.T) {
+	dv := diffview.New().
+		Before("main.go", TestDefaultBefore).
+		After("main.go", TestDefaultAfter).
+		LineNumbers(false)
+
+	t.Run("LightMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultLightStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+
+	t.Run("DarkMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultDarkStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+}

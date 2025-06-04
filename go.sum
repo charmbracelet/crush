@@ -72,10 +72,10 @@ github.com/charlievieth/fastwalk v1.0.11 h1:5sLT/q9+d9xMdpKExawLppqvXFZCVKf6JHnr
 github.com/charlievieth/fastwalk v1.0.11/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250526131538-b3f0c9e42318 h1:f8Q0ybZGxT+St1JfPM7yoz/XFpbmtodcIehaom/9XT8=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250526131538-b3f0c9e42318/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250526132317-434f93986a5c h1:EoW1x1K2EDKYw1D7raqZqWKnwk21IZVpYqLHQVhz1ZU=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250526132317-434f93986a5c/go.mod h1:sXuGtrlVJo43r1fVGBM06E7PPb16oBl8rDRr6YgQOck=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154534-5681225ad367 h1:X+w3YtXyLG3oguOKXvcDT8jQP856YLQsq6SwTE+gqTk=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154534-5681225ad367/go.mod h1:oOn1YZGZyJHxJfh4sFAna9vDzxJRNuErLETr/lnlB/I=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603122936-f1a3fad2b64e h1:+3I/1v7vbN0Vf8Tjm3Q0zdLQqjOM/TjQBvoRDQtoAss=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603122936-f1a3fad2b64e/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603125125-87aee03b3d4f h1:vvNB+i59Wp3L6gYcpuhfAdNjr4/e6qM/st3ySWfmZnU=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603125125-87aee03b3d4f/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174 h1:TlVW+df0rdU/osP0O8DIVS9WFOAzXe3nuiMwJR4n+CA=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174/go.mod h1:oOn1YZGZyJHxJfh4sFAna9vDzxJRNuErLETr/lnlB/I=
 github.com/charmbracelet/colorprofile v0.3.1 h1:k8dTHMd7fgw4bnFd7jXTLZrSU/CQrKnL3m+AxCzDz40=
@@ -84,8 +84,6 @@ github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe h1:i6ce4C
 github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe/go.mod h1:p3Q+aN4eQKeM5jhrmXPMgPrlKbmc59rWSnMsSA3udhk=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c h1:177KMz8zHRlEZJsWzafbKYh6OdjgvTspoH+UjaxgIXY=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c/go.mod h1:EJWvaCrhOhNGVZMvcjc0yVryl4qqpMs8tz0r9WyEkdQ=
-github.com/charmbracelet/x/ansi v0.9.3-0.20250516160309-24eee56f89fa h1:JU05TLAB6nOEL46bxHDV/+e8umBX32ODsGbVkc7o7bk=
-github.com/charmbracelet/x/ansi v0.9.3-0.20250516160309-24eee56f89fa/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
 github.com/charmbracelet/x/ansi v0.9.3-0.20250602153603-fb931ed90413 h1:L07QkDqRF274IZ2UJ/mCTL8DR95efU9BNWLYCDXEjvQ=
 github.com/charmbracelet/x/ansi v0.9.3-0.20250602153603-fb931ed90413/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz0Z3rsiOtMYiz8axkT24i9yFiueDhJbzyNUADmME=

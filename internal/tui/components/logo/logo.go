@@ -10,8 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/slice"
-	"github.com/lucasb-eyer/go-colorful"
-	"github.com/rivo/uniseg"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 )
 
 // letterform represents a letterform. It can be stretched horizontally by
@@ -46,7 +45,7 @@ func Render(version string, compact bool, o Opts) string {
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
-		fmt.Fprintln(b, applyForegroundGrad(r, o.TitleColorA, o.TitleColorB))
+		fmt.Fprintln(b, styles.ApplyForegroundGrad(r, o.TitleColorA, o.TitleColorB))
 	}
 	crush = b.String()
 
@@ -311,77 +310,4 @@ func stretchLetterformPart(s string, p letterformProps) string {
 		parts[i] = s
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
-}
-
-// applyForegroundGrad renders a given string with a horizontal gradient
-// foreground.
-func applyForegroundGrad(input string, color1, color2 color.Color) string {
-	if input == "" {
-		return ""
-	}
-
-	var o strings.Builder
-	if len(input) == 1 {
-		return lipgloss.NewStyle().Foreground(color1).Render(input)
-	}
-
-	var clusters []string
-	gr := uniseg.NewGraphemes(input)
-	for gr.Next() {
-		clusters = append(clusters, string(gr.Runes()))
-	}
-
-	ramp := blendColors(len(clusters), color1, color2)
-	for i, c := range ramp {
-		fmt.Fprint(&o, lipgloss.NewStyle().Foreground(c).Render(clusters[i]))
-	}
-
-	return o.String()
-}
-
-// blendColors returns a slice of colors blended between the given keys.
-// Blending is done in Hcl to stay in gamut.
-func blendColors(size int, stops ...color.Color) []color.Color {
-	if len(stops) < 2 {
-		return nil
-	}
-
-	stopsPrime := make([]colorful.Color, len(stops))
-	for i, k := range stops {
-		stopsPrime[i], _ = colorful.MakeColor(k)
-	}
-
-	numSegments := len(stopsPrime) - 1
-	blended := make([]color.Color, 0, size)
-
-	// Calculate how many colors each segment should have.
-	segmentSizes := make([]int, numSegments)
-	baseSize := size / numSegments
-	remainder := size % numSegments
-
-	// Distribute the remainder across segments.
-	for i := range numSegments {
-		segmentSizes[i] = baseSize
-		if i < remainder {
-			segmentSizes[i]++
-		}
-	}
-
-	// Generate colors for each segment.
-	for i := range numSegments {
-		c1 := stopsPrime[i]
-		c2 := stopsPrime[i+1]
-		segmentSize := segmentSizes[i]
-
-		for j := range segmentSize {
-			var t float64
-			if segmentSize > 1 {
-				t = float64(j) / float64(segmentSize-1)
-			}
-			c := c1.BlendHcl(c2, t)
-			blended = append(blended, c)
-		}
-	}
-
-	return blended
 }

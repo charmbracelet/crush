@@ -1,4 +1,4 @@
-package tui
+package status
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -6,35 +6,24 @@ import (
 )
 
 type KeyMap struct {
-	Logs       key.Binding
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	FilePicker key.Binding
+	Tab,
+	Commands,
+	Help key.Binding
 }
 
-func DefaultKeyMap() KeyMap {
+func DefaultKeyMap(tabHelp string) KeyMap {
 	return KeyMap{
-		Logs: key.NewBinding(
-			key.WithKeys("ctrl+l"),
-			key.WithHelp("ctrl+l", "logs"),
-		),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
-
-		Help: key.NewBinding(
-			key.WithKeys("ctrl+_"),
-			key.WithHelp("ctrl+?", "toggle help"),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", tabHelp),
 		),
 		Commands: key.NewBinding(
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		),
-		FilePicker: key.NewBinding(
-			key.WithKeys("ctrl+f"),
-			key.WithHelp("ctrl+f", "select files to upload"),
+		Help: key.NewBinding(
+			key.WithKeys("ctrl+?", "ctrl+_", "ctrl+/"),
+			key.WithHelp("ctrl+?", "more"),
 		),
 	}
 }
@@ -52,5 +41,9 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{}
+	return []key.Binding{
+		k.Tab,
+		k.Commands,
+		k.Help,
+	}
 }

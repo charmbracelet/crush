@@ -13,10 +13,12 @@ type Container interface {
 	Sizeable
 	Bindings
 	Positionable
+	Focusable
 }
 type container struct {
-	width  int
-	height int
+	width     int
+	height    int
+	isFocused bool
 
 	x, y int
 
@@ -35,14 +37,39 @@ type container struct {
 	borderStyle  lipgloss.Border
 }
 
+type ContainerOption func(*container)
+
+func NewContainer(content util.Model, options ...ContainerOption) Container {
+	c := &container{
+		content:     content,
+		borderStyle: lipgloss.NormalBorder(),
+	}
+
+	for _, option := range options {
+		option(c)
+	}
+
+	return c
+}
+
 func (c *container) Init() tea.Cmd {
 	return c.content.Init()
 }
 
 func (c *container) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	u, cmd := c.content.Update(msg)
-	c.content = u.(util.Model)
-	return c, cmd
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if c.IsFocused() {
+			u, cmd := c.content.Update(msg)
+			c.content = u.(util.Model)
+			return c, cmd
+		}
+		return c, nil
+	default:
+		u, cmd := c.content.Update(msg)
+		c.content = u.(util.Model)
+		return c, cmd
+	}
 }
 
 func (c *container) View() tea.View {
@@ -80,7 +107,8 @@ func (c *container) View() tea.View {
 
 	contentView := c.content.View()
 	view := tea.NewView(style.Render(contentView.String()))
-	view.SetCursor(contentView.Cursor())
+	cursor := contentView.Cursor()
+	view.SetCursor(cursor)
 	return view
 }
 
@@ -136,19 +164,31 @@ func (c *container) BindingKeys() []key.Binding {
 	return []key.Binding{}
 }
 
-type ContainerOption func(*container)
-
-func NewContainer(content util.Model, options ...ContainerOption) Container {
-	c := &container{
-		content:     content,
-		borderStyle: lipgloss.NormalBorder(),
+// Blur implements Container.
+func (c *container) Blur() tea.Cmd {
+	c.isFocused = false
+	if focusable, ok := c.content.(Focusable); ok {
+		return focusable.Blur()
 	}
+	return nil
+}
 
-	for _, option := range options {
-		option(c)
+// Focus implements Container.
+func (c *container) Focus() tea.Cmd {
+	c.isFocused = true
+	if focusable, ok := c.content.(Focusable); ok {
+		return focusable.Focus()
 	}
+	return nil
+}
 
-	return c
+// IsFocused implements Container.
+func (c *container) IsFocused() bool {
+	isFocused := c.isFocused
+	if focusable, ok := c.content.(Focusable); ok {
+		isFocused = isFocused || focusable.IsFocused()
+	}
+	return isFocused
 }
 
 // Padding options

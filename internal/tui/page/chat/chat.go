@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/session"
 	"github.com/opencode-ai/opencode/internal/tui/components/chat"
@@ -19,32 +20,28 @@ import (
 
 var ChatPage page.PageID = "chat"
 
+type ChatFocusedMsg struct {
+	Focused bool // True if the chat input is focused, false otherwise
+}
+
 type chatPage struct {
 	app *app.App
 
 	layout layout.SplitPaneLayout
 
 	session session.Session
-}
 
-type ChatKeyMap struct {
-	NewSession key.Binding
-	Cancel     key.Binding
-}
+	keyMap KeyMap
 
-var keyMap = ChatKeyMap{
-	NewSession: key.NewBinding(
-		key.WithKeys("ctrl+n"),
-		key.WithHelp("ctrl+n", "new session"),
-	),
-	Cancel: key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel"),
-	),
+	chatFocused bool
 }
 
 func (p *chatPage) Init() tea.Cmd {
-	return p.layout.Init()
+	cmd := p.layout.Init()
+	return tea.Batch(
+		cmd,
+		p.layout.FocusPanel(layout.BottomPanel), // Focus on the bottom panel (editor)
+	)
 }
 
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -79,13 +76,28 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.session = msg
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, keyMap.NewSession):
+		case key.Matches(msg, p.keyMap.NewSession):
 			p.session = session.Session{}
 			return p, tea.Batch(
 				p.clearMessages(),
 				util.CmdHandler(chat.SessionClearedMsg{}),
 			)
-		case key.Matches(msg, keyMap.Cancel):
+
+		case key.Matches(msg, p.keyMap.Tab):
+			logging.Info("Tab key pressed, toggling chat focus")
+			if p.session.ID == "" {
+				return p, nil
+			}
+			p.chatFocused = !p.chatFocused
+			if p.chatFocused {
+				cmds = append(cmds, p.layout.FocusPanel(layout.LeftPanel))
+				cmds = append(cmds, util.CmdHandler(ChatFocusedMsg{Focused: true}))
+			} else {
+				cmds = append(cmds, p.layout.FocusPanel(layout.BottomPanel))
+				cmds = append(cmds, util.CmdHandler(ChatFocusedMsg{Focused: false}))
+			}
+			return p, tea.Batch(cmds...)
+		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" {
 				// Cancel the current session's generation process
 				// This allows users to interrupt long-running operations
@@ -148,11 +160,6 @@ func (p *chatPage) View() tea.View {
 	return p.layout.View()
 }
 
-func (p *chatPage) BindingKeys() []key.Binding {
-	bindings := layout.KeyMapToSlice(keyMap)
-	return bindings
-}
-
 func NewChatPage(app *app.App) util.Model {
 	sidebarContainer := layout.NewContainer(
 		sidebar.NewSidebarCmp(),
@@ -169,5 +176,6 @@ func NewChatPage(app *app.App) util.Model {
 			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),
 		),
+		keyMap: DefaultKeyMap(),
 	}
 }

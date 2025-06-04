@@ -8,6 +8,14 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
+type LayoutPanel string
+
+const (
+	LeftPanel   LayoutPanel = "left"
+	RightPanel  LayoutPanel = "right"
+	BottomPanel LayoutPanel = "bottom"
+)
+
 type SplitPaneLayout interface {
 	util.Model
 	Sizeable
@@ -19,6 +27,8 @@ type SplitPaneLayout interface {
 	ClearLeftPanel() tea.Cmd
 	ClearRightPanel() tea.Cmd
 	ClearBottomPanel() tea.Cmd
+
+	FocusPanel(panel LayoutPanel) tea.Cmd
 }
 
 type splitPaneLayout struct {
@@ -277,6 +287,26 @@ func (s *splitPaneLayout) BindingKeys() []key.Binding {
 		}
 	}
 	return keys
+}
+
+func (s *splitPaneLayout) FocusPanel(panel LayoutPanel) tea.Cmd {
+	panels := map[LayoutPanel]Container{
+		LeftPanel:   s.leftPanel,
+		RightPanel:  s.rightPanel,
+		BottomPanel: s.bottomPanel,
+	}
+	var cmds []tea.Cmd
+	for p, container := range panels {
+		if container == nil {
+			continue
+		}
+		if p == panel {
+			cmds = append(cmds, container.Focus())
+		} else {
+			cmds = append(cmds, container.Blur())
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func NewSplitPane(options ...SplitPaneOption) SplitPaneLayout {

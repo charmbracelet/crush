@@ -13,7 +13,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/catppuccin/go v0.3.0
 	github.com/charlievieth/fastwalk v1.0.11
-	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250526131538-b3f0c9e42318
+	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603125125-87aee03b3d4f
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c

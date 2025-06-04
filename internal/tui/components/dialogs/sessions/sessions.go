@@ -15,7 +15,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
-const id dialogs.DialogID = "sessions"
+const SessionsDialogID dialogs.DialogID = "sessions"
 
 // SessionDialog interface for the session switching dialog
 type SessionDialog interface {
@@ -113,6 +113,8 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					),
 				)
 			}
+		case key.Matches(msg, s.keyMap.Close):
+			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := s.sessionsList.Update(msg)
 			s.sessionsList = u.(list.ListModel)
@@ -174,5 +176,5 @@ func (s *sessionDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 
 // ID implements SessionDialog.
 func (s *sessionDialogCmp) ID() dialogs.DialogID {
-	return id
+	return SessionsDialogID
 }

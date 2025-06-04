@@ -6,10 +6,11 @@ import (
 )
 
 type CommandsDialogKeyMap struct {
-	Select   key.Binding
-	Next     key.Binding
-	Previous key.Binding
-	Tab      key.Binding
+	Select,
+	Next,
+	Previous,
+	Tab,
+	Close key.Binding
 }
 
 func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
@@ -29,6 +30,10 @@ func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "switch selection"),
+		),
+		Close: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 	}
 }
@@ -53,10 +58,7 @@ func (k CommandsDialogKeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Select,
-		key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
-		),
+		k.Close,
 	}
 }
 

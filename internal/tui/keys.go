@@ -10,6 +10,7 @@ type KeyMap struct {
 	Quit       key.Binding
 	Help       key.Binding
 	Commands   key.Binding
+	Sessions   key.Binding
 	FilePicker key.Binding
 }
 
@@ -31,6 +32,10 @@ func DefaultKeyMap() KeyMap {
 		Commands: key.NewBinding(
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
+		),
+		Sessions: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "sessions"),
 		),
 		FilePicker: key.NewBinding(
 			key.WithKeys("ctrl+f"),

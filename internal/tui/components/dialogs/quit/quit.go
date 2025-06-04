@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	question                  = "Are you sure you want to quit?"
-	id       dialogs.DialogID = "quit"
+	question                      = "Are you sure you want to quit?"
+	QuitDialogID dialogs.DialogID = "quit"
 )
 
 // QuitDialog represents a confirmation dialog for quitting the application.
@@ -49,7 +49,7 @@ func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		q.wHeight = msg.Height
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, q.keymap.LeftRight) || key.Matches(msg, q.keymap.Tab):
+		case key.Matches(msg, q.keymap.LeftRight, q.keymap.Tab):
 			q.selectedNo = !q.selectedNo
 			return q, nil
 		case key.Matches(msg, q.keymap.EnterSpace):
@@ -59,7 +59,7 @@ func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return q, util.CmdHandler(dialogs.CloseDialogMsg{})
 		case key.Matches(msg, q.keymap.Yes):
 			return q, tea.Quit
-		case key.Matches(msg, q.keymap.No):
+		case key.Matches(msg, q.keymap.No, q.keymap.Close):
 			return q, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 	}
@@ -121,5 +121,5 @@ func (q *quitDialogCmp) Position() (int, int) {
 }
 
 func (q *quitDialogCmp) ID() dialogs.DialogID {
-	return id
+	return QuitDialogID
 }

@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	ID dialogs.DialogID = "models"
+	ModelsDialogID dialogs.DialogID = "models"
 
 	defaultWidth = 60
 )
@@ -145,6 +145,8 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(ModelSelectedMsg{Model: selectedItem}),
 			)
+		case key.Matches(msg, m.keyMap.Close):
+			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := m.modelList.Update(msg)
 			m.modelList = u.(list.ListModel)
@@ -257,5 +259,5 @@ func (m *modelDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 }
 
 func (m *modelDialogCmp) ID() dialogs.DialogID {
-	return ID
+	return ModelsDialogID
 }

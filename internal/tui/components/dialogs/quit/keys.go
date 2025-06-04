@@ -7,11 +7,12 @@ import (
 
 // KeyMap defines the keyboard bindings for the quit dialog.
 type KeyMap struct {
-	LeftRight  key.Binding
-	EnterSpace key.Binding
-	Yes        key.Binding
-	No         key.Binding
-	Tab        key.Binding
+	LeftRight,
+	EnterSpace,
+	Yes,
+	No,
+	Tab,
+	Close key.Binding
 }
 
 func DefaultKeymap() KeyMap {
@@ -35,6 +36,10 @@ func DefaultKeymap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "switch options"),
+		),
+		Close: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 	}
 }

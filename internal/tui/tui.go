@@ -189,14 +189,41 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	// dialogs
 	case key.Matches(msg, a.keyMap.Quit):
+		if a.dialog.ActiveDialogId() == quit.QuitDialogID {
+			// if the quit dialog is already open, close the app
+			return tea.Quit
+		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
 
 	case key.Matches(msg, a.keyMap.Commands):
+		if a.dialog.ActiveDialogId() == commands.CommandsDialogID {
+			// If the commands dialog is already open, close it
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(),
 		})
+	case key.Matches(msg, a.keyMap.Sessions):
+		if a.dialog.ActiveDialogId() == sessions.SessionsDialogID {
+			// If the sessions dialog is already open, close it
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		var cmds []tea.Cmd
+		if a.dialog.ActiveDialogId() == commands.CommandsDialogID {
+			// If the commands dialog is open, close it first
+			cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
+		}
+		cmds = append(cmds,
+			func() tea.Msg {
+				allSessions, _ := a.app.Sessions.List(context.Background())
+				return dialogs.OpenDialogMsg{
+					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+				}
+			},
+		)
+		return tea.Sequence(cmds...)
 	// Page navigation
 	case key.Matches(msg, a.keyMap.Logs):
 		return a.moveToPage(page.LogsPage)

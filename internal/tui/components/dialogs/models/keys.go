@@ -6,9 +6,10 @@ import (
 )
 
 type KeyMap struct {
-	Select   key.Binding
-	Next     key.Binding
-	Previous key.Binding
+	Select,
+	Next,
+	Previous,
+	Close key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -24,6 +25,10 @@ func DefaultKeyMap() KeyMap {
 		Previous: key.NewBinding(
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
+		),
+		Close: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 	}
 }
@@ -48,9 +53,6 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Select,
-		key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
-		),
+		k.Close,
 	}
 }

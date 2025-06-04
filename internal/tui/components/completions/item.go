@@ -29,23 +29,30 @@ type completionItemCmp struct {
 	focus        bool
 	matchIndexes []int
 	bgColor      color.Color
+	shortcut     string
 }
 
-type completionOptions func(*completionItemCmp)
+type CompletionOption func(*completionItemCmp)
 
-func WithBackgroundColor(c color.Color) completionOptions {
+func WithBackgroundColor(c color.Color) CompletionOption {
 	return func(cmp *completionItemCmp) {
 		cmp.bgColor = c
 	}
 }
 
-func WithMatchIndexes(indexes ...int) completionOptions {
+func WithMatchIndexes(indexes ...int) CompletionOption {
 	return func(cmp *completionItemCmp) {
 		cmp.matchIndexes = indexes
 	}
 }
 
-func NewCompletionItem(text string, value any, opts ...completionOptions) CompletionItem {
+func WithShortcut(shortcut string) CompletionOption {
+	return func(cmp *completionItemCmp) {
+		cmp.shortcut = shortcut
+	}
+}
+
+func NewCompletionItem(text string, value any, opts ...CompletionOption) CompletionItem {
 	c := &completionItemCmp{
 		text:  text,
 		value: value,
@@ -71,7 +78,14 @@ func (c *completionItemCmp) Update(tea.Msg) (tea.Model, tea.Cmd) {
 func (c *completionItemCmp) View() tea.View {
 	t := styles.CurrentTheme()
 
-	titleStyle := t.S().Text.Padding(0, 1).Width(c.width)
+	itemStyle := t.S().Base.Padding(0, 1).Width(c.width)
+	innerWidth := c.width - 2 // Account for padding
+
+	if c.shortcut != "" {
+		innerWidth -= lipgloss.Width(c.shortcut)
+	}
+
+	titleStyle := t.S().Text.Width(innerWidth)
 	titleMatchStyle := t.S().Text.Underline(true)
 	if c.bgColor != nil {
 		titleStyle = titleStyle.Background(c.bgColor)
@@ -79,36 +93,49 @@ func (c *completionItemCmp) View() tea.View {
 	}
 
 	if c.focus {
-		titleStyle = t.S().TextSelected.Padding(0, 1).Width(c.width)
+		titleStyle = t.S().TextSelected.Width(innerWidth)
 		titleMatchStyle = t.S().TextSelected.Underline(true)
+		itemStyle = itemStyle.Background(t.Primary)
 	}
 
 	var truncatedTitle string
-	var adjustedMatchIndexes []int
 
-	availableWidth := c.width - 2 // Account for padding
-	if len(c.matchIndexes) > 0 && len(c.text) > availableWidth {
+	if len(c.matchIndexes) > 0 && len(c.text) > innerWidth {
 		// Smart truncation: ensure the last matching part is visible
-		truncatedTitle, adjustedMatchIndexes = c.smartTruncate(c.text, availableWidth, c.matchIndexes)
+		truncatedTitle = c.smartTruncate(c.text, innerWidth, c.matchIndexes)
 	} else {
 		// No matches, use regular truncation
-		truncatedTitle = ansi.Truncate(c.text, availableWidth, "…")
-		adjustedMatchIndexes = c.matchIndexes
+		truncatedTitle = ansi.Truncate(c.text, innerWidth, "…")
 	}
 
 	text := titleStyle.Render(truncatedTitle)
-	if len(adjustedMatchIndexes) > 0 {
+	if len(c.matchIndexes) > 0 {
 		var ranges []lipgloss.Range
-		for _, rng := range matchedRanges(adjustedMatchIndexes) {
+		for _, rng := range matchedRanges(c.matchIndexes) {
 			// ansi.Cut is grapheme and ansi sequence aware, we match against a ansi.Stripped string, but we might still have graphemes.
 			// all that to say that rng is byte positions, but we need to pass it down to ansi.Cut as char positions.
 			// so we need to adjust it here:
-			start, stop := bytePosToVisibleCharPos(text, rng)
+			start, stop := bytePosToVisibleCharPos(truncatedTitle, rng)
 			ranges = append(ranges, lipgloss.NewRange(start, stop+1, titleMatchStyle))
 		}
 		text = lipgloss.StyleRanges(text, ranges...)
 	}
-	return tea.NewView(text)
+	parts := []string{text}
+	if c.shortcut != "" {
+		// Add the shortcut at the end
+		shortcutStyle := t.S().Muted
+		if c.focus {
+			shortcutStyle = t.S().TextSelected
+		}
+		parts = append(parts, shortcutStyle.Render(c.shortcut))
+	}
+	item := itemStyle.Render(
+		lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			parts...,
+		),
+	)
+	return tea.NewView(item)
 }
 
 // Blur implements CommandItem.
@@ -141,9 +168,6 @@ func (c *completionItemCmp) SetSize(width int, height int) tea.Cmd {
 
 func (c *completionItemCmp) MatchIndexes(indexes []int) {
 	c.matchIndexes = indexes
-	for i := range c.matchIndexes {
-		c.matchIndexes[i] += 1 // Adjust for the padding we add in View
-	}
 }
 
 func (c *completionItemCmp) FilterValue() string {
@@ -155,18 +179,18 @@ func (c *completionItemCmp) Value() any {
 }
 
 // smartTruncate implements fzf-style truncation that ensures the last matching part is visible
-func (c *completionItemCmp) smartTruncate(text string, width int, matchIndexes []int) (string, []int) {
+func (c *completionItemCmp) smartTruncate(text string, width int, matchIndexes []int) string {
 	if width <= 0 {
-		return "", []int{}
+		return ""
 	}
 
 	textLen := ansi.StringWidth(text)
 	if textLen <= width {
-		return text, matchIndexes
+		return text
 	}
 
 	if len(matchIndexes) == 0 {
-		return ansi.Truncate(text, width, "…"), []int{}
+		return ansi.Truncate(text, width, "…")
 	}
 
 	// Find the last match position
@@ -187,7 +211,7 @@ func (c *completionItemCmp) smartTruncate(text string, width int, matchIndexes [
 
 	// If the last match is within the available width, truncate from the end
 	if lastMatchVisualPos < availableWidth {
-		return ansi.Truncate(text, width, "…"), matchIndexes
+		return ansi.Truncate(text, width, "…")
 	}
 
 	// Calculate the start position to ensure the last match is visible
@@ -209,20 +233,7 @@ func (c *completionItemCmp) smartTruncate(text string, width int, matchIndexes [
 	// Truncate to fit width with ellipsis
 	truncatedText = ansi.Truncate(truncatedText, availableWidth, "")
 	truncatedText = "…" + truncatedText
-
-	// Adjust match indexes for the new truncated string
-	adjustedIndexes := []int{}
-	for _, idx := range matchIndexes {
-		if idx >= startBytePos {
-			newIdx := idx - startBytePos + 1 //
-			// Check if this match is still within the truncated string
-			if newIdx < len(truncatedText) {
-				adjustedIndexes = append(adjustedIndexes, newIdx)
-			}
-		}
-	}
-
-	return truncatedText, adjustedIndexes
+	return truncatedText
 }
 
 func matchedRanges(in []int) [][2]int {

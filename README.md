@@ -10,6 +10,11 @@ A powerful terminal-based AI assistant for developers, providing intelligent cod
 
 OpenCode is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting with various AI models to help with coding tasks, debugging, and more.
 
+<p>For a quick video overview, check out
+<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="25" src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg"> OpenCode + Gemini 2.5 Pro: BYE Claude Code! I'm SWITCHING To the FASTEST AI Coder!</a></p>
+
+<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="550" src="https://i3.ytimg.com/vi/P8luPmEa1QI/maxresdefault.jpg"></a><p>
+
 ## Features
 
 - **Interactive TUI**: Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) for a smooth terminal experience
@@ -273,23 +278,23 @@ By default, a spinner animation is displayed while the model is processing your 
 
 OpenCode supports the following output formats in non-interactive mode:
 
-| Format | Description                            |
-| ------ | -------------------------------------- |
-| `text` | Plain text output (default)            |
-| `json` | Output wrapped in a JSON object        |
+| Format | Description                     |
+| ------ | ------------------------------- |
+| `text` | Plain text output (default)     |
+| `json` | Output wrapped in a JSON object |
 
 The output format is implemented as a strongly-typed `OutputFormat` in the codebase, ensuring type safety and validation when processing outputs.
 
 ## Command-line Flags
 
-| Flag              | Short | Description                                            |
-| ----------------- | ----- | ------------------------------------------------------ |
-| `--help`          | `-h`  | Display help information                               |
-| `--debug`         | `-d`  | Enable debug mode                                      |
-| `--cwd`           | `-c`  | Set current working directory                          |
-| `--prompt`        | `-p`  | Run a single prompt in non-interactive mode            |
-| `--output-format` | `-f`  | Output format for non-interactive mode (text, json)    |
-| `--quiet`         | `-q`  | Hide spinner in non-interactive mode                   |
+| Flag              | Short | Description                                         |
+| ----------------- | ----- | --------------------------------------------------- |
+| `--help`          | `-h`  | Display help information                            |
+| `--debug`         | `-d`  | Enable debug mode                                   |
+| `--cwd`           | `-c`  | Set current working directory                       |
+| `--prompt`        | `-p`  | Run a single prompt in non-interactive mode         |
+| `--output-format` | `-f`  | Output format for non-interactive mode (text, json) |
+| `--quiet`         | `-q`  | Hide spinner in non-interactive mode                |
 
 ## Keyboard Shortcuts
 
@@ -572,7 +577,7 @@ While the LSP client implementation supports the full LSP protocol (including co
 OpenCode can also load and use models from a self-hosted (OpenAI-like) provider.
 This is useful for developers who want to experiment with custom models.
 
-### Configuring a self-hosted provider 
+### Configuring a self-hosted provider
 
 You can use a self-hosted model by setting the `LOCAL_ENDPOINT` environment variable.
 This will cause OpenCode to load and use the models from the specified endpoint.

@@ -16,7 +16,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -124,7 +123,7 @@ func (m *messageCmp) textWidth() int {
 // style returns the lipgloss style for the message component.
 // Applies different border colors and styles based on message role and focus state.
 func (msg *messageCmp) style() lipgloss.Style {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	var borderColor color.Color
 	borderStyle := lipgloss.NormalBorder()
 	if msg.focused {
@@ -133,17 +132,16 @@ func (msg *messageCmp) style() lipgloss.Style {
 
 	switch msg.message.Role {
 	case message.User:
-		borderColor = t.Secondary()
+		borderColor = t.Secondary
 	case message.Assistant:
-		borderColor = t.Primary()
+		borderColor = t.Primary
 	default:
 		// Tool call
-		borderColor = t.TextMuted()
+		borderColor = t.BgSubtle
 	}
 
-	return styles.BaseStyle().
+	return t.S().Muted.
 		BorderLeft(true).
-		Foreground(t.TextMuted()).
 		BorderForeground(borderColor).
 		BorderStyle(borderStyle)
 }
@@ -182,14 +180,13 @@ func (m *messageCmp) renderAssistantMessage() string {
 // renderUserMessage renders user messages with file attachments.
 // Displays message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	parts := []string{
 		m.markdownContent(),
 	}
-	attachmentStyles := styles.BaseStyle().
+	attachmentStyles := t.S().Text.
 		MarginLeft(1).
-		Background(t.BackgroundSecondary()).
-		Foreground(t.Text())
+		Background(t.BgSubtle)
 	attachments := []string{}
 	for _, attachment := range m.message.BinaryContent() {
 		file := filepath.Base(attachment.Path)

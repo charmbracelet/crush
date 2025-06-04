@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -93,51 +92,45 @@ func (m InitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m InitDialogCmp) View() string {
-	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base
 
 	// Calculate width needed for content
 	maxWidth := 60 // Width for explanation text
 
 	title := baseStyle.
-		Foreground(t.Primary()).
+		Foreground(t.Primary).
 		Bold(true).
 		Width(maxWidth).
 		Padding(0, 1).
 		Render("Initialize Project")
 
-	explanation := baseStyle.
-		Foreground(t.Text()).
+	explanation := t.S().Text.
 		Width(maxWidth).
 		Padding(0, 1).
 		Render("Initialization generates a new OpenCode.md file that contains information about your codebase, this file serves as memory for each project, you can freely add to it to help the agents be better at their job.")
 
-	question := baseStyle.
-		Foreground(t.Text()).
+	question := t.S().Text.
 		Width(maxWidth).
 		Padding(1, 1).
 		Render("Would you like to initialize this project?")
 
 	maxWidth = min(maxWidth, m.width-10)
-	yesStyle := baseStyle
-	noStyle := baseStyle
+	yesStyle := t.S().Text
+	noStyle := yesStyle
 
 	if m.selected == 0 {
 		yesStyle = yesStyle.
-			Background(t.Primary()).
-			Foreground(t.Background()).
+			Background(t.Primary).
 			Bold(true)
 		noStyle = noStyle.
-			Background(t.Background()).
-			Foreground(t.Primary())
+			Background(t.BgSubtle)
 	} else {
 		noStyle = noStyle.
-			Background(t.Primary()).
-			Foreground(t.Background()).
+			Background(t.Primary).
 			Bold(true)
 		yesStyle = yesStyle.
-			Background(t.Background()).
-			Foreground(t.Primary())
+			Background(t.BgSubtle)
 	}
 
 	yes := yesStyle.Padding(0, 3).Render("Yes")
@@ -161,8 +154,7 @@ func (m InitDialogCmp) View() string {
 
 	return baseStyle.Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
+		BorderForeground(t.BorderFocus).
 		Width(lipgloss.Width(content) + 4).
 		Render(content)
 }

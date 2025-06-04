@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -172,11 +171,11 @@ func (c *completionsCmp) View() tea.View {
 }
 
 func (c *completionsCmp) style() lipgloss.Style {
-	t := theme.CurrentTheme()
-	return styles.BaseStyle().
+	t := styles.CurrentTheme()
+	return t.S().Base.
 		Width(c.width).
 		Height(c.height).
-		Background(t.BackgroundSecondary())
+		Background(t.BgSubtle)
 }
 
 func (c *completionsCmp) Open() bool {

@@ -43,7 +43,7 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (p *logsPage) View() tea.View {
-	style := styles.BaseStyle().Width(p.width).Height(p.height)
+	style := styles.CurrentTheme().S().Base.Width(p.width).Height(p.height)
 	return tea.NewView(
 		style.Render(
 			lipgloss.JoinVertical(lipgloss.Top,

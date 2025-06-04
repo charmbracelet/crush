@@ -15,7 +15,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/llm/agent"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
 // responseContextHeight limits the number of lines displayed in tool output
@@ -107,7 +106,7 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	return joinHeaderBody(header, body)
 }
 
-// unmarshalParams safely unmarshals JSON parameters
+// unmarshalParams safely unmarshal JSON parameters
 func (br baseRenderer) unmarshalParams(input string, target any) error {
 	return json.Unmarshal([]byte(input), target)
 }
@@ -593,7 +592,7 @@ func joinHeaderBody(header, body string) string {
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
@@ -606,58 +605,55 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		if len(ln) > v.textWidth() {
 			ln = v.fit(ln, v.textWidth())
 		}
-		out = append(out, lipgloss.NewStyle().
+		out = append(out, t.S().Muted.
 			Width(v.textWidth()).
-			Background(t.BackgroundSecondary()).
-			Foreground(t.TextMuted()).
+			Background(t.BgSubtle).
 			Render(ln))
 	}
 
 	if len(lines) > responseContextHeight {
-		out = append(out, lipgloss.NewStyle().
-			Background(t.BackgroundSecondary()).
-			Foreground(t.TextMuted()).
+		out = append(out, t.S().Muted.
+			Background(t.BgSubtle).
 			Render(fmt.Sprintf("... (%d lines)", len(lines)-responseContextHeight)))
 	}
 	return strings.Join(out, "\n")
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	truncated := truncateHeight(content, responseContextHeight)
 
-	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BackgroundSecondary())
+	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgSubtle)
 	lines := strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
-		lines = append(lines, lipgloss.NewStyle().
-			Background(t.BackgroundSecondary()).
-			Foreground(t.TextMuted()).
+		lines = append(lines, t.S().Muted.
+			Background(t.BgSubtle).
 			Render(fmt.Sprintf("... (%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
 	for i, ln := range lines {
-		num := lipgloss.NewStyle().
-			PaddingLeft(4).PaddingRight(2).
-			Background(t.BackgroundSecondary()).
-			Foreground(t.TextMuted()).
+		num := t.S().Muted.
+			Background(t.BgSubtle).
+			PaddingLeft(4).
+			PaddingRight(2).
 			Render(fmt.Sprintf("%d", i+1+offset))
 		w := v.textWidth() - lipgloss.Width(num)
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
-			lipgloss.NewStyle().
+			t.S().Base.
 				Width(w).
-				Background(t.BackgroundSecondary()).
+				Background(t.BgSubtle).
 				Render(v.fit(ln, w)))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func (v *toolCallCmp) renderToolError() string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	err := strings.ReplaceAll(v.result.Content, "\n", " ")
 	err = fmt.Sprintf("Error: %s", err)
-	return styles.BaseStyle().Foreground(t.Error()).Render(v.fit(err, v.textWidth()))
+	return t.S().Base.Foreground(t.Error).Render(v.fit(err, v.textWidth()))
 }
 
 func removeWorkingDirPrefix(path string) string {

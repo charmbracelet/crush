@@ -19,7 +19,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/tui/image"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -258,7 +257,8 @@ func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
 }
 
 func (f *filepickerCmp) View() tea.View {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base
 	const maxVisibleDirs = 20
 	const maxWidth = 80
 
@@ -286,12 +286,11 @@ func (f *filepickerCmp) View() tea.View {
 
 	for i := startIdx; i < endIdx; i++ {
 		file := f.dirs[i]
-		itemStyle := styles.BaseStyle().Width(adjustedWidth)
+		itemStyle := t.S().Text.Width(adjustedWidth)
 
 		if i == f.cursor {
 			itemStyle = itemStyle.
-				Background(t.Primary()).
-				Foreground(t.Background()).
+				Background(t.Primary).
 				Bold(true)
 		}
 		filename := file.Name()
@@ -309,20 +308,18 @@ func (f *filepickerCmp) View() tea.View {
 
 	// Pad to always show exactly 21 lines
 	for len(files) < maxVisibleDirs {
-		files = append(files, styles.BaseStyle().Width(adjustedWidth).Render(""))
+		files = append(files, baseStyle.Width(adjustedWidth).Render(""))
 	}
 
-	currentPath := styles.BaseStyle().
+	currentPath := baseStyle.
 		Height(1).
 		Width(adjustedWidth).
 		Render(f.cwd.View())
 
-	viewportstyle := lipgloss.NewStyle().
+	viewportstyle := baseStyle.
 		Width(f.viewport.Width()).
-		Background(t.Background()).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.TextMuted()).
-		BorderBackground(t.Background()).
+		BorderForeground(t.BorderFocus).
 		Padding(2).
 		Render(f.viewport.View())
 	var insertExitText string
@@ -335,17 +332,16 @@ func (f *filepickerCmp) View() tea.View {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		currentPath,
-		styles.BaseStyle().Width(adjustedWidth).Render(""),
-		styles.BaseStyle().Width(adjustedWidth).Render(lipgloss.JoinVertical(lipgloss.Left, files...)),
-		styles.BaseStyle().Width(adjustedWidth).Render(""),
-		styles.BaseStyle().Foreground(t.TextMuted()).Width(adjustedWidth).Render(insertExitText),
+		baseStyle.Width(adjustedWidth).Render(""),
+		baseStyle.Width(adjustedWidth).Render(lipgloss.JoinVertical(lipgloss.Left, files...)),
+		baseStyle.Width(adjustedWidth).Render(""),
+		t.S().Muted.Width(adjustedWidth).Render(insertExitText),
 	)
 
 	f.cwd.SetValue(f.cwd.Value())
-	contentStyle := styles.BaseStyle().Padding(1, 2).
+	contentStyle := baseStyle.Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderBackground(t.Background()).
-		BorderForeground(t.TextMuted()).
+		BorderForeground(t.BorderFocus).
 		Width(lipgloss.Width(content) + 4)
 
 	return tea.NewView(

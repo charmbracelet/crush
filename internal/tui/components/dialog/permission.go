@@ -157,17 +157,17 @@ func (p *permissionDialogCmp) renderButtons() string {
 	// Style the selected button
 	switch p.selectedOption {
 	case 0:
-		allowStyle = allowStyle.Background(t.Primary)
+		allowStyle = allowStyle.Background(t.Secondary)
 		allowSessionStyle = allowSessionStyle.Background(t.BgSubtle)
 		denyStyle = denyStyle.Background(t.BgSubtle)
 	case 1:
 		allowStyle = allowStyle.Background(t.BgSubtle)
-		allowSessionStyle = allowSessionStyle.Background(t.Primary)
+		allowSessionStyle = allowSessionStyle.Background(t.Secondary)
 		denyStyle = denyStyle.Background(t.BgSubtle)
 	case 2:
 		allowStyle = allowStyle.Background(t.BgSubtle)
 		allowSessionStyle = allowSessionStyle.Background(t.BgSubtle)
-		denyStyle = denyStyle.Background(t.Primary)
+		denyStyle = denyStyle.Background(t.Secondary)
 	}
 
 	allowButton := allowStyle.Padding(0, 1).Render("Allow (a)")

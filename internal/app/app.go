@@ -19,7 +19,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/permission"
 	"github.com/opencode-ai/opencode/internal/session"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 )
 
 type App struct {
@@ -53,9 +52,6 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 		LSPClients:  make(map[string]*lsp.Client),
 	}
 
-	// Initialize theme based on configuration
-	app.initTheme()
-
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
 
@@ -78,22 +74,6 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 	}
 
 	return app, nil
-}
-
-// initTheme sets the application theme based on the configuration
-func (app *App) initTheme() {
-	cfg := config.Get()
-	if cfg == nil || cfg.TUI.Theme == "" {
-		return // Use default theme
-	}
-
-	// Try to set the theme from config
-	err := theme.SetTheme(cfg.TUI.Theme)
-	if err != nil {
-		logging.Warn("Failed to set theme from config, using default theme", "theme", cfg.TUI.Theme, "error", err)
-	} else {
-		logging.Debug("Set theme from config", "theme", cfg.TUI.Theme)
-	}
 }
 
 // RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.

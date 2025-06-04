@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/highlight"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -329,12 +329,11 @@ func highlightLine(fileName string, line string, bg color.Color) string {
 }
 
 // createStyles generates the lipgloss styles needed for rendering diffs
-func createStyles(t theme.Theme) (removedLineStyle, addedLineStyle, contextLineStyle, lineNumberStyle lipgloss.Style) {
-	removedLineStyle = lipgloss.NewStyle().Background(t.DiffRemovedBg())
-	addedLineStyle = lipgloss.NewStyle().Background(t.DiffAddedBg())
-	contextLineStyle = lipgloss.NewStyle().Background(t.DiffContextBg())
-	lineNumberStyle = lipgloss.NewStyle().Foreground(t.DiffLineNumber())
-
+func createStyles(t *styles.Theme) (removedLineStyle, addedLineStyle, contextLineStyle, lineNumberStyle lipgloss.Style) {
+	removedLineStyle = lipgloss.NewStyle().Background(t.S().Diff.RemovedBg)
+	addedLineStyle = lipgloss.NewStyle().Background(t.S().Diff.AddedBg)
+	contextLineStyle = lipgloss.NewStyle().Background(t.S().Diff.ContextBg)
+	lineNumberStyle = lipgloss.NewStyle().Foreground(t.S().Diff.LineNumber)
 	return
 }
 
@@ -446,10 +445,10 @@ func applyHighlighting(content string, segments []Segment, segmentType LineType,
 
 // renderLeftColumn formats the left side of a side-by-side diff
 func renderLeftColumn(fileName string, dl *DiffLine, colWidth int) string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 
 	if dl == nil {
-		contextLineStyle := lipgloss.NewStyle().Background(t.DiffContextBg())
+		contextLineStyle := t.S().Base.Background(t.S().Diff.ContextBg)
 		return contextLineStyle.Width(colWidth).Render("")
 	}
 
@@ -460,9 +459,9 @@ func renderLeftColumn(fileName string, dl *DiffLine, colWidth int) string {
 	var bgStyle lipgloss.Style
 	switch dl.Kind {
 	case LineRemoved:
-		marker = removedLineStyle.Foreground(t.DiffRemoved()).Render("-")
+		marker = removedLineStyle.Foreground(t.S().Diff.Removed).Render("-")
 		bgStyle = removedLineStyle
-		lineNumberStyle = lineNumberStyle.Foreground(t.DiffRemoved()).Background(t.DiffRemovedLineNumberBg())
+		lineNumberStyle = lineNumberStyle.Foreground(t.S().Diff.Removed).Background(t.S().Diff.RemovedLineNumberBg)
 	case LineAdded:
 		marker = "?"
 		bgStyle = contextLineStyle
@@ -485,7 +484,7 @@ func renderLeftColumn(fileName string, dl *DiffLine, colWidth int) string {
 
 	// Apply intra-line highlighting for removed lines
 	if dl.Kind == LineRemoved && len(dl.Segments) > 0 {
-		content = applyHighlighting(content, dl.Segments, LineRemoved, t.DiffHighlightRemoved())
+		content = applyHighlighting(content, dl.Segments, LineRemoved, t.S().Diff.HighlightRemoved)
 	}
 
 	// Add a padding space for removed lines
@@ -499,17 +498,17 @@ func renderLeftColumn(fileName string, dl *DiffLine, colWidth int) string {
 		ansi.Truncate(
 			lineText,
 			colWidth,
-			lipgloss.NewStyle().Background(bgStyle.GetBackground()).Foreground(t.TextMuted()).Render("..."),
+			lipgloss.NewStyle().Background(bgStyle.GetBackground()).Foreground(t.FgMuted).Render("..."),
 		),
 	)
 }
 
 // renderRightColumn formats the right side of a side-by-side diff
 func renderRightColumn(fileName string, dl *DiffLine, colWidth int) string {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 
 	if dl == nil {
-		contextLineStyle := lipgloss.NewStyle().Background(t.DiffContextBg())
+		contextLineStyle := lipgloss.NewStyle().Background(t.S().Diff.ContextBg)
 		return contextLineStyle.Width(colWidth).Render("")
 	}
 
@@ -520,9 +519,9 @@ func renderRightColumn(fileName string, dl *DiffLine, colWidth int) string {
 	var bgStyle lipgloss.Style
 	switch dl.Kind {
 	case LineAdded:
-		marker = addedLineStyle.Foreground(t.DiffAdded()).Render("+")
+		marker = addedLineStyle.Foreground(t.S().Diff.Added).Render("+")
 		bgStyle = addedLineStyle
-		lineNumberStyle = lineNumberStyle.Foreground(t.DiffAdded()).Background(t.DiffAddedLineNumberBg())
+		lineNumberStyle = lineNumberStyle.Foreground(t.S().Diff.Added).Background(t.S().Diff.AddedLineNumberBg)
 	case LineRemoved:
 		marker = "?"
 		bgStyle = contextLineStyle
@@ -545,7 +544,7 @@ func renderRightColumn(fileName string, dl *DiffLine, colWidth int) string {
 
 	// Apply intra-line highlighting for added lines
 	if dl.Kind == LineAdded && len(dl.Segments) > 0 {
-		content = applyHighlighting(content, dl.Segments, LineAdded, t.DiffHighlightAdded())
+		content = applyHighlighting(content, dl.Segments, LineAdded, t.S().Diff.HighlightAdded)
 	}
 
 	// Add a padding space for added lines
@@ -559,7 +558,7 @@ func renderRightColumn(fileName string, dl *DiffLine, colWidth int) string {
 		ansi.Truncate(
 			lineText,
 			colWidth,
-			lipgloss.NewStyle().Background(bgStyle.GetBackground()).Foreground(t.TextMuted()).Render("..."),
+			lipgloss.NewStyle().Background(bgStyle.GetBackground()).Foreground(t.FgMuted).Render("..."),
 		),
 	)
 }

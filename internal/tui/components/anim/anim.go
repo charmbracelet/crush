@@ -1,6 +1,7 @@
 package anim
 
 import (
+	"fmt"
 	"image/color"
 	"math/rand"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -240,7 +240,7 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 
 // View renders the animation.
 func (a anim) View() tea.View {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	var b strings.Builder
 
 	for i, c := range a.cyclingChars {
@@ -252,8 +252,7 @@ func (a anim) View() tea.View {
 	}
 
 	if len(a.labelChars) > 1 {
-		textStyle := styles.BaseStyle().
-			Foreground(t.Text())
+		textStyle := t.S().Text
 		for _, c := range a.labelChars {
 			b.WriteString(
 				textStyle.Render(string(c.currentValue)),
@@ -265,10 +264,15 @@ func (a anim) View() tea.View {
 	return tea.NewView(b.String())
 }
 
+func GetColor(c color.Color) string {
+	rgba := color.RGBAModel.Convert(c).(color.RGBA)
+	return fmt.Sprintf("#%02x%02x%02x", rgba.R, rgba.G, rgba.B)
+}
+
 func makeGradientRamp(length int) []color.Color {
-	t := theme.CurrentTheme()
-	startColor := theme.GetColor(t.Primary())
-	endColor := theme.GetColor(t.Secondary())
+	t := styles.CurrentTheme()
+	startColor := GetColor(t.Primary)
+	endColor := GetColor(t.Secondary)
 	var (
 		c        = make([]color.Color, length)
 		start, _ = colorful.Hex(startColor)

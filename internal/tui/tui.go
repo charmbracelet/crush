@@ -11,7 +11,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/pubsub"
 	cmpChat "github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/completions"
-	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/core/status"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/commands"
@@ -95,7 +94,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Status Messages
 	case util.InfoMsg, util.ClearStatusMsg:
 		s, statusCmd := a.status.Update(msg)
-		a.status = s.(core.StatusCmp)
+		a.status = s.(status.StatusCmp)
 		cmds = append(cmds, statusCmd)
 		return a, tea.Batch(cmds...)
 
@@ -108,7 +107,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[logging.LogMessage]:
 		// Send to the status component
 		s, statusCmd := a.status.Update(msg)
-		a.status = s.(core.StatusCmp)
+		a.status = s.(status.StatusCmp)
 		cmds = append(cmds, statusCmd)
 
 		// If the current page is logs, update the logs view
@@ -136,7 +135,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKeyPressMsg(msg)
 	}
 	s, _ := a.status.Update(msg)
-	a.status = s.(core.StatusCmp)
+	a.status = s.(status.StatusCmp)
 	updated, cmd := a.pages[a.currentPage].Update(msg)
 	a.pages[a.currentPage] = updated.(util.Model)
 	cmds = append(cmds, cmd)
@@ -151,7 +150,7 @@ func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 
 	// Update status bar
 	s, cmd := a.status.Update(msg)
-	a.status = s.(core.StatusCmp)
+	a.status = s.(status.StatusCmp)
 	cmds = append(cmds, cmd)
 
 	// Update the current page
@@ -285,7 +284,7 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
-	startPage := page.ChatPage
+	startPage := chat.ChatPage
 	model := &appModel{
 		currentPage: startPage,
 		app:         app,
@@ -294,7 +293,7 @@ func New(app *app.App) tea.Model {
 		keyMap:      DefaultKeyMap(),
 
 		pages: map[page.PageID]util.Model{
-			page.ChatPage: chat.NewChatPage(app),
+			chat.ChatPage: chat.NewChatPage(app),
 			page.LogsPage: page.NewLogsPage(),
 		},
 

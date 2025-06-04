@@ -13,8 +13,14 @@
 - [x] Sessions dialog
 - [ ] Models
 - [~] Move sessions and model dialog to the commands
+- [ ] Add sessions shortuct
+- [ ] Add all posible actions to the commands
 
 ## Investigate
 
 - [ ] Events when tool error
 - [ ] Fancy Spinner
+
+## Messages
+
+- [ ] Fix issue with numbers (padding)

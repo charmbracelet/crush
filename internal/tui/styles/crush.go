@@ -1,7 +1,6 @@
 package styles
 
 import (
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -14,10 +13,6 @@ func NewCrushTheme() *Theme {
 		Secondary: charmtone.Dolly,
 		Tertiary:  charmtone.Bok,
 		Accent:    charmtone.Zest,
-
-		Blue:         lipgloss.Color(charmtone.Malibu.Hex()),
-		PrimaryLight: charmtone.Hazy,
-
 		// Backgrounds
 		BgBase:    charmtone.Pepper,
 		BgSubtle:  charmtone.Charcoal,
@@ -40,10 +35,15 @@ func NewCrushTheme() *Theme {
 		Warning: charmtone.Uni,
 		Info:    charmtone.Malibu,
 
-		// TODO: fix this.
-		SyntaxBg:      lipgloss.Color("#1C1C1F"),
-		SyntaxKeyword: lipgloss.Color("#FF6DFE"),
-		SyntaxString:  lipgloss.Color("#E8FE96"),
-		SyntaxComment: lipgloss.Color("#6B6F85"),
+		// Colors
+		Blue: charmtone.Malibu,
+
+		Green:      charmtone.Julep,
+		GreenDark:  charmtone.Guac,
+		GreenLight: charmtone.Bok,
+
+		Red:      charmtone.Coral,
+		RedDark:  charmtone.Sriracha,
+		RedLight: charmtone.Salmon,
 	}
 }

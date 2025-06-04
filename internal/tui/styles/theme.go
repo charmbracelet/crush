@@ -30,10 +30,6 @@ type Theme struct {
 	Tertiary  color.Color
 	Accent    color.Color
 
-	// Colors
-	Blue color.Color
-	// TODO: add any others needed
-
 	BgBase    color.Color
 	BgSubtle  color.Color
 	BgOverlay color.Color
@@ -52,13 +48,38 @@ type Theme struct {
 	Warning color.Color
 	Info    color.Color
 
-	// TODO: add more syntax colors, maybe just use a chroma theme here.
-	SyntaxBg      color.Color
-	SyntaxKeyword color.Color
-	SyntaxString  color.Color
-	SyntaxComment color.Color
+	// Colors
+	// Blues
+	Blue color.Color
+
+	// Greens
+	Green      color.Color
+	GreenDark  color.Color
+	GreenLight color.Color
+
+	// Reds
+	Red      color.Color
+	RedDark  color.Color
+	RedLight color.Color
+
+	// TODO: add any others needed
 
 	styles *Styles
+}
+
+type Diff struct {
+	Added               color.Color
+	Removed             color.Color
+	Context             color.Color
+	HunkHeader          color.Color
+	HighlightAdded      color.Color
+	HighlightRemoved    color.Color
+	AddedBg             color.Color
+	RemovedBg           color.Color
+	ContextBg           color.Color
+	LineNumber          color.Color
+	AddedLineNumberBg   color.Color
+	RemovedLineNumberBg color.Color
 }
 
 type Styles struct {
@@ -86,6 +107,9 @@ type Styles struct {
 
 	// Help
 	Help help.Styles
+
+	// Diff
+	Diff Diff
 }
 
 func (t *Theme) S() *Styles {
@@ -389,6 +413,22 @@ func (t *Theme) buildStyles() *Styles {
 			FullKey:        base.Foreground(t.FgMuted),
 			FullDesc:       base.Foreground(t.FgSubtle),
 			FullSeparator:  base.Foreground(t.Border),
+		},
+
+		// TODO: Fix this this is bad
+		Diff: Diff{
+			Added:               t.Green,
+			Removed:             t.Red,
+			Context:             t.FgSubtle,
+			HunkHeader:          t.FgSubtle,
+			HighlightAdded:      t.GreenLight,
+			HighlightRemoved:    t.RedLight,
+			AddedBg:             t.GreenDark,
+			RemovedBg:           t.RedDark,
+			ContextBg:           t.BgSubtle,
+			LineNumber:          t.FgMuted,
+			AddedLineNumberBg:   t.GreenDark,
+			RemovedLineNumberBg: t.RedDark,
 		},
 	}
 }

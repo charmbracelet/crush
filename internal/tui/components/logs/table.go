@@ -10,7 +10,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/logging"
 	"github.com/opencode-ai/opencode/internal/pubsub"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -61,9 +61,9 @@ func (i *tableCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (i *tableCmp) View() tea.View {
-	t := theme.CurrentTheme()
+	t := styles.CurrentTheme()
 	defaultStyles := table.DefaultStyles()
-	defaultStyles.Selected = defaultStyles.Selected.Foreground(t.Primary())
+	defaultStyles.Selected = defaultStyles.Selected.Foreground(t.Primary)
 	i.table.SetStyles(defaultStyles)
 	return tea.NewView(i.table.View())
 }

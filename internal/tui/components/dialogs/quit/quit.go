@@ -74,15 +74,15 @@ func (q *quitDialogCmp) View() tea.View {
 	noStyle := yesStyle
 
 	if q.selectedNo {
-		noStyle = noStyle.Background(t.Primary)
+		noStyle = noStyle.Background(t.Secondary)
 		yesStyle = yesStyle.Background(t.BgSubtle)
 	} else {
-		yesStyle = yesStyle.Background(t.Primary)
+		yesStyle = yesStyle.Background(t.Secondary)
 		noStyle = noStyle.Background(t.BgSubtle)
 	}
 
-	yesButton := yesStyle.Padding(0, 1).Render("Yes")
-	noButton := noStyle.Padding(0, 1).Render("No")
+	yesButton := yesStyle.Padding(0, 1).Render("Yep!")
+	noButton := noStyle.Padding(0, 1).Render("Nope")
 
 	buttons := baseStyle.Width(lipgloss.Width(question)).Align(lipgloss.Right).Render(
 		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, "  ", noButton),

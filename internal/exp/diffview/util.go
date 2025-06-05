@@ -3,12 +3,15 @@ package diffview
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func pad(v any, width int) string {
 	s := fmt.Sprintf("%v", v)
-	if len(s) >= width {
+	w := ansi.StringWidth(s)
+	if w >= width {
 		return s
 	}
-	return strings.Repeat(" ", width-len(s)) + s
+	return strings.Repeat(" ", width-w) + s
 }

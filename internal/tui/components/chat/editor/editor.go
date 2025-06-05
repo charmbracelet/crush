@@ -361,7 +361,7 @@ func CreateTextArea(existing *textarea.Model) textarea.Model {
 			return "  > "
 		}
 		if focused {
-			return t.S().Base.Foreground(t.Blue).Render("::: ")
+			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
 		} else {
 			return t.S().Muted.Render("::: ")
 		}

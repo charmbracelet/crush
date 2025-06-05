@@ -40,6 +40,7 @@ type ListModel interface {
 	Items() []util.Model            // Get all items in the list
 	SelectedIndex() int             // Get the index of the currently selected item
 	SetSelected(int) tea.Cmd        // Set the selected item by index and scroll to it
+	ClearSelection() tea.Cmd        // Clear the current selection
 	Filter(string) tea.Cmd          // Filter items based on a search term
 }
 
@@ -1330,5 +1331,17 @@ func (m *model) SetSelected(index int) tea.Cmd {
 			m.renderVisible()
 		}
 	}
+	return tea.Batch(cmds...)
+}
+
+// ClearSelection clears the current selection and focus.
+func (m *model) ClearSelection() tea.Cmd {
+	cmds := []tea.Cmd{}
+	if m.selectionState.selectedIndex >= 0 && m.selectionState.selectedIndex < len(m.filteredItems) {
+		if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
+			cmds = append(cmds, i.Blur())
+		}
+	}
+	m.selectionState.selectedIndex = NoSelection
 	return tea.Batch(cmds...)
 }

@@ -3,6 +3,7 @@ package messages
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	if v.isNested {
 		width -= 4 // Adjust for nested tool call indentation
 	}
-	header := makeHeader(toolName, width, args...)
+	header := br.makeHeader(v, toolName, width, args...)
 	if v.isNested {
 		return v.style().Render(header)
 	}
@@ -109,6 +110,32 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 // unmarshalParams safely unmarshal JSON parameters
 func (br baseRenderer) unmarshalParams(input string, target any) error {
 	return json.Unmarshal([]byte(input), target)
+}
+
+// makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
+func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params ...string) string {
+	t := styles.CurrentTheme()
+	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	if v.result.ToolCallID != "" {
+		if v.result.IsError {
+			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
+		} else {
+			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
+		}
+	} else if v.cancelled {
+		icon = t.S().Muted.Render(styles.ToolPending)
+	}
+	tool = t.S().Base.Foreground(t.Blue).Render(tool)
+	prefix := fmt.Sprintf("%s %s: ", icon, tool)
+	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
+}
+
+// renderError provides consistent error rendering
+func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
+	t := styles.CurrentTheme()
+	header := br.makeHeader(v, prettifyToolName(v.call.Name), v.textWidth(), "")
+	message = t.S().Error.Render(v.fit(message, v.textWidth()-2)) // -2 for padding
+	return joinHeaderBody(header, message)
 }
 
 // Register tool renderers
@@ -167,12 +194,6 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	})
 }
 
-// renderError provides consistent error rendering
-func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
-	header := makeHeader("Error", v.textWidth(), message)
-	return joinHeaderBody(header, "")
-}
-
 // -----------------------------------------------------------------------------
 //  View renderer
 // -----------------------------------------------------------------------------
@@ -189,7 +210,7 @@ func (vr viewRenderer) Render(v *toolCallCmp) string {
 		return vr.renderError(v, "Invalid view parameters")
 	}
 
-	file := removeWorkingDirPrefix(params.FilePath)
+	file := prettyPath(params.FilePath)
 	args := newParamBuilder().
 		addMain(file).
 		addKeyValue("limit", formatNonZero(params.Limit)).
@@ -229,7 +250,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		return er.renderError(v, "Invalid edit parameters")
 	}
 
-	file := removeWorkingDirPrefix(params.FilePath)
+	file := prettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return er.renderWithParams(v, "Edit", args, func() string {
@@ -239,7 +260,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		}
 
 		trunc := truncateHeight(meta.Diff, responseContextHeight)
-		diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()))
+		diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()-2))
 		return diffView
 	})
 }
@@ -260,7 +281,7 @@ func (wr writeRenderer) Render(v *toolCallCmp) string {
 		return wr.renderError(v, "Invalid write parameters")
 	}
 
-	file := removeWorkingDirPrefix(params.FilePath)
+	file := prettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return wr.renderWithParams(v, "Write", args, func() string {
@@ -494,7 +515,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 	args := newParamBuilder().addMain(prompt).build()
 
-	header := makeHeader("Task", v.textWidth(), args...)
+	header := tr.makeHeader(v, "Task", v.textWidth(), args...)
 	t := tree.Root(header)
 
 	for _, call := range v.nestedToolCalls {
@@ -522,12 +543,6 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 	body := renderPlainContent(v, v.result.Content)
 	return joinHeaderBody(header, body)
-}
-
-// makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
-func makeHeader(tool string, width int, params ...string) string {
-	prefix := tool + ": "
-	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
@@ -575,20 +590,27 @@ func renderParamList(paramsWidth int, params ...string) string {
 
 // earlyState returns immediately‑rendered error/cancelled/ongoing states.
 func earlyState(header string, v *toolCallCmp) (string, bool) {
+	t := styles.CurrentTheme()
+	message := ""
 	switch {
 	case v.result.IsError:
-		return lipgloss.JoinVertical(lipgloss.Left, header, v.renderToolError()), true
+		message = v.renderToolError()
 	case v.cancelled:
-		return lipgloss.JoinVertical(lipgloss.Left, header, "Cancelled"), true
+		message = "Cancelled"
 	case v.result.ToolCallID == "":
-		return lipgloss.JoinVertical(lipgloss.Left, header, "Waiting for tool to finish..."), true
+		message = "Waiting for tool to start..."
 	default:
 		return "", false
 	}
+
+	message = t.S().Base.PaddingLeft(2).Render(message)
+	return lipgloss.JoinVertical(lipgloss.Left, header, message), true
 }
 
 func joinHeaderBody(header, body string) string {
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "")
+	t := styles.CurrentTheme()
+	body = t.S().Base.PaddingLeft(2).Render(body)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, "")
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {
@@ -596,17 +618,18 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
+	width := v.textWidth() - 2 // -2 for left padding
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
 			break
 		}
 		ln = " " + ln // left padding
-		if len(ln) > v.textWidth() {
-			ln = v.fit(ln, v.textWidth())
+		if len(ln) > width {
+			ln = v.fit(ln, width)
 		}
 		out = append(out, t.S().Muted.
-			Width(v.textWidth()).
+			Width(width).
 			Background(t.BgSubtle).
 			Render(ln))
 	}
@@ -638,7 +661,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 			PaddingLeft(4).
 			PaddingRight(2).
 			Render(fmt.Sprintf("%d", i+1+offset))
-		w := v.textWidth() - lipgloss.Width(num)
+		w := v.textWidth() - 2 - lipgloss.Width(num) // -2 for left padding
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			t.S().Base.
@@ -667,6 +690,15 @@ func truncateHeight(s string, h int) string {
 		return strings.Join(lines[:h], "\n")
 	}
 	return s
+}
+
+func prettyPath(path string) string {
+	// replace home directory with ~
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		path = strings.ReplaceAll(path, homeDir, "~")
+	}
+	return path
 }
 
 func prettifyToolName(name string) string {

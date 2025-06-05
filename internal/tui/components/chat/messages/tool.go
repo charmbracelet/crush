@@ -40,7 +40,7 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageId string             // ID of the message that initiated this tool call
+	parentMessageID string             // ID of the message that initiated this tool call
 	call            message.ToolCall   // The tool call being executed
 	result          message.ToolResult // The result of the tool execution
 	cancelled       bool               // Whether the tool call was cancelled
@@ -86,7 +86,7 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
-		parentMessageId: parentMessageId,
+		parentMessageID: parentMessageId,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -140,7 +140,7 @@ func (m *toolCallCmp) View() tea.View {
 		if m.isNested {
 			return tea.NewView(box.Render(m.renderPending()))
 		}
-		return tea.NewView(box.PaddingLeft(1).Render(m.renderPending()))
+		return tea.NewView(box.Render(m.renderPending()))
 	}
 
 	r := registry.lookup(m.call.Name)
@@ -148,7 +148,7 @@ func (m *toolCallCmp) View() tea.View {
 	if m.isNested {
 		return tea.NewView(box.Render(r.Render(m)))
 	}
-	return tea.NewView(box.PaddingLeft(1).Render(r.Render(m)))
+	return tea.NewView(box.Render(r.Render(m)))
 }
 
 // State management methods
@@ -168,7 +168,7 @@ func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 
 // ParentMessageId returns the ID of the message that initiated this tool call
 func (m *toolCallCmp) ParentMessageId() string {
-	return m.parentMessageId
+	return m.parentMessageID
 }
 
 // SetToolResult updates the tool result and stops the spinning animation
@@ -209,30 +209,24 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
-	return fmt.Sprintf("%s: %s", prettifyToolName(m.call.Name), m.anim.View())
+	t := styles.CurrentTheme()
+	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
+	return fmt.Sprintf("%s %s: %s", icon, tool, m.anim.View())
 }
 
 // style returns the lipgloss style for the tool call component.
 // Applies muted colors and focus-dependent border styles.
 func (m *toolCallCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
-	if m.isNested {
-		return t.S().Muted
-	}
-	borderStyle := lipgloss.NormalBorder()
-	if m.focused {
-		borderStyle = lipgloss.DoubleBorder()
-	}
-	return t.S().Muted.
-		BorderLeft(true).
-		BorderForeground(t.Border).
-		BorderStyle(borderStyle)
+
+	return t.S().Muted.PaddingLeft(4)
 }
 
 // textWidth calculates the available width for text content,
 // accounting for borders and padding
 func (m *toolCallCmp) textWidth() int {
-	return m.width - 2 // take into account the border and PaddingLeft
+	return m.width - 5 // take into account the border and PaddingLeft
 }
 
 // fit truncates content to fit within the specified width with ellipsis

@@ -20,6 +20,12 @@ var TestMultipleHunksBefore string
 //go:embed testdata/TestMultipleHunks.after
 var TestMultipleHunksAfter string
 
+//go:embed testdata/TestNarrow.before
+var TestNarrowBefore string
+
+//go:embed testdata/TestNarrow.after
+var TestNarrowAfter string
+
 func TestDefault(t *testing.T) {
 	dv := diffview.New().
 		Before("main.go", TestDefaultBefore).
@@ -74,6 +80,22 @@ func TestCustomContextLines(t *testing.T) {
 		Before("main.go", TestMultipleHunksBefore).
 		After("main.go", TestMultipleHunksAfter).
 		ContextLines(4)
+
+	t.Run("LightMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultLightStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+
+	t.Run("DarkMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultDarkStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+}
+
+func TestNarrow(t *testing.T) {
+	dv := diffview.New().
+		Before("text.txt", TestNarrowBefore).
+		After("text.txt", TestNarrowAfter)
 
 	t.Run("LightMode", func(t *testing.T) {
 		dv = dv.Style(diffview.DefaultLightStyle)

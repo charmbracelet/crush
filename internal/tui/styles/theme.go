@@ -199,11 +199,11 @@ func (t *Theme) buildStyles() *Styles {
 		Markdown: ansi.StyleConfig{
 			Document: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					BlockPrefix: "\n",
-					BlockSuffix: "\n",
-					Color:       stringPtr("252"),
+					// BlockPrefix: "\n",
+					// BlockSuffix: "\n",
+					Color: stringPtr("252"),
 				},
-				Margin: uintPtr(defaultMargin),
+				// Margin: uintPtr(defaultMargin),
 			},
 			BlockQuote: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{},

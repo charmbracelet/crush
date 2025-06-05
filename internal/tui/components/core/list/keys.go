@@ -33,22 +33,22 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("k"),
 		),
 		UpOneItem: key.NewBinding(
-			key.WithKeys("shift+up"),
+			key.WithKeys("shift+up", "shift+k"),
 		),
 		DownOneItem: key.NewBinding(
-			key.WithKeys("shift+down"),
+			key.WithKeys("shift+down", "shift+j"),
 		),
 		HalfPageDown: key.NewBinding(
-			key.WithKeys("ctrl+d"),
+			key.WithKeys("d"),
 		),
 		HalfPageUp: key.NewBinding(
-			key.WithKeys("ctrl+u"),
+			key.WithKeys("u"),
 		),
 		Home: key.NewBinding(
-			key.WithKeys("ctrl+g", "home"),
+			key.WithKeys("g", "home"),
 		),
 		End: key.NewBinding(
-			key.WithKeys("ctrl+shift+g", "end"),
+			key.WithKeys("shift+g", "end"),
 		),
 	}
 }

@@ -2,7 +2,6 @@ package messages
 
 import (
 	"fmt"
-	"image/color"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/tui/components/anim"
+	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
@@ -117,38 +117,35 @@ func (m *messageCmp) GetMessage() message.Message {
 // textWidth calculates the available width for text content,
 // accounting for borders and padding
 func (m *messageCmp) textWidth() int {
-	return m.width - 1 // take into account the border
+	return m.width - 2 // take into account the border and/or padding
 }
 
 // style returns the lipgloss style for the message component.
 // Applies different border colors and styles based on message role and focus state.
 func (msg *messageCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
-	var borderColor color.Color
 	borderStyle := lipgloss.NormalBorder()
 	if msg.focused {
-		borderStyle = lipgloss.DoubleBorder()
+		borderStyle = lipgloss.ThickBorder()
 	}
 
-	switch msg.message.Role {
-	case message.User:
-		borderColor = t.Secondary
-	case message.Assistant:
-		borderColor = t.Primary
-	default:
-		// Tool call
-		borderColor = t.BgSubtle
+	style := t.S().Text
+	if msg.message.Role == message.User {
+		style = style.PaddingLeft(1).BorderLeft(true).BorderStyle(borderStyle).BorderForeground(t.Primary)
+	} else {
+		if msg.focused {
+			style = style.PaddingLeft(1).BorderLeft(true).BorderStyle(borderStyle).BorderForeground(t.GreenDark)
+		} else {
+			style = style.PaddingLeft(2)
+		}
 	}
-
-	return t.S().Muted.
-		BorderLeft(true).
-		BorderForeground(borderColor).
-		BorderStyle(borderStyle)
+	return style
 }
 
 // renderAssistantMessage renders assistant messages with optional footer information.
 // Shows model name, response time, and finish reason when the message is complete.
 func (m *messageCmp) renderAssistantMessage() string {
+	t := styles.CurrentTheme()
 	parts := []string{
 		m.markdownContent(),
 	}
@@ -170,7 +167,8 @@ func (m *messageCmp) renderAssistantMessage() string {
 		case message.FinishReasonPermissionDenied:
 			infoMsg = "permission denied"
 		}
-		parts = append(parts, fmt.Sprintf(" %s (%s)", models.SupportedModels[m.message.Model].Name, infoMsg))
+		assistant := t.S().Muted.Render(fmt.Sprintf("⬡ %s (%s)", models.SupportedModels[m.message.Model].Name, infoMsg))
+		parts = append(parts, core.Section(assistant, m.textWidth()))
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -202,7 +200,7 @@ func (m *messageCmp) renderUserMessage() string {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return m.style().Render(joined)
+	return m.style().MarginBottom(1).Render(joined)
 }
 
 // toMarkdown converts text content to rendered markdown using the configured renderer
@@ -280,7 +278,8 @@ func (m *messageCmp) GetSize() (int, int) {
 
 // SetSize updates the width of the message component for text wrapping
 func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
-	m.width = width
+	// For better readability, we limit the width to a maximum of 120 characters
+	m.width = min(width, 120)
 	return nil
 }
 

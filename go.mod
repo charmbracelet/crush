@@ -9,7 +9,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.9.2
 	github.com/alecthomas/chroma/v2 v2.15.0
 	github.com/anthropics/anthropic-sdk-go v1.4.0
-	github.com/aymanbagabas/go-udiff v0.2.0
+	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/charlievieth/fastwalk v1.0.11
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e

@@ -21,7 +21,7 @@ tasks:
   dev:
     desc: Run with profiling enabled
     env:
-      OPENCODE_PROFILE: true
+      CRUSH_PROFILE: true
     cmds:
       - go run .
 

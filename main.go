@@ -15,7 +15,7 @@ func main() {
 		logging.ErrorPersist("Application terminated due to unhandled panic")
 	})
 
-	if os.Getenv("OPENCODE_PROFILE") != "" {
+	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			logging.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {

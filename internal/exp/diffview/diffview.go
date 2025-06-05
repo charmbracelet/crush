@@ -131,12 +131,12 @@ func (dv *DiffView) String() string {
 
 	var b strings.Builder
 
-	for i, h := range dv.unified.Hunks {
+	for _, h := range dv.unified.Hunks {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(codeWidth + leadingSymbolsSize).Render(dv.hunkLineFor(i)))
+		b.WriteString(dv.style.DividerLine.Code.Width(codeWidth + leadingSymbolsSize).Render(dv.hunkLineFor(h)))
 		b.WriteRune('\n')
 
 		beforeLine := h.FromLine
@@ -207,9 +207,8 @@ func (dv *DiffView) lineNumberDigits() (maxBefore, maxAfter int) {
 	return
 }
 
-func (dv *DiffView) hunkLineFor(i int) string {
-	h := dv.unified.Hunks[i]
-	beforeShownLines, afterShownLines := dv.hunkShownLines(i)
+func (dv *DiffView) hunkLineFor(h *udiff.Hunk) string {
+	beforeShownLines, afterShownLines := dv.hunkShownLines(h)
 
 	return fmt.Sprintf(
 		"  @@ -%d,%d +%d,%d @@ ",
@@ -222,8 +221,8 @@ func (dv *DiffView) hunkLineFor(i int) string {
 
 // hunkShownLines calculates the number of lines shown in a hunk for both before
 // and after versions.
-func (dv *DiffView) hunkShownLines(i int) (before, after int) {
-	for _, l := range dv.unified.Hunks[i].Lines {
+func (dv *DiffView) hunkShownLines(h *udiff.Hunk) (before, after int) {
+	for _, l := range h.Lines {
 		switch l.Kind {
 		case udiff.Equal:
 			before++
@@ -242,8 +241,8 @@ func (dv *DiffView) detectWidth() {
 		return
 	}
 
-	for i, h := range dv.unified.Hunks {
-		shownLines := ansi.StringWidth(dv.hunkLineFor(i))
+	for _, h := range dv.unified.Hunks {
+		shownLines := ansi.StringWidth(dv.hunkLineFor(h))
 
 		for _, l := range h.Lines {
 			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n"))

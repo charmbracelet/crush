@@ -67,7 +67,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 		case message.User:
 			content := anthropic.NewTextBlock(msg.Content().String())
 			if cache && !a.options.disableCache {
-				content.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{
+				content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 					Type: "ephemeral",
 				}
 			}
@@ -85,7 +85,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			if msg.Content().String() != "" {
 				content := anthropic.NewTextBlock(msg.Content().String())
 				if cache && !a.options.disableCache {
-					content.OfRequestTextBlock.CacheControl = anthropic.CacheControlEphemeralParam{
+					content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 						Type: "ephemeral",
 					}
 				}
@@ -98,7 +98,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 				if err != nil {
 					continue
 				}
-				blocks = append(blocks, anthropic.ContentBlockParamOfRequestToolUseBlock(toolCall.ID, inputMap, toolCall.Name))
+				blocks = append(blocks, anthropic.NewToolUseBlock(toolCall.ID, inputMap, toolCall.Name))
 			}
 
 			if len(blocks) == 0 {
@@ -167,17 +167,12 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	temperature := anthropic.Float(0)
 	if isUser {
 		for _, m := range lastMessage.Content {
-			if m.OfRequestTextBlock != nil && m.OfRequestTextBlock.Text != "" {
-				messageContent = m.OfRequestTextBlock.Text
+			if m.OfText != nil && m.OfText.Text != "" {
+				messageContent = m.OfText.Text
 			}
 		}
 		if messageContent != "" && a.options.shouldThink != nil && a.options.shouldThink(messageContent) {
-			thinkingParam = anthropic.ThinkingConfigParamUnion{
-				OfThinkingConfigEnabled: &anthropic.ThinkingConfigEnabledParam{
-					BudgetTokens: int64(float64(a.providerOptions.maxTokens) * 0.8),
-					Type:         "enabled",
-				},
-			}
+			thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
 			temperature = anthropic.Float(1)
 		}
 	}

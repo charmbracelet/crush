@@ -68,3 +68,20 @@ func TestMultipleHunks(t *testing.T) {
 		golden.RequireEqual(t, []byte(dv.String()))
 	})
 }
+
+func TestCustomContextLines(t *testing.T) {
+	dv := diffview.New().
+		Before("main.go", TestMultipleHunksBefore).
+		After("main.go", TestMultipleHunksAfter).
+		ContextLines(4)
+
+	t.Run("LightMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultLightStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+
+	t.Run("DarkMode", func(t *testing.T) {
+		dv = dv.Style(diffview.DefaultDarkStyle)
+		golden.RequireEqual(t, []byte(dv.String()))
+	})
+}

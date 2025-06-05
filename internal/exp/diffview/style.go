@@ -12,12 +12,23 @@ type LineStyle struct {
 }
 
 type Style struct {
-	EqualLine  LineStyle
-	InsertLine LineStyle
-	DeleteLine LineStyle
+	DividerLine LineStyle
+	EqualLine   LineStyle
+	InsertLine  LineStyle
+	DeleteLine  LineStyle
 }
 
 var DefaultLightStyle = Style{
+	DividerLine: LineStyle{
+		LineNumber: lipgloss.NewStyle().
+			Foreground(charmtone.Iron).
+			Background(charmtone.Thunder).
+			Align(lipgloss.Right).
+			Padding(0, 1),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Oyster).
+			Background(charmtone.Anchovy),
+	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Charcoal).
@@ -57,6 +68,16 @@ var DefaultLightStyle = Style{
 }
 
 var DefaultDarkStyle = Style{
+	DividerLine: LineStyle{
+		LineNumber: lipgloss.NewStyle().
+			Foreground(charmtone.Smoke).
+			Background(charmtone.Sapphire).
+			Align(lipgloss.Right).
+			Padding(0, 1),
+		Code: lipgloss.NewStyle().
+			Foreground(charmtone.Smoke).
+			Background(charmtone.Ox),
+	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Ash).

@@ -1,6 +1,7 @@
 package diffview
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -125,22 +126,34 @@ func (dv *DiffView) String() string {
 	}
 	dv.detectWidth()
 
-	lineNumberWidth := func(start, num int) int {
-		return len(strconv.Itoa(start + num))
-	}
+	codeWidth := dv.width - leadingSymbolsSize
+	beforeNumDigits, afterNumDigits := dv.lineNumberDigits()
 
 	var b strings.Builder
 
-	for _, h := range dv.unified.Hunks {
+	for i, h := range dv.unified.Hunks {
+		beforeShownLines, afterShownLines := dv.hunkShownLines(i)
+
+		if dv.lineNumbers {
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
+		}
+		b.WriteString(dv.style.DividerLine.Code.Width(codeWidth + leadingSymbolsSize).Render(
+			fmt.Sprintf(
+				"  @@ -%d,%d +%d,%d @@",
+				h.FromLine,
+				beforeShownLines,
+				h.ToLine,
+				afterShownLines,
+			),
+		))
+		b.WriteRune('\n')
+
 		beforeLine := h.FromLine
 		afterLine := h.ToLine
 
-		beforeNumDigits := lineNumberWidth(h.FromLine, len(h.Lines))
-		afterNumDigits := lineNumberWidth(h.ToLine, len(h.Lines))
-
 		for _, l := range h.Lines {
 			content := strings.TrimSuffix(l.Content, "\n")
-			codeWidth := dv.width - leadingSymbolsSize
 
 			switch l.Kind {
 			case udiff.Equal:
@@ -192,6 +205,33 @@ func (dv *DiffView) computeDiff() error {
 		dv.contextLines,
 	)
 	return dv.err
+}
+
+// lineNumberDigits calculates the maximum number of digits needed for before and
+// after line numbers.
+func (dv *DiffView) lineNumberDigits() (maxBefore, maxAfter int) {
+	for _, h := range dv.unified.Hunks {
+		maxBefore = max(maxBefore, len(strconv.Itoa(h.FromLine+len(h.Lines))))
+		maxAfter = max(maxAfter, len(strconv.Itoa(h.ToLine+len(h.Lines))))
+	}
+	return
+}
+
+// hunkShownLines calculates the number of lines shown in a hunk for both before
+// and after versions.
+func (dv *DiffView) hunkShownLines(i int) (before, after int) {
+	for _, l := range dv.unified.Hunks[i].Lines {
+		switch l.Kind {
+		case udiff.Equal:
+			before++
+			after++
+		case udiff.Insert:
+			after++
+		case udiff.Delete:
+			before++
+		}
+	}
+	return
 }
 
 func (dv *DiffView) detectWidth() {

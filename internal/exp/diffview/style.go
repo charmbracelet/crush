@@ -13,6 +13,7 @@ type LineStyle struct {
 
 type Style struct {
 	DividerLine LineStyle
+	MissingLine LineStyle
 	EqualLine   LineStyle
 	InsertLine  LineStyle
 	DeleteLine  LineStyle
@@ -28,6 +29,13 @@ var DefaultLightStyle = Style{
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Oyster).
 			Background(charmtone.Anchovy),
+	},
+	MissingLine: LineStyle{
+		LineNumber: lipgloss.NewStyle().
+			Background(charmtone.Ash).
+			Padding(0, 1),
+		Code: lipgloss.NewStyle().
+			Background(charmtone.Ash),
 	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
@@ -77,6 +85,13 @@ var DefaultDarkStyle = Style{
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Smoke).
 			Background(charmtone.Ox),
+	},
+	MissingLine: LineStyle{
+		LineNumber: lipgloss.NewStyle().
+			Background(charmtone.Charcoal).
+			Padding(0, 1),
+		Code: lipgloss.NewStyle().
+			Background(charmtone.Charcoal),
 	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().

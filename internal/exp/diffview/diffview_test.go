@@ -35,6 +35,9 @@ var (
 	UnifiedFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.Unified()
 	}
+	SplitFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.Split()
+	}
 
 	DefaultFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
@@ -73,6 +76,7 @@ var (
 
 	LayoutFuncs = TestFuncs{
 		"Unified": UnifiedFunc,
+		"Split":   SplitFunc,
 	}
 	BehaviorFuncs = TestFuncs{
 		"Default":            DefaultFunc,

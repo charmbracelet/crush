@@ -17,7 +17,9 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1
 	github.com/charmbracelet/x/ansi v0.8.0
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250602192518-9e722df69bbb
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250606192012-6931dbeeced5
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0
@@ -34,8 +36,6 @@ require (
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.10.0
 )
-
-require github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

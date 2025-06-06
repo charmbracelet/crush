@@ -1,0 +1,22 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... {{.CLI_ARGS}}
+
+  test:update:
+    desc: Run tests and update golden files
+    cmds:
+      - go test ./... -update {{.CLI_ARGS}}
+
+  test:print:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffView/**/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true

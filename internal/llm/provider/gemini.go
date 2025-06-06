@@ -69,19 +69,16 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 				Role:  "user",
 			})
 		case message.Assistant:
-			content := &genai.Content{
-				Role:  "model",
-				Parts: []*genai.Part{},
-			}
+			var assistantParts []*genai.Part
 
 			if msg.Content().String() != "" {
-				content.Parts = append(content.Parts, &genai.Part{Text: msg.Content().String()})
+				assistantParts = append(assistantParts, &genai.Part{Text: msg.Content().String()})
 			}
 
 			if len(msg.ToolCalls()) > 0 {
 				for _, call := range msg.ToolCalls() {
 					args, _ := parseJsonToMap(call.Input)
-					content.Parts = append(content.Parts, &genai.Part{
+					assistantParts = append(assistantParts, &genai.Part{
 						FunctionCall: &genai.FunctionCall{
 							Name: call.Name,
 							Args: args,
@@ -90,7 +87,12 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 				}
 			}
 
-			history = append(history, content)
+			if len(assistantParts) > 0 {
+				history = append(history, &genai.Content{
+					Role:  "model",
+					Parts: assistantParts,
+				})
+			}
 
 		case message.Tool:
 			for _, result := range msg.ToolResults() {

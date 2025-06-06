@@ -26,84 +26,83 @@ var TestNarrowBefore string
 //go:embed testdata/TestNarrow.after
 var TestNarrowAfter string
 
-func TestDefault(t *testing.T) {
-	dv := diffview.New().
-		Before("main.go", TestDefaultBefore).
-		After("main.go", TestDefaultAfter)
+type (
+	TestFunc  func(dv *diffview.DiffView) *diffview.DiffView
+	TestFuncs map[string]TestFunc
+)
 
-	t.Run("LightMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultLightStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
+var (
+	UnifiedFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.Unified()
+	}
 
-	t.Run("DarkMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultDarkStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-}
+	DefaultFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("main.go", TestDefaultBefore).
+			After("main.go", TestDefaultAfter)
+	}
+	NoLineNumbersFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("main.go", TestDefaultBefore).
+			After("main.go", TestDefaultAfter).
+			LineNumbers(false)
+	}
+	MultipleHunksFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("main.go", TestMultipleHunksBefore).
+			After("main.go", TestMultipleHunksAfter)
+	}
+	CustomContextLinesFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("main.go", TestMultipleHunksBefore).
+			After("main.go", TestMultipleHunksAfter).
+			ContextLines(4)
+	}
+	NarrowFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("text.txt", TestNarrowBefore).
+			After("text.txt", TestNarrowAfter)
+	}
 
-func TestNoLineNumbers(t *testing.T) {
-	dv := diffview.New().
-		Before("main.go", TestDefaultBefore).
-		After("main.go", TestDefaultAfter).
-		LineNumbers(false)
+	LightModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.Style(diffview.DefaultLightStyle)
+	}
+	DarkModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.Style(diffview.DefaultDarkStyle)
+	}
 
-	t.Run("LightMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultLightStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
+	LayoutFuncs = TestFuncs{
+		"Unified": UnifiedFunc,
+	}
+	BehaviorFuncs = TestFuncs{
+		"Default":            DefaultFunc,
+		"NoLineNumbers":      NoLineNumbersFunc,
+		"MultipleHunks":      MultipleHunksFunc,
+		"CustomContextLines": CustomContextLinesFunc,
+		"Narrow":             NarrowFunc,
+	}
+	ThemeFuncs = TestFuncs{
+		"LightMode": LightModeFunc,
+		"DarkMode":  DarkModeFunc,
+	}
+)
 
-	t.Run("DarkMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultDarkStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-}
-
-func TestMultipleHunks(t *testing.T) {
-	dv := diffview.New().
-		Before("main.go", TestMultipleHunksBefore).
-		After("main.go", TestMultipleHunksAfter)
-
-	t.Run("LightMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultLightStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-
-	t.Run("DarkMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultDarkStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-}
-
-func TestCustomContextLines(t *testing.T) {
-	dv := diffview.New().
-		Before("main.go", TestMultipleHunksBefore).
-		After("main.go", TestMultipleHunksAfter).
-		ContextLines(4)
-
-	t.Run("LightMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultLightStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-
-	t.Run("DarkMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultDarkStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-}
-
-func TestNarrow(t *testing.T) {
-	dv := diffview.New().
-		Before("text.txt", TestNarrowBefore).
-		After("text.txt", TestNarrowAfter)
-
-	t.Run("LightMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultLightStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
-
-	t.Run("DarkMode", func(t *testing.T) {
-		dv = dv.Style(diffview.DefaultDarkStyle)
-		golden.RequireEqual(t, []byte(dv.String()))
-	})
+func TestDiffView(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			for behaviorName, behaviorFunc := range BehaviorFuncs {
+				t.Run(behaviorName, func(t *testing.T) {
+					for themeName, themeFunc := range ThemeFuncs {
+						t.Run(themeName, func(t *testing.T) {
+							dv := diffview.New()
+							dv = layoutFunc(dv)
+							dv = behaviorFunc(dv)
+							dv = themeFunc(dv)
+							golden.RequireEqual(t, []byte(dv.String()))
+						})
+					}
+				})
+			}
+		})
+	}
 }

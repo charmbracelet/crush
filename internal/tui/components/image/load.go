@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/png"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -24,7 +23,7 @@ type loadMsg struct {
 	io.ReadCloser
 }
 
-func loadUrl(url string) tea.Cmd {
+func loadURL(url string) tea.Cmd {
 	var r io.ReadCloser
 	var err error
 
@@ -52,20 +51,9 @@ func load(r io.ReadCloser) tea.Cmd {
 }
 
 func handleLoadMsg(m Model, msg loadMsg) (Model, tea.Cmd) {
-	if m.cancelAnimation != nil {
-		m.cancelAnimation()
-	}
-
-	// blank out image so it says "loading..."
-	m.image = ""
-
-	return handleLoadMsgStatic(m, msg)
-}
-
-func handleLoadMsgStatic(m Model, msg loadMsg) (Model, tea.Cmd) {
 	defer msg.Close()
 
-	img, err := readerToimage(m.width, m.height, m.url, msg)
+	img, err := readerToImage(m.width, m.height, m.url, msg)
 	if err != nil {
 		return m, func() tea.Msg { return errMsg{err} }
 	}
@@ -73,7 +61,7 @@ func handleLoadMsgStatic(m Model, msg loadMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func imageToString(width, height uint, url string, img image.Image) (string, error) {
+func imageToString(width, height uint, img image.Image) (string, error) {
 	img = resize.Thumbnail(width, height*2-4, img, resize.Lanczos3)
 	b := img.Bounds()
 	w := b.Max.X
@@ -84,7 +72,7 @@ func imageToString(width, height uint, url string, img image.Image) (string, err
 		for x := w; x < int(width); x = x + 2 {
 			str.WriteString(" ")
 		}
-		for x := 0; x < w; x++ {
+		for x := range w {
 			c1, _ := colorful.MakeColor(img.At(x, y))
 			color1 := p.Color(c1.Hex())
 			c2, _ := colorful.MakeColor(img.At(x, y+1))
@@ -99,9 +87,9 @@ func imageToString(width, height uint, url string, img image.Image) (string, err
 	return str.String(), nil
 }
 
-func readerToimage(width uint, height uint, url string, r io.Reader) (string, error) {
+func readerToImage(width uint, height uint, url string, r io.Reader) (string, error) {
 	if strings.HasSuffix(strings.ToLower(url), ".svg") {
-		return svgToimage(width, height, url, r)
+		return svgToImage(width, height, r)
 	}
 
 	img, _, err := imageorient.Decode(r)
@@ -109,15 +97,15 @@ func readerToimage(width uint, height uint, url string, r io.Reader) (string, er
 		return "", err
 	}
 
-	return imageToString(width, height, url, img)
+	return imageToString(width, height, img)
 }
 
-func svgToimage(width uint, height uint, url string, r io.Reader) (string, error) {
+func svgToImage(width uint, height uint, r io.Reader) (string, error) {
 	// Original author: https://stackoverflow.com/users/10826783/usual-human
 	// https://stackoverflow.com/questions/42993407/how-to-create-and-export-svg-to-png-jpeg-in-golang
 	// Adapted to use size from SVG, and to use temp file.
 
-	tmpPngFile, err := ioutil.TempFile("", "imgcat.*.png")
+	tmpPngFile, err := os.CreateTemp("", "img.*.png")
 	if err != nil {
 		return "", err
 	}
@@ -153,5 +141,5 @@ func svgToimage(width uint, height uint, url string, r io.Reader) (string, error
 	if err != nil {
 		return "", err
 	}
-	return imageToString(width, height, url, img)
+	return imageToString(width, height, img)
 }

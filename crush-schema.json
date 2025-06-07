@@ -220,8 +220,8 @@
         "crush.local.md",
         "Crush.md",
         "Crush.local.md",
-        "OPENCODE.md",
-        "OPENCODE.local.md"
+        "CRUSH.md",
+        "CRUSH.local.md"
       ],
       "description": "Context paths for the application",
       "items": {

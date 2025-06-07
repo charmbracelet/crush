@@ -114,8 +114,8 @@ var defaultContextPaths = []string{
 	"crush.local.md",
 	"Crush.md",
 	"Crush.local.md",
-	"OPENCODE.md",
-	"OPENCODE.local.md",
+	"CRUSH.md",
+	"CRUSH.local.md",
 }
 
 // Global configuration instance
@@ -159,7 +159,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if cfg.Debug {
 		defaultLevel = slog.LevelDebug
 	}
-	if os.Getenv("OPENCODE_DEV_DEBUG") == "true" {
+	if os.Getenv("CRUSH_DEV_DEBUG") == "true" {
 		loggingFile := fmt.Sprintf("%s/%s", cfg.Data.Directory, "debug.log")
 
 		// if file does not exist create it

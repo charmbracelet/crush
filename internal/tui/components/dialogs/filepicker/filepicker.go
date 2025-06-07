@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/opencode-ai/opencode/internal/tui/components/core"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
+	"github.com/opencode-ai/opencode/internal/tui/components/image"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 )
 
@@ -23,11 +24,13 @@ type FilePicker interface {
 }
 
 type filePicker struct {
-	wWidth       int
-	wHeight      int
-	width        int
-	filepicker   filepicker.Model
-	selectedFile string
+	wWidth          int
+	wHeight         int
+	width           int
+	filepicker      filepicker.Model
+	selectedFile    string
+	highlightedFile string
+	image           image.Model
 }
 
 func NewFilePickerCmp() FilePicker {
@@ -42,7 +45,8 @@ func NewFilePickerCmp() FilePicker {
 	fp.Cursor = ""
 	fp.SetHeight(fileSelectionHight)
 
-	return &filePicker{filepicker: fp}
+	image := image.New(1, 1, "")
+	return &filePicker{filepicker: fp, image: image}
 }
 
 func (m *filePicker) Init() tea.Cmd {
@@ -65,15 +69,24 @@ func (m *filePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	var cmds []tea.Cmd
 	m.filepicker, cmd = m.filepicker.Update(msg)
+	cmds = append(cmds, cmd)
+	if m.highlightedFile != m.currentImage() && m.currentImage() != "" {
+		w, h := m.imagePreviewSize()
+		cmd = m.image.Redraw(uint(w-2), uint(h-2), m.currentImage())
+		cmds = append(cmds, cmd)
+	}
+	m.highlightedFile = m.currentImage()
 
 	// Did the user select a file?
 	if didSelect, path := m.filepicker.DidSelectFile(msg); didSelect {
 		// Get the path of the selected file.
 		m.selectedFile = path
 	}
-
-	return m, cmd
+	m.image, cmd = m.image.Update(msg)
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
 func (m *filePicker) View() tea.View {
@@ -98,21 +111,23 @@ func (m *filePicker) currentImage() string {
 }
 
 func (m *filePicker) imagePreview() string {
+	t := styles.CurrentTheme()
+	w, h := m.imagePreviewSize()
 	if m.currentImage() == "" {
-		return m.imagePreviewStyle().Render()
+		imgPreview := t.S().Base.
+			Width(w).
+			Height(h).
+			Background(t.BgOverlay)
+
+		return m.imagePreviewStyle().Render(imgPreview.Render())
 	}
 
-	return ""
+	return m.imagePreviewStyle().Width(w).Height(h).Render(m.image.View())
 }
 
 func (m *filePicker) imagePreviewStyle() lipgloss.Style {
 	t := styles.CurrentTheme()
-	w, h := m.imagePreviewSize()
-	return t.S().Base.
-		Width(w).
-		Height(h).
-		Margin(1).
-		Background(t.BgOverlay)
+	return t.S().Base.Padding(1, 1, 1, 1)
 }
 
 func (m *filePicker) imagePreviewSize() (int, int) {

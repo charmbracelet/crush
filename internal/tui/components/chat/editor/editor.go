@@ -19,7 +19,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/session"
 	"github.com/opencode-ai/opencode/internal/tui/components/chat"
 	"github.com/opencode-ai/opencode/internal/tui/components/completions"
-	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
@@ -142,13 +141,13 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.session = msg
 		}
 		return m, nil
-	case dialog.AttachmentAddedMsg:
-		if len(m.attachments) >= maxAttachments {
-			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
-			return m, cmd
-		}
-		m.attachments = append(m.attachments, msg.Attachment)
-		return m, nil
+	// case dialog.AttachmentAddedMsg:
+	// 	if len(m.attachments) >= maxAttachments {
+	// 		logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
+	// 		return m, cmd
+	// 	}
+	// 	m.attachments = append(m.attachments, msg.Attachment)
+	// 	return m, nil
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""

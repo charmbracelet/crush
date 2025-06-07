@@ -3,7 +3,7 @@ package anim
 import (
 	"fmt"
 	"image/color"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -41,7 +41,7 @@ type cyclingChar struct {
 }
 
 func (c cyclingChar) randomRune() rune {
-	return (charRunes)[rand.Intn(len(charRunes))] //nolint:gosec
+	return (charRunes)[rand.IntN(len(charRunes))] //nolint:gosec
 }
 
 func (c cyclingChar) state(start time.Time) charState {
@@ -137,7 +137,7 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	}
 
 	makeDelay := func(a int32, b time.Duration) time.Duration {
-		return time.Duration(rand.Int31n(a)) * (time.Millisecond * b) //nolint:gosec
+		return time.Duration(rand.Int32N(a)) * (time.Millisecond * b) //nolint:gosec
 	}
 
 	makeInitialDelay := func() time.Duration {
@@ -226,22 +226,34 @@ func (a anim) ID() string {
 }
 
 func (a *anim) updateChars(chars *[]cyclingChar) {
-	for i, c := range *chars {
+	charSlice := *chars // dereference to avoid repeated pointer access
+	for i, c := range charSlice {
 		switch c.state(a.start) {
 		case charInitialState:
-			(*chars)[i].currentValue = '.'
+			charSlice[i].currentValue = '.'
 		case charCyclingState:
-			(*chars)[i].currentValue = c.randomRune()
+			charSlice[i].currentValue = c.randomRune()
 		case charEndOfLifeState:
-			(*chars)[i].currentValue = c.finalValue
+			charSlice[i].currentValue = c.finalValue
 		}
 	}
 }
 
 // View renders the animation.
 func (a anim) View() tea.View {
-	t := styles.CurrentTheme()
-	var b strings.Builder
+	var (
+		t = styles.CurrentTheme()
+		b strings.Builder
+	)
+
+	// Pre-allocate builder capacity to avoid reallocations.
+	// Estimate: cycling chars + label chars + ellipsis + style overhead.
+	const (
+		bytesPerChar = 20 // ANSI styling
+		bufferSize   = 50 // ellipsis and safety margin
+	)
+	estimatedCap := len(a.cyclingChars)*bytesPerChar + len(a.labelChars)*bytesPerChar + bufferSize
+	b.Grow(estimatedCap)
 
 	for i, c := range a.cyclingChars {
 		if len(a.ramp) > i {
@@ -258,7 +270,7 @@ func (a anim) View() tea.View {
 				textStyle.Render(string(c.currentValue)),
 			)
 		}
-		return tea.NewView(b.String() + textStyle.Render(a.ellipsis.View()))
+		b.WriteString(textStyle.Render(a.ellipsis.View()))
 	}
 
 	return tea.NewView(b.String())

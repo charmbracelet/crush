@@ -6,8 +6,8 @@ import (
 
 	_ "net/http/pprof" // profiling
 
-	"github.com/opencode-ai/opencode/cmd"
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/charmbracelet/crush/cmd"
+	"github.com/charmbracelet/crush/internal/logging"
 )
 
 func main() {

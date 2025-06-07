@@ -8,6 +8,11 @@ tasks:
     cmds:
       - golangci-lint run
 
+  lint-fix:
+    desc: Run base linters and fix issues
+    cmds:
+      - golangci-lint run --fix
+
   test:
     desc: Run tests
     cmds:

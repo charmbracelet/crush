@@ -2,12 +2,12 @@ package commands
 
 import (
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
+	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/tui/components/core"
-	"github.com/opencode-ai/opencode/internal/tui/components/core/list"
-	"github.com/opencode-ai/opencode/internal/tui/layout"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 type ItemSection interface {

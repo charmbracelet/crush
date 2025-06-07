@@ -9,7 +9,7 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	chromaStyles "github.com/alecthomas/chroma/v2/styles"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
 func SyntaxHighlight(source, fileName string, bg color.Color) (string, error) {

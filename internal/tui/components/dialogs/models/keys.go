@@ -2,7 +2,7 @@ package models
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/opencode-ai/opencode/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/layout"
 )
 
 type KeyMap struct {

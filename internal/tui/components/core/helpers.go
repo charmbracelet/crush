@@ -4,9 +4,9 @@ import (
 	"image/color"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
 )
 
 func Section(text string, width int) string {

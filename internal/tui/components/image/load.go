@@ -3,6 +3,7 @@
 package image
 
 import (
+	"context"
 	"image"
 	"image/png"
 	"io"
@@ -28,8 +29,8 @@ func loadURL(url string) tea.Cmd {
 	var err error
 
 	if strings.HasPrefix(url, "http") {
-		var resp *http.Response
-		resp, err = http.Get(url)
+		var resp *http.Request
+		resp, err = http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 		r = resp.Body
 	} else {
 		r, err = os.Open(url)

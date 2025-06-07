@@ -258,7 +258,7 @@ func (a anim) View() tea.View {
 				textStyle.Render(string(c.currentValue)),
 			)
 		}
-		return tea.NewView(b.String() + textStyle.Render(a.ellipsis.View()))
+		b.WriteString(textStyle.Render(a.ellipsis.View()))
 	}
 
 	return tea.NewView(b.String())

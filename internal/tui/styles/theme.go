@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/v2/filepicker"
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	"github.com/charmbracelet/bubbles/v2/textinput"
@@ -110,6 +111,9 @@ type Styles struct {
 
 	// Diff
 	Diff Diff
+
+	// FilePicker
+	FilePicker filepicker.Styles
 }
 
 func (t *Theme) S() *Styles {
@@ -429,6 +433,20 @@ func (t *Theme) buildStyles() *Styles {
 			LineNumber:          t.FgMuted,
 			AddedLineNumberBg:   t.GreenDark,
 			RemovedLineNumberBg: t.RedDark,
+		},
+
+		FilePicker: filepicker.Styles{
+			DisabledCursor:   base.Foreground(t.FgMuted),
+			Cursor:           base.Foreground(t.FgBase),
+			Symlink:          base.Foreground(t.FgSubtle),
+			Directory:        base.Foreground(t.Primary),
+			File:             base.Foreground(t.FgBase),
+			DisabledFile:     base.Foreground(t.FgMuted),
+			DisabledSelected: base.Background(t.BgOverlay).Foreground(t.FgMuted),
+			Permission:       base.Foreground(t.FgMuted),
+			Selected:         base.Background(t.Primary).Foreground(t.FgBase),
+			FileSize:         base.Foreground(t.FgMuted),
+			EmptyDirectory:   base.Foreground(t.FgMuted).PaddingLeft(2).SetString("Empty directory"),
 		},
 	}
 }

@@ -24,17 +24,20 @@ type ChatFocusedMsg struct {
 	Focused bool // True if the chat input is focused, false otherwise
 }
 
-type chatPage struct {
-	app *app.App
+type (
+	OpenFilePickerMsg struct{}
+	chatPage          struct {
+		app *app.App
 
-	layout layout.SplitPaneLayout
+		layout layout.SplitPaneLayout
 
-	session session.Session
+		session session.Session
 
-	keyMap KeyMap
+		keyMap KeyMap
 
-	chatFocused bool
-}
+		chatFocused bool
+	}
+)
 
 func (p *chatPage) Init() tea.Cmd {
 	cmd := p.layout.Init()
@@ -83,6 +86,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(chat.SessionClearedMsg{}),
 			)
 
+		case key.Matches(msg, p.keyMap.FilePicker):
+			return p, util.CmdHandler(OpenFilePickerMsg{})
 		case key.Matches(msg, p.keyMap.Tab):
 			logging.Info("Tab key pressed, toggling chat focus")
 			if p.session.ID == "" {

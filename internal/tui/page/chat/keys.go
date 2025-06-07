@@ -7,6 +7,7 @@ import (
 
 type KeyMap struct {
 	NewSession key.Binding
+	FilePicker key.Binding
 	Cancel     key.Binding
 	Tab        key.Binding
 }
@@ -24,6 +25,10 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
+		),
+		FilePicker: key.NewBinding(
+			key.WithKeys("ctrl+f"),
+			key.WithHelp("ctrl+f", "select files to upload"),
 		),
 	}
 }

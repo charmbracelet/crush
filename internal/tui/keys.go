@@ -6,12 +6,11 @@ import (
 )
 
 type KeyMap struct {
-	Logs       key.Binding
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	Sessions   key.Binding
-	FilePicker key.Binding
+	Logs     key.Binding
+	Quit     key.Binding
+	Help     key.Binding
+	Commands key.Binding
+	Sessions key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -36,10 +35,6 @@ func DefaultKeyMap() KeyMap {
 		Sessions: key.NewBinding(
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("ctrl+s", "sessions"),
-		),
-		FilePicker: key.NewBinding(
-			key.WithKeys("ctrl+f"),
-			key.WithHelp("ctrl+f", "select files to upload"),
 		),
 	}
 }

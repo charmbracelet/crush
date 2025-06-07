@@ -11,9 +11,8 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.4.0
 	github.com/aymanbagabas/go-udiff v0.2.0
 	github.com/bmatcuk/doublestar/v4 v4.8.1
-	github.com/catppuccin/go v0.3.0
 	github.com/charlievieth/fastwalk v1.0.11
-	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250603125125-87aee03b3d4f
+	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c
@@ -23,9 +22,6 @@ require (
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.17.0
-	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6
-	github.com/muesli/reflow v0.3.0
-	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/openai/openai-go v0.1.0-beta.2
 	github.com/pressly/goose/v3 v3.24.2
@@ -36,6 +32,8 @@ require (
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.10.0
 )
+
+require github.com/dustin/go-humanize v1.0.1 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
@@ -60,7 +58,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.3 // indirect
 	github.com/aws/smithy-go v1.20.3 // indirect
-	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa // indirect
@@ -85,7 +82,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect

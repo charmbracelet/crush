@@ -14,6 +14,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/components/core/status"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/commands"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/filepicker"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/models"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/quit"
 	"github.com/opencode-ai/opencode/internal/tui/components/dialogs/sessions"
@@ -125,12 +126,22 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
 			}
 		}
+
 	case commands.SwitchModelMsg:
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
 				Model: models.NewModelDialogCmp(),
 			},
 		)
+	// File Picker
+	case chat.OpenFilePickerMsg:
+		if a.dialog.ActiveDialogId() == filepicker.FilePickerID {
+			// If the commands dialog is already open, close it
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: filepicker.NewFilePickerCmp(),
+		})
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 	}
@@ -138,6 +149,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.status = s.(status.StatusCmp)
 	updated, cmd := a.pages[a.currentPage].Update(msg)
 	a.pages[a.currentPage] = updated.(util.Model)
+	if a.dialog.HasDialogs() {
+		u, dialogCmd := a.dialog.Update(msg)
+		a.dialog = u.(dialogs.DialogCmp)
+		cmds = append(cmds, dialogCmd)
+	}
 	cmds = append(cmds, cmd)
 	return a, tea.Batch(cmds...)
 }
@@ -277,6 +293,7 @@ func (a *appModel) View() tea.View {
 		lipgloss.NewLayer(appView),
 	}
 	if a.dialog.HasDialogs() {
+		logging.Info("Rendering dialogs")
 		layers = append(
 			layers,
 			a.dialog.GetLayers()...,

@@ -108,7 +108,7 @@ func (m InitDialogCmp) View() string {
 	explanation := t.S().Text.
 		Width(maxWidth).
 		Padding(0, 1).
-		Render("Initialization generates a new OpenCode.md file that contains information about your codebase, this file serves as memory for each project, you can freely add to it to help the agents be better at their job.")
+		Render("Initialization generates a new Crush.md file that contains information about your codebase, this file serves as memory for each project, you can freely add to it to help the agents be better at their job.")
 
 	question := t.S().Text.
 		Width(maxWidth).

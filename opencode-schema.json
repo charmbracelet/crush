@@ -97,7 +97,7 @@
       "type": "object"
     }
   },
-  "description": "Configuration schema for the OpenCode application",
+  "description": "Configuration schema for the Crush application",
   "properties": {
     "agents": {
       "additionalProperties": {
@@ -218,8 +218,8 @@
         "CLAUDE.local.md",
         "crush.md",
         "crush.local.md",
-        "OpenCode.md",
-        "OpenCode.local.md",
+        "Crush.md",
+        "Crush.local.md",
         "OPENCODE.md",
         "OPENCODE.local.md"
       ],
@@ -397,6 +397,6 @@
       "type": "string"
     }
   },
-  "title": "OpenCode Configuration",
+  "title": "Crush Configuration",
   "type": "object"
 }

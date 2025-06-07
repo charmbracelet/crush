@@ -63,7 +63,7 @@ var CommonIgnorePatterns = []string{
 	".Spotlight-V100",
 	".fseventsd",
 
-	// OpenCode
+	// Crush
 	".crush",
 }
 

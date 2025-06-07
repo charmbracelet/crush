@@ -1,4 +1,4 @@
-# ⌬ OpenCode
+# ⌬ Crush
 
 <p align="center"><img src="https://github.com/user-attachments/assets/9ae61ef6-70e5-4876-bc45-5bcb4e52c714" width="800"></p>
 
@@ -8,10 +8,10 @@ A powerful terminal-based AI assistant for developers, providing intelligent cod
 
 ## Overview
 
-OpenCode is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting with various AI models to help with coding tasks, debugging, and more.
+Crush is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting with various AI models to help with coding tasks, debugging, and more.
 
 <p>For a quick video overview, check out
-<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="25" src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg"> OpenCode + Gemini 2.5 Pro: BYE Claude Code! I'm SWITCHING To the FASTEST AI Coder!</a></p>
+<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="25" src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg"> Crush + Gemini 2.5 Pro: BYE Claude Code! I'm SWITCHING To the FASTEST AI Coder!</a></p>
 
 <a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="550" src="https://i3.ytimg.com/vi/P8luPmEa1QI/maxresdefault.jpg"></a><p>
 
@@ -64,7 +64,7 @@ go install github.com/charmbracelet/crush@latest
 
 ## Configuration
 
-OpenCode looks for configuration in the following locations:
+Crush looks for configuration in the following locations:
 
 - `$HOME/.crush.json`
 - `$XDG_CONFIG_HOME/crush/.crush.json`
@@ -72,7 +72,7 @@ OpenCode looks for configuration in the following locations:
 
 ### Auto Compact Feature
 
-OpenCode includes an auto compact feature that automatically summarizes your conversation when it approaches the model's context window limit. When enabled (default setting), this feature:
+Crush includes an auto compact feature that automatically summarizes your conversation when it approaches the model's context window limit. When enabled (default setting), this feature:
 
 - Monitors token usage during your conversation
 - Automatically triggers summarization when usage reaches 95% of the model's context window
@@ -89,7 +89,7 @@ You can enable or disable this feature in your configuration file:
 
 ### Environment Variables
 
-You can configure OpenCode using environment variables:
+You can configure Crush using environment variables:
 
 | Environment Variable       | Purpose                                                |
 | -------------------------- | ------------------------------------------------------ |
@@ -110,7 +110,7 @@ You can configure OpenCode using environment variables:
 
 ### Shell Configuration
 
-OpenCode allows you to configure the shell used by the bash tool. By default, it uses the shell specified in the `SHELL` environment variable, or falls back to `/bin/bash` if not set.
+Crush allows you to configure the shell used by the bash tool. By default, it uses the shell specified in the `SHELL` environment variable, or falls back to `/bin/bash` if not set.
 
 You can override this in your configuration file:
 
@@ -190,7 +190,7 @@ This is useful if you want to use a different shell than your default system she
 
 ## Supported AI Models
 
-OpenCode supports a variety of AI models from different providers:
+Crush supports a variety of AI models from different providers:
 
 ### OpenAI
 
@@ -247,7 +247,7 @@ OpenCode supports a variety of AI models from different providers:
 ## Usage
 
 ```bash
-# Start OpenCode
+# Start Crush
 crush
 
 # Start with debug logging
@@ -259,7 +259,7 @@ crush -c /path/to/project
 
 ## Non-interactive Prompt Mode
 
-You can run OpenCode in non-interactive mode by passing a prompt directly as a command-line argument. This is useful for scripting, automation, or when you want a quick answer without launching the full TUI.
+You can run Crush in non-interactive mode by passing a prompt directly as a command-line argument. This is useful for scripting, automation, or when you want a quick answer without launching the full TUI.
 
 ```bash
 # Run a single prompt and print the AI's response to the terminal
@@ -272,13 +272,13 @@ crush -p "Explain the use of context in Go" -f json
 crush -p "Explain the use of context in Go" -q
 ```
 
-In this mode, OpenCode will process your prompt, print the result to standard output, and then exit. All permissions are auto-approved for the session.
+In this mode, Crush will process your prompt, print the result to standard output, and then exit. All permissions are auto-approved for the session.
 
-By default, a spinner animation is displayed while the model is processing your query. You can disable this spinner with the `-q` or `--quiet` flag, which is particularly useful when running OpenCode from scripts or automated workflows.
+By default, a spinner animation is displayed while the model is processing your query. You can disable this spinner with the `-q` or `--quiet` flag, which is particularly useful when running Crush from scripts or automated workflows.
 
 ### Output Formats
 
-OpenCode supports the following output formats in non-interactive mode:
+Crush supports the following output formats in non-interactive mode:
 
 | Format | Description                     |
 | ------ | ------------------------------- |
@@ -369,7 +369,7 @@ The output format is implemented as a strongly-typed `OutputFormat` in the codeb
 
 ## AI Assistant Tools
 
-OpenCode's AI assistant has access to various tools to help with coding tasks:
+Crush's AI assistant has access to various tools to help with coding tasks:
 
 ### File and Code Tools
 
@@ -395,7 +395,7 @@ OpenCode's AI assistant has access to various tools to help with coding tasks:
 
 ## Architecture
 
-OpenCode is built with a modular architecture:
+Crush is built with a modular architecture:
 
 - **cmd**: Command-line interface using Cobra
 - **internal/app**: Core application services
@@ -410,7 +410,7 @@ OpenCode is built with a modular architecture:
 
 ## Custom Commands
 
-OpenCode supports custom commands that can be created by users to quickly send predefined prompts to the AI assistant.
+Crush supports custom commands that can be created by users to quickly send predefined prompts to the AI assistant.
 
 ### Creating Custom Commands
 
@@ -449,7 +449,7 @@ This creates a command called `user:prime-context`.
 
 ### Command Arguments
 
-OpenCode supports named arguments in custom commands using placeholders in the format `$NAME` (where NAME consists of uppercase letters, numbers, and underscores, and must start with a letter).
+Crush supports named arguments in custom commands using placeholders in the format `$NAME` (where NAME consists of uppercase letters, numbers, and underscores, and must start with a letter).
 
 For example:
 
@@ -461,7 +461,7 @@ RUN git grep --author="$AUTHOR_NAME" -n .
 RUN grep -R "$SEARCH_PATTERN" $DIRECTORY
 ```
 
-When you run a command with arguments, OpenCode will prompt you to enter values for each unique placeholder. Named arguments provide several benefits:
+When you run a command with arguments, Crush will prompt you to enter values for each unique placeholder. Named arguments provide several benefits:
 
 - Clear identification of what each argument represents
 - Ability to use the same argument multiple times
@@ -487,16 +487,16 @@ The content of the command file will be sent as a message to the AI assistant.
 
 ### Built-in Commands
 
-OpenCode includes several built-in commands:
+Crush includes several built-in commands:
 
 | Command            | Description                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
-| Initialize Project | Creates or updates the OpenCode.md memory file with project-specific information                    |
+| Initialize Project | Creates or updates the Crush.md memory file with project-specific information                    |
 | Compact Session    | Manually triggers the summarization of the current session, creating a new session with the summary |
 
 ## MCP (Model Context Protocol)
 
-OpenCode implements the Model Context Protocol (MCP) to extend its capabilities through external tools. MCP provides a standardized way for the AI assistant to interact with external services and tools.
+Crush implements the Model Context Protocol (MCP) to extend its capabilities through external tools. MCP provides a standardized way for the AI assistant to interact with external services and tools.
 
 ### MCP Features
 
@@ -537,7 +537,7 @@ Once configured, MCP tools are automatically available to the AI assistant along
 
 ## LSP (Language Server Protocol)
 
-OpenCode integrates with Language Server Protocol to provide code intelligence features across multiple programming languages.
+Crush integrates with Language Server Protocol to provide code intelligence features across multiple programming languages.
 
 ### LSP Features
 
@@ -576,13 +576,13 @@ While the LSP client implementation supports the full LSP protocol (including co
 
 ## Using a self-hosted model provider
 
-OpenCode can also load and use models from a self-hosted (OpenAI-like) provider.
+Crush can also load and use models from a self-hosted (OpenAI-like) provider.
 This is useful for developers who want to experiment with custom models.
 
 ### Configuring a self-hosted provider
 
 You can use a self-hosted model by setting the `LOCAL_ENDPOINT` environment variable.
-This will cause OpenCode to load and use the models from the specified endpoint.
+This will cause Crush to load and use the models from the specified endpoint.
 
 ```bash
 LOCAL_ENDPOINT=http://localhost:1235/v1
@@ -625,7 +625,7 @@ go build -o crush
 
 ## Acknowledgments
 
-OpenCode gratefully acknowledges the contributions and support from these key individuals:
+Crush gratefully acknowledges the contributions and support from these key individuals:
 
 - [@isaacphi](https://github.com/isaacphi) - For the [mcp-language-server](https://github.com/isaacphi/mcp-language-server) project which provided the foundation for our LSP client implementation
 - [@adamdottv](https://github.com/adamdottv) - For the design direction and UI/UX architecture
@@ -634,7 +634,7 @@ Special thanks to the broader open source community whose tools and libraries ha
 
 ## License
 
-OpenCode is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Crush is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 

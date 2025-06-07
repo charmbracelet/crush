@@ -226,9 +226,9 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "init",
 			Title:       "Initialize Project",
-			Description: "Create/Update the OpenCode.md memory file",
+			Description: "Create/Update the Crush.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
-				prompt := `Please analyze this codebase and create a OpenCode.md file containing:
+				prompt := `Please analyze this codebase and create a Crush.md file containing:
 	1. Build/lint/test commands - especially for running a single test
 	2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
 

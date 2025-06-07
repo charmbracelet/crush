@@ -97,9 +97,9 @@ type Config struct {
 
 // Application constants
 const (
-	defaultDataDirectory = ".opencode"
+	defaultDataDirectory = ".crush"
 	defaultLogLevel      = "info"
-	appName              = "opencode"
+	appName              = "crush"
 
 	MaxTokensFallbackDefault = 4096
 )
@@ -110,8 +110,8 @@ var defaultContextPaths = []string{
 	".cursor/rules/",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
-	"opencode.md",
-	"opencode.local.md",
+	"crush.md",
+	"crush.local.md",
 	"OpenCode.md",
 	"OpenCode.local.md",
 	"OPENCODE.md",
@@ -221,7 +221,7 @@ func configureViper() {
 func setDefaults(debug bool) {
 	viper.SetDefault("data.directory", defaultDataDirectory)
 	viper.SetDefault("contextPaths", defaultContextPaths)
-	viper.SetDefault("tui.theme", "opencode")
+	viper.SetDefault("tui.theme", "crush")
 	viper.SetDefault("autoCompact", true)
 
 	// Set default shell from environment or fallback to /bin/bash

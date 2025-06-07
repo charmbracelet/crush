@@ -52,7 +52,7 @@ func generateSchema() map[string]any {
 			"directory": map[string]any{
 				"type":        "string",
 				"description": "Directory where application data is stored",
-				"default":     ".opencode",
+				"default":     ".crush",
 			},
 		},
 		"required": []string{"directory"},
@@ -89,8 +89,8 @@ func generateSchema() map[string]any {
 			".cursor/rules/",
 			"CLAUDE.md",
 			"CLAUDE.local.md",
-			"opencode.md",
-			"opencode.local.md",
+			"crush.md",
+			"crush.local.md",
 			"OpenCode.md",
 			"OpenCode.local.md",
 			"OPENCODE.md",
@@ -105,9 +105,9 @@ func generateSchema() map[string]any {
 			"theme": map[string]any{
 				"type":        "string",
 				"description": "TUI theme name",
-				"default":     "opencode",
+				"default":     "crush",
 				"enum": []string{
-					"opencode",
+					"crush",
 					"catppuccin",
 					"dracula",
 					"flexoki",

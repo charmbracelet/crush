@@ -64,7 +64,7 @@ var CommonIgnorePatterns = []string{
 	".fseventsd",
 
 	// OpenCode
-	".opencode",
+	".crush",
 }
 
 type DirectoryLister struct {

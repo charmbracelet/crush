@@ -216,8 +216,8 @@
         ".cursor/rules/",
         "CLAUDE.md",
         "CLAUDE.local.md",
-        "opencode.md",
-        "opencode.local.md",
+        "crush.md",
+        "crush.local.md",
         "OpenCode.md",
         "OpenCode.local.md",
         "OPENCODE.md",
@@ -233,7 +233,7 @@
       "description": "Storage configuration",
       "properties": {
         "directory": {
-          "default": ".opencode",
+          "default": ".crush",
           "description": "Directory where application data is stored",
           "type": "string"
         }
@@ -374,10 +374,10 @@
       "description": "Terminal User Interface configuration",
       "properties": {
         "theme": {
-          "default": "opencode",
+          "default": "crush",
           "description": "TUI theme name",
           "enum": [
-            "opencode",
+            "crush",
             "catppuccin",
             "dracula",
             "flexoki",

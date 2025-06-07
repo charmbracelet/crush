@@ -3,7 +3,7 @@ package anim
 import (
 	"fmt"
 	"image/color"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -41,7 +41,7 @@ type cyclingChar struct {
 }
 
 func (c cyclingChar) randomRune() rune {
-	return (charRunes)[rand.Intn(len(charRunes))] //nolint:gosec
+	return (charRunes)[rand.IntN(len(charRunes))] //nolint:gosec
 }
 
 func (c cyclingChar) state(start time.Time) charState {
@@ -137,7 +137,7 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	}
 
 	makeDelay := func(a int32, b time.Duration) time.Duration {
-		return time.Duration(rand.Int31n(a)) * (time.Millisecond * b) //nolint:gosec
+		return time.Duration(rand.Int32N(a)) * (time.Millisecond * b) //nolint:gosec
 	}
 
 	makeInitialDelay := func() time.Duration {

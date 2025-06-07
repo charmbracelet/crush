@@ -43,17 +43,17 @@ curl -fsSL https://raw.githubusercontent.com/charmbracelet/crush/refs/heads/main
 ### Using Homebrew (macOS and Linux)
 
 ```bash
-brew install opencode-ai/tap/opencode
+brew install crush-ai/tap/crush
 ```
 
 ### Using AUR (Arch Linux)
 
 ```bash
 # Using yay
-yay -S opencode-ai-bin
+yay -S crush-ai-bin
 
 # Using paru
-paru -S opencode-ai-bin
+paru -S crush-ai-bin
 ```
 
 ### Using Go
@@ -66,9 +66,9 @@ go install github.com/charmbracelet/crush@latest
 
 OpenCode looks for configuration in the following locations:
 
-- `$HOME/.opencode.json`
-- `$XDG_CONFIG_HOME/opencode/.opencode.json`
-- `./.opencode.json` (local directory)
+- `$HOME/.crush.json`
+- `$XDG_CONFIG_HOME/crush/.crush.json`
+- `./.crush.json` (local directory)
 
 ### Auto Compact Feature
 
@@ -130,7 +130,7 @@ This is useful if you want to use a different shell than your default system she
 ```json
 {
   "data": {
-    "directory": ".opencode"
+    "directory": ".crush"
   },
   "providers": {
     "openai": {
@@ -248,13 +248,13 @@ OpenCode supports a variety of AI models from different providers:
 
 ```bash
 # Start OpenCode
-opencode
+crush
 
 # Start with debug logging
-opencode -d
+crush -d
 
 # Start with a specific working directory
-opencode -c /path/to/project
+crush -c /path/to/project
 ```
 
 ## Non-interactive Prompt Mode
@@ -263,13 +263,13 @@ You can run OpenCode in non-interactive mode by passing a prompt directly as a c
 
 ```bash
 # Run a single prompt and print the AI's response to the terminal
-opencode -p "Explain the use of context in Go"
+crush -p "Explain the use of context in Go"
 
 # Get response in JSON format
-opencode -p "Explain the use of context in Go" -f json
+crush -p "Explain the use of context in Go" -f json
 
 # Run without showing the spinner (useful for scripts)
-opencode -p "Explain the use of context in Go" -q
+crush -p "Explain the use of context in Go" -q
 ```
 
 In this mode, OpenCode will process your prompt, print the result to standard output, and then exit. All permissions are auto-approved for the session.
@@ -419,26 +419,26 @@ Custom commands are predefined prompts stored as Markdown files in one of three 
 1. **User Commands** (prefixed with `user:`):
 
    ```
-   $XDG_CONFIG_HOME/opencode/commands/
+   $XDG_CONFIG_HOME/crush/commands/
    ```
 
-   (typically `~/.config/opencode/commands/` on Linux/macOS)
+   (typically `~/.config/crush/commands/` on Linux/macOS)
 
    or
 
    ```
-   $HOME/.opencode/commands/
+   $HOME/.crush/commands/
    ```
 
 2. **Project Commands** (prefixed with `project:`):
 
    ```
-   <PROJECT DIR>/.opencode/commands/
+   <PROJECT DIR>/.crush/commands/
    ```
 
 Each `.md` file in these directories becomes a custom command. The file name (without extension) becomes the command ID.
 
-For example, creating a file at `~/.config/opencode/commands/prime-context.md` with content:
+For example, creating a file at `~/.config/crush/commands/prime-context.md` with content:
 
 ```markdown
 RUN git ls-files
@@ -472,7 +472,7 @@ When you run a command with arguments, OpenCode will prompt you to enter values 
 You can organize commands in subdirectories:
 
 ```
-~/.config/opencode/commands/git/commit.md
+~/.config/crush/commands/git/commit.md
 ```
 
 This creates a command with ID `user:git:commit`.
@@ -614,13 +614,13 @@ You can also configure a self-hosted model in the configuration file under the `
 ```bash
 # Clone the repository
 git clone https://github.com/charmbracelet/crush.git
-cd opencode
+cd crush
 
 # Build
-go build -o opencode
+go build -o crush
 
 # Run
-./opencode
+./crush
 ```
 
 ## Acknowledgments

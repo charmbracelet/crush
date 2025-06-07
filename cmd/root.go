@@ -21,29 +21,29 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "opencode",
+	Use:   "crush",
 	Short: "Terminal-based AI assistant for software development",
 	Long: `OpenCode is a powerful terminal-based AI assistant that helps with software development tasks.
 It provides an interactive chat interface with AI capabilities, code analysis, and LSP integration
 to assist developers in writing, debugging, and understanding code directly from the terminal.`,
 	Example: `
   # Run in interactive mode
-  opencode
+  crush
 
   # Run with debug logging
-  opencode -d
+  crush -d
 
   # Run with debug logging in a specific directory
-  opencode -d -c /path/to/project
+  crush -d -c /path/to/project
 
   # Print version
-  opencode -v
+  crush -v
 
   # Run a single non-interactive prompt
-  opencode -p "Explain the use of context in Go"
+  crush -p "Explain the use of context in Go"
 
   # Run a single non-interactive prompt with JSON output format
-  opencode -p "Explain the use of context in Go" -f json
+  crush -p "Explain the use of context in Go" -f json
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// If the help flag is set, show the help message

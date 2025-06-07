@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/filepicker"
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -36,6 +37,8 @@ type model struct {
 	filePicker      filepicker.Model
 	highlightedFile string
 	image           image.Model
+	keyMap          KeyMap
+	help            help.Model
 }
 
 func NewFilePickerCmp() FilePicker {
@@ -51,7 +54,15 @@ func NewFilePickerCmp() FilePicker {
 	fp.SetHeight(fileSelectionHight)
 
 	image := image.New(1, 1, "")
-	return &model{filePicker: fp, image: image}
+
+	help := help.New()
+	help.Styles = t.S().Help
+	return &model{
+		filePicker: fp,
+		image:      image,
+		keyMap:     DefaultKeyMap(),
+		help:       help,
+	}
 }
 
 func (m *model) Init() tea.Cmd {
@@ -71,8 +82,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		styles.File = styles.File.Width(m.width)
 		m.filePicker.Styles = styles
 		return m, nil
-
 	case tea.KeyPressMsg:
+		if key.Matches(msg, m.keyMap.Close) {
+			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
 		if key.Matches(msg, m.filePicker.KeyMap.Back) {
 			// make sure we don't go back if we are at the home directory
 			homeDir, _ := os.UserHomeDir()
@@ -114,6 +127,7 @@ func (m *model) View() tea.View {
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Add Image", m.width-4)),
 		m.imagePreview(),
 		m.filePicker.View(),
+		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
 	return tea.NewView(m.style().Render(content))
 }

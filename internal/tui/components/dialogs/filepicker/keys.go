@@ -12,7 +12,6 @@ type KeyMap struct {
 	Up,
 	Forward,
 	Backward,
-	InsertCWD,
 	Close key.Binding
 }
 
@@ -38,10 +37,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("left", "h"),
 			key.WithHelp("left/h", "move backward"),
 		),
-		InsertCWD: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", "manual path input"),
-		),
+
 		Close: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close/exit"),
@@ -63,8 +59,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		k.InsertCWD,
 		key.NewBinding(
+			key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"),
 			key.WithHelp("↑↓←→", "navigate"),
 		),
 		k.Select,

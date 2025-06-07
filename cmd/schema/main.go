@@ -93,8 +93,8 @@ func generateSchema() map[string]any {
 			"crush.local.md",
 			"Crush.md",
 			"Crush.local.md",
-			"OPENCODE.md",
-			"OPENCODE.local.md",
+			"CRUSH.md",
+			"CRUSH.local.md",
 		},
 	}
 

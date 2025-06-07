@@ -3,7 +3,6 @@
 package image
 
 import (
-	"context"
 	"fmt"
 	_ "image/jpeg"
 	_ "image/png"
@@ -17,8 +16,6 @@ type Model struct {
 	width  uint
 	height uint
 	err    error
-
-	cancelAnimation context.CancelFunc
 }
 
 func New(width, height uint, url string) Model {
@@ -38,11 +35,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case errMsg:
 		m.err = msg
 		return m, nil
-	case rewdrawMsg:
+	case redrawMsg:
 		m.width = msg.width
 		m.height = msg.height
 		m.url = msg.url
-		return m, loadUrl(m.url)
+		return m, loadURL(m.url)
 	case loadMsg:
 		return handleLoadMsg(m, msg)
 	}
@@ -60,7 +57,7 @@ type errMsg struct{ error }
 
 func (m Model) Redraw(width uint, height uint, url string) tea.Cmd {
 	return func() tea.Msg {
-		return rewdrawMsg{
+		return redrawMsg{
 			width:  width,
 			height: height,
 			url:    url,
@@ -68,9 +65,9 @@ func (m Model) Redraw(width uint, height uint, url string) tea.Cmd {
 	}
 }
 
-func (m Model) UpdateUrl(url string) tea.Cmd {
+func (m Model) UpdateURL(url string) tea.Cmd {
 	return func() tea.Msg {
-		return rewdrawMsg{
+		return redrawMsg{
 			width:  m.width,
 			height: m.height,
 			url:    url,
@@ -78,7 +75,7 @@ func (m Model) UpdateUrl(url string) tea.Cmd {
 	}
 }
 
-type rewdrawMsg struct {
+type redrawMsg struct {
 	width  uint
 	height uint
 	url    string

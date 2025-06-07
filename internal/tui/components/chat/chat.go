@@ -46,8 +46,7 @@ type messageListCmp struct {
 	width, height    int
 	session          session.Session
 	listCmp          list.ListModel
-	focused          bool // Focus state for styling
-	previousSelected int  // Last selected item index for restoring focus
+	previousSelected int // Last selected item index for restoring focus
 
 	lastUserMessageTime int64
 }
@@ -56,20 +55,21 @@ type messageListCmp struct {
 // and reverse ordering (newest messages at bottom).
 func NewMessagesListCmp(app *app.App) MessageListCmp {
 	defaultKeymaps := list.DefaultKeyMap()
+	listCmp := list.New(
+		list.WithGapSize(1),
+		list.WithReverse(true),
+		list.WithKeyMap(defaultKeymaps),
+	)
 	return &messageListCmp{
-		app: app,
-		listCmp: list.New(
-			list.WithGapSize(1),
-			list.WithReverse(true),
-			list.WithKeyMap(defaultKeymaps),
-		),
+		app:              app,
+		listCmp:          listCmp,
 		previousSelected: list.NoSelection,
 	}
 }
 
 // Init initializes the component (no initialization needed).
 func (m *messageListCmp) Init() tea.Cmd {
-	return nil
+	return tea.Sequence(m.listCmp.Init(), m.listCmp.Blur())
 }
 
 // Update handles incoming messages and updates the component state.
@@ -483,24 +483,15 @@ func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 
 // Blur implements MessageListCmp.
 func (m *messageListCmp) Blur() tea.Cmd {
-	m.focused = false
-	m.previousSelected = m.listCmp.SelectedIndex()
-	m.listCmp.ClearSelection()
-	return nil
+	return m.listCmp.Blur()
 }
 
 // Focus implements MessageListCmp.
 func (m *messageListCmp) Focus() tea.Cmd {
-	m.focused = true
-	if m.previousSelected != list.NoSelection {
-		m.listCmp.SetSelected(m.previousSelected)
-	} else {
-		m.listCmp.SetSelected(len(m.listCmp.Items()) - 1)
-	}
-	return nil
+	return m.listCmp.Focus()
 }
 
 // IsFocused implements MessageListCmp.
 func (m *messageListCmp) IsFocused() bool {
-	return m.focused
+	return m.listCmp.IsFocused()
 }

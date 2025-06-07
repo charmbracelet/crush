@@ -31,6 +31,7 @@ const (
 type ListModel interface {
 	util.Model
 	layout.Sizeable
+	layout.Focusable
 	SetItems([]util.Model) tea.Cmd  // Replace all items in the list
 	AppendItem(util.Model) tea.Cmd  // Add an item to the end of the list
 	PrependItem(util.Model) tea.Cmd // Add an item to the beginning of the list
@@ -40,7 +41,6 @@ type ListModel interface {
 	Items() []util.Model            // Get all items in the list
 	SelectedIndex() int             // Get the index of the currently selected item
 	SetSelected(int) tea.Cmd        // Set the selected item by index and scroll to it
-	ClearSelection() tea.Cmd        // Clear the current selection
 	Filter(string) tea.Cmd          // Filter items based on a search term
 }
 
@@ -143,6 +143,8 @@ type model struct {
 	inputStyle        lipgloss.Style  // Style for the input field
 	hideFilterInput   bool            // Whether to hide the filter input field
 	currentSearch     string          // Current search term for filtering
+
+	isFocused bool // Whether the list is currently focused
 }
 
 // listOptions is a function type for configuring list options.
@@ -238,6 +240,7 @@ func New(opts ...listOptions) ListModel {
 		selectionState:    selectionState{selectedIndex: NoSelection},
 		filterPlaceholder: "Type to filter...",
 		inputStyle:        t.S().Base.Padding(0, 1, 1, 1),
+		isFocused:         true,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -746,8 +749,10 @@ func (m *model) ensureVisibleReverse(cachedItem renderedItem) {
 func (m *model) goToBottom() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = true
-	m.selectionState.selectedIndex = m.findLastSelectableItem()
-	cmds = append(cmds, m.focusSelected())
+	if m.isFocused {
+		m.selectionState.selectedIndex = m.findLastSelectableItem()
+		cmds = append(cmds, m.focusSelected())
+	}
 	m.ResetView()
 	return tea.Batch(cmds...)
 }
@@ -774,6 +779,9 @@ func (m *model) ResetView() {
 // focusSelected gives focus to the currently selected item if it supports focus.
 // Triggers a re-render of the item to show its focused state.
 func (m *model) focusSelected() tea.Cmd {
+	if !m.isFocused {
+		return nil // No focus change if the list is not focused
+	}
 	if !m.selectionState.isValidIndex(len(m.filteredItems)) {
 		return nil
 	}
@@ -953,9 +961,7 @@ func (m *model) UpdateItem(inx int, item util.Model) {
 	}
 	m.filteredItems[inx] = item
 	if m.selectionState.selectedIndex == inx {
-		if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
-			i.Focus()
-		}
+		m.focusSelected()
 	}
 	m.setItemSize(inx)
 	m.rerenderItem(inx)
@@ -1334,14 +1340,21 @@ func (m *model) SetSelected(index int) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// ClearSelection clears the current selection and focus.
-func (m *model) ClearSelection() tea.Cmd {
-	cmds := []tea.Cmd{}
-	if m.selectionState.selectedIndex >= 0 && m.selectionState.selectedIndex < len(m.filteredItems) {
-		if i, ok := m.filteredItems[m.selectionState.selectedIndex].(layout.Focusable); ok {
-			cmds = append(cmds, i.Blur())
-		}
-	}
-	m.selectionState.selectedIndex = NoSelection
-	return tea.Batch(cmds...)
+// Blur implements ListModel.
+func (m *model) Blur() tea.Cmd {
+	m.isFocused = false
+	cmd := m.blurSelected()
+	return cmd
+}
+
+// Focus implements ListModel.
+func (m *model) Focus() tea.Cmd {
+	m.isFocused = true
+	cmd := m.focusSelected()
+	return cmd
+}
+
+// IsFocused implements ListModel.
+func (m *model) IsFocused() bool {
+	return m.isFocused
 }

@@ -226,14 +226,15 @@ func (a anim) ID() string {
 }
 
 func (a *anim) updateChars(chars *[]cyclingChar) {
-	for i, c := range *chars {
+	charSlice := *chars // dereference to avoid repeated pointer access
+	for i, c := range charSlice {
 		switch c.state(a.start) {
 		case charInitialState:
-			(*chars)[i].currentValue = '.'
+			charSlice[i].currentValue = '.'
 		case charCyclingState:
-			(*chars)[i].currentValue = c.randomRune()
+			charSlice[i].currentValue = c.randomRune()
 		case charEndOfLifeState:
-			(*chars)[i].currentValue = c.finalValue
+			charSlice[i].currentValue = c.finalValue
 		}
 	}
 }

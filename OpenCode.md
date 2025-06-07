@@ -1,4 +1,4 @@
-# OpenCode Development Guide
+# Crush Development Guide
 
 ## Build/Test/Lint Commands
 

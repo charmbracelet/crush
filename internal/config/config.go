@@ -112,8 +112,8 @@ var defaultContextPaths = []string{
 	"CLAUDE.local.md",
 	"crush.md",
 	"crush.local.md",
-	"OpenCode.md",
-	"OpenCode.local.md",
+	"Crush.md",
+	"Crush.local.md",
 	"OPENCODE.md",
 	"OPENCODE.local.md",
 }

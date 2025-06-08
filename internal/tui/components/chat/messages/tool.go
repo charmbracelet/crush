@@ -220,6 +220,9 @@ func (m *toolCallCmp) renderPending() string {
 func (m *toolCallCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
 
+	if m.isNested {
+		return t.S().Muted
+	}
 	return t.S().Muted.PaddingLeft(4)
 }
 
@@ -275,12 +278,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished or if the result doesn't match the call ID.
 func (m *toolCallCmp) shouldSpin() bool {
-	if !m.call.Finished {
-		return true
-	} else if m.result.ToolCallID != m.call.ID {
-		return true
-	}
-	return false
+	return !m.call.Finished
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation

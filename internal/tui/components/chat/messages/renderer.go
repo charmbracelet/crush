@@ -3,12 +3,11 @@ package messages
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fileutil"
 	"github.com/charmbracelet/crush/internal/highlight"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -210,7 +209,7 @@ func (vr viewRenderer) Render(v *toolCallCmp) string {
 		return vr.renderError(v, "Invalid view parameters")
 	}
 
-	file := prettyPath(params.FilePath)
+	file := fileutil.PrettyPath(params.FilePath)
 	args := newParamBuilder().
 		addMain(file).
 		addKeyValue("limit", formatNonZero(params.Limit)).
@@ -250,7 +249,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		return er.renderError(v, "Invalid edit parameters")
 	}
 
-	file := prettyPath(params.FilePath)
+	file := fileutil.PrettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return er.renderWithParams(v, "Edit", args, func() string {
@@ -281,7 +280,7 @@ func (wr writeRenderer) Render(v *toolCallCmp) string {
 		return wr.renderError(v, "Invalid write parameters")
 	}
 
-	file := prettyPath(params.FilePath)
+	file := fileutil.PrettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return wr.renderWithParams(v, "Write", args, func() string {
@@ -411,6 +410,7 @@ func (lr lsRenderer) Render(v *toolCallCmp) string {
 	if path == "" {
 		path = "."
 	}
+	path = fileutil.PrettyPath(path)
 
 	args := newParamBuilder().addMain(path).build()
 
@@ -637,6 +637,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	if len(lines) > responseContextHeight {
 		out = append(out, t.S().Muted.
 			Background(t.BgSubtle).
+			Width(width).
 			Render(fmt.Sprintf("... (%d lines)", len(lines)-responseContextHeight)))
 	}
 	return strings.Join(out, "\n")
@@ -652,6 +653,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
 			Background(t.BgSubtle).
+			Width(v.textWidth()-2).
 			Render(fmt.Sprintf("... (%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
@@ -679,26 +681,12 @@ func (v *toolCallCmp) renderToolError() string {
 	return t.S().Base.Foreground(t.Error).Render(v.fit(err, v.textWidth()))
 }
 
-func removeWorkingDirPrefix(path string) string {
-	wd := config.WorkingDirectory()
-	return strings.TrimPrefix(path, wd)
-}
-
 func truncateHeight(s string, h int) string {
 	lines := strings.Split(s, "\n")
 	if len(lines) > h {
 		return strings.Join(lines[:h], "\n")
 	}
 	return s
-}
-
-func prettyPath(path string) string {
-	// replace home directory with ~
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		path = strings.ReplaceAll(path, homeDir, "~")
-	}
-	return path
 }
 
 func prettifyToolName(name string) string {

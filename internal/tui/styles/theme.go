@@ -50,6 +50,8 @@ type Theme struct {
 	Info    color.Color
 
 	// Colors
+	// White
+	White color.Color
 	// Blues
 	Blue color.Color
 

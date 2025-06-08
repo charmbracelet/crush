@@ -6,7 +6,9 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -15,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
 	"github.com/charmbracelet/crush/internal/tui/layout"
@@ -60,6 +63,7 @@ func (a appModel) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	logging.Info("TUI Update", "msg", msg)
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 
@@ -142,7 +146,33 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: filepicker.NewFilePickerCmp(),
 		})
+	// Permissions
+	case pubsub.Event[permission.PermissionRequest]:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: permissions.NewPermissionDialogCmp(msg.Payload),
+		})
+	case permissions.PermissionResponseMsg:
+		switch msg.Action {
+		case permissions.PermissionAllow:
+			a.app.Permissions.Grant(msg.Permission)
+		case permissions.PermissionAllowForSession:
+			a.app.Permissions.GrantPersistent(msg.Permission)
+		case permissions.PermissionDeny:
+			a.app.Permissions.Deny(msg.Permission)
+		}
+		return a, nil
+	// Key Press Messages
 	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+t" {
+			go a.app.Permissions.Request(permission.CreatePermissionRequest{
+				SessionID: "123",
+				ToolName:  "bash",
+				Action:    "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "ls -la",
+				},
+			})
+		}
 		return a, a.handleKeyPressMsg(msg)
 	}
 	s, _ := a.status.Update(msg)

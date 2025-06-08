@@ -67,7 +67,7 @@ func SkipHidden(path string) bool {
 	}
 
 	commonIgnoredDirs := map[string]bool{
-		".crush":        true,
+		".crush":           true,
 		"node_modules":     true,
 		"vendor":           true,
 		"dist":             true,
@@ -201,4 +201,13 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		results[i] = m.Path
 	}
 	return results, truncated, nil
+}
+
+func PrettyPath(path string) string {
+	// replace home directory with ~
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		path = strings.ReplaceAll(path, homeDir, "~")
+	}
+	return path
 }

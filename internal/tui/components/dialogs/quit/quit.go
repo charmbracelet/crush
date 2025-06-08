@@ -74,10 +74,10 @@ func (q *quitDialogCmp) View() tea.View {
 	noStyle := yesStyle
 
 	if q.selectedNo {
-		noStyle = noStyle.Background(t.Secondary)
+		noStyle = noStyle.Foreground(t.White).Background(t.Secondary)
 		yesStyle = yesStyle.Background(t.BgSubtle)
 	} else {
-		yesStyle = yesStyle.Background(t.Secondary)
+		yesStyle = yesStyle.Foreground(t.White).Background(t.Secondary)
 		noStyle = noStyle.Background(t.BgSubtle)
 	}
 

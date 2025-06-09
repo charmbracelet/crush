@@ -72,6 +72,8 @@ github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e 
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174 h1:TlVW+df0rdU/osP0O8DIVS9WFOAzXe3nuiMwJR4n+CA=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250602154956-43689cfc0174/go.mod h1:oOn1YZGZyJHxJfh4sFAna9vDzxJRNuErLETr/lnlB/I=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250609143341-c76fa36f1b94 h1:QIi50k+uNTJmp2sMs+33D1m/EWr/7OPTJ8x92AY3eOc=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250609143341-c76fa36f1b94/go.mod h1:oOn1YZGZyJHxJfh4sFAna9vDzxJRNuErLETr/lnlB/I=
 github.com/charmbracelet/colorprofile v0.3.1 h1:k8dTHMd7fgw4bnFd7jXTLZrSU/CQrKnL3m+AxCzDz40=
 github.com/charmbracelet/colorprofile v0.3.1/go.mod h1:/GkGusxNs8VB/RSOh3fu0TJmQ4ICMMPApIIVn0KszZ0=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe h1:i6ce4CcAlPpTj2ER69m1DBeLZ3RRcHnKExuwhKa3GfY=

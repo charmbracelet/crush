@@ -137,7 +137,12 @@ func (dv *DiffView) String() string {
 	dv.convertDiffToSplit()
 	dv.adjustStyles()
 	dv.detectNumDigits()
-	dv.detectCodeWidth()
+
+	if dv.width <= 0 {
+		dv.detectCodeWidth()
+	} else {
+		dv.resizeCodeWidth()
+	}
 
 	switch dv.layout {
 	case layoutUnified:
@@ -254,6 +259,21 @@ func (dv *DiffView) detectSplitCodeWidth() {
 	}
 }
 
+// resizeCodeWidth resizes the code width to fit within the specified width.
+func (dv *DiffView) resizeCodeWidth() {
+	fullNumWidth := dv.beforeNumDigits + dv.afterNumDigits
+	fullNumWidth += lineNumPadding * 4 // left and right padding for both line numbers
+
+	switch dv.layout {
+	case layoutUnified:
+		dv.codeWidth = dv.width - fullNumWidth - leadingSymbolsSize
+	case layoutSplit:
+		dv.codeWidth = (dv.width - fullNumWidth - leadingSymbolsSize*2) / 2
+	}
+
+	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
+}
+
 // renderUnified renders the unified diff view as a string.
 func (dv *DiffView) renderUnified() string {
 	var b strings.Builder
@@ -263,7 +283,8 @@ func (dv *DiffView) renderUnified() string {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(h)))
+		content := ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(content))
 		b.WriteRune('\n')
 
 		beforeLine := h.FromLine
@@ -271,6 +292,7 @@ func (dv *DiffView) renderUnified() string {
 
 		for _, l := range h.Lines {
 			content := strings.TrimSuffix(l.Content, "\n")
+			content = ansi.Truncate(content, dv.codeWidth, "…")
 
 			switch l.Kind {
 			case udiff.Equal:
@@ -313,7 +335,8 @@ func (dv *DiffView) renderSplit() string {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(dv.unified.Hunks[i])))
+		content := ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…")
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(content))
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
 		}
@@ -328,9 +351,11 @@ func (dv *DiffView) renderSplit() string {
 			var afterContent string
 			if l.before != nil {
 				beforeContent = strings.TrimSuffix(l.before.Content, "\n")
+				beforeContent = ansi.Truncate(beforeContent, dv.codeWidth, "…")
 			}
 			if l.after != nil {
 				afterContent = strings.TrimSuffix(l.after.Content, "\n")
+				afterContent = ansi.Truncate(afterContent, dv.codeWidth, "…")
 			}
 
 			switch {

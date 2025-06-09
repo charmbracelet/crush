@@ -586,22 +586,26 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		a.Publish(pubsub.CreatedEvent, event)
 
 		// Send the messages to the summarize provider
-		response, err := a.summarizeProvider.SendMessages(
+		response := a.summarizeProvider.StreamResponse(
 			summarizeCtx,
 			msgsWithPrompt,
 			make([]tools.BaseTool, 0),
 		)
-		if err != nil {
-			event = AgentEvent{
-				Type:  AgentEventTypeError,
-				Error: fmt.Errorf("failed to summarize: %w", err),
-				Done:  true,
+		var finalResponse *provider.ProviderResponse
+		for r := range response {
+			if r.Error != nil {
+				event = AgentEvent{
+					Type:  AgentEventTypeError,
+					Error: fmt.Errorf("failed to summarize: %w", err),
+					Done:  true,
+				}
+				a.Publish(pubsub.CreatedEvent, event)
+				return
 			}
-			a.Publish(pubsub.CreatedEvent, event)
-			return
+			finalResponse = r.Response
 		}
 
-		summary := strings.TrimSpace(response.Content)
+		summary := strings.TrimSpace(finalResponse.Content)
 		if summary == "" {
 			event = AgentEvent{
 				Type:  AgentEventTypeError,
@@ -651,10 +655,10 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			return
 		}
 		oldSession.SummaryMessageID = msg.ID
-		oldSession.CompletionTokens = response.Usage.OutputTokens
+		oldSession.CompletionTokens = finalResponse.Usage.OutputTokens
 		oldSession.PromptTokens = 0
 		model := a.summarizeProvider.Model()
-		usage := response.Usage
+		usage := finalResponse.Usage
 		cost := model.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 			model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 			model.CostPer1MIn/1e6*float64(usage.InputTokens) +

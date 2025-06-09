@@ -45,8 +45,10 @@ type DiffView struct {
 
 	splitHunks []splitHunk
 
-	codeWidth     int
-	fullCodeWidth int // with leading symbols
+	codeWidth       int
+	fullCodeWidth   int // with leading symbols
+	beforeNumDigits int
+	afterNumDigits  int
 }
 
 // New creates a new DiffView with default settings.
@@ -130,6 +132,7 @@ func (dv *DiffView) String() string {
 		return err.Error()
 	}
 	dv.convertDiffToSplit()
+	dv.detectNumDigits()
 	dv.detectCodeWidth()
 
 	switch dv.layout {
@@ -144,14 +147,12 @@ func (dv *DiffView) String() string {
 
 // renderUnified renders the unified diff view as a string.
 func (dv *DiffView) renderUnified() string {
-	beforeNumDigits, afterNumDigits := dv.lineNumberDigits()
-
 	var b strings.Builder
 
 	for _, h := range dv.unified.Hunks {
 		if dv.lineNumbers {
-			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
-			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
 		}
 		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(h)))
 		b.WriteRune('\n')
@@ -165,24 +166,24 @@ func (dv *DiffView) renderUnified() string {
 			switch l.Kind {
 			case udiff.Equal:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
-					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + content))
 				beforeLine++
 				afterLine++
 			case udiff.Insert:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(" ", beforeNumDigits)))
-					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
 				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(content))
 				afterLine++
 			case udiff.Delete:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
-					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", afterNumDigits)))
+					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
 				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content))
@@ -197,17 +198,15 @@ func (dv *DiffView) renderUnified() string {
 
 // renderSplit renders the split (side-by-side) diff view as a string.
 func (dv *DiffView) renderSplit() string {
-	beforeNumDigits, afterNumDigits := dv.lineNumberDigits()
-
 	var b strings.Builder
 
 	for i, h := range dv.splitHunks {
 		if dv.lineNumbers {
-			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
 		}
 		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(dv.unified.Hunks[i])))
 		if dv.lineNumbers {
-			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
+			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
 		}
 		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(" "))
 		b.WriteRune('\n')
@@ -228,18 +227,18 @@ func (dv *DiffView) renderSplit() string {
 			switch {
 			case l.before == nil:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", beforeNumDigits)))
+					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 				}
 				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
 			case l.before.Kind == udiff.Equal:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + beforeContent))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
+					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
 				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent))
@@ -249,18 +248,18 @@ func (dv *DiffView) renderSplit() string {
 			switch {
 			case l.after == nil:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", afterNumDigits)))
+					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
 			case l.after.Kind == udiff.Equal:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + afterContent))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
 				if dv.lineNumbers {
-					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
+					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
 				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(afterContent))
@@ -293,14 +292,16 @@ func (dv *DiffView) computeDiff() error {
 	return dv.err
 }
 
-// lineNumberDigits calculates the maximum number of digits needed for before and
+// detectNumDigits calculates the maximum number of digits needed for before and
 // after line numbers.
-func (dv *DiffView) lineNumberDigits() (maxBefore, maxAfter int) {
+func (dv *DiffView) detectNumDigits() {
+	dv.beforeNumDigits = 0
+	dv.afterNumDigits = 0
+
 	for _, h := range dv.unified.Hunks {
-		maxBefore = max(maxBefore, len(strconv.Itoa(h.FromLine+len(h.Lines))))
-		maxAfter = max(maxAfter, len(strconv.Itoa(h.ToLine+len(h.Lines))))
+		dv.beforeNumDigits = max(dv.beforeNumDigits, len(strconv.Itoa(h.FromLine+len(h.Lines))))
+		dv.afterNumDigits = max(dv.afterNumDigits, len(strconv.Itoa(h.ToLine+len(h.Lines))))
 	}
-	return
 }
 
 func (dv *DiffView) hunkLineFor(h *udiff.Hunk) string {

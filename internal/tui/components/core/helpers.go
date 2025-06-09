@@ -76,3 +76,58 @@ func Status(ops StatusOpts, width int) string {
 		description,
 	}, " ")
 }
+
+type ButtonOpts struct {
+	Text            string
+	UnderlineIndex  int  // Index of character to underline (0-based)
+	Selected        bool // Whether this button is selected
+}
+
+// SelectableButton creates a button with an underlined character and selection state
+func SelectableButton(opts ButtonOpts) string {
+	t := styles.CurrentTheme()
+	
+	// Base style for the button
+	buttonStyle := t.S().Text
+	
+	// Apply selection styling
+	if opts.Selected {
+		buttonStyle = buttonStyle.Foreground(t.White).Background(t.Secondary)
+	} else {
+		buttonStyle = buttonStyle.Background(t.BgSubtle)
+	}
+	
+	// Create the button text with underlined character
+	text := opts.Text
+	if opts.UnderlineIndex >= 0 && opts.UnderlineIndex < len(text) {
+		before := text[:opts.UnderlineIndex]
+		underlined := text[opts.UnderlineIndex : opts.UnderlineIndex+1]
+		after := text[opts.UnderlineIndex+1:]
+		
+		message := buttonStyle.Render(before) + 
+			buttonStyle.Underline(true).Render(underlined) + 
+			buttonStyle.Render(after)
+		
+		return buttonStyle.Padding(0, 2).Render(message)
+	}
+	
+	// Fallback if no underline index specified
+	return buttonStyle.Padding(0, 2).Render(text)
+}
+
+// SelectableButtons creates a horizontal row of selectable buttons
+func SelectableButtons(buttons []ButtonOpts, spacing string) string {
+	if spacing == "" {
+		spacing = "  "
+	}
+	
+	var parts []string
+	for i, button := range buttons {
+		parts = append(parts, SelectableButton(button))
+		if i < len(buttons)-1 {
+			parts = append(parts, spacing)
+		}
+	}
+	
+	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}

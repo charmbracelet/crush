@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	initDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/init"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -58,6 +60,24 @@ func (a appModel) Init() tea.Cmd {
 
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
+
+	// Check if we should show the init dialog
+	cmds = append(cmds, func() tea.Msg {
+		shouldShow, err := config.ShouldShowInitDialog()
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to check init status: " + err.Error(),
+			}
+		}
+		if shouldShow {
+			return dialogs.OpenDialogMsg{
+				Model: initDialog.NewInitDialogCmp(),
+			}
+		}
+		return nil
+	})
+
 	return tea.Batch(cmds...)
 }
 
@@ -159,6 +179,33 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.GrantPersistent(msg.Permission)
 		case permissions.PermissionDeny:
 			a.app.Permissions.Deny(msg.Permission)
+		}
+		return a, nil
+	// Init Dialog
+	case initDialog.CloseInitDialogMsg:
+		if msg.Initialize {
+			// Run the initialization command
+			prompt := `Please analyze this codebase and create a Crush.md file containing:
+1. Build/lint/test commands - especially for running a single test
+2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+
+The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
+If there's already a crush.md, improve it.
+If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
+			
+			// Mark the project as initialized
+			if err := config.MarkProjectInitialized(); err != nil {
+				return a, util.ReportError(err)
+			}
+			
+			return a, util.CmdHandler(cmpChat.SendMsg{
+				Text: prompt,
+			})
+		} else {
+			// Mark the project as initialized without running the command
+			if err := config.MarkProjectInitialized(); err != nil {
+				return a, util.ReportError(err)
+			}
 		}
 		return a, nil
 	// Key Press Messages

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -37,8 +38,39 @@ func ShouldShowInitDialog() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
+	// Check if any variation of crush.md already exists in working directory
+	crushExists, err := crushMdExists(WorkingDirectory())
+	if err != nil {
+		return false, fmt.Errorf("failed to check for crush.md files: %w", err)
+	}
+	if crushExists {
+		// Crush.md already exists, don't show the dialog
+		return false, nil
+	}
+
 	// File doesn't exist, show the dialog
 	return true, nil
+}
+
+// crushMdExists checks if any case variation of crush.md exists in the directory
+func crushMdExists(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		
+		name := strings.ToLower(entry.Name())
+		if name == "crush.md" {
+			return true, nil
+		}
+	}
+	
+	return false, nil
 }
 
 // MarkProjectInitialized marks the current project as initialized

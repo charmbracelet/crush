@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
+	"github.com/charmbracelet/crush/internal/tui/page/logs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -137,7 +138,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, statusCmd)
 
 		// If the current page is logs, update the logs view
-		if a.currentPage == page.LogsPage {
+		if a.currentPage == logs.LogsPage {
 			updated, pageCmd := a.pages[a.currentPage].Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			cmds = append(cmds, pageCmd)
@@ -328,7 +329,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Sequence(cmds...)
 	// Page navigation
 	case key.Matches(msg, a.keyMap.Logs):
-		return a.moveToPage(page.LogsPage)
+		return a.moveToPage(logs.LogsPage)
 
 	default:
 		if a.dialog.HasDialogs() {
@@ -379,7 +380,6 @@ func (a *appModel) View() tea.View {
 		lipgloss.NewLayer(appView),
 	}
 	if a.dialog.HasDialogs() {
-		logging.Info("Rendering dialogs")
 		layers = append(
 			layers,
 			a.dialog.GetLayers()...,
@@ -424,7 +424,7 @@ func New(app *app.App) tea.Model {
 
 		pages: map[page.PageID]util.Model{
 			chat.ChatPage: chat.NewChatPage(app),
-			page.LogsPage: page.NewLogsPage(),
+			logs.LogsPage: logs.NewLogsPage(),
 		},
 
 		dialog:      dialogs.NewDialogCmp(),

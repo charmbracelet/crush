@@ -360,7 +360,6 @@ func (c *editorCmp) Blur() tea.Cmd {
 
 // Focus implements Container.
 func (c *editorCmp) Focus() tea.Cmd {
-	logging.Info("Focusing editor textarea")
 	return c.textarea.Focus()
 }
 

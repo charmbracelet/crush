@@ -263,4 +263,3 @@ func (c *compactDialogCmp) Position() (int, int) {
 func (c *compactDialogCmp) ID() dialogs.DialogID {
 	return CompactDialogID
 }
-

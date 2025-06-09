@@ -1,13 +1,18 @@
 package filepicker
 
 import (
+	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/filepicker"
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/image"
@@ -23,7 +28,7 @@ const (
 )
 
 type FilePickedMsg struct {
-	FilePath string
+	Attachment message.Attachment
 }
 
 type FilePicker interface {
@@ -111,7 +116,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Get the path of the selected file.
 		return m, tea.Sequence(
 			util.CmdHandler(dialogs.CloseDialogMsg{}),
-			util.CmdHandler(FilePickedMsg{FilePath: path}),
+			func() tea.Msg {
+				isFileLarge, err := ValidateFileSize(path, maxAttachmentSize)
+				if err != nil {
+					logging.ErrorPersist("unable to read the image")
+					return nil
+				}
+				if isFileLarge {
+					logging.ErrorPersist("file too large, max 5MB")
+					return nil
+				}
+
+				content, err := os.ReadFile(path)
+				if err != nil {
+					logging.ErrorPersist("Unable read selected file")
+					return nil
+				}
+
+				mimeBufferSize := min(512, len(content))
+				mimeType := http.DetectContentType(content[:mimeBufferSize])
+				fileName := filepath.Base(path)
+				attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+				return FilePickedMsg{
+					Attachment: attachment,
+				}
+			},
 		)
 	}
 	m.image, cmd = m.image.Update(msg)
@@ -184,4 +213,17 @@ func (m *model) Position() (int, int) {
 	col := m.wWidth / 2
 	col -= m.width / 2
 	return row, col
+}
+
+func ValidateFileSize(filePath string, sizeLimit int64) (bool, error) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return false, fmt.Errorf("error getting file info: %w", err)
+	}
+
+	if fileInfo.Size() > sizeLimit {
+		return true, nil
+	}
+
+	return false, nil
 }

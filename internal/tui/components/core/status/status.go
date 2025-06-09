@@ -88,7 +88,7 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m statusCmp) View() tea.View {
 	t := styles.CurrentTheme()
-	status := t.S().Base.Padding(0, 1).Render(m.help.View(DefaultKeyMap("focus chat")))
+	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(DefaultKeyMap("focus chat")))
 	if m.info.Msg != "" {
 		switch m.info.Type {
 		case util.InfoTypeError:

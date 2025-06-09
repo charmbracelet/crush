@@ -6,6 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -87,7 +89,15 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 
 		case key.Matches(msg, p.keyMap.FilePicker):
-			return p, util.CmdHandler(OpenFilePickerMsg{})
+			cfg := config.Get()
+			agentCfg := cfg.Agents[config.AgentCoder]
+			selectedModelID := agentCfg.Model
+			model := models.SupportedModels[selectedModelID]
+			if model.SupportsAttachments {
+				return p, util.CmdHandler(OpenFilePickerMsg{})
+			} else {
+				return p, util.ReportWarn("File attachments are not supported by the current model: " + string(selectedModelID))
+			}
 		case key.Matches(msg, p.keyMap.Tab):
 			logging.Info("Tab key pressed, toggling chat focus")
 			if p.session.ID == "" {

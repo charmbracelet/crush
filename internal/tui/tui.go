@@ -85,7 +85,6 @@ func (a appModel) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	logging.Info("TUI Update", "msg", msg)
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 
@@ -248,7 +247,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleWindowResize processes window resize events and updates all components.
 func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
 	var cmds []tea.Cmd
-	msg.Height -= 1 // Make space for the status bar
+	msg.Height -= 2 // Make space for the status bar
 	a.width, a.height = msg.Width, msg.Height
 
 	// Update status bar

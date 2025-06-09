@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -141,13 +142,13 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.session = msg
 		}
 		return m, nil
-	// case dialog.AttachmentAddedMsg:
-	// 	if len(m.attachments) >= maxAttachments {
-	// 		logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
-	// 		return m, cmd
-	// 	}
-	// 	m.attachments = append(m.attachments, msg.Attachment)
-	// 	return m, nil
+	case filepicker.FilePickedMsg:
+		if len(m.attachments) >= maxAttachments {
+			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
+			return m, cmd
+		}
+		m.attachments = append(m.attachments, msg.Attachment)
+		return m, nil
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
@@ -351,35 +352,6 @@ func (m *editorCmp) startCompletions() tea.Msg {
 	}
 }
 
-func CreateTextArea(existing *textarea.Model) textarea.Model {
-	t := styles.CurrentTheme()
-	ta := textarea.New()
-	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(lineIndex int, focused bool) string {
-		if lineIndex == 0 {
-			return "  > "
-		}
-		if focused {
-			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
-		} else {
-			return t.S().Muted.Render("::: ")
-		}
-	})
-	ta.ShowLineNumbers = false
-	ta.CharLimit = -1
-	ta.Placeholder = "Tell me more about this project..."
-	ta.SetVirtualCursor(false)
-
-	if existing != nil {
-		ta.SetValue(existing.Value())
-		ta.SetWidth(existing.Width())
-		ta.SetHeight(existing.Height())
-	}
-
-	ta.Focus()
-	return ta
-}
-
 // Blur implements Container.
 func (c *editorCmp) Blur() tea.Cmd {
 	c.textarea.Blur()
@@ -398,7 +370,25 @@ func (c *editorCmp) IsFocused() bool {
 }
 
 func NewEditorCmp(app *app.App) util.Model {
-	ta := CreateTextArea(nil)
+	t := styles.CurrentTheme()
+	ta := textarea.New()
+	ta.SetStyles(t.S().TextArea)
+	ta.SetPromptFunc(4, func(lineIndex int, focused bool) string {
+		if lineIndex == 0 {
+			return "  > "
+		}
+		if focused {
+			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
+		} else {
+			return t.S().Muted.Render("::: ")
+		}
+	})
+	ta.ShowLineNumbers = false
+	ta.CharLimit = -1
+	ta.Placeholder = "Tell me more about this project..."
+	ta.SetVirtualCursor(false)
+	ta.Focus()
+
 	return &editorCmp{
 		app:      app,
 		textarea: ta,

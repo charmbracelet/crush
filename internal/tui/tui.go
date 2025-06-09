@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	initDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/init"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -157,6 +159,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: models.NewModelDialogCmp(),
 			},
 		)
+	// Compact
+	case commands.CompactMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
+		})
+
 	// File Picker
 	case chat.OpenFilePickerMsg:
 		if a.dialog.ActiveDialogId() == filepicker.FilePickerID {
@@ -181,33 +189,35 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Deny(msg.Permission)
 		}
 		return a, nil
-	// Init Dialog
-	case initDialog.CloseInitDialogMsg:
-		if msg.Initialize {
-			// Run the initialization command
-			prompt := `Please analyze this codebase and create a Crush.md file containing:
-1. Build/lint/test commands - especially for running a single test
-2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+	// Agent Events
+	case pubsub.Event[agent.AgentEvent]:
+		payload := msg.Payload
 
-The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-If there's already a crush.md, improve it.
-If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
-			
-			// Mark the project as initialized
-			if err := config.MarkProjectInitialized(); err != nil {
-				return a, util.ReportError(err)
-			}
-			
-			return a, util.CmdHandler(cmpChat.SendMsg{
-				Text: prompt,
-			})
-		} else {
-			// Mark the project as initialized without running the command
-			if err := config.MarkProjectInitialized(); err != nil {
-				return a, util.ReportError(err)
+		// Forward agent events to dialogs
+		if a.dialog.HasDialogs() && a.dialog.ActiveDialogId() == compact.CompactDialogID {
+			u, dialogCmd := a.dialog.Update(payload)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		}
+
+		// Handle auto-compact logic
+		if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSessionID != "" {
+			// Get current session to check token usage
+			session, err := a.app.Sessions.Get(context.Background(), a.selectedSessionID)
+			if err == nil {
+				model := a.app.CoderAgent.Model()
+				contextWindow := model.ContextWindow
+				tokens := session.CompletionTokens + session.PromptTokens
+				if (tokens >= int64(float64(contextWindow)*0.95)) && config.Get().AutoCompact {
+					// Show compact confirmation dialog
+					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
+						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),
+					}))
+				}
 			}
 		}
-		return a, nil
+
+		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+t" {
@@ -296,7 +306,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: commands.NewCommandDialog(),
+			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
 		if a.dialog.ActiveDialogId() == sessions.SessionsDialogID {

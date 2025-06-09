@@ -5,6 +5,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/config"
+	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -51,7 +53,7 @@ func (m *initDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Close):
 			return m, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(CloseInitDialogMsg{Initialize: false}),
+				m.handleInitialization(false),
 			)
 		case key.Matches(msg, m.keyMap.ChangeSelection):
 			m.selected = (m.selected + 1) % 2
@@ -59,17 +61,17 @@ func (m *initDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Select):
 			return m, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(CloseInitDialogMsg{Initialize: m.selected == 0}),
+				m.handleInitialization(m.selected == 0),
 			)
 		case key.Matches(msg, m.keyMap.Y):
 			return m, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(CloseInitDialogMsg{Initialize: true}),
+				m.handleInitialization(true),
 			)
 		case key.Matches(msg, m.keyMap.N):
 			return m, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(CloseInitDialogMsg{Initialize: false}),
+				m.handleInitialization(false),
 			)
 		}
 	}
@@ -166,6 +168,38 @@ func (m *initDialogCmp) Position() (int, int) {
 	row := (m.wHeight / 2) - (m.height / 2)
 	col := (m.wWidth / 2) - (m.width / 2)
 	return row, col
+}
+
+// handleInitialization handles the initialization logic when the dialog is closed.
+func (m *initDialogCmp) handleInitialization(initialize bool) tea.Cmd {
+	if initialize {
+		// Run the initialization command
+		prompt := `Please analyze this codebase and create a Crush.md file containing:
+1. Build/lint/test commands - especially for running a single test
+2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+
+The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
+If there's already a crush.md, improve it.
+If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
+
+		// Mark the project as initialized
+		if err := config.MarkProjectInitialized(); err != nil {
+			return util.ReportError(err)
+		}
+
+		return tea.Sequence(
+			util.CmdHandler(cmpChat.SessionClearedMsg{}),
+			util.CmdHandler(cmpChat.SendMsg{
+				Text: prompt,
+			}),
+		)
+	} else {
+		// Mark the project as initialized without running the command
+		if err := config.MarkProjectInitialized(); err != nil {
+			return util.ReportError(err)
+		}
+	}
+	return nil
 }
 
 // CloseInitDialogMsg is a message that is sent when the init dialog is closed.

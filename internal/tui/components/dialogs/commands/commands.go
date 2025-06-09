@@ -50,14 +50,18 @@ type commandDialogCmp struct {
 	help         help.Model
 	commandType  int       // SystemCommands or UserCommands
 	userCommands []Command // User-defined commands
+	sessionID    string    // Current session ID
 }
 
 type (
 	SwitchSessionsMsg struct{}
 	SwitchModelMsg    struct{}
+	CompactMsg        struct {
+		SessionID string
+	}
 )
 
-func NewCommandDialog() CommandsDialog {
+func NewCommandDialog(sessionID string) CommandsDialog {
 	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultCommandsDialogKeyMap()
 
@@ -87,6 +91,7 @@ func NewCommandDialog() CommandsDialog {
 		keyMap:      DefaultCommandsDialogKeyMap(),
 		help:        help,
 		commandType: SystemCommands,
+		sessionID:   sessionID,
 	}
 }
 
@@ -222,7 +227,7 @@ func (c *commandDialogCmp) Position() (int, int) {
 }
 
 func (c *commandDialogCmp) defaultCommands() []Command {
-	return []Command{
+	commands := []Command{
 		{
 			ID:          "init",
 			Title:       "Initialize Project",
@@ -235,33 +240,35 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
 	If there's already a crush.md, improve it.
 	If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
-				return tea.Batch(
-					util.CmdHandler(chat.SendMsg{
-						Text: prompt,
-					}),
-				)
+				return util.CmdHandler(chat.SendMsg{
+					Text: prompt,
+				})
 			},
 		},
-		{
+	}
+
+	// Only show compact command if there's an active session
+	if c.sessionID != "" {
+		commands = append(commands, Command{
 			ID:          "compact",
 			Title:       "Compact Session",
 			Description: "Summarize the current session and create a new one with the summary",
 			Handler: func(cmd Command) tea.Cmd {
-				return func() tea.Msg {
-					// TODO: implement compact message
-					return ""
-				}
+				return util.CmdHandler(CompactMsg{
+					SessionID: c.sessionID,
+				})
 			},
-		},
+		})
+	}
+
+	return append(commands, []Command{
 		{
 			ID:          "switch_session",
 			Title:       "Switch Session",
 			Description: "Switch to a different session",
 			Shortcut:    "ctrl+s",
 			Handler: func(cmd Command) tea.Cmd {
-				return func() tea.Msg {
-					return SwitchSessionsMsg{}
-				}
+				return util.CmdHandler(SwitchSessionsMsg{})
 			},
 		},
 		{
@@ -269,12 +276,10 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
 			Handler: func(cmd Command) tea.Cmd {
-				return func() tea.Msg {
-					return SwitchModelMsg{}
-				}
+				return util.CmdHandler(SwitchModelMsg{})
 			},
 		},
-	}
+	}...)
 }
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {

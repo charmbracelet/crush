@@ -282,7 +282,7 @@ func (dv *DiffView) computeDiff() error {
 		return dv.err
 	}
 	dv.isComputed = true
-	dv.edits = myers.ComputeEdits(
+	dv.edits = myers.ComputeEdits( //nolint:staticcheck
 		dv.before.content,
 		dv.after.content,
 	)

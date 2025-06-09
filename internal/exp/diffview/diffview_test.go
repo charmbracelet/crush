@@ -2,8 +2,10 @@ package diffview_test
 
 import (
 	_ "embed"
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/opencode-ai/opencode/internal/exp/diffview"
 )
@@ -66,6 +68,18 @@ var (
 			Before("text.txt", TestNarrowBefore).
 			After("text.txt", TestNarrowAfter)
 	}
+	SmallWidthFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("text.txt", TestMultipleHunksBefore).
+			After("text.txt", TestMultipleHunksAfter).
+			Width(40)
+	}
+	LargeWidthFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("text.txt", TestMultipleHunksBefore).
+			After("text.txt", TestMultipleHunksAfter).
+			Width(120)
+	}
 
 	LightModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.Style(diffview.DefaultLightStyle)
@@ -84,6 +98,8 @@ var (
 		"MultipleHunks":      MultipleHunksFunc,
 		"CustomContextLines": CustomContextLinesFunc,
 		"Narrow":             NarrowFunc,
+		"SmallWidth":         SmallWidthFunc,
+		"LargeWidth":         LargeWidthFunc,
 	}
 	ThemeFuncs = TestFuncs{
 		"LightMode": LightModeFunc,
@@ -102,11 +118,30 @@ func TestDiffView(t *testing.T) {
 							dv = layoutFunc(dv)
 							dv = behaviorFunc(dv)
 							dv = themeFunc(dv)
-							golden.RequireEqual(t, []byte(dv.String()))
+
+							output := dv.String()
+							golden.RequireEqual(t, []byte(output))
+
+							switch behaviorName {
+							case "SmallWidth":
+								assertLineWidth(t, 40, output)
+							case "LargeWidth":
+								assertLineWidth(t, 120, output)
+							}
 						})
 					}
 				})
 			}
 		})
+	}
+}
+
+func assertLineWidth(t *testing.T, expected int, output string) {
+	var lineWidth int
+	for line := range strings.SplitSeq(output, "\n") {
+		lineWidth = max(lineWidth, ansi.StringWidth(line))
+	}
+	if lineWidth != expected {
+		t.Errorf("expected output width to be == %d, got %d", expected, lineWidth)
 	}
 }

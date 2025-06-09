@@ -43,9 +43,10 @@ type DiffView struct {
 	unified    udiff.UnifiedDiff
 	edits      []udiff.Edit
 
-	splitHunks      []splitHunk
-	beforeCodeWidth int
-	afterCodeWidth  int
+	splitHunks []splitHunk
+
+	codeWidth     int
+	fullCodeWidth int // with leading symbols
 }
 
 // New creates a new DiffView with default settings.
@@ -128,6 +129,8 @@ func (dv *DiffView) String() string {
 	if err := dv.computeDiff(); err != nil {
 		return err.Error()
 	}
+	dv.convertDiffToSplit()
+	dv.detectCodeWidth()
 
 	switch dv.layout {
 	case layoutUnified:
@@ -141,9 +144,6 @@ func (dv *DiffView) String() string {
 
 // renderUnified renders the unified diff view as a string.
 func (dv *DiffView) renderUnified() string {
-	dv.detectUnifiedWidth()
-
-	codeWidth := dv.width - leadingSymbolsSize
 	beforeNumDigits, afterNumDigits := dv.lineNumberDigits()
 
 	var b strings.Builder
@@ -153,7 +153,7 @@ func (dv *DiffView) renderUnified() string {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(codeWidth + leadingSymbolsSize).Render(dv.hunkLineFor(h)))
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(h)))
 		b.WriteRune('\n')
 
 		beforeLine := h.FromLine
@@ -168,7 +168,7 @@ func (dv *DiffView) renderUnified() string {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(codeWidth + leadingSymbolsSize).Render("  " + content))
+				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + content))
 				beforeLine++
 				afterLine++
 			case udiff.Insert:
@@ -177,7 +177,7 @@ func (dv *DiffView) renderUnified() string {
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
 				}
 				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(codeWidth).Render(content))
+				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(content))
 				afterLine++
 			case udiff.Delete:
 				if dv.lineNumbers {
@@ -185,7 +185,7 @@ func (dv *DiffView) renderUnified() string {
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", afterNumDigits)))
 				}
 				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Code.Width(codeWidth).Render(content))
+				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content))
 				beforeLine++
 			}
 			b.WriteRune('\n')
@@ -197,9 +197,6 @@ func (dv *DiffView) renderUnified() string {
 
 // renderSplit renders the split (side-by-side) diff view as a string.
 func (dv *DiffView) renderSplit() string {
-	dv.convertDiffToSplit()
-	dv.detectSplitWidth()
-
 	beforeNumDigits, afterNumDigits := dv.lineNumberDigits()
 
 	var b strings.Builder
@@ -208,11 +205,11 @@ func (dv *DiffView) renderSplit() string {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", beforeNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(dv.beforeCodeWidth + leadingSymbolsSize).Render(dv.hunkLineFor(dv.unified.Hunks[i])))
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(dv.hunkLineFor(dv.unified.Hunks[i])))
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", afterNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(dv.afterCodeWidth + leadingSymbolsSize).Render(" "))
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(" "))
 		b.WriteRune('\n')
 
 		beforeLine := h.fromLine
@@ -233,19 +230,19 @@ func (dv *DiffView) renderSplit() string {
 				if dv.lineNumbers {
 					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", beforeNumDigits)))
 				}
-				b.WriteString(dv.style.MissingLine.Code.Width(dv.beforeCodeWidth + leadingSymbolsSize).Render("  "))
+				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
 			case l.before.Kind == udiff.Equal:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.beforeCodeWidth + leadingSymbolsSize).Render("  " + beforeContent))
+				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + beforeContent))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, beforeNumDigits)))
 				}
 				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Code.Width(dv.beforeCodeWidth).Render(beforeContent))
+				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent))
 				beforeLine++
 			}
 
@@ -254,19 +251,19 @@ func (dv *DiffView) renderSplit() string {
 				if dv.lineNumbers {
 					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", afterNumDigits)))
 				}
-				b.WriteString(dv.style.MissingLine.Code.Width(dv.afterCodeWidth + leadingSymbolsSize).Render("  "))
+				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
 			case l.after.Kind == udiff.Equal:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.afterCodeWidth + leadingSymbolsSize).Render("  " + afterContent))
+				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + afterContent))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, afterNumDigits)))
 				}
 				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(dv.afterCodeWidth).Render(afterContent))
+				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(afterContent))
 				afterLine++
 			}
 
@@ -335,51 +332,55 @@ func (dv *DiffView) hunkShownLines(h *udiff.Hunk) (before, after int) {
 	return
 }
 
-func (dv *DiffView) detectUnifiedWidth() {
-	if dv.width > 0 {
-		return
+func (dv *DiffView) detectCodeWidth() {
+	switch dv.layout {
+	case layoutUnified:
+		dv.detectUnifiedCodeWidth()
+	case layoutSplit:
+		dv.detectSplitCodeWidth()
 	}
+	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
+}
+
+func (dv *DiffView) detectUnifiedCodeWidth() {
+	dv.codeWidth = 0
 
 	for _, h := range dv.unified.Hunks {
 		shownLines := ansi.StringWidth(dv.hunkLineFor(h))
 
 		for _, l := range h.Lines {
-			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n"))
-			lineWidth += leadingSymbolsSize
-			dv.width = max(dv.width, lineWidth, shownLines)
+			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n")) + 1
+			dv.codeWidth = max(dv.codeWidth, lineWidth, shownLines)
 		}
 	}
 }
 
 func (dv *DiffView) convertDiffToSplit() {
+	if dv.layout != layoutSplit {
+		return
+	}
+
 	dv.splitHunks = make([]splitHunk, len(dv.unified.Hunks))
 	for i, h := range dv.unified.Hunks {
 		dv.splitHunks[i] = hunkToSplit(h)
 	}
 }
 
-func (dv *DiffView) detectSplitWidth() {
-	if dv.width > 0 {
-		return
-	}
+func (dv *DiffView) detectSplitCodeWidth() {
+	dv.codeWidth = 0
 
 	for i, h := range dv.splitHunks {
 		shownLines := ansi.StringWidth(dv.hunkLineFor(dv.unified.Hunks[i]))
 
 		for _, l := range h.lines {
-			var lineWidth int
 			if l.before != nil {
 				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.before.Content, "\n")) + 1
-				dv.beforeCodeWidth = max(dv.beforeCodeWidth, codeWidth, shownLines)
-				lineWidth += codeWidth
+				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
 			}
 			if l.after != nil {
 				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.after.Content, "\n")) + 1
-				dv.afterCodeWidth = max(dv.afterCodeWidth, codeWidth, shownLines)
-				lineWidth += codeWidth
+				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
 			}
-			lineWidth += leadingSymbolsSize * 2
-			dv.width = max(dv.width, lineWidth, shownLines)
 		}
 	}
 }

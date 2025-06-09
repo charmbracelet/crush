@@ -23,26 +23,21 @@ var DefaultLightStyle = Style{
 	DividerLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Iron).
-			Background(charmtone.Thunder).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(charmtone.Thunder),
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Oyster).
 			Background(charmtone.Anchovy),
 	},
 	MissingLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
-			Background(charmtone.Ash).
-			Padding(0, 1),
+			Background(charmtone.Ash),
 		Code: lipgloss.NewStyle().
 			Background(charmtone.Ash),
 	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Charcoal).
-			Background(charmtone.Ash).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(charmtone.Ash),
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Pepper).
 			Background(charmtone.Salt),
@@ -50,9 +45,7 @@ var DefaultLightStyle = Style{
 	InsertLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Turtle).
-			Background(lipgloss.Color("#c8e6c9")).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(lipgloss.Color("#c8e6c9")),
 		Symbol: lipgloss.NewStyle().
 			Foreground(charmtone.Turtle).
 			Background(lipgloss.Color("#e8f5e9")),
@@ -63,9 +56,7 @@ var DefaultLightStyle = Style{
 	DeleteLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Cherry).
-			Background(lipgloss.Color("#ffcdd2")).
-			Align(lipgloss.Left).
-			Padding(0, 1),
+			Background(lipgloss.Color("#ffcdd2")),
 		Symbol: lipgloss.NewStyle().
 			Foreground(charmtone.Cherry).
 			Background(lipgloss.Color("#ffebee")),
@@ -79,26 +70,21 @@ var DefaultDarkStyle = Style{
 	DividerLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Smoke).
-			Background(charmtone.Sapphire).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(charmtone.Sapphire),
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Smoke).
 			Background(charmtone.Ox),
 	},
 	MissingLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
-			Background(charmtone.Charcoal).
-			Padding(0, 1),
+			Background(charmtone.Charcoal),
 		Code: lipgloss.NewStyle().
 			Background(charmtone.Charcoal),
 	},
 	EqualLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Ash).
-			Background(charmtone.Charcoal).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(charmtone.Charcoal),
 		Code: lipgloss.NewStyle().
 			Foreground(charmtone.Salt).
 			Background(charmtone.Pepper),
@@ -106,9 +92,7 @@ var DefaultDarkStyle = Style{
 	InsertLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Turtle).
-			Background(lipgloss.Color("#293229")).
-			Align(lipgloss.Right).
-			Padding(0, 1),
+			Background(lipgloss.Color("#293229")),
 		Symbol: lipgloss.NewStyle().
 			Foreground(charmtone.Turtle).
 			Background(lipgloss.Color("#303a30")),
@@ -119,9 +103,7 @@ var DefaultDarkStyle = Style{
 	DeleteLine: LineStyle{
 		LineNumber: lipgloss.NewStyle().
 			Foreground(charmtone.Cherry).
-			Background(lipgloss.Color("#332929")).
-			Align(lipgloss.Left).
-			Padding(0, 1),
+			Background(lipgloss.Color("#332929")),
 		Symbol: lipgloss.NewStyle().
 			Foreground(charmtone.Cherry).
 			Background(lipgloss.Color("#3a3030")),

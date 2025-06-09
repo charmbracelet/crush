@@ -12,7 +12,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const leadingSymbolsSize = 2
+const (
+	leadingSymbolsSize = 2
+	lineNumPadding     = 1
+)
 
 type file struct {
 	path    string
@@ -132,6 +135,7 @@ func (dv *DiffView) String() string {
 		return err.Error()
 	}
 	dv.convertDiffToSplit()
+	dv.adjustStyles()
 	dv.detectNumDigits()
 	dv.detectCodeWidth()
 
@@ -143,6 +147,18 @@ func (dv *DiffView) String() string {
 	default:
 		panic("unknown diffview layout")
 	}
+}
+
+func (dv *DiffView) adjustStyles() {
+	dv.style.MissingLine.LineNumber = setPadding(dv.style.MissingLine.LineNumber)
+	dv.style.DividerLine.LineNumber = setPadding(dv.style.DividerLine.LineNumber)
+	dv.style.EqualLine.LineNumber = setPadding(dv.style.EqualLine.LineNumber)
+	dv.style.InsertLine.LineNumber = setPadding(dv.style.InsertLine.LineNumber)
+	dv.style.DeleteLine.LineNumber = setPadding(dv.style.DeleteLine.LineNumber)
+}
+
+func setPadding(s lipgloss.Style) lipgloss.Style {
+	return s.Padding(0, lineNumPadding).Align(lipgloss.Right)
 }
 
 // renderUnified renders the unified diff view as a string.

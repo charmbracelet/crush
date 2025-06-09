@@ -149,6 +149,40 @@ func (dv *DiffView) String() string {
 	}
 }
 
+// computeDiff computes the differences between the "before" and "after" files.
+func (dv *DiffView) computeDiff() error {
+	if dv.isComputed {
+		return dv.err
+	}
+	dv.isComputed = true
+	dv.edits = myers.ComputeEdits( //nolint:staticcheck
+		dv.before.content,
+		dv.after.content,
+	)
+	dv.unified, dv.err = udiff.ToUnifiedDiff(
+		dv.before.path,
+		dv.after.path,
+		dv.before.content,
+		dv.edits,
+		dv.contextLines,
+	)
+	return dv.err
+}
+
+// convertDiffToSplit converts the unified diff to a split diff if the layout is
+// set to split.
+func (dv *DiffView) convertDiffToSplit() {
+	if dv.layout != layoutSplit {
+		return
+	}
+
+	dv.splitHunks = make([]splitHunk, len(dv.unified.Hunks))
+	for i, h := range dv.unified.Hunks {
+		dv.splitHunks[i] = hunkToSplit(h)
+	}
+}
+
+// adjustStyles adjusts adds padding and alignment to the styles.
 func (dv *DiffView) adjustStyles() {
 	dv.style.MissingLine.LineNumber = setPadding(dv.style.MissingLine.LineNumber)
 	dv.style.DividerLine.LineNumber = setPadding(dv.style.DividerLine.LineNumber)
@@ -157,8 +191,67 @@ func (dv *DiffView) adjustStyles() {
 	dv.style.DeleteLine.LineNumber = setPadding(dv.style.DeleteLine.LineNumber)
 }
 
+// detectNumDigits calculates the maximum number of digits needed for before and
+// after line numbers.
+func (dv *DiffView) detectNumDigits() {
+	dv.beforeNumDigits = 0
+	dv.afterNumDigits = 0
+
+	for _, h := range dv.unified.Hunks {
+		dv.beforeNumDigits = max(dv.beforeNumDigits, len(strconv.Itoa(h.FromLine+len(h.Lines))))
+		dv.afterNumDigits = max(dv.afterNumDigits, len(strconv.Itoa(h.ToLine+len(h.Lines))))
+	}
+}
+
 func setPadding(s lipgloss.Style) lipgloss.Style {
 	return s.Padding(0, lineNumPadding).Align(lipgloss.Right)
+}
+
+// detectCodeWidth calculates the maximum width of code lines in the diff view.
+func (dv *DiffView) detectCodeWidth() {
+	switch dv.layout {
+	case layoutUnified:
+		dv.detectUnifiedCodeWidth()
+	case layoutSplit:
+		dv.detectSplitCodeWidth()
+	}
+	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
+}
+
+// detectUnifiedCodeWidth calculates the maximum width of code lines in a
+// unified diff.
+func (dv *DiffView) detectUnifiedCodeWidth() {
+	dv.codeWidth = 0
+
+	for _, h := range dv.unified.Hunks {
+		shownLines := ansi.StringWidth(dv.hunkLineFor(h))
+
+		for _, l := range h.Lines {
+			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n")) + 1
+			dv.codeWidth = max(dv.codeWidth, lineWidth, shownLines)
+		}
+	}
+}
+
+// detectSplitCodeWidth calculates the maximum width of code lines in a
+// split diff.
+func (dv *DiffView) detectSplitCodeWidth() {
+	dv.codeWidth = 0
+
+	for i, h := range dv.splitHunks {
+		shownLines := ansi.StringWidth(dv.hunkLineFor(dv.unified.Hunks[i]))
+
+		for _, l := range h.lines {
+			if l.before != nil {
+				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.before.Content, "\n")) + 1
+				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
+			}
+			if l.after != nil {
+				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.after.Content, "\n")) + 1
+				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
+			}
+		}
+	}
 }
 
 // renderUnified renders the unified diff view as a string.
@@ -289,37 +382,7 @@ func (dv *DiffView) renderSplit() string {
 	return b.String()
 }
 
-func (dv *DiffView) computeDiff() error {
-	if dv.isComputed {
-		return dv.err
-	}
-	dv.isComputed = true
-	dv.edits = myers.ComputeEdits( //nolint:staticcheck
-		dv.before.content,
-		dv.after.content,
-	)
-	dv.unified, dv.err = udiff.ToUnifiedDiff(
-		dv.before.path,
-		dv.after.path,
-		dv.before.content,
-		dv.edits,
-		dv.contextLines,
-	)
-	return dv.err
-}
-
-// detectNumDigits calculates the maximum number of digits needed for before and
-// after line numbers.
-func (dv *DiffView) detectNumDigits() {
-	dv.beforeNumDigits = 0
-	dv.afterNumDigits = 0
-
-	for _, h := range dv.unified.Hunks {
-		dv.beforeNumDigits = max(dv.beforeNumDigits, len(strconv.Itoa(h.FromLine+len(h.Lines))))
-		dv.afterNumDigits = max(dv.afterNumDigits, len(strconv.Itoa(h.ToLine+len(h.Lines))))
-	}
-}
-
+// hunkLineFor formats the header line for a hunk in the unified diff view.
 func (dv *DiffView) hunkLineFor(h *udiff.Hunk) string {
 	beforeShownLines, afterShownLines := dv.hunkShownLines(h)
 
@@ -347,57 +410,4 @@ func (dv *DiffView) hunkShownLines(h *udiff.Hunk) (before, after int) {
 		}
 	}
 	return
-}
-
-func (dv *DiffView) detectCodeWidth() {
-	switch dv.layout {
-	case layoutUnified:
-		dv.detectUnifiedCodeWidth()
-	case layoutSplit:
-		dv.detectSplitCodeWidth()
-	}
-	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
-}
-
-func (dv *DiffView) detectUnifiedCodeWidth() {
-	dv.codeWidth = 0
-
-	for _, h := range dv.unified.Hunks {
-		shownLines := ansi.StringWidth(dv.hunkLineFor(h))
-
-		for _, l := range h.Lines {
-			lineWidth := ansi.StringWidth(strings.TrimSuffix(l.Content, "\n")) + 1
-			dv.codeWidth = max(dv.codeWidth, lineWidth, shownLines)
-		}
-	}
-}
-
-func (dv *DiffView) convertDiffToSplit() {
-	if dv.layout != layoutSplit {
-		return
-	}
-
-	dv.splitHunks = make([]splitHunk, len(dv.unified.Hunks))
-	for i, h := range dv.unified.Hunks {
-		dv.splitHunks[i] = hunkToSplit(h)
-	}
-}
-
-func (dv *DiffView) detectSplitCodeWidth() {
-	dv.codeWidth = 0
-
-	for i, h := range dv.splitHunks {
-		shownLines := ansi.StringWidth(dv.hunkLineFor(dv.unified.Hunks[i]))
-
-		for _, l := range h.lines {
-			if l.before != nil {
-				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.before.Content, "\n")) + 1
-				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
-			}
-			if l.after != nil {
-				codeWidth := ansi.StringWidth(strings.TrimSuffix(l.after.Content, "\n")) + 1
-				dv.codeWidth = max(dv.codeWidth, codeWidth, shownLines)
-			}
-		}
-	}
 }

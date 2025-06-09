@@ -133,44 +133,27 @@ func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
 
 func (p *permissionDialogCmp) renderButtons() string {
 	t := styles.CurrentTheme()
-
-	allowStyle := t.S().Text
-	allowSessionStyle := allowStyle
-	denyStyle := allowStyle
-
-	// Style the selected button
-	switch p.selectedOption {
-	case 0:
-		allowStyle = allowStyle.Foreground(t.White).Background(t.Secondary)
-		allowSessionStyle = allowSessionStyle.Background(t.BgSubtle)
-		denyStyle = denyStyle.Background(t.BgSubtle)
-	case 1:
-		allowStyle = allowStyle.Background(t.BgSubtle)
-		allowSessionStyle = allowSessionStyle.Foreground(t.White).Background(t.Secondary)
-		denyStyle = denyStyle.Background(t.BgSubtle)
-	case 2:
-		allowStyle = allowStyle.Background(t.BgSubtle)
-		allowSessionStyle = allowSessionStyle.Background(t.BgSubtle)
-		denyStyle = denyStyle.Foreground(t.White).Background(t.Secondary)
-	}
-
 	baseStyle := t.S().Base
 
-	allowMessage := fmt.Sprintf("%s%s", allowStyle.Underline(true).Render("A"), allowStyle.Render("llow"))
-	allowButton := allowStyle.Padding(0, 2).Render(allowMessage)
-	allowSessionMessage := fmt.Sprintf("%s%s%s", allowSessionStyle.Render("Allow for "), allowSessionStyle.Underline(true).Render("S"), allowSessionStyle.Render("ession"))
-	allowSessionButton := allowSessionStyle.Padding(0, 2).Render(allowSessionMessage)
-	denyMessage := fmt.Sprintf("%s%s", denyStyle.Underline(true).Render("D"), denyStyle.Render("eny"))
-	denyButton := denyStyle.Padding(0, 2).Render(denyMessage)
+	buttons := []core.ButtonOpts{
+		{
+			Text:           "Allow",
+			UnderlineIndex: 0, // "A"
+			Selected:       p.selectedOption == 0,
+		},
+		{
+			Text:           "Allow for Session",
+			UnderlineIndex: 10, // "S" in "Session"
+			Selected:       p.selectedOption == 1,
+		},
+		{
+			Text:           "Deny",
+			UnderlineIndex: 0, // "D"
+			Selected:       p.selectedOption == 2,
+		},
+	}
 
-	content := lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		allowButton,
-		"  ",
-		allowSessionButton,
-		"  ",
-		denyButton,
-	)
+	content := core.SelectableButtons(buttons, "  ")
 
 	return baseStyle.AlignHorizontal(lipgloss.Right).Width(p.width - 4).Render(content)
 }

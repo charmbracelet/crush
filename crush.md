@@ -1,22 +1,22 @@
 # Crush Development Guide
 
 ## Build/Test/Lint Commands
-
-- **Build**: `go build ./...` or `go build .` (for main binary)
-- **Test**: `task test` or `go test ./...`
-- **Single test**: `go test ./internal/path/to/package -run TestName`
-- **Lint**: `task lint` or `golangci-lint run`
-- **Format**: `task fmt` or `gofumpt -w .`
+- **Build**: `go build .` or `go run .`
+- **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
+- **Lint**: `task lint` (golangci-lint run) or `task lint-fix` (with --fix)
+- **Format**: `task fmt` (gofumpt -w .)
+- **Dev**: `task dev` (runs with profiling enabled)
 
 ## Code Style Guidelines
-
-- **Imports**: Standard library first, then third-party, then internal packages (separated by blank lines)
-- **Types**: Use `any` instead of `interface{}`, prefer concrete types over interfaces when possible
-- **Naming**: Use camelCase for private, PascalCase for public, descriptive names (e.g., `messageListCmp`, `handleNewUserMessage`)
-- **Constants**: Use `const` blocks with descriptive names (e.g., `NotFound = -1`)
-- **Error handling**: Always check errors, use `require.NoError()` in tests, return errors up the stack
-- **Documentation**: Add comments for all public types/methods, explain complex logic in private methods
-- **Testing**: Use testify/assert and testify/require, table-driven tests with `t.Run()`, mark helpers with `t.Helper()`
-- **File organization**: Group related functionality, extract helper methods for complex logic, use meaningful method names
-- **TUI components**: Implement interfaces (util.Model, layout.Sizeable), document component purpose and behavior
-- **Message handling**: Use pubsub events, handle different message roles (User/Assistant/Tool), manage tool calls separately
+- **Imports**: Use goimports formatting, group stdlib, external, internal packages
+- **Formatting**: Use gofumpt (stricter than gofmt), enabled in golangci-lint
+- **Naming**: Standard Go conventions - PascalCase for exported, camelCase for unexported
+- **Types**: Prefer explicit types, use type aliases for clarity (e.g., `type AgentName string`)
+- **Error handling**: Return errors explicitly, use `fmt.Errorf` for wrapping
+- **Context**: Always pass context.Context as first parameter for operations
+- **Interfaces**: Define interfaces in consuming packages, keep them small and focused
+- **Structs**: Use struct embedding for composition, group related fields
+- **Constants**: Use typed constants with iota for enums, group in const blocks
+- **Testing**: Use testify/assert and testify/require, parallel tests with `t.Parallel()`
+- **JSON tags**: Use snake_case for JSON field names
+- **File permissions**: Use octal notation (0o755, 0o644) for file permissions

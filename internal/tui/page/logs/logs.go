@@ -1,26 +1,30 @@
-package page
+package logs
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/components/logs"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
+	logsComponents "github.com/charmbracelet/crush/internal/tui/components/logs"
 	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/page"
+	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-var LogsPage PageID = "logs"
+var LogsPage page.PageID = "logs"
 
 type LogPage interface {
 	util.Model
 	layout.Sizeable
-	layout.Bindings
 }
+
 type logsPage struct {
 	width, height int
-	table         layout.Container
-	details       layout.Container
+	table         logsComponents.TableComponent
+	details       logsComponents.DetailComponent
+	keyMap        KeyMap
 }
 
 func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -30,32 +34,37 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.width = msg.Width
 		p.height = msg.Height
 		return p, p.SetSize(msg.Width, msg.Height)
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, p.keyMap.Back):
+			return p, util.CmdHandler(page.PageChangeMsg{ID: chat.ChatPage})
+		}
 	}
 
 	table, cmd := p.table.Update(msg)
 	cmds = append(cmds, cmd)
-	p.table = table.(layout.Container)
+	p.table = table.(logsComponents.TableComponent)
 	details, cmd := p.details.Update(msg)
 	cmds = append(cmds, cmd)
-	p.details = details.(layout.Container)
+	p.details = details.(logsComponents.DetailComponent)
 
 	return p, tea.Batch(cmds...)
 }
 
 func (p *logsPage) View() tea.View {
-	style := styles.CurrentTheme().S().Base.Width(p.width).Height(p.height)
+	baseStyle := styles.CurrentTheme().S().Base
+	style := baseStyle.Width(p.width).Height(p.height).Padding(1)
+	title := core.Title("Logs", p.width-2)
+
 	return tea.NewView(
 		style.Render(
 			lipgloss.JoinVertical(lipgloss.Top,
-				p.table.View().String(),
+				title,
 				p.details.View().String(),
+				p.table.View().String(),
 			),
 		),
 	)
-}
-
-func (p *logsPage) BindingKeys() []key.Binding {
-	return p.table.BindingKeys()
 }
 
 // GetSize implements LogPage.
@@ -67,9 +76,11 @@ func (p *logsPage) GetSize() (int, int) {
 func (p *logsPage) SetSize(width int, height int) tea.Cmd {
 	p.width = width
 	p.height = height
+	availableHeight := height - 2 // Padding for top and bottom
+	availableHeight -= 1          // title height
 	return tea.Batch(
-		p.table.SetSize(width, height/2),
-		p.details.SetSize(width, height/2),
+		p.table.SetSize(width-2, availableHeight/2),
+		p.details.SetSize(width-2, availableHeight/2),
 	)
 }
 
@@ -82,7 +93,8 @@ func (p *logsPage) Init() tea.Cmd {
 
 func NewLogsPage() LogPage {
 	return &logsPage{
-		table:   layout.NewContainer(logs.NewLogsTable(), layout.WithBorderAll()),
-		details: layout.NewContainer(logs.NewLogsDetails(), layout.WithBorderAll()),
+		details: logsComponents.NewLogsDetails(),
+		table:   logsComponents.NewLogsTable(),
+		keyMap:  DefaultKeyMap(),
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/models"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -99,7 +98,6 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + string(selectedModelID))
 			}
 		case key.Matches(msg, p.keyMap.Tab):
-			logging.Info("Tab key pressed, toggling chat focus")
 			if p.session.ID == "" {
 				return p, nil
 			}

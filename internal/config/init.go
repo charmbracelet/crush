@@ -63,13 +63,13 @@ func crushMdExists(dir string) (bool, error) {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		name := strings.ToLower(entry.Name())
 		if name == "crush.md" {
 			return true, nil
 		}
 	}
-	
+
 	return false, nil
 }
 

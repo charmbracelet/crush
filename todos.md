@@ -11,9 +11,9 @@
 
 - [x] Cleanup Commands
 - [x] Sessions dialog
-- [ ] Models
-- [~] Move sessions and model dialog to the commands
-- [ ] Add sessions shortuct
+- [x] Models
+- [x] Move sessions and model dialog to the commands
+- [x] Add sessions shortuct
 - [ ] Add all posible actions to the commands
 
 ## Investigate
@@ -24,3 +24,6 @@
 ## Messages
 
 - [ ] Fix issue with numbers (padding)
+- [ ] Run tools in parallel and add the responses in parallel
+- [ ] Handle parallel permission calls
+- [ ] Weird behavior sometimes the message does not update

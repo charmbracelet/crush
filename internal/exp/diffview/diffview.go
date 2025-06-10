@@ -198,6 +198,9 @@ func (dv *DiffView) convertDiffToSplit() {
 
 // adjustStyles adjusts adds padding and alignment to the styles.
 func (dv *DiffView) adjustStyles() {
+	setPadding := func(s lipgloss.Style) lipgloss.Style {
+		return s.Padding(0, lineNumPadding).Align(lipgloss.Right)
+	}
 	dv.style.MissingLine.LineNumber = setPadding(dv.style.MissingLine.LineNumber)
 	dv.style.DividerLine.LineNumber = setPadding(dv.style.DividerLine.LineNumber)
 	dv.style.EqualLine.LineNumber = setPadding(dv.style.EqualLine.LineNumber)
@@ -215,10 +218,6 @@ func (dv *DiffView) detectNumDigits() {
 		dv.beforeNumDigits = max(dv.beforeNumDigits, len(strconv.Itoa(h.FromLine+len(h.Lines))))
 		dv.afterNumDigits = max(dv.afterNumDigits, len(strconv.Itoa(h.ToLine+len(h.Lines))))
 	}
-}
-
-func setPadding(s lipgloss.Style) lipgloss.Style {
-	return s.Padding(0, lineNumPadding).Align(lipgloss.Right)
 }
 
 // detectCodeWidth calculates the maximum width of code lines in the diff view.

@@ -70,14 +70,14 @@ var (
 	}
 	SmallWidthFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
-			Before("text.txt", TestMultipleHunksBefore).
-			After("text.txt", TestMultipleHunksAfter).
+			Before("main.go", TestMultipleHunksBefore).
+			After("main.go", TestMultipleHunksAfter).
 			Width(40)
 	}
 	LargeWidthFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
-			Before("text.txt", TestMultipleHunksBefore).
-			After("text.txt", TestMultipleHunksAfter).
+			Before("main.go", TestMultipleHunksBefore).
+			After("main.go", TestMultipleHunksAfter).
 			Width(120)
 	}
 

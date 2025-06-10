@@ -286,6 +286,8 @@ func (dv *DiffView) resizeCodeWidth() {
 func (dv *DiffView) renderUnified() string {
 	var b strings.Builder
 
+	fullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
+
 	for _, h := range dv.unified.Hunks {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
@@ -308,7 +310,9 @@ func (dv *DiffView) renderUnified() string {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + content))
+				b.WriteString(fullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + content),
+				))
 				beforeLine++
 				afterLine++
 			case udiff.Insert:
@@ -316,16 +320,20 @@ func (dv *DiffView) renderUnified() string {
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(content))
+				b.WriteString(fullContentStyle.Render(
+					dv.style.InsertLine.Symbol.Render("+ ") +
+						dv.style.InsertLine.Code.Width(dv.codeWidth).Render(content),
+				))
 				afterLine++
 			case udiff.Delete:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content))
+				b.WriteString(fullContentStyle.Render(
+					dv.style.DeleteLine.Symbol.Render("- ") +
+						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content),
+				))
 				beforeLine++
 			}
 			b.WriteRune('\n')
@@ -338,6 +346,9 @@ func (dv *DiffView) renderUnified() string {
 // renderSplit renders the split (side-by-side) diff view as a string.
 func (dv *DiffView) renderSplit() string {
 	var b strings.Builder
+
+	beforeFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
+	afterFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth + btoi(dv.extraColOnAfter))
 
 	for i, h := range dv.splitHunks {
 		if dv.lineNumbers {
@@ -371,19 +382,25 @@ func (dv *DiffView) renderSplit() string {
 				if dv.lineNumbers {
 					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 				}
-				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
+				b.WriteString(beforeFullContentStyle.Render(
+					dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "),
+				))
 			case l.before.Kind == udiff.Equal:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + beforeContent))
+				b.WriteString(beforeFullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + beforeContent),
+				))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
-				b.WriteString(dv.style.DeleteLine.Symbol.Render("- "))
-				b.WriteString(dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent))
+				b.WriteString(beforeFullContentStyle.Render(
+					dv.style.DeleteLine.Symbol.Render("- ") +
+						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent),
+				))
 				beforeLine++
 			}
 
@@ -392,19 +409,25 @@ func (dv *DiffView) renderSplit() string {
 				if dv.lineNumbers {
 					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "))
+				b.WriteString(afterFullContentStyle.Render(
+					dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "),
+				))
 			case l.after.Kind == udiff.Equal:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  " + afterContent))
+				b.WriteString(afterFullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  " + afterContent),
+				))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth + btoi(dv.extraColOnAfter)).Render(afterContent))
+				b.WriteString(afterFullContentStyle.Render(
+					dv.style.InsertLine.Symbol.Render("+ ") +
+						dv.style.InsertLine.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(afterContent),
+				))
 				afterLine++
 			}
 

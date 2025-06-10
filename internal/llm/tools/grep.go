@@ -12,10 +12,61 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fileutil"
+)
+
+// regexCache provides thread-safe caching of compiled regex patterns
+type regexCache struct {
+	cache map[string]*regexp.Regexp
+	mu    sync.RWMutex
+}
+
+// newRegexCache creates a new regex cache
+func newRegexCache() *regexCache {
+	return &regexCache{
+		cache: make(map[string]*regexp.Regexp),
+	}
+}
+
+// get retrieves a compiled regex from cache or compiles and caches it
+func (rc *regexCache) get(pattern string) (*regexp.Regexp, error) {
+	// Try to get from cache first (read lock)
+	rc.mu.RLock()
+	if regex, exists := rc.cache[pattern]; exists {
+		rc.mu.RUnlock()
+		return regex, nil
+	}
+	rc.mu.RUnlock()
+
+	// Compile the regex (write lock)
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	// Double-check in case another goroutine compiled it while we waited
+	if regex, exists := rc.cache[pattern]; exists {
+		return regex, nil
+	}
+
+	// Compile and cache the regex
+	regex, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	rc.cache[pattern] = regex
+	return regex, nil
+}
+
+// Global regex cache instances
+var (
+	searchRegexCache = newRegexCache()
+	globRegexCache   = newRegexCache()
+	// Pre-compiled regex for glob conversion (used frequently)
+	globBraceRegex = regexp.MustCompile(`\{([^}]+)\}`)
 )
 
 type GrepParams struct {
@@ -266,7 +317,8 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
-	regex, err := regexp.Compile(pattern)
+	// Use cached regex compilation
+	regex, err := searchRegexCache.get(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex pattern: %w", err)
 	}
@@ -274,7 +326,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	var includePattern *regexp.Regexp
 	if include != "" {
 		regexPattern := globToRegex(include)
-		includePattern, err = regexp.Compile(regexPattern)
+		includePattern, err = globRegexCache.get(regexPattern)
 		if err != nil {
 			return nil, fmt.Errorf("invalid include pattern: %w", err)
 		}
@@ -349,8 +401,8 @@ func globToRegex(glob string) string {
 	regexPattern = strings.ReplaceAll(regexPattern, "*", ".*")
 	regexPattern = strings.ReplaceAll(regexPattern, "?", ".")
 
-	re := regexp.MustCompile(`\{([^}]+)\}`)
-	regexPattern = re.ReplaceAllStringFunc(regexPattern, func(match string) string {
+	// Use pre-compiled regex instead of compiling each time
+	regexPattern = globBraceRegex.ReplaceAllStringFunc(regexPattern, func(match string) string {
 		inner := match[1 : len(match)-1]
 		return "(" + strings.ReplaceAll(inner, ",", "|") + ")"
 	})

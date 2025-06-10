@@ -16,6 +16,12 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
+// Pre-compiled regex patterns for better performance
+var (
+	hunkHeaderRegex = regexp.MustCompile(`^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@`)
+	ansiRegex       = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-9?]*(?:;[0-9?]*)*[@-~])`)
+)
+
 // -------------------------------------------------------------------------
 // Core Types
 // -------------------------------------------------------------------------
@@ -129,7 +135,6 @@ func ParseUnifiedDiff(diff string) (DiffResult, error) {
 	var result DiffResult
 	var currentHunk *Hunk
 
-	hunkHeaderRe := regexp.MustCompile(`^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@`)
 	lines := strings.Split(diff, "\n")
 
 	var oldLine, newLine int
@@ -150,7 +155,7 @@ func ParseUnifiedDiff(diff string) (DiffResult, error) {
 		}
 
 		// Parse hunk headers
-		if matches := hunkHeaderRe.FindStringSubmatch(line); matches != nil {
+		if matches := hunkHeaderRegex.FindStringSubmatch(line); matches != nil {
 			if currentHunk != nil {
 				result.Hunks = append(result.Hunks, *currentHunk)
 			}
@@ -343,8 +348,7 @@ func createStyles(t *styles.Theme) (removedLineStyle, addedLineStyle, contextLin
 
 // applyHighlighting applies intra-line highlighting to a piece of text
 func applyHighlighting(content string, segments []Segment, segmentType LineType, highlightBg color.Color) string {
-	// Find all ANSI sequences in the content
-	ansiRegex := regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-9?]*(?:;[0-9?]*)*[@-~])`)
+	// Find all ANSI sequences in the content using pre-compiled regex
 	ansiMatches := ansiRegex.FindAllStringIndex(content, -1)
 
 	// Build a mapping of visible character positions to their actual indices

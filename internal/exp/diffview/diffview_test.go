@@ -2,6 +2,7 @@ package diffview_test
 
 import (
 	_ "embed"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -128,6 +129,36 @@ func TestDiffView(t *testing.T) {
 							case "LargeWidth":
 								assertLineWidth(t, 120, output)
 							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDiffViewWidth(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			for themeName, themeFunc := range ThemeFuncs {
+				t.Run(themeName, func(t *testing.T) {
+					for width := 1; width <= 110; width++ {
+						if layoutName == "Unified" && width > 60 {
+							continue
+						}
+
+						t.Run(fmt.Sprintf("WidthOf%03d", width), func(t *testing.T) {
+							dv := diffview.New().
+								Before("main.go", TestMultipleHunksBefore).
+								After("main.go", TestMultipleHunksAfter).
+								Width(width)
+							dv = layoutFunc(dv)
+							dv = themeFunc(dv)
+
+							output := dv.String()
+							golden.RequireEqual(t, []byte(output))
+
+							assertLineWidth(t, width, output)
 						})
 					}
 				})

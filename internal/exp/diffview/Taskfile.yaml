@@ -20,3 +20,23 @@ tasks:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
     silent: true
+
+  test:print:width:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewWidth/Unified/LightMode/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:width:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewWidth/Split/LightMode/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true

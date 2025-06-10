@@ -15,3 +15,18 @@ func pad(v any, width int) string {
 	}
 	return strings.Repeat(" ", width-w) + s
 }
+
+func isEven(n int) bool {
+	return n%2 == 0
+}
+
+func isOdd(n int) bool {
+	return !isEven(n)
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

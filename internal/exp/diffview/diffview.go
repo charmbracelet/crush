@@ -49,7 +49,8 @@ type DiffView struct {
 	splitHunks []splitHunk
 
 	codeWidth       int
-	fullCodeWidth   int // with leading symbols
+	fullCodeWidth   int  // with leading symbols
+	extraColOnAfter bool // add extra column on after panel
 	beforeNumDigits int
 	afterNumDigits  int
 }
@@ -144,11 +145,16 @@ func (dv *DiffView) String() string {
 		dv.resizeCodeWidth()
 	}
 
+	style := lipgloss.NewStyle()
+	if dv.width > 0 {
+		style = style.MaxWidth(dv.width)
+	}
+
 	switch dv.layout {
 	case layoutUnified:
-		return dv.renderUnified()
+		return style.Render(strings.TrimSuffix(dv.renderUnified(), "\n"))
 	case layoutSplit:
-		return dv.renderSplit()
+		return style.Render(strings.TrimSuffix(dv.renderSplit(), "\n"))
 	default:
 		panic("unknown diffview layout")
 	}
@@ -268,7 +274,9 @@ func (dv *DiffView) resizeCodeWidth() {
 	case layoutUnified:
 		dv.codeWidth = dv.width - fullNumWidth - leadingSymbolsSize
 	case layoutSplit:
-		dv.codeWidth = (dv.width - fullNumWidth - leadingSymbolsSize*2) / 2
+		remainingWidth := dv.width - fullNumWidth - leadingSymbolsSize*2
+		dv.codeWidth = remainingWidth / 2
+		dv.extraColOnAfter = isOdd(remainingWidth)
 	}
 
 	dv.fullCodeWidth = dv.codeWidth + leadingSymbolsSize
@@ -340,7 +348,7 @@ func (dv *DiffView) renderSplit() string {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
 		}
-		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(" "))
+		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
 		b.WriteRune('\n')
 
 		beforeLine := h.fromLine
@@ -355,7 +363,7 @@ func (dv *DiffView) renderSplit() string {
 			}
 			if l.after != nil {
 				afterContent = strings.TrimSuffix(l.after.Content, "\n")
-				afterContent = ansi.Truncate(afterContent, dv.codeWidth, "…")
+				afterContent = ansi.Truncate(afterContent, dv.codeWidth+btoi(dv.extraColOnAfter), "…")
 			}
 
 			switch {
@@ -384,19 +392,19 @@ func (dv *DiffView) renderSplit() string {
 				if dv.lineNumbers {
 					b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
+				b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "))
 			case l.after.Kind == udiff.Equal:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
-				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + afterContent))
+				b.WriteString(dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  " + afterContent))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
 				if dv.lineNumbers {
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(dv.style.InsertLine.Symbol.Render("+ "))
-				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth).Render(afterContent))
+				b.WriteString(dv.style.InsertLine.Code.Width(dv.codeWidth + btoi(dv.extraColOnAfter)).Render(afterContent))
 				afterLine++
 			}
 

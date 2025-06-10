@@ -292,7 +292,8 @@ func (dv *DiffView) renderUnified() string {
 	fullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
 	printedLines := 0
 
-	for _, h := range dv.unified.Hunks {
+outer:
+	for i, h := range dv.unified.Hunks {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
@@ -305,7 +306,23 @@ func (dv *DiffView) renderUnified() string {
 		beforeLine := h.FromLine
 		afterLine := h.ToLine
 
-		for _, l := range h.Lines {
+		for j, l := range h.Lines {
+			// print ellipis if we don't have enough space to print the rest of the diff
+			hasReachedHeight := dv.height > 0 && printedLines+1 == dv.height
+			isLastHunk := i+1 == len(dv.unified.Hunks)
+			isLastLine := j+1 == len(h.Lines)
+			if hasReachedHeight && (!isLastHunk || !isLastLine) {
+				if dv.lineNumbers {
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+				}
+				b.WriteString(fullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+				))
+				b.WriteRune('\n')
+				break outer
+			}
+
 			content := strings.TrimSuffix(l.Content, "\n")
 			content = ansi.Truncate(content, dv.codeWidth, "…")
 
@@ -368,6 +385,7 @@ func (dv *DiffView) renderSplit() string {
 	afterFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth + btoi(dv.extraColOnAfter))
 	printedLines := 0
 
+outer:
 	for i, h := range dv.splitHunks {
 		if dv.lineNumbers {
 			b.WriteString(dv.style.DividerLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
@@ -384,7 +402,28 @@ func (dv *DiffView) renderSplit() string {
 		beforeLine := h.fromLine
 		afterLine := h.toLine
 
-		for _, l := range h.lines {
+		for j, l := range h.lines {
+			// print ellipis if we don't have enough space to print the rest of the diff
+			hasReachedHeight := dv.height > 0 && printedLines+1 == dv.height
+			isLastHunk := i+1 == len(dv.unified.Hunks)
+			isLastLine := j+1 == len(h.lines)
+			if hasReachedHeight && (!isLastHunk || !isLastLine) {
+				if dv.lineNumbers {
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+				}
+				b.WriteString(beforeFullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+				))
+				if dv.lineNumbers {
+					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+				}
+				b.WriteString(afterFullContentStyle.Render(
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+				))
+				b.WriteRune('\n')
+				break outer
+			}
+
 			var beforeContent string
 			var afterContent string
 			if l.before != nil {

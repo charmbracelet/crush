@@ -149,6 +149,9 @@ func (dv *DiffView) String() string {
 	if dv.width > 0 {
 		style = style.MaxWidth(dv.width)
 	}
+	if dv.height > 0 {
+		style = style.MaxHeight(dv.height)
+	}
 
 	switch dv.layout {
 	case layoutUnified:
@@ -287,6 +290,7 @@ func (dv *DiffView) renderUnified() string {
 	var b strings.Builder
 
 	fullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
+	printedLines := 0
 
 	for _, h := range dv.unified.Hunks {
 		if dv.lineNumbers {
@@ -296,6 +300,7 @@ func (dv *DiffView) renderUnified() string {
 		content := ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")
 		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth).Render(content))
 		b.WriteRune('\n')
+		printedLines++
 
 		beforeLine := h.FromLine
 		afterLine := h.ToLine
@@ -337,7 +342,19 @@ func (dv *DiffView) renderUnified() string {
 				beforeLine++
 			}
 			b.WriteRune('\n')
+
+			printedLines++
 		}
+	}
+
+	for printedLines < dv.height {
+		if dv.lineNumbers {
+			b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+			b.WriteString(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+		}
+		b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "))
+		b.WriteRune('\n')
+		printedLines++
 	}
 
 	return b.String()
@@ -349,6 +366,7 @@ func (dv *DiffView) renderSplit() string {
 
 	beforeFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
 	afterFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth + btoi(dv.extraColOnAfter))
+	printedLines := 0
 
 	for i, h := range dv.splitHunks {
 		if dv.lineNumbers {
@@ -361,6 +379,7 @@ func (dv *DiffView) renderSplit() string {
 		}
 		b.WriteString(dv.style.DividerLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
 		b.WriteRune('\n')
+		printedLines++
 
 		beforeLine := h.fromLine
 		afterLine := h.toLine
@@ -432,7 +451,22 @@ func (dv *DiffView) renderSplit() string {
 			}
 
 			b.WriteRune('\n')
+
+			printedLines++
 		}
+	}
+
+	for printedLines < dv.height {
+		if dv.lineNumbers {
+			b.WriteString(dv.style.MissingLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+		}
+		b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render(" "))
+		if dv.lineNumbers {
+			b.WriteString(dv.style.MissingLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+		}
+		b.WriteString(dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+		b.WriteRune('\n')
+		printedLines++
 	}
 
 	return b.String()

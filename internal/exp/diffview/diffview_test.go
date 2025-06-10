@@ -167,6 +167,32 @@ func TestDiffViewWidth(t *testing.T) {
 	}
 }
 
+func TestDiffViewHeight(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			for themeName, themeFunc := range ThemeFuncs {
+				t.Run(themeName, func(t *testing.T) {
+					for height := 1; height <= 20; height++ {
+						t.Run(fmt.Sprintf("HeightOf%03d", height), func(t *testing.T) {
+							dv := diffview.New().
+								Before("main.go", TestMultipleHunksBefore).
+								After("main.go", TestMultipleHunksAfter).
+								Height(height)
+							dv = layoutFunc(dv)
+							dv = themeFunc(dv)
+
+							output := dv.String()
+							golden.RequireEqual(t, []byte(output))
+
+							assertHeight(t, height, output)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func assertLineWidth(t *testing.T, expected int, output string) {
 	var lineWidth int
 	for line := range strings.SplitSeq(output, "\n") {
@@ -174,5 +200,13 @@ func assertLineWidth(t *testing.T, expected int, output string) {
 	}
 	if lineWidth != expected {
 		t.Errorf("expected output width to be == %d, got %d", expected, lineWidth)
+	}
+}
+
+func assertHeight(t *testing.T, expected int, output string) {
+	output = strings.TrimSuffix(output, "\n")
+	lines := strings.Count(output, "\n") + 1
+	if lines != expected {
+		t.Errorf("expected output height to be == %d, got %d", expected, lines)
 	}
 }

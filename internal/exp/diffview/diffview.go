@@ -331,12 +331,13 @@ outer:
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.Lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {
+				lineStyle := dv.lineStyleForType(l.Kind)
 				if dv.lineNumbers {
-					write(dv.style.EqualLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-					write(dv.style.EqualLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+					write(lineStyle.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+					write(lineStyle.LineNumber.Render(pad("…", dv.afterNumDigits)))
 				}
 				write(fullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+					lineStyle.Code.Width(dv.fullCodeWidth).Render("  …"),
 				))
 				write("\n")
 				break outer
@@ -436,17 +437,25 @@ outer:
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {
+				lineStyle := dv.style.MissingLine
+				if l.before != nil {
+					lineStyle = dv.lineStyleForType(l.before.Kind)
+				}
 				if dv.lineNumbers {
-					write(dv.style.EqualLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+					write(lineStyle.LineNumber.Render(pad("…", dv.beforeNumDigits)))
 				}
 				write(beforeFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+					lineStyle.Code.Width(dv.fullCodeWidth).Render("  …"),
 				))
+				lineStyle = dv.style.MissingLine
+				if l.after != nil {
+					lineStyle = dv.lineStyleForType(l.after.Kind)
+				}
 				if dv.lineNumbers {
-					write(dv.style.EqualLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+					write(lineStyle.LineNumber.Render(pad("…", dv.afterNumDigits)))
 				}
 				write(afterFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  …"),
+					lineStyle.Code.Width(dv.fullCodeWidth).Render("  …"),
 				))
 				write("\n")
 				break outer
@@ -572,4 +581,17 @@ func (dv *DiffView) hunkShownLines(h *udiff.Hunk) (before, after int) {
 		}
 	}
 	return
+}
+
+func (dv *DiffView) lineStyleForType(t udiff.OpKind) LineStyle {
+	switch t {
+	case udiff.Equal:
+		return dv.style.EqualLine
+	case udiff.Insert:
+		return dv.style.InsertLine
+	case udiff.Delete:
+		return dv.style.DeleteLine
+	default:
+		return dv.style.MissingLine
+	}
 }

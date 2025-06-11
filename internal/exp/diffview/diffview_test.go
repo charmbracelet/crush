@@ -193,6 +193,29 @@ func TestDiffViewHeight(t *testing.T) {
 	}
 }
 
+func TestDiffViewXOffset(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			for xOffset := range 21 {
+				t.Run(fmt.Sprintf("XOffsetOf%02d", xOffset), func(t *testing.T) {
+					dv := diffview.New().
+						Before("main.go", TestDefaultBefore).
+						After("main.go", TestDefaultAfter).
+						Style(diffview.DefaultLightStyle).
+						Width(60).
+						XOffset(xOffset)
+					dv = layoutFunc(dv)
+
+					output := dv.String()
+					golden.RequireEqual(t, []byte(output))
+
+					assertLineWidth(t, 60, output)
+				})
+			}
+		})
+	}
+}
+
 func assertLineWidth(t *testing.T, expected int, output string) {
 	var lineWidth int
 	for line := range strings.SplitSeq(output, "\n") {

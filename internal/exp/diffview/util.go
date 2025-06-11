@@ -30,3 +30,10 @@ func btoi(b bool) int {
 	}
 	return 0
 }
+
+func ternary[T any](cond bool, t, f T) T {
+	if cond {
+		return t
+	}
+	return f
+}

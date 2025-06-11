@@ -60,3 +60,23 @@ tasks:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
     silent: true
+
+  test:print:xoffset:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewXOffset/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:xoffset:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewXOffset/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true

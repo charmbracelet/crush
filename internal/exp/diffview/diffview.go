@@ -539,11 +539,11 @@ outer:
 
 	for printedLines < dv.height {
 		if dv.lineNumbers {
-			write(dv.style.MissingLine.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+			write(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 		}
 		write(dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render(" "))
 		if dv.lineNumbers {
-			write(dv.style.MissingLine.LineNumber.Render(pad("…", dv.afterNumDigits)))
+			write(dv.style.MissingLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 		}
 		write(dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
 		write("\n")

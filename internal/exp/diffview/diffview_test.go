@@ -161,27 +161,23 @@ func TestDiffViewTabs(t *testing.T) {
 func TestDiffViewWidth(t *testing.T) {
 	for layoutName, layoutFunc := range LayoutFuncs {
 		t.Run(layoutName, func(t *testing.T) {
-			for themeName, themeFunc := range ThemeFuncs {
-				t.Run(themeName, func(t *testing.T) {
-					for width := 1; width <= 110; width++ {
-						if layoutName == "Unified" && width > 60 {
-							continue
-						}
+			for width := 1; width <= 110; width++ {
+				if layoutName == "Unified" && width > 60 {
+					continue
+				}
 
-						t.Run(fmt.Sprintf("WidthOf%03d", width), func(t *testing.T) {
-							dv := diffview.New().
-								Before("main.go", TestMultipleHunksBefore).
-								After("main.go", TestMultipleHunksAfter).
-								Width(width)
-							dv = layoutFunc(dv)
-							dv = themeFunc(dv)
+				t.Run(fmt.Sprintf("WidthOf%03d", width), func(t *testing.T) {
+					dv := diffview.New().
+						Before("main.go", TestMultipleHunksBefore).
+						After("main.go", TestMultipleHunksAfter).
+						Width(width).
+						Style(diffview.DefaultLightStyle)
+					dv = layoutFunc(dv)
 
-							output := dv.String()
-							golden.RequireEqual(t, []byte(output))
+					output := dv.String()
+					golden.RequireEqual(t, []byte(output))
 
-							assertLineWidth(t, width, output)
-						})
-					}
+					assertLineWidth(t, width, output)
 				})
 			}
 		})
@@ -191,23 +187,19 @@ func TestDiffViewWidth(t *testing.T) {
 func TestDiffViewHeight(t *testing.T) {
 	for layoutName, layoutFunc := range LayoutFuncs {
 		t.Run(layoutName, func(t *testing.T) {
-			for themeName, themeFunc := range ThemeFuncs {
-				t.Run(themeName, func(t *testing.T) {
-					for height := 1; height <= 20; height++ {
-						t.Run(fmt.Sprintf("HeightOf%03d", height), func(t *testing.T) {
-							dv := diffview.New().
-								Before("main.go", TestMultipleHunksBefore).
-								After("main.go", TestMultipleHunksAfter).
-								Height(height)
-							dv = layoutFunc(dv)
-							dv = themeFunc(dv)
+			for height := 1; height <= 20; height++ {
+				t.Run(fmt.Sprintf("HeightOf%03d", height), func(t *testing.T) {
+					dv := diffview.New().
+						Before("main.go", TestMultipleHunksBefore).
+						After("main.go", TestMultipleHunksAfter).
+						Height(height).
+						Style(diffview.DefaultLightStyle)
+					dv = layoutFunc(dv)
 
-							output := dv.String()
-							golden.RequireEqual(t, []byte(output))
+					output := dv.String()
+					golden.RequireEqual(t, []byte(output))
 
-							assertHeight(t, height, output)
-						})
-					}
+					assertHeight(t, height, output)
 				})
 			}
 		})

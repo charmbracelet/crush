@@ -39,6 +39,7 @@ type DiffView struct {
 	highlight    bool
 	height       int
 	width        int
+	xOffset      int
 	style        Style
 
 	isComputed bool
@@ -127,6 +128,12 @@ func (dv *DiffView) Height(height int) *DiffView {
 // Width sets the width of the DiffView.
 func (dv *DiffView) Width(width int) *DiffView {
 	dv.width = width
+	return dv
+}
+
+// XOffset sets the horizontal offset for the DiffView.
+func (dv *DiffView) XOffset(xOffset int) *DiffView {
+	dv.xOffset = xOffset
 	return dv
 }
 
@@ -323,7 +330,10 @@ outer:
 			}
 
 			content := strings.TrimSuffix(l.Content, "\n")
+			content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 			content = ansi.Truncate(content, dv.codeWidth, "…")
+
+			leadingEllipsis := dv.xOffset > 0 && strings.TrimSpace(content) != ""
 
 			switch l.Kind {
 			case udiff.Equal:
@@ -332,7 +342,7 @@ outer:
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(fullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + content),
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
 				))
 				beforeLine++
 				afterLine++
@@ -342,7 +352,7 @@ outer:
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(fullContentStyle.Render(
-					dv.style.InsertLine.Symbol.Render("+ ") +
+					dv.style.InsertLine.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
 						dv.style.InsertLine.Code.Width(dv.codeWidth).Render(content),
 				))
 				afterLine++
@@ -352,7 +362,7 @@ outer:
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
 				}
 				b.WriteString(fullContentStyle.Render(
-					dv.style.DeleteLine.Symbol.Render("- ") +
+					dv.style.DeleteLine.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
 						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content),
 				))
 				beforeLine++
@@ -427,12 +437,17 @@ outer:
 			var afterContent string
 			if l.before != nil {
 				beforeContent = strings.TrimSuffix(l.before.Content, "\n")
+				beforeContent = ansi.GraphemeWidth.Cut(beforeContent, dv.xOffset, len(beforeContent))
 				beforeContent = ansi.Truncate(beforeContent, dv.codeWidth, "…")
 			}
 			if l.after != nil {
 				afterContent = strings.TrimSuffix(l.after.Content, "\n")
+				afterContent = ansi.GraphemeWidth.Cut(afterContent, dv.xOffset, len(afterContent))
 				afterContent = ansi.Truncate(afterContent, dv.codeWidth+btoi(dv.extraColOnAfter), "…")
 			}
+
+			leadingBeforeEllipsis := dv.xOffset > 0 && strings.TrimSpace(beforeContent) != ""
+			leadingAfterEllipsis := dv.xOffset > 0 && strings.TrimSpace(afterContent) != ""
 
 			switch {
 			case l.before == nil:
@@ -447,7 +462,7 @@ outer:
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				b.WriteString(beforeFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render("  " + beforeContent),
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render(ternary(leadingBeforeEllipsis, " …", "  ") + beforeContent),
 				))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
@@ -455,7 +470,7 @@ outer:
 					b.WriteString(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				b.WriteString(beforeFullContentStyle.Render(
-					dv.style.DeleteLine.Symbol.Render("- ") +
+					dv.style.DeleteLine.Symbol.Render(ternary(leadingBeforeEllipsis, "-…", "- ")) +
 						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent),
 				))
 				beforeLine++
@@ -474,7 +489,7 @@ outer:
 					b.WriteString(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(afterFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  " + afterContent),
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(ternary(leadingAfterEllipsis, " …", "  ") + afterContent),
 				))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
@@ -482,7 +497,7 @@ outer:
 					b.WriteString(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				b.WriteString(afterFullContentStyle.Render(
-					dv.style.InsertLine.Symbol.Render("+ ") +
+					dv.style.InsertLine.Symbol.Render(ternary(leadingAfterEllipsis, "+…", "+ ")) +
 						dv.style.InsertLine.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(afterContent),
 				))
 				afterLine++

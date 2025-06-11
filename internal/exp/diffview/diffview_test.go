@@ -29,6 +29,12 @@ var TestNarrowBefore string
 //go:embed testdata/TestNarrow.after
 var TestNarrowAfter string
 
+//go:embed testdata/TestTabs.before
+var TestTabsBefore string
+
+//go:embed testdata/TestTabs.after
+var TestTabsAfter string
+
 type (
 	TestFunc  func(dv *diffview.DiffView) *diffview.DiffView
 	TestFuncs map[string]TestFunc
@@ -133,6 +139,21 @@ func TestDiffView(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestDiffViewTabs(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			dv := diffview.New().
+				Before("main.go", TestTabsBefore).
+				After("main.go", TestTabsAfter).
+				Style(diffview.DefaultLightStyle)
+			dv = layoutFunc(dv)
+
+			output := dv.String()
+			golden.RequireEqual(t, []byte(output))
 		})
 	}
 }

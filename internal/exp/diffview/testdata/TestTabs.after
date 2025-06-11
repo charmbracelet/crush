@@ -1,0 +1,15 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func main() {
+	fmt.Println(getContent())
+}
+
+func getContent() string {
+	content := strings.ToUpper("Hello, World!")
+	return content
+}

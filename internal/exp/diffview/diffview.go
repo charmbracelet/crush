@@ -42,6 +42,7 @@ type DiffView struct {
 	xOffset      int
 	yOffset      int
 	style        Style
+	tabWidth     int
 
 	isComputed bool
 	err        error
@@ -63,6 +64,7 @@ func New() *DiffView {
 		layout:       layoutUnified,
 		contextLines: udiff.DefaultContextLines,
 		lineNumbers:  true,
+		tabWidth:     8,
 	}
 	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
 		dv.style = DefaultDarkStyle
@@ -144,8 +146,16 @@ func (dv *DiffView) YOffset(yOffset int) *DiffView {
 	return dv
 }
 
+// TabWidth sets the tab width. Only relevant for code that contains tabs, like
+// Go code.
+func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
+	dv.tabWidth = tabWidth
+	return dv
+}
+
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
+	dv.replaceTabs()
 	if err := dv.computeDiff(); err != nil {
 		return err.Error()
 	}
@@ -175,6 +185,14 @@ func (dv *DiffView) String() string {
 	default:
 		panic("unknown diffview layout")
 	}
+}
+
+// replaceTabs replaces tabs in the before and after file contents with spaces
+// according to the specified tab width.
+func (dv *DiffView) replaceTabs() {
+	spaces := strings.Repeat(" ", dv.tabWidth)
+	dv.before.content = strings.ReplaceAll(dv.before.content, "\t", spaces)
+	dv.after.content = strings.ReplaceAll(dv.after.content, "\t", spaces)
 }
 
 // computeDiff computes the differences between the "before" and "after" files.

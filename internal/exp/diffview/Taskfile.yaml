@@ -25,7 +25,7 @@ tasks:
     desc: Print golden files for debugging
     method: none
     sources:
-      - ./testdata/TestDiffViewWidth/Unified/LightMode/*.golden
+      - ./testdata/TestDiffViewWidth/Unified/*.golden
     cmds:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
@@ -35,7 +35,7 @@ tasks:
     desc: Print golden files for debugging
     method: none
     sources:
-      - ./testdata/TestDiffViewWidth/Split/LightMode/*.golden
+      - ./testdata/TestDiffViewWidth/Split/*.golden
     cmds:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
@@ -45,7 +45,7 @@ tasks:
     desc: Print golden files for debugging
     method: none
     sources:
-      - ./testdata/TestDiffViewHeight/Unified/LightMode/*.golden
+      - ./testdata/TestDiffViewHeight/Unified/*.golden
     cmds:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
@@ -55,7 +55,7 @@ tasks:
     desc: Print golden files for debugging
     method: none
     sources:
-      - ./testdata/TestDiffViewHeight/Split/LightMode/*.golden
+      - ./testdata/TestDiffViewHeight/Split/*.golden
     cmds:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}

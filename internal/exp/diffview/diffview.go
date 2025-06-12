@@ -2,10 +2,13 @@ package diffview
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -43,6 +46,7 @@ type DiffView struct {
 	yOffset      int
 	style        Style
 	tabWidth     int
+	chromaStyle  *chroma.Style
 
 	isComputed bool
 	err        error
@@ -150,6 +154,13 @@ func (dv *DiffView) YOffset(yOffset int) *DiffView {
 // Go code.
 func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
 	dv.tabWidth = tabWidth
+	return dv
+}
+
+// ChromaStyle sets the chroma style for syntax highlighting.
+// If nil, no syntax highlighting will be applied.
+func (dv *DiffView) ChromaStyle(style *chroma.Style) *DiffView {
+	dv.chromaStyle = style
 	return dv
 }
 
@@ -361,14 +372,19 @@ outer:
 				break outer
 			}
 
-			content := strings.TrimSuffix(l.Content, "\n")
-			content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-			content = ansi.Truncate(content, dv.codeWidth, "…")
+			getContent := func(ls LineStyle) string {
+				content := strings.TrimSuffix(l.Content, "\n")
+				content = dv.hightlightCode(content, ls.Code.GetBackground())
+				content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
+				content = ansi.Truncate(content, dv.codeWidth, "…")
+				return content
+			}
 
 			leadingEllipsis := dv.xOffset > 0 && strings.TrimSpace(content) != ""
 
 			switch l.Kind {
 			case udiff.Equal:
+				content := getContent(dv.style.EqualLine)
 				if dv.lineNumbers {
 					write(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					write(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
@@ -379,6 +395,7 @@ outer:
 				beforeLine++
 				afterLine++
 			case udiff.Insert:
+				content := getContent(dv.style.InsertLine)
 				if dv.lineNumbers {
 					write(dv.style.InsertLine.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
 					write(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
@@ -389,6 +406,7 @@ outer:
 				))
 				afterLine++
 			case udiff.Delete:
+				content := getContent(dv.style.DeleteLine)
 				if dv.lineNumbers {
 					write(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 					write(dv.style.DeleteLine.LineNumber.Render(pad(" ", dv.afterNumDigits)))
@@ -479,21 +497,16 @@ outer:
 				break outer
 			}
 
-			var beforeContent string
-			var afterContent string
-			if l.before != nil {
-				beforeContent = strings.TrimSuffix(l.before.Content, "\n")
-				beforeContent = ansi.GraphemeWidth.Cut(beforeContent, dv.xOffset, len(beforeContent))
-				beforeContent = ansi.Truncate(beforeContent, dv.codeWidth, "…")
+			getContent := func(content string, ls LineStyle) string {
+				content = strings.TrimSuffix(content, "\n")
+				content = dv.hightlightCode(content, ls.Code.GetBackground())
+				content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
+				content = ansi.Truncate(content, dv.codeWidth, "…")
+				return content
 			}
-			if l.after != nil {
-				afterContent = strings.TrimSuffix(l.after.Content, "\n")
-				afterContent = ansi.GraphemeWidth.Cut(afterContent, dv.xOffset, len(afterContent))
-				afterContent = ansi.Truncate(afterContent, dv.codeWidth+btoi(dv.extraColOnAfter), "…")
+			getLeadingEllipsis := func(content string) bool {
+				return dv.xOffset > 0 && strings.TrimSpace(content) != ""
 			}
-
-			leadingBeforeEllipsis := dv.xOffset > 0 && strings.TrimSpace(beforeContent) != ""
-			leadingAfterEllipsis := dv.xOffset > 0 && strings.TrimSpace(afterContent) != ""
 
 			switch {
 			case l.before == nil:
@@ -504,20 +517,24 @@ outer:
 					dv.style.MissingLine.Code.Width(dv.fullCodeWidth).Render("  "),
 				))
 			case l.before.Kind == udiff.Equal:
+				content := getContent(l.before.Content, dv.style.EqualLine)
+				leadingEllipsis := getLeadingEllipsis(content)
 				if dv.lineNumbers {
 					write(dv.style.EqualLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				write(beforeFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render(ternary(leadingBeforeEllipsis, " …", "  ") + beforeContent),
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
 				))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
+				content := getContent(l.before.Content, dv.style.DeleteLine)
+				leadingEllipsis := getLeadingEllipsis(content)
 				if dv.lineNumbers {
 					write(dv.style.DeleteLine.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
 				}
 				write(beforeFullContentStyle.Render(
-					dv.style.DeleteLine.Symbol.Render(ternary(leadingBeforeEllipsis, "-…", "- ")) +
-						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(beforeContent),
+					dv.style.DeleteLine.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
+						dv.style.DeleteLine.Code.Width(dv.codeWidth).Render(content),
 				))
 				beforeLine++
 			}
@@ -531,20 +548,24 @@ outer:
 					dv.style.MissingLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "),
 				))
 			case l.after.Kind == udiff.Equal:
+				content := getContent(l.after.Content, dv.style.EqualLine)
+				leadingEllipsis := getLeadingEllipsis(content)
 				if dv.lineNumbers {
 					write(dv.style.EqualLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				write(afterFullContentStyle.Render(
-					dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(ternary(leadingAfterEllipsis, " …", "  ") + afterContent),
+					dv.style.EqualLine.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(ternary(leadingEllipsis, " …", "  ") + content),
 				))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
+				content := getContent(l.after.Content, dv.style.InsertLine)
+				leadingEllipsis := getLeadingEllipsis(content)
 				if dv.lineNumbers {
 					write(dv.style.InsertLine.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
 				}
 				write(afterFullContentStyle.Render(
-					dv.style.InsertLine.Symbol.Render(ternary(leadingAfterEllipsis, "+…", "+ ")) +
-						dv.style.InsertLine.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(afterContent),
+					dv.style.InsertLine.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
+						dv.style.InsertLine.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(content),
 				))
 				afterLine++
 			}
@@ -611,5 +632,42 @@ func (dv *DiffView) lineStyleForType(t udiff.OpKind) LineStyle {
 		return dv.style.DeleteLine
 	default:
 		return dv.style.MissingLine
+	}
+}
+
+func (dv *DiffView) hightlightCode(source string, bgColor color.Color) string {
+	if dv.chromaStyle == nil {
+		return source
+	}
+
+	l := dv.getChromaLexer(source)
+	f := dv.getChromaFormatter(bgColor)
+
+	it, err := l.Tokenise(nil, source)
+	if err != nil {
+		return source
+	}
+
+	var b strings.Builder
+	if err := f.Format(&b, dv.chromaStyle, it); err != nil {
+		return source
+	}
+	return b.String()
+}
+
+func (dv *DiffView) getChromaLexer(source string) chroma.Lexer {
+	l := lexers.Match(dv.before.path)
+	if l == nil {
+		l = lexers.Analyse(source)
+	}
+	if l == nil {
+		l = lexers.Fallback
+	}
+	return chroma.Coalesce(l)
+}
+
+func (dv *DiffView) getChromaFormatter(gbColor color.Color) chroma.Formatter {
+	return chromaFormatter{
+		bgColor: gbColor,
 	}
 }

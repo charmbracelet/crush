@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/opencode-ai/opencode/internal/exp/diffview"
@@ -87,12 +88,22 @@ var (
 			After("main.go", TestMultipleHunksAfter).
 			Width(120)
 	}
+	NoSyntaxHighlightFunc = func(dv *diffview.DiffView) *diffview.DiffView {
+		return dv.
+			Before("main.go", TestMultipleHunksBefore).
+			After("main.go", TestMultipleHunksAfter).
+			ChromaStyle(nil)
+	}
 
 	LightModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
-		return dv.Style(diffview.DefaultLightStyle)
+		return dv.
+			Style(diffview.DefaultLightStyle).
+			ChromaStyle(styles.Get("catppuccin-latte"))
 	}
 	DarkModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
-		return dv.Style(diffview.DefaultDarkStyle)
+		return dv.
+			Style(diffview.DefaultDarkStyle).
+			ChromaStyle(styles.Get("catppuccin-macchiato"))
 	}
 
 	LayoutFuncs = TestFuncs{
@@ -107,6 +118,7 @@ var (
 		"Narrow":             NarrowFunc,
 		"SmallWidth":         SmallWidthFunc,
 		"LargeWidth":         LargeWidthFunc,
+		"NoSyntaxHighlight":  NoSyntaxHighlightFunc,
 	}
 	ThemeFuncs = TestFuncs{
 		"LightMode": LightModeFunc,
@@ -123,8 +135,8 @@ func TestDiffView(t *testing.T) {
 						t.Run(themeName, func(t *testing.T) {
 							dv := diffview.New()
 							dv = layoutFunc(dv)
-							dv = behaviorFunc(dv)
 							dv = themeFunc(dv)
+							dv = behaviorFunc(dv)
 
 							output := dv.String()
 							golden.RequireEqual(t, []byte(output))
@@ -149,7 +161,8 @@ func TestDiffViewTabs(t *testing.T) {
 			dv := diffview.New().
 				Before("main.go", TestTabsBefore).
 				After("main.go", TestTabsAfter).
-				Style(diffview.DefaultLightStyle)
+				Style(diffview.DefaultLightStyle).
+				ChromaStyle(styles.Get("catppuccin-latte"))
 			dv = layoutFunc(dv)
 
 			output := dv.String()
@@ -171,7 +184,8 @@ func TestDiffViewWidth(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Width(width).
-						Style(diffview.DefaultLightStyle)
+						Style(diffview.DefaultLightStyle).
+						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
 					output := dv.String()
@@ -193,7 +207,8 @@ func TestDiffViewHeight(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Height(height).
-						Style(diffview.DefaultLightStyle)
+						Style(diffview.DefaultLightStyle).
+						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
 					output := dv.String()
@@ -215,6 +230,7 @@ func TestDiffViewXOffset(t *testing.T) {
 						Before("main.go", TestDefaultBefore).
 						After("main.go", TestDefaultAfter).
 						Style(diffview.DefaultLightStyle).
+						ChromaStyle(styles.Get("catppuccin-latte")).
 						Width(60).
 						XOffset(xOffset)
 					dv = layoutFunc(dv)
@@ -238,6 +254,7 @@ func TestDiffViewYOffset(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Style(diffview.DefaultLightStyle).
+						ChromaStyle(styles.Get("catppuccin-latte")).
 						Height(5).
 						YOffset(yOffset)
 					dv = layoutFunc(dv)

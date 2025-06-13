@@ -18,7 +18,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -118,6 +120,14 @@ func (m *editorCmp) send() tea.Cmd {
 	}
 
 	value := m.textarea.Value()
+	value = strings.TrimSpace(value)
+
+	switch value {
+	case "exit", "quit":
+		m.textarea.Reset()
+		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+	}
+
 	m.textarea.Reset()
 	attachments := m.attachments
 

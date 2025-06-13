@@ -1,0 +1,107 @@
+package commands
+
+import (
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/layout"
+)
+
+type CommandsDialogKeyMap struct {
+	Select,
+	Next,
+	Previous,
+	Tab,
+	Close key.Binding
+}
+
+func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
+	return CommandsDialogKeyMap{
+		Select: key.NewBinding(
+			key.WithKeys("enter", "ctrl+y"),
+			key.WithHelp("enter", "confirm"),
+		),
+		Next: key.NewBinding(
+			key.WithKeys("down", "ctrl+n"),
+			key.WithHelp("↓", "next item"),
+		),
+		Previous: key.NewBinding(
+			key.WithKeys("up", "ctrl+p"),
+			key.WithHelp("↑", "previous item"),
+		),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch selection"),
+		),
+		Close: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
+// FullHelp implements help.KeyMap.
+func (k CommandsDialogKeyMap) FullHelp() [][]key.Binding {
+	m := [][]key.Binding{}
+	slice := layout.KeyMapToSlice(k)
+	for i := 0; i < len(slice); i += 4 {
+		end := min(i+4, len(slice))
+		m = append(m, slice[i:end])
+	}
+	return m
+}
+
+// ShortHelp implements help.KeyMap.
+func (k CommandsDialogKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		k.Tab,
+		key.NewBinding(
+			key.WithKeys("down", "up"),
+			key.WithHelp("↑↓", "choose"),
+		),
+		k.Select,
+		k.Close,
+	}
+}
+
+type ArgumentsDialogKeyMap struct {
+	Confirm  key.Binding
+	Next     key.Binding
+	Previous key.Binding
+}
+
+func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
+	return ArgumentsDialogKeyMap{
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "confirm"),
+		),
+
+		Next: key.NewBinding(
+			key.WithKeys("tab", "down"),
+			key.WithHelp("tab/↓", "next"),
+		),
+		Previous: key.NewBinding(
+			key.WithKeys("shift+tab", "up"),
+			key.WithHelp("shift+tab/↑", "previous"),
+		),
+	}
+}
+
+// FullHelp implements help.KeyMap.
+func (k ArgumentsDialogKeyMap) FullHelp() [][]key.Binding {
+	m := [][]key.Binding{}
+	slice := layout.KeyMapToSlice(k)
+	for i := 0; i < len(slice); i += 4 {
+		end := min(i+4, len(slice))
+		m = append(m, slice[i:end])
+	}
+	return m
+}
+
+// ShortHelp implements help.KeyMap.
+func (k ArgumentsDialogKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		k.Confirm,
+		k.Next,
+		k.Previous,
+	}
+}

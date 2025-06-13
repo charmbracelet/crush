@@ -1,17 +1,20 @@
 package chat
 
 import (
-	"fmt"
-	"sort"
+	"context"
+	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/message"
-	"github.com/opencode-ai/opencode/internal/session"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
-	"github.com/opencode-ai/opencode/internal/version"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
+	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type SendMsg struct {
@@ -23,119 +26,472 @@ type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
 
-type EditorFocusMsg bool
+const (
+	NotFound = -1
+)
 
-func header(width int) string {
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		logo(width),
-		repo(width),
-		"",
-		cwd(width),
+// MessageListCmp represents a component that displays a list of chat messages
+// with support for real-time updates and session management.
+type MessageListCmp interface {
+	util.Model
+	layout.Sizeable
+	layout.Focusable
+}
+
+// messageListCmp implements MessageListCmp, providing a virtualized list
+// of chat messages with support for tool calls, real-time updates, and
+// session switching.
+type messageListCmp struct {
+	app              *app.App
+	width, height    int
+	session          session.Session
+	listCmp          list.ListModel
+	previousSelected int // Last selected item index for restoring focus
+
+	lastUserMessageTime int64
+}
+
+// NewMessagesListCmp creates a new message list component with custom keybindings
+// and reverse ordering (newest messages at bottom).
+func NewMessagesListCmp(app *app.App) MessageListCmp {
+	defaultKeymaps := list.DefaultKeyMap()
+	listCmp := list.New(
+		list.WithGapSize(1),
+		list.WithReverse(true),
+		list.WithKeyMap(defaultKeymaps),
+	)
+	return &messageListCmp{
+		app:              app,
+		listCmp:          listCmp,
+		previousSelected: list.NoSelection,
+	}
+}
+
+// Init initializes the component (no initialization needed).
+func (m *messageListCmp) Init() tea.Cmd {
+	return tea.Sequence(m.listCmp.Init(), m.listCmp.Blur())
+}
+
+// Update handles incoming messages and updates the component state.
+func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case SessionSelectedMsg:
+		if msg.ID != m.session.ID {
+			cmd := m.SetSession(msg)
+			return m, cmd
+		}
+		return m, nil
+	case SessionClearedMsg:
+		m.session = session.Session{}
+		return m, m.listCmp.SetItems([]util.Model{})
+
+	case pubsub.Event[message.Message]:
+		cmd := m.handleMessageEvent(msg)
+		return m, cmd
+	default:
+		var cmds []tea.Cmd
+		u, cmd := m.listCmp.Update(msg)
+		m.listCmp = u.(list.ListModel)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+	}
+}
+
+// View renders the message list or an initial screen if empty.
+func (m *messageListCmp) View() tea.View {
+	return tea.NewView(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			m.listCmp.View().String(),
+		),
 	)
 }
 
-func lspsConfigured(width int) string {
-	cfg := config.Get()
-	title := "LSP Configuration"
-	title = ansi.Truncate(title, width, "…")
-
-	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
-
-	lsps := baseStyle.
-		Width(width).
-		Foreground(t.Primary()).
-		Bold(true).
-		Render(title)
-
-	// Get LSP names and sort them for consistent ordering
-	var lspNames []string
-	for name := range cfg.LSP {
-		lspNames = append(lspNames, name)
+// handleChildSession handles messages from child sessions (agent tools).
+func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message]) tea.Cmd {
+	var cmds []tea.Cmd
+	if len(event.Payload.ToolCalls()) == 0 {
+		return nil
 	}
-	sort.Strings(lspNames)
+	items := m.listCmp.Items()
+	toolCallInx := NotFound
+	var toolCall messages.ToolCallCmp
+	for i := len(items) - 1; i >= 0; i-- {
+		if msg, ok := items[i].(messages.ToolCallCmp); ok {
+			if msg.GetToolCall().ID == event.Payload.SessionID {
+				toolCallInx = i
+				toolCall = msg
+			}
+		}
+	}
+	if toolCallInx == NotFound {
+		return nil
+	}
+	nestedToolCalls := toolCall.GetNestedToolCalls()
+	for _, tc := range event.Payload.ToolCalls() {
+		found := false
+		for existingInx, existingTC := range nestedToolCalls {
+			if existingTC.GetToolCall().ID == tc.ID {
+				nestedToolCalls[existingInx].SetToolCall(tc)
+				found = true
+				break
+			}
+		}
+		if !found {
+			nestedCall := messages.NewToolCallCmp(
+				event.Payload.ID,
+				tc,
+				messages.WithToolCallNested(true),
+			)
+			cmds = append(cmds, nestedCall.Init())
+			nestedToolCalls = append(
+				nestedToolCalls,
+				nestedCall,
+			)
+		}
+	}
+	toolCall.SetNestedToolCalls(nestedToolCalls)
+	m.listCmp.UpdateItem(
+		toolCallInx,
+		toolCall,
+	)
+	return tea.Batch(cmds...)
+}
 
-	var lspViews []string
-	for _, name := range lspNames {
-		lsp := cfg.LSP[name]
-		lspName := baseStyle.
-			Foreground(t.Text()).
-			Render(fmt.Sprintf("• %s", name))
+// handleMessageEvent processes different types of message events (created/updated).
+func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message]) tea.Cmd {
+	switch event.Type {
+	case pubsub.CreatedEvent:
+		if event.Payload.SessionID != m.session.ID {
+			return m.handleChildSession(event)
+		}
+		if m.messageExists(event.Payload.ID) {
+			return nil
+		}
+		return m.handleNewMessage(event.Payload)
+	case pubsub.UpdatedEvent:
+		if event.Payload.SessionID != m.session.ID {
+			return m.handleChildSession(event)
+		}
+		return m.handleUpdateAssistantMessage(event.Payload)
+	}
+	return nil
+}
 
-		cmd := lsp.Command
-		cmd = ansi.Truncate(cmd, width-lipgloss.Width(lspName)-3, "…")
+// messageExists checks if a message with the given ID already exists in the list.
+func (m *messageListCmp) messageExists(messageID string) bool {
+	items := m.listCmp.Items()
+	// Search backwards as new messages are more likely to be at the end
+	for i := len(items) - 1; i >= 0; i-- {
+		if msg, ok := items[i].(messages.MessageCmp); ok && msg.GetMessage().ID == messageID {
+			return true
+		}
+	}
+	return false
+}
 
-		lspPath := baseStyle.
-			Foreground(t.TextMuted()).
-			Render(fmt.Sprintf(" (%s)", cmd))
+// handleNewMessage routes new messages to appropriate handlers based on role.
+func (m *messageListCmp) handleNewMessage(msg message.Message) tea.Cmd {
+	switch msg.Role {
+	case message.User:
+		return m.handleNewUserMessage(msg)
+	case message.Assistant:
+		return m.handleNewAssistantMessage(msg)
+	case message.Tool:
+		return m.handleToolMessage(msg)
+	}
+	return nil
+}
 
-		lspViews = append(lspViews,
-			baseStyle.
-				Width(width).
-				Render(
-					lipgloss.JoinHorizontal(
-						lipgloss.Left,
-						lspName,
-						lspPath,
-					),
-				),
-		)
+// handleNewUserMessage adds a new user message to the list and updates the timestamp.
+func (m *messageListCmp) handleNewUserMessage(msg message.Message) tea.Cmd {
+	m.lastUserMessageTime = msg.CreatedAt
+	return m.listCmp.AppendItem(messages.NewMessageCmp(msg))
+}
+
+// handleToolMessage updates existing tool calls with their results.
+func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
+	items := m.listCmp.Items()
+	for _, tr := range msg.ToolResults() {
+		if toolCallIndex := m.findToolCallByID(items, tr.ToolCallID); toolCallIndex != NotFound {
+			toolCall := items[toolCallIndex].(messages.ToolCallCmp)
+			toolCall.SetToolResult(tr)
+			m.listCmp.UpdateItem(toolCallIndex, toolCall)
+		}
+	}
+	return nil
+}
+
+// findToolCallByID searches for a tool call with the specified ID.
+// Returns the index if found, NotFound otherwise.
+func (m *messageListCmp) findToolCallByID(items []util.Model, toolCallID string) int {
+	// Search backwards as tool calls are more likely to be recent
+	for i := len(items) - 1; i >= 0; i-- {
+		if toolCall, ok := items[i].(messages.ToolCallCmp); ok && toolCall.GetToolCall().ID == toolCallID {
+			return i
+		}
+	}
+	return NotFound
+}
+
+// handleUpdateAssistantMessage processes updates to assistant messages,
+// managing both message content and associated tool calls.
+func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.Cmd {
+	var cmds []tea.Cmd
+	items := m.listCmp.Items()
+
+	// Find existing assistant message and tool calls for this message
+	assistantIndex, existingToolCalls := m.findAssistantMessageAndToolCalls(items, msg.ID)
+
+	// Handle assistant message content
+	if cmd := m.updateAssistantMessageContent(msg, assistantIndex); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 
-	return baseStyle.
-		Width(width).
-		Render(
-			lipgloss.JoinVertical(
-				lipgloss.Left,
-				lsps,
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					lspViews...,
-				),
+	// Handle tool calls
+	if cmd := m.updateToolCalls(msg, existingToolCalls); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// findAssistantMessageAndToolCalls locates the assistant message and its tool calls.
+func (m *messageListCmp) findAssistantMessageAndToolCalls(items []util.Model, messageID string) (int, map[int]messages.ToolCallCmp) {
+	assistantIndex := NotFound
+	toolCalls := make(map[int]messages.ToolCallCmp)
+
+	// Search backwards as messages are more likely to be at the end
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		if asMsg, ok := item.(messages.MessageCmp); ok {
+			if asMsg.GetMessage().ID == messageID {
+				assistantIndex = i
+			}
+		} else if tc, ok := item.(messages.ToolCallCmp); ok {
+			if tc.ParentMessageId() == messageID {
+				toolCalls[i] = tc
+			}
+		}
+	}
+
+	return assistantIndex, toolCalls
+}
+
+// updateAssistantMessageContent updates or removes the assistant message based on content.
+func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assistantIndex int) tea.Cmd {
+	if assistantIndex == NotFound {
+		return nil
+	}
+
+	shouldShowMessage := m.shouldShowAssistantMessage(msg)
+	hasToolCallsOnly := len(msg.ToolCalls()) > 0 && msg.Content().Text == ""
+
+	if shouldShowMessage {
+		m.listCmp.UpdateItem(
+			assistantIndex,
+			messages.NewMessageCmp(
+				msg,
+				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
+	} else if hasToolCallsOnly {
+		m.listCmp.DeleteItem(assistantIndex)
+	}
+
+	return nil
 }
 
-func logo(width int) string {
-	logo := fmt.Sprintf("%s %s", styles.OpenCodeIcon, "OpenCode")
-	t := theme.CurrentTheme()
-	baseStyle := styles.BaseStyle()
+// shouldShowAssistantMessage determines if an assistant message should be displayed.
+func (m *messageListCmp) shouldShowAssistantMessage(msg message.Message) bool {
+	return len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.IsThinking()
+}
 
-	versionText := baseStyle.
-		Foreground(t.TextMuted()).
-		Render(version.Version)
+// updateToolCalls handles updates to tool calls, updating existing ones and adding new ones.
+func (m *messageListCmp) updateToolCalls(msg message.Message, existingToolCalls map[int]messages.ToolCallCmp) tea.Cmd {
+	var cmds []tea.Cmd
 
-	return baseStyle.
-		Bold(true).
-		Width(width).
-		Render(
-			lipgloss.JoinHorizontal(
-				lipgloss.Left,
-				logo,
-				" ",
-				versionText,
+	for _, tc := range msg.ToolCalls() {
+		if cmd := m.updateOrAddToolCall(tc, existingToolCalls, msg.ID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// updateOrAddToolCall updates an existing tool call or adds a new one.
+func (m *messageListCmp) updateOrAddToolCall(tc message.ToolCall, existingToolCalls map[int]messages.ToolCallCmp, messageID string) tea.Cmd {
+	// Try to find existing tool call
+	for index, existingTC := range existingToolCalls {
+		if tc.ID == existingTC.GetToolCall().ID {
+			existingTC.SetToolCall(tc)
+			m.listCmp.UpdateItem(index, existingTC)
+			return nil
+		}
+	}
+
+	// Add new tool call if not found
+	return m.listCmp.AppendItem(messages.NewToolCallCmp(messageID, tc))
+}
+
+// handleNewAssistantMessage processes new assistant messages and their tool calls.
+func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd {
+	var cmds []tea.Cmd
+
+	// Add assistant message if it should be displayed
+	if m.shouldShowAssistantMessage(msg) {
+		cmd := m.listCmp.AppendItem(
+			messages.NewMessageCmp(
+				msg,
+				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
+		cmds = append(cmds, cmd)
+	}
+
+	// Add tool calls
+	for _, tc := range msg.ToolCalls() {
+		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
+		cmds = append(cmds, cmd)
+	}
+
+	return tea.Batch(cmds...)
 }
 
-func repo(width int) string {
-	repo := "https://github.com/opencode-ai/opencode"
-	t := theme.CurrentTheme()
+// SetSession loads and displays messages for a new session.
+func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
+	if m.session.ID == session.ID {
+		return nil
+	}
 
-	return styles.BaseStyle().
-		Foreground(t.TextMuted()).
-		Width(width).
-		Render(repo)
+	m.session = session
+	sessionMessages, err := m.app.Messages.List(context.Background(), session.ID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	if len(sessionMessages) == 0 {
+		return m.listCmp.SetItems([]util.Model{})
+	}
+
+	// Initialize with first message timestamp
+	m.lastUserMessageTime = sessionMessages[0].CreatedAt
+
+	// Build tool result map for efficient lookup
+	toolResultMap := m.buildToolResultMap(sessionMessages)
+
+	// Convert messages to UI components
+	uiMessages := m.convertMessagesToUI(sessionMessages, toolResultMap)
+
+	return m.listCmp.SetItems(uiMessages)
 }
 
-func cwd(width int) string {
-	cwd := fmt.Sprintf("cwd: %s", config.WorkingDirectory())
-	t := theme.CurrentTheme()
-
-	return styles.BaseStyle().
-		Foreground(t.TextMuted()).
-		Width(width).
-		Render(cwd)
+// buildToolResultMap creates a map of tool call ID to tool result for efficient lookup.
+func (m *messageListCmp) buildToolResultMap(messages []message.Message) map[string]message.ToolResult {
+	toolResultMap := make(map[string]message.ToolResult)
+	for _, msg := range messages {
+		for _, tr := range msg.ToolResults() {
+			toolResultMap[tr.ToolCallID] = tr
+		}
+	}
+	return toolResultMap
 }
 
+// convertMessagesToUI converts database messages to UI components.
+func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
+	uiMessages := make([]util.Model, 0)
+
+	for _, msg := range sessionMessages {
+		switch msg.Role {
+		case message.User:
+			m.lastUserMessageTime = msg.CreatedAt
+			uiMessages = append(uiMessages, messages.NewMessageCmp(msg))
+		case message.Assistant:
+			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
+		}
+	}
+
+	return uiMessages
+}
+
+// convertAssistantMessage converts an assistant message and its tool calls to UI components.
+func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
+	var uiMessages []util.Model
+
+	// Add assistant message if it should be displayed
+	if m.shouldShowAssistantMessage(msg) {
+		uiMessages = append(
+			uiMessages,
+			messages.NewMessageCmp(
+				msg,
+				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
+			),
+		)
+	}
+
+	// Add tool calls with their results and status
+	for _, tc := range msg.ToolCalls() {
+		options := m.buildToolCallOptions(tc, msg, toolResultMap)
+		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, options...))
+		// If this tool call is the agent tool, fetch nested tool calls
+		if tc.Name == agent.AgentToolName {
+			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)
+			nestedUIMessages := m.convertMessagesToUI(nestedMessages, make(map[string]message.ToolResult))
+			nestedToolCalls := make([]messages.ToolCallCmp, 0, len(nestedUIMessages))
+			for _, nestedMsg := range nestedUIMessages {
+				if toolCall, ok := nestedMsg.(messages.ToolCallCmp); ok {
+					toolCall.SetIsNested(true)
+					nestedToolCalls = append(nestedToolCalls, toolCall)
+				}
+			}
+			uiMessages[len(uiMessages)-1].(messages.ToolCallCmp).SetNestedToolCalls(nestedToolCalls)
+		}
+	}
+
+	return uiMessages
+}
+
+// buildToolCallOptions creates options for tool call components based on results and status.
+func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.Message, toolResultMap map[string]message.ToolResult) []messages.ToolCallOption {
+	var options []messages.ToolCallOption
+
+	// Add tool result if available
+	if tr, ok := toolResultMap[tc.ID]; ok {
+		options = append(options, messages.WithToolCallResult(tr))
+	}
+
+	// Add cancelled status if applicable
+	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
+		options = append(options, messages.WithToolCallCancelled())
+	}
+
+	return options
+}
+
+// GetSize returns the current width and height of the component.
+func (m *messageListCmp) GetSize() (int, int) {
+	return m.width, m.height
+}
+
+// SetSize updates the component dimensions and propagates to the list component.
+func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
+	m.width = width
+	m.height = height - 1
+	return m.listCmp.SetSize(width, height-1)
+}
+
+// Blur implements MessageListCmp.
+func (m *messageListCmp) Blur() tea.Cmd {
+	return m.listCmp.Blur()
+}
+
+// Focus implements MessageListCmp.
+func (m *messageListCmp) Focus() tea.Cmd {
+	return m.listCmp.Focus()
+}
+
+// IsFocused implements MessageListCmp.
+func (m *messageListCmp) IsFocused() bool {
+	return m.listCmp.IsFocused()
+}

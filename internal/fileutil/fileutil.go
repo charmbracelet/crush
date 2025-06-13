@@ -2,7 +2,6 @@ package fileutil
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +10,9 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/logging"
+	ignore "github.com/sabhiram/go-gitignore"
 )
 
 var (
@@ -53,21 +54,6 @@ func GetRgCmd(globPattern string) *exec.Cmd {
 	return cmd
 }
 
-func GetFzfCmd(query string) *exec.Cmd {
-	if fzfPath == "" {
-		return nil
-	}
-	fzfArgs := []string{
-		"--filter",
-		query,
-		"--read0",
-		"--print0",
-	}
-	cmd := exec.Command(fzfPath, fzfArgs...)
-	cmd.Dir = "."
-	return cmd
-}
-
 type FileInfo struct {
 	Path    string
 	ModTime time.Time
@@ -81,7 +67,7 @@ func SkipHidden(path string) bool {
 	}
 
 	commonIgnoredDirs := map[string]bool{
-		".opencode":        true,
+		".crush":           true,
 		"node_modules":     true,
 		"vendor":           true,
 		"dist":             true,
@@ -112,37 +98,92 @@ func SkipHidden(path string) bool {
 	return false
 }
 
-func GlobWithDoublestar(pattern, searchPath string, limit int) ([]string, bool, error) {
-	fsys := os.DirFS(searchPath)
-	relPattern := strings.TrimPrefix(pattern, "/")
-	var matches []FileInfo
+// FastGlobWalker provides gitignore-aware file walking with fastwalk
+type FastGlobWalker struct {
+	gitignore *ignore.GitIgnore
+	rootPath  string
+}
 
-	err := doublestar.GlobWalk(fsys, relPattern, func(path string, d fs.DirEntry) error {
+func NewFastGlobWalker(searchPath string) *FastGlobWalker {
+	walker := &FastGlobWalker{
+		rootPath: searchPath,
+	}
+
+	// Load gitignore if it exists
+	gitignorePath := filepath.Join(searchPath, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
+			walker.gitignore = gi
+		}
+	}
+
+	return walker
+}
+
+func (w *FastGlobWalker) shouldSkip(path string) bool {
+	if SkipHidden(path) {
+		return true
+	}
+
+	if w.gitignore != nil {
+		relPath, err := filepath.Rel(w.rootPath, path)
+		if err == nil && w.gitignore.MatchesPath(relPath) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
+	walker := NewFastGlobWalker(searchPath)
+	var matches []FileInfo
+	conf := fastwalk.Config{
+		Follow: true,
+		// Use forward slashes when running a Windows binary under WSL or MSYS
+		ToSlash: fastwalk.DefaultToSlash(),
+		Sort:    fastwalk.SortFilesFirst,
+	}
+	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+
 		if d.IsDir() {
+			if walker.shouldSkip(path) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		if SkipHidden(path) {
+
+		if walker.shouldSkip(path) {
 			return nil
 		}
+
+		// Check if path matches the pattern
+		relPath, err := filepath.Rel(searchPath, path)
+		if err != nil {
+			relPath = path
+		}
+
+		matched, err := doublestar.Match(pattern, relPath)
+		if err != nil || !matched {
+			return nil
+		}
+
 		info, err := d.Info()
 		if err != nil {
 			return nil
 		}
-		absPath := path
-		if !strings.HasPrefix(absPath, searchPath) && searchPath != "." {
-			absPath = filepath.Join(searchPath, absPath)
-		} else if !strings.HasPrefix(absPath, "/") && searchPath == "." {
-			absPath = filepath.Join(searchPath, absPath) // Ensure relative paths are joined correctly
-		}
 
-		matches = append(matches, FileInfo{Path: absPath, ModTime: info.ModTime()})
+		matches = append(matches, FileInfo{Path: path, ModTime: info.ModTime()})
 		if limit > 0 && len(matches) >= limit*2 {
-			return fs.SkipAll
+			return filepath.SkipAll
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("glob walk error: %w", err)
+		return nil, false, fmt.Errorf("fastwalk error: %w", err)
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
@@ -160,4 +201,13 @@ func GlobWithDoublestar(pattern, searchPath string, limit int) ([]string, bool, 
 		results[i] = m.Path
 	}
 	return results, truncated, nil
+}
+
+func PrettyPath(path string) string {
+	// replace home directory with ~
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		path = strings.ReplaceAll(path, homeDir, "~")
+	}
+	return path
 }

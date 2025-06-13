@@ -1,22 +1,28 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
+	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type Container interface {
-	tea.Model
+	util.Model
 	Sizeable
 	Bindings
+	Positionable
+	Focusable
 }
 type container struct {
-	width  int
-	height int
+	width     int
+	height    int
+	isFocused bool
 
-	content tea.Model
+	x, y int
+
+	content util.Model
 
 	// Style options
 	paddingTop    int
@@ -31,23 +37,47 @@ type container struct {
 	borderStyle  lipgloss.Border
 }
 
+type ContainerOption func(*container)
+
+func NewContainer(content util.Model, options ...ContainerOption) Container {
+	c := &container{
+		content:     content,
+		borderStyle: lipgloss.NormalBorder(),
+	}
+
+	for _, option := range options {
+		option(c)
+	}
+
+	return c
+}
+
 func (c *container) Init() tea.Cmd {
 	return c.content.Init()
 }
 
 func (c *container) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	u, cmd := c.content.Update(msg)
-	c.content = u
-	return c, cmd
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if c.IsFocused() {
+			u, cmd := c.content.Update(msg)
+			c.content = u.(util.Model)
+			return c, cmd
+		}
+		return c, nil
+	default:
+		u, cmd := c.content.Update(msg)
+		c.content = u.(util.Model)
+		return c, cmd
+	}
 }
 
-func (c *container) View() string {
-	t := theme.CurrentTheme()
-	style := lipgloss.NewStyle()
+func (c *container) View() tea.View {
+	t := styles.CurrentTheme()
 	width := c.width
 	height := c.height
 
-	style = style.Background(t.Background())
+	style := t.S().Base
 
 	// Apply border if any side is enabled
 	if c.borderTop || c.borderRight || c.borderBottom || c.borderLeft {
@@ -65,7 +95,7 @@ func (c *container) View() string {
 			width--
 		}
 		style = style.Border(c.borderStyle, c.borderTop, c.borderRight, c.borderBottom, c.borderLeft)
-		style = style.BorderBackground(t.Background()).BorderForeground(t.BorderNormal())
+		style = style.BorderBackground(t.BgBase).BorderForeground(t.Border)
 	}
 	style = style.
 		Width(width).
@@ -75,7 +105,11 @@ func (c *container) View() string {
 		PaddingBottom(c.paddingBottom).
 		PaddingLeft(c.paddingLeft)
 
-	return style.Render(c.content.View())
+	contentView := c.content.View()
+	view := tea.NewView(style.Render(contentView.String()))
+	cursor := contentView.Cursor()
+	view.SetCursor(cursor)
+	return view
 }
 
 func (c *container) SetSize(width, height int) tea.Cmd {
@@ -114,6 +148,15 @@ func (c *container) GetSize() (int, int) {
 	return c.width, c.height
 }
 
+func (c *container) SetPosition(x, y int) tea.Cmd {
+	c.x = x
+	c.y = y
+	if positionable, ok := c.content.(Positionable); ok {
+		return positionable.SetPosition(x, y)
+	}
+	return nil
+}
+
 func (c *container) BindingKeys() []key.Binding {
 	if b, ok := c.content.(Bindings); ok {
 		return b.BindingKeys()
@@ -121,20 +164,31 @@ func (c *container) BindingKeys() []key.Binding {
 	return []key.Binding{}
 }
 
-type ContainerOption func(*container)
-
-func NewContainer(content tea.Model, options ...ContainerOption) Container {
-
-	c := &container{
-		content:     content,
-		borderStyle: lipgloss.NormalBorder(),
+// Blur implements Container.
+func (c *container) Blur() tea.Cmd {
+	c.isFocused = false
+	if focusable, ok := c.content.(Focusable); ok {
+		return focusable.Blur()
 	}
+	return nil
+}
 
-	for _, option := range options {
-		option(c)
+// Focus implements Container.
+func (c *container) Focus() tea.Cmd {
+	c.isFocused = true
+	if focusable, ok := c.content.(Focusable); ok {
+		return focusable.Focus()
 	}
+	return nil
+}
 
-	return c
+// IsFocused implements Container.
+func (c *container) IsFocused() bool {
+	isFocused := c.isFocused
+	if focusable, ok := c.content.(Focusable); ok {
+		isFocused = isFocused || focusable.IsFocused()
+	}
+	return isFocused
 }
 
 // Padding options

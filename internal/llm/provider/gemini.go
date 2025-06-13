@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/llm/tools"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/message"
 	"google.golang.org/genai"
 )
 
@@ -365,7 +365,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 			eventChan <- ProviderEvent{Type: EventContentStop}
 
 			if finalResp != nil {
-
 				finishReason := message.FinishReasonEndTurn
 				if len(finalResp.Candidates) > 0 {
 					finishReason = g.finishReason(finalResp.Candidates[0].FinishReason)
@@ -384,7 +383,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 				}
 				return
 			}
-
 		}
 	}()
 

@@ -1,72 +1,105 @@
 package logs
 
 import (
-	"encoding/json"
+	"fmt"
 	"slices"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/pubsub"
-	"github.com/opencode-ai/opencode/internal/tui/layout"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/theme"
-	"github.com/opencode-ai/opencode/internal/tui/util"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/table"
+	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type TableComponent interface {
-	tea.Model
+	util.Model
 	layout.Sizeable
 	layout.Bindings
 }
 
 type tableCmp struct {
 	table table.Model
+	logs  []logging.LogMessage
 }
 
 type selectedLogMsg logging.LogMessage
 
 func (i *tableCmp) Init() tea.Cmd {
+	i.logs = logging.List()
 	i.setRows()
 	return nil
 }
 
 func (i *tableCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case pubsub.Event[logging.LogMessage]:
-		i.setRows()
-		return i, nil
+		return i, func() tea.Msg {
+			if msg.Type == pubsub.CreatedEvent {
+				rows := i.table.Rows()
+				for _, row := range rows {
+					if row[1] == msg.Payload.ID {
+						return nil // If the log already exists, do not add it again
+					}
+				}
+				i.logs = append(i.logs, msg.Payload)
+				i.table.SetRows(
+					append(
+						[]table.Row{
+							logToRow(msg.Payload),
+						},
+						i.table.Rows()...,
+					),
+				)
+			}
+			return selectedLogMsg(msg.Payload)
+		}
 	}
-	prevSelectedRow := i.table.SelectedRow()
 	t, cmd := i.table.Update(msg)
 	cmds = append(cmds, cmd)
 	i.table = t
-	selectedRow := i.table.SelectedRow()
-	if selectedRow != nil {
-		if prevSelectedRow == nil || selectedRow[0] == prevSelectedRow[0] {
-			var log logging.LogMessage
-			for _, row := range logging.List() {
-				if row.ID == selectedRow[0] {
-					log = row
-					break
-				}
-			}
-			if log.ID != "" {
-				cmds = append(cmds, util.CmdHandler(selectedLogMsg(log)))
+
+	cmds = append(cmds, func() tea.Msg {
+		for _, log := range logging.List() {
+			if log.ID == i.table.SelectedRow()[1] {
+				// If the selected row matches the log ID, return the selected log message
+				return selectedLogMsg(log)
 			}
 		}
-	}
+		return nil
+	})
 	return i, tea.Batch(cmds...)
 }
 
-func (i *tableCmp) View() string {
-	t := theme.CurrentTheme()
+func (i *tableCmp) View() tea.View {
+	t := styles.CurrentTheme()
 	defaultStyles := table.DefaultStyles()
-	defaultStyles.Selected = defaultStyles.Selected.Foreground(t.Primary())
+
+	// Header styling
+	defaultStyles.Header = defaultStyles.Header.
+		Foreground(t.Primary).
+		Bold(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderBottom(true).
+		BorderForeground(t.Border)
+
+	// Selected row styling
+	defaultStyles.Selected = defaultStyles.Selected.
+		Foreground(t.FgSelected).
+		Background(t.Primary).
+		Bold(false)
+
+	// Cell styling
+	defaultStyles.Cell = defaultStyles.Cell.
+		Foreground(t.FgBase)
+
 	i.table.SetStyles(defaultStyles)
-	return styles.ForceReplaceBackgroundWithLipgloss(i.table.View(), t.Background())
+	return tea.NewView(i.table.View())
 }
 
 func (i *tableCmp) GetSize() (int, int) {
@@ -76,12 +109,30 @@ func (i *tableCmp) GetSize() (int, int) {
 func (i *tableCmp) SetSize(width int, height int) tea.Cmd {
 	i.table.SetWidth(width)
 	i.table.SetHeight(height)
-	cloumns := i.table.Columns()
-	for i, col := range cloumns {
-		col.Width = (width / len(cloumns)) - 2
-		cloumns[i] = col
-	}
-	i.table.SetColumns(cloumns)
+
+	columnWidth := (width - 10) / 4
+	i.table.SetColumns([]table.Column{
+		{
+			Title: "Level",
+			Width: 10,
+		},
+		{
+			Title: "ID",
+			Width: columnWidth,
+		},
+		{
+			Title: "Time",
+			Width: columnWidth,
+		},
+		{
+			Title: "Message",
+			Width: columnWidth,
+		},
+		{
+			Title: "Attributes",
+			Width: columnWidth,
+		},
+	})
 	return nil
 }
 
@@ -92,39 +143,54 @@ func (i *tableCmp) BindingKeys() []key.Binding {
 func (i *tableCmp) setRows() {
 	rows := []table.Row{}
 
-	logs := logging.List()
-	slices.SortFunc(logs, func(a, b logging.LogMessage) int {
+	slices.SortFunc(i.logs, func(a, b logging.LogMessage) int {
 		if a.Time.Before(b.Time) {
-			return 1
+			return -1
 		}
 		if a.Time.After(b.Time) {
-			return -1
+			return 1
 		}
 		return 0
 	})
 
-	for _, log := range logs {
-		bm, _ := json.Marshal(log.Attributes)
-
-		row := table.Row{
-			log.ID,
-			log.Time.Format("15:04:05"),
-			log.Level,
-			log.Message,
-			string(bm),
-		}
-		rows = append(rows, row)
+	for _, log := range i.logs {
+		rows = append(rows, logToRow(log))
 	}
 	i.table.SetRows(rows)
 }
 
+func logToRow(log logging.LogMessage) table.Row {
+	// Format attributes as JSON string
+	var attrStr string
+	if len(log.Attributes) > 0 {
+		var parts []string
+		for _, attr := range log.Attributes {
+			parts = append(parts, fmt.Sprintf(`{"Key":"%s","Value":"%s"}`, attr.Key, attr.Value))
+		}
+		attrStr = "[" + strings.Join(parts, ",") + "]"
+	}
+
+	// Format time with relative time
+	timeStr := log.Time.Format("2006-01-05 15:04:05 UTC")
+	relativeTime := getRelativeTime(log.Time)
+	fullTimeStr := timeStr + " " + relativeTime
+
+	return table.Row{
+		strings.ToUpper(log.Level),
+		log.ID,
+		fullTimeStr,
+		log.Message,
+		attrStr,
+	}
+}
+
 func NewLogsTable() TableComponent {
 	columns := []table.Column{
-		{Title: "ID", Width: 4},
-		{Title: "Time", Width: 4},
-		{Title: "Level", Width: 10},
-		{Title: "Message", Width: 10},
-		{Title: "Attributes", Width: 10},
+		{Title: "Level"},
+		{Title: "ID"},
+		{Title: "Time"},
+		{Title: "Message"},
+		{Title: "Attributes"},
 	}
 
 	tableModel := table.New(

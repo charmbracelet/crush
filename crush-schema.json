@@ -1,0 +1,402 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "agent": {
+      "description": "Agent configuration",
+      "properties": {
+        "maxTokens": {
+          "description": "Maximum tokens for the agent",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "model": {
+          "description": "Model ID for the agent",
+          "enum": [
+            "gpt-4.1",
+            "llama-3.3-70b-versatile",
+            "azure.gpt-4.1",
+            "openrouter.gpt-4o",
+            "openrouter.o1-mini",
+            "openrouter.claude-3-haiku",
+            "claude-3-opus",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o1",
+            "meta-llama/llama-4-maverick-17b-128e-instruct",
+            "azure.o3-mini",
+            "openrouter.gpt-4o-mini",
+            "openrouter.o1",
+            "claude-3.5-haiku",
+            "o4-mini",
+            "azure.gpt-4.1-mini",
+            "openrouter.o3",
+            "grok-3-beta",
+            "o3-mini",
+            "qwen-qwq",
+            "azure.o1",
+            "openrouter.gemini-2.5-flash",
+            "openrouter.gemini-2.5",
+            "o1-mini",
+            "azure.gpt-4o",
+            "openrouter.gpt-4.1-mini",
+            "openrouter.claude-3.5-sonnet",
+            "openrouter.o3-mini",
+            "gpt-4.1-mini",
+            "gpt-4.5-preview",
+            "gpt-4.1-nano",
+            "deepseek-r1-distill-llama-70b",
+            "azure.gpt-4o-mini",
+            "openrouter.gpt-4.1",
+            "bedrock.claude-3.7-sonnet",
+            "claude-3-haiku",
+            "o3",
+            "gemini-2.0-flash-lite",
+            "azure.o3",
+            "azure.gpt-4.5-preview",
+            "openrouter.claude-3-opus",
+            "grok-3-mini-fast-beta",
+            "claude-4-sonnet",
+            "azure.o4-mini",
+            "grok-3-fast-beta",
+            "claude-3.5-sonnet",
+            "azure.o1-mini",
+            "openrouter.claude-3.7-sonnet",
+            "openrouter.gpt-4.5-preview",
+            "grok-3-mini-beta",
+            "claude-3.7-sonnet",
+            "gemini-2.0-flash",
+            "openrouter.deepseek-r1-free",
+            "vertexai.gemini-2.5-flash",
+            "vertexai.gemini-2.5",
+            "o1-pro",
+            "gemini-2.5",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "azure.gpt-4.1-nano",
+            "openrouter.gpt-4.1-nano",
+            "gemini-2.5-flash",
+            "openrouter.o4-mini",
+            "openrouter.claude-3.5-haiku",
+            "claude-4-opus",
+            "openrouter.o1-pro"
+          ],
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "description": "Reasoning effort for models that support it (OpenAI, Anthropic)",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Configuration schema for the Crush application",
+  "properties": {
+    "agents": {
+      "additionalProperties": {
+        "description": "Agent configuration",
+        "properties": {
+          "maxTokens": {
+            "description": "Maximum tokens for the agent",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "description": "Model ID for the agent",
+            "enum": [
+              "gpt-4.1",
+              "llama-3.3-70b-versatile",
+              "azure.gpt-4.1",
+              "openrouter.gpt-4o",
+              "openrouter.o1-mini",
+              "openrouter.claude-3-haiku",
+              "claude-3-opus",
+              "gpt-4o",
+              "gpt-4o-mini",
+              "o1",
+              "meta-llama/llama-4-maverick-17b-128e-instruct",
+              "azure.o3-mini",
+              "openrouter.gpt-4o-mini",
+              "openrouter.o1",
+              "claude-3.5-haiku",
+              "o4-mini",
+              "azure.gpt-4.1-mini",
+              "openrouter.o3",
+              "grok-3-beta",
+              "o3-mini",
+              "qwen-qwq",
+              "azure.o1",
+              "openrouter.gemini-2.5-flash",
+              "openrouter.gemini-2.5",
+              "o1-mini",
+              "azure.gpt-4o",
+              "openrouter.gpt-4.1-mini",
+              "openrouter.claude-3.5-sonnet",
+              "openrouter.o3-mini",
+              "gpt-4.1-mini",
+              "gpt-4.5-preview",
+              "gpt-4.1-nano",
+              "deepseek-r1-distill-llama-70b",
+              "azure.gpt-4o-mini",
+              "openrouter.gpt-4.1",
+              "bedrock.claude-3.7-sonnet",
+              "claude-3-haiku",
+              "o3",
+              "gemini-2.0-flash-lite",
+              "azure.o3",
+              "azure.gpt-4.5-preview",
+              "openrouter.claude-3-opus",
+              "grok-3-mini-fast-beta",
+              "claude-4-sonnet",
+              "azure.o4-mini",
+              "grok-3-fast-beta",
+              "claude-3.5-sonnet",
+              "azure.o1-mini",
+              "openrouter.claude-3.7-sonnet",
+              "openrouter.gpt-4.5-preview",
+              "grok-3-mini-beta",
+              "claude-3.7-sonnet",
+              "gemini-2.0-flash",
+              "openrouter.deepseek-r1-free",
+              "vertexai.gemini-2.5-flash",
+              "vertexai.gemini-2.5",
+              "o1-pro",
+              "gemini-2.5",
+              "meta-llama/llama-4-scout-17b-16e-instruct",
+              "azure.gpt-4.1-nano",
+              "openrouter.gpt-4.1-nano",
+              "gemini-2.5-flash",
+              "openrouter.o4-mini",
+              "openrouter.claude-3.5-haiku",
+              "claude-4-opus",
+              "openrouter.o1-pro"
+            ],
+            "type": "string"
+          },
+          "reasoningEffort": {
+            "description": "Reasoning effort for models that support it (OpenAI, Anthropic)",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "description": "Agent configurations",
+      "properties": {
+        "coder": {
+          "$ref": "#/definitions/agent"
+        },
+        "task": {
+          "$ref": "#/definitions/agent"
+        },
+        "title": {
+          "$ref": "#/definitions/agent"
+        }
+      },
+      "type": "object"
+    },
+    "contextPaths": {
+      "default": [
+        ".github/copilot-instructions.md",
+        ".cursorrules",
+        ".cursor/rules/",
+        "CLAUDE.md",
+        "CLAUDE.local.md",
+        "crush.md",
+        "crush.local.md",
+        "Crush.md",
+        "Crush.local.md",
+        "CRUSH.md",
+        "CRUSH.local.md"
+      ],
+      "description": "Context paths for the application",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "data": {
+      "description": "Storage configuration",
+      "properties": {
+        "directory": {
+          "default": ".crush",
+          "description": "Directory where application data is stored",
+          "type": "string"
+        }
+      },
+      "required": [
+        "directory"
+      ],
+      "type": "object"
+    },
+    "debug": {
+      "default": false,
+      "description": "Enable debug mode",
+      "type": "boolean"
+    },
+    "debugLSP": {
+      "default": false,
+      "description": "Enable LSP debug mode",
+      "type": "boolean"
+    },
+    "lsp": {
+      "additionalProperties": {
+        "description": "LSP configuration for a language",
+        "properties": {
+          "args": {
+            "description": "Command arguments for the LSP server",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Command to execute for the LSP server",
+            "type": "string"
+          },
+          "disabled": {
+            "default": false,
+            "description": "Whether the LSP is disabled",
+            "type": "boolean"
+          },
+          "options": {
+            "description": "Additional options for the LSP server",
+            "type": "object"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "Language Server Protocol configurations",
+      "type": "object"
+    },
+    "mcpServers": {
+      "additionalProperties": {
+        "description": "MCP server configuration",
+        "properties": {
+          "args": {
+            "description": "Command arguments for the MCP server",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Command to execute for the MCP server",
+            "type": "string"
+          },
+          "env": {
+            "description": "Environment variables for the MCP server",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "HTTP headers for SSE type MCP servers",
+            "type": "object"
+          },
+          "type": {
+            "default": "stdio",
+            "description": "Type of MCP server",
+            "enum": [
+              "stdio",
+              "sse"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "URL for SSE type MCP servers",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "description": "Model Control Protocol server configurations",
+      "type": "object"
+    },
+    "providers": {
+      "additionalProperties": {
+        "description": "Provider configuration",
+        "properties": {
+          "apiKey": {
+            "description": "API key for the provider",
+            "type": "string"
+          },
+          "disabled": {
+            "default": false,
+            "description": "Whether the provider is disabled",
+            "type": "boolean"
+          },
+          "provider": {
+            "description": "Provider type",
+            "enum": [
+              "anthropic",
+              "openai",
+              "gemini",
+              "groq",
+              "openrouter",
+              "bedrock",
+              "azure",
+              "vertexai"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "description": "LLM provider configurations",
+      "type": "object"
+    },
+    "tui": {
+      "description": "Terminal User Interface configuration",
+      "properties": {
+        "theme": {
+          "default": "crush",
+          "description": "TUI theme name",
+          "enum": [
+            "crush",
+            "catppuccin",
+            "dracula",
+            "flexoki",
+            "gruvbox",
+            "monokai",
+            "onedark",
+            "tokyonight",
+            "tron"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "wd": {
+      "description": "Working directory for the application",
+      "type": "string"
+    }
+  },
+  "title": "Crush Configuration",
+  "type": "object"
+}

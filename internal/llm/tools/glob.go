@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/fileutil"
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/logging"
 )
 
 const (
@@ -137,7 +137,7 @@ func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
 		logging.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
 	}
 
-	return fileutil.GlobWithDoublestar(pattern, searchPath, limit)
+	return fileutil.GlobWithDoubleStar(pattern, searchPath, limit)
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {

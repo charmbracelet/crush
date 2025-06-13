@@ -6,9 +6,9 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/pubsub"
 )
 
 var ErrorPermissionDenied = errors.New("permission denied")
@@ -34,7 +34,7 @@ type PermissionRequest struct {
 
 type Service interface {
 	pubsub.Suscriber[PermissionRequest]
-	GrantPersistant(permission PermissionRequest)
+	GrantPersistent(permission PermissionRequest)
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
 	Request(opts CreatePermissionRequest) bool
@@ -49,7 +49,7 @@ type permissionService struct {
 	autoApproveSessions []string
 }
 
-func (s *permissionService) GrantPersistant(permission PermissionRequest) {
+func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	respCh, ok := s.pendingRequests.Load(permission.ID)
 	if ok {
 		respCh.(chan bool) <- true

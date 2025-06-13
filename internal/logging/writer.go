@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/go-logfmt/logfmt"
-	"github.com/opencode-ai/opencode/internal/pubsub"
 )
 
 const (

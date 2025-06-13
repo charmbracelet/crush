@@ -1,11 +1,11 @@
-# OpenCode Configuration Schema Generator
+# Crush Configuration Schema Generator
 
-This tool generates a JSON Schema for the OpenCode configuration file. The schema can be used to validate configuration files and provide autocompletion in editors that support JSON Schema.
+This tool generates a JSON Schema for the Crush configuration file. The schema can be used to validate configuration files and provide autocompletion in editors that support JSON Schema.
 
 ## Usage
 
 ```bash
-go run cmd/schema/main.go > opencode-schema.json
+go run cmd/schema/main.go > crush-schema.json
 ```
 
 This will generate a JSON Schema file that can be used to validate configuration files.
@@ -24,7 +24,7 @@ The generated schema includes:
 
 You can use the generated schema in several ways:
 
-1. **Editor Integration**: Many editors (VS Code, JetBrains IDEs, etc.) support JSON Schema for validation and autocompletion. You can configure your editor to use the generated schema for `.opencode.json` files.
+1. **Editor Integration**: Many editors (VS Code, JetBrains IDEs, etc.) support JSON Schema for validation and autocompletion. You can configure your editor to use the generated schema for `.crush.json` files.
 
 2. **Validation Tools**: You can use tools like [jsonschema](https://github.com/Julian/jsonschema) to validate your configuration files against the schema.
 
@@ -37,7 +37,7 @@ Here's an example configuration that conforms to the schema:
 ```json
 {
   "data": {
-    "directory": ".opencode"
+    "directory": ".crush"
   },
   "debug": false,
   "providers": {

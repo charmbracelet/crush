@@ -38,13 +38,13 @@ func ShouldShowInitDialog() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	// Check if any variation of crush.md already exists in working directory
+	// Check if any variation of CRUSH.md already exists in working directory
 	crushExists, err := crushMdExists(WorkingDirectory())
 	if err != nil {
-		return false, fmt.Errorf("failed to check for crush.md files: %w", err)
+		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
 	}
 	if crushExists {
-		// Crush.md already exists, don't show the dialog
+		// CRUSH.md already exists, don't show the dialog
 		return false, nil
 	}
 

@@ -231,14 +231,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "init",
 			Title:       "Initialize Project",
-			Description: "Create/Update the Crush.md memory file",
+			Description: "Create/Update the CRUSH.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
-				prompt := `Please analyze this codebase and create a Crush.md file containing:
+				prompt := `Please analyze this codebase and create a CRUSH.md file containing:
 	1. Build/lint/test commands - especially for running a single test
 	2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
 
 	The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-	If there's already a crush.md, improve it.
+	If there's already a CRUSH.md, improve it.
 	If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
 				return util.CmdHandler(chat.SendMsg{
 					Text: prompt,

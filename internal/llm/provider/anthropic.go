@@ -12,11 +12,11 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/llm/models"
-	"github.com/opencode-ai/opencode/internal/llm/tools"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 type anthropicOptions struct {
@@ -195,7 +195,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	}
 }
 
-func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (resposne *ProviderResponse, err error) {
+func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
 	if cfg.Debug {
@@ -305,7 +305,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 								ToolCall: &message.ToolCall{
 									ID:       currentToolCallID,
 									Finished: false,
-									Input:    event.Delta.JSON.PartialJSON.Raw(),
+									Input:    event.Delta.PartialJSON,
 								},
 							}
 						}
@@ -339,6 +339,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 							Usage:        a.usage(accumulatedMessage),
 							FinishReason: a.finishReason(string(accumulatedMessage.StopReason)),
 						},
+						Content: content,
 					}
 				}
 			}

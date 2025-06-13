@@ -2,6 +2,7 @@ package models
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/spf13/viper"
 )
 
@@ -53,7 +54,6 @@ func init() {
 		loadLocalModels(models)
 
 		viper.SetDefault("providers.local.apiKey", "dummy")
-		ProviderPopularity[ProviderLocal] = 0
 	}
 }
 
@@ -75,7 +75,7 @@ type localModel struct {
 }
 
 func listLocalModels(modelsEndpoint string) []localModel {
-	res, err := http.Get(modelsEndpoint)
+	res, err := http.NewRequestWithContext(context.Background(), http.MethodGet, modelsEndpoint, nil)
 	if err != nil {
 		logging.Debug("Failed to list local models",
 			"error", err,
@@ -84,9 +84,9 @@ func listLocalModels(modelsEndpoint string) []localModel {
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusOK {
+	if res.Response.StatusCode != http.StatusOK {
 		logging.Debug("Failed to list local models",
-			"status", res.StatusCode,
+			"status", res.Response.Status,
 			"endpoint", modelsEndpoint,
 		)
 	}

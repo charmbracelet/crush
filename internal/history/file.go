@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
-	"github.com/opencode-ai/opencode/internal/db"
-	"github.com/opencode-ai/opencode/internal/pubsub"
 )
 
 const (

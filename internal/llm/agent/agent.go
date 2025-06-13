@@ -8,16 +8,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/llm/models"
-	"github.com/opencode-ai/opencode/internal/llm/prompt"
-	"github.com/opencode-ai/opencode/internal/llm/provider"
-	"github.com/opencode-ai/opencode/internal/llm/tools"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/message"
-	"github.com/opencode-ai/opencode/internal/permission"
-	"github.com/opencode-ai/opencode/internal/pubsub"
-	"github.com/opencode-ai/opencode/internal/session"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/llm/prompt"
+	"github.com/charmbracelet/crush/internal/llm/provider"
+	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 // Common errors
@@ -443,18 +443,14 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		assistantMsg.AppendContent(event.Content)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStart:
+		logging.Info("Tool call started", "toolCall", event.ToolCall)
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
-	// TODO: see how to handle this
-	// case provider.EventToolUseDelta:
-	// 	tm := time.Unix(assistantMsg.UpdatedAt, 0)
-	// 	assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
-	// 	if time.Since(tm) > 1000*time.Millisecond {
-	// 		err := a.messages.Update(ctx, *assistantMsg)
-	// 		assistantMsg.UpdatedAt = time.Now().Unix()
-	// 		return err
-	// 	}
+	case provider.EventToolUseDelta:
+		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
+		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStop:
+		logging.Info("Finished tool call", "toolCall", event.ToolCall)
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventError:
@@ -590,22 +586,26 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		a.Publish(pubsub.CreatedEvent, event)
 
 		// Send the messages to the summarize provider
-		response, err := a.summarizeProvider.SendMessages(
+		response := a.summarizeProvider.StreamResponse(
 			summarizeCtx,
 			msgsWithPrompt,
 			make([]tools.BaseTool, 0),
 		)
-		if err != nil {
-			event = AgentEvent{
-				Type:  AgentEventTypeError,
-				Error: fmt.Errorf("failed to summarize: %w", err),
-				Done:  true,
+		var finalResponse *provider.ProviderResponse
+		for r := range response {
+			if r.Error != nil {
+				event = AgentEvent{
+					Type:  AgentEventTypeError,
+					Error: fmt.Errorf("failed to summarize: %w", err),
+					Done:  true,
+				}
+				a.Publish(pubsub.CreatedEvent, event)
+				return
 			}
-			a.Publish(pubsub.CreatedEvent, event)
-			return
+			finalResponse = r.Response
 		}
 
-		summary := strings.TrimSpace(response.Content)
+		summary := strings.TrimSpace(finalResponse.Content)
 		if summary == "" {
 			event = AgentEvent{
 				Type:  AgentEventTypeError,
@@ -655,10 +655,10 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			return
 		}
 		oldSession.SummaryMessageID = msg.ID
-		oldSession.CompletionTokens = response.Usage.OutputTokens
+		oldSession.CompletionTokens = finalResponse.Usage.OutputTokens
 		oldSession.PromptTokens = 0
 		model := a.summarizeProvider.Model()
-		usage := response.Usage
+		usage := finalResponse.Usage
 		cost := model.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 			model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 			model.CostPer1MIn/1e6*float64(usage.InputTokens) +

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 type PersistentShell struct {
@@ -61,23 +61,23 @@ func GetPersistentShell(workingDir string) *PersistentShell {
 func newPersistentShell(cwd string) *PersistentShell {
 	// Get shell configuration from config
 	cfg := config.Get()
-	
+
 	// Default to environment variable if config is not set or nil
 	var shellPath string
 	var shellArgs []string
-	
+
 	if cfg != nil {
 		shellPath = cfg.Shell.Path
 		shellArgs = cfg.Shell.Args
 	}
-	
+
 	if shellPath == "" {
 		shellPath = os.Getenv("SHELL")
 		if shellPath == "" {
 			shellPath = "/bin/bash"
 		}
 	}
-	
+
 	// Default shell args
 	if len(shellArgs) == 0 {
 		shellArgs = []string{"-l"}
@@ -149,10 +149,10 @@ func (s *PersistentShell) execCommand(command string, timeout time.Duration, ctx
 	}
 
 	tempDir := os.TempDir()
-	stdoutFile := filepath.Join(tempDir, fmt.Sprintf("opencode-stdout-%d", time.Now().UnixNano()))
-	stderrFile := filepath.Join(tempDir, fmt.Sprintf("opencode-stderr-%d", time.Now().UnixNano()))
-	statusFile := filepath.Join(tempDir, fmt.Sprintf("opencode-status-%d", time.Now().UnixNano()))
-	cwdFile := filepath.Join(tempDir, fmt.Sprintf("opencode-cwd-%d", time.Now().UnixNano()))
+	stdoutFile := filepath.Join(tempDir, fmt.Sprintf("crush-stdout-%d", time.Now().UnixNano()))
+	stderrFile := filepath.Join(tempDir, fmt.Sprintf("crush-stderr-%d", time.Now().UnixNano()))
+	statusFile := filepath.Join(tempDir, fmt.Sprintf("crush-status-%d", time.Now().UnixNano()))
+	cwdFile := filepath.Join(tempDir, fmt.Sprintf("crush-cwd-%d", time.Now().UnixNano()))
 
 	defer func() {
 		os.Remove(stdoutFile)

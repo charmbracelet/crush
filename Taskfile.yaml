@@ -1,0 +1,46 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  lint:
+    desc: Run base linters
+    cmds:
+      - golangci-lint run
+
+  lint-fix:
+    desc: Run base linters and fix issues
+    cmds:
+      - golangci-lint run --fix
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... {{.CLI_ARGS}}
+
+  fmt:
+    desc: Run gofumpt
+    cmds:
+      - gofumpt -w .
+
+  dev:
+    desc: Run with profiling enabled
+    env:
+      CRUSH_PROFILE: true
+    cmds:
+      - go run .
+
+  profile:cpu:
+    desc: 10s CPU profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/profile?seconds=10'
+
+  profile:heap:
+    desc: Heap profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/heap'
+
+  profile:allocs:
+    desc: Allocations profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'

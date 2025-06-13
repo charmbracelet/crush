@@ -41,6 +41,6 @@ Thumbs.db
 .env
 .env.local
 
-.opencode/
+.crush/
 
-opencode
+crush

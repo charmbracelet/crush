@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/models"
 )
 
 // JSONSchemaType represents a JSON Schema type
@@ -38,8 +38,8 @@ func main() {
 func generateSchema() map[string]any {
 	schema := map[string]any{
 		"$schema":     "http://json-schema.org/draft-07/schema#",
-		"title":       "OpenCode Configuration",
-		"description": "Configuration schema for the OpenCode application",
+		"title":       "Crush Configuration",
+		"description": "Configuration schema for the Crush application",
 		"type":        "object",
 		"properties":  map[string]any{},
 	}
@@ -52,7 +52,7 @@ func generateSchema() map[string]any {
 			"directory": map[string]any{
 				"type":        "string",
 				"description": "Directory where application data is stored",
-				"default":     ".opencode",
+				"default":     ".crush",
 			},
 		},
 		"required": []string{"directory"},
@@ -89,12 +89,12 @@ func generateSchema() map[string]any {
 			".cursor/rules/",
 			"CLAUDE.md",
 			"CLAUDE.local.md",
-			"opencode.md",
-			"opencode.local.md",
-			"OpenCode.md",
-			"OpenCode.local.md",
-			"OPENCODE.md",
-			"OPENCODE.local.md",
+			"crush.md",
+			"crush.local.md",
+			"Crush.md",
+			"Crush.local.md",
+			"CRUSH.md",
+			"CRUSH.local.md",
 		},
 	}
 
@@ -105,9 +105,9 @@ func generateSchema() map[string]any {
 			"theme": map[string]any{
 				"type":        "string",
 				"description": "TUI theme name",
-				"default":     "opencode",
+				"default":     "crush",
 				"enum": []string{
-					"opencode",
+					"crush",
 					"catppuccin",
 					"dracula",
 					"flexoki",

@@ -1,14 +1,17 @@
 package styles
 
 const (
-	OpenCodeIcon string = "⌬"
-
 	CheckIcon    string = "✓"
-	ErrorIcon    string = "✖"
+	ErrorIcon    string = "×"
 	WarningIcon  string = "⚠"
 	InfoIcon     string = ""
 	HintIcon     string = "i"
 	SpinnerIcon  string = "..."
 	LoadingIcon  string = "⟳"
 	DocumentIcon string = "🖼"
+
+	// Tool call icons
+	ToolPending string = "●"
+	ToolSuccess string = "✓"
+	ToolError   string = "×"
 )

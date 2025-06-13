@@ -1,0 +1,22 @@
+# Crush Development Guide
+
+## Build/Test/Lint Commands
+- **Build**: `go build .` or `go run .`
+- **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
+- **Lint**: `task lint` (golangci-lint run) or `task lint-fix` (with --fix)
+- **Format**: `task fmt` (gofumpt -w .)
+- **Dev**: `task dev` (runs with profiling enabled)
+
+## Code Style Guidelines
+- **Imports**: Use goimports formatting, group stdlib, external, internal packages
+- **Formatting**: Use gofumpt (stricter than gofmt), enabled in golangci-lint
+- **Naming**: Standard Go conventions - PascalCase for exported, camelCase for unexported
+- **Types**: Prefer explicit types, use type aliases for clarity (e.g., `type AgentName string`)
+- **Error handling**: Return errors explicitly, use `fmt.Errorf` for wrapping
+- **Context**: Always pass context.Context as first parameter for operations
+- **Interfaces**: Define interfaces in consuming packages, keep them small and focused
+- **Structs**: Use struct embedding for composition, group related fields
+- **Constants**: Use typed constants with iota for enums, group in const blocks
+- **Testing**: Use testify/assert and testify/require, parallel tests with `t.Parallel()`
+- **JSON tags**: Use snake_case for JSON field names
+- **File permissions**: Use octal notation (0o755, 0o644) for file permissions

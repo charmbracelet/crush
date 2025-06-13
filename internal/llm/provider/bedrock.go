@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/opencode-ai/opencode/internal/llm/tools"
-	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 type bedrockOptions struct {
@@ -98,4 +98,3 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 
 	return b.childProvider.stream(ctx, messages, tools)
 }
-

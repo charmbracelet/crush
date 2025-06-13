@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/fsnotify/fsnotify"
-	"github.com/opencode-ai/opencode/internal/config"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/lsp"
-	"github.com/opencode-ai/opencode/internal/lsp/protocol"
 )
 
 // WorkspaceWatcher manages LSP file watching
@@ -401,7 +401,6 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 					"watched", matched,
 					"kind", kind,
 				)
-
 			}
 
 			// Check if this path should be watched according to server registrations

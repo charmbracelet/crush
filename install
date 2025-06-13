@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-APP=opencode
+APP=crush
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,19 +36,19 @@ case "$filename" in
     ;;
 esac
 
-INSTALL_DIR=$HOME/.opencode/bin
+INSTALL_DIR=$HOME/.crush/bin
 mkdir -p "$INSTALL_DIR"
 
 if [ -z "$requested_version" ]; then
-    url="https://github.com/opencode-ai/opencode/releases/latest/download/$filename"
-    specific_version=$(curl -s https://api.github.com/repos/opencode-ai/opencode/releases/latest | awk -F'"' '/"tag_name": "/ {gsub(/^v/, "", $4); print $4}')
+    url="https://github.com/charmbracelet/crush/releases/latest/download/$filename"
+    specific_version=$(curl -s https://api.github.com/repos/charmbracelet/crush/releases/latest | awk -F'"' '/"tag_name": "/ {gsub(/^v/, "", $4); print $4}')
 
     if [[ $? -ne 0 ]]; then
         echo "${RED}Failed to fetch version information${NC}"
         exit 1
     fi
 else
-    url="https://github.com/opencode-ai/opencode/releases/download/v${requested_version}/$filename"
+    url="https://github.com/charmbracelet/crush/releases/download/v${requested_version}/$filename"
     specific_version=$requested_version
 fi
 
@@ -67,12 +67,12 @@ print_message() {
 }
 
 check_version() {
-    if command -v opencode >/dev/null 2>&1; then
-        opencode_path=$(which opencode)
+    if command -v crush >/dev/null 2>&1; then
+        crush_path=$(which crush)
 
 
         ## TODO: check if version is installed
-        # installed_version=$(opencode version)
+        # installed_version=$(crush version)
         installed_version="0.0.1"
         installed_version=$(echo $installed_version | awk '{print $2}')
 
@@ -86,11 +86,11 @@ check_version() {
 }
 
 download_and_install() {
-    print_message info "Downloading ${ORANGE}opencode ${GREEN}version: ${YELLOW}$specific_version ${GREEN}..."
-    mkdir -p opencodetmp && cd opencodetmp
+    print_message info "Downloading ${ORANGE}crush ${GREEN}version: ${YELLOW}$specific_version ${GREEN}..."
+    mkdir -p crushtmp && cd crushtmp
     curl -# -L $url | tar xz
-    mv opencode $INSTALL_DIR
-    cd .. && rm -rf opencodetmp 
+    mv crush $INSTALL_DIR
+    cd .. && rm -rf crushtmp 
 }
 
 check_version
@@ -102,9 +102,9 @@ add_to_path() {
     local command=$2
 
     if [[ -w $config_file ]]; then
-        echo -e "\n# opencode" >> "$config_file"
+        echo -e "\n# crush" >> "$config_file"
         echo "$command" >> "$config_file"
-        print_message info "Successfully added ${ORANGE}opencode ${GREEN}to \$PATH in $config_file"
+        print_message info "Successfully added ${ORANGE}crush ${GREEN}to \$PATH in $config_file"
     else
         print_message warning "Manually add the directory to $config_file (or similar):"
         print_message info "  $command"

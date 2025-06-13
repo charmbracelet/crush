@@ -491,7 +491,7 @@ Crush includes several built-in commands:
 
 | Command            | Description                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
-| Initialize Project | Creates or updates the Crush.md memory file with project-specific information                    |
+| Initialize Project | Creates or updates the CRUSH.md memory file with project-specific information                    |
 | Compact Session    | Manually triggers the summarization of the current session, creating a new session with the summary |
 
 ## MCP (Model Context Protocol)

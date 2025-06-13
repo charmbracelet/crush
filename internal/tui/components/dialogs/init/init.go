@@ -106,7 +106,7 @@ func (m *initDialogCmp) renderContent() string {
 
 	explanation := t.S().Text.
 		Width(m.width - 4).
-		Render("Initialization generates a new Crush.md file that contains information about your codebase, this file serves as memory for each project, you can freely add to it to help the agents be better at their job.")
+		Render("Initialization generates a new CRUSH.md file that contains information about your codebase, this file serves as memory for each project, you can freely add to it to help the agents be better at their job.")
 
 	question := t.S().Text.
 		Width(m.width - 4).
@@ -174,12 +174,12 @@ func (m *initDialogCmp) Position() (int, int) {
 func (m *initDialogCmp) handleInitialization(initialize bool) tea.Cmd {
 	if initialize {
 		// Run the initialization command
-		prompt := `Please analyze this codebase and create a Crush.md file containing:
+		prompt := `Please analyze this codebase and create a CRUSH.md file containing:
 1. Build/lint/test commands - especially for running a single test
 2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
 
 The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-If there's already a crush.md, improve it.
+If there's already a CRUSH.md, improve it.
 If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
 
 		// Mark the project as initialized

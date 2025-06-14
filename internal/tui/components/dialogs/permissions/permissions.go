@@ -267,10 +267,13 @@ func (p *permissionDialogCmp) renderBashContent() string {
 
 func (p *permissionDialogCmp) renderEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
-		})
+		formatter := core.DiffFormatter().
+			Before(fileutil.PrettyPath(pr.FilePath), pr.OldContent).
+			After(fileutil.PrettyPath(pr.FilePath), pr.NewContent).
+			Width(p.contentViewPort.Width()).
+			Split()
 
+		diff := formatter.String()
 		contentHeight := min(p.height-9, lipgloss.Height(diff))
 		p.contentViewPort.SetHeight(contentHeight)
 		p.contentViewPort.SetContent(diff)

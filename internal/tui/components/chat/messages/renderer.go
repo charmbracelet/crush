@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fileutil"
 	"github.com/charmbracelet/crush/internal/highlight"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss/v2/tree"
@@ -257,9 +257,12 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 			return renderPlainContent(v, v.result.Content)
 		}
 
-		trunc := truncateHeight(meta.Diff, responseContextHeight)
-		diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()-2))
-		return diffView
+		formatter := core.DiffFormatter().
+			Before(fileutil.PrettyPath(params.FilePath), meta.OldContent).
+			After(fileutil.PrettyPath(params.FilePath), meta.NewContent).
+			Split().
+			Width(v.textWidth() - 2) // -2 for padding
+		return formatter.String()
 	})
 }
 

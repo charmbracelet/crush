@@ -148,7 +148,6 @@ func init() {
 	registry.register(tools.GrepToolName, func() renderer { return grepRenderer{} })
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
-	registry.register(tools.PatchToolName, func() renderer { return patchRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
@@ -447,38 +446,6 @@ func (sr sourcegraphRenderer) Render(v *toolCallCmp) string {
 }
 
 // -----------------------------------------------------------------------------
-//  Patch renderer
-// -----------------------------------------------------------------------------
-
-// patchRenderer handles multi-file patches with change summaries
-type patchRenderer struct {
-	baseRenderer
-}
-
-// Render displays patch summary with file count and change statistics
-func (pr patchRenderer) Render(v *toolCallCmp) string {
-	var params tools.PatchParams
-	if err := pr.unmarshalParams(v.call.Input, &params); err != nil {
-		return pr.renderError(v, "Invalid patch parameters")
-	}
-
-	args := newParamBuilder().addMain("multiple files").build()
-
-	return pr.renderWithParams(v, "Patch", args, func() string {
-		var meta tools.PatchResponseMetadata
-		if err := pr.unmarshalParams(v.result.Metadata, &meta); err != nil {
-			return renderPlainContent(v, v.result.Content)
-		}
-
-		summary := fmt.Sprintf("Changed %d files (%d+ %d-)",
-			len(meta.FilesChanged), meta.Additions, meta.Removals)
-		filesList := strings.Join(meta.FilesChanged, "\n")
-
-		return renderPlainContent(v, summary+"\n\n"+filesList)
-	})
-}
-
-// -----------------------------------------------------------------------------
 //  Diagnostics renderer
 // -----------------------------------------------------------------------------
 
@@ -711,8 +678,6 @@ func prettifyToolName(name string) string {
 		return "View"
 	case tools.WriteToolName:
 		return "Write"
-	case tools.PatchToolName:
-		return "Patch"
 	default:
 		return name
 	}

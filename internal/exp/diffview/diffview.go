@@ -3,7 +3,6 @@ package diffview
 import (
 	"fmt"
 	"image/color"
-	"os"
 	"strconv"
 	"strings"
 
@@ -70,11 +69,7 @@ func New() *DiffView {
 		lineNumbers:  true,
 		tabWidth:     8,
 	}
-	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
-		dv.style = DefaultDarkStyle
-	} else {
-		dv.style = DefaultLightStyle
-	}
+	dv.style = DefaultDarkStyle
 	return dv
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -24,7 +25,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/page/logs"
@@ -167,7 +167,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// File Picker
 	case chat.OpenFilePickerMsg:
-		if a.dialog.ActiveDialogId() == filepicker.FilePickerID {
+		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -194,7 +194,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		payload := msg.Payload
 
 		// Forward agent events to dialogs
-		if a.dialog.HasDialogs() && a.dialog.ActiveDialogId() == compact.CompactDialogID {
+		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
 			u, dialogCmd := a.dialog.Update(payload)
 			a.dialog = u.(dialogs.DialogCmp)
 			cmds = append(cmds, dialogCmd)
@@ -292,7 +292,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	// dialogs
 	case key.Matches(msg, a.keyMap.Quit):
-		if a.dialog.ActiveDialogId() == quit.QuitDialogID {
+		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
 			// if the quit dialog is already open, close the app
 			return tea.Quit
 		}
@@ -301,7 +301,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		})
 
 	case key.Matches(msg, a.keyMap.Commands):
-		if a.dialog.ActiveDialogId() == commands.CommandsDialogID {
+		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
 			// If the commands dialog is already open, close it
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -309,12 +309,12 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
-		if a.dialog.ActiveDialogId() == sessions.SessionsDialogID {
+		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
 			// If the sessions dialog is already open, close it
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		var cmds []tea.Cmd
-		if a.dialog.ActiveDialogId() == commands.CommandsDialogID {
+		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
 			// If the commands dialog is open, close it first
 			cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
 		}

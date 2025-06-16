@@ -38,7 +38,7 @@ type DialogCmp interface {
 	HasDialogs() bool
 	GetLayers() []*lipgloss.Layer
 	ActiveView() *tea.View
-	ActiveDialogId() DialogID
+	ActiveDialogID() DialogID
 }
 
 type dialogCmp struct {
@@ -140,7 +140,7 @@ func (d dialogCmp) ActiveView() *tea.View {
 	return &view
 }
 
-func (d dialogCmp) ActiveDialogId() DialogID {
+func (d dialogCmp) ActiveDialogID() DialogID {
 	if len(d.dialogs) == 0 {
 		return ""
 	}

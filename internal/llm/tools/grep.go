@@ -402,19 +402,20 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, st
 	return false, 0, "", scanner.Err()
 }
 
+var binaryExts = map[string]struct{}{
+	".exe": {}, ".dll": {}, ".so": {}, ".dylib": {},
+	".bin": {}, ".obj": {}, ".o": {}, ".a": {},
+	".zip": {}, ".tar": {}, ".gz": {}, ".bz2": {},
+	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {},
+	".pdf": {}, ".doc": {}, ".docx": {}, ".xls": {},
+	".mp3": {}, ".mp4": {}, ".avi": {}, ".mov": {},
+}
+
 // isBinaryFile performs a quick check to determine if a file is binary
 func isBinaryFile(filePath string) bool {
 	// Check file extension first (fastest)
 	ext := strings.ToLower(filepath.Ext(filePath))
-	binaryExts := map[string]bool{
-		".exe": true, ".dll": true, ".so": true, ".dylib": true,
-		".bin": true, ".obj": true, ".o": true, ".a": true,
-		".zip": true, ".tar": true, ".gz": true, ".bz2": true,
-		".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
-		".pdf": true, ".doc": true, ".docx": true, ".xls": true,
-		".mp3": true, ".mp4": true, ".avi": true, ".mov": true,
-	}
-	if binaryExts[ext] {
+	if _, isBinary := binaryExts[ext]; isBinary {
 		return true
 	}
 

@@ -34,24 +34,26 @@ import (
 
 // appModel represents the main application model that manages pages, dialogs, and UI state.
 type appModel struct {
-	width, height int
-	keyMap        KeyMap
+	wWidth, wHeight int // Window dimensions
+	width, height   int
+	keyMap          KeyMap
 
 	currentPage  page.PageID
 	previousPage page.PageID
 	pages        map[page.PageID]util.Model
 	loadedPages  map[page.PageID]bool
 
-	status status.StatusCmp
+	// Status
+	status          status.StatusCmp
+	showingFullHelp bool
 
 	app *app.App
 
 	dialog      dialogs.DialogCmp
 	completions completions.Completions
 
-	// Session
+	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
-	fullHelp          bool   // Whether to show full help text
 }
 
 // Init initializes the application model and returns initial commands.
@@ -99,7 +101,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		return a, nil
 	case tea.WindowSizeMsg:
-		return a, a.handleWindowResize(msg)
+		return a, a.handleWindowResize(msg.Width, msg.Height)
 
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg, completions.CloseCompletionsMsg:
@@ -244,23 +246,29 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleWindowResize processes window resize events and updates all components.
-func (a *appModel) handleWindowResize(msg tea.WindowSizeMsg) tea.Cmd {
+func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
-	msg.Height -= 2 // Make space for the status bar
-	a.width, a.height = msg.Width, msg.Height
-
+	a.wWidth, a.wHeight = width, height
+	if a.showingFullHelp {
+		height -= 3
+	} else {
+		height -= 2
+	}
+	a.width, a.height = width, height
 	// Update status bar
-	s, cmd := a.status.Update(msg)
+	s, cmd := a.status.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	a.status = s.(status.StatusCmp)
 	cmds = append(cmds, cmd)
 
 	// Update the current page
-	updated, cmd := a.pages[a.currentPage].Update(msg)
-	a.pages[a.currentPage] = updated.(util.Model)
-	cmds = append(cmds, cmd)
+	for p, page := range a.pages {
+		updated, pageCmd := page.Update(tea.WindowSizeMsg{Width: width, Height: height})
+		a.pages[p] = updated.(util.Model)
+		cmds = append(cmds, pageCmd)
+	}
 
 	// Update the dialogs
-	dialog, cmd := a.dialog.Update(msg)
+	dialog, cmd := a.dialog.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	a.dialog = dialog.(dialogs.DialogCmp)
 	cmds = append(cmds, cmd)
 
@@ -288,6 +296,11 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		u, cmd := a.completions.Update(msg)
 		a.completions = u.(completions.Completions)
 		return cmd
+		// help
+	case key.Matches(msg, a.keyMap.Help):
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a.handleWindowResize(a.wWidth, a.wHeight)
 	// dialogs
 	case key.Matches(msg, a.keyMap.Quit):
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
@@ -345,7 +358,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	if a.app.CoderAgent.IsBusy() {
-		// For now we don't move to any page if the agent is busy
+		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
 
@@ -367,7 +380,12 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
-	pageView := a.pages[a.currentPage].View()
+	page := a.pages[a.currentPage]
+	if withHelp, ok := page.(layout.Help); ok {
+		a.keyMap.pageBindings = withHelp.Bindings()
+	}
+	a.status.SetKeyMap(a.keyMap)
+	pageView := page.View()
 	components := []string{
 		pageView.String(),
 	}
@@ -412,17 +430,20 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
-	startPage := chat.ChatPage
+	chatPage := chat.NewChatPage(app)
+	keyMap := DefaultKeyMap()
+	keyMap.pageBindings = chatPage.Bindings()
+
 	model := &appModel{
-		currentPage: startPage,
+		currentPage: chat.ChatPageID,
 		app:         app,
-		status:      status.NewStatusCmp(),
+		status:      status.NewStatusCmp(keyMap),
 		loadedPages: make(map[page.PageID]bool),
-		keyMap:      DefaultKeyMap(),
+		keyMap:      keyMap,
 
 		pages: map[page.PageID]util.Model{
-			chat.ChatPage: chat.NewChatPage(app),
-			logs.LogsPage: logs.NewLogsPage(),
+			chat.ChatPageID: chatPage,
+			logs.LogsPage:   logs.NewLogsPage(),
 		},
 
 		dialog:      dialogs.NewDialogCmp(),

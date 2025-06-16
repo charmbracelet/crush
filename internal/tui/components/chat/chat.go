@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/llm/agent"
@@ -49,21 +50,23 @@ type messageListCmp struct {
 	previousSelected int // Last selected item index for restoring focus
 
 	lastUserMessageTime int64
+	defaultListKeyMap   list.KeyMap
 }
 
 // NewMessagesListCmp creates a new message list component with custom keybindings
 // and reverse ordering (newest messages at bottom).
 func NewMessagesListCmp(app *app.App) MessageListCmp {
-	defaultKeymaps := list.DefaultKeyMap()
+	defaultListKeyMap := list.DefaultKeyMap()
 	listCmp := list.New(
 		list.WithGapSize(1),
 		list.WithReverse(true),
-		list.WithKeyMap(defaultKeymaps),
+		list.WithKeyMap(defaultListKeyMap),
 	)
 	return &messageListCmp{
-		app:              app,
-		listCmp:          listCmp,
-		previousSelected: list.NoSelection,
+		app:               app,
+		listCmp:           listCmp,
+		previousSelected:  list.NoSelection,
+		defaultListKeyMap: defaultListKeyMap,
 	}
 }
 
@@ -494,4 +497,9 @@ func (m *messageListCmp) Focus() tea.Cmd {
 // IsFocused implements MessageListCmp.
 func (m *messageListCmp) IsFocused() bool {
 	return m.listCmp.IsFocused()
+}
+
+func (m *messageListCmp) Bindings() []key.Binding {
+	bindings := layout.KeyMapToSlice(m.defaultListKeyMap)
+	return bindings
 }

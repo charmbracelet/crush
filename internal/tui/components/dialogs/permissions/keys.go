@@ -2,7 +2,6 @@ package permissions
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 type KeyMap struct {
@@ -48,10 +47,23 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
+// KeyBindings implements layout.KeyMapProvider
+func (k KeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Left,
+		k.Right,
+		k.Tab,
+		k.Select,
+		k.Allow,
+		k.AllowSession,
+		k.Deny,
+	}
+}
+
 // FullHelp implements help.KeyMap.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := layout.KeyMapToSlice(k)
+	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])

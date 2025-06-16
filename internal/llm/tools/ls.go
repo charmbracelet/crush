@@ -209,7 +209,7 @@ func printNode(builder *strings.Builder, node *TreeNode, level int) {
 
 	nodeName := node.Name
 	if node.Type == "directory" {
-		nodeName += string(filepath.Separator)
+		nodeName = nodeName + string(filepath.Separator)
 	}
 
 	fmt.Fprintf(builder, "%s- %s\n", indent, nodeName)

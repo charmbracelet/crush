@@ -198,35 +198,35 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 	}
 
-	var output string
+	var output strings.Builder
 	if len(matches) == 0 {
-		output = "No files found"
+		output.WriteString("No files found")
 	} else {
-		output = fmt.Sprintf("Found %d matches\n", len(matches))
+		fmt.Fprintf(&output, "Found %d matches\n", len(matches))
 
 		currentFile := ""
 		for _, match := range matches {
 			if currentFile != match.path {
 				if currentFile != "" {
-					output += "\n"
+					output.WriteString("\n")
 				}
 				currentFile = match.path
-				output += fmt.Sprintf("%s:\n", match.path)
+				fmt.Fprintf(&output, "%s:\n", match.path)
 			}
 			if match.lineNum > 0 {
-				output += fmt.Sprintf("  Line %d: %s\n", match.lineNum, match.lineText)
+				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, match.lineText)
 			} else {
-				output += fmt.Sprintf("  %s\n", match.path)
+				fmt.Fprintf(&output, "  %s\n", match.path)
 			}
 		}
 
 		if truncated {
-			output += "\n(Results are truncated. Consider using a more specific path or pattern.)"
+			output.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
 		}
 	}
 
 	return WithResponseMetadata(
-		NewTextResponse(output),
+		NewTextResponse(output.String()),
 		GrepResponseMetadata{
 			NumberOfMatches: len(matches),
 			Truncated:       truncated,

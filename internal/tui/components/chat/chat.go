@@ -500,6 +500,6 @@ func (m *messageListCmp) IsFocused() bool {
 }
 
 func (m *messageListCmp) Bindings() []key.Binding {
-	bindings := layout.KeyMapToSlice(m.defaultListKeyMap)
+	bindings := m.defaultListKeyMap.KeyBindings()
 	return bindings
 }

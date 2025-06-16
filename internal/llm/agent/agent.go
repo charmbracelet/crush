@@ -241,7 +241,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 				logging.ErrorPersist("panic while generating title")
 			})
 			titleErr := a.generateTitle(context.Background(), sessionID, content)
-			if titleErr != nil {
+			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
 				logging.ErrorPersist(fmt.Sprintf("failed to generate title: %v", titleErr))
 			}
 		}()

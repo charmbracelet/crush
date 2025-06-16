@@ -90,6 +90,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		logging.Info(
+			"Keyboard enhancements detected",
+			"Disambiguation", msg.SupportsKeyDisambiguation(),
+			"ReleaseKeys", msg.SupportsKeyReleases(),
+			"UniformKeys", msg.SupportsUniformKeyLayout(),
+		)
+		return a, nil
 	case tea.WindowSizeMsg:
 		return a, a.handleWindowResize(msg)
 

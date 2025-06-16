@@ -51,3 +51,19 @@ func DefaultKeyMap() KeyMap {
 		),
 	}
 }
+
+// KeyBindings implements layout.KeyMapProvider
+func (k KeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Down,
+		k.Up,
+		k.NDown,
+		k.NUp,
+		k.DownOneItem,
+		k.UpOneItem,
+		k.HalfPageDown,
+		k.HalfPageUp,
+		k.Home,
+		k.End,
+	}
+}

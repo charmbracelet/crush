@@ -27,6 +27,21 @@ func DefaultEditorKeyMap() EditorKeyMap {
 	}
 }
 
+// KeyBindings implements layout.KeyMapProvider
+func (k EditorKeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.AddFile,
+		k.SendMessage,
+		k.OpenEditor,
+	}
+}
+
+type DeleteAttachmentKeyMaps struct {
+	AttachmentDeleteMode key.Binding
+	Escape               key.Binding
+	DeleteAllAttachments key.Binding
+}
+
 // TODO: update this to use the new keymap concepts
 var AttachmentsKeyMaps = DeleteAttachmentKeyMaps{
 	AttachmentDeleteMode: key.NewBinding(

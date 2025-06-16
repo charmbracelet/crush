@@ -245,28 +245,28 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 		return projectDiagnostics[i] < projectDiagnostics[j]
 	})
 
-	output := ""
+	var output strings.Builder
 
 	if len(fileDiagnostics) > 0 {
-		output += "\n<file_diagnostics>\n"
+		output.WriteString("\n<file_diagnostics>\n")
 		if len(fileDiagnostics) > 10 {
-			output += strings.Join(fileDiagnostics[:10], "\n")
-			output += fmt.Sprintf("\n... and %d more diagnostics", len(fileDiagnostics)-10)
+			output.WriteString(strings.Join(fileDiagnostics[:10], "\n"))
+			fmt.Fprintf(&output, "\n... and %d more diagnostics", len(fileDiagnostics)-10)
 		} else {
-			output += strings.Join(fileDiagnostics, "\n")
+			output.WriteString(strings.Join(fileDiagnostics, "\n"))
 		}
-		output += "\n</file_diagnostics>\n"
+		output.WriteString("\n</file_diagnostics>\n")
 	}
 
 	if len(projectDiagnostics) > 0 {
-		output += "\n<project_diagnostics>\n"
+		output.WriteString("\n<project_diagnostics>\n")
 		if len(projectDiagnostics) > 10 {
-			output += strings.Join(projectDiagnostics[:10], "\n")
-			output += fmt.Sprintf("\n... and %d more diagnostics", len(projectDiagnostics)-10)
+			output.WriteString(strings.Join(projectDiagnostics[:10], "\n"))
+			fmt.Fprintf(&output, "\n... and %d more diagnostics", len(projectDiagnostics)-10)
 		} else {
-			output += strings.Join(projectDiagnostics, "\n")
+			output.WriteString(strings.Join(projectDiagnostics, "\n"))
 		}
-		output += "\n</project_diagnostics>\n"
+		output.WriteString("\n</project_diagnostics>\n")
 	}
 
 	if len(fileDiagnostics) > 0 || len(projectDiagnostics) > 0 {
@@ -275,13 +275,13 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 		projectErrors := countSeverity(projectDiagnostics, "Error")
 		projectWarnings := countSeverity(projectDiagnostics, "Warn")
 
-		output += "\n<diagnostic_summary>\n"
-		output += fmt.Sprintf("Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
-		output += fmt.Sprintf("Project: %d errors, %d warnings\n", projectErrors, projectWarnings)
-		output += "</diagnostic_summary>\n"
+		output.WriteString("\n<diagnostic_summary>\n")
+		fmt.Fprintf(&output, "Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
+		fmt.Fprintf(&output, "Project: %d errors, %d warnings\n", projectErrors, projectWarnings)
+		output.WriteString("</diagnostic_summary>\n")
 	}
 
-	return output
+	return output.String()
 }
 
 func countSeverity(diagnostics []string, severity string) int {

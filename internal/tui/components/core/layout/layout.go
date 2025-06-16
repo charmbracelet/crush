@@ -1,8 +1,6 @@
 package layout
 
 import (
-	"reflect"
-
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
@@ -26,14 +24,7 @@ type Positionable interface {
 	SetPosition(x, y int) tea.Cmd
 }
 
-func KeyMapToSlice(t any) (bindings []key.Binding) {
-	typ := reflect.TypeOf(t)
-	if typ.Kind() != reflect.Struct {
-		return nil
-	}
-	for i := range typ.NumField() {
-		v := reflect.ValueOf(t).Field(i)
-		bindings = append(bindings, v.Interface().(key.Binding))
-	}
-	return
+// KeyMapProvider defines an interface for types that can provide their key bindings as a slice
+type KeyMapProvider interface {
+	KeyBindings() []key.Binding
 }

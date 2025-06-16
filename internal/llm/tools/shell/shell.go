@@ -192,10 +192,10 @@ echo $EXEC_EXIT_CODE > %s
 		// Use exponential backoff polling
 		pollInterval := 1 * time.Millisecond
 		maxPollInterval := 100 * time.Millisecond
-		
+
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -219,7 +219,7 @@ echo $EXEC_EXIT_CODE > %s
 						return
 					}
 				}
-				
+
 				// Exponential backoff to reduce CPU usage for longer-running commands
 				if pollInterval < maxPollInterval {
 					pollInterval = time.Duration(float64(pollInterval) * 1.5)

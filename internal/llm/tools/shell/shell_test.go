@@ -28,7 +28,7 @@ func TestShellPerformanceImprovement(t *testing.T) {
 	assert.Equal(t, 0, exitCode)
 	assert.Contains(t, stdout, "hello world")
 	assert.Empty(t, stderr)
-	
+
 	// Quick commands should complete very fast with our exponential backoff
 	assert.Less(t, duration, 50*time.Millisecond, "Quick command should complete fast with exponential backoff")
 }
@@ -44,7 +44,7 @@ func BenchmarkShellQuickCommands(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_, _, exitCode, _, err := shell.Exec(context.Background(), "echo test", 0)
 		if err != nil || exitCode != 0 {

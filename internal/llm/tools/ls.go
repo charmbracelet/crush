@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 type LSParams struct {
@@ -108,7 +108,7 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		return NewTextErrorResponse(fmt.Sprintf("path does not exist: %s", searchPath)), nil
 	}
 
-	files, truncated, err := fileutil.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
+	files, truncated, err := fsext.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error listing directory: %w", err)
 	}

@@ -14,6 +14,8 @@ import (
 
 type StatusCmp interface {
 	util.Model
+	ToggleFullHelp()
+	SetKeyMap(keyMap help.KeyMap)
 }
 
 type statusCmp struct {
@@ -22,23 +24,25 @@ type statusCmp struct {
 	messageTTL time.Duration
 	session    session.Session
 	help       help.Model
+	keyMap     help.KeyMap
 }
 
 // clearMessageCmd is a command that clears status messages after a timeout
-func (m statusCmp) clearMessageCmd(ttl time.Duration) tea.Cmd {
+func (m *statusCmp) clearMessageCmd(ttl time.Duration) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
 		return util.ClearStatusMsg{}
 	})
 }
 
-func (m statusCmp) Init() tea.Cmd {
+func (m *statusCmp) Init() tea.Cmd {
 	return nil
 }
 
-func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.help.Width = msg.Width - 2
 		return m, nil
 
 	// Handle status info
@@ -86,9 +90,9 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m statusCmp) View() tea.View {
+func (m *statusCmp) View() tea.View {
 	t := styles.CurrentTheme()
-	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(DefaultKeyMap("focus chat")))
+	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(m.keyMap))
 	if m.info.Msg != "" {
 		switch m.info.Type {
 		case util.InfoTypeError:
@@ -102,12 +106,21 @@ func (m statusCmp) View() tea.View {
 	return tea.NewView(status)
 }
 
-func NewStatusCmp() StatusCmp {
+func (m *statusCmp) ToggleFullHelp() {
+	m.help.ShowAll = !m.help.ShowAll
+}
+
+func (m *statusCmp) SetKeyMap(keyMap help.KeyMap) {
+	m.keyMap = keyMap
+}
+
+func NewStatusCmp(keyMap help.KeyMap) StatusCmp {
 	t := styles.CurrentTheme()
 	help := help.New()
 	help.Styles = t.S().Help
 	return &statusCmp{
 		messageTTL: 10 * time.Second,
 		help:       help,
+		keyMap:     keyMap,
 	}
 }

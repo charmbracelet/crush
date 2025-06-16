@@ -1,7 +1,7 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/v2/help"
+	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -157,9 +157,9 @@ func (c *container) SetPosition(x, y int) tea.Cmd {
 	return nil
 }
 
-func (c *container) Help() help.KeyMap {
+func (c *container) Bindings() []key.Binding {
 	if b, ok := c.content.(Help); ok {
-		return b.Help()
+		return b.Bindings()
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/v2/help"
+	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -269,20 +269,20 @@ func (s *splitPaneLayout) ClearBottomPanel() tea.Cmd {
 	return nil
 }
 
-func (s *splitPaneLayout) Help() help.KeyMap {
+func (s *splitPaneLayout) Bindings() []key.Binding {
 	if s.leftPanel != nil {
 		if b, ok := s.leftPanel.(Help); ok && s.leftPanel.IsFocused() {
-			return b.Help()
+			return b.Bindings()
 		}
 	}
 	if s.rightPanel != nil {
 		if b, ok := s.rightPanel.(Help); ok && s.rightPanel.IsFocused() {
-			return b.Help()
+			return b.Bindings()
 		}
 	}
 	if s.bottomPanel != nil {
 		if b, ok := s.bottomPanel.(Help); ok && s.bottomPanel.IsFocused() {
-			return b.Help()
+			return b.Bindings()
 		}
 	}
 	return nil

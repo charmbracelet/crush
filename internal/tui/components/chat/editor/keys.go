@@ -2,17 +2,21 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 type EditorKeyMap struct {
-	Send       key.Binding
-	OpenEditor key.Binding
+	AddFile     key.Binding
+	SendMessage key.Binding
+	OpenEditor  key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
 	return EditorKeyMap{
-		Send: key.NewBinding(
+		AddFile: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "add file"),
+		),
+		SendMessage: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "send"),
 		),
@@ -20,25 +24,6 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			key.WithKeys("ctrl+e"),
 			key.WithHelp("ctrl+e", "open editor"),
 		),
-	}
-}
-
-// FullHelp implements help.KeyMap.
-func (k EditorKeyMap) FullHelp() [][]key.Binding {
-	m := [][]key.Binding{}
-	slice := layout.KeyMapToSlice(k)
-	for i := 0; i < len(slice); i += 4 {
-		end := min(i+4, len(slice))
-		m = append(m, slice[i:end])
-	}
-	return m
-}
-
-// ShortHelp implements help.KeyMap.
-func (k EditorKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{
-		k.Send,
-		k.OpenEditor,
 	}
 }
 

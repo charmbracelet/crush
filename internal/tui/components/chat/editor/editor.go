@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -248,7 +249,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Hanlde Enter key
-		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Send) {
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {
 				// If the last character is a backslash, remove it and add a newline
@@ -368,6 +369,10 @@ func (c *editorCmp) Focus() tea.Cmd {
 // IsFocused implements Container.
 func (c *editorCmp) IsFocused() bool {
 	return c.textarea.Focused()
+}
+
+func (c *editorCmp) Bindings() []key.Binding {
+	return layout.KeyMapToSlice(c.keyMap)
 }
 
 func NewEditorCmp(app *app.App) util.Model {

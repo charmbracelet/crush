@@ -4,8 +4,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
-	logsComponents "github.com/charmbracelet/crush/internal/tui/components/logs"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	logsComponents "github.com/charmbracelet/crush/internal/tui/components/logs"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -37,7 +37,7 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.Back):
-			return p, util.CmdHandler(page.PageChangeMsg{ID: chat.ChatPage})
+			return p, util.CmdHandler(page.PageChangeMsg{ID: chat.ChatPageID})
 		}
 	}
 

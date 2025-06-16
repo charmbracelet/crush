@@ -25,9 +25,9 @@ type SourcegraphResponseMetadata struct {
 }
 
 type sourcegraphTool struct {
-	client        *http.Client
-	clientPool    map[int]*http.Client
-	clientPoolMu  sync.RWMutex
+	client       *http.Client
+	clientPool   map[int]*http.Client
+	clientPoolMu sync.RWMutex
 }
 
 const (

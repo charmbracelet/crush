@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -342,7 +342,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil // Skip directories
 		}
 
-		if fileutil.SkipHidden(path) {
+		if fsext.SkipHidden(path) {
 			return nil
 		}
 

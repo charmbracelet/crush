@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/highlight"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -208,7 +208,7 @@ func (vr viewRenderer) Render(v *toolCallCmp) string {
 		return vr.renderError(v, "Invalid view parameters")
 	}
 
-	file := fileutil.PrettyPath(params.FilePath)
+	file := fsext.PrettyPath(params.FilePath)
 	args := newParamBuilder().
 		addMain(file).
 		addKeyValue("limit", formatNonZero(params.Limit)).
@@ -248,7 +248,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		return er.renderError(v, "Invalid edit parameters")
 	}
 
-	file := fileutil.PrettyPath(params.FilePath)
+	file := fsext.PrettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return er.renderWithParams(v, "Edit", args, func() string {
@@ -258,8 +258,8 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		}
 
 		formatter := core.DiffFormatter().
-			Before(fileutil.PrettyPath(params.FilePath), meta.OldContent).
-			After(fileutil.PrettyPath(params.FilePath), meta.NewContent).
+			Before(fsext.PrettyPath(params.FilePath), meta.OldContent).
+			After(fsext.PrettyPath(params.FilePath), meta.NewContent).
 			Split().
 			Width(v.textWidth() - 2) // -2 for padding
 		return formatter.String()
@@ -282,7 +282,7 @@ func (wr writeRenderer) Render(v *toolCallCmp) string {
 		return wr.renderError(v, "Invalid write parameters")
 	}
 
-	file := fileutil.PrettyPath(params.FilePath)
+	file := fsext.PrettyPath(params.FilePath)
 	args := newParamBuilder().addMain(file).build()
 
 	return wr.renderWithParams(v, "Write", args, func() string {
@@ -412,7 +412,7 @@ func (lr lsRenderer) Render(v *toolCallCmp) string {
 	if path == "" {
 		path = "."
 	}
-	path = fileutil.PrettyPath(path)
+	path = fsext.PrettyPath(path)
 
 	args := newParamBuilder().addMain(path).build()
 

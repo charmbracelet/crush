@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
@@ -231,7 +231,7 @@ func (m *sidebarCmp) filesBlock() string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		filePath := fileutil.DirTrim(fileutil.PrettyPath(file.FilePath), 2)
+		filePath := fsext.DirTrim(fsext.PrettyPath(file.FilePath), 2)
 		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
 		fileList = append(fileList,
 			core.Status(

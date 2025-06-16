@@ -19,7 +19,7 @@ func createTestWorkspace(tb testing.TB) string {
 	// Create test files for Go project
 	testFiles := []string{
 		"go.mod",
-		"go.sum", 
+		"go.sum",
 		"main.go",
 		"src/lib.go",
 		"src/utils.go",
@@ -38,11 +38,11 @@ func createTestWorkspace(tb testing.TB) string {
 	for _, file := range testFiles {
 		fullPath := filepath.Join(tmpDir, file)
 		dir := filepath.Dir(fullPath)
-		
+
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			tb.Fatal(err)
 		}
-		
+
 		if err := os.WriteFile(fullPath, []byte("// test content"), 0644); err != nil {
 			tb.Fatal(err)
 		}
@@ -128,7 +128,7 @@ func simulateNewApproach(workspacePath string, serverName string) (int, time.Dur
 
 	// NEW APPROACH: Collect all files first
 	var filesToOpen []string
-	
+
 	// For each pattern, find matching files
 	for _, pattern := range patterns {
 		matches, err := doublestar.Glob(os.DirFS(workspacePath), pattern)
@@ -144,7 +144,7 @@ func simulateNewApproach(workspacePath string, serverName string) (int, time.Dur
 			}
 
 			filesToOpen = append(filesToOpen, fullPath)
-			
+
 			// Limit the number of files per pattern
 			if len(filesToOpen) >= 5 {
 				break
@@ -156,14 +156,14 @@ func simulateNewApproach(workspacePath string, serverName string) (int, time.Dur
 	batchSize := 3
 	for i := 0; i < len(filesToOpen); i += batchSize {
 		end := min(i+batchSize, len(filesToOpen))
-		
+
 		// Open batch of files
 		for j := i; j < end; j++ {
 			// Simulate file opening (1ms overhead)
 			time.Sleep(1 * time.Millisecond)
 			filesOpened++
 		}
-		
+
 		// Only add delay between batches, not individual files
 		if end < len(filesToOpen) {
 			time.Sleep(50 * time.Millisecond)
@@ -205,11 +205,11 @@ func TestPerformanceComparison(t *testing.T) {
 
 	t.Logf("Old approach: %d files in %v", filesOpenedOld, oldDuration)
 	t.Logf("New approach: %d files in %v", filesOpenedNew, newDuration)
-	
+
 	if newDuration > 0 && oldDuration > 0 {
 		improvement := float64(oldDuration-newDuration) / float64(oldDuration) * 100
 		t.Logf("Performance improvement: %.1f%%", improvement)
-		
+
 		if improvement <= 0 {
 			t.Errorf("Expected performance improvement, but new approach was slower")
 		}

@@ -25,7 +25,7 @@
 - [ ] Implement responsive mode
 - [ ] Revisit the core list component
   - [ ] This component has become super complex we might need to fix this.
-- [ ] Investigate ways to make the spinner less CPU intensive
+- [x] Investigate ways to make the spinner less CPU intensive
 - [ ] General cleanup and documentation
 - [ ] Update the readme
 

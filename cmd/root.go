@@ -117,6 +117,8 @@ to assist developers in writing, debugging, and understanding code directly from
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
+			tea.WithKeyReleases(),
+			tea.WithUniformKeyLayout(),
 		)
 
 		// Setup the subscriptions, this will send services events to the TUI

@@ -5,10 +5,10 @@ import (
 )
 
 type KeyMap struct {
-	NewSession key.Binding
-	FilePicker key.Binding
-	Cancel     key.Binding
-	Tab        key.Binding
+	NewSession    key.Binding
+	AddAttachment key.Binding
+	Cancel        key.Binding
+	Tab           key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -16,6 +16,10 @@ func DefaultKeyMap() KeyMap {
 		NewSession: key.NewBinding(
 			key.WithKeys("ctrl+n"),
 			key.WithHelp("ctrl+n", "new session"),
+		),
+		AddAttachment: key.NewBinding(
+			key.WithKeys("ctrl+f"),
+			key.WithHelp("ctrl+f", "add attachment"),
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc"),
@@ -25,37 +29,5 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
 		),
-		FilePicker: key.NewBinding(
-			key.WithKeys("ctrl+f"),
-			key.WithHelp("ctrl+f", "select files to upload"),
-		),
-	}
-}
-
-// KeyBindings implements layout.KeyMapProvider
-func (k KeyMap) KeyBindings() []key.Binding {
-	return []key.Binding{
-		k.NewSession,
-		k.FilePicker,
-		k.Cancel,
-		k.Tab,
-	}
-}
-
-// FullHelp implements help.KeyMap.
-func (k KeyMap) FullHelp() [][]key.Binding {
-	m := [][]key.Binding{}
-	slice := k.KeyBindings()
-	for i := 0; i < len(slice); i += 4 {
-		end := min(i+4, len(slice))
-		m = append(m, slice[i:end])
-	}
-	return m
-}
-
-// ShortHelp implements help.KeyMap.
-func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{
-		k.Tab,
 	}
 }

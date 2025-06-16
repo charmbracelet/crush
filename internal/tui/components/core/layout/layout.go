@@ -1,7 +1,8 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/v2/help"
+	"reflect"
+
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
@@ -18,7 +19,7 @@ type Sizeable interface {
 }
 
 type Help interface {
-	Help() help.KeyMap
+	Bindings() []key.Binding
 }
 
 type Positionable interface {

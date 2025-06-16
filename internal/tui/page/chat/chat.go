@@ -19,26 +19,31 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
-var ChatPage page.PageID = "chat"
-
-type ChatFocusedMsg struct {
-	Focused bool // True if the chat input is focused, false otherwise
-}
+var ChatPageID page.PageID = "chat"
 
 type (
 	OpenFilePickerMsg struct{}
-	chatPage          struct {
-		app *app.App
-
-		layout layout.SplitPaneLayout
-
-		session session.Session
-
-		keyMap KeyMap
-
-		chatFocused bool
+	ChatFocusedMsg    struct {
+		Focused bool // True if the chat input is focused, false otherwise
 	}
 )
+
+type ChatPage interface {
+	util.Model
+	layout.Help
+}
+
+type chatPage struct {
+	app *app.App
+
+	layout layout.SplitPaneLayout
+
+	session session.Session
+
+	keyMap KeyMap
+
+	chatFocused bool
+}
 
 func (p *chatPage) Init() tea.Cmd {
 	cmd := p.layout.Init()
@@ -87,7 +92,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(chat.SessionClearedMsg{}),
 			)
 
-		case key.Matches(msg, p.keyMap.FilePicker):
+		case key.Matches(msg, p.keyMap.AddAttachment):
 			cfg := config.Get()
 			agentCfg := cfg.Agents[config.AgentCoder]
 			selectedModelID := agentCfg.Model
@@ -173,7 +178,36 @@ func (p *chatPage) View() tea.View {
 	return p.layout.View()
 }
 
-func NewChatPage(app *app.App) util.Model {
+func (p *chatPage) Bindings() []key.Binding {
+	bindings := []key.Binding{
+		p.keyMap.NewSession,
+		p.keyMap.AddAttachment,
+	}
+	if p.app.CoderAgent.IsBusy() {
+		bindings = append([]key.Binding{p.keyMap.Cancel}, bindings...)
+	}
+
+	if p.chatFocused {
+		bindings = append([]key.Binding{
+			key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "focus editor"),
+			),
+		}, bindings...)
+	} else {
+		bindings = append([]key.Binding{
+			key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "focus chat"),
+			),
+		}, bindings...)
+	}
+
+	bindings = append(bindings, p.layout.Bindings()...)
+	return bindings
+}
+
+func NewChatPage(app *app.App) ChatPage {
 	sidebarContainer := layout.NewContainer(
 		sidebar.NewSidebarCmp(),
 		layout.WithPadding(1, 1, 1, 1),

@@ -37,7 +37,7 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.Back):
-			return p, util.CmdHandler(page.PageChangeMsg{ID: chat.ChatPage})
+			return p, util.CmdHandler(page.PageChangeMsg{ID: chat.ChatPageID})
 		}
 	}
 

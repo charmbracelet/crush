@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
@@ -29,10 +28,8 @@ type FetchPermissionsParams struct {
 }
 
 type fetchTool struct {
-	client       *http.Client
-	clientPool   map[int]*http.Client
-	clientPoolMu sync.RWMutex
-	permissions  permission.Service
+	client      *http.Client
+	permissions permission.Service
 }
 
 const (
@@ -78,49 +75,8 @@ func NewFetchTool(permissions permission.Service) BaseTool {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		clientPool:  make(map[int]*http.Client),
 		permissions: permissions,
 	}
-}
-
-// getClientForTimeout returns a cached client for the given timeout or the default client
-func (t *fetchTool) getClientForTimeout(timeout int) *http.Client {
-	if timeout <= 0 {
-		return t.client
-	}
-
-	maxTimeout := 120 // 2 minutes
-	if timeout > maxTimeout {
-		timeout = maxTimeout
-	}
-
-	// Check if we have a cached client for this timeout
-	t.clientPoolMu.RLock()
-	if client, exists := t.clientPool[timeout]; exists {
-		t.clientPoolMu.RUnlock()
-		return client
-	}
-	t.clientPoolMu.RUnlock()
-
-	// Create and cache a new client
-	t.clientPoolMu.Lock()
-	defer t.clientPoolMu.Unlock()
-
-	// Double-check in case another goroutine created it
-	if client, exists := t.clientPool[timeout]; exists {
-		return client
-	}
-
-	client := &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	t.clientPool[timeout] = client
-	return client
 }
 
 func (t *fetchTool) Info() ToolInfo {
@@ -185,16 +141,26 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	client := t.getClientForTimeout(params.Timeout)
+	// Handle timeout with context
+	requestCtx := ctx
+	if params.Timeout > 0 {
+		maxTimeout := 120 // 2 minutes
+		if params.Timeout > maxTimeout {
+			params.Timeout = maxTimeout
+		}
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+		defer cancel()
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)
+	req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", "crush/1.0")
 
-	resp, err := client.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 	}

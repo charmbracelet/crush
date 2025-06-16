@@ -167,7 +167,7 @@ func (m *messageCmp) renderAssistantMessage() string {
 		case message.FinishReasonPermissionDenied:
 			infoMsg = "permission denied"
 		}
-		assistant := t.S().Muted.Render(fmt.Sprintf("⬡ %s (%s)", models.SupportedModels[m.message.Model].Name, infoMsg))
+		assistant := t.S().Muted.Render(fmt.Sprintf("%s %s (%s)", styles.ModelIcon, models.SupportedModels[m.message.Model].Name, infoMsg))
 		parts = append(parts, core.Section(assistant, m.textWidth()))
 	}
 

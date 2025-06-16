@@ -69,7 +69,7 @@ func New() *DiffView {
 		lineNumbers:  true,
 		tabWidth:     8,
 	}
-	dv.style = DefaultDarkStyle
+	dv.style = DefaultDarkStyle()
 	return dv
 }
 

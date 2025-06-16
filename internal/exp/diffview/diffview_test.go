@@ -97,12 +97,12 @@ var (
 
 	LightModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
-			Style(diffview.DefaultLightStyle).
+			Style(diffview.DefaultLightStyle()).
 			ChromaStyle(styles.Get("catppuccin-latte"))
 	}
 	DarkModeFunc = func(dv *diffview.DiffView) *diffview.DiffView {
 		return dv.
-			Style(diffview.DefaultDarkStyle).
+			Style(diffview.DefaultDarkStyle()).
 			ChromaStyle(styles.Get("catppuccin-macchiato"))
 	}
 
@@ -165,7 +165,7 @@ func TestDiffViewTabs(t *testing.T) {
 			dv := diffview.New().
 				Before("main.go", TestTabsBefore).
 				After("main.go", TestTabsAfter).
-				Style(diffview.DefaultLightStyle).
+				Style(diffview.DefaultLightStyle()).
 				ChromaStyle(styles.Get("catppuccin-latte"))
 			dv = layoutFunc(dv)
 
@@ -190,7 +190,7 @@ func TestDiffViewWidth(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Width(width).
-						Style(diffview.DefaultLightStyle).
+						Style(diffview.DefaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
@@ -215,7 +215,7 @@ func TestDiffViewHeight(t *testing.T) {
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
 						Height(height).
-						Style(diffview.DefaultLightStyle).
+						Style(diffview.DefaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte"))
 					dv = layoutFunc(dv)
 
@@ -239,7 +239,7 @@ func TestDiffViewXOffset(t *testing.T) {
 					dv := diffview.New().
 						Before("main.go", TestDefaultBefore).
 						After("main.go", TestDefaultAfter).
-						Style(diffview.DefaultLightStyle).
+						Style(diffview.DefaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte")).
 						Width(60).
 						XOffset(xOffset)
@@ -265,7 +265,7 @@ func TestDiffViewYOffset(t *testing.T) {
 					dv := diffview.New().
 						Before("main.go", TestMultipleHunksBefore).
 						After("main.go", TestMultipleHunksAfter).
-						Style(diffview.DefaultLightStyle).
+						Style(diffview.DefaultLightStyle()).
 						ChromaStyle(styles.Get("catppuccin-latte")).
 						Height(5).
 						YOffset(yOffset)

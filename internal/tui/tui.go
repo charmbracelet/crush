@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -52,6 +51,7 @@ type appModel struct {
 
 	// Session
 	selectedSessionID string // The ID of the currently selected session
+	fullHelp          bool   // Whether to show full help text
 }
 
 // Init initializes the application model and returns initial commands.
@@ -220,16 +220,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+t" {
-			go a.app.Permissions.Request(permission.CreatePermissionRequest{
-				SessionID: "123",
-				ToolName:  "bash",
-				Action:    "execute",
-				Params: tools.BashPermissionsParams{
-					Command: "ls -la",
-				},
-			})
-		}
 		return a, a.handleKeyPressMsg(msg)
 	}
 	s, _ := a.status.Update(msg)

@@ -209,7 +209,7 @@ func (p *chatPage) Bindings() []key.Binding {
 
 func NewChatPage(app *app.App) ChatPage {
 	sidebarContainer := layout.NewContainer(
-		sidebar.NewSidebarCmp(app.LSPClients),
+		sidebar.NewSidebarCmp(app.History, app.LSPClients),
 		layout.WithPadding(1, 1, 1, 1),
 	)
 	editorContainer := layout.NewContainer(

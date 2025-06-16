@@ -38,6 +38,7 @@ func Title(title string, width int) string {
 type StatusOpts struct {
 	Icon             string
 	IconColor        color.Color
+	NoIcon           bool // If true, no icon will be displayed
 	Title            string
 	TitleColor       color.Color
 	Description      string
@@ -51,6 +52,8 @@ func Status(ops StatusOpts, width int) string {
 	iconColor := t.Success
 	if ops.Icon != "" {
 		icon = ops.Icon
+	} else if ops.NoIcon {
+		icon = ""
 	}
 	if ops.IconColor != nil {
 		iconColor = ops.IconColor
@@ -65,7 +68,6 @@ func Status(ops StatusOpts, width int) string {
 	if ops.DescriptionColor != nil {
 		descriptionColor = ops.DescriptionColor
 	}
-	icon = t.S().Base.Foreground(iconColor).Render(icon)
 	title = t.S().Base.Foreground(titleColor).Render(title)
 	if description != "" {
 		extraContent := len(ops.ExtraContent)
@@ -75,11 +77,12 @@ func Status(ops StatusOpts, width int) string {
 		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContent, "…")
 	}
 	description = t.S().Base.Foreground(descriptionColor).Render(description)
-	content := []string{
-		icon,
-		title,
-		description,
+
+	content := []string{}
+	if icon != "" {
+		content = append(content, t.S().Base.Foreground(iconColor).Render(icon))
 	}
+	content = append(content, title, description)
 	if ops.ExtraContent != "" {
 		content = append(content, ops.ExtraContent)
 	}

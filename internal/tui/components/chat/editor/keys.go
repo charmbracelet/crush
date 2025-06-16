@@ -2,7 +2,6 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 type EditorKeyMap struct {
@@ -23,10 +22,18 @@ func DefaultEditorKeyMap() EditorKeyMap {
 	}
 }
 
+// KeyBindings implements layout.KeyMapProvider
+func (k EditorKeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Send,
+		k.OpenEditor,
+	}
+}
+
 // FullHelp implements help.KeyMap.
 func (k EditorKeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := layout.KeyMapToSlice(k)
+	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])

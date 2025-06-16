@@ -2,7 +2,6 @@ package commands
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 type CommandsDialogKeyMap struct {
@@ -38,10 +37,21 @@ func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 	}
 }
 
+// KeyBindings implements layout.KeyMapProvider
+func (k CommandsDialogKeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Select,
+		k.Next,
+		k.Previous,
+		k.Tab,
+		k.Close,
+	}
+}
+
 // FullHelp implements help.KeyMap.
 func (k CommandsDialogKeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := layout.KeyMapToSlice(k)
+	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])
@@ -86,10 +96,19 @@ func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
 	}
 }
 
+// KeyBindings implements layout.KeyMapProvider
+func (k ArgumentsDialogKeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Confirm,
+		k.Next,
+		k.Previous,
+	}
+}
+
 // FullHelp implements help.KeyMap.
 func (k ArgumentsDialogKeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := layout.KeyMapToSlice(k)
+	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])

@@ -1,8 +1,6 @@
 package layout
 
 import (
-	"reflect"
-
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )

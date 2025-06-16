@@ -18,7 +18,6 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -47,12 +46,6 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
-}
-
-type DeleteAttachmentKeyMaps struct {
-	AttachmentDeleteMode key.Binding
-	Escape               key.Binding
-	DeleteAllAttachments key.Binding
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -372,7 +365,7 @@ func (c *editorCmp) IsFocused() bool {
 }
 
 func (c *editorCmp) Bindings() []key.Binding {
-	return layout.KeyMapToSlice(c.keyMap)
+	return c.keyMap.KeyBindings()
 }
 
 func NewEditorCmp(app *app.App) util.Model {

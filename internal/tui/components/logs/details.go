@@ -5,11 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/logging"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -18,7 +17,6 @@ import (
 type DetailComponent interface {
 	util.Model
 	layout.Sizeable
-	layout.Bindings
 }
 
 type detailCmp struct {
@@ -170,10 +168,6 @@ func (i *detailCmp) SetSize(width int, height int) tea.Cmd {
 	i.viewport.SetHeight(i.height - 4)
 	i.updateContent()
 	return nil
-}
-
-func (i *detailCmp) BindingKeys() []key.Binding {
-	return layout.KeyMapToSlice(i.viewport.KeyMap)
 }
 
 func NewLogsDetails() DetailComponent {

@@ -1,29 +1,27 @@
-# Chat Page
+## TODOs before release
 
-## Landing page
-
-- [x] Implement the logo landing page
-- [x] Add cwd improved
-- [x] Implement Active LSPs
-- [x] Implement Active MCPs
-
-## Dialogs
-
-- [x] Cleanup Commands
-- [x] Sessions dialog
-- [x] Models
-- [x] Move sessions and model dialog to the commands
-- [x] Add sessions shortuct
-- [ ] Add all posible actions to the commands
-
-## Investigate
-
+- [~] Implement help
+  - [ ] Show full help
+  - [ ] Make help dependent on the focused pane and page
 - [ ] Events when tool error
-- [ ] Fancy Spinner
-
-## Messages
-
 - [ ] Fix issue with numbers (padding)
-- [ ] Run tools in parallel and add the responses in parallel
-- [ ] Handle parallel permission calls
-- [ ] Weird behavior sometimes the message does not update
+- [ ] Fancy Spinner
+- [ ] Add all possible actions to the commands
+- [ ] Parallel tool calls and permissions
+  - [ ] Run the tools in parallel and add results in parallel
+  - [ ] Show multiple permissions dialogs
+- [ ] Investigate messages issues
+  - [ ] Weird behavior sometimes the message does not update
+  - [ ] Message length (I saw the message go beyond the correct length when there are errors)
+  - [ ] Address UX issues
+- [ ] Implement current model in the sidebar
+- [ ] Implement changed files
+- [ ] Implement responsive mode
+- [ ] Revisit the core list component
+  - [ ] This component has become super complex we might need to fix this.
+- [ ] General cleanup and documentation
+- [ ] Update the readme
+
+## Maybe
+
+- [ ] Revisit the provider/model/configs

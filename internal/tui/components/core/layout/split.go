@@ -1,7 +1,7 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/help"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -19,7 +19,7 @@ const (
 type SplitPaneLayout interface {
 	util.Model
 	Sizeable
-	Bindings
+	Help
 	SetLeftPanel(panel Container) tea.Cmd
 	SetRightPanel(panel Container) tea.Cmd
 	SetBottomPanel(panel Container) tea.Cmd
@@ -269,24 +269,23 @@ func (s *splitPaneLayout) ClearBottomPanel() tea.Cmd {
 	return nil
 }
 
-func (s *splitPaneLayout) BindingKeys() []key.Binding {
-	keys := []key.Binding{}
+func (s *splitPaneLayout) Help() help.KeyMap {
 	if s.leftPanel != nil {
-		if b, ok := s.leftPanel.(Bindings); ok {
-			keys = append(keys, b.BindingKeys()...)
+		if b, ok := s.leftPanel.(Help); ok && s.leftPanel.IsFocused() {
+			return b.Help()
 		}
 	}
 	if s.rightPanel != nil {
-		if b, ok := s.rightPanel.(Bindings); ok {
-			keys = append(keys, b.BindingKeys()...)
+		if b, ok := s.rightPanel.(Help); ok && s.rightPanel.IsFocused() {
+			return b.Help()
 		}
 	}
 	if s.bottomPanel != nil {
-		if b, ok := s.bottomPanel.(Bindings); ok {
-			keys = append(keys, b.BindingKeys()...)
+		if b, ok := s.bottomPanel.(Help); ok && s.bottomPanel.IsFocused() {
+			return b.Help()
 		}
 	}
-	return keys
+	return nil
 }
 
 func (s *splitPaneLayout) FocusPanel(panel LayoutPanel) tea.Cmd {

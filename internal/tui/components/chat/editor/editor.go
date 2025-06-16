@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
-	"github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -325,13 +324,6 @@ func (m *editorCmp) attachmentsContent() string {
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 	return content
-}
-
-func (m *editorCmp) BindingKeys() []key.Binding {
-	bindings := []key.Binding{}
-	bindings = append(bindings, layout.KeyMapToSlice(m.keyMap)...)
-	bindings = append(bindings, layout.KeyMapToSlice(DeleteKeyMaps)...)
-	return bindings
 }
 
 func (m *editorCmp) SetPosition(x, y int) tea.Cmd {

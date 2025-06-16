@@ -19,16 +19,12 @@ type Sizeable interface {
 	GetSize() (int, int)
 }
 
-type Bindings interface {
-	BindingKeys() []key.Binding
+type Help interface {
+	Help() help.KeyMap
 }
 
 type Positionable interface {
 	SetPosition(x, y int) tea.Cmd
-}
-
-type Help interface {
-	Help() help.KeyMap
 }
 
 func KeyMapToSlice(t any) (bindings []key.Binding) {

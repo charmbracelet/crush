@@ -42,6 +42,7 @@ type StatusOpts struct {
 	TitleColor       color.Color
 	Description      string
 	DescriptionColor color.Color
+	ExtraContent     string // Additional content to append after the description
 }
 
 func Status(ops StatusOpts, width int) string {
@@ -67,14 +68,23 @@ func Status(ops StatusOpts, width int) string {
 	icon = t.S().Base.Foreground(iconColor).Render(icon)
 	title = t.S().Base.Foreground(titleColor).Render(title)
 	if description != "" {
-		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2, "…")
+		extraContent := len(ops.ExtraContent)
+		if extraContent > 0 {
+			extraContent += 1
+		}
+		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContent, "…")
 	}
 	description = t.S().Base.Foreground(descriptionColor).Render(description)
-	return strings.Join([]string{
+	content := []string{
 		icon,
 		title,
 		description,
-	}, " ")
+	}
+	if ops.ExtraContent != "" {
+		content = append(content, ops.ExtraContent)
+	}
+
+	return strings.Join(content, " ")
 }
 
 type ButtonOpts struct {

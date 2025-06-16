@@ -3,7 +3,8 @@
 - [x] Implement help
   - [x] Show full help
   - [x] Make help dependent on the focused pane and page
-- [ ] Implement current model in the sidebar
+- [x] Implement current model in the sidebar
+- [x] Implement LSP errors
 - [ ] Implement changed files
 - [ ] Events when tool error
 - [ ] Support bash commands
@@ -23,6 +24,7 @@
   - [ ] Address UX issues
   - [ ] Fix issue with numbers (padding) view tool
 - [ ] Implement responsive mode
+- [ ] Update interactive mode to use the spinner
 - [ ] Revisit the core list component
   - [ ] This component has become super complex we might need to fix this.
 - [ ] Investigate ways to make the spinner less CPU intensive

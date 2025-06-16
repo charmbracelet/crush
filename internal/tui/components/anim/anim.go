@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	charCyclingFPS  = time.Second / 8  // Reduced from 22 to 8 FPS for better CPU efficiency
-	colorCycleFPS   = time.Second / 3  // Reduced from 5 to 3 FPS
-	maxCyclingChars = 60               // Reduced from 120 to 60 characters
+	charCyclingFPS  = time.Second / 8 // Reduced from 22 to 8 FPS for better CPU efficiency
+	colorCycleFPS   = time.Second / 3 // Reduced from 5 to 3 FPS
+	maxCyclingChars = 60              // Reduced from 120 to 60 characters
 )
 
 var (

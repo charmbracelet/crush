@@ -211,3 +211,27 @@ func PrettyPath(path string) string {
 	}
 	return path
 }
+
+func DirTrim(pwd string, lim int) string {
+	var (
+		out string
+		sep = string(filepath.Separator)
+	)
+	dirs := strings.Split(pwd, sep)
+	if lim > len(dirs)-1 || lim <= 0 {
+		return pwd
+	}
+	for i := len(dirs) - 1; i > 0; i-- {
+		out = sep + out
+		if i == len(dirs)-1 {
+			out = dirs[i]
+		} else if i >= len(dirs)-lim {
+			out = string(dirs[i][0]) + out
+		} else {
+			out = "..." + out
+			break
+		}
+	}
+	out = filepath.Join("~", out)
+	return out
+}

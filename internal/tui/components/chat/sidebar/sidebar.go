@@ -1,12 +1,16 @@
 package sidebar
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -21,11 +25,21 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
 	logoBreakpoint = 65
 )
+
+type SessionFile struct {
+	FilePath  string
+	Additions int
+	Deletions int
+}
+type SessionFilesMsg struct {
+	Files []SessionFile
+}
 
 type Sidebar interface {
 	util.Model
@@ -38,11 +52,14 @@ type sidebarCmp struct {
 	logo          string
 	cwd           string
 	lspClients    map[string]*lsp.Client
+	history       history.Service
+	files         []SessionFile
 }
 
-func NewSidebarCmp(lspClients map[string]*lsp.Client) Sidebar {
+func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client) Sidebar {
 	return &sidebarCmp{
 		lspClients: lspClients,
+		history:    history,
 	}
 }
 
@@ -58,6 +75,12 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.ID != m.session.ID {
 			m.session = msg
 		}
+		return m, m.loadSessionFiles
+	case SessionFilesMsg:
+		m.files = msg.Files
+		logging.Info("Loaded session files", "count", len(m.files))
+		return m, nil
+
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
 	case pubsub.Event[session.Session]:
@@ -85,6 +108,8 @@ func (m *sidebarCmp) View() tea.View {
 		"",
 		m.currentModelBlock(),
 		"",
+		m.filesBlock(),
+		"",
 		m.lspBlock(),
 		"",
 		m.mcpBlock(),
@@ -93,6 +118,58 @@ func (m *sidebarCmp) View() tea.View {
 	return tea.NewView(
 		lipgloss.JoinVertical(lipgloss.Left, parts...),
 	)
+}
+
+func (m *sidebarCmp) loadSessionFiles() tea.Msg {
+	files, err := m.history.ListBySession(context.Background(), m.session.ID)
+	if err != nil {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  err.Error(),
+		}
+	}
+
+	type fileHistory struct {
+		initialVersion history.File
+		latestVersion  history.File
+	}
+
+	fileMap := make(map[string]fileHistory)
+
+	for _, file := range files {
+		if existing, ok := fileMap[file.Path]; ok {
+			// Update the latest version
+			if existing.latestVersion.CreatedAt < file.CreatedAt {
+				existing.latestVersion = file
+			}
+			if file.Version == history.InitialVersion {
+				existing.initialVersion = file
+			}
+			fileMap[file.Path] = existing
+		} else {
+			// Add the initial version
+			fileMap[file.Path] = fileHistory{
+				initialVersion: file,
+				latestVersion:  file,
+			}
+		}
+	}
+
+	sessionFiles := make([]SessionFile, 0, len(fileMap))
+	for path, fh := range fileMap {
+		if fh.initialVersion.Version == history.InitialVersion {
+			_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
+			sessionFiles = append(sessionFiles, SessionFile{
+				FilePath:  path,
+				Additions: additions,
+				Deletions: deletions,
+			})
+		}
+	}
+
+	return SessionFilesMsg{
+		Files: sessionFiles,
+	}
 }
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
@@ -120,6 +197,59 @@ func (m *sidebarCmp) logoBlock(compact bool) string {
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
 	})
+}
+
+func (m *sidebarCmp) filesBlock() string {
+	maxWidth := min(m.width, 58)
+	t := styles.CurrentTheme()
+
+	section := t.S().Muted.Render(
+		core.Section("Files", maxWidth),
+	)
+
+	if len(m.files) == 0 {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			section,
+			"",
+			t.S().Base.Foreground(t.Border).Render("None"),
+		)
+	}
+
+	fileList := []string{section, ""}
+
+	for _, file := range m.files {
+		// Extract just the filename from the path
+
+		// Create status indicators for additions/deletions
+		var statusParts []string
+		if file.Additions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
+		}
+		if file.Deletions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
+		}
+
+		extraContent := strings.Join(statusParts, " ")
+		filePath := fileutil.DirTrim(fileutil.PrettyPath(file.FilePath), 2)
+		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
+		fileList = append(fileList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:    t.FgMuted,
+					NoIcon:       true,
+					Title:        filePath,
+					ExtraContent: extraContent,
+				},
+				m.width,
+			),
+		)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		fileList...,
+	)
 }
 
 func (m *sidebarCmp) lspBlock() string {
@@ -177,7 +307,6 @@ func (m *sidebarCmp) lspBlock() string {
 			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s%d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
 		}
 
-		logging.Info("LSP Errors", "errors", errs)
 		lspList = append(lspList,
 			core.Status(
 				core.StatusOpts{

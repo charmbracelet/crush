@@ -5,7 +5,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	logsComponents "github.com/charmbracelet/crush/internal/tui/components/logs"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"

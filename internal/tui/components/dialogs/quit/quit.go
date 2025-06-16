@@ -4,7 +4,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
-	"github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -18,7 +17,6 @@ const (
 // QuitDialog represents a confirmation dialog for quitting the application.
 type QuitDialog interface {
 	dialogs.DialogModel
-	layout.Bindings
 }
 
 type quitDialogCmp struct {
@@ -105,10 +103,6 @@ func (q *quitDialogCmp) View() tea.View {
 	return tea.NewView(
 		quitDialogStyle.Render(content),
 	)
-}
-
-func (q *quitDialogCmp) BindingKeys() []key.Binding {
-	return layout.KeyMapToSlice(q.keymap)
 }
 
 func (q *quitDialogCmp) Position() (int, int) {

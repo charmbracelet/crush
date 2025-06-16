@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )

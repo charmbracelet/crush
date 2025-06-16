@@ -5,12 +5,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/table"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -19,7 +18,6 @@ import (
 type TableComponent interface {
 	util.Model
 	layout.Sizeable
-	layout.Bindings
 }
 
 type tableCmp struct {
@@ -134,10 +132,6 @@ func (i *tableCmp) SetSize(width int, height int) tea.Cmd {
 		},
 	})
 	return nil
-}
-
-func (i *tableCmp) BindingKeys() []key.Binding {
-	return layout.KeyMapToSlice(i.table.KeyMap)
 }
 
 func (i *tableCmp) setRows() {

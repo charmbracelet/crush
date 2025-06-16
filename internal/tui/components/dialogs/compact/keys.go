@@ -2,7 +2,7 @@ package compact
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 // KeyMap defines the key bindings for the compact dialog.

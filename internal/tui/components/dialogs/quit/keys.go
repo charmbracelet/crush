@@ -2,7 +2,7 @@ package quit
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/tui/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 )
 
 // KeyMap defines the keyboard bindings for the quit dialog.

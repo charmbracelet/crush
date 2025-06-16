@@ -1,7 +1,7 @@
 package layout
 
 import (
-	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/help"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -11,7 +11,7 @@ import (
 type Container interface {
 	util.Model
 	Sizeable
-	Bindings
+	Help
 	Positionable
 	Focusable
 }
@@ -157,11 +157,11 @@ func (c *container) SetPosition(x, y int) tea.Cmd {
 	return nil
 }
 
-func (c *container) BindingKeys() []key.Binding {
-	if b, ok := c.content.(Bindings); ok {
-		return b.BindingKeys()
+func (c *container) Help() help.KeyMap {
+	if b, ok := c.content.(Help); ok {
+		return b.Help()
 	}
-	return []key.Binding{}
+	return nil
 }
 
 // Blur implements Container.

@@ -434,7 +434,7 @@ func isBinaryFile(filePath string) bool {
 	}
 
 	// Check for null bytes (common in binary files)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if buffer[i] == 0 {
 			return true
 		}

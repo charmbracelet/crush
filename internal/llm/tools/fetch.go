@@ -69,6 +69,11 @@ func NewFetchTool(permissions permission.Service) BaseTool {
 	return &fetchTool{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 		permissions: permissions,
 	}
@@ -136,25 +141,26 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	client := t.client
+	// Handle timeout with context
+	requestCtx := ctx
 	if params.Timeout > 0 {
 		maxTimeout := 120 // 2 minutes
 		if params.Timeout > maxTimeout {
 			params.Timeout = maxTimeout
 		}
-		client = &http.Client{
-			Timeout: time.Duration(params.Timeout) * time.Second,
-		}
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+		defer cancel()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)
+	req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", "crush/1.0")
 
-	resp, err := client.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 	}

@@ -24,14 +24,16 @@ type EditParams struct {
 }
 
 type EditPermissionsParams struct {
-	FilePath string `json:"file_path"`
-	Diff     string `json:"diff"`
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
 }
 
 type EditResponseMetadata struct {
-	Diff      string `json:"diff"`
-	Additions int    `json:"additions"`
-	Removals  int    `json:"removals"`
+	Additions  int    `json:"additions"`
+	Removals   int    `json:"removals"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
 }
 
 type editTool struct {
@@ -191,7 +193,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
 
-	diff, additions, removals := diff.GenerateDiff(
+	_, additions, removals := diff.GenerateDiff(
 		"",
 		content,
 		filePath,
@@ -209,8 +211,9 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
 			Params: EditPermissionsParams{
-				FilePath: filePath,
-				Diff:     diff,
+				FilePath:   filePath,
+				OldContent: "",
+				NewContent: content,
 			},
 		},
 	)
@@ -243,9 +246,10 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	return WithResponseMetadata(
 		NewTextResponse("File created: "+filePath),
 		EditResponseMetadata{
-			Diff:      diff,
-			Additions: additions,
-			Removals:  removals,
+			OldContent: "",
+			NewContent: content,
+			Additions:  additions,
+			Removals:   removals,
 		},
 	), nil
 }
@@ -301,7 +305,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
 
-	diff, additions, removals := diff.GenerateDiff(
+	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
 		filePath,
@@ -320,8 +324,9 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
 			Params: EditPermissionsParams{
-				FilePath: filePath,
-				Diff:     diff,
+				FilePath:   filePath,
+				OldContent: oldContent,
+				NewContent: newContent,
 			},
 		},
 	)
@@ -362,9 +367,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	return WithResponseMetadata(
 		NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
-			Diff:      diff,
-			Additions: additions,
-			Removals:  removals,
+			OldContent: oldContent,
+			NewContent: newContent,
+			Additions:  additions,
+			Removals:   removals,
 		},
 	), nil
 }
@@ -422,7 +428,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	if sessionID == "" || messageID == "" {
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
-	diff, additions, removals := diff.GenerateDiff(
+	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
 		filePath,
@@ -440,8 +446,9 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),
 			Params: EditPermissionsParams{
-				FilePath: filePath,
-				Diff:     diff,
+				FilePath:   filePath,
+				OldContent: oldContent,
+				NewContent: newContent,
 			},
 		},
 	)
@@ -482,8 +489,9 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	return WithResponseMetadata(
 		NewTextResponse("Content replaced in file: "+filePath),
 		EditResponseMetadata{
-			Diff:      diff,
-			Additions: additions,
-			Removals:  removals,
+			OldContent: oldContent,
+			NewContent: newContent,
+			Additions:  additions,
+			Removals:   removals,
 		}), nil
 }

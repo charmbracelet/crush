@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/crush/internal/exp/diffview"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -143,4 +145,13 @@ func SelectableButtons(buttons []ButtonOpts, spacing string) string {
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}
+
+func DiffFormatter() *diffview.DiffView {
+	formatDiff := diffview.New()
+	style := chroma.MustNewStyle("crush", styles.GetChromaTheme())
+	diff := formatDiff.
+		SyntaxHightlight(true).
+		ChromaStyle(style)
+	return diff
 }

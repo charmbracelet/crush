@@ -203,8 +203,8 @@ func (m *sidebarCmp) filesBlock() string {
 	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
-	section := t.S().Muted.Render(
-		core.Section("Files", maxWidth),
+	section := t.S().Subtle.Render(
+		core.Section("Modified Files", maxWidth),
 	)
 
 	if len(m.files) == 0 {
@@ -256,7 +256,7 @@ func (m *sidebarCmp) lspBlock() string {
 	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
-	section := t.S().Muted.Render(
+	section := t.S().Subtle.Render(
 		core.Section("LSPs", maxWidth),
 	)
 
@@ -330,7 +330,7 @@ func (m *sidebarCmp) mcpBlock() string {
 	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
-	section := t.S().Muted.Render(
+	section := t.S().Subtle.Render(
 		core.Section("MCPs", maxWidth),
 	)
 
@@ -393,8 +393,8 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 
 	formattedCost := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("$%.2f", cost))
 
-	formattedTokens = baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := baseStyle.Foreground(t.FgSubtle).Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedTokens = baseStyle.Foreground(t.FgSubtle).Render(fmt.Sprintf("(%s)", formattedTokens))
+	formattedPercentage := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("%d%%", int(percentage)))
 	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 	if percentage > 80 {
 		// add the warning icon
@@ -416,8 +416,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 	modelName := t.S().Text.Render(model.Name)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
-		// section,
-		// "",
 		modelInfo,
 	}
 	if s.session.ID != "" {

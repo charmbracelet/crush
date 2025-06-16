@@ -189,6 +189,13 @@ echo $EXEC_EXIT_CODE > %s
 
 	done := make(chan bool)
 	go func() {
+		// Use exponential backoff polling
+		pollInterval := 1 * time.Millisecond
+		maxPollInterval := 100 * time.Millisecond
+
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -197,7 +204,7 @@ echo $EXEC_EXIT_CODE > %s
 				done <- true
 				return
 
-			case <-time.After(10 * time.Millisecond):
+			case <-ticker.C:
 				if fileExists(statusFile) && fileSize(statusFile) > 0 {
 					done <- true
 					return
@@ -211,6 +218,15 @@ echo $EXEC_EXIT_CODE > %s
 						done <- true
 						return
 					}
+				}
+
+				// Exponential backoff to reduce CPU usage for longer-running commands
+				if pollInterval < maxPollInterval {
+					pollInterval = time.Duration(float64(pollInterval) * 1.5)
+					if pollInterval > maxPollInterval {
+						pollInterval = maxPollInterval
+					}
+					ticker.Reset(pollInterval)
 				}
 			}
 		}

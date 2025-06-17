@@ -1,0 +1,48 @@
+{
+  "From": "main.go",
+  "To": "main.go",
+  "Hunks": [
+    {
+      "FromLine": 3,
+      "ToLine": 3,
+      "Lines": [
+        {
+          "Kind": 2,
+          "Content": "\timport (\n"
+        },
+        {
+          "Kind": 2,
+          "Content": "\t\t\"fmt\"\n"
+        },
+        {
+          "Kind": 2,
+          "Content": "\t)\n"
+        },
+        {
+          "Kind": 2,
+          "Content": "\n"
+        },
+        {
+          "Kind": 2,
+          "Content": "\tfunc main() {\n"
+        },
+        {
+          "Kind": 0,
+          "Content": "\t\tfmt.Println(\"Hello, World!\")\n"
+        },
+        {
+          "Kind": 1,
+          "Content": "\t\tcontent := \"Hello, World!\"\n"
+        },
+        {
+          "Kind": 1,
+          "Content": "\t\tfmt.Println(content)\n"
+        },
+        {
+          "Kind": 2,
+          "Content": "\t}"
+        }
+      ]
+    }
+  ]
+}

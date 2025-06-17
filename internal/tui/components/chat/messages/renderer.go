@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fileutil"
 	"github.com/charmbracelet/crush/internal/highlight"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss/v2/tree"
@@ -148,7 +148,6 @@ func init() {
 	registry.register(tools.GrepToolName, func() renderer { return grepRenderer{} })
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
-	registry.register(tools.PatchToolName, func() renderer { return patchRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
@@ -258,9 +257,12 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 			return renderPlainContent(v, v.result.Content)
 		}
 
-		trunc := truncateHeight(meta.Diff, responseContextHeight)
-		diffView, _ := diff.FormatDiff(trunc, diff.WithTotalWidth(v.textWidth()-2))
-		return diffView
+		formatter := core.DiffFormatter().
+			Before(fileutil.PrettyPath(params.FilePath), meta.OldContent).
+			After(fileutil.PrettyPath(params.FilePath), meta.NewContent).
+			Split().
+			Width(v.textWidth() - 2) // -2 for padding
+		return formatter.String()
 	})
 }
 
@@ -443,38 +445,6 @@ func (sr sourcegraphRenderer) Render(v *toolCallCmp) string {
 
 	return sr.renderWithParams(v, "Sourcegraph", args, func() string {
 		return renderPlainContent(v, v.result.Content)
-	})
-}
-
-// -----------------------------------------------------------------------------
-//  Patch renderer
-// -----------------------------------------------------------------------------
-
-// patchRenderer handles multi-file patches with change summaries
-type patchRenderer struct {
-	baseRenderer
-}
-
-// Render displays patch summary with file count and change statistics
-func (pr patchRenderer) Render(v *toolCallCmp) string {
-	var params tools.PatchParams
-	if err := pr.unmarshalParams(v.call.Input, &params); err != nil {
-		return pr.renderError(v, "Invalid patch parameters")
-	}
-
-	args := newParamBuilder().addMain("multiple files").build()
-
-	return pr.renderWithParams(v, "Patch", args, func() string {
-		var meta tools.PatchResponseMetadata
-		if err := pr.unmarshalParams(v.result.Metadata, &meta); err != nil {
-			return renderPlainContent(v, v.result.Content)
-		}
-
-		summary := fmt.Sprintf("Changed %d files (%d+ %d-)",
-			len(meta.FilesChanged), meta.Additions, meta.Removals)
-		filesList := strings.Join(meta.FilesChanged, "\n")
-
-		return renderPlainContent(v, summary+"\n\n"+filesList)
 	})
 }
 
@@ -711,8 +681,6 @@ func prettifyToolName(name string) string {
 		return "View"
 	case tools.WriteToolName:
 		return "Write"
-	case tools.PatchToolName:
-		return "Patch"
 	default:
 		return name
 	}

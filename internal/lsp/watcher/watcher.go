@@ -257,7 +257,10 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 		}
 	}
 
-	// For each pattern, find and open matching files
+	// Collect all files to open first
+	var filesToOpen []string
+
+	// For each pattern, find matching files
 	for _, pattern := range patterns {
 		// Use doublestar.Glob to find files matching the pattern (supports ** patterns)
 		matches, err := doublestar.Glob(os.DirFS(w.workspacePath), pattern)
@@ -278,7 +281,23 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 				continue
 			}
 
-			// Open the file
+			filesToOpen = append(filesToOpen, fullPath)
+
+			// Limit the number of files per pattern
+			if len(filesToOpen) >= 5 && (serverName != "java" && serverName != "jdtls") {
+				break
+			}
+		}
+	}
+
+	// Open files in batches to reduce overhead
+	batchSize := 3
+	for i := 0; i < len(filesToOpen); i += batchSize {
+		end := min(i+batchSize, len(filesToOpen))
+
+		// Open batch of files
+		for j := i; j < end; j++ {
+			fullPath := filesToOpen[j]
 			if err := w.client.OpenFile(ctx, fullPath); err != nil {
 				if cnf.DebugLSP {
 					logging.Debug("Error opening high-priority file", "path", fullPath, "error", err)
@@ -289,14 +308,11 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 					logging.Debug("Opened high-priority file", "path", fullPath)
 				}
 			}
+		}
 
-			// Add a small delay to prevent overwhelming the server
-			time.Sleep(20 * time.Millisecond)
-
-			// Limit the number of files opened per pattern
-			if filesOpened >= 5 && (serverName != "java" && serverName != "jdtls") {
-				break
-			}
+		// Only add delay between batches, not individual files
+		if end < len(filesToOpen) {
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 

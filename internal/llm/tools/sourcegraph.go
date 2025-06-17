@@ -129,6 +129,11 @@ func NewSourcegraphTool() BaseTool {
 	return &sourcegraphTool{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 	}
 }
@@ -178,15 +183,17 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	if params.ContextWindow <= 0 {
 		params.ContextWindow = 10 // Default context window
 	}
-	client := t.client
+
+	// Handle timeout with context
+	requestCtx := ctx
 	if params.Timeout > 0 {
 		maxTimeout := 120 // 2 minutes
 		if params.Timeout > maxTimeout {
 			params.Timeout = maxTimeout
 		}
-		client = &http.Client{
-			Timeout: time.Duration(params.Timeout) * time.Second,
-		}
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+		defer cancel()
 	}
 
 	type graphqlRequest struct {
@@ -208,7 +215,7 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	graphqlQuery := string(graphqlQueryBytes)
 
 	req, err := http.NewRequestWithContext(
-		ctx,
+		requestCtx,
 		"POST",
 		"https://sourcegraph.com/.api/graphql",
 		bytes.NewBuffer([]byte(graphqlQuery)),
@@ -220,7 +227,7 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush/1.0")
 
-	resp, err := client.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 	}

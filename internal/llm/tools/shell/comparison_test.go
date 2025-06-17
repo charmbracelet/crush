@@ -31,7 +31,6 @@ func TestShellPerformanceComparison(t *testing.T) {
 	t.Logf("Quick command took: %v", duration)
 }
 
-
 // Benchmark CPU usage during polling
 func BenchmarkShellPolling(b *testing.B) {
 	tmpDir, err := os.MkdirTemp("", "shell-bench")

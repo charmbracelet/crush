@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -14,7 +12,7 @@ import (
 )
 
 const (
-	InitialVersion = "initial"
+	InitialVersion = 0
 )
 
 type File struct {
@@ -22,7 +20,7 @@ type File struct {
 	SessionID string
 	Path      string
 	Content   string
-	Version   string
+	Version   int64
 	CreatedAt int64
 	UpdatedAt int64
 }
@@ -35,7 +33,6 @@ type Service interface {
 	GetByPathAndSession(ctx context.Context, path, sessionID string) (File, error)
 	ListBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
-	Update(ctx context.Context, file File) (File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 }
@@ -71,30 +68,13 @@ func (s *service) CreateVersion(ctx context.Context, sessionID, path, content st
 	}
 
 	// Get the latest version
-	latestFile := files[0] // Files are ordered by created_at DESC
-	latestVersion := latestFile.Version
-
-	// Generate the next version
-	var nextVersion string
-	if latestVersion == InitialVersion {
-		nextVersion = "v1"
-	} else if strings.HasPrefix(latestVersion, "v") {
-		versionNum, err := strconv.Atoi(latestVersion[1:])
-		if err != nil {
-			// If we can't parse the version, just use a timestamp-based version
-			nextVersion = fmt.Sprintf("v%d", latestFile.CreatedAt)
-		} else {
-			nextVersion = fmt.Sprintf("v%d", versionNum+1)
-		}
-	} else {
-		// If the version format is unexpected, use a timestamp-based version
-		nextVersion = fmt.Sprintf("v%d", latestFile.CreatedAt)
-	}
+	latestFile := files[0] // Files are ordered by version DESC, created_at DESC
+	nextVersion := latestFile.Version + 1
 
 	return s.createWithVersion(ctx, sessionID, path, content, nextVersion)
 }
 
-func (s *service) createWithVersion(ctx context.Context, sessionID, path, content, version string) (File, error) {
+func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64) (File, error) {
 	// Maximum number of retries for transaction conflicts
 	const maxRetries = 3
 	var file File
@@ -126,16 +106,8 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 			// Check if this is a uniqueness constraint violation
 			if strings.Contains(txErr.Error(), "UNIQUE constraint failed") {
 				if attempt < maxRetries-1 {
-					// If we have retries left, generate a new version and try again
-					if strings.HasPrefix(version, "v") {
-						versionNum, parseErr := strconv.Atoi(version[1:])
-						if parseErr == nil {
-							version = fmt.Sprintf("v%d", versionNum+1)
-							continue
-						}
-					}
-					// If we can't parse the version, use a timestamp-based version
-					version = fmt.Sprintf("v%d", time.Now().Unix())
+					// If we have retries left, increment version and try again
+					version++
 					continue
 				}
 			}
@@ -196,20 +168,6 @@ func (s *service) ListLatestSessionFiles(ctx context.Context, sessionID string) 
 		files[i] = s.fromDBItem(dbFile)
 	}
 	return files, nil
-}
-
-func (s *service) Update(ctx context.Context, file File) (File, error) {
-	dbFile, err := s.q.UpdateFile(ctx, db.UpdateFileParams{
-		ID:      file.ID,
-		Content: file.Content,
-		Version: file.Version,
-	})
-	if err != nil {
-		return File{}, err
-	}
-	updatedFile := s.fromDBItem(dbFile)
-	s.Publish(pubsub.UpdatedEvent, updatedFile)
-	return updatedFile, nil
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {

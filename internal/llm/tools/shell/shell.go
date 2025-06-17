@@ -1,87 +1,323 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/charmbracelet/crush/internal/logging"
-	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/interp"
-	"mvdan.cc/sh/v3/syntax"
+	"syscall"
+	"time"
 )
 
 type PersistentShell struct {
-	env []string
-	cwd string
-	mu  sync.Mutex
+	cmd          *exec.Cmd
+	stdin        *os.File
+	isAlive      bool
+	cwd          string
+	mu           sync.Mutex
+	commandQueue chan *commandExecution
+}
+
+type commandExecution struct {
+	command    string
+	timeout    time.Duration
+	resultChan chan commandResult
+	ctx        context.Context
+}
+
+type commandResult struct {
+	stdout      string
+	stderr      string
+	exitCode    int
+	interrupted bool
+	err         error
 }
 
 var (
-	once          sync.Once
-	shellInstance *PersistentShell
+	shellInstance     *PersistentShell
+	shellInstanceOnce sync.Once
 )
 
-func GetPersistentShell(cwd string) *PersistentShell {
-	once.Do(func() {
-		shellInstance = newPersistentShell(cwd)
+func GetPersistentShell(workingDir string) *PersistentShell {
+	shellInstanceOnce.Do(func() {
+		shellInstance = newPersistentShell(workingDir)
 	})
+
+	if shellInstance == nil {
+		shellInstance = newPersistentShell(workingDir)
+	} else if !shellInstance.isAlive {
+		shellInstance = newPersistentShell(shellInstance.cwd)
+	}
+
 	return shellInstance
 }
 
 func newPersistentShell(cwd string) *PersistentShell {
-	return &PersistentShell{
-		cwd: cwd,
-		env: os.Environ(),
+	// Default to environment variable
+	shellPath := os.Getenv("SHELL")
+	if shellPath == "" {
+		shellPath = "/bin/bash"
+	}
+
+	// Default shell args
+	shellArgs := []string{"-l"}
+
+	cmd := exec.Command(shellPath, shellArgs...)
+	cmd.Dir = cwd
+
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil
+	}
+
+	cmd.Env = append(os.Environ(), "GIT_EDITOR=true")
+
+	err = cmd.Start()
+	if err != nil {
+		return nil
+	}
+
+	shell := &PersistentShell{
+		cmd:          cmd,
+		stdin:        stdinPipe.(*os.File),
+		isAlive:      true,
+		cwd:          cwd,
+		commandQueue: make(chan *commandExecution, 10),
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "Panic in shell command processor: %v\n", r)
+				shell.isAlive = false
+				close(shell.commandQueue)
+			}
+		}()
+		shell.processCommands()
+	}()
+
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			// Log the error if needed
+		}
+		shell.isAlive = false
+		close(shell.commandQueue)
+	}()
+
+	return shell
+}
+
+func (s *PersistentShell) processCommands() {
+	for cmd := range s.commandQueue {
+		result := s.execCommand(cmd.command, cmd.timeout, cmd.ctx)
+		cmd.resultChan <- result
 	}
 }
 
-func (s *PersistentShell) Exec(ctx context.Context, command string) (string, string, error) {
+func (s *PersistentShell) execCommand(command string, timeout time.Duration, ctx context.Context) commandResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil {
-		return "", "", fmt.Errorf("could not parse command: %w", err)
+	if !s.isAlive {
+		return commandResult{
+			stderr:   "Shell is not alive",
+			exitCode: 1,
+			err:      errors.New("shell is not alive"),
+		}
 	}
 
-	var stdout, stderr bytes.Buffer
-	runner, err := interp.New(
-		interp.StdIO(nil, &stdout, &stderr),
-		interp.Interactive(false),
-		interp.Env(expand.ListEnviron(s.env...)),
-		interp.Dir(s.cwd),
+	tempDir := os.TempDir()
+	stdoutFile := filepath.Join(tempDir, fmt.Sprintf("crush-stdout-%d", time.Now().UnixNano()))
+	stderrFile := filepath.Join(tempDir, fmt.Sprintf("crush-stderr-%d", time.Now().UnixNano()))
+	statusFile := filepath.Join(tempDir, fmt.Sprintf("crush-status-%d", time.Now().UnixNano()))
+	cwdFile := filepath.Join(tempDir, fmt.Sprintf("crush-cwd-%d", time.Now().UnixNano()))
+
+	defer func() {
+		os.Remove(stdoutFile)
+		os.Remove(stderrFile)
+		os.Remove(statusFile)
+		os.Remove(cwdFile)
+	}()
+
+	fullCommand := fmt.Sprintf(`
+eval %s < /dev/null > %s 2> %s
+EXEC_EXIT_CODE=$?
+pwd > %s
+echo $EXEC_EXIT_CODE > %s
+`,
+		shellQuote(command),
+		shellQuote(stdoutFile),
+		shellQuote(stderrFile),
+		shellQuote(cwdFile),
+		shellQuote(statusFile),
 	)
+
+	_, err := s.stdin.Write([]byte(fullCommand + "\n"))
 	if err != nil {
-		return "", "", fmt.Errorf("could not run command: %w", err)
+		return commandResult{
+			stderr:   fmt.Sprintf("Failed to write command to shell: %v", err),
+			exitCode: 1,
+			err:      err,
+		}
 	}
 
-	err = runner.Run(ctx, line)
-	s.cwd = runner.Dir
-	s.env = []string{}
-	for name, vr := range runner.Vars {
-		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
+	interrupted := false
+
+	startTime := time.Now()
+
+	done := make(chan bool)
+	go func() {
+		// Use exponential backoff polling
+		pollInterval := 1 * time.Millisecond
+		maxPollInterval := 100 * time.Millisecond
+
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				s.killChildren()
+				interrupted = true
+				done <- true
+				return
+
+			case <-ticker.C:
+				if fileExists(statusFile) && fileSize(statusFile) > 0 {
+					done <- true
+					return
+				}
+
+				if timeout > 0 {
+					elapsed := time.Since(startTime)
+					if elapsed > timeout {
+						s.killChildren()
+						interrupted = true
+						done <- true
+						return
+					}
+				}
+
+				// Exponential backoff to reduce CPU usage for longer-running commands
+				if pollInterval < maxPollInterval {
+					pollInterval = min(time.Duration(float64(pollInterval)*1.5), maxPollInterval)
+					ticker.Reset(pollInterval)
+				}
+			}
+		}
+	}()
+
+	<-done
+
+	stdout := readFileOrEmpty(stdoutFile)
+	stderr := readFileOrEmpty(stderrFile)
+	exitCodeStr := readFileOrEmpty(statusFile)
+	newCwd := readFileOrEmpty(cwdFile)
+
+	exitCode := 0
+	if exitCodeStr != "" {
+		fmt.Sscanf(exitCodeStr, "%d", &exitCode)
+	} else if interrupted {
+		exitCode = 143
+		stderr += "\nCommand execution timed out or was interrupted"
 	}
-	logging.InfoPersist("Command finished", "command", command, "err", err)
-	return stdout.String(), stderr.String(), err
+
+	if newCwd != "" {
+		s.cwd = strings.TrimSpace(newCwd)
+	}
+
+	return commandResult{
+		stdout:      stdout,
+		stderr:      stderr,
+		exitCode:    exitCode,
+		interrupted: interrupted,
+	}
 }
 
-func IsInterrupt(err error) bool {
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded)
+func (s *PersistentShell) killChildren() {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+
+	pgrepCmd := exec.Command("pgrep", "-P", fmt.Sprintf("%d", s.cmd.Process.Pid))
+	output, err := pgrepCmd.Output()
+	if err != nil {
+		return
+	}
+
+	for pidStr := range strings.SplitSeq(string(output), "\n") {
+		if pidStr = strings.TrimSpace(pidStr); pidStr != "" {
+			var pid int
+			fmt.Sscanf(pidStr, "%d", &pid)
+			if pid > 0 {
+				proc, err := os.FindProcess(pid)
+				if err == nil {
+					proc.Signal(syscall.SIGTERM)
+				}
+			}
+		}
+	}
 }
 
-func ExitCode(err error) int {
-	if err == nil {
+func (s *PersistentShell) Exec(ctx context.Context, command string, timeoutMs int) (string, string, int, bool, error) {
+	if !s.isAlive {
+		return "", "Shell is not alive", 1, false, errors.New("shell is not alive")
+	}
+
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+
+	resultChan := make(chan commandResult)
+	s.commandQueue <- &commandExecution{
+		command:    command,
+		timeout:    timeout,
+		resultChan: resultChan,
+		ctx:        ctx,
+	}
+
+	result := <-resultChan
+	return result.stdout, result.stderr, result.exitCode, result.interrupted, result.err
+}
+
+func (s *PersistentShell) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.isAlive {
+		return
+	}
+
+	s.stdin.Write([]byte("exit\n"))
+
+	s.cmd.Process.Kill()
+	s.isAlive = false
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func readFileOrEmpty(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
 		return 0
 	}
-	status, ok := interp.IsExitStatus(err)
-	if ok {
-		return int(status)
-	}
-	return 1
+	return info.Size()
 }

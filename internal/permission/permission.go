@@ -1,10 +1,12 @@
 package permission
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -44,9 +46,11 @@ type Service interface {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	sessionPermissions  []PermissionRequest
-	pendingRequests     sync.Map
-	autoApproveSessions []string
+	sessionPermissions    []PermissionRequest
+	sessionPermissionsMu  sync.RWMutex
+	pendingRequests       sync.Map
+	autoApproveSessions   []string
+	autoApproveSessionsMu sync.RWMutex
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -54,7 +58,10 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	if ok {
 		respCh.(chan bool) <- true
 	}
+
+	s.sessionPermissionsMu.Lock()
 	s.sessionPermissions = append(s.sessionPermissions, permission)
+	s.sessionPermissionsMu.Unlock()
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
@@ -72,9 +79,14 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(opts CreatePermissionRequest) bool {
-	if slices.Contains(s.autoApproveSessions, opts.SessionID) {
+	s.autoApproveSessionsMu.RLock()
+	autoApprove := slices.Contains(s.autoApproveSessions, opts.SessionID)
+	s.autoApproveSessionsMu.RUnlock()
+
+	if autoApprove {
 		return true
 	}
+
 	dir := filepath.Dir(opts.Path)
 	if dir == "." {
 		dir = config.WorkingDirectory()
@@ -89,11 +101,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		Params:      opts.Params,
 	}
 
+	s.sessionPermissionsMu.RLock()
 	for _, p := range s.sessionPermissions {
 		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
+			s.sessionPermissionsMu.RUnlock()
 			return true
 		}
 	}
+	s.sessionPermissionsMu.RUnlock()
 
 	respCh := make(chan bool, 1)
 
@@ -102,13 +117,22 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	// Wait for the response with a timeout
-	resp := <-respCh
-	return resp
+	// Wait for the response with a timeout to prevent indefinite blocking
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	select {
+	case resp := <-respCh:
+		return resp
+	case <-ctx.Done():
+		return false // Timeout - deny by default
+	}
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
+	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions = append(s.autoApproveSessions, sessionID)
+	s.autoApproveSessionsMu.Unlock()
 }
 
 func NewPermissionService() Service {

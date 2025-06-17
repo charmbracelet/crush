@@ -17,12 +17,23 @@ import (
 )
 
 const (
-	charCyclingFPS  = time.Second / 22
-	colorCycleFPS   = time.Second / 5
-	maxCyclingChars = 120
+	charCyclingFPS  = time.Second / 8 // 8 FPS for better CPU efficiency
+	colorCycleFPS   = time.Second / 3 // 3 FPS
+	maxCyclingChars = 60              // 60 characters
 )
 
-var charRunes = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
+var (
+	charRunes    = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
+	charRunePool = make([]rune, 1000) // Pre-generated pool of random characters
+	poolIndex    = 0
+)
+
+func init() {
+	// Pre-populate the character pool to avoid runtime random generation
+	for i := range charRunePool {
+		charRunePool[i] = charRunes[rand.IntN(len(charRunes))]
+	}
+}
 
 type charState int
 
@@ -41,7 +52,9 @@ type cyclingChar struct {
 }
 
 func (c cyclingChar) randomRune() rune {
-	return (charRunes)[rand.IntN(len(charRunes))] //nolint:gosec
+	// Use pre-generated pool instead of runtime random generation
+	poolIndex = (poolIndex + 1) % len(charRunePool)
+	return charRunePool[poolIndex]
 }
 
 func (c cyclingChar) state(start time.Time) charState {
@@ -126,14 +139,18 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	// color the cycling characters with a gradient ramp.
 	const minRampSize = 3
 	if n >= minRampSize {
-		// Note: double capacity for color cycling as we'll need to reverse and
-		// append the ramp for seamless transitions.
-		c.ramp = make([]lipgloss.Style, n, n*2) //nolint:mnd
+		// Optimized: single capacity allocation for color cycling
+		c.ramp = make([]lipgloss.Style, 0, n*2)
 		ramp := makeGradientRamp(n)
-		for i, color := range ramp {
-			c.ramp[i] = lipgloss.NewStyle().Foreground(color)
+		for _, color := range ramp {
+			c.ramp = append(c.ramp, lipgloss.NewStyle().Foreground(color))
 		}
-		c.ramp = append(c.ramp, reverse(c.ramp)...) // reverse and append for color cycling
+		// Create reversed copy for seamless color cycling
+		reversed := make([]lipgloss.Style, len(c.ramp))
+		for i, style := range c.ramp {
+			reversed[len(c.ramp)-1-i] = style
+		}
+		c.ramp = append(c.ramp, reversed...)
 	}
 
 	makeDelay := func(a int32, b time.Duration) time.Duration {
@@ -246,29 +263,28 @@ func (a anim) View() tea.View {
 		b strings.Builder
 	)
 
-	// Pre-allocate builder capacity to avoid reallocations.
-	// Estimate: cycling chars + label chars + ellipsis + style overhead.
+	// Optimized capacity calculation to reduce allocations
 	const (
-		bytesPerChar = 20 // ANSI styling
-		bufferSize   = 50 // ellipsis and safety margin
+		bytesPerChar = 15 // Reduced estimate for ANSI styling
+		bufferSize   = 30 // Reduced safety margin
 	)
 	estimatedCap := len(a.cyclingChars)*bytesPerChar + len(a.labelChars)*bytesPerChar + bufferSize
 	b.Grow(estimatedCap)
 
+	// Render cycling characters with gradient (if available)
 	for i, c := range a.cyclingChars {
 		if len(a.ramp) > i {
 			b.WriteString(a.ramp[i].Render(string(c.currentValue)))
-			continue
+		} else {
+			b.WriteRune(c.currentValue)
 		}
-		b.WriteRune(c.currentValue)
 	}
 
+	// Render label characters and ellipsis
 	if len(a.labelChars) > 1 {
 		textStyle := t.S().Text
 		for _, c := range a.labelChars {
-			b.WriteString(
-				textStyle.Render(string(c.currentValue)),
-			)
+			b.WriteString(textStyle.Render(string(c.currentValue)))
 		}
 		b.WriteString(textStyle.Render(a.ellipsis.View()))
 	}
@@ -295,13 +311,4 @@ func makeGradientRamp(length int) []color.Color {
 		c[i] = lipgloss.Color(step.Hex())
 	}
 	return c
-}
-
-func reverse[T any](in []T) []T {
-	out := make([]T, len(in))
-	copy(out, in[:])
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
 }

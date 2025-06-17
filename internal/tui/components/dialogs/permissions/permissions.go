@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -49,6 +50,11 @@ type permissionDialogCmp struct {
 	permission      permission.PermissionRequest
 	contentViewPort viewport.Model
 	selectedOption  int // 0: Allow, 1: Allow for session, 2: Deny
+
+	// Diff view state
+	diffSplitMode bool // true for split, false for unified
+	diffXOffset   int  // horizontal scroll offset
+	diffYOffset   int  // vertical scroll offset
 
 	keyMap KeyMap
 }
@@ -101,6 +107,21 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionDeny, Permission: p.permission}),
 			)
+		case key.Matches(msg, p.keyMap.ToggleDiffMode):
+			p.diffSplitMode = !p.diffSplitMode
+			return p, nil
+		case key.Matches(msg, p.keyMap.ScrollDown):
+			p.diffYOffset += 1
+			return p, nil
+		case key.Matches(msg, p.keyMap.ScrollUp):
+			p.diffYOffset = max(0, p.diffYOffset-1)
+			return p, nil
+		case key.Matches(msg, p.keyMap.ScrollLeft):
+			p.diffXOffset = max(0, p.diffXOffset-5)
+			return p, nil
+		case key.Matches(msg, p.keyMap.ScrollRight):
+			p.diffXOffset += 5
+			return p, nil
 		default:
 			// Pass other keys to viewport
 			viewPort, cmd := p.contentViewPort.Update(msg)
@@ -269,8 +290,15 @@ func (p *permissionDialogCmp) renderEditContent() string {
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
 			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
-			Split()
+			XOffset(p.diffXOffset).
+			YOffset(p.diffYOffset)
+		if p.diffSplitMode {
+			formatter = formatter.Split()
+		} else {
+			formatter = formatter.Unified()
+		}
 
 		diff := formatter.String()
 		contentHeight := min(p.height-9, lipgloss.Height(diff))
@@ -367,11 +395,13 @@ func (p *permissionDialogCmp) render() string {
 
 	// Render content based on tool type
 	var contentFinal string
+	var contentHelp string
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		contentFinal = p.renderBashContent()
 	case tools.EditToolName:
 		contentFinal = p.renderEditContent()
+		contentHelp = help.New().View(p.keyMap)
 	case tools.WriteToolName:
 		contentFinal = p.renderWriteContent()
 	case tools.FetchToolName:
@@ -381,8 +411,7 @@ func (p *permissionDialogCmp) render() string {
 	}
 	// Calculate content height dynamically based on window size
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Top,
+	strs := []string{
 		title,
 		"",
 		headerContent,
@@ -390,7 +419,11 @@ func (p *permissionDialogCmp) render() string {
 		"",
 		buttons,
 		"",
-	)
+	}
+	if contentHelp != "" {
+		strs = append(strs, "", contentHelp)
+	}
+	content := lipgloss.JoinVertical(lipgloss.Top, strs...)
 
 	return baseStyle.
 		Padding(0, 1).

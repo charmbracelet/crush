@@ -107,8 +107,11 @@ func (m *sidebarCmp) View() tea.View {
 		m.cwd,
 		"",
 		m.currentModelBlock(),
-		"",
-		m.filesBlock(),
+	)
+	if m.session.ID != "" {
+		parts = append(parts, "", m.filesBlock())
+	}
+	parts = append(parts,
 		"",
 		m.lspBlock(),
 		"",

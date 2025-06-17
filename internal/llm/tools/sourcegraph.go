@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -25,9 +24,7 @@ type SourcegraphResponseMetadata struct {
 }
 
 type sourcegraphTool struct {
-	client       *http.Client
-	clientPool   map[int]*http.Client
-	clientPoolMu sync.RWMutex
+	client *http.Client
 }
 
 const (
@@ -138,48 +135,7 @@ func NewSourcegraphTool() BaseTool {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		clientPool: make(map[int]*http.Client),
 	}
-}
-
-// getClientForTimeout returns a cached client for the given timeout or the default client
-func (t *sourcegraphTool) getClientForTimeout(timeout int) *http.Client {
-	if timeout <= 0 {
-		return t.client
-	}
-
-	maxTimeout := 120 // 2 minutes
-	if timeout > maxTimeout {
-		timeout = maxTimeout
-	}
-
-	// Check if we have a cached client for this timeout
-	t.clientPoolMu.RLock()
-	if client, exists := t.clientPool[timeout]; exists {
-		t.clientPoolMu.RUnlock()
-		return client
-	}
-	t.clientPoolMu.RUnlock()
-
-	// Create and cache a new client
-	t.clientPoolMu.Lock()
-	defer t.clientPoolMu.Unlock()
-
-	// Double-check in case another goroutine created it
-	if client, exists := t.clientPool[timeout]; exists {
-		return client
-	}
-
-	client := &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	t.clientPool[timeout] = client
-	return client
 }
 
 func (t *sourcegraphTool) Info() ToolInfo {
@@ -227,7 +183,18 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	if params.ContextWindow <= 0 {
 		params.ContextWindow = 10 // Default context window
 	}
-	client := t.getClientForTimeout(params.Timeout)
+
+	// Handle timeout with context
+	requestCtx := ctx
+	if params.Timeout > 0 {
+		maxTimeout := 120 // 2 minutes
+		if params.Timeout > maxTimeout {
+			params.Timeout = maxTimeout
+		}
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+		defer cancel()
+	}
 
 	type graphqlRequest struct {
 		Query     string `json:"query"`
@@ -248,7 +215,7 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	graphqlQuery := string(graphqlQueryBytes)
 
 	req, err := http.NewRequestWithContext(
-		ctx,
+		requestCtx,
 		"POST",
 		"https://sourcegraph.com/.api/graphql",
 		bytes.NewBuffer([]byte(graphqlQuery)),
@@ -260,7 +227,7 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush/1.0")
 
-	resp, err := client.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 	}

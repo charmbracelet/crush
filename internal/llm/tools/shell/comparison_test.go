@@ -3,7 +3,6 @@ package shell
 import (
 	"context"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -30,35 +29,6 @@ func TestShellPerformanceComparison(t *testing.T) {
 	assert.Empty(t, stderr)
 
 	t.Logf("Quick command took: %v", duration)
-}
-
-func TestShellCPUUsageComparison(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "shell-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
-
-	// Measure CPU and memory usage during a longer command
-	var m1, m2 runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&m1)
-
-	start := time.Now()
-	_, stderr, exitCode, _, err := shell.Exec(context.Background(), "sleep 0.1", 1000)
-	duration := time.Since(start)
-
-	runtime.ReadMemStats(&m2)
-
-	require.NoError(t, err)
-	assert.Equal(t, 0, exitCode)
-	assert.Empty(t, stderr)
-
-	memGrowth := m2.Alloc - m1.Alloc
-	t.Logf("Sleep 0.1s command took: %v", duration)
-	t.Logf("Memory growth during polling: %d bytes", memGrowth)
-	t.Logf("GC cycles during test: %d", m2.NumGC-m1.NumGC)
 }
 
 // Benchmark CPU usage during polling

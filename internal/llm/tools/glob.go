@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/logging"
 )
 
@@ -127,7 +127,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 }
 
 func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
-	cmdRg := fileutil.GetRgCmd(pattern)
+	cmdRg := fsext.GetRgCmd(pattern)
 	if cmdRg != nil {
 		cmdRg.Dir = searchPath
 		matches, err := runRipgrep(cmdRg, searchPath, limit)
@@ -137,7 +137,7 @@ func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
 		logging.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
 	}
 
-	return fileutil.GlobWithDoubleStar(pattern, searchPath, limit)
+	return fsext.GlobWithDoubleStar(pattern, searchPath, limit)
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
@@ -158,7 +158,7 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 		if !filepath.IsAbs(absPath) {
 			absPath = filepath.Join(searchRoot, absPath)
 		}
-		if fileutil.SkipHidden(absPath) {
+		if fsext.SkipHidden(absPath) {
 			continue
 		}
 		matches = append(matches, absPath)

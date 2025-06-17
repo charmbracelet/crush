@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fileutil"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -170,7 +170,7 @@ func (p *permissionDialogCmp) renderHeader() string {
 	pathKey := t.S().Muted.Render("Path")
 	pathValue := t.S().Text.
 		Width(p.width - lipgloss.Width(pathKey)).
-		Render(fmt.Sprintf(" %s", fileutil.PrettyPath(p.permission.Path)))
+		Render(fmt.Sprintf(" %s", fsext.PrettyPath(p.permission.Path)))
 
 	headerParts := []string{
 		lipgloss.JoinHorizontal(
@@ -196,7 +196,7 @@ func (p *permissionDialogCmp) renderHeader() string {
 		fileKey := t.S().Muted.Render("File")
 		filePath := t.S().Text.
 			Width(p.width - lipgloss.Width(fileKey)).
-			Render(fmt.Sprintf(" %s", fileutil.PrettyPath(params.FilePath)))
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.FilePath)))
 		headerParts = append(headerParts,
 			lipgloss.JoinHorizontal(
 				lipgloss.Left,
@@ -211,7 +211,7 @@ func (p *permissionDialogCmp) renderHeader() string {
 		fileKey := t.S().Muted.Render("File")
 		filePath := t.S().Text.
 			Width(p.width - lipgloss.Width(fileKey)).
-			Render(fmt.Sprintf(" %s", fileutil.PrettyPath(params.FilePath)))
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.FilePath)))
 		headerParts = append(headerParts,
 			lipgloss.JoinHorizontal(
 				lipgloss.Left,
@@ -267,24 +267,13 @@ func (p *permissionDialogCmp) renderBashContent() string {
 
 func (p *permissionDialogCmp) renderEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
-		})
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
+			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			Width(p.contentViewPort.Width()).
+			Split()
 
-		contentHeight := min(p.height-9, lipgloss.Height(diff))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(diff)
-		return p.styleViewport()
-	}
-	return ""
-}
-
-func (p *permissionDialogCmp) renderPatchContent() string {
-	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
-		})
-
+		diff := formatter.String()
 		contentHeight := min(p.height-9, lipgloss.Height(diff))
 		p.contentViewPort.SetHeight(contentHeight)
 		p.contentViewPort.SetContent(diff)
@@ -381,8 +370,6 @@ func (p *permissionDialogCmp) render() string {
 		contentFinal = p.renderBashContent()
 	case tools.EditToolName:
 		contentFinal = p.renderEditContent()
-	case tools.PatchToolName:
-		contentFinal = p.renderPatchContent()
 	case tools.WriteToolName:
 		contentFinal = p.renderWriteContent()
 	case tools.FetchToolName:

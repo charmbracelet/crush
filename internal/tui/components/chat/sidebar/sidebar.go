@@ -1,11 +1,22 @@
 package sidebar
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -16,11 +27,27 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
 	logoBreakpoint = 65
 )
+
+type FileHistory struct {
+	initialVersion history.File
+	latestVersion  history.File
+}
+
+type SessionFile struct {
+	History   FileHistory
+	FilePath  string
+	Additions int
+	Deletions int
+}
+type SessionFilesMsg struct {
+	Files []SessionFile
+}
 
 type Sidebar interface {
 	util.Model
@@ -32,10 +59,17 @@ type sidebarCmp struct {
 	session       session.Session
 	logo          string
 	cwd           string
+	lspClients    map[string]*lsp.Client
+	history       history.Service
+	// Using a sync map here because we might receive file history events concurrently
+	files sync.Map
 }
 
-func NewSidebarCmp() Sidebar {
-	return &sidebarCmp{}
+func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client) Sidebar {
+	return &sidebarCmp{
+		lspClients: lspClients,
+		history:    history,
+	}
 }
 
 func (m *sidebarCmp) Init() tea.Cmd {
@@ -50,8 +84,19 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.ID != m.session.ID {
 			m.session = msg
 		}
+		return m, m.loadSessionFiles
+	case SessionFilesMsg:
+		m.files = sync.Map{}
+		for _, file := range msg.Files {
+			m.files.Store(file.FilePath, file)
+		}
+		return m, nil
+
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
+	case pubsub.Event[history.File]:
+		logging.Info("sidebar", "Received file history event", "file", msg.Payload.Path, "session", msg.Payload.SessionID)
+		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
 			if m.session.ID == msg.Payload.ID {
@@ -75,6 +120,13 @@ func (m *sidebarCmp) View() tea.View {
 	parts = append(parts,
 		m.cwd,
 		"",
+		m.currentModelBlock(),
+	)
+	if m.session.ID != "" {
+		parts = append(parts, "", m.filesBlock())
+	}
+	parts = append(parts,
+		"",
 		m.lspBlock(),
 		"",
 		m.mcpBlock(),
@@ -83,6 +135,91 @@ func (m *sidebarCmp) View() tea.View {
 	return tea.NewView(
 		lipgloss.JoinVertical(lipgloss.Left, parts...),
 	)
+}
+
+func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
+	return func() tea.Msg {
+		file := event.Payload
+		found := false
+		m.files.Range(func(key, value any) bool {
+			existing := value.(SessionFile)
+			if existing.FilePath == file.Path {
+				if existing.History.latestVersion.Version < file.Version {
+					existing.History.latestVersion = file
+				} else if file.Version == 0 {
+					existing.History.initialVersion = file
+				} else {
+					// If the version is not greater than the latest, we ignore it
+					return true
+				}
+				before := existing.History.initialVersion.Content
+				after := existing.History.latestVersion.Content
+				path := existing.History.initialVersion.Path
+				_, additions, deletions := diff.GenerateDiff(before, after, path)
+				existing.Additions = additions
+				existing.Deletions = deletions
+				m.files.Store(file.Path, existing)
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return nil
+		}
+		sf := SessionFile{
+			History: FileHistory{
+				initialVersion: file,
+				latestVersion:  file,
+			},
+			FilePath:  file.Path,
+			Additions: 0,
+			Deletions: 0,
+		}
+		m.files.Store(file.Path, sf)
+		return nil
+	}
+}
+
+func (m *sidebarCmp) loadSessionFiles() tea.Msg {
+	files, err := m.history.ListBySession(context.Background(), m.session.ID)
+	if err != nil {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  err.Error(),
+		}
+	}
+
+	fileMap := make(map[string]FileHistory)
+
+	for _, file := range files {
+		if existing, ok := fileMap[file.Path]; ok {
+			// Update the latest version
+			existing.latestVersion = file
+			fileMap[file.Path] = existing
+		} else {
+			// Add the initial version
+			fileMap[file.Path] = FileHistory{
+				initialVersion: file,
+				latestVersion:  file,
+			}
+		}
+	}
+
+	sessionFiles := make([]SessionFile, 0, len(fileMap))
+	for path, fh := range fileMap {
+		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
+		sessionFiles = append(sessionFiles, SessionFile{
+			History:   fh,
+			FilePath:  path,
+			Additions: additions,
+			Deletions: deletions,
+		})
+	}
+
+	return SessionFilesMsg{
+		Files: sessionFiles,
+	}
 }
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
@@ -112,11 +249,74 @@ func (m *sidebarCmp) logoBlock(compact bool) string {
 	})
 }
 
+func (m *sidebarCmp) filesBlock() string {
+	maxWidth := min(m.width, 58)
+	t := styles.CurrentTheme()
+
+	section := t.S().Subtle.Render(
+		core.Section("Modified Files", maxWidth),
+	)
+
+	files := make([]SessionFile, 0)
+	m.files.Range(func(key, value any) bool {
+		file := value.(SessionFile)
+		files = append(files, file)
+		return true // continue iterating
+	})
+	if len(files) == 0 {
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			section,
+			"",
+			t.S().Base.Foreground(t.Border).Render("None"),
+		)
+	}
+
+	fileList := []string{section, ""}
+	// order files by the latest version's created time
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
+	})
+
+	for _, file := range files {
+		// Extract just the filename from the path
+
+		// Create status indicators for additions/deletions
+		var statusParts []string
+		if file.Additions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
+		}
+		if file.Deletions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
+		}
+
+		extraContent := strings.Join(statusParts, " ")
+		filePath := fsext.DirTrim(fsext.PrettyPath(file.FilePath), 2)
+		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
+		fileList = append(fileList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:    t.FgMuted,
+					NoIcon:       true,
+					Title:        filePath,
+					ExtraContent: extraContent,
+				},
+				m.width,
+			),
+		)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		fileList...,
+	)
+}
+
 func (m *sidebarCmp) lspBlock() string {
 	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
-	section := t.S().Muted.Render(
+	section := t.S().Subtle.Render(
 		core.Section("LSPs", maxWidth),
 	)
 
@@ -137,12 +337,43 @@ func (m *sidebarCmp) lspBlock() string {
 		if l.Disabled {
 			iconColor = t.FgMuted
 		}
+		lspErrs := map[protocol.DiagnosticSeverity]int{
+			protocol.SeverityError:       0,
+			protocol.SeverityWarning:     0,
+			protocol.SeverityHint:        0,
+			protocol.SeverityInformation: 0,
+		}
+		if client, ok := m.lspClients[n]; ok {
+			for _, diagnostics := range client.GetDiagnostics() {
+				for _, diagnostic := range diagnostics {
+					if severity, ok := lspErrs[diagnostic.Severity]; ok {
+						lspErrs[diagnostic.Severity] = severity + 1
+					}
+				}
+			}
+		}
+
+		errs := []string{}
+		if lspErrs[protocol.SeverityError] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s%d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
+		}
+		if lspErrs[protocol.SeverityWarning] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s%d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
+		}
+		if lspErrs[protocol.SeverityHint] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s%d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
+		}
+		if lspErrs[protocol.SeverityInformation] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s%d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
+		}
+
 		lspList = append(lspList,
 			core.Status(
 				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       n,
-					Description: l.Command,
+					IconColor:    iconColor,
+					Title:        n,
+					Description:  l.Command,
+					ExtraContent: strings.Join(errs, " "),
 				},
 				m.width,
 			),
@@ -159,7 +390,7 @@ func (m *sidebarCmp) mcpBlock() string {
 	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
-	section := t.S().Muted.Render(
+	section := t.S().Subtle.Render(
 		core.Section("MCPs", maxWidth),
 	)
 
@@ -192,6 +423,74 @@ func (m *sidebarCmp) mcpBlock() string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		mcpList...,
+	)
+}
+
+func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
+	t := styles.CurrentTheme()
+	// Format tokens in human-readable format (e.g., 110K, 1.2M)
+	var formattedTokens string
+	switch {
+	case tokens >= 1_000_000:
+		formattedTokens = fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	case tokens >= 1_000:
+		formattedTokens = fmt.Sprintf("%.1fK", float64(tokens)/1_000)
+	default:
+		formattedTokens = fmt.Sprintf("%d", tokens)
+	}
+
+	// Remove .0 suffix if present
+	if strings.HasSuffix(formattedTokens, ".0K") {
+		formattedTokens = strings.Replace(formattedTokens, ".0K", "K", 1)
+	}
+	if strings.HasSuffix(formattedTokens, ".0M") {
+		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
+	}
+
+	percentage := (float64(tokens) / float64(contextWindow)) * 100
+
+	baseStyle := t.S().Base
+
+	formattedCost := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("$%.2f", cost))
+
+	formattedTokens = baseStyle.Foreground(t.FgSubtle).Render(fmt.Sprintf("(%s)", formattedTokens))
+	formattedPercentage := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
+	if percentage > 80 {
+		// add the warning icon
+		formattedTokens = fmt.Sprintf("%s %s", styles.WarningIcon, formattedTokens)
+	}
+
+	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
+}
+
+func (s *sidebarCmp) currentModelBlock() string {
+	cfg := config.Get()
+	agentCfg := cfg.Agents[config.AgentCoder]
+	selectedModelID := agentCfg.Model
+	model := models.SupportedModels[selectedModelID]
+
+	t := styles.CurrentTheme()
+
+	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+	modelName := t.S().Text.Render(model.Name)
+	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
+	parts := []string{
+		modelInfo,
+	}
+	if s.session.ID != "" {
+		parts = append(
+			parts,
+			"  "+formatTokensAndCost(
+				s.session.CompletionTokens+s.session.PromptTokens,
+				model.ContextWindow,
+				s.session.Cost,
+			),
+		)
+	}
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
 	)
 }
 

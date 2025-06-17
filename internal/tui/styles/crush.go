@@ -32,7 +32,7 @@ func NewCrushTheme() *Theme {
 		// Status
 		Success: charmtone.Guac,
 		Error:   charmtone.Sriracha,
-		Warning: charmtone.Uni,
+		Warning: charmtone.Zest,
 		Info:    charmtone.Malibu,
 
 		// Colors

@@ -1,0 +1,11 @@
+--- main.go
++++ main.go
+@@ -5,5 +5,6 @@
+ 	)
+ 
+ 	func main() {
+-		fmt.Println("Hello, World!")
++		content := "Hello, World!"
++		fmt.Println(content)
+ 	}
+\ No newline at end of file

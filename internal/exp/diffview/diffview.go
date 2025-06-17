@@ -38,7 +38,6 @@ type DiffView struct {
 	after        file
 	contextLines int
 	lineNumbers  bool
-	highlight    bool
 	height       int
 	width        int
 	xOffset      int
@@ -112,12 +111,6 @@ func (dv *DiffView) Style(style Style) *DiffView {
 // LineNumbers sets whether to display line numbers in the DiffView.
 func (dv *DiffView) LineNumbers(lineNumbers bool) *DiffView {
 	dv.lineNumbers = lineNumbers
-	return dv
-}
-
-// SyntaxHightlight sets whether to enable syntax highlighting in the DiffView.
-func (dv *DiffView) SyntaxHightlight(highlight bool) *DiffView {
-	dv.highlight = highlight
 	return dv
 }
 

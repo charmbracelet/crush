@@ -158,6 +158,8 @@ func TestDiffView(t *testing.T) {
 }
 
 func TestDiffViewTabs(t *testing.T) {
+	t.Parallel()
+
 	for layoutName, layoutFunc := range LayoutFuncs {
 		t.Run(layoutName, func(t *testing.T) {
 			t.Parallel()

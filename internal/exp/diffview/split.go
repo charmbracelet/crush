@@ -37,7 +37,6 @@ func hunkToSplit(h *udiff.Hunk) (sh splitHunk) {
 		var sl splitLine
 
 		switch ul.Kind {
-
 		// For equal lines, add as is
 		case udiff.Equal:
 			sl.before = &ul

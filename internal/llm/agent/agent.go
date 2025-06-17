@@ -163,7 +163,9 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 		return err
 	}
 	parts := []message.ContentPart{message.TextContent{Text: content}}
-	response, err := a.titleProvider.SendMessages(
+
+	// Use streaming approach like summarization
+	response := a.titleProvider.StreamResponse(
 		ctx,
 		[]message.Message{
 			{
@@ -173,11 +175,20 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 		},
 		make([]tools.BaseTool, 0),
 	)
-	if err != nil {
-		return err
+
+	var finalResponse *provider.ProviderResponse
+	for r := range response {
+		if r.Error != nil {
+			return r.Error
+		}
+		finalResponse = r.Response
 	}
 
-	title := strings.TrimSpace(strings.ReplaceAll(response.Content, "\n", " "))
+	if finalResponse == nil {
+		return fmt.Errorf("no response received from title provider")
+	}
+
+	title := strings.TrimSpace(strings.ReplaceAll(finalResponse.Content, "\n", " "))
 	if title == "" {
 		return nil
 	}

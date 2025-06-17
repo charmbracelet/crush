@@ -465,12 +465,12 @@ func TestBatchEditTool_NonUniqueString(t *testing.T) {
 	response, err := tool.Run(ctx, call)
 	require.NoError(t, err)
 	assert.True(t, response.IsError)
-	
+
 	// Check metadata for the specific error
 	var metadata BatchEditResponseMetadata
 	err = json.Unmarshal([]byte(response.Metadata), &metadata)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, 1, metadata.TotalFailed)
 	assert.Len(t, metadata.Results, 1)
 	assert.False(t, metadata.Results[0].Success)

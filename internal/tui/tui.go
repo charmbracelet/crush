@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -174,6 +175,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
+
+	// Model Switch
+	case models.ModelSelectedMsg:
+		model, err := a.app.CoderAgent.Update(config.AgentCoder, msg.Model.ID)
+		if err != nil {
+			return a, util.ReportError(err)
+		}
+
+		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", model.Name))
 
 	// File Picker
 	case chat.OpenFilePickerMsg:

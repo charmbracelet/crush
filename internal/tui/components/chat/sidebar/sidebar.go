@@ -291,7 +291,10 @@ func (m *sidebarCmp) filesBlock() string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		filePath := fsext.DirTrim(fsext.PrettyPath(file.FilePath), 2)
+		cwd := config.WorkingDirectory() + string(os.PathSeparator)
+		filePath := file.FilePath
+		filePath = strings.TrimPrefix(filePath, cwd)
+		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
 		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
 		fileList = append(fileList,
 			core.Status(

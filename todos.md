@@ -36,3 +36,4 @@
 - [ ] Revisit the provider/model/configs
 - [ ] Implement correct persistent shell
 - [ ] Store file read/write time somewhere so that the we can make sure that even if we restart we do not need to re-read the same file
+- [ ] Send updates to the UI when new LSP diagnostics are available

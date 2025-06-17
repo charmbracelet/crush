@@ -5,7 +5,9 @@
   - [x] Make help dependent on the focused pane and page
 - [x] Implement current model in the sidebar
 - [x] Implement LSP errors
-- [ ] Implement changed files
+- [x] Implement changed files
+  - [x] Implement initial load
+  - [x] Implement realtime file changes
 - [ ] Events when tool error
 - [ ] Support bash commands
 - [ ] Editor attachments fixes

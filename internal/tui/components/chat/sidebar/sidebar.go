@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -32,7 +34,13 @@ const (
 	logoBreakpoint = 65
 )
 
+type FileHistory struct {
+	initialVersion history.File
+	latestVersion  history.File
+}
+
 type SessionFile struct {
+	History   FileHistory
 	FilePath  string
 	Additions int
 	Deletions int
@@ -53,7 +61,8 @@ type sidebarCmp struct {
 	cwd           string
 	lspClients    map[string]*lsp.Client
 	history       history.Service
-	files         []SessionFile
+	// Using a sync map here because we might receive file history events concurrently
+	files sync.Map
 }
 
 func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client) Sidebar {
@@ -77,12 +86,17 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadSessionFiles
 	case SessionFilesMsg:
-		m.files = msg.Files
-		logging.Info("Loaded session files", "count", len(m.files))
+		m.files = sync.Map{}
+		for _, file := range msg.Files {
+			m.files.Store(file.FilePath, file)
+		}
 		return m, nil
 
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
+	case pubsub.Event[history.File]:
+		logging.Info("sidebar", "Received file history event", "file", msg.Payload.Path, "session", msg.Payload.SessionID)
+		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
 			if m.session.ID == msg.Payload.ID {
@@ -123,6 +137,50 @@ func (m *sidebarCmp) View() tea.View {
 	)
 }
 
+func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
+	return func() tea.Msg {
+		file := event.Payload
+		found := false
+		m.files.Range(func(key, value any) bool {
+			existing := value.(SessionFile)
+			if existing.FilePath == file.Path {
+				if existing.History.latestVersion.Version < file.Version {
+					existing.History.latestVersion = file
+				} else if file.Version == 0 {
+					existing.History.initialVersion = file
+				} else {
+					// If the version is not greater than the latest, we ignore it
+					return true
+				}
+				before := existing.History.initialVersion.Content
+				after := existing.History.latestVersion.Content
+				path := existing.History.initialVersion.Path
+				_, additions, deletions := diff.GenerateDiff(before, after, path)
+				existing.Additions = additions
+				existing.Deletions = deletions
+				m.files.Store(file.Path, existing)
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return nil
+		}
+		sf := SessionFile{
+			History: FileHistory{
+				initialVersion: file,
+				latestVersion:  file,
+			},
+			FilePath:  file.Path,
+			Additions: 0,
+			Deletions: 0,
+		}
+		m.files.Store(file.Path, sf)
+		return nil
+	}
+}
+
 func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 	files, err := m.history.ListBySession(context.Background(), m.session.ID)
 	if err != nil {
@@ -132,26 +190,16 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 		}
 	}
 
-	type fileHistory struct {
-		initialVersion history.File
-		latestVersion  history.File
-	}
-
-	fileMap := make(map[string]fileHistory)
+	fileMap := make(map[string]FileHistory)
 
 	for _, file := range files {
 		if existing, ok := fileMap[file.Path]; ok {
 			// Update the latest version
-			if existing.latestVersion.CreatedAt < file.CreatedAt {
-				existing.latestVersion = file
-			}
-			if file.Version == history.InitialVersion {
-				existing.initialVersion = file
-			}
+			existing.latestVersion = file
 			fileMap[file.Path] = existing
 		} else {
 			// Add the initial version
-			fileMap[file.Path] = fileHistory{
+			fileMap[file.Path] = FileHistory{
 				initialVersion: file,
 				latestVersion:  file,
 			}
@@ -160,14 +208,13 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 	sessionFiles := make([]SessionFile, 0, len(fileMap))
 	for path, fh := range fileMap {
-		if fh.initialVersion.Version == history.InitialVersion {
-			_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
-			sessionFiles = append(sessionFiles, SessionFile{
-				FilePath:  path,
-				Additions: additions,
-				Deletions: deletions,
-			})
-		}
+		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
+		sessionFiles = append(sessionFiles, SessionFile{
+			History:   fh,
+			FilePath:  path,
+			Additions: additions,
+			Deletions: deletions,
+		})
 	}
 
 	return SessionFilesMsg{
@@ -210,7 +257,13 @@ func (m *sidebarCmp) filesBlock() string {
 		core.Section("Modified Files", maxWidth),
 	)
 
-	if len(m.files) == 0 {
+	files := make([]SessionFile, 0)
+	m.files.Range(func(key, value any) bool {
+		file := value.(SessionFile)
+		files = append(files, file)
+		return true // continue iterating
+	})
+	if len(files) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			section,
@@ -220,8 +273,12 @@ func (m *sidebarCmp) filesBlock() string {
 	}
 
 	fileList := []string{section, ""}
+	// order files by the latest version's created time
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
+	})
 
-	for _, file := range m.files {
+	for _, file := range files {
 		// Extract just the filename from the path
 
 		// Create status indicators for additions/deletions

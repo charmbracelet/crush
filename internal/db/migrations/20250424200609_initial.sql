@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS files (
     session_id TEXT NOT NULL,
     path TEXT NOT NULL,
     content TEXT NOT NULL,
-    version TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
     updated_at INTEGER NOT NULL,  -- Unix timestamp in milliseconds
     FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE,

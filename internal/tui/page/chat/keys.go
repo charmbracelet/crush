@@ -9,6 +9,7 @@ type KeyMap struct {
 	AddAttachment key.Binding
 	Cancel        key.Binding
 	Tab           key.Binding
+	Details       key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -28,6 +29,10 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
+		),
+		Details: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "toggle details"),
 		),
 	}
 }

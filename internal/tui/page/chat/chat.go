@@ -18,7 +18,9 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/page"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 var ChatPageID page.PageID = "chat"
@@ -51,7 +53,9 @@ type chatPage struct {
 
 	compactMode      bool
 	forceCompactMode bool // Force compact mode regardless of window size
+	showDetails      bool // Show details in the header
 	header           header.Header
+	compactSidebar   layout.Container
 }
 
 func (p *chatPage) Init() tea.Cmd {
@@ -69,6 +73,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		h, cmd := p.header.Update(msg)
 		cmds = append(cmds, cmd)
 		p.header = h.(header.Header)
+		if p.compactMode && p.showDetails {
+			cmds = append(cmds, p.compactSidebar.SetSize(msg.Width-4, 0))
+		}
 		// the mode is only relevant when there is a  session
 		if p.session.ID != "" {
 			// Only auto-switch to compact mode if not forced
@@ -178,15 +185,34 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.app.CoderAgent.Cancel(p.session.ID)
 				return p, nil
 			}
+		case key.Matches(msg, p.keyMap.Details):
+			if p.session.ID == "" || !p.compactMode {
+				return p, nil // No session to show details for
+			}
+			p.showDetails = !p.showDetails
+			p.header.SetDetailsOpen(p.showDetails)
+			if p.showDetails {
+				p.compactSidebar = sidebarCmp(p.app, true)
+				c, cmd := p.compactSidebar.Update(chat.SessionSelectedMsg(p.session))
+				p.compactSidebar = c.(layout.Container)
+				return p, tea.Batch(
+					cmd,
+					p.compactSidebar.SetSize(p.wWidth-4, 0),
+				)
+			}
+
+			return p, nil
 		}
 	}
 	u, cmd := p.layout.Update(msg)
 	cmds = append(cmds, cmd)
 	p.layout = u.(layout.SplitPaneLayout)
 
-	h, cmd := p.header.Update(msg)
-	cmds = append(cmds, cmd)
-	p.header = h.(header.Header)
+	if p.compactMode && p.showDetails {
+		s, cmd := p.compactSidebar.Update(msg)
+		p.compactSidebar = s.(layout.Container)
+		cmds = append(cmds, cmd)
+	}
 	return p, tea.Batch(cmds...)
 }
 
@@ -199,7 +225,7 @@ func (p *chatPage) setMessages() tea.Cmd {
 }
 
 func (p *chatPage) setSidebar() tea.Cmd {
-	sidebarContainer := sidebarCmp(p.app)
+	sidebarContainer := sidebarCmp(p.app, false)
 	sidebarContainer.Init()
 	return p.layout.SetRightPanel(sidebarContainer)
 }
@@ -267,16 +293,29 @@ func (p *chatPage) View() tea.View {
 		return p.layout.View()
 	}
 	layoutView := p.layout.View()
-	chatView := tea.NewView(
-		strings.Join(
-			[]string{
-				p.header.View().String(),
-				layoutView.String(),
-			}, "\n",
-		),
+	chatView := strings.Join(
+		[]string{
+			p.header.View().String(),
+			layoutView.String(),
+		}, "\n",
 	)
-	chatView.SetCursor(layoutView.Cursor())
-	return chatView
+	layers := []*lipgloss.Layer{
+		lipgloss.NewLayer(chatView).X(0).Y(0),
+	}
+	if p.showDetails {
+		t := styles.CurrentTheme()
+		style := t.S().Base.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.BorderFocus)
+		details := style.Render(p.compactSidebar.View().String())
+		layers = append(layers, lipgloss.NewLayer(details).X(1).Y(1))
+	}
+	canvas := lipgloss.NewCanvas(
+		layers...,
+	)
+	view := tea.NewView(canvas.Render())
+	view.SetCursor(layoutView.Cursor())
+	return view
 }
 
 func (p *chatPage) Bindings() []key.Binding {
@@ -308,10 +347,14 @@ func (p *chatPage) Bindings() []key.Binding {
 	return bindings
 }
 
-func sidebarCmp(app *app.App) layout.Container {
+func sidebarCmp(app *app.App, compact bool) layout.Container {
+	padding := layout.WithPadding(1, 1, 1, 1)
+	if compact {
+		padding = layout.WithPadding(0, 1, 1, 1)
+	}
 	return layout.NewContainer(
-		sidebar.NewSidebarCmp(app.History, app.LSPClients),
-		layout.WithPadding(1, 1, 1, 1),
+		sidebar.NewSidebarCmp(app.History, app.LSPClients, compact),
+		padding,
 	)
 }
 
@@ -322,7 +365,7 @@ func NewChatPage(app *app.App) ChatPage {
 	return &chatPage{
 		app: app,
 		layout: layout.NewSplitPane(
-			layout.WithRightPanel(sidebarCmp(app)),
+			layout.WithRightPanel(sidebarCmp(app, false)),
 			layout.WithBottomPanel(editorContainer),
 			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),

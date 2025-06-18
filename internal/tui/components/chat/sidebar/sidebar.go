@@ -60,15 +60,17 @@ type sidebarCmp struct {
 	logo          string
 	cwd           string
 	lspClients    map[string]*lsp.Client
+	compactMode   bool
 	history       history.Service
 	// Using a sync map here because we might receive file history events concurrently
 	files sync.Map
 }
 
-func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client) Sidebar {
+func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
 	return &sidebarCmp{
-		lspClients: lspClients,
-		history:    history,
+		lspClients:  lspClients,
+		history:     history,
+		compactMode: compact,
 	}
 }
 
@@ -109,17 +111,24 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *sidebarCmp) View() tea.View {
 	t := styles.CurrentTheme()
-	parts := []string{
-		m.logo,
+	parts := []string{}
+	if !m.compactMode {
+		parts = append(parts, m.logo)
 	}
 
-	if m.session.ID != "" {
+	if !m.compactMode && m.session.ID != "" {
 		parts = append(parts, t.S().Muted.Render(m.session.Title), "")
+	} else if m.session.ID != "" {
+		parts = append(parts, t.S().Text.Render(m.session.Title), "")
 	}
 
+	if !m.compactMode {
+		parts = append(parts,
+			m.cwd,
+			"",
+		)
+	}
 	parts = append(parts,
-		m.cwd,
-		"",
 		m.currentModelBlock(),
 	)
 	if m.session.ID != "" {

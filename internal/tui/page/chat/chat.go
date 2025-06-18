@@ -253,6 +253,10 @@ func (p *chatPage) setCompactMode(compact bool) tea.Cmd {
 		cmds = append(cmds, p.layout.SetSize(p.wWidth, p.wHeight))
 		// set the sidebar
 		cmds = append(cmds, p.setSidebar())
+		l, cmd := p.layout.Update(chat.SessionSelectedMsg(p.session))
+		p.layout = l.(layout.SplitPaneLayout)
+		cmds = append(cmds, cmd)
+
 		return tea.Batch(cmds...)
 	}
 }

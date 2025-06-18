@@ -283,6 +283,33 @@ func TestDiffViewYOffset(t *testing.T) {
 	}
 }
 
+func TestDiffViewYOffsetInfinite(t *testing.T) {
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			for yOffset := range 17 {
+				t.Run(fmt.Sprintf("YOffsetOf%02d", yOffset), func(t *testing.T) {
+					t.Parallel()
+
+					dv := diffview.New().
+						Before("main.go", TestMultipleHunksBefore).
+						After("main.go", TestMultipleHunksAfter).
+						Style(diffview.DefaultLightStyle()).
+						ChromaStyle(styles.Get("catppuccin-latte")).
+						Height(5).
+						YOffset(yOffset).
+						InfiniteYScroll(true)
+					dv = layoutFunc(dv)
+
+					output := dv.String()
+					golden.RequireEqual(t, []byte(output))
+
+					assertHeight(t, 5, output)
+				})
+			}
+		})
+	}
+}
+
 func assertLineWidth(t *testing.T, expected int, output string) {
 	var lineWidth int
 	for line := range strings.SplitSeq(output, "\n") {

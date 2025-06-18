@@ -582,6 +582,33 @@ func ApplyForegroundGrad(input string, color1, color2 color.Color) string {
 	return o.String()
 }
 
+// ApplyBoldForegroundGrad renders a given string with a horizontal gradient
+// foreground.
+func ApplyBoldForegroundGrad(input string, color1, color2 color.Color) string {
+	if input == "" {
+		return ""
+	}
+	t := CurrentTheme()
+
+	var o strings.Builder
+	if len(input) == 1 {
+		return t.S().Base.Bold(true).Foreground(color1).Render(input)
+	}
+
+	var clusters []string
+	gr := uniseg.NewGraphemes(input)
+	for gr.Next() {
+		clusters = append(clusters, string(gr.Runes()))
+	}
+
+	ramp := blendColors(len(clusters), color1, color2)
+	for i, c := range ramp {
+		fmt.Fprint(&o, t.S().Base.Bold(true).Foreground(c).Render(clusters[i]))
+	}
+
+	return o.String()
+}
+
 // blendColors returns a slice of colors blended between the given keys.
 // Blending is done in Hcl to stay in gamut.
 func blendColors(size int, stops ...color.Color) []color.Color {

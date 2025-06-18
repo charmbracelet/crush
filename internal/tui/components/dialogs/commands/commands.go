@@ -264,7 +264,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
-	if c.wWidth > 90 && c.sessionID != "" {
+	if c.wWidth > 120 && c.sessionID != "" {
 		commands = append(commands, Command{
 			ID:          "toggle_sidebar",
 			Title:       "Toggle Sidebar",

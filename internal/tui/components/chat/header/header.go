@@ -19,6 +19,7 @@ import (
 type Header interface {
 	util.Model
 	SetSession(session session.Session)
+	SetDetailsOpen(open bool)
 }
 
 type header struct {
@@ -117,6 +118,10 @@ func (h *header) details() string {
 	}
 	dot := t.S().Subtle.Render(" • ")
 	return strings.Join(parts, dot)
+}
+
+func (h *header) SetDetailsOpen(open bool) {
+	h.detailsOpen = open
 }
 
 // SetSession implements Header.

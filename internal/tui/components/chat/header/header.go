@@ -114,7 +114,7 @@ func (h *header) details() string {
 	if h.detailsOpen {
 		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" close"))
 	} else {
-		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" open"))
+		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" open "))
 	}
 	dot := t.S().Subtle.Render(" • ")
 	return strings.Join(parts, dot)

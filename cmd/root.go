@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 )
 
@@ -46,16 +47,6 @@ to assist developers in writing, debugging, and understanding code directly from
   crush -p "Explain the use of context in Go" -f json
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// If the help flag is set, show the help message
-		if cmd.Flag("help").Changed {
-			cmd.Help()
-			return nil
-		}
-		if cmd.Flag("version").Changed {
-			fmt.Println(version.Version)
-			return nil
-		}
-
 		// Load the config
 		debug, _ := cmd.Flags().GetBool("debug")
 		cwd, _ := cmd.Flags().GetString("cwd")
@@ -282,15 +273,17 @@ func setupSubscriptions(app *app.App, parentCtx context.Context) (chan tea.Msg, 
 }
 
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := fang.Execute(
+		context.Background(),
+		rootCmd,
+		fang.WithVersion(version.Version),
+	); err != nil {
 		os.Exit(1)
 	}
 }
 
 func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.Flags().BoolP("version", "v", false, "Version")
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")

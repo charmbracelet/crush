@@ -26,7 +26,7 @@ import (
 
 var ChatPageID page.PageID = "chat"
 
-const CompactModeBreakpoint = 90 // Width at which the chat page switches to compact mode
+const CompactModeBreakpoint = 120 // Width at which the chat page switches to compact mode
 
 type (
 	OpenFilePickerMsg struct{}

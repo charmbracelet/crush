@@ -33,18 +33,19 @@ const (
 
 // DiffView represents a view for displaying differences between two files.
 type DiffView struct {
-	layout       layout
-	before       file
-	after        file
-	contextLines int
-	lineNumbers  bool
-	height       int
-	width        int
-	xOffset      int
-	yOffset      int
-	style        Style
-	tabWidth     int
-	chromaStyle  *chroma.Style
+	layout          layout
+	before          file
+	after           file
+	contextLines    int
+	lineNumbers     bool
+	height          int
+	width           int
+	xOffset         int
+	yOffset         int
+	infiniteYScroll bool
+	style           Style
+	tabWidth        int
+	chromaStyle     *chroma.Style
 
 	isComputed bool
 	err        error
@@ -53,6 +54,7 @@ type DiffView struct {
 
 	splitHunks []splitHunk
 
+	totalLines      int
 	codeWidth       int
 	fullCodeWidth   int  // with leading symbols
 	extraColOnAfter bool // add extra column on after panel
@@ -138,6 +140,12 @@ func (dv *DiffView) YOffset(yOffset int) *DiffView {
 	return dv
 }
 
+// InfiniteYScroll allows the YOffset to scroll beyond the last line.
+func (dv *DiffView) InfiniteYScroll(infiniteYScroll bool) *DiffView {
+	dv.infiniteYScroll = infiniteYScroll
+	return dv
+}
+
 // TabWidth sets the tab width. Only relevant for code that contains tabs, like
 // Go code.
 func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
@@ -161,6 +169,8 @@ func (dv *DiffView) String() string {
 	dv.convertDiffToSplit()
 	dv.adjustStyles()
 	dv.detectNumDigits()
+	dv.detectTotalLines()
+	dv.preventInfiniteYScroll()
 
 	if dv.width <= 0 {
 		dv.detectCodeWidth()
@@ -249,6 +259,37 @@ func (dv *DiffView) detectNumDigits() {
 		dv.beforeNumDigits = max(dv.beforeNumDigits, len(strconv.Itoa(h.FromLine+len(h.Lines))))
 		dv.afterNumDigits = max(dv.afterNumDigits, len(strconv.Itoa(h.ToLine+len(h.Lines))))
 	}
+}
+
+func (dv *DiffView) detectTotalLines() {
+	dv.totalLines = 0
+
+	switch dv.layout {
+	case layoutUnified:
+		for _, h := range dv.unified.Hunks {
+			dv.totalLines += 1 + len(h.Lines)
+		}
+	case layoutSplit:
+		for _, h := range dv.splitHunks {
+			dv.totalLines += 1 + len(h.lines)
+		}
+	}
+}
+
+func (dv *DiffView) preventInfiniteYScroll() {
+	if dv.infiniteYScroll {
+		return
+	}
+
+	// clamp yOffset to prevent scrolling beyond the last line
+	if dv.height > 0 {
+		maxYOffset := max(0, dv.totalLines-dv.height)
+		dv.yOffset = min(dv.yOffset, maxYOffset)
+	} else {
+		// if no height limit, ensure yOffset doesn't exceed total lines
+		dv.yOffset = min(dv.yOffset, max(0, dv.totalLines-1))
+	}
+	dv.yOffset = max(0, dv.yOffset) // ensure yOffset is not negative
 }
 
 // detectCodeWidth calculates the maximum width of code lines in the diff view.

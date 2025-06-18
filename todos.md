@@ -25,7 +25,7 @@
   - [ ] Message length (I saw the message go beyond the correct length when there are errors)
   - [ ] Address UX issues
   - [ ] Fix issue with numbers (padding) view tool
-- [ ] Implement responsive mode
+- [x] Implement responsive mode
 - [ ] Update interactive mode to use the spinner
 - [ ] Revisit the core list component
   - [ ] This component has become super complex we might need to fix this.

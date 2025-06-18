@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
@@ -307,7 +308,14 @@ func (p *chatPage) View() tea.View {
 		style := t.S().Base.
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus)
-		details := style.Render(p.compactSidebar.View().String())
+		version := t.S().Subtle.Padding(0, 1).AlignHorizontal(lipgloss.Right).Width(p.wWidth - 4).Render(version.Version)
+		details := style.Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				p.compactSidebar.View().String(),
+				version,
+			),
+		)
 		layers = append(layers, lipgloss.NewLayer(details).X(1).Y(1))
 	}
 	canvas := lipgloss.NewCanvas(

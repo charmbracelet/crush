@@ -12,7 +12,7 @@ type Container interface {
 	util.Model
 	Sizeable
 	Help
-	Positionable
+	Positional
 	Focusable
 }
 type container struct {
@@ -151,7 +151,7 @@ func (c *container) GetSize() (int, int) {
 func (c *container) SetPosition(x, y int) tea.Cmd {
 	c.x = x
 	c.y = y
-	if positionable, ok := c.content.(Positionable); ok {
+	if positionable, ok := c.content.(Positional); ok {
 		return positionable.SetPosition(x, y)
 	}
 	return nil

@@ -20,7 +20,7 @@ type Help interface {
 	Bindings() []key.Binding
 }
 
-type Positionable interface {
+type Positional interface {
 	SetPosition(x, y int) tea.Cmd
 }
 

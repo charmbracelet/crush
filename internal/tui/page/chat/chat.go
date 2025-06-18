@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/editor"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/header"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/sidebar"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -20,6 +22,8 @@ import (
 )
 
 var ChatPageID page.PageID = "chat"
+
+const CompactModeBreakpoint = 90 // Width at which the chat page switches to compact mode
 
 type (
 	OpenFilePickerMsg struct{}
@@ -34,7 +38,8 @@ type ChatPage interface {
 }
 
 type chatPage struct {
-	app *app.App
+	wWidth, wHeight int // Window dimensions
+	app             *app.App
 
 	layout layout.SplitPaneLayout
 
@@ -43,6 +48,10 @@ type chatPage struct {
 	keyMap KeyMap
 
 	chatFocused bool
+
+	compactMode      bool
+	forceCompactMode bool // Force compact mode regardless of window size
+	header           header.Header
 }
 
 func (p *chatPage) Init() tea.Cmd {
@@ -57,12 +66,54 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		cmd := p.layout.SetSize(msg.Width, msg.Height)
+		h, cmd := p.header.Update(msg)
 		cmds = append(cmds, cmd)
+		p.header = h.(header.Header)
+		// the mode is only relevant when there is a  session
+		if p.session.ID != "" {
+			// Only auto-switch to compact mode if not forced
+			if !p.forceCompactMode {
+				if msg.Width <= CompactModeBreakpoint && p.wWidth > CompactModeBreakpoint {
+					p.wWidth = msg.Width
+					p.wHeight = msg.Height
+					cmds = append(cmds, p.setCompactMode(true))
+					return p, tea.Batch(cmds...)
+				} else if msg.Width > CompactModeBreakpoint && p.wWidth <= CompactModeBreakpoint {
+					p.wWidth = msg.Width
+					p.wHeight = msg.Height
+					return p, p.setCompactMode(false)
+				}
+			}
+		}
+		p.wWidth = msg.Width
+		p.wHeight = msg.Height
+		layoutHeight := msg.Height
+		if p.compactMode {
+			// make space for the header
+			layoutHeight -= 1
+		}
+		cmd = p.layout.SetSize(msg.Width, layoutHeight)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+
 	case chat.SendMsg:
 		cmd := p.sendMessage(msg.Text, msg.Attachments)
 		if cmd != nil {
 			return p, cmd
+		}
+	case commands.ToggleCompactModeMsg:
+		// Only allow toggling if window width is larger than compact breakpoint
+		if p.wWidth > CompactModeBreakpoint {
+			p.forceCompactMode = !p.forceCompactMode
+			// If force compact mode is enabled, switch to compact mode
+			// If force compact mode is disabled, switch based on window size
+			if p.forceCompactMode {
+				return p, p.setCompactMode(true)
+			} else {
+				// Return to auto mode based on window size
+				shouldBeCompact := p.wWidth <= CompactModeBreakpoint
+				return p, p.setCompactMode(shouldBeCompact)
+			}
 		}
 	case commands.CommandRunCustomMsg:
 		// Check if the agent is busy before executing custom commands
@@ -82,7 +133,12 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		needsModeChange := p.session.ID == ""
 		p.session = msg
+		p.header.SetSession(msg)
+		if needsModeChange && (p.wWidth <= CompactModeBreakpoint || p.forceCompactMode) {
+			cmds = append(cmds, p.setCompactMode(true))
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
@@ -90,8 +146,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, tea.Batch(
 				p.clearMessages(),
 				util.CmdHandler(chat.SessionClearedMsg{}),
+				p.setCompactMode(false),
 			)
-
 		case key.Matches(msg, p.keyMap.AddAttachment):
 			cfg := config.Get()
 			agentCfg := cfg.Agents[config.AgentCoder]
@@ -128,6 +184,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	p.layout = u.(layout.SplitPaneLayout)
 
+	h, cmd := p.header.Update(msg)
+	cmds = append(cmds, cmd)
+	p.header = h.(header.Header)
 	return p, tea.Batch(cmds...)
 }
 
@@ -139,8 +198,36 @@ func (p *chatPage) setMessages() tea.Cmd {
 	return tea.Batch(p.layout.SetLeftPanel(messagesContainer), messagesContainer.Init())
 }
 
+func (p *chatPage) setSidebar() tea.Cmd {
+	sidebarContainer := sidebarCmp(p.app)
+	sidebarContainer.Init()
+	return p.layout.SetRightPanel(sidebarContainer)
+}
+
 func (p *chatPage) clearMessages() tea.Cmd {
 	return p.layout.ClearLeftPanel()
+}
+
+func (p *chatPage) setCompactMode(compact bool) tea.Cmd {
+	p.compactMode = compact
+	var cmds []tea.Cmd
+	if compact {
+		// add offset for the header
+		p.layout.SetOffset(0, 1)
+		// make space for the header
+		cmds = append(cmds, p.layout.SetSize(p.wWidth, p.wHeight-1))
+		// remove the sidebar
+		cmds = append(cmds, p.layout.ClearRightPanel())
+		return tea.Batch(cmds...)
+	} else {
+		// remove the offset for the header
+		p.layout.SetOffset(0, 0)
+		// restore the original size
+		cmds = append(cmds, p.layout.SetSize(p.wWidth, p.wHeight))
+		// set the sidebar
+		cmds = append(cmds, p.setSidebar())
+		return tea.Batch(cmds...)
+	}
 }
 
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
@@ -175,7 +262,21 @@ func (p *chatPage) GetSize() (int, int) {
 }
 
 func (p *chatPage) View() tea.View {
-	return p.layout.View()
+	if !p.compactMode || p.session.ID == "" {
+		// If not in compact mode or there is no session, we don't show the header
+		return p.layout.View()
+	}
+	layoutView := p.layout.View()
+	chatView := tea.NewView(
+		strings.Join(
+			[]string{
+				p.header.View().String(),
+				layoutView.String(),
+			}, "\n",
+		),
+	)
+	chatView.SetCursor(layoutView.Cursor())
+	return chatView
 }
 
 func (p *chatPage) Bindings() []key.Binding {
@@ -207,22 +308,26 @@ func (p *chatPage) Bindings() []key.Binding {
 	return bindings
 }
 
-func NewChatPage(app *app.App) ChatPage {
-	sidebarContainer := layout.NewContainer(
+func sidebarCmp(app *app.App) layout.Container {
+	return layout.NewContainer(
 		sidebar.NewSidebarCmp(app.History, app.LSPClients),
 		layout.WithPadding(1, 1, 1, 1),
 	)
+}
+
+func NewChatPage(app *app.App) ChatPage {
 	editorContainer := layout.NewContainer(
 		editor.NewEditorCmp(app),
 	)
 	return &chatPage{
 		app: app,
 		layout: layout.NewSplitPane(
-			layout.WithRightPanel(sidebarContainer),
+			layout.WithRightPanel(sidebarCmp(app)),
 			layout.WithBottomPanel(editorContainer),
 			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),
 		),
 		keyMap: DefaultKeyMap(),
+		header: header.New(app.LSPClients),
 	}
 }

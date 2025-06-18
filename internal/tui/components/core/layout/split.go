@@ -3,6 +3,7 @@ package layout
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -29,11 +30,14 @@ type SplitPaneLayout interface {
 	ClearBottomPanel() tea.Cmd
 
 	FocusPanel(panel LayoutPanel) tea.Cmd
+	SetOffset(x, y int)
 }
 
 type splitPaneLayout struct {
-	width  int
-	height int
+	width   int
+	height  int
+	xOffset int
+	yOffset int
 
 	ratio         float64
 	verticalRatio float64
@@ -150,6 +154,7 @@ func (s *splitPaneLayout) View() tea.View {
 func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	s.width = width
 	s.height = height
+	logging.Info("Setting split pane size", "width", width, "height", height)
 
 	var topHeight, bottomHeight int
 	var cmds []tea.Cmd
@@ -194,24 +199,24 @@ func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	if s.leftPanel != nil {
 		cmd := s.leftPanel.SetSize(leftWidth, topHeight)
 		cmds = append(cmds, cmd)
-		if positionable, ok := s.leftPanel.(Positionable); ok {
-			cmds = append(cmds, positionable.SetPosition(0, 0))
+		if positional, ok := s.leftPanel.(Positional); ok {
+			cmds = append(cmds, positional.SetPosition(s.xOffset, s.yOffset))
 		}
 	}
 
 	if s.rightPanel != nil {
 		cmd := s.rightPanel.SetSize(rightWidth, topHeight)
 		cmds = append(cmds, cmd)
-		if positionable, ok := s.rightPanel.(Positionable); ok {
-			cmds = append(cmds, positionable.SetPosition(leftWidth, 0))
+		if positional, ok := s.rightPanel.(Positional); ok {
+			cmds = append(cmds, positional.SetPosition(s.xOffset+leftWidth, s.yOffset))
 		}
 	}
 
 	if s.bottomPanel != nil {
 		cmd := s.bottomPanel.SetSize(width, bottomHeight)
 		cmds = append(cmds, cmd)
-		if positionable, ok := s.bottomPanel.(Positionable); ok {
-			cmds = append(cmds, positionable.SetPosition(0, topHeight))
+		if positional, ok := s.bottomPanel.(Positional); ok {
+			cmds = append(cmds, positional.SetPosition(s.xOffset, s.yOffset+topHeight))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -306,6 +311,12 @@ func (s *splitPaneLayout) FocusPanel(panel LayoutPanel) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// SetOffset implements SplitPaneLayout.
+func (s *splitPaneLayout) SetOffset(x int, y int) {
+	s.xOffset = x
+	s.yOffset = y
 }
 
 func NewSplitPane(options ...SplitPaneOption) SplitPaneLayout {

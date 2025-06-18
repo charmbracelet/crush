@@ -223,9 +223,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 }
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
-	if width < logoBreakpoint && m.width >= logoBreakpoint {
+	if width < logoBreakpoint && (m.width == 0 || m.width >= logoBreakpoint) {
 		m.logo = m.logoBlock(true)
-	} else if width >= logoBreakpoint && m.width < logoBreakpoint {
+	} else if width >= logoBreakpoint && (m.width == 0 || m.width < logoBreakpoint) {
 		m.logo = m.logoBlock(false)
 	}
 
@@ -358,16 +358,16 @@ func (m *sidebarCmp) lspBlock() string {
 
 		errs := []string{}
 		if lspErrs[protocol.SeverityError] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s%d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
+			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
 		}
 		if lspErrs[protocol.SeverityWarning] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s%d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
+			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
 		}
 		if lspErrs[protocol.SeverityHint] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s%d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
 		}
 		if lspErrs[protocol.SeverityInformation] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s%d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
 		}
 
 		lspList = append(lspList,

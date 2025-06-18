@@ -54,9 +54,10 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg struct{}
-	SwitchModelMsg    struct{}
-	CompactMsg        struct {
+	SwitchSessionsMsg    struct{}
+	SwitchModelMsg       struct{}
+	ToggleCompactModeMsg struct{}
+	CompactMsg           struct {
 		SessionID string
 	}
 )
@@ -111,6 +112,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
+		c.SetCommandType(c.commandType)
 		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
 	case tea.KeyPressMsg:
 		switch {
@@ -251,13 +253,24 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	// Only show compact command if there's an active session
 	if c.sessionID != "" {
 		commands = append(commands, Command{
-			ID:          "compact",
-			Title:       "Compact Session",
+			ID:          "Summarize",
+			Title:       "Summarize Session",
 			Description: "Summarize the current session and create a new one with the summary",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(CompactMsg{
 					SessionID: c.sessionID,
 				})
+			},
+		})
+	}
+	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
+	if c.wWidth > 90 && c.sessionID != "" {
+		commands = append(commands, Command{
+			ID:          "toggle_sidebar",
+			Title:       "Toggle Sidebar",
+			Description: "Toggle between compact and normal layout",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ToggleCompactModeMsg{})
 			},
 		})
 	}

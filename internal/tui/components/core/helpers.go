@@ -72,11 +72,11 @@ func Status(ops StatusOpts, width int) string {
 	}
 	title = t.S().Base.Foreground(titleColor).Render(title)
 	if description != "" {
-		extraContent := len(ops.ExtraContent)
-		if extraContent > 0 {
-			extraContent += 1
+		extraContentWidth := lipgloss.Width(ops.ExtraContent)
+		if extraContentWidth > 0 {
+			extraContentWidth += 1
 		}
-		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContent, "…")
+		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContentWidth, "…")
 	}
 	description = t.S().Base.Foreground(descriptionColor).Render(description)
 

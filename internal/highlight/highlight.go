@@ -2,7 +2,6 @@ package highlight
 
 import (
 	"bytes"
-	"fmt"
 	"image/color"
 
 	"github.com/alecthomas/chroma/v2"
@@ -52,9 +51,4 @@ func SyntaxHighlight(source, fileName string, bg color.Color) (string, error) {
 	var buf bytes.Buffer
 	err = f.Format(&buf, s, it)
 	return buf.String(), err
-}
-
-func getColor(c color.Color) string {
-	rgba := color.RGBAModel.Convert(c).(color.RGBA)
-	return fmt.Sprintf("#%02x%02x%02x", rgba.R, rgba.G, rgba.B)
 }

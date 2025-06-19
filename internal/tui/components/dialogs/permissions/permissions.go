@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -285,10 +284,13 @@ func (p *permissionDialogCmp) renderEditContent() string {
 func (p *permissionDialogCmp) renderWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
 		// Use the cache for diff rendering
-		diff := p.GetOrSetDiff(p.permission.ID, func() (string, error) {
-			return diff.FormatDiff(pr.Diff, diff.WithTotalWidth(p.contentViewPort.Width()))
-		})
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
+			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			Width(p.contentViewPort.Width()).
+			Split()
 
+		diff := formatter.String()
 		contentHeight := min(p.height-9, lipgloss.Height(diff))
 		p.contentViewPort.SetHeight(contentHeight)
 		p.contentViewPort.SetContent(diff)

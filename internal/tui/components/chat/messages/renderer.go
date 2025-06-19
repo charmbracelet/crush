@@ -125,7 +125,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
-	prefix := fmt.Sprintf("%s %s: ", icon, tool)
+	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
@@ -517,6 +517,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
 func renderParamList(paramsWidth int, params ...string) string {
+	t := styles.CurrentTheme()
 	if len(params) == 0 {
 		return ""
 	}
@@ -526,7 +527,7 @@ func renderParamList(paramsWidth int, params ...string) string {
 	}
 
 	if len(params) == 1 {
-		return mainParam
+		return t.S().Subtle.Render(mainParam)
 	}
 	otherParams := params[1:]
 	// create pairs of key/value
@@ -548,14 +549,14 @@ func renderParamList(paramsWidth int, params ...string) string {
 	remainingWidth := paramsWidth - lipgloss.Width(partsRendered) - 3 // count for " ()"
 	if remainingWidth < 30 {
 		// No space for the params, just show the main
-		return mainParam
+		return t.S().Subtle.Render(mainParam)
 	}
 
 	if len(parts) > 0 {
 		mainParam = fmt.Sprintf("%s (%s)", mainParam, strings.Join(parts, ", "))
 	}
 
-	return ansi.Truncate(mainParam, paramsWidth, "...")
+	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "..."))
 }
 
 // earlyState returns immediately‑rendered error/cancelled/ongoing states.
@@ -580,7 +581,7 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 func joinHeaderBody(header, body string) string {
 	t := styles.CurrentTheme()
 	body = t.S().Base.PaddingLeft(2).Render(body)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, "")
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "")
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {

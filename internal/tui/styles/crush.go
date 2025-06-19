@@ -41,6 +41,8 @@ func NewCrushTheme() *Theme {
 
 		Blue: charmtone.Malibu,
 
+		Yellow: charmtone.Mustard,
+
 		Green:      charmtone.Julep,
 		GreenDark:  charmtone.Guac,
 		GreenLight: charmtone.Bok,

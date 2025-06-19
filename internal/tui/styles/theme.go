@@ -54,8 +54,12 @@ type Theme struct {
 	// Colors
 	// White
 	White color.Color
+
 	// Blues
 	Blue color.Color
+
+	// Yellows
+	Yellow color.Color
 
 	// Greens
 	Green      color.Color
@@ -66,8 +70,6 @@ type Theme struct {
 	Red      color.Color
 	RedDark  color.Color
 	RedLight color.Color
-
-	// TODO: add any others needed
 
 	styles *Styles
 }

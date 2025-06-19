@@ -749,8 +749,8 @@ func (m *model) ensureVisibleReverse(cachedItem renderedItem) {
 func (m *model) goToBottom() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = true
+	m.selectionState.selectedIndex = m.findLastSelectableItem()
 	if m.isFocused {
-		m.selectionState.selectedIndex = m.findLastSelectableItem()
 		cmds = append(cmds, m.focusSelected())
 	}
 	m.ResetView()
@@ -764,7 +764,9 @@ func (m *model) goToTop() tea.Cmd {
 	cmds := []tea.Cmd{m.blurSelected()}
 	m.viewState.reverse = false
 	m.selectionState.selectedIndex = m.findFirstSelectableItem()
-	cmds = append(cmds, m.focusSelected())
+	if m.isFocused {
+		cmds = append(cmds, m.focusSelected())
+	}
 	m.ResetView()
 	return tea.Batch(cmds...)
 }

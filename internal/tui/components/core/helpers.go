@@ -148,8 +148,9 @@ func SelectableButtons(buttons []ButtonOpts, spacing string) string {
 }
 
 func DiffFormatter() *diffview.DiffView {
+	t := styles.CurrentTheme()
 	formatDiff := diffview.New()
 	style := chroma.MustNewStyle("crush", styles.GetChromaTheme())
-	diff := formatDiff.ChromaStyle(style)
+	diff := formatDiff.ChromaStyle(style).Style(t.S().Diff)
 	return diff
 }

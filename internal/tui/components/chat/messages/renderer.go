@@ -600,45 +600,56 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		}
 		out = append(out, t.S().Muted.
 			Width(width).
-			Background(t.BgSubtle).
+			Background(t.BgBaseLighter).
 			Render(ln))
 	}
 
 	if len(lines) > responseContextHeight {
 		out = append(out, t.S().Muted.
-			Background(t.BgSubtle).
+			Background(t.BgBaseLighter).
 			Width(width).
 			Render(fmt.Sprintf("... (%d lines)", len(lines)-responseContextHeight)))
 	}
 	return strings.Join(out, "\n")
 }
 
+func pad(v any, width int) string {
+	s := fmt.Sprintf("%v", v)
+	w := ansi.StringWidth(s)
+	if w >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-w) + s
+}
+
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
 	t := styles.CurrentTheme()
 	truncated := truncateHeight(content, responseContextHeight)
 
-	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgSubtle)
+	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgBase)
 	lines := strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
-			Background(t.BgSubtle).
-			Width(v.textWidth()-2).
-			Render(fmt.Sprintf("... (%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
+			Background(t.BgBase).
+			Render(fmt.Sprintf(" ... (%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
+	maxLineNumber := len(lines) + offset
+	padding := lipgloss.Width(fmt.Sprintf("%d", maxLineNumber))
 	for i, ln := range lines {
-		num := t.S().Muted.
-			Background(t.BgSubtle).
-			PaddingLeft(4).
-			PaddingRight(2).
-			Render(fmt.Sprintf("%d", i+1+offset))
+		num := t.S().Base.
+			Foreground(t.FgMuted).
+			Background(t.BgBase).
+			PaddingRight(1).
+			PaddingLeft(1).
+			Render(pad(i+1+offset, padding))
 		w := v.textWidth() - 2 - lipgloss.Width(num) // -2 for left padding
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			t.S().Base.
+				PaddingLeft(1).
 				Width(w).
-				Background(t.BgSubtle).
 				Render(v.fit(ln, w)))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)

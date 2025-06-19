@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/exp/diffview"
 	"github.com/charmbracelet/glamour/v2/ansi"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
@@ -31,9 +32,10 @@ type Theme struct {
 	Tertiary  color.Color
 	Accent    color.Color
 
-	BgBase    color.Color
-	BgSubtle  color.Color
-	BgOverlay color.Color
+	BgBase        color.Color
+	BgBaseLighter color.Color
+	BgSubtle      color.Color
+	BgOverlay     color.Color
 
 	FgBase      color.Color
 	FgMuted     color.Color
@@ -70,21 +72,6 @@ type Theme struct {
 	styles *Styles
 }
 
-type Diff struct {
-	Added               color.Color
-	Removed             color.Color
-	Context             color.Color
-	HunkHeader          color.Color
-	HighlightAdded      color.Color
-	HighlightRemoved    color.Color
-	AddedBg             color.Color
-	RemovedBg           color.Color
-	ContextBg           color.Color
-	LineNumber          color.Color
-	AddedLineNumberBg   color.Color
-	RemovedLineNumberBg color.Color
-}
-
 type Styles struct {
 	Base         lipgloss.Style
 	SelectedBase lipgloss.Style
@@ -112,7 +99,7 @@ type Styles struct {
 	Help help.Styles
 
 	// Diff
-	Diff Diff
+	Diff diffview.Style
 
 	// FilePicker
 	FilePicker filepicker.Styles
@@ -421,22 +408,50 @@ func (t *Theme) buildStyles() *Styles {
 			FullSeparator:  base.Foreground(t.Border),
 		},
 
-		// TODO: Fix this this is bad
-		Diff: Diff{
-			Added:               t.Green,
-			Removed:             t.Red,
-			Context:             t.FgSubtle,
-			HunkHeader:          t.FgSubtle,
-			HighlightAdded:      t.GreenLight,
-			HighlightRemoved:    t.RedLight,
-			AddedBg:             t.GreenDark,
-			RemovedBg:           t.RedDark,
-			ContextBg:           t.BgSubtle,
-			LineNumber:          t.FgMuted,
-			AddedLineNumberBg:   t.GreenDark,
-			RemovedLineNumberBg: t.RedDark,
+		Diff: diffview.Style{
+			DividerLine: diffview.LineStyle{
+				LineNumber: lipgloss.NewStyle().
+					Foreground(t.FgHalfMuted).
+					Background(t.BgBaseLighter),
+				Code: lipgloss.NewStyle().
+					Foreground(t.FgHalfMuted).
+					Background(t.BgBaseLighter),
+			},
+			MissingLine: diffview.LineStyle{
+				LineNumber: lipgloss.NewStyle().
+					Background(t.BgBaseLighter),
+				Code: lipgloss.NewStyle().
+					Background(t.BgBaseLighter),
+			},
+			EqualLine: diffview.LineStyle{
+				LineNumber: lipgloss.NewStyle().
+					Foreground(t.FgMuted).
+					Background(t.BgBase),
+				Code: lipgloss.NewStyle().
+					Foreground(t.FgMuted).
+					Background(t.BgBase),
+			},
+			InsertLine: diffview.LineStyle{
+				LineNumber: lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#629657")).
+					Background(lipgloss.Color("#2b322a")),
+				Symbol: lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#629657")).
+					Background(lipgloss.Color("#323931")),
+				Code: lipgloss.NewStyle().
+					Background(lipgloss.Color("#323931")),
+			},
+			DeleteLine: diffview.LineStyle{
+				LineNumber: lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#a45c59")).
+					Background(lipgloss.Color("#312929")),
+				Symbol: lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#a45c59")).
+					Background(lipgloss.Color("#383030")),
+				Code: lipgloss.NewStyle().
+					Background(lipgloss.Color("#383030")),
+			},
 		},
-
 		FilePicker: filepicker.Styles{
 			DisabledCursor:   base.Foreground(t.FgMuted),
 			Cursor:           base.Foreground(t.FgBase),

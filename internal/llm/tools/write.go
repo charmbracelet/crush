@@ -23,8 +23,9 @@ type WriteParams struct {
 }
 
 type WritePermissionsParams struct {
-	FilePath string `json:"file_path"`
-	Diff     string `json:"diff"`
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
 }
 
 type writeTool struct {
@@ -174,8 +175,9 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
 			Params: WritePermissionsParams{
-				FilePath: filePath,
-				Diff:     diff,
+				FilePath:   filePath,
+				OldContent: oldContent,
+				NewContent: params.Content,
 			},
 		},
 	)

@@ -260,8 +260,10 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(params.FilePath), meta.OldContent).
 			After(fsext.PrettyPath(params.FilePath), meta.NewContent).
-			Split().
 			Width(v.textWidth() - 2) // -2 for padding
+		if v.textWidth() > 120 {
+			formatter = formatter.Split()
+		}
 		return formatter.String()
 	})
 }

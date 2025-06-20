@@ -207,6 +207,10 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
 	t := styles.CurrentTheme()
+	if m.isNested {
+		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
+		return fmt.Sprintf("%s %s", tool, m.anim.View())
+	}
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
 	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
@@ -226,14 +230,17 @@ func (m *toolCallCmp) style() lipgloss.Style {
 // textWidth calculates the available width for text content,
 // accounting for borders and padding
 func (m *toolCallCmp) textWidth() int {
+	if m.isNested {
+		return m.width - 6
+	}
 	return m.width - 5 // take into account the border and PaddingLeft
 }
 
 // fit truncates content to fit within the specified width with ellipsis
 func (m *toolCallCmp) fit(content string, width int) string {
 	t := styles.CurrentTheme()
-	lineStyle := t.S().Muted.Background(t.BgSubtle)
-	dots := lineStyle.Render("...")
+	lineStyle := t.S().Muted
+	dots := lineStyle.Render("…")
 	return ansi.Truncate(content, width, dots)
 }
 

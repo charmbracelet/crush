@@ -14,13 +14,11 @@ func BenchmarkShellQuickCommands(b *testing.B) {
 	require.NoError(b, err)
 	defer os.RemoveAll(tmpDir)
 
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
+	shell := newPersistentShell(tmpDir)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, exitCode, _, err := shell.Exec(context.Background(), "echo test", 0)
 		if err != nil || exitCode != 0 {
 			b.Fatalf("Command failed: %v, exit code: %d", err, exitCode)

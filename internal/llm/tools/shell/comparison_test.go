@@ -15,8 +15,7 @@ func TestShellPerformanceComparison(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
+	shell := newPersistentShell(tmpDir)
 
 	// Test quick command
 	start := time.Now()
@@ -37,8 +36,7 @@ func BenchmarkShellPolling(b *testing.B) {
 	require.NoError(b, err)
 	defer os.RemoveAll(tmpDir)
 
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
+	shell := newPersistentShell(tmpDir)
 
 	b.ResetTimer()
 	b.ReportAllocs()

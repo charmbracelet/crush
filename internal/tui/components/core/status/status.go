@@ -88,6 +88,7 @@ func (m *statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					TTL:  msg.Payload.PersistTime,
 				}
 			}
+			return m, m.clearMessageCmd(m.info.TTL)
 		}
 	}
 	return m, nil
@@ -136,7 +137,7 @@ func NewStatusCmp(keyMap help.KeyMap) StatusCmp {
 	help := help.New()
 	help.Styles = t.S().Help
 	return &statusCmp{
-		messageTTL: 10 * time.Second,
+		messageTTL: 5 * time.Second,
 		help:       help,
 		keyMap:     keyMap,
 	}

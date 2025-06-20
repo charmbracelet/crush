@@ -288,9 +288,9 @@ func (m *sidebarCmp) filesBlock() string {
 	})
 
 	for _, file := range files {
-		// Extract just the filename from the path
-
-		// Create status indicators for additions/deletions
+		if file.Additions == 0 && file.Deletions == 0 {
+			continue // skip files with no changes
+		}
 		var statusParts []string
 		if file.Additions > 0 {
 			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))

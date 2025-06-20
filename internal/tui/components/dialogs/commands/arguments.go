@@ -211,15 +211,6 @@ func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	return cursor
 }
 
-func (c *commandArgumentsDialogCmp) style() lipgloss.Style {
-	t := styles.CurrentTheme()
-	return t.S().Base.
-		Width(c.width).
-		Padding(1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderFocus)
-}
-
 func (c *commandArgumentsDialogCmp) Position() (int, int) {
 	row := c.wHeight / 2
 	row -= c.wHeight / 2

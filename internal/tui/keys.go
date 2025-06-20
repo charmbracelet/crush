@@ -61,8 +61,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		}
 	}
 
-	for i := 0; i < len(cleaned); i += 2 {
-		end := min(i+2, len(cleaned))
+	for i := 0; i < len(cleaned); i += 3 {
+		end := min(i+3, len(cleaned))
 		m = append(m, cleaned[i:end])
 	}
 	return m

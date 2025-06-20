@@ -111,8 +111,18 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 	return json.Unmarshal([]byte(input), target)
 }
 
+// makeHeader builds the tool call header with status icon and parameters for a nested tool call.
+func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
+	t := styles.CurrentTheme()
+	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
+	return tool + renderParamList(true, width-lipgloss.Width(tool), params...)
+}
+
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
 func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params ...string) string {
+	if v.isNested {
+		return br.makeNestedHeader(v, tool, width, params...)
+	}
 	t := styles.CurrentTheme()
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	if v.result.ToolCallID != "" {
@@ -125,8 +135,8 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
-	prefix := fmt.Sprintf("%s %s: ", icon, tool)
-	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
+	prefix := fmt.Sprintf("%s %s ", icon, tool)
+	return prefix + renderParamList(false, width-lipgloss.Width(prefix), params...)
 }
 
 // renderError provides consistent error rendering
@@ -260,8 +270,10 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(params.FilePath), meta.OldContent).
 			After(fsext.PrettyPath(params.FilePath), meta.NewContent).
-			Split().
 			Width(v.textWidth() - 2) // -2 for padding
+		if v.textWidth() > 120 {
+			formatter = formatter.Split()
+		}
 		return formatter.String()
 	})
 }
@@ -475,25 +487,45 @@ type agentRenderer struct {
 	baseRenderer
 }
 
+func RoundedEnumerator(children tree.Children, index int) string {
+	if children.Length()-1 == index {
+		return " ╰──"
+	}
+	return " ├──"
+}
+
 // Render displays agent task parameters and result content
 func (tr agentRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
 	var params agent.AgentParams
 	if err := tr.unmarshalParams(v.call.Input, &params); err != nil {
 		return tr.renderError(v, "Invalid task parameters")
 	}
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
-	args := newParamBuilder().addMain(prompt).build()
 
-	header := tr.makeHeader(v, "Task", v.textWidth(), args...)
-	t := tree.Root(header)
+	header := tr.makeHeader(v, "Agent", v.textWidth())
+	taskTag := t.S().Base.Padding(0, 1).MarginLeft(1).Background(t.BlueLight).Foreground(t.White).Render("Task")
+	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2 // -2 for padding
+	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		"",
+		lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			taskTag,
+			" ",
+			prompt,
+		),
+	)
+	childTools := tree.Root(header)
 
 	for _, call := range v.nestedToolCalls {
-		t.Child(call.View())
+		childTools.Child(call.View())
 	}
-
 	parts := []string{
-		t.Enumerator(tree.RoundedEnumerator).String(),
+		childTools.Enumerator(RoundedEnumerator).String(),
 	}
 	if v.result.ToolCallID == "" {
 		v.spinning = true
@@ -516,7 +548,8 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
-func renderParamList(paramsWidth int, params ...string) string {
+func renderParamList(nested bool, paramsWidth int, params ...string) string {
+	t := styles.CurrentTheme()
 	if len(params) == 0 {
 		return ""
 	}
@@ -526,7 +559,10 @@ func renderParamList(paramsWidth int, params ...string) string {
 	}
 
 	if len(params) == 1 {
-		return mainParam
+		if nested {
+			return t.S().Muted.Render(mainParam)
+		}
+		return t.S().Subtle.Render(mainParam)
 	}
 	otherParams := params[1:]
 	// create pairs of key/value
@@ -547,15 +583,21 @@ func renderParamList(paramsWidth int, params ...string) string {
 	partsRendered := strings.Join(parts, ", ")
 	remainingWidth := paramsWidth - lipgloss.Width(partsRendered) - 3 // count for " ()"
 	if remainingWidth < 30 {
+		if nested {
+			return t.S().Muted.Render(mainParam)
+		}
 		// No space for the params, just show the main
-		return mainParam
+		return t.S().Subtle.Render(mainParam)
 	}
 
 	if len(parts) > 0 {
 		mainParam = fmt.Sprintf("%s (%s)", mainParam, strings.Join(parts, ", "))
 	}
 
-	return ansi.Truncate(mainParam, paramsWidth, "...")
+	if nested {
+		return t.S().Muted.Render(ansi.Truncate(mainParam, paramsWidth, "..."))
+	}
+	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "..."))
 }
 
 // earlyState returns immediately‑rendered error/cancelled/ongoing states.
@@ -580,7 +622,7 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 func joinHeaderBody(header, body string) string {
 	t := styles.CurrentTheme()
 	body = t.S().Base.PaddingLeft(2).Render(body)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, "")
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "")
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {
@@ -600,46 +642,56 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		}
 		out = append(out, t.S().Muted.
 			Width(width).
-			Background(t.BgSubtle).
+			Background(t.BgBaseLighter).
 			Render(ln))
 	}
 
 	if len(lines) > responseContextHeight {
 		out = append(out, t.S().Muted.
-			Background(t.BgSubtle).
+			Background(t.BgBaseLighter).
 			Width(width).
 			Render(fmt.Sprintf("... (%d lines)", len(lines)-responseContextHeight)))
 	}
 	return strings.Join(out, "\n")
 }
 
+func pad(v any, width int) string {
+	s := fmt.Sprintf("%v", v)
+	w := ansi.StringWidth(s)
+	if w >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-w) + s
+}
+
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
 	t := styles.CurrentTheme()
 	truncated := truncateHeight(content, responseContextHeight)
 
-	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgSubtle)
+	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgBase)
 	lines := strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
-			Background(t.BgSubtle).
-			Width(v.textWidth()-2).
-			Render(fmt.Sprintf("... (%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
+			Background(t.BgBase).
+			Render(fmt.Sprintf(" …(%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
+	maxLineNumber := len(lines) + offset
+	padding := lipgloss.Width(fmt.Sprintf("%d", maxLineNumber))
 	for i, ln := range lines {
-		num := t.S().Muted.
-			Background(t.BgSubtle).
-			PaddingLeft(4).
-			PaddingRight(2).
-			Render(fmt.Sprintf("%d", i+1+offset))
-		w := v.textWidth() - 2 - lipgloss.Width(num) // -2 for left padding
+		num := t.S().Base.
+			Foreground(t.FgMuted).
+			Background(t.BgBase).
+			PaddingRight(1).
+			PaddingLeft(1).
+			Render(pad(i+1+offset, padding))
+		w := v.textWidth() - 10 - lipgloss.Width(num) // -4 for left padding
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			t.S().Base.
-				Width(w).
-				Background(t.BgSubtle).
-				Render(v.fit(ln, w)))
+				PaddingLeft(1).
+				Render(v.fit(ln, w-1)))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
@@ -648,7 +700,7 @@ func (v *toolCallCmp) renderToolError() string {
 	t := styles.CurrentTheme()
 	err := strings.ReplaceAll(v.result.Content, "\n", " ")
 	err = fmt.Sprintf("Error: %s", err)
-	return t.S().Base.Foreground(t.Error).Render(v.fit(err, v.textWidth()))
+	return t.S().Base.Foreground(t.Error).Render(v.fit(err, v.textWidth()-2))
 }
 
 func truncateHeight(s string, h int) string {
@@ -662,7 +714,7 @@ func truncateHeight(s string, h int) string {
 func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
-		return "Task"
+		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.EditToolName:

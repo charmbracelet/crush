@@ -8,13 +8,14 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -37,31 +38,16 @@ type messageCmp struct {
 	focused bool // Focus state for border styling
 
 	// Core message data and state
-	message             message.Message // The underlying message content
-	spinning            bool            // Whether to show loading animation
-	anim                util.Model      // Animation component for loading states
-	lastUserMessageTime time.Time       // Used for calculating response duration
-}
-
-// MessageOption provides functional options for configuring message components
-type MessageOption func(*messageCmp)
-
-// WithLastUserMessageTime sets the timestamp of the last user message
-// for calculating assistant response duration
-func WithLastUserMessageTime(t time.Time) MessageOption {
-	return func(m *messageCmp) {
-		m.lastUserMessageTime = t
-	}
+	message  message.Message // The underlying message content
+	spinning bool            // Whether to show loading animation
+	anim     util.Model      // Animation component for loading states
 }
 
 // NewMessageCmp creates a new message component with the given message and options
-func NewMessageCmp(msg message.Message, opts ...MessageOption) MessageCmp {
+func NewMessageCmp(msg message.Message) MessageCmp {
 	m := &messageCmp{
 		message: msg,
 		anim:    anim.New(15, ""),
-	}
-	for _, opt := range opts {
-		opt(m)
 	}
 	return m
 }
@@ -145,30 +131,8 @@ func (msg *messageCmp) style() lipgloss.Style {
 // renderAssistantMessage renders assistant messages with optional footer information.
 // Shows model name, response time, and finish reason when the message is complete.
 func (m *messageCmp) renderAssistantMessage() string {
-	t := styles.CurrentTheme()
 	parts := []string{
 		m.markdownContent(),
-	}
-
-	finished := m.message.IsFinished()
-	finishData := m.message.FinishPart()
-	// Only show the footer if the message is not a tool call
-	if finished && finishData.Reason != message.FinishReasonToolUse {
-		infoMsg := ""
-		switch finishData.Reason {
-		case message.FinishReasonEndTurn:
-			finishTime := time.Unix(finishData.Time, 0)
-			duration := finishTime.Sub(m.lastUserMessageTime)
-			infoMsg = duration.String()
-		case message.FinishReasonCanceled:
-			infoMsg = "canceled"
-		case message.FinishReasonError:
-			infoMsg = "error"
-		case message.FinishReasonPermissionDenied:
-			infoMsg = "permission denied"
-		}
-		assistant := t.S().Muted.Render(fmt.Sprintf("%s %s (%s)", styles.ModelIcon, models.SupportedModels[m.message.Model].Name, infoMsg))
-		parts = append(parts, core.Section(assistant, m.textWidth()))
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -200,7 +164,7 @@ func (m *messageCmp) renderUserMessage() string {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return m.style().MarginBottom(1).Render(joined)
+	return m.style().Render(joined)
 }
 
 // toMarkdown converts text content to rendered markdown using the configured renderer
@@ -225,7 +189,7 @@ func (m *messageCmp) markdownContent() string {
 		} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
 			// Sometimes the LLMs respond with no content when they think the previous tool result
 			//  provides the requested question
-			content = "*Finished without output*"
+			content = ""
 		} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
 			content = "*Canceled*"
 		}
@@ -286,4 +250,60 @@ func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
 // Spinning returns whether the message is currently showing a loading animation
 func (m *messageCmp) Spinning() bool {
 	return m.spinning
+}
+
+type AssistantSection interface {
+	util.Model
+	layout.Sizeable
+	list.SectionHeader
+}
+type assistantSectionModel struct {
+	width               int
+	message             message.Message
+	lastUserMessageTime time.Time
+}
+
+func NewAssistantSection(message message.Message, lastUserMessageTime time.Time) AssistantSection {
+	return &assistantSectionModel{
+		width:               0,
+		message:             message,
+		lastUserMessageTime: lastUserMessageTime,
+	}
+}
+
+func (m *assistantSectionModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m *assistantSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+	return m, nil
+}
+
+func (m *assistantSectionModel) View() tea.View {
+	t := styles.CurrentTheme()
+	finishData := m.message.FinishPart()
+	finishTime := time.Unix(finishData.Time, 0)
+	duration := finishTime.Sub(m.lastUserMessageTime)
+	infoMsg := t.S().Subtle.Render(duration.String())
+	icon := t.S().Subtle.Render(styles.ModelIcon)
+	model := t.S().Muted.Render(models.SupportedModels[m.message.Model].Name)
+	assistant := fmt.Sprintf("%s  %s %s", icon, model, infoMsg)
+	return tea.NewView(
+		t.S().Base.PaddingLeft(2).Render(
+			core.Section(assistant, m.width-2),
+		),
+	)
+}
+
+func (m *assistantSectionModel) GetSize() (int, int) {
+	return m.width, 1
+}
+
+func (m *assistantSectionModel) SetSize(width int, height int) tea.Cmd {
+	m.width = width
+	return nil
+}
+
+func (m *assistantSectionModel) IsSectionHeader() bool {
+	return true
 }

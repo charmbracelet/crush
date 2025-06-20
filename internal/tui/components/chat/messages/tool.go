@@ -25,7 +25,7 @@ type ToolCallCmp interface {
 	SetToolResult(message.ToolResult)  // Update tool result
 	SetToolCall(message.ToolCall)      // Update tool call
 	SetCancelled()                     // Mark as cancelled
-	ParentMessageId() string           // Get parent message ID
+	ParentMessageID() string           // Get parent message ID
 	Spinning() bool                    // Animation state for pending tools
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
@@ -137,9 +137,6 @@ func (m *toolCallCmp) View() tea.View {
 	box := m.style()
 
 	if !m.call.Finished && !m.cancelled {
-		if m.isNested {
-			return tea.NewView(box.Render(m.renderPending()))
-		}
 		return tea.NewView(box.Render(m.renderPending()))
 	}
 
@@ -166,8 +163,8 @@ func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	}
 }
 
-// ParentMessageId returns the ID of the message that initiated this tool call
-func (m *toolCallCmp) ParentMessageId() string {
+// ParentMessageID returns the ID of the message that initiated this tool call
+func (m *toolCallCmp) ParentMessageID() string {
 	return m.parentMessageID
 }
 
@@ -212,7 +209,7 @@ func (m *toolCallCmp) renderPending() string {
 	t := styles.CurrentTheme()
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
-	return fmt.Sprintf("%s %s: %s", icon, tool, m.anim.View())
+	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
 }
 
 // style returns the lipgloss style for the tool call component.

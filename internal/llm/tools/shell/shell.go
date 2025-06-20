@@ -49,7 +49,7 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 	}
 
 	var stdout, stderr bytes.Buffer
-	shell, err := interp.New(
+	runner, err := interp.New(
 		interp.StdIO(nil, &stdout, &stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
@@ -59,7 +59,7 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 		return "", "", 1, false, fmt.Errorf("could not run command: %w", err)
 	}
 
-	if err := shell.Run(ctx, line); err != nil {
+	if err := runner.Run(ctx, line); err != nil {
 		status, ok := interp.IsExitStatus(err)
 		if !ok {
 			status = 1
@@ -68,12 +68,10 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 		return stdout.String(), stderr.String(), int(status), interrupted, err
 	}
 
-	s.cwd = shell.Dir
+	s.cwd = runner.Dir
 	s.env = []string{}
-	for name, vr := range shell.Vars {
-		if vr.Exported {
-			s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
-		}
+	for name, vr := range runner.Vars {
+		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
 	}
 	return stdout.String(), stderr.String(), 0, false, nil
 }

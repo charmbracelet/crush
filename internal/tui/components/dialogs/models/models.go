@@ -53,8 +53,6 @@ func NewModelDialogCmp() ModelDialog {
 
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
-	listKeyMap.NDown.SetEnabled(false)
-	listKeyMap.NUp.SetEnabled(false)
 	listKeyMap.HalfPageDown.SetEnabled(false)
 	listKeyMap.HalfPageUp.SetEnabled(false)
 	listKeyMap.Home.SetEnabled(false)

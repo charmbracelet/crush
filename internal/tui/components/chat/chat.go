@@ -509,6 +509,5 @@ func (m *messageListCmp) IsFocused() bool {
 }
 
 func (m *messageListCmp) Bindings() []key.Binding {
-	bindings := m.defaultListKeyMap.KeyBindings()
-	return bindings
+	return m.defaultListKeyMap.KeyBindings()
 }

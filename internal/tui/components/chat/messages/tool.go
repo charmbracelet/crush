@@ -224,7 +224,12 @@ func (m *toolCallCmp) style() lipgloss.Style {
 	if m.isNested {
 		return t.S().Muted
 	}
-	return t.S().Muted.PaddingLeft(4)
+	style := t.S().Muted.PaddingLeft(4)
+
+	if m.focused {
+		style = style.PaddingLeft(3).BorderStyle(focusedMessageBorder).BorderLeft(true).BorderForeground(t.GreenDark)
+	}
+	return style
 }
 
 // textWidth calculates the available width for text content,

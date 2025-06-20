@@ -193,15 +193,15 @@ func (m *modelDialogCmp) listHeight() int {
 
 func GetSelectedModel(cfg *config.Config) models.Model {
 	agentCfg := cfg.Agents[config.AgentCoder]
-	selectedModelId := agentCfg.Model
-	return models.SupportedModels[selectedModelId]
+	selectedModelID := agentCfg.Model
+	return models.SupportedModels[selectedModelID]
 }
 
 func getEnabledProviders(cfg *config.Config) []models.ModelProvider {
 	var providers []models.ModelProvider
-	for providerId, provider := range cfg.Providers {
+	for providerID, provider := range cfg.Providers {
 		if !provider.Disabled {
-			providers = append(providers, providerId)
+			providers = append(providers, providerID)
 		}
 	}
 

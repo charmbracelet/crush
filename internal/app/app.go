@@ -163,4 +163,5 @@ func (app *App) Shutdown() {
 		}
 		cancel()
 	}
+	app.CoderAgent.CancelAll()
 }

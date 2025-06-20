@@ -143,8 +143,9 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 	t := styles.CurrentTheme()
 	header := br.makeHeader(v, prettifyToolName(v.call.Name), v.textWidth(), "")
-	message = t.S().Error.Render(v.fit(message, v.textWidth()-2)) // -2 for padding
-	return joinHeaderBody(header, message)
+	errorTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
+	message = t.S().Base.Foreground(t.FgHalfMuted).Render(v.fit(message, v.textWidth()-3-lipgloss.Width(errorTag))) // -2 for padding and space
+	return joinHeaderBody(header, errorTag+" "+message)
 }
 
 // Register tool renderers
@@ -198,6 +199,9 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	args := newParamBuilder().addMain(cmd).build()
 
 	return br.renderWithParams(v, "Bash", args, func() string {
+		if v.result.Content == tools.BashNoOutput {
+			return ""
+		}
 		return renderPlainContent(v, v.result.Content)
 	})
 }
@@ -254,12 +258,11 @@ type editRenderer struct {
 // Render displays the edited file with a formatted diff of changes
 func (er editRenderer) Render(v *toolCallCmp) string {
 	var params tools.EditParams
-	if err := er.unmarshalParams(v.call.Input, &params); err != nil {
-		return er.renderError(v, "Invalid edit parameters")
+	var args []string
+	if err := er.unmarshalParams(v.call.Input, &params); err == nil {
+		file := fsext.PrettyPath(params.FilePath)
+		args = newParamBuilder().addMain(file).build()
 	}
-
-	file := fsext.PrettyPath(params.FilePath)
-	args := newParamBuilder().addMain(file).build()
 
 	return er.renderWithParams(v, "Edit", args, func() string {
 		var meta tools.EditResponseMetadata
@@ -290,12 +293,12 @@ type writeRenderer struct {
 // Render displays the file being written with syntax highlighting
 func (wr writeRenderer) Render(v *toolCallCmp) string {
 	var params tools.WriteParams
-	if err := wr.unmarshalParams(v.call.Input, &params); err != nil {
-		return wr.renderError(v, "Invalid write parameters")
+	var args []string
+	var file string
+	if err := wr.unmarshalParams(v.call.Input, &params); err == nil {
+		file = fsext.PrettyPath(params.FilePath)
+		args = newParamBuilder().addMain(file).build()
 	}
-
-	file := fsext.PrettyPath(params.FilePath)
-	args := newParamBuilder().addMain(file).build()
 
 	return wr.renderWithParams(v, "Write", args, func() string {
 		return renderCodeContent(v, file, params.Content, 0)
@@ -314,15 +317,14 @@ type fetchRenderer struct {
 // Render displays the fetched URL with format and timeout parameters
 func (fr fetchRenderer) Render(v *toolCallCmp) string {
 	var params tools.FetchParams
-	if err := fr.unmarshalParams(v.call.Input, &params); err != nil {
-		return fr.renderError(v, "Invalid fetch parameters")
+	var args []string
+	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			addKeyValue("format", params.Format).
+			addKeyValue("timeout", formatTimeout(params.Timeout)).
+			build()
 	}
-
-	args := newParamBuilder().
-		addMain(params.URL).
-		addKeyValue("format", params.Format).
-		addKeyValue("timeout", formatTimeout(params.Timeout)).
-		build()
 
 	return fr.renderWithParams(v, "Fetch", args, func() string {
 		file := fr.getFileExtension(params.Format)
@@ -362,14 +364,13 @@ type globRenderer struct {
 // Render displays the glob pattern with optional path parameter
 func (gr globRenderer) Render(v *toolCallCmp) string {
 	var params tools.GlobParams
-	if err := gr.unmarshalParams(v.call.Input, &params); err != nil {
-		return gr.renderError(v, "Invalid glob parameters")
+	var args []string
+	if err := gr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.Pattern).
+			addKeyValue("path", params.Path).
+			build()
 	}
-
-	args := newParamBuilder().
-		addMain(params.Pattern).
-		addKeyValue("path", params.Path).
-		build()
 
 	return gr.renderWithParams(v, "Glob", args, func() string {
 		return renderPlainContent(v, v.result.Content)
@@ -388,16 +389,15 @@ type grepRenderer struct {
 // Render displays the search pattern with path, include, and literal text options
 func (gr grepRenderer) Render(v *toolCallCmp) string {
 	var params tools.GrepParams
-	if err := gr.unmarshalParams(v.call.Input, &params); err != nil {
-		return gr.renderError(v, "Invalid grep parameters")
+	var args []string
+	if err := gr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.Pattern).
+			addKeyValue("path", params.Path).
+			addKeyValue("include", params.Include).
+			addFlag("literal", params.LiteralText).
+			build()
 	}
-
-	args := newParamBuilder().
-		addMain(params.Pattern).
-		addKeyValue("path", params.Path).
-		addKeyValue("include", params.Include).
-		addFlag("literal", params.LiteralText).
-		build()
 
 	return gr.renderWithParams(v, "Grep", args, func() string {
 		return renderPlainContent(v, v.result.Content)
@@ -416,17 +416,16 @@ type lsRenderer struct {
 // Render displays the directory path, defaulting to current directory
 func (lr lsRenderer) Render(v *toolCallCmp) string {
 	var params tools.LSParams
-	if err := lr.unmarshalParams(v.call.Input, &params); err != nil {
-		return lr.renderError(v, "Invalid ls parameters")
-	}
+	var args []string
+	if err := lr.unmarshalParams(v.call.Input, &params); err == nil {
+		path := params.Path
+		if path == "" {
+			path = "."
+		}
+		path = fsext.PrettyPath(path)
 
-	path := params.Path
-	if path == "" {
-		path = "."
+		args = newParamBuilder().addMain(path).build()
 	}
-	path = fsext.PrettyPath(path)
-
-	args := newParamBuilder().addMain(path).build()
 
 	return lr.renderWithParams(v, "List", args, func() string {
 		return renderPlainContent(v, v.result.Content)
@@ -445,15 +444,14 @@ type sourcegraphRenderer struct {
 // Render displays the search query with optional count and context window parameters
 func (sr sourcegraphRenderer) Render(v *toolCallCmp) string {
 	var params tools.SourcegraphParams
-	if err := sr.unmarshalParams(v.call.Input, &params); err != nil {
-		return sr.renderError(v, "Invalid sourcegraph parameters")
+	var args []string
+	if err := sr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.Query).
+			addKeyValue("count", formatNonZero(params.Count)).
+			addKeyValue("context", formatNonZero(params.ContextWindow)).
+			build()
 	}
-
-	args := newParamBuilder().
-		addMain(params.Query).
-		addKeyValue("count", formatNonZero(params.Count)).
-		addKeyValue("context", formatNonZero(params.ContextWindow)).
-		build()
 
 	return sr.renderWithParams(v, "Sourcegraph", args, func() string {
 		return renderPlainContent(v, v.result.Content)
@@ -498,13 +496,15 @@ func RoundedEnumerator(children tree.Children, index int) string {
 func (tr agentRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params agent.AgentParams
-	if err := tr.unmarshalParams(v.call.Input, &params); err != nil {
-		return tr.renderError(v, "Invalid task parameters")
-	}
+	tr.unmarshalParams(v.call.Input, &params)
+
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
+	if res, done := earlyState(header, v); done {
+		return res
+	}
 	taskTag := t.S().Base.Padding(0, 1).MarginLeft(1).Background(t.BlueLight).Foreground(t.White).Render("Task")
 	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2 // -2 for padding
 	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
@@ -608,15 +608,15 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.result.IsError:
 		message = v.renderToolError()
 	case v.cancelled:
-		message = "Cancelled"
+		message = t.S().Base.Padding(0, 1).Background(t.Border).Render("Cancelled")
 	case v.result.ToolCallID == "":
-		message = "Waiting for tool to start..."
+		message = t.S().Base.Padding(0, 1).Background(t.Accent).Foreground(t.FgSubtle).Render("Waiting for tool to start...")
 	default:
 		return "", false
 	}
 
 	message = t.S().Base.PaddingLeft(2).Render(message)
-	return lipgloss.JoinVertical(lipgloss.Left, header, message), true
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", message), true
 }
 
 func joinHeaderBody(header, body string) string {
@@ -699,8 +699,9 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 func (v *toolCallCmp) renderToolError() string {
 	t := styles.CurrentTheme()
 	err := strings.ReplaceAll(v.result.Content, "\n", " ")
-	err = fmt.Sprintf("Error: %s", err)
-	return t.S().Base.Foreground(t.Error).Render(v.fit(err, v.textWidth()-2))
+	errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
+	err = fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(v.fit(err, v.textWidth()-2-lipgloss.Width(errTag))))
+	return err
 }
 
 func truncateHeight(s string, h int) string {

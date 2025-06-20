@@ -150,7 +150,7 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 	}
 
 	var matches []string
-	for _, p := range bytes.Split(out, []byte{0}) {
+	for p := range bytes.SplitSeq(out, []byte{0}) {
 		if len(p) == 0 {
 			continue
 		}

@@ -257,19 +257,11 @@ func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, boo
 }
 
 func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
-	_, err := exec.LookPath("rg")
-	if err != nil {
-		return nil, fmt.Errorf("ripgrep not found: %w", err)
+	cmd := fsext.GetRgSearchCmd(pattern, path, include)
+	if cmd == nil {
+		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-n", pattern}
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, path)
-
-	cmd := exec.Command("rg", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {

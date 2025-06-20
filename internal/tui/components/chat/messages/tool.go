@@ -83,10 +83,10 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
-func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
+func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
-		parentMessageID: parentMessageId,
+		parentMessageID: parentMessageID,
 	}
 	for _, opt := range opts {
 		opt(m)

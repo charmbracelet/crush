@@ -9,7 +9,7 @@ const (
 	SpinnerIcon  string = "..."
 	LoadingIcon  string = "⟳"
 	DocumentIcon string = "🖼"
-	ModelIcon    string = "⬡"
+	ModelIcon    string = "◇"
 
 	// Tool call icons
 	ToolPending string = "●"

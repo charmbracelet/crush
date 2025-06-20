@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 type PersistentShell struct {
@@ -216,10 +218,7 @@ echo $EXEC_EXIT_CODE > %s
 
 				// Exponential backoff to reduce CPU usage for longer-running commands
 				if pollInterval < maxPollInterval {
-					pollInterval = time.Duration(float64(pollInterval) * 1.5)
-					if pollInterval > maxPollInterval {
-						pollInterval = maxPollInterval
-					}
+					pollInterval = min(time.Duration(float64(pollInterval)*1.5), maxPollInterval)
 					ticker.Reset(pollInterval)
 				}
 			}
@@ -257,23 +256,21 @@ func (s *PersistentShell) killChildren() {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return
 	}
-
-	pgrepCmd := exec.Command("pgrep", "-P", fmt.Sprintf("%d", s.cmd.Process.Pid))
-	output, err := pgrepCmd.Output()
+	p, err := process.NewProcess(int32(s.cmd.Process.Pid))
 	if err != nil {
+		logging.WarnPersist("could not kill persistent shell child processes", "err", err)
 		return
 	}
 
-	for pidStr := range strings.SplitSeq(string(output), "\n") {
-		if pidStr = strings.TrimSpace(pidStr); pidStr != "" {
-			var pid int
-			fmt.Sscanf(pidStr, "%d", &pid)
-			if pid > 0 {
-				proc, err := os.FindProcess(pid)
-				if err == nil {
-					proc.Signal(syscall.SIGTERM)
-				}
-			}
+	children, err := p.Children()
+	if err != nil {
+		logging.WarnPersist("could not kill persistent shell child processes", "err", err)
+		return
+	}
+
+	for _, child := range children {
+		if err := child.SendSignal(syscall.SIGTERM); err != nil {
+			logging.WarnPersist("could not kill persistent shell child processes", "err", err, "pid", child.Pid)
 		}
 	}
 }
@@ -307,7 +304,9 @@ func (s *PersistentShell) Close() {
 
 	s.stdin.Write([]byte("exit\n"))
 
-	s.cmd.Process.Kill()
+	if err := s.cmd.Process.Kill(); err != nil {
+		logging.WarnPersist("could not kill persistent shell", "err", err)
+	}
 	s.isAlive = false
 }
 

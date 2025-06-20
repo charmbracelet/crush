@@ -99,8 +99,8 @@ func SkipHidden(path string) bool {
 		"jspm_packages":    true,
 	}
 
-	parts := strings.Split(path, string(os.PathSeparator))
-	for _, part := range parts {
+	parts := strings.SplitSeq(path, string(os.PathSeparator))
+	for part := range parts {
 		if commonIgnoredDirs[part] {
 			return true
 		}

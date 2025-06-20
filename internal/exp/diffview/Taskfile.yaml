@@ -100,3 +100,23 @@ tasks:
       - for: sources
         cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
     silent: true
+
+  test:print:yoffset:unified:infinite:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffsetInfinite/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:yoffset:split:infinite:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffsetInfinite/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true

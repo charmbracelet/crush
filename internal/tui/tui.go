@@ -94,12 +94,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
-		logging.Info(
-			"Keyboard enhancements detected",
-			"Disambiguation", msg.SupportsKeyDisambiguation(),
-			"ReleaseKeys", msg.SupportsKeyReleases(),
-			"UniformKeys", msg.SupportsUniformKeyLayout(),
-		)
 		return a, nil
 	case tea.WindowSizeMsg:
 		return a, a.handleWindowResize(msg.Width, msg.Height)
@@ -260,7 +254,7 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
 	a.wWidth, a.wHeight = width, height
 	if a.showingFullHelp {
-		height -= 3
+		height -= 4
 	} else {
 		height -= 2
 	}

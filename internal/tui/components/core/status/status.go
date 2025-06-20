@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -10,6 +11,8 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type StatusCmp interface {
@@ -85,6 +88,7 @@ func (m *statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					TTL:  msg.Payload.PersistTime,
 				}
 			}
+			return m, m.clearMessageCmd(m.info.TTL)
 		}
 	}
 	return m, nil
@@ -94,16 +98,30 @@ func (m *statusCmp) View() tea.View {
 	t := styles.CurrentTheme()
 	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(m.keyMap))
 	if m.info.Msg != "" {
-		switch m.info.Type {
-		case util.InfoTypeError:
-			status = t.S().Base.Background(t.Error).Padding(0, 1).Width(m.width).Render(m.info.Msg)
-		case util.InfoTypeWarn:
-			status = t.S().Base.Background(t.Warning).Padding(0, 1).Width(m.width).Render(m.info.Msg)
-		default:
-			status = t.S().Base.Background(t.Info).Padding(0, 1).Width(m.width).Render(m.info.Msg)
-		}
+		status = m.infoMsg()
 	}
 	return tea.NewView(status)
+}
+
+func (m *statusCmp) infoMsg() string {
+	t := styles.CurrentTheme()
+	message := ""
+	infoType := ""
+	switch m.info.Type {
+	case util.InfoTypeError:
+		infoType = t.S().Base.Background(t.Red).Padding(0, 1).Render("ERROR")
+		width := m.width - lipgloss.Width(infoType)
+		message = t.S().Base.Background(t.Error).Foreground(t.White).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+	case util.InfoTypeWarn:
+		infoType = t.S().Base.Foreground(t.BgOverlay).Background(t.Yellow).Padding(0, 1).Render("WARNING")
+		width := m.width - lipgloss.Width(infoType)
+		message = t.S().Base.Foreground(t.BgOverlay).Background(t.Warning).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+	default:
+		infoType = t.S().Base.Foreground(t.BgOverlay).Background(t.Green).Padding(0, 1).Render("OKAY!")
+		width := m.width - lipgloss.Width(infoType)
+		message = t.S().Base.Background(t.Success).Foreground(t.White).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+	}
+	return strings.Join([]string{infoType, message}, "")
 }
 
 func (m *statusCmp) ToggleFullHelp() {
@@ -119,7 +137,7 @@ func NewStatusCmp(keyMap help.KeyMap) StatusCmp {
 	help := help.New()
 	help.Styles = t.S().Help
 	return &statusCmp{
-		messageTTL: 10 * time.Second,
+		messageTTL: 5 * time.Second,
 		help:       help,
 		keyMap:     keyMap,
 	}

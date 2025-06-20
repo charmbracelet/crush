@@ -50,6 +50,7 @@ type Service interface {
 	Model() models.Model
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
+	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	Update(agentName config.AgentName, modelID models.ModelID) (models.Model, error)
@@ -696,6 +697,13 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	}()
 
 	return nil
+}
+
+func (a *agent) CancelAll() {
+	a.activeRequests.Range(func(key, value any) bool {
+		a.Cancel(key.(string)) // key is sessionID
+		return true
+	})
 }
 
 func createAgentProvider(agentName config.AgentName) (provider.Provider, error) {

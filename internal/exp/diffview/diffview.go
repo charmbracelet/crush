@@ -33,18 +33,19 @@ const (
 
 // DiffView represents a view for displaying differences between two files.
 type DiffView struct {
-	layout       layout
-	before       file
-	after        file
-	contextLines int
-	lineNumbers  bool
-	height       int
-	width        int
-	xOffset      int
-	yOffset      int
-	style        Style
-	tabWidth     int
-	chromaStyle  *chroma.Style
+	layout          layout
+	before          file
+	after           file
+	contextLines    int
+	lineNumbers     bool
+	height          int
+	width           int
+	xOffset         int
+	yOffset         int
+	infiniteYScroll bool
+	style           Style
+	tabWidth        int
+	chromaStyle     *chroma.Style
 
 	isComputed bool
 	err        error
@@ -53,6 +54,7 @@ type DiffView struct {
 
 	splitHunks []splitHunk
 
+	totalLines      int
 	codeWidth       int
 	fullCodeWidth   int  // with leading symbols
 	extraColOnAfter bool // add extra column on after panel
@@ -138,6 +140,12 @@ func (dv *DiffView) YOffset(yOffset int) *DiffView {
 	return dv
 }
 
+// InfiniteYScroll allows the YOffset to scroll beyond the last line.
+func (dv *DiffView) InfiniteYScroll(infiniteYScroll bool) *DiffView {
+	dv.infiniteYScroll = infiniteYScroll
+	return dv
+}
+
 // TabWidth sets the tab width. Only relevant for code that contains tabs, like
 // Go code.
 func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
@@ -161,6 +169,8 @@ func (dv *DiffView) String() string {
 	dv.convertDiffToSplit()
 	dv.adjustStyles()
 	dv.detectNumDigits()
+	dv.detectTotalLines()
+	dv.preventInfiniteYScroll()
 
 	if dv.width <= 0 {
 		dv.detectCodeWidth()
@@ -251,6 +261,37 @@ func (dv *DiffView) detectNumDigits() {
 	}
 }
 
+func (dv *DiffView) detectTotalLines() {
+	dv.totalLines = 0
+
+	switch dv.layout {
+	case layoutUnified:
+		for _, h := range dv.unified.Hunks {
+			dv.totalLines += 1 + len(h.Lines)
+		}
+	case layoutSplit:
+		for _, h := range dv.splitHunks {
+			dv.totalLines += 1 + len(h.lines)
+		}
+	}
+}
+
+func (dv *DiffView) preventInfiniteYScroll() {
+	if dv.infiniteYScroll {
+		return
+	}
+
+	// clamp yOffset to prevent scrolling beyond the last line
+	if dv.height > 0 {
+		maxYOffset := max(0, dv.totalLines-dv.height)
+		dv.yOffset = min(dv.yOffset, maxYOffset)
+	} else {
+		// if no height limit, ensure yOffset doesn't exceed total lines
+		dv.yOffset = min(dv.yOffset, max(0, dv.totalLines-1))
+	}
+	dv.yOffset = max(0, dv.yOffset) // ensure yOffset is not negative
+}
+
 // detectCodeWidth calculates the maximum width of code lines in the diff view.
 func (dv *DiffView) detectCodeWidth() {
 	switch dv.layout {
@@ -321,23 +362,29 @@ func (dv *DiffView) renderUnified() string {
 
 	fullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
 	printedLines := -dv.yOffset
+	shouldWrite := func() bool { return printedLines >= 0 }
 
-	write := func(s string) {
-		if printedLines >= 0 {
-			b.WriteString(s)
-		}
+	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
+		content = strings.TrimSuffix(in, "\n")
+		content = dv.hightlightCode(content, ls.Code.GetBackground())
+		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
+		content = ansi.Truncate(content, dv.codeWidth, "…")
+		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
+		return
 	}
 
 outer:
 	for i, h := range dv.unified.Hunks {
-		ls := dv.style.DividerLine
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-			write(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+		if shouldWrite() {
+			ls := dv.style.DividerLine
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+				b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+			}
+			content := ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+			b.WriteString("\n")
 		}
-		content := ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")
-		write(ls.Code.Width(dv.fullCodeWidth).Render(content))
-		write("\n")
 		printedLines++
 
 		beforeLine := h.FromLine
@@ -349,80 +396,82 @@ outer:
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.Lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {
-				ls := dv.lineStyleForType(l.Kind)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-					write(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.lineStyleForType(l.Kind)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+						b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+					}
+					b.WriteString(fullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render("  …"),
+					))
+					b.WriteRune('\n')
 				}
-				write(fullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render("  …"),
-				))
-				write("\n")
 				break outer
 			}
 
-			getContent := func(ls LineStyle) string {
-				content := strings.TrimSuffix(l.Content, "\n")
-				content = dv.hightlightCode(content, ls.Code.GetBackground())
-				content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-				content = ansi.Truncate(content, dv.codeWidth, "…")
-				return content
-			}
-
-			leadingEllipsis := dv.xOffset > 0 && strings.TrimSpace(content) != ""
-
 			switch l.Kind {
 			case udiff.Equal:
-				ls := dv.style.EqualLine
-				content := getContent(ls)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
-					write(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.EqualLine
+					content, leadingEllipsis := getContent(l.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+					}
+					b.WriteString(fullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
+					))
 				}
-				write(fullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
-				))
 				beforeLine++
 				afterLine++
 			case udiff.Insert:
-				ls := dv.style.InsertLine
-				content := getContent(ls)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
-					write(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.InsertLine
+					content, leadingEllipsis := getContent(l.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+					}
+					b.WriteString(fullContentStyle.Render(
+						ls.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
+							ls.Code.Width(dv.codeWidth).Render(content),
+					))
 				}
-				write(fullContentStyle.Render(
-					ls.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
-						ls.Code.Width(dv.codeWidth).Render(content),
-				))
 				afterLine++
 			case udiff.Delete:
-				ls := dv.style.DeleteLine
-				content := getContent(ls)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
-					write(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.DeleteLine
+					content, leadingEllipsis := getContent(l.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+						b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+					}
+					b.WriteString(fullContentStyle.Render(
+						ls.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
+							ls.Code.Width(dv.codeWidth).Render(content),
+					))
 				}
-				write(fullContentStyle.Render(
-					ls.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
-						ls.Code.Width(dv.codeWidth).Render(content),
-				))
 				beforeLine++
 			}
-			write("\n")
+			if shouldWrite() {
+				b.WriteRune('\n')
+			}
 
 			printedLines++
 		}
 	}
 
 	for printedLines < dv.height {
-		ls := dv.style.MissingLine
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
-			write(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+		if shouldWrite() {
+			ls := dv.style.MissingLine
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+				b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+			}
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render("  "))
+			b.WriteRune('\n')
 		}
-		write(ls.Code.Width(dv.fullCodeWidth).Render("  "))
-		write("\n")
 		printedLines++
 	}
 
@@ -436,26 +485,32 @@ func (dv *DiffView) renderSplit() string {
 	beforeFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth)
 	afterFullContentStyle := lipgloss.NewStyle().MaxWidth(dv.fullCodeWidth + btoi(dv.extraColOnAfter))
 	printedLines := -dv.yOffset
+	shouldWrite := func() bool { return printedLines >= 0 }
 
-	write := func(s string) {
-		if printedLines >= 0 {
-			b.WriteString(s)
-		}
+	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
+		content = strings.TrimSuffix(in, "\n")
+		content = dv.hightlightCode(content, ls.Code.GetBackground())
+		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
+		content = ansi.Truncate(content, dv.codeWidth, "…")
+		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
+		return
 	}
 
 outer:
 	for i, h := range dv.splitHunks {
-		ls := dv.style.DividerLine
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+		if shouldWrite() {
+			ls := dv.style.DividerLine
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+			}
+			content := ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…")
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+			}
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+			b.WriteRune('\n')
 		}
-		content := ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…")
-		write(ls.Code.Width(dv.fullCodeWidth).Render(content))
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-		}
-		write(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
-		write("\n")
 		printedLines++
 
 		beforeLine := h.fromLine
@@ -467,126 +522,129 @@ outer:
 			isLastHunk := i+1 == len(dv.unified.Hunks)
 			isLastLine := j+1 == len(h.lines)
 			if hasReachedHeight && (!isLastHunk || !isLastLine) {
-				ls := dv.style.MissingLine
-				if l.before != nil {
-					ls = dv.lineStyleForType(l.before.Kind)
+				if shouldWrite() {
+					ls := dv.style.MissingLine
+					if l.before != nil {
+						ls = dv.lineStyleForType(l.before.Kind)
+					}
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+					}
+					b.WriteString(beforeFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render("  …"),
+					))
+					ls = dv.style.MissingLine
+					if l.after != nil {
+						ls = dv.lineStyleForType(l.after.Kind)
+					}
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+					}
+					b.WriteString(afterFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render("  …"),
+					))
+					b.WriteRune('\n')
 				}
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
-				}
-				write(beforeFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render("  …"),
-				))
-				ls = dv.style.MissingLine
-				if l.after != nil {
-					ls = dv.lineStyleForType(l.after.Kind)
-				}
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
-				}
-				write(afterFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render("  …"),
-				))
-				write("\n")
 				break outer
-			}
-
-			getContent := func(content string, ls LineStyle) string {
-				content = strings.TrimSuffix(content, "\n")
-				content = dv.hightlightCode(content, ls.Code.GetBackground())
-				content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-				content = ansi.Truncate(content, dv.codeWidth, "…")
-				return content
-			}
-			getLeadingEllipsis := func(content string) bool {
-				return dv.xOffset > 0 && strings.TrimSpace(content) != ""
 			}
 
 			switch {
 			case l.before == nil:
-				ls := dv.style.MissingLine
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.MissingLine
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+					}
+					b.WriteString(beforeFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render("  "),
+					))
 				}
-				write(beforeFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render("  "),
-				))
 			case l.before.Kind == udiff.Equal:
-				ls := dv.style.EqualLine
-				content := getContent(l.before.Content, ls)
-				leadingEllipsis := getLeadingEllipsis(content)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.EqualLine
+					content, leadingEllipsis := getContent(l.before.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+					}
+					b.WriteString(beforeFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
+					))
 				}
-				write(beforeFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth).Render(ternary(leadingEllipsis, " …", "  ") + content),
-				))
 				beforeLine++
 			case l.before.Kind == udiff.Delete:
-				ls := dv.style.DeleteLine
-				content := getContent(l.before.Content, ls)
-				leadingEllipsis := getLeadingEllipsis(content)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.DeleteLine
+					content, leadingEllipsis := getContent(l.before.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(beforeLine, dv.beforeNumDigits)))
+					}
+					b.WriteString(beforeFullContentStyle.Render(
+						ls.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
+							ls.Code.Width(dv.codeWidth).Render(content),
+					))
 				}
-				write(beforeFullContentStyle.Render(
-					ls.Symbol.Render(ternary(leadingEllipsis, "-…", "- ")) +
-						ls.Code.Width(dv.codeWidth).Render(content),
-				))
 				beforeLine++
 			}
 
 			switch {
 			case l.after == nil:
-				ls := dv.style.MissingLine
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.MissingLine
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+					}
+					b.WriteString(afterFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "),
+					))
 				}
-				write(afterFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render("  "),
-				))
 			case l.after.Kind == udiff.Equal:
-				ls := dv.style.EqualLine
-				content := getContent(l.after.Content, ls)
-				leadingEllipsis := getLeadingEllipsis(content)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.EqualLine
+					content, leadingEllipsis := getContent(l.after.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+					}
+					b.WriteString(afterFullContentStyle.Render(
+						ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(ternary(leadingEllipsis, " …", "  ") + content),
+					))
 				}
-				write(afterFullContentStyle.Render(
-					ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(ternary(leadingEllipsis, " …", "  ") + content),
-				))
 				afterLine++
 			case l.after.Kind == udiff.Insert:
-				ls := dv.style.InsertLine
-				content := getContent(l.after.Content, ls)
-				leadingEllipsis := getLeadingEllipsis(content)
-				if dv.lineNumbers {
-					write(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+				if shouldWrite() {
+					ls := dv.style.InsertLine
+					content, leadingEllipsis := getContent(l.after.Content, ls)
+					if dv.lineNumbers {
+						b.WriteString(ls.LineNumber.Render(pad(afterLine, dv.afterNumDigits)))
+					}
+					b.WriteString(afterFullContentStyle.Render(
+						ls.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
+							ls.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(content),
+					))
 				}
-				write(afterFullContentStyle.Render(
-					ls.Symbol.Render(ternary(leadingEllipsis, "+…", "+ ")) +
-						ls.Code.Width(dv.codeWidth+btoi(dv.extraColOnAfter)).Render(content),
-				))
 				afterLine++
 			}
 
-			write("\n")
+			if shouldWrite() {
+				b.WriteRune('\n')
+			}
 
 			printedLines++
 		}
 	}
 
 	for printedLines < dv.height {
-		ls := dv.style.MissingLine
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+		if shouldWrite() {
+			ls := dv.style.MissingLine
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
+			}
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(" "))
+			if dv.lineNumbers {
+				b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
+			}
+			b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+			b.WriteRune('\n')
 		}
-		write(ls.Code.Width(dv.fullCodeWidth).Render(" "))
-		if dv.lineNumbers {
-			write(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
-		}
-		write(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
-		write("\n")
 		printedLines++
 	}
 

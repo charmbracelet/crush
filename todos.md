@@ -20,7 +20,16 @@
 - [ ] Parallel tool calls and permissions
   - [ ] Run the tools in parallel and add results in parallel
   - [ ] Show multiple permissions dialogs
+- [ ] Add another space around buttons
+- [ ] Completions
+  - [ ] Should change the help to show the completions stuff
+  - [ ] Should make it wider
+  - [ ] Tab and ctrl+y should accept
+  - [ ] Words should line up
+  - [ ] If there are no completions and cick tab/ctrl+y/enter it should close it
 - [ ] Investigate messages issues
+  - [ ] Make the agent separator look like the
+  - [ ] Cleanup tool calls (watch all states)
   - [ ] Weird behavior sometimes the message does not update
   - [ ] Message length (I saw the message go beyond the correct length when there are errors)
   - [ ] Address UX issues

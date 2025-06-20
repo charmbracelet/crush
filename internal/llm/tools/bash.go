@@ -36,6 +36,7 @@ const (
 	DefaultTimeout  = 1 * 60 * 1000  // 1 minutes in milliseconds
 	MaxTimeout      = 10 * 60 * 1000 // 10 minutes in milliseconds
 	MaxOutputLength = 30000
+	BashNoOutput    = "no output"
 )
 
 var bannedCommands = []string{
@@ -321,7 +322,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		EndTime:   time.Now().UnixMilli(),
 	}
 	if stdout == "" {
-		return WithResponseMetadata(NewTextResponse("no output"), metadata), nil
+		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
 	}
 	return WithResponseMetadata(NewTextResponse(stdout), metadata), nil
 }

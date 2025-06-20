@@ -32,10 +32,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("k"),
 		),
 		UpOneItem: key.NewBinding(
-			key.WithKeys("shift+up", "shift+k"),
+			key.WithKeys("shift+up", "K"),
 		),
 		DownOneItem: key.NewBinding(
-			key.WithKeys("shift+down", "shift+j"),
+			key.WithKeys("shift+down", "J"),
 		),
 		HalfPageDown: key.NewBinding(
 			key.WithKeys("d"),
@@ -47,7 +47,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("g", "home"),
 		),
 		End: key.NewBinding(
-			key.WithKeys("shift+g", "end"),
+			key.WithKeys("G", "end"),
 		),
 	}
 }

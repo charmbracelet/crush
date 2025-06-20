@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -33,6 +34,7 @@ type (
 	ChatFocusedMsg    struct {
 		Focused bool // True if the chat input is focused, false otherwise
 	}
+	CancelTimerExpiredMsg struct{}
 )
 
 type ChatPage interface {
@@ -57,6 +59,8 @@ type chatPage struct {
 	showDetails      bool // Show details in the header
 	header           header.Header
 	compactSidebar   layout.Container
+
+	cancelPending bool // True if ESC was pressed once and waiting for second press
 }
 
 func (p *chatPage) Init() tea.Cmd {
@@ -67,9 +71,19 @@ func (p *chatPage) Init() tea.Cmd {
 	)
 }
 
+// cancelTimerCmd creates a command that expires the cancel timer after 2 seconds
+func (p *chatPage) cancelTimerCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return CancelTimerExpiredMsg{}
+	})
+}
+
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case CancelTimerExpiredMsg:
+		p.cancelPending = false
+		return p, nil
 	case tea.WindowSizeMsg:
 		h, cmd := p.header.Update(msg)
 		cmds = append(cmds, cmd)
@@ -181,10 +195,16 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, tea.Batch(cmds...)
 		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" {
-				// Cancel the current session's generation process
-				// This allows users to interrupt long-running operations
-				p.app.CoderAgent.Cancel(p.session.ID)
-				return p, nil
+				if p.cancelPending {
+					// Second ESC press - actually cancel the session
+					p.cancelPending = false
+					p.app.CoderAgent.Cancel(p.session.ID)
+					return p, nil
+				} else {
+					// First ESC press - start the timer
+					p.cancelPending = true
+					return p, p.cancelTimerCmd()
+				}
 			}
 		case key.Matches(msg, p.keyMap.Details):
 			if p.session.ID == "" || !p.compactMode {
@@ -336,7 +356,14 @@ func (p *chatPage) Bindings() []key.Binding {
 		p.keyMap.AddAttachment,
 	}
 	if p.app.CoderAgent.IsBusy() {
-		bindings = append([]key.Binding{p.keyMap.Cancel}, bindings...)
+		cancelBinding := p.keyMap.Cancel
+		if p.cancelPending {
+			cancelBinding = key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "press again to cancel"),
+			)
+		}
+		bindings = append([]key.Binding{cancelBinding}, bindings...)
 	}
 
 	if p.chatFocused {

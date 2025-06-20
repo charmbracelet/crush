@@ -11,7 +11,12 @@ type KeyMap struct {
 	Select,
 	Allow,
 	AllowSession,
-	Deny key.Binding
+	Deny,
+	ToggleDiffMode,
+	ScrollDown,
+	ScrollUp key.Binding
+	ScrollLeft,
+	ScrollRight key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -41,8 +46,28 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("d", "deny"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "tab", "ctrl+y"),
+			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
+		),
+		ToggleDiffMode: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "toggle diff mode"),
+		),
+		ScrollDown: key.NewBinding(
+			key.WithKeys("shift+down", "J"),
+			key.WithHelp("shift+↓", "scroll down"),
+		),
+		ScrollUp: key.NewBinding(
+			key.WithKeys("shift+up", "K"),
+			key.WithHelp("shift+↑", "scroll up"),
+		),
+		ScrollLeft: key.NewBinding(
+			key.WithKeys("shift+left", "H"),
+			key.WithHelp("shift+←", "scroll left"),
+		),
+		ScrollRight: key.NewBinding(
+			key.WithKeys("shift+right", "L"),
+			key.WithHelp("shift+→", "scroll right"),
 		),
 	}
 }
@@ -57,6 +82,11 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Allow,
 		k.AllowSession,
 		k.Deny,
+		k.ToggleDiffMode,
+		k.ScrollDown,
+		k.ScrollUp,
+		k.ScrollLeft,
+		k.ScrollRight,
 	}
 }
 
@@ -74,9 +104,14 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		k.Allow,
-		k.AllowSession,
-		k.Deny,
-		k.Select,
+		k.ToggleDiffMode,
+		key.NewBinding(
+			key.WithKeys("shift+left", "shift+down", "shift+up", "shift+right"),
+			key.WithHelp("shift+←↓↑→", "scroll"),
+		),
+		key.NewBinding(
+			key.WithKeys("shift+h", "shift+j", "shift+k", "shift+l"),
+			key.WithHelp("shift+hjkl", "scroll"),
+		),
 	}
 }

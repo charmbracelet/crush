@@ -14,9 +14,10 @@ func NewCrushTheme() *Theme {
 		Tertiary:  charmtone.Bok,
 		Accent:    charmtone.Zest,
 		// Backgrounds
-		BgBase:    charmtone.Pepper,
-		BgSubtle:  charmtone.Charcoal,
-		BgOverlay: charmtone.Iron,
+		BgBase:        charmtone.Pepper,
+		BgBaseLighter: Lighten(charmtone.Pepper, 2),
+		BgSubtle:      charmtone.Charcoal,
+		BgOverlay:     charmtone.Iron,
 
 		// Foregrounds
 		FgBase:      charmtone.Ash,
@@ -38,7 +39,10 @@ func NewCrushTheme() *Theme {
 		// Colors
 		White: charmtone.Butter,
 
-		Blue: charmtone.Malibu,
+		BlueLight: charmtone.Sardine,
+		Blue:      charmtone.Malibu,
+
+		Yellow: charmtone.Mustard,
 
 		Green:      charmtone.Julep,
 		GreenDark:  charmtone.Guac,

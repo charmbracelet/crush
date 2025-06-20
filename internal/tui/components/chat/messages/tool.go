@@ -25,7 +25,7 @@ type ToolCallCmp interface {
 	SetToolResult(message.ToolResult)  // Update tool result
 	SetToolCall(message.ToolCall)      // Update tool call
 	SetCancelled()                     // Mark as cancelled
-	ParentMessageId() string           // Get parent message ID
+	ParentMessageID() string           // Get parent message ID
 	Spinning() bool                    // Animation state for pending tools
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
@@ -83,10 +83,10 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
-func NewToolCallCmp(parentMessageId string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
+func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
-		parentMessageID: parentMessageId,
+		parentMessageID: parentMessageID,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -137,9 +137,6 @@ func (m *toolCallCmp) View() tea.View {
 	box := m.style()
 
 	if !m.call.Finished && !m.cancelled {
-		if m.isNested {
-			return tea.NewView(box.Render(m.renderPending()))
-		}
 		return tea.NewView(box.Render(m.renderPending()))
 	}
 
@@ -166,8 +163,8 @@ func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	}
 }
 
-// ParentMessageId returns the ID of the message that initiated this tool call
-func (m *toolCallCmp) ParentMessageId() string {
+// ParentMessageID returns the ID of the message that initiated this tool call
+func (m *toolCallCmp) ParentMessageID() string {
 	return m.parentMessageID
 }
 
@@ -210,9 +207,13 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
 	t := styles.CurrentTheme()
+	if m.isNested {
+		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
+		return fmt.Sprintf("%s %s", tool, m.anim.View())
+	}
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
-	return fmt.Sprintf("%s %s: %s", icon, tool, m.anim.View())
+	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
 }
 
 // style returns the lipgloss style for the tool call component.
@@ -229,14 +230,17 @@ func (m *toolCallCmp) style() lipgloss.Style {
 // textWidth calculates the available width for text content,
 // accounting for borders and padding
 func (m *toolCallCmp) textWidth() int {
+	if m.isNested {
+		return m.width - 6
+	}
 	return m.width - 5 // take into account the border and PaddingLeft
 }
 
 // fit truncates content to fit within the specified width with ellipsis
 func (m *toolCallCmp) fit(content string, width int) string {
 	t := styles.CurrentTheme()
-	lineStyle := t.S().Muted.Background(t.BgSubtle)
-	dots := lineStyle.Render("...")
+	lineStyle := t.S().Muted
+	dots := lineStyle.Render("…")
 	return ansi.Truncate(content, width, dots)
 }
 

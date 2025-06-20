@@ -2,13 +2,16 @@ package shell
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/charmbracelet/crush/internal/logging"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -39,7 +42,11 @@ func newPersistentShell(cwd string) *PersistentShell {
 	}
 }
 
-func (s *PersistentShell) Exec(ctx context.Context, command string) (string, string, int, bool, error) {
+func (s *PersistentShell) Exec(
+	ctx context.Context,
+	command string,
+	timeout time.Duration,
+) (string, string, int, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -59,19 +66,52 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 		return "", "", 1, false, fmt.Errorf("could not run command: %w", err)
 	}
 
-	if err := runner.Run(ctx, line); err != nil {
-		status, ok := interp.IsExitStatus(err)
-		if !ok {
-			status = 1
+	doneCh := make(chan struct{}, 1)
+	errCh := make(chan error, 1)
+	runCtx, cancel := context.WithTimeout(ctx, cmp.Or(timeout, time.Hour*999))
+	defer cancel()
+
+	go func() {
+		errCh <- runner.Run(runCtx, line)
+	}()
+
+	var interrupted bool
+	var exitStatus int
+	go func() {
+	out:
+		for {
+			select {
+			case err := <-errCh:
+				status, ok := interp.IsExitStatus(err)
+				if err != nil && !ok {
+					status = 1
+				}
+				exitStatus = int(status)
+				interrupted = errors.Is(err, context.Canceled) ||
+					errors.Is(err, context.DeadlineExceeded)
+				break out
+			case <-runCtx.Done():
+				interrupted = true
+				exitStatus = 1
+				break out
+			case <-ctx.Done():
+				interrupted = true
+				exitStatus = 1
+				cancel() // cancel the run context
+				break out
+			}
 		}
-		interrupted := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-		return stdout.String(), stderr.String(), int(status), interrupted, err
-	}
+		doneCh <- struct{}{}
+	}()
+
+	<-doneCh
 
 	s.cwd = runner.Dir
 	s.env = []string{}
 	for name, vr := range runner.Vars {
 		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
 	}
-	return stdout.String(), stderr.String(), 0, false, nil
+
+	logging.InfoPersist("Command finished", "command", command, "interrupted", interrupted, "exitStatus", exitStatus)
+	return stdout.String(), stderr.String(), int(exitStatus), interrupted, err
 }

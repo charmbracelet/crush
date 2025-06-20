@@ -25,12 +25,10 @@ func init() {
 	rgPath, err = exec.LookPath("rg")
 	if err != nil {
 		logging.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
-		rgPath = ""
 	}
 	fzfPath, err = exec.LookPath("fzf")
 	if err != nil {
 		logging.Warn("FZF not found in $PATH. Some features might be limited or slower.")
-		fzfPath = ""
 	}
 }
 
@@ -49,9 +47,21 @@ func GetRgCmd(globPattern string) *exec.Cmd {
 		}
 		rgArgs = append(rgArgs, "--glob", globPattern)
 	}
-	cmd := exec.Command(rgPath, rgArgs...)
-	cmd.Dir = "."
-	return cmd
+	return exec.Command(rgPath, rgArgs...)
+}
+
+func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
+	if rgPath == "" {
+		return nil
+	}
+	// Use -n to show line numbers and include the matched line
+	args := []string{"-n", pattern}
+	if include != "" {
+		args = append(args, "--glob", include)
+	}
+	args = append(args, path)
+
+	return exec.Command("rg", args...)
 }
 
 type FileInfo struct {

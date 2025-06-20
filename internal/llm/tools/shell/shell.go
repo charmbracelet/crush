@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 
 type PersistentShell struct {
 	cmd          *exec.Cmd
-	stdin        *os.File
+	stdin        io.WriteCloser
 	isAlive      bool
 	cwd          string
 	mu           sync.Mutex
@@ -39,22 +40,15 @@ type commandResult struct {
 	err         error
 }
 
-var (
-	shellInstance     *PersistentShell
-	shellInstanceOnce sync.Once
-)
+var shellInstance *PersistentShell
 
 func GetPersistentShell(workingDir string) *PersistentShell {
-	shellInstanceOnce.Do(func() {
-		shellInstance = newPersistentShell(workingDir)
-	})
-
 	if shellInstance == nil {
 		shellInstance = newPersistentShell(workingDir)
-	} else if !shellInstance.isAlive {
+	}
+	if !shellInstance.isAlive {
 		shellInstance = newPersistentShell(shellInstance.cwd)
 	}
-
 	return shellInstance
 }
 
@@ -100,7 +94,7 @@ func newPersistentShell(cwd string) *PersistentShell {
 
 	shell := &PersistentShell{
 		cmd:          cmd,
-		stdin:        stdinPipe.(*os.File),
+		stdin:        stdinPipe,
 		isAlive:      true,
 		cwd:          cwd,
 		commandQueue: make(chan *commandExecution, 10),

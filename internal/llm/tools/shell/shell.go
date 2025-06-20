@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/logging"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -59,13 +60,17 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 		return "", "", 1, false, fmt.Errorf("could not run command: %w", err)
 	}
 
-	if err := runner.Run(ctx, line); err != nil {
-		status, ok := interp.IsExitStatus(err)
-		if !ok {
-			status = 1
-		}
-		interrupted := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-		return stdout.String(), stderr.String(), int(status), interrupted, err
+	var interrupted bool
+	var exitStatus int
+	err = runner.Run(ctx, line)
+	if err != nil {
+		exitStatus = errorExit(err)
+		interrupted = errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded)
+	}
+	if interrupted {
+		// the caller expects a nil err if interrupted
+		err = nil
 	}
 
 	s.cwd = runner.Dir
@@ -73,5 +78,14 @@ func (s *PersistentShell) Exec(ctx context.Context, command string) (string, str
 	for name, vr := range runner.Vars {
 		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
 	}
-	return stdout.String(), stderr.String(), 0, false, nil
+	logging.InfoPersist("Command finished", "command", command, "interrupted", interrupted, "exitStatus", exitStatus, "err", err)
+	return stdout.String(), stderr.String(), exitStatus, interrupted, err
+}
+
+func errorExit(err error) int {
+	status, ok := interp.IsExitStatus(err)
+	if ok {
+		return int(status)
+	}
+	return 1
 }

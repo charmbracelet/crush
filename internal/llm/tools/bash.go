@@ -286,7 +286,12 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	}
 	startTime := time.Now()
 	shell := shell.GetPersistentShell(config.WorkingDirectory())
-	stdout, stderr, exitCode, interrupted, err := shell.Exec(ctx, params.Command, params.Timeout)
+	if params.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Millisecond)
+		defer cancel()
+	}
+	stdout, stderr, exitCode, interrupted, err := shell.Exec(ctx, params.Command)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error executing command: %w", err)
 	}

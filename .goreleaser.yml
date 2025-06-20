@@ -1,24 +1,35 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
+# vim: set ts=2 sw=2 tw=0 fo=jcroql
 version: 2
-project_name: opencode
-before:
-  hooks:
+
+project_name: crush
+
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+  license: "MIT"
+  homepage: "https://charm.sh/crush"
+  description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
+  maintainers:
+    - "kujtimiihoxha <kujtimii.h@gmail.com>"
+
 builds:
   - env:
       - CGO_ENABLED=0
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/opencode-ai/opencode/internal/version.Version={{.Version}}
+      - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
     main: ./main.go
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: >-
-      opencode-
+      crush-
       {{- if eq .Os "darwin" }}mac-
       {{- else if eq .Os "windows" }}windows-
       {{- else if eq .Os "linux" }}linux-{{end}}
@@ -28,34 +39,31 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
+
 checksum:
   name_template: "checksums.txt"
+
 snapshot:
-  name_template: "0.0.0-{{ .Timestamp }}"
+  version_template: "0.0.0-{{ .Timestamp }}"
+
 aurs:
-  - name: opencode-ai
-    homepage: "https://github.com/opencode-ai/opencode"
-    description: "terminal based agent that can build anything"
-    maintainers:
-      - "kujtimiihoxha <kujtimii.h@gmail.com>"
-    license: "MIT"
-    private_key: "{{ .Env.AUR_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/opencode-ai-bin.git"
+  - private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/charmbracelet-bin.git"
     provides:
-      - opencode
+      - crush
     conflicts:
-      - opencode
+      - crush
     package: |-
-      install -Dm755 ./opencode "${pkgdir}/usr/bin/opencode"
-brews:
+      install -Dm755 ./crush "${pkgdir}/usr/bin/crush"
+
+homebrew_casks:
   - repository:
-      owner: opencode-ai
+      owner: charmbracelet
       name: homebrew-tap
+
 nfpms:
-  - maintainer: kujtimiihoxha
-    description: terminal based agent that can build anything
-    formats:
+  - formats:
       - deb
       - rpm
     file_name_template: >-

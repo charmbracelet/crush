@@ -272,7 +272,7 @@ func (m *messageListCmp) findAssistantMessageAndToolCalls(items []util.Model, me
 				assistantIndex = i
 			}
 		} else if tc, ok := item.(messages.ToolCallCmp); ok {
-			if tc.ParentMessageId() == messageID {
+			if tc.ParentMessageID() == messageID {
 				toolCalls[i] = tc
 			}
 		}
@@ -295,9 +295,17 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 			assistantIndex,
 			messages.NewMessageCmp(
 				msg,
-				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
+
+		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+			m.listCmp.AppendItem(
+				messages.NewAssistantSection(
+					msg,
+					time.Unix(m.lastUserMessageTime, 0),
+				),
+			)
+		}
 	} else if hasToolCallsOnly {
 		m.listCmp.DeleteItem(assistantIndex)
 	}
@@ -347,7 +355,6 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 		cmd := m.listCmp.AppendItem(
 			messages.NewMessageCmp(
 				msg,
-				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
 		cmds = append(cmds, cmd)
@@ -412,6 +419,9 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 			uiMessages = append(uiMessages, messages.NewMessageCmp(msg))
 		case message.Assistant:
 			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
+			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+				uiMessages = append(uiMessages, messages.NewAssistantSection(msg, time.Unix(m.lastUserMessageTime, 0)))
+			}
 		}
 	}
 
@@ -428,7 +438,6 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 			uiMessages,
 			messages.NewMessageCmp(
 				msg,
-				messages.WithLastUserMessageTime(time.Unix(m.lastUserMessageTime, 0)),
 			),
 		)
 	}

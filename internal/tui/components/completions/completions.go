@@ -57,8 +57,6 @@ func New() Completions {
 	keyMap := list.DefaultKeyMap()
 	keyMap.Up.SetEnabled(false)
 	keyMap.Down.SetEnabled(false)
-	keyMap.NDown.SetEnabled(false)
-	keyMap.NUp.SetEnabled(false)
 	keyMap.HalfPageDown.SetEnabled(false)
 	keyMap.HalfPageUp.SetEnabled(false)
 	keyMap.Home.SetEnabled(false)

@@ -254,10 +254,6 @@ func New(opts ...listOptions) ListModel {
 		ti.Focus()
 		ti.SetStyles(t.S().TextInput)
 		m.input = ti
-
-		// disable j,k movements
-		m.keyMap.NDown.SetEnabled(false)
-		m.keyMap.NUp.SetEnabled(false)
 	}
 	return m
 }
@@ -319,9 +315,9 @@ func (m *model) View() tea.View {
 // Supports scrolling, item selection, and navigation to top/bottom.
 func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keyMap.Down) || key.Matches(msg, m.keyMap.NDown):
+	case key.Matches(msg, m.keyMap.Down):
 		m.scrollDown(1)
-	case key.Matches(msg, m.keyMap.Up) || key.Matches(msg, m.keyMap.NUp):
+	case key.Matches(msg, m.keyMap.Up):
 		m.scrollUp(1)
 	case key.Matches(msg, m.keyMap.DownOneItem):
 		return m, m.selectNextItem()

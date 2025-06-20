@@ -43,6 +43,10 @@ type messageCmp struct {
 	anim     util.Model      // Animation component for loading states
 }
 
+var focusedMessageBorder = lipgloss.Border{
+	Left: "▌",
+}
+
 // NewMessageCmp creates a new message component with the given message and options
 func NewMessageCmp(msg message.Message) MessageCmp {
 	m := &messageCmp{
@@ -112,7 +116,7 @@ func (msg *messageCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
 	borderStyle := lipgloss.NormalBorder()
 	if msg.focused {
-		borderStyle = lipgloss.ThickBorder()
+		borderStyle = focusedMessageBorder
 	}
 
 	style := t.S().Text

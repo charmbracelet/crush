@@ -291,7 +291,7 @@ func (m *assistantSectionModel) View() tea.View {
 	infoMsg := t.S().Subtle.Render(duration.String())
 	icon := t.S().Subtle.Render(styles.ModelIcon)
 	model := t.S().Muted.Render(models.SupportedModels[m.message.Model].Name)
-	assistant := fmt.Sprintf("%s  %s %s", icon, model, infoMsg)
+	assistant := fmt.Sprintf("%s %s %s", icon, model, infoMsg)
 	return tea.NewView(
 		t.S().Base.PaddingLeft(2).Render(
 			core.Section(assistant, m.width-2),

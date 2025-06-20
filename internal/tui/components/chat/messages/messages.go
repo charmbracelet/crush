@@ -290,7 +290,7 @@ func (m *assistantSectionModel) View() tea.View {
 	assistant := fmt.Sprintf("%s  %s %s", icon, model, infoMsg)
 	return tea.NewView(
 		t.S().Base.PaddingLeft(2).Render(
-			core.Section(assistant, m.width-1),
+			core.Section(assistant, m.width-2),
 		),
 	)
 }

@@ -164,7 +164,7 @@ func (m *messageCmp) renderUserMessage() string {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return m.style().MarginBottom(1).Render(joined)
+	return m.style().Render(joined)
 }
 
 // toMarkdown converts text content to rendered markdown using the configured renderer

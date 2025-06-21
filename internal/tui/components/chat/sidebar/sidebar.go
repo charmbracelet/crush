@@ -509,9 +509,10 @@ func (s *sidebarCmp) currentModelBlock() string {
 func cwd() string {
 	cwd := config.WorkingDirectory()
 	t := styles.CurrentTheme()
-	// replace home directory with ~
+	// Replace home directory with ~, unless we're at the top level of the
+	// home directory).
 	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	if err == nil && cwd != homeDir {
 		cwd = strings.ReplaceAll(cwd, homeDir, "~")
 	}
 	return t.S().Muted.Render(cwd)

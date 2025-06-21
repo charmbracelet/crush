@@ -1,8 +1,6 @@
 package shell
 
 import (
-	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -11,16 +9,12 @@ import (
 )
 
 func TestShellPerformanceComparison(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "shell-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
+	shell := newPersistentShell(t.TempDir())
 
 	// Test quick command
 	start := time.Now()
-	stdout, stderr, exitCode, _, err := shell.Exec(context.Background(), "echo 'hello'", 0)
+	stdout, stderr, err := shell.Exec(t.Context(), "echo 'hello'")
+	exitCode := ExitCode(err)
 	duration := time.Since(start)
 
 	require.NoError(t, err)
@@ -33,19 +27,14 @@ func TestShellPerformanceComparison(t *testing.T) {
 
 // Benchmark CPU usage during polling
 func BenchmarkShellPolling(b *testing.B) {
-	tmpDir, err := os.MkdirTemp("", "shell-bench")
-	require.NoError(b, err)
-	defer os.RemoveAll(tmpDir)
+	shell := newPersistentShell(b.TempDir())
 
-	shell := GetPersistentShell(tmpDir)
-	defer shell.Close()
-
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Use a short sleep to measure polling overhead
-		_, _, exitCode, _, err := shell.Exec(context.Background(), "sleep 0.02", 500)
+		_, _, err := shell.Exec(b.Context(), "sleep 0.02")
+		exitCode := ExitCode(err)
 		if err != nil || exitCode != 0 {
 			b.Fatalf("Command failed: %v, exit code: %d", err, exitCode)
 		}

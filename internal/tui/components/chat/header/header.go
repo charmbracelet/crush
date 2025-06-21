@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -44,6 +46,14 @@ func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		p.width = msg.Width - 2
+	case chat.SessionSelectedMsg:
+		p.session = msg
+	case pubsub.Event[session.Session]:
+		if msg.Type == pubsub.UpdatedEvent {
+			if p.session.ID == msg.Payload.ID {
+				p.session = msg.Payload
+			}
+		}
 	}
 	return p, nil
 }

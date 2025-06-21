@@ -64,10 +64,10 @@ type chatPage struct {
 }
 
 func (p *chatPage) Init() tea.Cmd {
-	cmd := p.layout.Init()
 	return tea.Batch(
-		cmd,
-		p.layout.FocusPanel(layout.BottomPanel), // Focus on the bottom panel (editor)
+		p.layout.Init(),
+		p.compactSidebar.Init(),
+		p.layout.FocusPanel(layout.BottomPanel), // Focus on the bottom panel (editor),
 	)
 }
 
@@ -88,9 +88,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		h, cmd := p.header.Update(msg)
 		cmds = append(cmds, cmd)
 		p.header = h.(header.Header)
-		if p.compactMode && p.showDetails {
-			cmds = append(cmds, p.compactSidebar.SetSize(msg.Width-4, 0))
-		}
+		cmds = append(cmds, p.compactSidebar.SetSize(msg.Width-4, 0))
 		// the mode is only relevant when there is a  session
 		if p.session.ID != "" {
 			// Only auto-switch to compact mode if not forced
@@ -213,13 +211,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.showDetails = !p.showDetails
 			p.header.SetDetailsOpen(p.showDetails)
 			if p.showDetails {
-				p.compactSidebar = sidebarCmp(p.app, true)
-				c, cmd := p.compactSidebar.Update(chat.SessionSelectedMsg(p.session))
-				p.compactSidebar = c.(layout.Container)
-				return p, tea.Batch(
-					cmd,
-					p.compactSidebar.SetSize(p.wWidth-4, 0),
-				)
+				return p, tea.Batch()
 			}
 
 			return p, nil
@@ -228,12 +220,12 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	u, cmd := p.layout.Update(msg)
 	cmds = append(cmds, cmd)
 	p.layout = u.(layout.SplitPaneLayout)
-
-	if p.compactMode && p.showDetails {
-		s, cmd := p.compactSidebar.Update(msg)
-		p.compactSidebar = s.(layout.Container)
-		cmds = append(cmds, cmd)
-	}
+	h, cmd := p.header.Update(msg)
+	p.header = h.(header.Header)
+	cmds = append(cmds, cmd)
+	s, cmd := p.compactSidebar.Update(msg)
+	p.compactSidebar = s.(layout.Container)
+	cmds = append(cmds, cmd)
 	return p, tea.Batch(cmds...)
 }
 
@@ -409,7 +401,8 @@ func NewChatPage(app *app.App) ChatPage {
 			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),
 		),
-		keyMap: DefaultKeyMap(),
-		header: header.New(app.LSPClients),
+		compactSidebar: sidebarCmp(app, true),
+		keyMap:         DefaultKeyMap(),
+		header:         header.New(app.LSPClients),
 	}
 }

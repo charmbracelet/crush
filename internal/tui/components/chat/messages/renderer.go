@@ -502,7 +502,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); done {
+	if res, done := earlyState(header, v); v.cancelled && done {
 		return res
 	}
 	taskTag := t.S().Base.Padding(0, 1).MarginLeft(1).Background(t.BlueLight).Foreground(t.White).Render("Task")
@@ -527,6 +527,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	parts := []string{
 		childTools.Enumerator(RoundedEnumerator).String(),
 	}
+
 	if v.result.ToolCallID == "" {
 		v.spinning = true
 		parts = append(parts, v.anim.View().String())

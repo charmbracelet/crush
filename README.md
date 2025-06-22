@@ -1,5 +1,5 @@
 > [!NOTE]  
-> This is the original OpenCode repository, now continuing at Charm with its original creator, [Kujtim Hoxha](https://github.com/kujtimiihoxha).  
+> This is the original OpenCode repository, now continuing at [Charm](https://github.com/charmbracelet) with its original creator, [Kujtim Hoxha](https://github.com/kujtimiihoxha).  
 > Development is continuing under a new name as we prepare for a public relaunch.  
 > Follow [@charmcli](https://x.com/charmcli) or join our [Discord](https://charm.sh/chat) for updates.
 

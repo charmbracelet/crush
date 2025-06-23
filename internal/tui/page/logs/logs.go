@@ -51,18 +51,16 @@ func (p *logsPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, tea.Batch(cmds...)
 }
 
-func (p *logsPage) View() tea.View {
+func (p *logsPage) View() string {
 	baseStyle := styles.CurrentTheme().S().Base
 	style := baseStyle.Width(p.width).Height(p.height).Padding(1)
 	title := core.Title("Logs", p.width-2)
 
-	return tea.NewView(
-		style.Render(
-			lipgloss.JoinVertical(lipgloss.Top,
-				title,
-				p.details.View().String(),
-				p.table.View().String(),
-			),
+	return style.Render(
+		lipgloss.JoinVertical(lipgloss.Top,
+			title,
+			p.details.View(),
+			p.table.View(),
 		),
 	)
 }

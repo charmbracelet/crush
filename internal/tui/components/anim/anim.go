@@ -257,7 +257,7 @@ func (a *anim) updateChars(chars *[]cyclingChar) {
 }
 
 // View renders the animation.
-func (a anim) View() tea.View {
+func (a anim) View() string {
 	var (
 		t = styles.CurrentTheme()
 		b strings.Builder
@@ -289,7 +289,7 @@ func (a anim) View() tea.View {
 		b.WriteString(textStyle.Render(a.ellipsis.View()))
 	}
 
-	return tea.NewView(b.String())
+	return b.String()
 }
 
 func GetColor(c color.Color) string {

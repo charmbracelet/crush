@@ -154,22 +154,28 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *modelDialogCmp) View() tea.View {
+func (m *modelDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := m.modelList.View()
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-4)),
-		listView.String(),
+		listView,
 		"",
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
-	v := tea.NewView(m.style().Render(content))
-	if listView.Cursor() != nil {
-		c := m.moveCursor(listView.Cursor())
-		v.SetCursor(c)
+	return m.style().Render(content)
+}
+
+func (m *modelDialogCmp) Cursor() *tea.Cursor {
+	if cursor, ok := m.modelList.(util.Cursor); ok {
+		cursor := cursor.Cursor()
+		if cursor != nil {
+			cursor = m.moveCursor(cursor)
+			return cursor
+		}
 	}
-	return v
+	return nil
 }
 
 func (m *modelDialogCmp) style() lipgloss.Style {

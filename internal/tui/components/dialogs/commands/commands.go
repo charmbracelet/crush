@@ -143,23 +143,29 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return c, nil
 }
 
-func (c *commandDialogCmp) View() tea.View {
+func (c *commandDialogCmp) View() string {
 	t := styles.CurrentTheme()
-	listView := c.commandList.View()
+	listView := c.commandList
 	radio := c.commandTypeRadio()
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5)+" "+radio),
-		listView.String(),
+		listView.View(),
 		"",
 		t.S().Base.Width(c.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(c.help.View(c.keyMap)),
 	)
-	v := tea.NewView(c.style().Render(content))
-	if listView.Cursor() != nil {
-		c := c.moveCursor(listView.Cursor())
-		v.SetCursor(c)
+	return c.style().Render(content)
+}
+
+func (c *commandDialogCmp) Cursor() *tea.Cursor {
+	if cursor, ok := c.commandList.(util.Cursor); ok {
+		cursor := cursor.Cursor()
+		if cursor != nil {
+			cursor = c.moveCursor(cursor)
+		}
+		return cursor
 	}
-	return v
+	return nil
 }
 
 func (c *commandDialogCmp) commandTypeRadio() string {

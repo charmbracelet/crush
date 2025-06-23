@@ -542,7 +542,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 	if v.result.ToolCallID == "" {
 		v.spinning = true
-		parts = append(parts, v.anim.View().String())
+		parts = append(parts, v.anim.View())
 	} else {
 		v.spinning = false
 	}

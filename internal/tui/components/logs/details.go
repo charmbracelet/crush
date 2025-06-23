@@ -145,7 +145,7 @@ func getRelativeTime(logTime time.Time) string {
 	}
 }
 
-func (i *detailCmp) View() tea.View {
+func (i *detailCmp) View() string {
 	t := styles.CurrentTheme()
 	style := t.S().Base.
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -153,7 +153,7 @@ func (i *detailCmp) View() tea.View {
 		Width(i.width - 2).   // Adjust width for border
 		Height(i.height - 2). // Adjust height for border
 		Padding(1)
-	return tea.NewView(style.Render(i.viewport.View()))
+	return style.Render(i.viewport.View())
 }
 
 func (i *detailCmp) GetSize() (int, int) {

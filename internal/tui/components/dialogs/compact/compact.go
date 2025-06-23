@@ -242,8 +242,8 @@ func (c *compactDialogCmp) render() string {
 		Render(dialogContent)
 }
 
-func (c *compactDialogCmp) View() tea.View {
-	return tea.NewView(c.render())
+func (c *compactDialogCmp) View() string {
+	return c.render()
 }
 
 // SetSize sets the size of the component.

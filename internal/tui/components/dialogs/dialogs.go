@@ -37,7 +37,7 @@ type DialogCmp interface {
 	Dialogs() []DialogModel
 	HasDialogs() bool
 	GetLayers() []*lipgloss.Layer
-	ActiveView() *tea.View
+	ActiveModel() util.Model
 	ActiveDialogID() DialogID
 }
 
@@ -132,12 +132,11 @@ func (d dialogCmp) Dialogs() []DialogModel {
 	return d.dialogs
 }
 
-func (d dialogCmp) ActiveView() *tea.View {
+func (d dialogCmp) ActiveModel() util.Model {
 	if len(d.dialogs) == 0 {
 		return nil
 	}
-	view := d.dialogs[len(d.dialogs)-1].View()
-	return &view
+	return d.dialogs[len(d.dialogs)-1]
 }
 
 func (d dialogCmp) ActiveDialogID() DialogID {
@@ -150,7 +149,7 @@ func (d dialogCmp) ActiveDialogID() DialogID {
 func (d dialogCmp) GetLayers() []*lipgloss.Layer {
 	layers := []*lipgloss.Layer{}
 	for _, dialog := range d.Dialogs() {
-		dialogView := dialog.View().String()
+		dialogView := dialog.View()
 		row, col := dialog.Position()
 		layers = append(layers, lipgloss.NewLayer(dialogView).X(col).Y(row))
 	}

@@ -52,6 +52,7 @@ type SessionFilesMsg struct {
 type Sidebar interface {
 	util.Model
 	layout.Sizeable
+	SetSession(session session.Session) tea.Cmd
 }
 
 type sidebarCmp struct {
@@ -83,10 +84,7 @@ func (m *sidebarCmp) Init() tea.Cmd {
 func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case chat.SessionSelectedMsg:
-		if msg.ID != m.session.ID {
-			m.session = msg
-		}
-		return m, m.loadSessionFiles
+		return m, m.SetSession(msg)
 	case SessionFilesMsg:
 		m.files = sync.Map{}
 		for _, file := range msg.Files {
@@ -504,6 +502,12 @@ func (s *sidebarCmp) currentModelBlock() string {
 		lipgloss.Left,
 		parts...,
 	)
+}
+
+// SetSession implements Sidebar.
+func (m *sidebarCmp) SetSession(session session.Session) tea.Cmd {
+	m.session = session
+	return m.loadSessionFiles
 }
 
 func cwd() string {

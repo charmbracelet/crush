@@ -167,6 +167,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.clearMessages(),
 				util.CmdHandler(chat.SessionClearedMsg{}),
 				p.setCompactMode(false),
+				p.layout.FocusPanel(layout.BottomPanel),
+				util.CmdHandler(ChatFocusedMsg{Focused: false}),
 			)
 		case key.Matches(msg, p.keyMap.AddAttachment):
 			cfg := config.Get()
@@ -238,7 +240,7 @@ func (p *chatPage) setMessages() tea.Cmd {
 }
 
 func (p *chatPage) setSidebar() tea.Cmd {
-	sidebarContainer := sidebarCmp(p.app, false)
+	sidebarContainer := sidebarCmp(p.app, false, p.session)
 	sidebarContainer.Init()
 	return p.layout.SetRightPanel(sidebarContainer)
 }
@@ -378,13 +380,18 @@ func (p *chatPage) Bindings() []key.Binding {
 	return bindings
 }
 
-func sidebarCmp(app *app.App, compact bool) layout.Container {
+func sidebarCmp(app *app.App, compact bool, session session.Session) layout.Container {
 	padding := layout.WithPadding(1, 1, 1, 1)
 	if compact {
 		padding = layout.WithPadding(0, 1, 1, 1)
 	}
+	sidebar := sidebar.NewSidebarCmp(app.History, app.LSPClients, compact)
+	if session.ID != "" {
+		sidebar.SetSession(session)
+	}
+
 	return layout.NewContainer(
-		sidebar.NewSidebarCmp(app.History, app.LSPClients, compact),
+		sidebar,
 		padding,
 	)
 }
@@ -396,12 +403,12 @@ func NewChatPage(app *app.App) ChatPage {
 	return &chatPage{
 		app: app,
 		layout: layout.NewSplitPane(
-			layout.WithRightPanel(sidebarCmp(app, false)),
+			layout.WithRightPanel(sidebarCmp(app, false, session.Session{})),
 			layout.WithBottomPanel(editorContainer),
 			layout.WithFixedBottomHeight(5),
 			layout.WithFixedRightWidth(31),
 		),
-		compactSidebar: sidebarCmp(app, true),
+		compactSidebar: sidebarCmp(app, true, session.Session{}),
 		keyMap:         DefaultKeyMap(),
 		header:         header.New(app.LSPClients),
 	}

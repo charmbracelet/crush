@@ -17,8 +17,8 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 	}
 
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Project:  os.Getenv("VERTEXAI_PROJECT"),
-		Location: os.Getenv("VERTEXAI_LOCATION"),
+		Project:  os.Getenv("GOOGLE_CLOUD_PROJECT"),
+		Location: os.Getenv("GOOGLE_CLOUD_LOCATION"),
 		Backend:  genai.BackendVertexAI,
 	})
 	if err != nil {

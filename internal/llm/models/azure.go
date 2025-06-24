@@ -1,6 +1,6 @@
 package models
 
-const ProviderAzure ModelProvider = "azure"
+const ProviderAzure InferenceProvider = "azure"
 
 const (
 	AzureGPT41        ModelID = "azure.gpt-4.1"

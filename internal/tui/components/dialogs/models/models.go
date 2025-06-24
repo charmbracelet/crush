@@ -80,7 +80,7 @@ func NewModelDialogCmp() ModelDialog {
 	}
 }
 
-var ProviderPopularity = map[models.ModelProvider]int{
+var ProviderPopularity = map[models.InferenceProvider]int{
 	models.ProviderAnthropic:  1,
 	models.ProviderOpenAI:     2,
 	models.ProviderGemini:     3,
@@ -92,7 +92,7 @@ var ProviderPopularity = map[models.ModelProvider]int{
 	models.ProviderXAI:        9,
 }
 
-var ProviderName = map[models.ModelProvider]string{
+var ProviderName = map[models.InferenceProvider]string{
 	models.ProviderAnthropic:  "Anthropic",
 	models.ProviderOpenAI:     "OpenAI",
 	models.ProviderGemini:     "Gemini",
@@ -195,8 +195,8 @@ func GetSelectedModel(cfg *config.Config) models.Model {
 	return models.SupportedModels[selectedModelID]
 }
 
-func getEnabledProviders(cfg *config.Config) []models.ModelProvider {
-	var providers []models.ModelProvider
+func getEnabledProviders(cfg *config.Config) []models.InferenceProvider {
+	var providers []models.InferenceProvider
 	for providerID, provider := range cfg.Providers {
 		if !provider.Disabled {
 			providers = append(providers, providerID)
@@ -204,7 +204,7 @@ func getEnabledProviders(cfg *config.Config) []models.ModelProvider {
 	}
 
 	// Sort by provider popularity
-	slices.SortFunc(providers, func(a, b models.ModelProvider) int {
+	slices.SortFunc(providers, func(a, b models.InferenceProvider) int {
 		rA := ProviderPopularity[a]
 		rB := ProviderPopularity[b]
 
@@ -220,7 +220,7 @@ func getEnabledProviders(cfg *config.Config) []models.ModelProvider {
 	return providers
 }
 
-func getModelsForProvider(provider models.ModelProvider) []models.Model {
+func getModelsForProvider(provider models.InferenceProvider) []models.Model {
 	var providerModels []models.Model
 	for _, model := range models.SupportedModels {
 		if model.Provider == provider {

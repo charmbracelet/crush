@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderOpenRouter ModelProvider = "openrouter"
+	ProviderOpenRouter InferenceProvider = "openrouter"
 
 	OpenRouterGPT41          ModelID = "openrouter.gpt-4.1"
 	OpenRouterGPT41Mini      ModelID = "openrouter.gpt-4.1-mini"

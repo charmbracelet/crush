@@ -76,7 +76,7 @@ func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client, c
 }
 
 func (m *sidebarCmp) Init() tea.Cmd {
-	m.logo = m.logoBlock(false)
+	m.logo = m.logoBlock()
 	m.cwd = cwd()
 	return nil
 }
@@ -231,9 +231,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
 	if width < logoBreakpoint && (m.width == 0 || m.width >= logoBreakpoint) {
-		m.logo = m.logoBlock(true)
+		m.logo = m.logoBlock()
 	} else if width >= logoBreakpoint && (m.width == 0 || m.width < logoBreakpoint) {
-		m.logo = m.logoBlock(false)
+		m.logo = m.logoBlock()
 	}
 
 	m.width = width
@@ -245,9 +245,9 @@ func (m *sidebarCmp) GetSize() (int, int) {
 	return m.width, m.height
 }
 
-func (m *sidebarCmp) logoBlock(compact bool) string {
+func (m *sidebarCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return logo.Render(version.Version, compact, logo.Opts{
+	return logo.Render(version.Version, true, logo.Opts{
 		FieldColor:   t.Primary,
 		TitleColorA:  t.Secondary,
 		TitleColorB:  t.Primary,

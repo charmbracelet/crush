@@ -76,17 +76,17 @@ type TUIConfig struct {
 
 // Config is the main configuration structure for the application.
 type Config struct {
-	Data         Data                              `json:"data"`
-	WorkingDir   string                            `json:"wd,omitempty"`
-	MCPServers   map[string]MCPServer              `json:"mcpServers,omitempty"`
-	Providers    map[models.ModelProvider]Provider `json:"providers,omitempty"`
-	LSP          map[string]LSPConfig              `json:"lsp,omitempty"`
-	Agents       map[AgentName]Agent               `json:"agents,omitempty"`
-	Debug        bool                              `json:"debug,omitempty"`
-	DebugLSP     bool                              `json:"debugLSP,omitempty"`
-	ContextPaths []string                          `json:"contextPaths,omitempty"`
-	TUI          TUIConfig                         `json:"tui"`
-	AutoCompact  bool                              `json:"autoCompact,omitempty"`
+	Data         Data                                  `json:"data"`
+	WorkingDir   string                                `json:"wd,omitempty"`
+	MCPServers   map[string]MCPServer                  `json:"mcpServers,omitempty"`
+	Providers    map[models.InferenceProvider]Provider `json:"providers,omitempty"`
+	LSP          map[string]LSPConfig                  `json:"lsp,omitempty"`
+	Agents       map[AgentName]Agent                   `json:"agents,omitempty"`
+	Debug        bool                                  `json:"debug,omitempty"`
+	DebugLSP     bool                                  `json:"debugLSP,omitempty"`
+	ContextPaths []string                              `json:"contextPaths,omitempty"`
+	TUI          TUIConfig                             `json:"tui"`
+	AutoCompact  bool                                  `json:"autoCompact,omitempty"`
 }
 
 // Application constants
@@ -128,7 +128,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	cfg = &Config{
 		WorkingDir: workingDir,
 		MCPServers: make(map[string]MCPServer),
-		Providers:  make(map[models.ModelProvider]Provider),
+		Providers:  make(map[models.InferenceProvider]Provider),
 		LSP:        make(map[string]LSPConfig),
 	}
 
@@ -640,7 +640,7 @@ func Validate() error {
 }
 
 // getProviderAPIKey gets the API key for a provider from environment variables
-func getProviderAPIKey(provider models.ModelProvider) string {
+func getProviderAPIKey(provider models.InferenceProvider) string {
 	switch provider {
 	case models.ProviderAnthropic:
 		return os.Getenv("ANTHROPIC_API_KEY")

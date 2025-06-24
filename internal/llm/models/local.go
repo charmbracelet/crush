@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	ProviderLocal ModelProvider = "local"
+	ProviderLocal InferenceProvider = "local"
 
 	localModelsPath        = "v1/models"
 	lmStudioBetaModelsPath = "api/v0/models"

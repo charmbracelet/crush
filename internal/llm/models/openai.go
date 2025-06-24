@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderOpenAI ModelProvider = "openai"
+	ProviderOpenAI InferenceProvider = "openai"
 
 	GPT41        ModelID = "gpt-4.1"
 	GPT41Mini    ModelID = "gpt-4.1-mini"

@@ -3,23 +3,23 @@ package models
 import "maps"
 
 type (
-	ModelID       string
-	ModelProvider string
+	ModelID           string
+	InferenceProvider string
 )
 
 type Model struct {
-	ID                  ModelID       `json:"id"`
-	Name                string        `json:"name"`
-	Provider            ModelProvider `json:"provider"`
-	APIModel            string        `json:"api_model"`
-	CostPer1MIn         float64       `json:"cost_per_1m_in"`
-	CostPer1MOut        float64       `json:"cost_per_1m_out"`
-	CostPer1MInCached   float64       `json:"cost_per_1m_in_cached"`
-	CostPer1MOutCached  float64       `json:"cost_per_1m_out_cached"`
-	ContextWindow       int64         `json:"context_window"`
-	DefaultMaxTokens    int64         `json:"default_max_tokens"`
-	CanReason           bool          `json:"can_reason"`
-	SupportsAttachments bool          `json:"supports_attachments"`
+	ID                  ModelID           `json:"id"`
+	Name                string            `json:"name"`
+	Provider            InferenceProvider `json:"provider"`
+	APIModel            string            `json:"api_model"`
+	CostPer1MIn         float64           `json:"cost_per_1m_in"`
+	CostPer1MOut        float64           `json:"cost_per_1m_out"`
+	CostPer1MInCached   float64           `json:"cost_per_1m_in_cached"`
+	CostPer1MOutCached  float64           `json:"cost_per_1m_out_cached"`
+	ContextWindow       int64             `json:"context_window"`
+	DefaultMaxTokens    int64             `json:"default_max_tokens"`
+	CanReason           bool              `json:"can_reason"`
+	SupportsAttachments bool              `json:"supports_attachments"`
 }
 
 // Model IDs
@@ -29,9 +29,9 @@ const ( // GEMINI
 )
 
 const (
-	ProviderBedrock ModelProvider = "bedrock"
+	ProviderBedrock InferenceProvider = "bedrock"
 	// ForTests
-	ProviderMock ModelProvider = "__mock"
+	ProviderMock InferenceProvider = "__mock"
 )
 
 var SupportedModels = map[ModelID]Model{
@@ -46,6 +46,20 @@ var SupportedModels = map[ModelID]Model{
 		CostPer1MOutCached: 0.30,
 		CostPer1MOut:       15.0,
 	},
+}
+
+var KnownProviders = []InferenceProvider{
+	ProviderAnthropic,
+	ProviderOpenAI,
+	ProviderGemini,
+	ProviderAzure,
+	ProviderGROQ,
+	ProviderLocal,
+	ProviderOpenRouter,
+	ProviderVertexAI,
+	ProviderBedrock,
+	ProviderXAI,
+	ProviderMock,
 }
 
 func init() {

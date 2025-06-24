@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderXAI ModelProvider = "xai"
+	ProviderXAI InferenceProvider = "xai"
 
 	XAIGrok3Beta         ModelID = "grok-3-beta"
 	XAIGrok3MiniBeta     ModelID = "grok-3-mini-beta"

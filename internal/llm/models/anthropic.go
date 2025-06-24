@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderAnthropic ModelProvider = "anthropic"
+	ProviderAnthropic InferenceProvider = "anthropic"
 
 	// Models
 	Claude35Sonnet ModelID = "claude-3.5-sonnet"

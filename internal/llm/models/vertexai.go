@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderVertexAI ModelProvider = "vertexai"
+	ProviderVertexAI InferenceProvider = "vertexai"
 
 	// Models
 	VertexAIGemini25Flash ModelID = "vertexai.gemini-2.5-flash"

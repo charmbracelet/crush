@@ -82,7 +82,7 @@ type baseProvider[C ProviderClient] struct {
 	client  C
 }
 
-func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption) (Provider, error) {
+func NewProvider(providerName models.InferenceProvider, opts ...ProviderClientOption) (Provider, error) {
 	clientOptions := providerClientOptions{}
 	for _, o := range opts {
 		o(&clientOptions)

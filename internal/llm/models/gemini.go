@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderGemini ModelProvider = "gemini"
+	ProviderGemini InferenceProvider = "gemini"
 
 	// Models
 	Gemini25Flash     ModelID = "gemini-2.5-flash"

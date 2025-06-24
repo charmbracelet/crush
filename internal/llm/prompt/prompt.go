@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/logging"
 )
 
-func GetAgentPrompt(agentName config.AgentName, provider models.ModelProvider) string {
+func GetAgentPrompt(agentName config.AgentName, provider models.InferenceProvider) string {
 	basePrompt := ""
 	switch agentName {
 	case config.AgentCoder:

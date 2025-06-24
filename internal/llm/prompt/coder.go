@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
 
-func CoderPrompt(provider models.ModelProvider) string {
+func CoderPrompt(provider models.InferenceProvider) string {
 	basePrompt := baseAnthropicCoderPrompt
 	switch provider {
 	case models.ProviderOpenAI:

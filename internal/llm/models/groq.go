@@ -1,7 +1,7 @@
 package models
 
 const (
-	ProviderGROQ ModelProvider = "groq"
+	ProviderGROQ InferenceProvider = "groq"
 
 	// GROQ
 	QWENQwq ModelID = "qwen-qwq"

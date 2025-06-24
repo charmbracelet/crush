@@ -263,15 +263,14 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		return a.err(fmt.Errorf("failed to get session: %w", err))
 	}
 	if session.SummaryMessageID != "" {
-		summaryMsgInex := -1
+		// create msgIndexMap for O(1) lookup of message index by ID.
+		msgIndexMap := make(map[string]int, len(msgs))
 		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgInex = i
-				break
-			}
+			msgIndexMap[msg.ID] = i
 		}
-		if summaryMsgInex != -1 {
-			msgs = msgs[summaryMsgInex:]
+		
+		if summaryMsgIndex, found := msgIndexMap[session.SummaryMessageID]; found {
+			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
 		}
 	}

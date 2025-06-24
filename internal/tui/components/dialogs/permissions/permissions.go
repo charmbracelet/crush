@@ -56,6 +56,13 @@ type permissionDialogCmp struct {
 	diffXOffset   int  // horizontal scroll offset
 	diffYOffset   int  // vertical scroll offset
 
+	renderedContent map[string]string // cache for rendered content
+	lastDimensions  struct {
+		width  int
+		height int
+		split  bool
+	} // track last render dimensions to invalidate cache
+
 	keyMap KeyMap
 }
 
@@ -67,6 +74,7 @@ func NewPermissionDialogCmp(permission permission.PermissionRequest) PermissionD
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
 		keyMap:          DefaultKeyMap(),
+		renderedContent: make(map[string]string),
 	}
 }
 
@@ -251,78 +259,119 @@ func (p *permissionDialogCmp) renderBashContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
-		content := pr.Command
-		t := styles.CurrentTheme()
-		content = strings.TrimSpace(content)
-		content = "\n" + content + "\n"
-		lines := strings.Split(content, "\n")
+		cacheKey := fmt.Sprintf("bash_%s_%d", p.permission.ID, p.width)
 
-		width := p.width - 4
-		var out []string
-		for _, ln := range lines {
-			ln = " " + ln // left padding
-			if len(ln) > width {
-				ln = ansi.Truncate(ln, width, "…")
+		return p.getCachedContent(cacheKey, func() string {
+			content := pr.Command
+			t := styles.CurrentTheme()
+			content = strings.TrimSpace(content)
+			content = "\n" + content + "\n"
+			lines := strings.Split(content, "\n")
+
+			width := p.width - 4
+			var out []string
+			for _, ln := range lines {
+				ln = " " + ln // left padding
+				if len(ln) > width {
+					ln = ansi.Truncate(ln, width, "…")
+				}
+				out = append(out, t.S().Muted.
+					Width(width).
+					Foreground(t.FgBase).
+					Background(t.BgSubtle).
+					Render(ln))
 			}
-			out = append(out, t.S().Muted.
-				Width(width).
-				Foreground(t.FgBase).
-				Background(t.BgSubtle).
-				Render(ln))
-		}
 
-		// Use the cache for markdown rendering
-		renderedContent := strings.Join(out, "\n")
-		finalContent := baseStyle.
-			Width(p.contentViewPort.Width()).
-			Render(renderedContent)
+			// Use the cache for markdown rendering
+			renderedContent := strings.Join(out, "\n")
+			finalContent := baseStyle.
+				Width(p.contentViewPort.Width()).
+				Render(renderedContent)
 
-		contentHeight := min(p.height-9, lipgloss.Height(finalContent))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(finalContent)
-		return p.styleViewport()
+			contentHeight := min(p.height-9, lipgloss.Height(finalContent))
+			p.contentViewPort.SetHeight(contentHeight)
+			p.contentViewPort.SetContent(finalContent)
+			return p.styleViewport()
+		})
 	}
 	return ""
 }
 
+func (p *permissionDialogCmp) shouldInvalidateCache() bool {
+	return p.lastDimensions.width != p.contentViewPort.Width() ||
+		p.lastDimensions.height != p.contentViewPort.Height() ||
+		p.lastDimensions.split != p.diffSplitMode
+}
+
+func (p *permissionDialogCmp) updateCacheDimensions() {
+	p.lastDimensions.width = p.contentViewPort.Width()
+	p.lastDimensions.height = p.contentViewPort.Height()
+	p.lastDimensions.split = p.diffSplitMode
+}
+
+func (p *permissionDialogCmp) getCachedContent(key string, generator func() string) string {
+	if p.shouldInvalidateCache() {
+		p.renderedContent = make(map[string]string) // clear cache
+		p.updateCacheDimensions()
+	}
+
+	if content, exists := p.renderedContent[key]; exists {
+		return content
+	}
+
+	content := generator()
+	p.renderedContent[key] = content
+	return content
+}
+
 func (p *permissionDialogCmp) renderEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		formatter := core.DiffFormatter().
-			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
-			Height(p.contentViewPort.Height()).
-			Width(p.contentViewPort.Width()).
-			XOffset(p.diffXOffset).
-			YOffset(p.diffYOffset)
-		if p.diffSplitMode {
-			formatter = formatter.Split()
-		} else {
-			formatter = formatter.Unified()
-		}
+		cacheKey := fmt.Sprintf("edit_%d_%d_%t_%d_%d",
+			p.contentViewPort.Width(), p.contentViewPort.Height(),
+			p.diffSplitMode, p.diffXOffset, p.diffYOffset)
 
-		diff := formatter.String()
-		contentHeight := min(p.height-9, lipgloss.Height(diff))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(diff)
-		return p.styleViewport()
+		return p.getCachedContent(cacheKey, func() string {
+			formatter := core.DiffFormatter().
+				Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
+				After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+				Height(p.contentViewPort.Height()).
+				Width(p.contentViewPort.Width()).
+				XOffset(p.diffXOffset).
+				YOffset(p.diffYOffset)
+			if p.diffSplitMode {
+				formatter = formatter.Split()
+			} else {
+				formatter = formatter.Unified()
+			}
+
+			diff := formatter.String()
+			contentHeight := min(p.height-9, lipgloss.Height(diff))
+			p.contentViewPort.SetHeight(contentHeight)
+			p.contentViewPort.SetContent(diff)
+			return p.styleViewport()
+		})
 	}
 	return ""
 }
 
 func (p *permissionDialogCmp) renderWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
-		// Use the cache for diff rendering
-		formatter := core.DiffFormatter().
-			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
-			Width(p.contentViewPort.Width()).
-			Split()
+		cacheKey := fmt.Sprintf("write_%d", p.contentViewPort.Width())
 
-		diff := formatter.String()
-		contentHeight := min(p.height-9, lipgloss.Height(diff))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(diff)
-		return p.styleViewport()
+		return p.getCachedContent(cacheKey, func() string {
+			// Use the cache for diff rendering
+			formatter := core.DiffFormatter().
+				Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
+				After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+				Width(p.contentViewPort.Width()).
+				Split()
+
+			diff := formatter.String()
+			contentHeight := min(p.height-9, lipgloss.Height(diff))
+			p.contentViewPort.SetHeight(contentHeight)
+			p.contentViewPort.SetContent(diff)
+			return p.styleViewport()
+		})
 	}
 	return ""
 }
@@ -331,7 +380,39 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
-		content := fmt.Sprintf("```bash\n%s\n```", pr.URL)
+		cacheKey := fmt.Sprintf("fetch_%s_%d", p.permission.ID, p.width)
+
+		return p.getCachedContent(cacheKey, func() string {
+			content := fmt.Sprintf("```bash\n%s\n```", pr.URL)
+
+			// Use the cache for markdown rendering
+			renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
+				r := styles.GetMarkdownRenderer(p.width - 4)
+				s, err := r.Render(content)
+				return s, err
+			})
+
+			finalContent := baseStyle.
+				Width(p.contentViewPort.Width()).
+				Render(renderedContent)
+
+			contentHeight := min(p.height-9, lipgloss.Height(finalContent))
+			p.contentViewPort.SetHeight(contentHeight)
+			p.contentViewPort.SetContent(finalContent)
+			return p.styleViewport()
+		})
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) renderDefaultContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+
+	cacheKey := fmt.Sprintf("default_%s_%d", p.permission.ID, p.width)
+
+	return p.getCachedContent(cacheKey, func() string {
+		content := p.permission.Description
 
 		// Use the cache for markdown rendering
 		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
@@ -343,38 +424,14 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 		finalContent := baseStyle.
 			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
-
-		contentHeight := min(p.height-9, lipgloss.Height(finalContent))
-		p.contentViewPort.SetHeight(contentHeight)
 		p.contentViewPort.SetContent(finalContent)
+
+		if renderedContent == "" {
+			return ""
+		}
+
 		return p.styleViewport()
-	}
-	return ""
-}
-
-func (p *permissionDialogCmp) renderDefaultContent() string {
-	t := styles.CurrentTheme()
-	baseStyle := t.S().Base.Background(t.BgSubtle)
-
-	content := p.permission.Description
-
-	// Use the cache for markdown rendering
-	renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
-		r := styles.GetMarkdownRenderer(p.width - 4)
-		s, err := r.Render(content)
-		return s, err
 	})
-
-	finalContent := baseStyle.
-		Width(p.contentViewPort.Width()).
-		Render(renderedContent)
-	p.contentViewPort.SetContent(finalContent)
-
-	if renderedContent == "" {
-		return ""
-	}
-
-	return p.styleViewport()
 }
 
 func (p *permissionDialogCmp) styleViewport() string {
@@ -472,11 +529,17 @@ func (c *permissionDialogCmp) GetOrSetDiff(key string, generator func() (string,
 }
 
 func (c *permissionDialogCmp) GetOrSetMarkdown(key string, generator func() (string, error)) string {
-	content, err := generator()
-	if err != nil {
-		return fmt.Sprintf("Error rendering markdown: %v", err)
+	// Use the internal cache for markdown content
+	if content, exists := c.renderedContent[key]; exists {
+		return content
 	}
 
+	content, err := generator()
+	if err != nil {
+		content = fmt.Sprintf("Error rendering markdown: %v", err)
+	}
+
+	c.renderedContent[key] = content
 	return content
 }
 

@@ -79,17 +79,19 @@ func processContextPaths(workDir string, paths []string) string {
 					}
 					if !d.IsDir() {
 						// Check if we've already processed this file (case-insensitive)
-						processedMutex.Lock()
 						lowerPath := strings.ToLower(path)
-						if !processedFiles[lowerPath] {
-							processedFiles[lowerPath] = true
-							processedMutex.Unlock()
 
+						processedMutex.Lock()
+						alreadyProcessed := processedFiles[lowerPath]
+						if !alreadyProcessed {
+							processedFiles[lowerPath] = true
+						}
+						processedMutex.Unlock()
+
+						if !alreadyProcessed {
 							if result := processFile(path); result != "" {
 								resultCh <- result
 							}
-						} else {
-							processedMutex.Unlock()
 						}
 					}
 					return nil
@@ -98,18 +100,20 @@ func processContextPaths(workDir string, paths []string) string {
 				fullPath := filepath.Join(workDir, p)
 
 				// Check if we've already processed this file (case-insensitive)
-				processedMutex.Lock()
 				lowerPath := strings.ToLower(fullPath)
-				if !processedFiles[lowerPath] {
-					processedFiles[lowerPath] = true
-					processedMutex.Unlock()
 
+				processedMutex.Lock()
+				alreadyProcessed := processedFiles[lowerPath]
+				if !alreadyProcessed {
+					processedFiles[lowerPath] = true
+				}
+				processedMutex.Unlock()
+
+				if !alreadyProcessed {
 					result := processFile(fullPath)
 					if result != "" {
 						resultCh <- result
 					}
-				} else {
-					processedMutex.Unlock()
 				}
 			}
 		}(path)

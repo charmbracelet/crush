@@ -13,7 +13,8 @@ func TestShellPerformanceComparison(t *testing.T) {
 
 	// Test quick command
 	start := time.Now()
-	stdout, stderr, exitCode, _, err := shell.Exec(t.Context(), "echo 'hello'", 0)
+	stdout, stderr, err := shell.Exec(t.Context(), "echo 'hello'")
+	exitCode := ExitCode(err)
 	duration := time.Since(start)
 
 	require.NoError(t, err)
@@ -32,7 +33,8 @@ func BenchmarkShellPolling(b *testing.B) {
 
 	for b.Loop() {
 		// Use a short sleep to measure polling overhead
-		_, _, exitCode, _, err := shell.Exec(b.Context(), "sleep 0.02", 0)
+		_, _, err := shell.Exec(b.Context(), "sleep 0.02")
+		exitCode := ExitCode(err)
 		if err != nil || exitCode != 0 {
 			b.Fatalf("Command failed: %v, exit code: %d", err, exitCode)
 		}

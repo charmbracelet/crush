@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -302,37 +303,49 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
 
-	errorMessage := stderr
-	if interrupted {
-		if errorMessage != "" {
-			errorMessage += "\n"
-		}
-		errorMessage += "Command was aborted before completion"
-	} else if exitCode != 0 {
-		if errorMessage != "" {
-			errorMessage += "\n"
-		}
-		errorMessage += fmt.Sprintf("Exit code %d", exitCode)
+	var errorBuilder strings.Builder
+	if stderr != "" {
+		errorBuilder.WriteString(stderr)
 	}
 
+	if interrupted {
+		if errorBuilder.Len() > 0 {
+			errorBuilder.WriteRune('\n')
+		}
+		errorBuilder.WriteString("Command was aborted before completion")
+	} else if exitCode != 0 {
+		if errorBuilder.Len() > 0 {
+			errorBuilder.WriteRune('\n')
+		}
+		errorBuilder.WriteString("Exit code ")
+		errorBuilder.WriteString(strconv.Itoa(exitCode))
+	}
+
+	errorMessage := errorBuilder.String()
 	hasBothOutputs := stdout != "" && stderr != ""
 
+	var outputBuilder strings.Builder
+	outputBuilder.WriteString(stdout)
+
 	if hasBothOutputs {
-		stdout += "\n"
+		outputBuilder.WriteRune('\n')
 	}
 
 	if errorMessage != "" {
-		stdout += "\n" + errorMessage
+		outputBuilder.WriteRune('\n')
+		outputBuilder.WriteString(errorMessage)
 	}
+
+	finalOutput := outputBuilder.String()
 
 	metadata := BashResponseMetadata{
 		StartTime: startTime.UnixMilli(),
 		EndTime:   time.Now().UnixMilli(),
 	}
-	if stdout == "" {
+	if finalOutput == "" {
 		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
 	}
-	return WithResponseMetadata(NewTextResponse(stdout), metadata), nil
+	return WithResponseMetadata(NewTextResponse(finalOutput), metadata), nil
 }
 
 func truncateOutput(content string) string {

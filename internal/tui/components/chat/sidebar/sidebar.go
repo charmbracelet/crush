@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -461,17 +462,28 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 
 	baseStyle := t.S().Base
 
-	formattedCost := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("$%.2f", cost))
+	// Build the final string efficiently using strings.Builder
+	var builder strings.Builder
 
-	formattedTokens = baseStyle.Foreground(t.FgSubtle).Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("%d%%", int(percentage)))
-	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
+	// Add warning icon if needed
 	if percentage > 80 {
-		// add the warning icon
-		formattedTokens = fmt.Sprintf("%s %s", styles.WarningIcon, formattedTokens)
+		builder.WriteString(styles.WarningIcon)
+		builder.WriteRune(' ')
 	}
 
-	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
+	muted := baseStyle.Foreground(t.FgMuted)
+	subtle := baseStyle.Foreground(t.FgSubtle)
+
+	// Add percentage
+	builder.WriteString(muted.Render(strconv.Itoa(int(percentage)) + "% "))
+
+	// Add tokens in parentheses
+	builder.WriteString(subtle.Render("(" + formattedTokens + ") "))
+
+	// Add cost
+	builder.WriteString(muted.Render("$" + strconv.FormatFloat(cost, 'f', 2, 64)))
+
+	return builder.String()
 }
 
 func (s *sidebarCmp) currentModelBlock() string {

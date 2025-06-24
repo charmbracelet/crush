@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -267,7 +268,9 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		for _, err := range errors {
 			if errMap, ok := err.(map[string]any); ok {
 				if message, ok := errMap["message"].(string); ok {
-					buffer.WriteString(fmt.Sprintf("- %s\n", message))
+					buffer.WriteString("- ")
+					buffer.WriteString(message)
+					buffer.WriteRune('\n')
 				}
 			}
 		}
@@ -294,13 +297,17 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 	limitHit, _ := searchResults["limitHit"].(bool)
 
 	buffer.WriteString("# Sourcegraph Search Results\n\n")
-	buffer.WriteString(fmt.Sprintf("Found %d matches across %d results\n", int(matchCount), int(resultCount)))
+	buffer.WriteString("Found ")
+	buffer.WriteString(strconv.Itoa(int(matchCount)))
+	buffer.WriteString(" matches across ")
+	buffer.WriteString(strconv.Itoa(int(resultCount)))
+	buffer.WriteString(" results\n")
 
 	if limitHit {
 		buffer.WriteString("(Result limit reached, try a more specific query)\n")
 	}
 
-	buffer.WriteString("\n")
+	buffer.WriteRune('\n')
 
 	results, ok := searchResults["results"].([]any)
 	if !ok || len(results) == 0 {
@@ -337,10 +344,18 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		fileURL, _ := file["url"].(string)
 		fileContent, _ := file["content"].(string)
 
-		buffer.WriteString(fmt.Sprintf("## Result %d: %s/%s\n\n", i+1, repoName, filePath))
+		buffer.WriteString("## Result ")
+		buffer.WriteString(strconv.Itoa(i + 1))
+		buffer.WriteString(": ")
+		buffer.WriteString(repoName)
+		buffer.WriteRune('/')
+		buffer.WriteString(filePath)
+		buffer.WriteString("\n\n")
 
 		if fileURL != "" {
-			buffer.WriteString(fmt.Sprintf("URL: %s\n\n", fileURL))
+			buffer.WriteString("URL: ")
+			buffer.WriteString(fileURL)
+			buffer.WriteString("\n\n")
 		}
 
 		if len(lineMatches) > 0 {
@@ -362,24 +377,36 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 
 					for j := startLine - 1; j < int(lineNumber)-1 && j < len(lines); j++ {
 						if j >= 0 {
-							buffer.WriteString(fmt.Sprintf("%d| %s\n", j+1, lines[j]))
+							buffer.WriteString(strconv.Itoa(j + 1))
+							buffer.WriteString("| ")
+							buffer.WriteString(lines[j])
+							buffer.WriteRune('\n')
 						}
 					}
 
-					buffer.WriteString(fmt.Sprintf("%d|  %s\n", int(lineNumber), preview))
+					buffer.WriteString(strconv.Itoa(int(lineNumber)))
+					buffer.WriteString("|  ")
+					buffer.WriteString(preview)
+					buffer.WriteRune('\n')
 
 					endLine := int(lineNumber) + contextWindow
 
 					for j := int(lineNumber); j < endLine && j < len(lines); j++ {
 						if j < len(lines) {
-							buffer.WriteString(fmt.Sprintf("%d| %s\n", j+1, lines[j]))
+							buffer.WriteString(strconv.Itoa(j + 1))
+							buffer.WriteString("| ")
+							buffer.WriteString(lines[j])
+							buffer.WriteRune('\n')
 						}
 					}
 
 					buffer.WriteString("```\n\n")
 				} else {
 					buffer.WriteString("```\n")
-					buffer.WriteString(fmt.Sprintf("%d| %s\n", int(lineNumber), preview))
+					buffer.WriteString(strconv.Itoa(int(lineNumber)))
+					buffer.WriteString("| ")
+					buffer.WriteString(preview)
+					buffer.WriteRune('\n')
 					buffer.WriteString("```\n\n")
 				}
 			}

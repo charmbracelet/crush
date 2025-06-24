@@ -1,12 +1,10 @@
 package permission
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -117,15 +115,10 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	// Wait for the response with a timeout to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
+	// Wait for the response indefinitely
 	select {
 	case resp := <-respCh:
 		return resp
-	case <-ctx.Done():
-		return false // Timeout - deny by default
 	}
 }
 

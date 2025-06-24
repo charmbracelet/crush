@@ -56,6 +56,11 @@ type permissionDialogCmp struct {
 	diffXOffset   int  // horizontal scroll offset
 	diffYOffset   int  // vertical scroll offset
 
+	// Caching
+	cachedContent    string
+	cachedContentKey string
+	contentDirty     bool
+
 	keyMap KeyMap
 }
 
@@ -67,11 +72,16 @@ func NewPermissionDialogCmp(permission permission.PermissionRequest) PermissionD
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
 		keyMap:          DefaultKeyMap(),
+		contentDirty:    true, // Mark as dirty initially
 	}
 }
 
 func (p *permissionDialogCmp) Init() tea.Cmd {
 	return p.contentViewPort.Init()
+}
+
+func (p *permissionDialogCmp) supportsDiffView() bool {
+	return p.permission.ToolName == tools.EditToolName || p.permission.ToolName == tools.WriteToolName
 }
 
 func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -81,6 +91,7 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		p.wWidth = msg.Width
 		p.wHeight = msg.Height
+		p.contentDirty = true // Mark content as dirty on window resize
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
@@ -108,20 +119,35 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionDeny, Permission: p.permission}),
 			)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
-			p.diffSplitMode = !p.diffSplitMode
-			return p, nil
+			if p.supportsDiffView() {
+				p.diffSplitMode = !p.diffSplitMode
+				p.contentDirty = true // Mark content as dirty when diff mode changes
+				return p, nil
+			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
-			p.diffYOffset += 1
-			return p, nil
+			if p.supportsDiffView() {
+				p.diffYOffset += 1
+				p.contentDirty = true // Mark content as dirty when scrolling
+				return p, nil
+			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
-			p.diffYOffset = max(0, p.diffYOffset-1)
-			return p, nil
+			if p.supportsDiffView() {
+				p.diffYOffset = max(0, p.diffYOffset-1)
+				p.contentDirty = true // Mark content as dirty when scrolling
+				return p, nil
+			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
-			p.diffXOffset = max(0, p.diffXOffset-5)
-			return p, nil
+			if p.supportsDiffView() {
+				p.diffXOffset = max(0, p.diffXOffset-5)
+				p.contentDirty = true // Mark content as dirty when scrolling
+				return p, nil
+			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
-			p.diffXOffset += 5
-			return p, nil
+			if p.supportsDiffView() {
+				p.diffXOffset += 5
+				p.contentDirty = true // Mark content as dirty when scrolling
+				return p, nil
+			}
 		default:
 			// Pass other keys to viewport
 			viewPort, cmd := p.contentViewPort.Update(msg)
@@ -247,7 +273,49 @@ func (p *permissionDialogCmp) renderHeader() string {
 	return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Left, headerParts...))
 }
 
-func (p *permissionDialogCmp) renderBashContent() string {
+func (p *permissionDialogCmp) generateContentKey() string {
+	return fmt.Sprintf("%s_%s_%t_%d_%d_%d_%d",
+		p.permission.ID,
+		p.permission.ToolName,
+		p.diffSplitMode,
+		p.diffXOffset,
+		p.diffYOffset,
+		p.contentViewPort.Width(),
+		p.contentViewPort.Height())
+}
+
+func (p *permissionDialogCmp) getOrGenerateContent() string {
+	currentKey := p.generateContentKey()
+
+	// Return cached content if available and not dirty
+	if !p.contentDirty && p.cachedContentKey == currentKey && p.cachedContent != "" {
+		return p.cachedContent
+	}
+
+	// Generate new content
+	var content string
+	switch p.permission.ToolName {
+	case tools.BashToolName:
+		content = p.generateBashContent()
+	case tools.EditToolName:
+		content = p.generateEditContent()
+	case tools.WriteToolName:
+		content = p.generateWriteContent()
+	case tools.FetchToolName:
+		content = p.generateFetchContent()
+	default:
+		content = p.generateDefaultContent()
+	}
+
+	// Cache the result
+	p.cachedContent = content
+	p.cachedContentKey = currentKey
+	p.contentDirty = false
+
+	return content
+}
+
+func (p *permissionDialogCmp) generateBashContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
@@ -277,15 +345,12 @@ func (p *permissionDialogCmp) renderBashContent() string {
 			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
 
-		contentHeight := min(p.height-9, lipgloss.Height(finalContent))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(finalContent)
-		return p.styleViewport()
+		return finalContent
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) renderEditContent() string {
+func (p *permissionDialogCmp) generateEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
@@ -301,33 +366,34 @@ func (p *permissionDialogCmp) renderEditContent() string {
 		}
 
 		diff := formatter.String()
-		contentHeight := min(p.height-9, lipgloss.Height(diff))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(diff)
-		return p.styleViewport()
+		return diff
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) renderWriteContent() string {
+func (p *permissionDialogCmp) generateWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
 		// Use the cache for diff rendering
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
 			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
-			Split()
+			XOffset(p.diffXOffset).
+			YOffset(p.diffYOffset)
+		if p.diffSplitMode {
+			formatter = formatter.Split()
+		} else {
+			formatter = formatter.Unified()
+		}
 
 		diff := formatter.String()
-		contentHeight := min(p.height-9, lipgloss.Height(diff))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(diff)
-		return p.styleViewport()
+		return diff
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) renderFetchContent() string {
+func (p *permissionDialogCmp) generateFetchContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
@@ -344,15 +410,12 @@ func (p *permissionDialogCmp) renderFetchContent() string {
 			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
 
-		contentHeight := min(p.height-9, lipgloss.Height(finalContent))
-		p.contentViewPort.SetHeight(contentHeight)
-		p.contentViewPort.SetContent(finalContent)
-		return p.styleViewport()
+		return finalContent
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) renderDefaultContent() string {
+func (p *permissionDialogCmp) generateDefaultContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 
@@ -368,13 +431,12 @@ func (p *permissionDialogCmp) renderDefaultContent() string {
 	finalContent := baseStyle.
 		Width(p.contentViewPort.Width()).
 		Render(renderedContent)
-	p.contentViewPort.SetContent(finalContent)
 
 	if renderedContent == "" {
 		return ""
 	}
 
-	return p.styleViewport()
+	return finalContent
 }
 
 func (p *permissionDialogCmp) styleViewport() string {
@@ -393,21 +455,17 @@ func (p *permissionDialogCmp) render() string {
 
 	p.contentViewPort.SetWidth(p.width - 4)
 
-	// Render content based on tool type
-	var contentFinal string
+	// Get cached or generate content
+	contentFinal := p.getOrGenerateContent()
+
+	// Always set viewport content (the caching is handled in getOrGenerateContent)
+	contentHeight := min(p.height-9, lipgloss.Height(contentFinal))
+	p.contentViewPort.SetHeight(contentHeight)
+	p.contentViewPort.SetContent(contentFinal)
+
 	var contentHelp string
-	switch p.permission.ToolName {
-	case tools.BashToolName:
-		contentFinal = p.renderBashContent()
-	case tools.EditToolName:
-		contentFinal = p.renderEditContent()
+	if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
-	case tools.WriteToolName:
-		contentFinal = p.renderWriteContent()
-	case tools.FetchToolName:
-		contentFinal = p.renderFetchContent()
-	default:
-		contentFinal = p.renderDefaultContent()
 	}
 	// Calculate content height dynamically based on window size
 
@@ -415,7 +473,7 @@ func (p *permissionDialogCmp) render() string {
 		title,
 		"",
 		headerContent,
-		contentFinal,
+		p.styleViewport(),
 		"",
 		buttons,
 		"",
@@ -443,6 +501,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	if p.permission.ID == "" {
 		return nil
 	}
+
+	oldWidth, oldHeight := p.width, p.height
+
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		p.width = int(float64(p.wWidth) * 0.4)
@@ -460,15 +521,13 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 		p.width = int(float64(p.wWidth) * 0.7)
 		p.height = int(float64(p.wHeight) * 0.5)
 	}
-	return nil
-}
 
-func (c *permissionDialogCmp) GetOrSetDiff(key string, generator func() (string, error)) string {
-	content, err := generator()
-	if err != nil {
-		return fmt.Sprintf("Error formatting diff: %v", err)
+	// Mark content as dirty if size changed
+	if oldWidth != p.width || oldHeight != p.height {
+		p.contentDirty = true
 	}
-	return content
+
+	return nil
 }
 
 func (c *permissionDialogCmp) GetOrSetMarkdown(key string, generator func() (string, error)) string {

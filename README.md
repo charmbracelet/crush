@@ -1,3 +1,8 @@
+> [!NOTE]  
+> This is the original OpenCode repository, now continuing at [Charm](https://github.com/charmbracelet) with its original creator, [Kujtim Hoxha](https://github.com/kujtimiihoxha).  
+> Development is continuing under a new name as we prepare for a public relaunch.  
+> Follow [@charmcli](https://x.com/charmcli) or join our [Discord](https://charm.sh/chat) for updates.
+
 # ⌬ Crush
 
 <p align="center"><img src="https://github.com/user-attachments/assets/9ae61ef6-70e5-4876-bc45-5bcb4e52c714" width="800"></p>
@@ -491,7 +496,7 @@ Crush includes several built-in commands:
 
 | Command            | Description                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
-| Initialize Project | Creates or updates the CRUSH.md memory file with project-specific information                    |
+| Initialize Project | Creates or updates the CRUSH.md memory file with project-specific information                       |
 | Compact Session    | Manually triggers the summarization of the current session, creating a new session with the summary |
 
 ## MCP (Model Context Protocol)

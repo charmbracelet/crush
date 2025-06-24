@@ -18,7 +18,8 @@ require (
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250523195325-2d1af06b557c
 	github.com/charmbracelet/x/ansi v0.9.3-0.20250602153603-fb931ed90413
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250530202730-6ba1785cd7b9
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444
+	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-logfmt/logfmt v0.6.0
@@ -67,7 +68,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20250528180458-2d5d6cb84620
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef
 	github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.1 // indirect

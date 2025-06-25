@@ -273,22 +273,9 @@ func (p *permissionDialogCmp) renderHeader() string {
 	return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Left, headerParts...))
 }
 
-func (p *permissionDialogCmp) generateContentKey() string {
-	return fmt.Sprintf("%s_%s_%t_%d_%d_%d_%d",
-		p.permission.ID,
-		p.permission.ToolName,
-		p.diffSplitMode,
-		p.diffXOffset,
-		p.diffYOffset,
-		p.contentViewPort.Width(),
-		p.contentViewPort.Height())
-}
-
 func (p *permissionDialogCmp) getOrGenerateContent() string {
-	currentKey := p.generateContentKey()
-
 	// Return cached content if available and not dirty
-	if !p.contentDirty && p.cachedContentKey == currentKey && p.cachedContent != "" {
+	if !p.contentDirty && p.cachedContent != "" {
 		return p.cachedContent
 	}
 
@@ -309,7 +296,6 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 
 	// Cache the result
 	p.cachedContent = content
-	p.cachedContentKey = currentKey
 	p.contentDirty = false
 
 	return content

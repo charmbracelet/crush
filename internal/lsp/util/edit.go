@@ -11,7 +11,7 @@ import (
 )
 
 func applyTextEdits(uri protocol.DocumentUri, edits []protocol.TextEdit) error {
-	path := strings.TrimPrefix(string(uri), "file://")
+	path := uri.Path()
 
 	// Read the file content
 	content, err := os.ReadFile(path)
@@ -148,7 +148,7 @@ func applyTextEdit(lines []string, edit protocol.TextEdit) ([]string, error) {
 // applyDocumentChange applies a DocumentChange (create/rename/delete operations)
 func applyDocumentChange(change protocol.DocumentChange) error {
 	if change.CreateFile != nil {
-		path := strings.TrimPrefix(string(change.CreateFile.URI), "file://")
+		path := change.CreateFile.URI.Path()
 		if change.CreateFile.Options != nil {
 			if change.CreateFile.Options.Overwrite {
 				// Proceed with overwrite
@@ -164,7 +164,7 @@ func applyDocumentChange(change protocol.DocumentChange) error {
 	}
 
 	if change.DeleteFile != nil {
-		path := strings.TrimPrefix(string(change.DeleteFile.URI), "file://")
+		path := change.DeleteFile.URI.Path()
 		if change.DeleteFile.Options != nil && change.DeleteFile.Options.Recursive {
 			if err := os.RemoveAll(path); err != nil {
 				return fmt.Errorf("failed to delete directory recursively: %w", err)
@@ -177,8 +177,8 @@ func applyDocumentChange(change protocol.DocumentChange) error {
 	}
 
 	if change.RenameFile != nil {
-		oldPath := strings.TrimPrefix(string(change.RenameFile.OldURI), "file://")
-		newPath := strings.TrimPrefix(string(change.RenameFile.NewURI), "file://")
+		oldPath := change.RenameFile.OldURI.Path()
+		newPath := change.RenameFile.NewURI.Path()
 		if change.RenameFile.Options != nil {
 			if !change.RenameFile.Options.Overwrite {
 				if _, err := os.Stat(newPath); err == nil {

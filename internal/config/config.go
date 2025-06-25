@@ -203,9 +203,17 @@ func Load(workingDir string, debug bool) (*Config, error) {
 func configureViper() {
 	viper.SetConfigName(fmt.Sprintf(".%s", appName))
 	viper.SetConfigType("json")
+	
+	// Unix-style paths
 	viper.AddConfigPath("$HOME")
 	viper.AddConfigPath(fmt.Sprintf("$XDG_CONFIG_HOME/%s", appName))
 	viper.AddConfigPath(fmt.Sprintf("$HOME/.config/%s", appName))
+	
+	// Windows-style paths
+	viper.AddConfigPath(fmt.Sprintf("$USERPROFILE"))
+	viper.AddConfigPath(fmt.Sprintf("$APPDATA/%s", appName))
+	viper.AddConfigPath(fmt.Sprintf("$LOCALAPPDATA/%s", appName))
+	
 	viper.SetEnvPrefix(strings.ToUpper(appName))
 	viper.AutomaticEnv()
 }

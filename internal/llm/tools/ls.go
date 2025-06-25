@@ -58,6 +58,12 @@ LIMITATIONS:
 - Does not show file sizes or permissions
 - Cannot recursively list all directories in a large project
 
+WINDOWS NOTES:
+- Hidden file detection uses Unix convention (files starting with '.')
+- Windows-specific hidden files (with hidden attribute) are not automatically skipped
+- Common Windows directories like System32, Program Files are not in default ignore list
+- Path separators are handled automatically (both / and \ work)
+
 TIPS:
 - Use Glob tool for finding files by name patterns instead of browsing
 - Use Grep tool for searching file contents

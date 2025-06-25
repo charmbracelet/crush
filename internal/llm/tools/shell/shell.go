@@ -1,3 +1,14 @@
+// Package shell provides cross-platform shell execution capabilities.
+// 
+// WINDOWS COMPATIBILITY NOTE:
+// This implementation uses mvdan.cc/sh/v3 which provides POSIX shell emulation
+// on Windows. While this works for basic commands, it has limitations:
+// - Windows-specific commands (dir, type, copy) are not available
+// - PowerShell and cmd.exe specific features are not supported
+// - Some Windows path handling may be inconsistent
+// 
+// For full Windows compatibility, consider adding native Windows shell support
+// using os/exec with cmd.exe or PowerShell for Windows-specific commands.
 package shell
 
 import (

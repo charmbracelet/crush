@@ -90,6 +90,11 @@ When making edits:
    - Do not leave the code in a broken state
    - Always use absolute file paths (starting with /)
 
+WINDOWS NOTES:
+- File paths should use forward slashes (/) for cross-platform compatibility
+- On Windows, absolute paths start with drive letters (C:/) but forward slashes work throughout
+- File permissions are handled automatically by the Go runtime
+
 Remember: when making multiple file edits in a row to the same file, you should prefer to send all edits in a single message with multiple calls to this tool, rather than multiple messages with a single call each.`
 )
 

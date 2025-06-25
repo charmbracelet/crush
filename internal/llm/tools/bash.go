@@ -59,6 +59,14 @@ func bashDescription() string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	return fmt.Sprintf(`Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
+IMPORTANT FOR WINDOWS USERS:
+- This tool uses a POSIX shell emulator (mvdan.cc/sh/v3) that works cross-platform, including Windows
+- On Windows, this provides bash-like functionality without requiring WSL or Git Bash
+- Use forward slashes (/) in paths - they work on all platforms and are converted automatically
+- Windows-specific commands (like 'dir', 'type', 'copy') are not available - use Unix equivalents ('ls', 'cat', 'cp')
+- Environment variables use Unix syntax: $VAR instead of %%VAR%%
+- File paths are automatically converted between Windows and Unix formats as needed
+
 Before executing the command, please follow these steps:
 
 1. Directory Verification:

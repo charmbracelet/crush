@@ -64,6 +64,10 @@ LIMITATIONS:
 - You should read a file before writing to it to avoid conflicts
 - Cannot append to files (rewrites the entire file)
 
+WINDOWS NOTES:
+- File permissions (0o755, 0o644) are Unix-style but work on Windows with appropriate translations
+- Use forward slashes (/) in paths for cross-platform compatibility
+- Windows file attributes and permissions are handled automatically by the Go runtime
 
 TIPS:
 - Use the View tool first to examine existing files before modifying them

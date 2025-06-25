@@ -47,6 +47,12 @@ LIMITATIONS:
 - Does not search file contents (use Grep tool for that)
 - Hidden files (starting with '.') are skipped
 
+WINDOWS NOTES:
+- Uses ripgrep (rg) command if available, otherwise falls back to built-in Go implementation
+- On Windows, install ripgrep via: winget install BurntSushi.ripgrep.MSVC
+- Path separators are handled automatically (both / and \ work)
+- Patterns should use forward slashes (/) for cross-platform compatibility
+
 TIPS:
 - For the most useful results, combine with the Grep tool: first find files with Glob, then search their contents with Grep
 - When doing iterative exploration that may require multiple rounds of searching, consider using the Agent tool instead

@@ -60,6 +60,11 @@ LIMITATIONS:
 - Cannot display binary files or images
 - Images can be identified but not displayed
 
+WINDOWS NOTES:
+- Handles both Windows (CRLF) and Unix (LF) line endings automatically
+- File paths work with both forward slashes (/) and backslashes (\)
+- Text encoding is detected automatically for most common formats
+
 TIPS:
 - Use with Glob tool to first find files you want to view
 - For code exploration, first use Grep to find relevant files, then View to examine them

@@ -220,13 +220,13 @@ func (m *Model) render() string {
 	var title string
 	switch m.state {
 	case StatePrompt:
-		title = "🚀 Update Available"
+		title = "Update Available"
 	case StateUpdating:
-		title = "🔄 Updating..."
+		title = "Updating..."
 	case StateSuccess:
-		title = "✅ Update Complete"
+		title = "Update Complete"
 	case StateError:
-		title = "❌ Update Failed"
+		title = "Update Failed"
 	}
 
 	titleRendered := core.Title(title, m.width-4)

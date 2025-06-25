@@ -175,6 +175,9 @@ func init() {
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
+	registry.register(tools.JobStartToolName, func() renderer { return jobStartRenderer{} })
+	registry.register(tools.JobEndToolName, func() renderer { return jobEndRenderer{} })
+	registry.register(tools.JobViewToolName, func() renderer { return jobViewRenderer{} })
 }
 
 // -----------------------------------------------------------------------------
@@ -871,7 +874,118 @@ func prettifyToolName(name string) string {
 		return "View"
 	case tools.WriteToolName:
 		return "Write"
+	case tools.JobStartToolName:
+		return "Job Start"
+	case tools.JobEndToolName:
+		return "Job End"
+	case tools.JobViewToolName:
+		return "Job View"
 	default:
 		return name
 	}
+}
+
+// -----------------------------------------------------------------------------
+//  Job Start renderer
+// -----------------------------------------------------------------------------
+
+// jobStartRenderer handles job start command display
+type jobStartRenderer struct {
+	baseRenderer
+}
+
+// Render displays the job start command with directory parameter
+func (jr jobStartRenderer) Render(v *toolCallCmp) string {
+	var params tools.JobStartParams
+	if err := jr.unmarshalParams(v.call.Input, &params); err != nil {
+		return jr.renderError(v, "Invalid job start parameters")
+	}
+
+	cmd := strings.ReplaceAll(params.Command, "\n", " ")
+	args := newParamBuilder().
+		addMain(cmd).
+		addKeyValue("directory", params.Directory).
+		build()
+
+	return jr.renderWithParams(v, "Job Start", args, func() string {
+		var response tools.JobStartResponse
+		if err := jr.unmarshalParams(v.result.Content, &response); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+		t := styles.CurrentTheme()
+		jobTag := t.S().Base.Padding(0, 1).Background(t.Green).Foreground(t.White).Render("STARTED")
+		jobID := t.S().Base.Foreground(t.Blue).Render(response.JobID)
+		return fmt.Sprintf("%s Job %s", jobTag, jobID)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Job End renderer
+// -----------------------------------------------------------------------------
+
+// jobEndRenderer handles job termination display
+type jobEndRenderer struct {
+	baseRenderer
+}
+
+// Render displays the job end command with job ID
+func (jr jobEndRenderer) Render(v *toolCallCmp) string {
+	var params tools.JobEndParams
+	if err := jr.unmarshalParams(v.call.Input, &params); err != nil {
+		return jr.renderError(v, "Invalid job end parameters")
+	}
+
+	args := newParamBuilder().addMain(params.JobID).build()
+
+	return jr.renderWithParams(v, "Job End", args, func() string {
+		t := styles.CurrentTheme()
+		jobTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("TERMINATED")
+		jobID := t.S().Base.Foreground(t.Blue).Render(params.JobID)
+		return fmt.Sprintf("%s Job %s", jobTag, jobID)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Job View renderer
+// -----------------------------------------------------------------------------
+
+// jobViewRenderer handles job output viewing display
+type jobViewRenderer struct {
+	baseRenderer
+}
+
+// Render displays the job view command with job ID and lines parameter
+func (jr jobViewRenderer) Render(v *toolCallCmp) string {
+	var params tools.JobViewParams
+	if err := jr.unmarshalParams(v.call.Input, &params); err != nil {
+		return jr.renderError(v, "Invalid job view parameters")
+	}
+
+	args := newParamBuilder().
+		addMain(params.JobID).
+		addKeyValue("lines", formatNonZero(params.Lines)).
+		build()
+
+	return jr.renderWithParams(v, "Job View", args, func() string {
+		var response tools.JobViewResponse
+		if err := jr.unmarshalParams(v.result.Content, &response); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		t := styles.CurrentTheme()
+		var statusTag string
+		if response.IsActive {
+			statusTag = t.S().Base.Padding(0, 1).Background(t.Green).Foreground(t.White).Render("ACTIVE")
+		} else {
+			statusTag = t.S().Base.Padding(0, 1).Background(t.Border).Foreground(t.White).Render("INACTIVE")
+		}
+
+		if response.Output == "" {
+			return fmt.Sprintf("%s No output available", statusTag)
+		}
+
+		header := fmt.Sprintf("%s Output:", statusTag)
+		output := renderPlainContent(v, response.Output)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", output)
+	})
 }

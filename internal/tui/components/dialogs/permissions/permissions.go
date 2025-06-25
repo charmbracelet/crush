@@ -276,6 +276,8 @@ func (p *permissionDialogCmp) renderHeader() string {
 			),
 			baseStyle.Render(strings.Repeat(" ", p.width)),
 		)
+	case tools.JobStartToolName:
+		headerParts = append(headerParts, t.S().Muted.Width(p.width).Render("Command"))
 	case tools.EditToolName:
 		params := p.permission.Params.(tools.EditPermissionsParams)
 		fileKey := t.S().Muted.Render("File")
@@ -339,6 +341,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateBashContent()
 	case tools.DownloadToolName:
 		content = p.generateDownloadContent()
+	case tools.JobStartToolName:
+		content = p.generateJobStartContent()
 	case tools.EditToolName:
 		content = p.generateEditContent()
 	case tools.WriteToolName:
@@ -356,6 +360,43 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 	p.contentDirty = false
 
 	return content
+}
+
+func (p *permissionDialogCmp) generateJobStartContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.JobStartParams); ok {
+		content := pr.Command
+		if pr.Directory != "" {
+			content = fmt.Sprintf("cd %s && %s", pr.Directory, pr.Command)
+		}
+		content = strings.TrimSpace(content)
+		content = "\n" + content + "\n"
+		lines := strings.Split(content, "\n")
+
+		width := p.width - 4
+		var out []string
+		for _, ln := range lines {
+			ln = " " + ln // left padding
+			if len(ln) > width {
+				ln = ansi.Truncate(ln, width, "…")
+			}
+			out = append(out, t.S().Muted.
+				Width(width).
+				Foreground(t.FgBase).
+				Background(t.BgSubtle).
+				Render(ln))
+		}
+
+		// Use the cache for markdown rendering
+		renderedContent := strings.Join(out, "\n")
+		finalContent := baseStyle.
+			Width(p.contentViewPort.Width()).
+			Render(renderedContent)
+
+		return finalContent
+	}
+	return ""
 }
 
 func (p *permissionDialogCmp) generateBashContent() string {
@@ -611,6 +652,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	case tools.DownloadToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.4)
+	case tools.JobStartToolName:
+		p.width = int(float64(p.wWidth) * 0.4)
+		p.height = int(float64(p.wHeight) * 0.3)
 	case tools.EditToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.8)

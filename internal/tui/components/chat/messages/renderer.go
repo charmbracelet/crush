@@ -278,7 +278,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		if v.textWidth() > 120 {
 			formatter = formatter.Split()
 		}
-		// add a messagfe to the bottom if the content was truncated
+		// add a message to the bottom if the content was truncated
 		formatted := formatter.String()
 		if lipgloss.Height(formatted) > responseContextHeight {
 			contentLines := strings.Split(formatted, "\n")

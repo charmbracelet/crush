@@ -67,10 +67,61 @@ paru -S crush-ai-bin
 go install github.com/charmbracelet/crush@latest
 ```
 
+### Windows Installation
+
+For Windows users, you can install Crush using:
+
+**Using Winget:**
+```powershell
+# Install Crush (when available)
+winget install crush-ai
+
+# Install recommended dependencies
+winget install BurntSushi.ripgrep.MSVC
+```
+
+**Using Scoop:**
+```powershell
+# Install Crush
+scoop install crush
+
+# Install recommended dependencies  
+scoop install ripgrep
+```
+
+**Manual Installation:**
+1. Download the latest Windows release from [GitHub Releases](https://github.com/charmbracelet/crush/releases)
+2. Extract the executable to a directory in your PATH
+
+## Optional Dependencies
+
+For enhanced performance, you can install these optional tools:
+
+**Ripgrep** (recommended for faster file searching):
+- **macOS**: `brew install ripgrep`
+- **Linux**: `sudo apt install ripgrep` (Ubuntu/Debian) or `sudo dnf install ripgrep` (Fedora)
+- **Windows**: `winget install BurntSushi.ripgrep.MSVC` or `scoop install ripgrep`
+- **From source**: See [ripgrep installation guide](https://github.com/BurntSushi/ripgrep#installation)
+
+Crush will automatically use ripgrep if available, otherwise it falls back to built-in Go implementations.
+
 ## Configuration
 
 Crush looks for configuration in the following locations:
 
+**Unix/Linux/macOS:**
+- `$HOME/.crush.json`
+- `$XDG_CONFIG_HOME/crush/.crush.json`
+- `./.crush.json` (local directory)
+
+**Windows:**
+- `%USERPROFILE%\.crush.json`
+- `%APPDATA%\crush\.crush.json`
+- `%LOCALAPPDATA%\crush\.crush.json`
+- `.\.crush.json` (local directory)
+
+**WSL (Windows Subsystem for Linux):**
+- WSL is treated as Linux by Go, so uses Linux paths
 - `$HOME/.crush.json`
 - `$XDG_CONFIG_HOME/crush/.crush.json`
 - `./.crush.json` (local directory)

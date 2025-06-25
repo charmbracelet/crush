@@ -71,24 +71,6 @@ go install github.com/charmbracelet/crush@latest
 
 For Windows users, you can install Crush using:
 
-**Using Winget:**
-```powershell
-# Install Crush (when available)
-winget install crush-ai
-
-# Install recommended dependencies
-winget install BurntSushi.ripgrep.MSVC
-```
-
-**Using Scoop:**
-```powershell
-# Install Crush
-scoop install crush
-
-# Install recommended dependencies  
-scoop install ripgrep
-```
-
 **Manual Installation:**
 1. Download the latest Windows release from [GitHub Releases](https://github.com/charmbracelet/crush/releases)
 2. Extract the executable to a directory in your PATH

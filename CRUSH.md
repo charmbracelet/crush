@@ -1,6 +1,7 @@
 # Crush Development Guide
 
 ## Build/Test/Lint Commands
+
 - **Build**: `go build .` or `go run .`
 - **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
 - **Lint**: `task lint` (golangci-lint run) or `task lint-fix` (with --fix)
@@ -8,6 +9,7 @@
 - **Dev**: `task dev` (runs with profiling enabled)
 
 ## Code Style Guidelines
+
 - **Imports**: Use goimports formatting, group stdlib, external, internal packages
 - **Formatting**: Use gofumpt (stricter than gofmt), enabled in golangci-lint
 - **Naming**: Standard Go conventions - PascalCase for exported, camelCase for unexported
@@ -21,3 +23,12 @@
 - **JSON tags**: Use snake_case for JSON field names
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
 - **Comments**: End comments in periods unless comments are at the end of the line.
+
+## Formatting
+
+- ALWAYS format any Go code you write.
+  - First, try `goftumpt -w .`.
+  - If `gofumpt` is not available, use `goimports`.
+  - If `goimports` is not available, use `gofmt`.
+  - You can also use `task fmt` to run `gofumpt -w .` on the entire project,
+    as long as `gofumpt` is on the `PATH`.

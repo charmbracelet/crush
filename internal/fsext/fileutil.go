@@ -61,7 +61,7 @@ func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
 	}
 	args = append(args, path)
 
-	return exec.Command("rg", args...)
+	return exec.Command(rgPath, args...)
 }
 
 type FileInfo struct {

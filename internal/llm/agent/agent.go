@@ -162,6 +162,7 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 	if err != nil {
 		return err
 	}
+	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 	parts := []message.ContentPart{message.TextContent{Text: content}}
 	response, err := a.titleProvider.SendMessages(
 		ctx,
@@ -230,6 +231,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 }
 
 func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
+	cfg := config.Get()
 	// List existing messages; if none, start title generation asynchronously.
 	msgs, err := a.messages.List(ctx, sessionID)
 	if err != nil {
@@ -288,7 +290,13 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			}
 			return a.err(fmt.Errorf("failed to process events: %w", err))
 		}
-		logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
+		if cfg.Debug {
+			seqId := (len(msgHistory) + 1) / 2
+			toolResultFilepath := logging.WriteToolResultsJson(sessionID, seqId, toolResults)
+			logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", "{}", "filepath", toolResultFilepath)
+		} else {
+			logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
+		}
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
 			// We are not done, we need to respond with the tool response
 			msgHistory = append(msgHistory, agentMessage, *toolResults)
@@ -312,6 +320,7 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 }
 
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
+	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 	eventChan := a.provider.StreamResponse(ctx, msgHistory, a.tools)
 
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -325,7 +334,6 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
-	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 
 	// Process each event in the stream.
 	for event := range eventChan {
@@ -357,10 +365,17 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		default:
 			// Continue processing
 			var tool tools.BaseTool
-			for _, availableTools := range a.tools {
-				if availableTools.Info().Name == toolCall.Name {
-					tool = availableTools
+			for _, availableTool := range a.tools {
+				if availableTool.Info().Name == toolCall.Name {
+					tool = availableTool
+					break
 				}
+				// Monkey patch for Copilot Sonnet-4 tool repetition obfuscation
+				// if strings.HasPrefix(toolCall.Name, availableTool.Info().Name) &&
+				// 	strings.HasPrefix(toolCall.Name, availableTool.Info().Name+availableTool.Info().Name) {
+				// 	tool = availableTool
+				// 	break
+				// }
 			}
 
 			// Tool not found
@@ -553,6 +568,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
+		summarizeCtx = context.WithValue(summarizeCtx, tools.SessionIDContextKey, sessionID)
 
 		if len(msgs) == 0 {
 			event = AgentEvent{

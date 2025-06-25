@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -161,6 +162,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	}
 	if os.Getenv("OPENCODE_DEV_DEBUG") == "true" {
 		loggingFile := fmt.Sprintf("%s/%s", cfg.Data.Directory, "debug.log")
+		messagesPath := fmt.Sprintf("%s/%s", cfg.Data.Directory, "messages")
 
 		// if file does not exist create it
 		if _, err := os.Stat(loggingFile); os.IsNotExist(err) {
@@ -171,6 +173,13 @@ func Load(workingDir string, debug bool) (*Config, error) {
 				return cfg, fmt.Errorf("failed to create log file: %w", err)
 			}
 		}
+
+		if _, err := os.Stat(messagesPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(messagesPath, 0o756); err != nil {
+				return cfg, fmt.Errorf("failed to create directory: %w", err)
+			}
+		}
+		logging.MessageDir = messagesPath
 
 		sloggingFileWriter, err := os.OpenFile(loggingFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 		if err != nil {
@@ -245,6 +254,7 @@ func setDefaults(debug bool) {
 // environment variables and configuration file.
 func setProviderDefaults() {
 	// Set all API keys we can find in the environment
+	// Note: Viper does not default if the json apiKey is ""
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		viper.SetDefault("providers.anthropic.apiKey", apiKey)
 	}
@@ -267,16 +277,32 @@ func setProviderDefaults() {
 		// api-key may be empty when using Entra ID credentials – that's okay
 		viper.SetDefault("providers.azure.apiKey", os.Getenv("AZURE_OPENAI_API_KEY"))
 	}
+	if apiKey, err := LoadGitHubToken(); err == nil && apiKey != "" {
+		viper.SetDefault("providers.copilot.apiKey", apiKey)
+		if viper.GetString("providers.copilot.apiKey") == "" {
+			viper.Set("providers.copilot.apiKey", apiKey)
+		}
+	}
 
 	// Use this order to set the default models
-	// 1. Anthropic
-	// 2. OpenAI
-	// 3. Google Gemini
-	// 4. Groq
-	// 5. OpenRouter
-	// 6. AWS Bedrock
-	// 7. Azure
-	// 8. Google Cloud VertexAI
+	// 1. Copilot
+	// 2. Anthropic
+	// 3. OpenAI
+	// 4. Google Gemini
+	// 5. Groq
+	// 6. OpenRouter
+	// 7. AWS Bedrock
+	// 8. Azure
+	// 9. Google Cloud VertexAI
+
+	// copilot configuration
+	if key := viper.GetString("providers.copilot.apiKey"); strings.TrimSpace(key) != "" {
+		viper.SetDefault("agents.coder.model", models.CopilotGPT4o)
+		viper.SetDefault("agents.summarizer.model", models.CopilotGPT4o)
+		viper.SetDefault("agents.task.model", models.CopilotGPT4o)
+		viper.SetDefault("agents.title.model", models.CopilotGPT4o)
+		return
+	}
 
 	// Anthropic configuration
 	if key := viper.GetString("providers.anthropic.apiKey"); strings.TrimSpace(key) != "" {
@@ -399,6 +425,14 @@ func hasVertexAICredentials() bool {
 	return false
 }
 
+func hasCopilotCredentials() bool {
+	// Check for explicit Copilot parameters
+	if token, _ := LoadGitHubToken(); token != "" {
+		return true
+	}
+	return false
+}
+
 // readConfig handles the result of reading a configuration file.
 func readConfig(err error) error {
 	if err == nil {
@@ -440,6 +474,9 @@ func applyDefaultValues() {
 // It validates model IDs and providers, ensuring they are supported.
 func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 	// Check if model exists
+	// TODO:	If a copilot model is specified, but model is not found,
+	// 		 	it might be new model. The https://api.githubcopilot.com/models
+	// 		 	endpoint should be queried to validate if the model is supported.
 	model, modelExists := models.SupportedModels[agent.Model]
 	if !modelExists {
 		logging.Warn("unsupported model configured, reverting to default",
@@ -584,6 +621,7 @@ func Validate() error {
 	// Validate providers
 	for provider, providerCfg := range cfg.Providers {
 		if providerCfg.APIKey == "" && !providerCfg.Disabled {
+			fmt.Printf("provider has no API key, marking as disabled %s", provider)
 			logging.Warn("provider has no API key, marking as disabled", "provider", provider)
 			providerCfg.Disabled = true
 			cfg.Providers[provider] = providerCfg
@@ -631,6 +669,18 @@ func getProviderAPIKey(provider models.ModelProvider) string {
 
 // setDefaultModelForAgent sets a default model for an agent based on available providers
 func setDefaultModelForAgent(agent AgentName) bool {
+	if hasCopilotCredentials() {
+		maxTokens := int64(5000)
+		if agent == AgentTitle {
+			maxTokens = 80
+		}
+
+		cfg.Agents[agent] = Agent{
+			Model:     models.CopilotGPT4o,
+			MaxTokens: maxTokens,
+		}
+		return true
+	}
 	// Check providers in order of preference
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		maxTokens := int64(5000)
@@ -877,4 +927,54 @@ func UpdateTheme(themeName string) error {
 	return updateCfgFile(func(config *Config) {
 		config.TUI.Theme = themeName
 	})
+}
+
+// Tries to load Github token from all possible locations
+func LoadGitHubToken() (string, error) {
+	// First check environment variable
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token, nil
+	}
+
+	// Get config directory
+	var configDir string
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		configDir = xdgConfig
+	} else if runtime.GOOS == "windows" {
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			configDir = localAppData
+		} else {
+			configDir = filepath.Join(os.Getenv("HOME"), "AppData", "Local")
+		}
+	} else {
+		configDir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+
+	// Try both hosts.json and apps.json files
+	filePaths := []string{
+		filepath.Join(configDir, "github-copilot", "hosts.json"),
+		filepath.Join(configDir, "github-copilot", "apps.json"),
+	}
+
+	for _, filePath := range filePaths {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var config map[string]map[string]interface{}
+		if err := json.Unmarshal(data, &config); err != nil {
+			continue
+		}
+
+		for key, value := range config {
+			if strings.Contains(key, "github.com") {
+				if oauthToken, ok := value["oauth_token"].(string); ok {
+					return oauthToken, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("GitHub token not found in standard locations")
 }

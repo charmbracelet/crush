@@ -96,22 +96,23 @@ You can enable or disable this feature in your configuration file:
 
 You can configure OpenCode using environment variables:
 
-| Environment Variable       | Purpose                                                |
-| -------------------------- | ------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`        | For Claude models                                      |
-| `OPENAI_API_KEY`           | For OpenAI models                                      |
-| `GEMINI_API_KEY`           | For Google Gemini models                               |
-| `VERTEXAI_PROJECT`         | For Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`        | For Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`             | For Groq models                                        |
-| `AWS_ACCESS_KEY_ID`        | For AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`    | For AWS Bedrock (Claude)                               |
-| `AWS_REGION`               | For AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_ENDPOINT`    | For Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`     | For Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION` | For Azure OpenAI models                                |
-| `LOCAL_ENDPOINT`           | For self-hosted models                                 |
-| `SHELL`                    | Default shell to use (if not specified in config)      |
+| Environment Variable       | Purpose                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`        | For Claude models                                                                |
+| `OPENAI_API_KEY`           | For OpenAI models                                                                |
+| `GEMINI_API_KEY`           | For Google Gemini models                                                         |
+| `GITHUB_TOKEN`             | For Github Copilot models (see [Using Github Copilot](#using-github-copilot))    |
+| `VERTEXAI_PROJECT`         | For Google Cloud VertexAI (Gemini)                                               |
+| `VERTEXAI_LOCATION`        | For Google Cloud VertexAI (Gemini)                                               |
+| `GROQ_API_KEY`             | For Groq models                                                                  |
+| `AWS_ACCESS_KEY_ID`        | For AWS Bedrock (Claude)                                                         |
+| `AWS_SECRET_ACCESS_KEY`    | For AWS Bedrock (Claude)                                                         |
+| `AWS_REGION`               | For AWS Bedrock (Claude)                                                         |
+| `AZURE_OPENAI_ENDPOINT`    | For Azure OpenAI models                                                          |
+| `AZURE_OPENAI_API_KEY`     | For Azure OpenAI models (optional when using Entra ID)                           |
+| `AZURE_OPENAI_API_VERSION` | For Azure OpenAI models                                                          |
+| `LOCAL_ENDPOINT`           | For self-hosted models                                                           |
+| `SHELL`                    | Default shell to use (if not specified in config)                                |
 
 ### Shell Configuration
 
@@ -144,6 +145,9 @@ This is useful if you want to use a different shell than your default system she
     },
     "anthropic": {
       "apiKey": "your-api-key",
+      "disabled": false
+    },
+    "copilot": {
       "disabled": false
     },
     "groq": {
@@ -215,6 +219,23 @@ OpenCode supports a variety of AI models from different providers:
 - Claude 3.7 Sonnet
 - Claude 3 Haiku
 - Claude 3 Opus
+
+### GitHub Copilot
+
+- GPT-3.5 Turbo
+- GPT-4
+- GPT-4o
+- GPT-4o Mini
+- GPT-4.1
+- Claude 3.5 Sonnet
+- Claude 3.7 Sonnet
+- Claude 3.7 Sonnet Thinking
+- Claude Sonnet 4
+- O1
+- O3 Mini
+- O4 Mini
+- Gemini 2.0 Flash
+- Gemini 2.5 Pro
 
 ### Google
 
@@ -578,6 +599,25 @@ The AI assistant can access LSP features through the `diagnostics` tool, allowin
 - Suggest fixes based on diagnostics
 
 While the LSP client implementation supports the full LSP protocol (including completions, hover, definition, etc.), currently only diagnostics are exposed to the AI assistant.
+
+## Using Github Copilot
+
+_Copilot support is currently experimental._
+
+### Requirements
+- [Copilot chat in the IDE](https://github.com/settings/copilot) enabled in GitHub settings
+- One of:
+  - VSCode Github Copilot chat extension
+  - Github `gh` CLI
+  - Neovim Github Copilot plugin (`copilot.vim` or `copilot.lua`)
+  - Github token with copilot permissions
+
+If using one of the above plugins or cli tools, make sure you use the authenticate
+the tool with your github account. This should create a github token at one of the following locations:
+- ~/.config/github-copilot/[hosts,apps].json
+- $XDG_CONFIG_HOME/github-copilot/[hosts,apps].json
+
+If using an explicit github token, you may either set the $GITHUB_TOKEN environment variable or add it to the opencode.json config file at `providers.copilot.apiKey`.
 
 ## Using a self-hosted model provider
 

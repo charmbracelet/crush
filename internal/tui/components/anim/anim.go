@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	charCyclingFPS  = time.Second / 8 // 8 FPS for better CPU efficiency
-	colorCycleFPS   = time.Second / 3 // 3 FPS
-	maxCyclingChars = 60              // 60 characters
+	charCyclingFPS  = time.Second / 22
+	colorCycleFPS   = time.Second / 5
+	maxCyclingChars = 60
 )
 
 var (
@@ -29,7 +29,7 @@ var (
 )
 
 func init() {
-	// Pre-populate the character pool to avoid runtime random generation
+	// Pre-populate the character pool to avoid runtime random generation.
 	for i := range charRunePool {
 		charRunePool[i] = charRunes[rand.IntN(len(charRunes))]
 	}
@@ -52,7 +52,7 @@ type cyclingChar struct {
 }
 
 func (c cyclingChar) randomRune() rune {
-	// Use pre-generated pool instead of runtime random generation
+	// Use pre-generated pool instead of runtime random generation.
 	poolIndex = (poolIndex + 1) % len(charRunePool)
 	return charRunePool[poolIndex]
 }
@@ -139,13 +139,13 @@ func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
 	// color the cycling characters with a gradient ramp.
 	const minRampSize = 3
 	if n >= minRampSize {
-		// Optimized: single capacity allocation for color cycling
+		// Optimized: single capacity allocation for color cycling.
 		c.ramp = make([]lipgloss.Style, 0, n*2)
 		ramp := makeGradientRamp(n)
 		for _, color := range ramp {
 			c.ramp = append(c.ramp, lipgloss.NewStyle().Foreground(color))
 		}
-		// Create reversed copy for seamless color cycling
+		// Create reversed copy for seamless color cycling.
 		reversed := make([]lipgloss.Style, len(c.ramp))
 		for i, style := range c.ramp {
 			reversed[len(c.ramp)-1-i] = style
@@ -263,7 +263,7 @@ func (a anim) View() tea.View {
 		b strings.Builder
 	)
 
-	// Optimized capacity calculation to reduce allocations
+	// Optimized capacity calculation to reduce allocations.
 	const (
 		bytesPerChar = 15 // Reduced estimate for ANSI styling
 		bufferSize   = 30 // Reduced safety margin
@@ -271,7 +271,7 @@ func (a anim) View() tea.View {
 	estimatedCap := len(a.cyclingChars)*bytesPerChar + len(a.labelChars)*bytesPerChar + bufferSize
 	b.Grow(estimatedCap)
 
-	// Render cycling characters with gradient (if available)
+	// Render cycling characters with gradient (if available).
 	for i, c := range a.cyclingChars {
 		if len(a.ramp) > i {
 			b.WriteString(a.ramp[i].Render(string(c.currentValue)))
@@ -280,7 +280,7 @@ func (a anim) View() tea.View {
 		}
 	}
 
-	// Render label characters and ellipsis
+	// Render label characters and ellipsis.
 	if len(a.labelChars) > 1 {
 		textStyle := t.S().Text
 		for _, c := range a.labelChars {

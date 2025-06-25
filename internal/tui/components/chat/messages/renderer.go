@@ -257,6 +257,7 @@ type editRenderer struct {
 
 // Render displays the edited file with a formatted diff of changes
 func (er editRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
 	var params tools.EditParams
 	var args []string
 	if err := er.unmarshalParams(v.call.Input, &params); err == nil {
@@ -277,7 +278,18 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 		if v.textWidth() > 120 {
 			formatter = formatter.Split()
 		}
-		return formatter.String()
+		// add a message to the bottom if the content was truncated
+		formatted := formatter.String()
+		if lipgloss.Height(formatted) > responseContextHeight {
+			contentLines := strings.Split(formatted, "\n")
+			truncateMessage := t.S().Muted.
+				Background(t.BgBaseLighter).
+				PaddingLeft(2).
+				Width(v.textWidth() - 4).
+				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
+			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
+		}
+		return formatted
 	})
 }
 
@@ -556,7 +568,7 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	}
 	mainParam := params[0]
 	if len(mainParam) > paramsWidth {
-		mainParam = mainParam[:paramsWidth-3] + "..."
+		mainParam = mainParam[:paramsWidth-3] + "…"
 	}
 
 	if len(params) == 1 {
@@ -596,9 +608,9 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	}
 
 	if nested {
-		return t.S().Muted.Render(ansi.Truncate(mainParam, paramsWidth, "..."))
+		return t.S().Muted.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 	}
-	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "..."))
+	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 }
 
 // earlyState returns immediately‑rendered error/cancelled/ongoing states.
@@ -651,7 +663,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		out = append(out, t.S().Muted.
 			Background(t.BgBaseLighter).
 			Width(width).
-			Render(fmt.Sprintf("... (%d lines)", len(lines)-responseContextHeight)))
+			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
 	}
 	return strings.Join(out, "\n")
 }

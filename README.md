@@ -1,14 +1,16 @@
-> [!NOTE]  
-> This is the original OpenCode repository, now continuing at [Charm](https://github.com/charmbracelet) with its original creator, [Kujtim Hoxha](https://github.com/kujtimiihoxha).  
-> Development is continuing under a new name as we prepare for a public relaunch.  
-> Follow [@charmcli](https://x.com/charmcli) or join our [Discord](https://charm.sh/chat) for updates.
+> [!WARNING]
+> 🚧 This is a pre-release under heavy, active development. Things are still in flux but we’re excited to share early progress.
 
-# ⌬ Crush
+# Crush
 
-<p align="center"><img src="https://github.com/user-attachments/assets/9ae61ef6-70e5-4876-bc45-5bcb4e52c714" width="800"></p>
+<p>
+    <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
+    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
+</p>
 
-> **⚠️ Early Development Notice:** This project is in early development and is not yet ready for production use. Features may change, break, or be incomplete. Use at your own risk.
+Crush is a tool for building software with AI.
 
+<<<<<<< windows-tools
 A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal.
 
 ## Overview
@@ -669,19 +671,18 @@ Crush gratefully acknowledges the contributions and support from these key indiv
 - [@adamdottv](https://github.com/adamdottv) - For the design direction and UI/UX architecture
 
 Special thanks to the broader open source community whose tools and libraries have made this project possible.
+=======
+>>>>>>> main
 
 ## License
 
-Crush is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+[MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)
 
-## Contributing
+---
 
-Contributions are welcome! Here's how you can contribute:
+Part of [Charm](https://charm.sh).
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+<a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-badge.jpg" /></a>
 
-Please make sure to update tests as appropriate and follow the existing code style.
+<!--prettier-ignore-->
+Charm热爱开源 • Charm loves open source

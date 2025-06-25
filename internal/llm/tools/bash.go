@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -45,27 +46,58 @@ var bannedCommands = []string{
 	"http-prompt", "chrome", "firefox", "safari",
 }
 
-var safeReadOnlyCommands = []string{
-	"ls", "echo", "pwd", "date", "cal", "uptime", "whoami", "id", "groups", "env", "printenv", "set", "unset", "which", "type", "whereis",
-	"whatis", "uname", "hostname", "df", "du", "free", "top", "ps", "kill", "killall", "nice", "nohup", "time", "timeout",
+// getSafeReadOnlyCommands returns platform-appropriate safe commands
+func getSafeReadOnlyCommands() []string {
+	// Base commands that work on all platforms
+	baseCommands := []string{
+		// Cross-platform commands
+		"echo", "hostname", "whoami",
+		
+		// Git commands (cross-platform)
+		"git status", "git log", "git diff", "git show", "git branch", "git tag", "git remote", "git ls-files", "git ls-remote",
+		"git rev-parse", "git config --get", "git config --list", "git describe", "git blame", "git grep", "git shortlog",
 
-	"git status", "git log", "git diff", "git show", "git branch", "git tag", "git remote", "git ls-files", "git ls-remote",
-	"git rev-parse", "git config --get", "git config --list", "git describe", "git blame", "git grep", "git shortlog",
+		// Go commands (cross-platform)
+		"go version", "go help", "go list", "go env", "go doc", "go vet", "go fmt", "go mod", "go test", "go build", "go run", "go install", "go clean",
+	}
 
-	"go version", "go help", "go list", "go env", "go doc", "go vet", "go fmt", "go mod", "go test", "go build", "go run", "go install", "go clean",
+	if runtime.GOOS == "windows" {
+		// Windows-specific commands
+		windowsCommands := []string{
+			"dir", "type", "where", "ver", "systeminfo", "tasklist", "ipconfig", "ping", "nslookup",
+			"Get-Process", "Get-Location", "Get-ChildItem", "Get-Content", "Get-Date", "Get-Host", "Get-ComputerInfo",
+		}
+		return append(baseCommands, windowsCommands...)
+	} else {
+		// Unix/Linux commands (including WSL, since WSL reports as Linux)
+		unixCommands := []string{
+			"ls", "pwd", "date", "cal", "uptime", "id", "groups", "env", "printenv", "set", "unset", "which", "type", "whereis",
+			"whatis", "uname", "df", "du", "free", "top", "ps", "kill", "killall", "nice", "nohup", "time", "timeout",
+		}
+		return append(baseCommands, unixCommands...)
+	}
 }
 
 func bashDescription() string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	return fmt.Sprintf(`Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
-IMPORTANT FOR WINDOWS USERS:
-- This tool uses a POSIX shell emulator (mvdan.cc/sh/v3) that works cross-platform, including Windows
-- On Windows, this provides bash-like functionality without requiring WSL or Git Bash
-- Use forward slashes (/) in paths - they work on all platforms and are converted automatically
-- Windows-specific commands (like 'dir', 'type', 'copy') are not available - use Unix equivalents ('ls', 'cat', 'cp')
-- Environment variables use Unix syntax: $VAR instead of %%VAR%%
-- File paths are automatically converted between Windows and Unix formats as needed
+CROSS-PLATFORM SHELL SUPPORT:
+- Unix/Linux/macOS: Uses native bash/sh shell
+- Windows: Intelligent shell selection:
+  * Windows commands (dir, type, copy, etc.) use cmd.exe
+  * PowerShell commands (Get-, Set-, etc.) use PowerShell
+  * Unix-style commands (ls, cat, etc.) use POSIX emulation
+- WSL: Automatically treated as Linux (which is correct)
+- Automatic detection: Chooses the best shell based on command and platform
+- Persistent state: Working directory and environment variables persist between commands
+
+WINDOWS-SPECIFIC FEATURES:
+- Native Windows commands: dir, type, copy, move, del, md, rd, cls, where, tasklist, etc.
+- PowerShell support: Get-Process, Set-Location, and other PowerShell cmdlets
+- Windows path handling: Supports both forward slashes (/) and backslashes (\)
+- Drive letters: Properly handles C:\, D:\, etc.
+- Environment variables: Supports both Unix ($VAR) and Windows (%%VAR%%) syntax
 
 Before executing the command, please follow these steps:
 
@@ -262,6 +294,8 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	isSafeReadOnly := false
 	cmdLower := strings.ToLower(params.Command)
 
+	// Get platform-appropriate safe commands
+	safeReadOnlyCommands := getSafeReadOnlyCommands()
 	for _, safe := range safeReadOnlyCommands {
 		if strings.HasPrefix(cmdLower, strings.ToLower(safe)) {
 			if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {

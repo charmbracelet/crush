@@ -124,11 +124,10 @@ LIMITATIONS:
 - Very large binary files may be skipped
 - Hidden files (starting with '.') are skipped
 
-WINDOWS NOTES:
+CROSS-PLATFORM NOTES:
 - Uses ripgrep (rg) command if available for better performance
-- On Windows, install ripgrep via: winget install BurntSushi.ripgrep.MSVC
 - Falls back to built-in Go implementation if ripgrep is not available
-- File paths are normalized automatically for Windows compatibility
+- File paths are normalized automatically for cross-platform compatibility
 
 TIPS:
 - For faster, more targeted searches, first use Glob to find relevant files, then use Grep

@@ -10,7 +10,6 @@
 
 Crush is a tool for building software with AI.
 
-
 ## License
 
 [MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)

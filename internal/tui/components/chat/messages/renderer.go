@@ -915,7 +915,15 @@ func (jr jobStartRenderer) Render(v *toolCallCmp) string {
 		t := styles.CurrentTheme()
 		jobTag := t.S().Base.Padding(0, 1).Background(t.Green).Foreground(t.White).Render("STARTED")
 		jobID := t.S().Base.Foreground(t.Blue).Render(response.JobID)
-		return fmt.Sprintf("%s Job %s", jobTag, jobID)
+
+		header := fmt.Sprintf("%s Job %s", jobTag, jobID)
+
+		if response.InitialOutput != "" && response.InitialOutput != "Job started, no output yet." {
+			output := renderPlainContent(v, response.InitialOutput)
+			return lipgloss.JoinVertical(lipgloss.Left, header, "", "Initial output:", output)
+		}
+
+		return header
 	})
 }
 
@@ -938,10 +946,23 @@ func (jr jobEndRenderer) Render(v *toolCallCmp) string {
 	args := newParamBuilder().addMain(params.JobID).build()
 
 	return jr.renderWithParams(v, "Job End", args, func() string {
+		var response tools.JobEndResponse
+		if err := jr.unmarshalParams(v.result.Content, &response); err != nil {
+			// Fallback to simple display if parsing fails
+			t := styles.CurrentTheme()
+			jobTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("TERMINATED")
+			jobID := t.S().Base.Foreground(t.Blue).Render(params.JobID)
+			return fmt.Sprintf("%s Job %s", jobTag, jobID)
+		}
+
 		t := styles.CurrentTheme()
 		jobTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("TERMINATED")
-		jobID := t.S().Base.Foreground(t.Blue).Render(params.JobID)
-		return fmt.Sprintf("%s Job %s", jobTag, jobID)
+		jobID := t.S().Base.Foreground(t.Blue).Render(response.JobID)
+
+		header := fmt.Sprintf("%s Job %s", jobTag, jobID)
+		details := fmt.Sprintf("Command: %s\nRuntime: %s", response.Command, response.Runtime)
+
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", details)
 	})
 }
 
@@ -980,12 +1001,21 @@ func (jr jobViewRenderer) Render(v *toolCallCmp) string {
 			statusTag = t.S().Base.Padding(0, 1).Background(t.Border).Foreground(t.White).Render("INACTIVE")
 		}
 
-		if response.Output == "" {
-			return fmt.Sprintf("%s No output available", statusTag)
+		jobID := t.S().Base.Foreground(t.Blue).Render(response.JobID)
+		header := fmt.Sprintf("%s Job %s", statusTag, jobID)
+
+		details := fmt.Sprintf("Command: %s\nRuntime: %s", response.Command, response.Runtime)
+		
+		// Add exit error if present
+		if response.ExitError != "" {
+			details += fmt.Sprintf("\nExit Error: %s", response.ExitError)
 		}
 
-		header := fmt.Sprintf("%s Output:", statusTag)
+		if response.Output == "" {
+			return lipgloss.JoinVertical(lipgloss.Left, header, "", details, "", "No output available")
+		}
+
 		output := renderPlainContent(v, response.Output)
-		return lipgloss.JoinVertical(lipgloss.Left, header, "", output)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", details, "", "Output:", output)
 	})
 }

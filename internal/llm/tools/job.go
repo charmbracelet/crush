@@ -32,24 +32,41 @@ type JobViewParams struct {
 }
 
 type JobStartResponse struct {
-	JobID string `json:"job_id"`
+	JobID         string `json:"job_id"`
+	Command       string `json:"command"`
+	Directory     string `json:"directory"`
+	InitialOutput string `json:"initial_output"`
 }
 
 type JobViewResponse struct {
-	Output   string `json:"output"`
-	IsActive bool   `json:"is_active"`
+	JobID     string `json:"job_id"`
+	Command   string `json:"command"`
+	Directory string `json:"directory"`
+	Output    string `json:"output"`
+	IsActive  bool   `json:"is_active"`
+	Runtime   string `json:"runtime"`
+	ExitError string `json:"exit_error,omitempty"`
+}
+
+type JobEndResponse struct {
+	JobID     string `json:"job_id"`
+	Command   string `json:"command"`
+	Directory string `json:"directory"`
+	Runtime   string `json:"runtime"`
 }
 
 type jobInstance struct {
-	id         string
-	shell      *shell.JobShell
-	outputFile *os.File
-	cancel     context.CancelFunc
-	startTime  time.Time
-	command    string
-	directory  string
-	completed  bool
-	mu         sync.RWMutex
+	id           string
+	shell        *shell.JobShell
+	outputFile   *os.File
+	cancel       context.CancelFunc
+	startTime    time.Time
+	completeTime *time.Time // When the job completed (nil if still running)
+	command      string
+	directory    string
+	completed    bool
+	exitError    error // Store the exit error if any
+	mu           sync.RWMutex
 }
 
 type jobManager struct {
@@ -76,8 +93,36 @@ func getJobManager() *jobManager {
 		jobMgr = &jobManager{
 			jobs: make(map[string]*jobInstance),
 		}
+		// Start cleanup goroutine
+		go jobMgr.cleanupCompletedJobs()
 	})
 	return jobMgr
+}
+
+// cleanupCompletedJobs periodically removes completed jobs older than 1 hour
+func (jm *jobManager) cleanupCompletedJobs() {
+	ticker := time.NewTicker(10 * time.Minute) // Check every 10 minutes
+	defer ticker.Stop()
+
+	for range ticker.C {
+		jm.mu.Lock()
+		now := time.Now()
+		for jobID, job := range jm.jobs {
+			job.mu.RLock()
+			shouldCleanup := job.completed && job.completeTime != nil &&
+				now.Sub(*job.completeTime) > time.Hour
+			job.mu.RUnlock()
+
+			if shouldCleanup {
+				// Clean up resources
+				job.outputFile.Close()
+				os.Remove(job.outputFile.Name())
+				delete(jm.jobs, jobID)
+				fmt.Printf("Cleaned up completed job %s\n", jobID)
+			}
+		}
+		jm.mu.Unlock()
+	}
 }
 
 type jobStartTool struct {
@@ -312,7 +357,43 @@ func (j *jobStartTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	mgr.jobs[jobID] = job
 	mgr.mu.Unlock()
 
-	return NewTextResponse(fmt.Sprintf("Job started successfully with ID: %s\nCommand: %s\nDirectory: %s\nUse job_view to monitor output and job_end to terminate.", jobID, params.Command, workingDir)), nil
+	// Start monitoring for job completion
+	go func() {
+		// Wait for the job to complete
+		exitErr := <-jobShell.Done()
+
+		// Mark job as completed
+		now := time.Now()
+		job.mu.Lock()
+		job.completed = true
+		job.exitError = exitErr
+		job.completeTime = &now
+		job.mu.Unlock()
+	}()
+
+	// Wait a moment for initial output
+	time.Sleep(500 * time.Millisecond)
+
+	// Read initial output (first few lines)
+	initialOutput, _ := readLastLines(outputFile.Name(), 10)
+	if initialOutput == "" {
+		initialOutput = "Job started, no output yet."
+	}
+
+	// Create structured response
+	response := JobStartResponse{
+		JobID:         jobID,
+		Command:       params.Command,
+		Directory:     workingDir,
+		InitialOutput: initialOutput,
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("failed to marshal response: %v", err)), nil
+	}
+
+	return NewTextResponse(string(responseBytes)), nil
 }
 
 func (j *jobEndTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
@@ -353,7 +434,21 @@ func (j *jobEndTool) Run(ctx context.Context, call ToolCall) (ToolResponse, erro
 	os.Remove(job.outputFile.Name())
 
 	duration := time.Since(job.startTime)
-	return NewTextResponse(fmt.Sprintf("Job %s terminated successfully.\nCommand: %s\nRan for: %v", params.JobID, job.command, duration.Round(time.Second))), nil
+
+	// Create structured response
+	response := JobEndResponse{
+		JobID:     params.JobID,
+		Command:   job.command,
+		Directory: job.directory,
+		Runtime:   duration.Round(time.Second).String(),
+	}
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("failed to marshal response: %v", err)), nil
+	}
+
+	return NewTextResponse(string(responseBytes)), nil
 }
 
 func (j *jobViewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
@@ -382,6 +477,7 @@ func (j *jobViewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, err
 	// Check if job is still active
 	job.mu.RLock()
 	isActive := !job.completed
+	exitError := job.exitError
 	job.mu.RUnlock()
 
 	// Read the last N lines from the output file
@@ -391,9 +487,19 @@ func (j *jobViewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, err
 	}
 
 	// Create structured response for better rendering
+	duration := time.Since(job.startTime)
 	response := JobViewResponse{
-		Output:   output,
-		IsActive: isActive,
+		JobID:     params.JobID,
+		Command:   job.command,
+		Directory: job.directory,
+		Output:    output,
+		IsActive:  isActive,
+		Runtime:   duration.Round(time.Second).String(),
+	}
+
+	// Add exit error if the job completed with an error
+	if !isActive && exitError != nil {
+		response.ExitError = exitError.Error()
 	}
 
 	responseBytes, err := json.Marshal(response)

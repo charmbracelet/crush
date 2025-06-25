@@ -57,9 +57,8 @@ type permissionDialogCmp struct {
 	diffYOffset   int  // vertical scroll offset
 
 	// Caching
-	cachedContent    string
-	cachedContentKey string
-	contentDirty     bool
+	cachedContent string
+	contentDirty  bool
 
 	keyMap KeyMap
 }

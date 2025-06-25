@@ -73,6 +73,12 @@ type TUIConfig struct {
 	Theme string `json:"theme,omitempty"`
 }
 
+// UpdateConfig defines the configuration for auto-updates.
+type UpdateConfig struct {
+	CheckForUpdates bool   `json:"checkForUpdates,omitempty"`
+	SkippedVersion  string `json:"skippedVersion,omitempty"`
+}
+
 // Config is the main configuration structure for the application.
 type Config struct {
 	Data         Data                              `json:"data"`
@@ -85,6 +91,7 @@ type Config struct {
 	DebugLSP     bool                              `json:"debugLSP,omitempty"`
 	ContextPaths []string                          `json:"contextPaths,omitempty"`
 	TUI          TUIConfig                         `json:"tui"`
+	Update       UpdateConfig                      `json:"update"`
 	AutoCompact  bool                              `json:"autoCompact,omitempty"`
 }
 
@@ -216,6 +223,7 @@ func setDefaults(debug bool) {
 	viper.SetDefault("contextPaths", defaultContextPaths)
 	viper.SetDefault("tui.theme", "crush")
 	viper.SetDefault("autoCompact", true)
+	viper.SetDefault("update.checkForUpdates", true)
 
 	if debug {
 		viper.SetDefault("debug", true)
@@ -862,4 +870,12 @@ func UpdateTheme(themeName string) error {
 	return updateCfgFile(func(config *Config) {
 		config.TUI.Theme = themeName
 	})
+}
+
+// ShouldCheckForUpdates returns whether we should check for updates.
+func ShouldCheckForUpdates() bool {
+	if cfg == nil {
+		return false
+	}
+	return cfg.Update.CheckForUpdates
 }

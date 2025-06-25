@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -25,11 +26,13 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	updateDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/update"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/page/logs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/updater"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
@@ -79,6 +82,27 @@ func (a appModel) Init() tea.Cmd {
 		if shouldShow {
 			return dialogs.OpenDialogMsg{
 				Model: initDialog.NewInitDialogCmp(),
+			}
+		}
+		return nil
+	})
+
+	// Check for updates on startup
+	cmds = append(cmds, func() tea.Msg {
+		if config.ShouldCheckForUpdates() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			
+			updateInfo, err := updater.CheckForUpdate(ctx)
+			if err != nil {
+				logging.Debug("Failed to check for updates: %v", err)
+				return nil
+			}
+			
+			if updateInfo != nil {
+				return updateDialog.UpdateAvailableMsg{
+					UpdateInfo: updateInfo,
+				}
 			}
 		}
 		return nil
@@ -202,6 +226,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case permissions.PermissionDeny:
 			a.app.Permissions.Deny(msg.Permission)
 		}
+		return a, nil
+
+	// Update handling
+	case updateDialog.UpdateAvailableMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: updateDialog.New(context.Background(), msg.UpdateInfo),
+		})
+	case updateDialog.UpdateDeclinedMsg:
+		// User declined the update, nothing to do
 		return a, nil
 	// Agent Events
 	case pubsub.Event[agent.AgentEvent]:

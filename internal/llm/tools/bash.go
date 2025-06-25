@@ -128,23 +128,25 @@ CROSS-PLATFORM SHELL SUPPORT:
 
 Before executing the command, please follow these steps:
 
-1. Directory Verification:
+1. Determine if the command is long running / blocking:
+ - If the command is long running (e.g., servers, watchers, etc.), do NOT use this tool. Use the job tool instead.
+2. Directory Verification:
  - If the command will create new directories or files, first use the LS tool to verify the parent directory exists and is the correct location
  - For example, before running "mkdir foo/bar", first use LS to check that "foo" exists and is the intended parent directory
 
-2. Security Check:
+3. Security Check:
  - For security and to limit the threat of a prompt injection attack, some commands are limited or banned. If you use a disallowed command, you will receive an error message explaining the restriction. Explain the error to the User.
  - Verify that the command is not one of the banned commands: %s.
 
-3. Command Execution:
+4. Command Execution:
  - After ensuring proper quoting, execute the command.
  - Capture the output of the command.
 
-4. Output Processing:
+5. Output Processing:
  - If the output exceeds %d characters, output will be truncated before being returned to you.
  - Prepare the output for display to the user.
 
-5. Return Result:
+6. Return Result:
  - Provide the processed output of the command.
  - If any errors occurred during execution, include those in the output.
  - The result will also have metadata like the cwd (current working directory) at the end, included with <cwd></cwd> tags.

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools/shell"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/hotdiva2000"
 )
 
 type JobStartParams struct {
@@ -80,13 +81,6 @@ var (
 	jobCounter   int
 	jobCounterMu sync.Mutex
 )
-
-func generateShortJobID() string {
-	jobCounterMu.Lock()
-	defer jobCounterMu.Unlock()
-	jobCounter++
-	return fmt.Sprintf("job%d", jobCounter)
-}
 
 func getJobManager() *jobManager {
 	jobMgrOnce.Do(func() {
@@ -311,7 +305,7 @@ func (j *jobStartTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	jobID := generateShortJobID()
+	jobID := hotdiva2000.Generate()
 
 	// Create temporary file for output
 	tempDir := os.TempDir()

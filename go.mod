@@ -46,9 +46,10 @@ require (
 	mvdan.cc/sh/v3 v3.11.0
 )
 
-require golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-
 require (
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
+	github.com/charmbracelet/hotdiva2000 v0.0.0-20250428120649-83c28ea5905c // indirect
+	github.com/spf13/cast v1.7.1 // indirect
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.13.0 // indirect
 	cloud.google.com/go/compute/metadata v0.6.0 // indirect

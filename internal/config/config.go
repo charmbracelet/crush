@@ -193,8 +193,9 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	// Override the max tokens for title agent
 	cfg.Agents[AgentTitle] = Agent{
-		Model:     cfg.Agents[AgentTitle].Model,
-		MaxTokens: 80,
+		Model:           cfg.Agents[AgentTitle].Model,
+		MaxTokens:       80,
+		ReasoningEffort: cfg.Agents[AgentTitle].ReasoningEffort,
 	}
 	return cfg, nil
 }
@@ -203,17 +204,17 @@ func Load(workingDir string, debug bool) (*Config, error) {
 func configureViper() {
 	viper.SetConfigName(fmt.Sprintf(".%s", appName))
 	viper.SetConfigType("json")
-	
+
 	// Unix-style paths
 	viper.AddConfigPath("$HOME")
 	viper.AddConfigPath(fmt.Sprintf("$XDG_CONFIG_HOME/%s", appName))
 	viper.AddConfigPath(fmt.Sprintf("$HOME/.config/%s", appName))
-	
+
 	// Windows-style paths
 	viper.AddConfigPath(fmt.Sprintf("$USERPROFILE"))
 	viper.AddConfigPath(fmt.Sprintf("$APPDATA/%s", appName))
 	viper.AddConfigPath(fmt.Sprintf("$LOCALAPPDATA/%s", appName))
-	
+
 	viper.SetEnvPrefix(strings.ToUpper(appName))
 	viper.AutomaticEnv()
 }
@@ -631,8 +632,9 @@ func setDefaultModelForAgent(agent AgentName) bool {
 			maxTokens = 80
 		}
 		cfg.Agents[agent] = Agent{
-			Model:     models.Claude37Sonnet,
-			MaxTokens: maxTokens,
+			Model:           models.Claude37Sonnet,
+			MaxTokens:       maxTokens,
+			ReasoningEffort: cfg.Agents[agent].ReasoningEffort,
 		}
 		return true
 	}

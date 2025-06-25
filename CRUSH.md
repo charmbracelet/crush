@@ -20,3 +20,4 @@
 - **Testing**: Use testify/assert and testify/require, parallel tests with `t.Parallel()`
 - **JSON tags**: Use snake_case for JSON field names
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
+- **Comments**: End comments in periods unless comments are at the end of the line.

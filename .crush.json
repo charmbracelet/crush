@@ -1,11 +1,11 @@
 {
-  "$schema": "./opencode-schema.json",
+  "$schema": "./crush-schema.json",
   "lsp": {
     "Go": {
       "command": "gopls"
     }
   },
   "tui": {
-    "theme": "charm"
+    "theme": "crush"
   }
 }

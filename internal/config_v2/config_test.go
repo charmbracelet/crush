@@ -1,6 +1,7 @@
 package configv2
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -28,6 +29,7 @@ func TestConfigWithEnv(t *testing.T) {
 	os.Setenv("XAI_API_KEY", "test-xai-key")
 	os.Setenv("OPENROUTER_API_KEY", "test-openrouter-key")
 	cfg := InitConfig(cwdDir)
-	fmt.Println(cfg)
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	fmt.Println(string(data))
 	assert.Len(t, cfg.Providers, 5)
 }

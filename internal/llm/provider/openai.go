@@ -19,13 +19,8 @@ import (
 )
 
 type openaiOptions struct {
-	baseURL         string
-	disableCache    bool
 	reasoningEffort string
-	extraHeaders    map[string]string
 }
-
-type OpenAIOption func(*openaiOptions)
 
 type openaiClient struct {
 	providerOptions providerClientOptions
@@ -39,20 +34,17 @@ func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	openaiOpts := openaiOptions{
 		reasoningEffort: "medium",
 	}
-	for _, o := range opts.openaiOptions {
-		o(&openaiOpts)
-	}
 
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
 	}
-	if openaiOpts.baseURL != "" {
-		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(openaiOpts.baseURL))
+	if opts.baseURL != "" {
+		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(opts.baseURL))
 	}
 
-	if openaiOpts.extraHeaders != nil {
-		for key, value := range openaiOpts.extraHeaders {
+	if opts.extraHeaders != nil {
+		for key, value := range opts.extraHeaders {
 			openaiClientOptions = append(openaiClientOptions, option.WithHeader(key, value))
 		}
 	}
@@ -390,36 +382,5 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 		OutputTokens:        completion.Usage.CompletionTokens,
 		CacheCreationTokens: 0, // OpenAI doesn't provide this directly
 		CacheReadTokens:     cachedTokens,
-	}
-}
-
-func WithOpenAIBaseURL(baseURL string) OpenAIOption {
-	return func(options *openaiOptions) {
-		options.baseURL = baseURL
-	}
-}
-
-func WithOpenAIExtraHeaders(headers map[string]string) OpenAIOption {
-	return func(options *openaiOptions) {
-		options.extraHeaders = headers
-	}
-}
-
-func WithOpenAIDisableCache() OpenAIOption {
-	return func(options *openaiOptions) {
-		options.disableCache = true
-	}
-}
-
-func WithReasoningEffort(effort string) OpenAIOption {
-	return func(options *openaiOptions) {
-		defaultReasoningEffort := "medium"
-		switch effort {
-		case "low", "medium", "high":
-			defaultReasoningEffort = effort
-		default:
-			logging.Warn("Invalid reasoning effort, using default: medium")
-		}
-		options.reasoningEffort = defaultReasoningEffort
 	}
 }

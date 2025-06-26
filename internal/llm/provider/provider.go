@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 
 	"github.com/charmbracelet/crush/internal/llm/models"
@@ -59,15 +60,13 @@ type Provider interface {
 }
 
 type providerClientOptions struct {
+	baseURL       string
 	apiKey        string
 	model         models.Model
+	disableCache  bool
 	maxTokens     int64
 	systemMessage string
-
-	anthropicOptions []AnthropicOption
-	openaiOptions    []OpenAIOption
-	geminiOptions    []GeminiOption
-	bedrockOptions   []BedrockOption
+	extraHeaders  map[string]string
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -91,7 +90,7 @@ func NewProvider(providerName models.InferenceProvider, opts ...ProviderClientOp
 	case models.ProviderAnthropic:
 		return &baseProvider[AnthropicClient]{
 			options: clientOptions,
-			client:  newAnthropicClient(clientOptions),
+			client:  newAnthropicClient(clientOptions, false),
 		}, nil
 	case models.ProviderOpenAI:
 		return &baseProvider[OpenAIClient]{
@@ -109,9 +108,7 @@ func NewProvider(providerName models.InferenceProvider, opts ...ProviderClientOp
 			client:  newBedrockClient(clientOptions),
 		}, nil
 	case models.ProviderGROQ:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://api.groq.com/openai/v1"),
-		)
+		clientOptions.baseURL = "https://api.groq.com/openai/v1"
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
@@ -127,29 +124,23 @@ func NewProvider(providerName models.InferenceProvider, opts ...ProviderClientOp
 			client:  newVertexAIClient(clientOptions),
 		}, nil
 	case models.ProviderOpenRouter:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://openrouter.ai/api/v1"),
-			WithOpenAIExtraHeaders(map[string]string{
-				"HTTP-Referer": "crush.charm.land",
-				"X-Title":      "Crush",
-			}),
-		)
+		clientOptions.baseURL = "https://openrouter.ai/api/v1"
+		clientOptions.extraHeaders = map[string]string{
+			"HTTP-Referer": "crush.charm.land",
+			"X-Title":      "Crush",
+		}
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
 		}, nil
 	case models.ProviderXAI:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://api.x.ai/v1"),
-		)
+		clientOptions.baseURL = "https://api.x.ai/v1"
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
 		}, nil
 	case models.ProviderLocal:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL(os.Getenv("LOCAL_ENDPOINT")),
-		)
+		clientOptions.baseURL = os.Getenv("LOCAL_ENDPOINT")
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
@@ -186,6 +177,12 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 	return p.client.stream(ctx, messages, tools)
 }
 
+func WithBaseURL(baseURL string) ProviderClientOption {
+	return func(options *providerClientOptions) {
+		options.baseURL = baseURL
+	}
+}
+
 func WithAPIKey(apiKey string) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.apiKey = apiKey
@@ -198,6 +195,21 @@ func WithModel(model models.Model) ProviderClientOption {
 	}
 }
 
+func WithDisableCache(disableCache bool) ProviderClientOption {
+	return func(options *providerClientOptions) {
+		options.disableCache = disableCache
+	}
+}
+
+func WithExtraHeaders(extraHeaders map[string]string) ProviderClientOption {
+	return func(options *providerClientOptions) {
+		if options.extraHeaders == nil {
+			options.extraHeaders = make(map[string]string)
+		}
+		maps.Copy(options.extraHeaders, extraHeaders)
+	}
+}
+
 func WithMaxTokens(maxTokens int64) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.maxTokens = maxTokens
@@ -207,29 +219,5 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 func WithSystemMessage(systemMessage string) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.systemMessage = systemMessage
-	}
-}
-
-func WithAnthropicOptions(anthropicOptions ...AnthropicOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.anthropicOptions = anthropicOptions
-	}
-}
-
-func WithOpenAIOptions(openaiOptions ...OpenAIOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.openaiOptions = openaiOptions
-	}
-}
-
-func WithGeminiOptions(geminiOptions ...GeminiOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.geminiOptions = geminiOptions
-	}
-}
-
-func WithBedrockOptions(bedrockOptions ...BedrockOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.bedrockOptions = bedrockOptions
 	}
 }

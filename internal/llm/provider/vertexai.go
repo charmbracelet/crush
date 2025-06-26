@@ -11,11 +11,6 @@ import (
 type VertexAIClient ProviderClient
 
 func newVertexAIClient(opts providerClientOptions) VertexAIClient {
-	geminiOpts := geminiOptions{}
-	for _, o := range opts.geminiOptions {
-		o(&geminiOpts)
-	}
-
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		Project:  os.Getenv("GOOGLE_CLOUD_PROJECT"),
 		Location: os.Getenv("GOOGLE_CLOUD_LOCATION"),
@@ -28,7 +23,6 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 
 	return &geminiClient{
 		providerOptions: opts,
-		options:         geminiOpts,
 		client:          client,
 	}
 }

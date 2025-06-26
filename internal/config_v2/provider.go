@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/charmbracelet/fur/pkg/client"
-	"github.com/charmbracelet/fur/pkg/provider"
+	"github.com/charmbracelet/crush/internal/fur/client"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
 var fur = client.New()

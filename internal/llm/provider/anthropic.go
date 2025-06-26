@@ -19,40 +19,25 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-type anthropicOptions struct {
-	useBedrock   bool
-	disableCache bool
-	shouldThink  func(userMessage string) bool
-}
-
-type AnthropicOption func(*anthropicOptions)
-
 type anthropicClient struct {
 	providerOptions providerClientOptions
-	options         anthropicOptions
 	client          anthropic.Client
 }
 
 type AnthropicClient ProviderClient
 
-func newAnthropicClient(opts providerClientOptions) AnthropicClient {
-	anthropicOpts := anthropicOptions{}
-	for _, o := range opts.anthropicOptions {
-		o(&anthropicOpts)
-	}
-
+func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicClient {
 	anthropicClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
 	}
-	if anthropicOpts.useBedrock {
+	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
 
 	client := anthropic.NewClient(anthropicClientOptions...)
 	return &anthropicClient{
 		providerOptions: opts,
-		options:         anthropicOpts,
 		client:          client,
 	}
 }
@@ -66,7 +51,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 		switch msg.Role {
 		case message.User:
 			content := anthropic.NewTextBlock(msg.Content().String())
-			if cache && !a.options.disableCache {
+			if cache && !a.providerOptions.disableCache {
 				content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 					Type: "ephemeral",
 				}
@@ -84,7 +69,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			blocks := []anthropic.ContentBlockParamUnion{}
 			if msg.Content().String() != "" {
 				content := anthropic.NewTextBlock(msg.Content().String())
-				if cache && !a.options.disableCache {
+				if cache && !a.providerOptions.disableCache {
 					content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 						Type: "ephemeral",
 					}
@@ -132,7 +117,7 @@ func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolU
 			},
 		}
 
-		if i == len(tools)-1 && !a.options.disableCache {
+		if i == len(tools)-1 && !a.providerOptions.disableCache {
 			toolParam.CacheControl = anthropic.CacheControlEphemeralParam{
 				Type: "ephemeral",
 			}
@@ -161,21 +146,22 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
 	var thinkingParam anthropic.ThinkingConfigParamUnion
-	lastMessage := messages[len(messages)-1]
-	isUser := lastMessage.Role == anthropic.MessageParamRoleUser
-	messageContent := ""
+	// TODO: Implement a proper thinking function
+	// lastMessage := messages[len(messages)-1]
+	// isUser := lastMessage.Role == anthropic.MessageParamRoleUser
+	// messageContent := ""
 	temperature := anthropic.Float(0)
-	if isUser {
-		for _, m := range lastMessage.Content {
-			if m.OfText != nil && m.OfText.Text != "" {
-				messageContent = m.OfText.Text
-			}
-		}
-		if messageContent != "" && a.options.shouldThink != nil && a.options.shouldThink(messageContent) {
-			thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
-			temperature = anthropic.Float(1)
-		}
-	}
+	// if isUser {
+	// 	for _, m := range lastMessage.Content {
+	// 		if m.OfText != nil && m.OfText.Text != "" {
+	// 			messageContent = m.OfText.Text
+	// 		}
+	// 	}
+	// 	if messageContent != "" && a.shouldThink != nil && a.options.shouldThink(messageContent) {
+	// 		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
+	// 		temperature = anthropic.Float(1)
+	// 	}
+	// }
 
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(a.providerOptions.model.APIModel),
@@ -439,24 +425,7 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 	}
 }
 
-func WithAnthropicBedrock(useBedrock bool) AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.useBedrock = useBedrock
-	}
-}
-
-func WithAnthropicDisableCache() AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.disableCache = true
-	}
-}
-
+// TODO: check if we need
 func DefaultShouldThinkFn(s string) bool {
 	return strings.Contains(strings.ToLower(s), "think")
-}
-
-func WithAnthropicShouldThinkFn(fn func(string) bool) AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.shouldThink = fn
-	}
 }

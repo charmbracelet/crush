@@ -17,26 +17,14 @@ import (
 	"google.golang.org/genai"
 )
 
-type geminiOptions struct {
-	disableCache bool
-}
-
-type GeminiOption func(*geminiOptions)
-
 type geminiClient struct {
 	providerOptions providerClientOptions
-	options         geminiOptions
 	client          *genai.Client
 }
 
 type GeminiClient ProviderClient
 
 func newGeminiClient(opts providerClientOptions) GeminiClient {
-	geminiOpts := geminiOptions{}
-	for _, o := range opts.geminiOptions {
-		o(&geminiOpts)
-	}
-
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: opts.apiKey, Backend: genai.BackendGeminiAPI})
 	if err != nil {
 		logging.Error("Failed to create Gemini client", "error", err)
@@ -45,7 +33,6 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 
 	return &geminiClient{
 		providerOptions: opts,
-		options:         geminiOpts,
 		client:          client,
 	}
 }
@@ -449,12 +436,6 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 		OutputTokens:        int64(resp.UsageMetadata.CandidatesTokenCount),
 		CacheCreationTokens: 0, // Not directly provided by Gemini
 		CacheReadTokens:     int64(resp.UsageMetadata.CachedContentTokenCount),
-	}
-}
-
-func WithGeminiDisableCache() GeminiOption {
-	return func(options *geminiOptions) {
-		options.disableCache = true
 	}
 }
 

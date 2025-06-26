@@ -11,22 +11,14 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-type bedrockOptions struct {
-	// Bedrock specific options can be added here
-}
-
-type BedrockOption func(*bedrockOptions)
-
 type bedrockClient struct {
 	providerOptions providerClientOptions
-	options         bedrockOptions
 	childProvider   ProviderClient
 }
 
 type BedrockClient ProviderClient
 
 func newBedrockClient(opts providerClientOptions) BedrockClient {
-	bedrockOpts := bedrockOptions{}
 	// Apply bedrock specific options if they are added in the future
 
 	// Get AWS region from environment
@@ -41,7 +33,6 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 	if len(region) < 2 {
 		return &bedrockClient{
 			providerOptions: opts,
-			options:         bedrockOpts,
 			childProvider:   nil, // Will cause an error when used
 		}
 	}
@@ -55,14 +46,11 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 	if strings.Contains(string(opts.model.APIModel), "anthropic") {
 		// Create Anthropic client with Bedrock configuration
 		anthropicOpts := opts
-		anthropicOpts.anthropicOptions = append(anthropicOpts.anthropicOptions,
-			WithAnthropicBedrock(true),
-			WithAnthropicDisableCache(),
-		)
+		// TODO: later find a way to check if the AWS account has caching enabled
+		opts.disableCache = true // Disable cache for Bedrock
 		return &bedrockClient{
 			providerOptions: opts,
-			options:         bedrockOpts,
-			childProvider:   newAnthropicClient(anthropicOpts),
+			childProvider:   newAnthropicClient(anthropicOpts, true),
 		}
 	}
 
@@ -70,7 +58,6 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 	// This will cause an error when used
 	return &bedrockClient{
 		providerOptions: opts,
-		options:         bedrockOpts,
 		childProvider:   nil,
 	}
 }

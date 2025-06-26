@@ -34,15 +34,15 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("tab", "switch"),
 		),
 		Allow: key.NewBinding(
-			key.WithKeys("a", "ctrl+a"),
+			key.WithKeys("a", "A", "ctrl+a"),
 			key.WithHelp("a", "allow"),
 		),
 		AllowSession: key.NewBinding(
-			key.WithKeys("s", "ctrl+s"),
+			key.WithKeys("s", "S", "ctrl+s"),
 			key.WithHelp("s", "allow session"),
 		),
 		Deny: key.NewBinding(
-			key.WithKeys("d", "ctrl+d"),
+			key.WithKeys("d", "D", "ctrl+d"),
 			key.WithHelp("d", "deny"),
 		),
 		Select: key.NewBinding(

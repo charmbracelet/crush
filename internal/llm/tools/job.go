@@ -331,11 +331,11 @@ func (j *jobStartTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	}
 
 	// Start the command asynchronously
-	if err := jobShell.ExecAsync(jobCtx, params.Command); err != nil {
+	if jobErr := jobShell.ExecAsync(jobCtx, params.Command); jobErr != nil {
 		cancel()
 		outputFile.Close()
 		os.Remove(outputFile.Name())
-		return NewTextErrorResponse(fmt.Sprintf("failed to start job: %v", err)), nil
+		return NewTextErrorResponse(fmt.Sprintf("failed to start job: %v", jobErr)), nil
 	}
 
 	// Store job instance

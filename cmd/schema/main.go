@@ -89,6 +89,8 @@ func generateSchema() map[string]any {
 			".cursor/rules/",
 			"CLAUDE.md",
 			"CLAUDE.local.md",
+			"GEMINI.md",
+			"gemini.md",
 			"crush.md",
 			"crush.local.md",
 			"Crush.md",

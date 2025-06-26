@@ -32,6 +32,10 @@ type MCPClient interface {
 	Close() error
 }
 
+func (b *mcpTool) Name() string {
+	return fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name)
+}
+
 func (b *mcpTool) Info() tools.ToolInfo {
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name),

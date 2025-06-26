@@ -138,6 +138,10 @@ func NewSourcegraphTool() BaseTool {
 	}
 }
 
+func (t *sourcegraphTool) Name() string {
+	return SourcegraphToolName
+}
+
 func (t *sourcegraphTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        SourcegraphToolName,

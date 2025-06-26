@@ -26,6 +26,10 @@ type AgentParams struct {
 	Prompt string `json:"prompt"`
 }
 
+func (b *agentTool) Name() string {
+	return AgentToolName
+}
+
 func (b *agentTool) Info() tools.ToolInfo {
 	return tools.ToolInfo{
 		Name:        AgentToolName,

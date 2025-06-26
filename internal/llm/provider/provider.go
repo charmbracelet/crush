@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 
 	"github.com/charmbracelet/crush/internal/llm/models"
@@ -177,18 +176,6 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 	return p.client.stream(ctx, messages, tools)
 }
 
-func WithBaseURL(baseURL string) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.baseURL = baseURL
-	}
-}
-
-func WithAPIKey(apiKey string) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.apiKey = apiKey
-	}
-}
-
 func WithModel(model models.Model) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.model = model
@@ -198,15 +185,6 @@ func WithModel(model models.Model) ProviderClientOption {
 func WithDisableCache(disableCache bool) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.disableCache = disableCache
-	}
-}
-
-func WithExtraHeaders(extraHeaders map[string]string) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		if options.extraHeaders == nil {
-			options.extraHeaders = make(map[string]string)
-		}
-		maps.Copy(options.extraHeaders, extraHeaders)
 	}
 }
 

@@ -82,8 +82,9 @@ type ProviderConfig struct {
 }
 
 type Agent struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID          AgentID `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled"`
 
@@ -229,6 +230,7 @@ func loadConfig(cwd string) (*Config, error) {
 
 	agents := map[AgentID]Agent{
 		AgentCoder: {
+			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
 			Provider:     preferredProvider.ID,
@@ -237,6 +239,7 @@ func loadConfig(cwd string) (*Config, error) {
 			// All tools allowed
 		},
 		AgentTask: {
+			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Provider:     preferredProvider.ID,
@@ -254,6 +257,7 @@ func loadConfig(cwd string) (*Config, error) {
 			AllowedLSP: []string{},
 		},
 		AgentTitle: {
+			ID:           AgentTitle,
 			Name:         "Title",
 			Description:  "An agent that helps with generating titles for sessions.",
 			Provider:     preferredProvider.ID,
@@ -265,6 +269,7 @@ func loadConfig(cwd string) (*Config, error) {
 			AllowedLSP: []string{},
 		},
 		AgentSummarize: {
+			ID:           AgentSummarize,
 			Name:         "Summarize",
 			Description:  "An agent that helps with summarizing sessions.",
 			Provider:     preferredProvider.ID,
@@ -429,43 +434,44 @@ func mergeAgents(base, global, local *Config) {
 		if cfg == nil {
 			continue
 		}
-		for agentID, globalAgent := range cfg.Agents {
+		for agentID, newAgent := range cfg.Agents {
 			if _, ok := base.Agents[agentID]; !ok {
-				base.Agents[agentID] = globalAgent
+				newAgent.ID = agentID // Ensure the ID is set correctly
+				base.Agents[agentID] = newAgent
 			} else {
 				switch agentID {
 				case AgentCoder:
 					baseAgent := base.Agents[agentID]
-					baseAgent.Model = globalAgent.Model
-					baseAgent.Provider = globalAgent.Provider
-					baseAgent.AllowedMCP = globalAgent.AllowedMCP
-					baseAgent.AllowedLSP = globalAgent.AllowedLSP
+					baseAgent.Model = newAgent.Model
+					baseAgent.Provider = newAgent.Provider
+					baseAgent.AllowedMCP = newAgent.AllowedMCP
+					baseAgent.AllowedLSP = newAgent.AllowedLSP
 					base.Agents[agentID] = baseAgent
 				case AgentTask:
 					baseAgent := base.Agents[agentID]
-					baseAgent.Model = globalAgent.Model
-					baseAgent.Provider = globalAgent.Provider
+					baseAgent.Model = newAgent.Model
+					baseAgent.Provider = newAgent.Provider
 					base.Agents[agentID] = baseAgent
 				case AgentTitle:
 					baseAgent := base.Agents[agentID]
-					baseAgent.Model = globalAgent.Model
-					baseAgent.Provider = globalAgent.Provider
+					baseAgent.Model = newAgent.Model
+					baseAgent.Provider = newAgent.Provider
 					base.Agents[agentID] = baseAgent
 				case AgentSummarize:
 					baseAgent := base.Agents[agentID]
-					baseAgent.Model = globalAgent.Model
-					baseAgent.Provider = globalAgent.Provider
+					baseAgent.Model = newAgent.Model
+					baseAgent.Provider = newAgent.Provider
 					base.Agents[agentID] = baseAgent
 				default:
 					baseAgent := base.Agents[agentID]
-					baseAgent.Name = globalAgent.Name
-					baseAgent.Description = globalAgent.Description
-					baseAgent.Disabled = globalAgent.Disabled
-					baseAgent.Provider = globalAgent.Provider
-					baseAgent.Model = globalAgent.Model
-					baseAgent.AllowedTools = globalAgent.AllowedTools
-					baseAgent.AllowedMCP = globalAgent.AllowedMCP
-					baseAgent.AllowedLSP = globalAgent.AllowedLSP
+					baseAgent.Name = newAgent.Name
+					baseAgent.Description = newAgent.Description
+					baseAgent.Disabled = newAgent.Disabled
+					baseAgent.Provider = newAgent.Provider
+					baseAgent.Model = newAgent.Model
+					baseAgent.AllowedTools = newAgent.AllowedTools
+					baseAgent.AllowedMCP = newAgent.AllowedMCP
+					baseAgent.AllowedLSP = newAgent.AllowedLSP
 					base.Agents[agentID] = baseAgent
 
 				}

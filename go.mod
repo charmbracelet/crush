@@ -20,6 +20,7 @@ require (
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
 	github.com/charmbracelet/x/ansi v0.9.3
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
+	github.com/charmbracelet/hotdiva2000 v0.0.0-20250626041657-42fba947ecdb
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/fsnotify/fsnotify v1.9.0
@@ -48,7 +49,7 @@ require (
 
 require (
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	github.com/charmbracelet/hotdiva2000 v0.0.0-20250428120649-83c28ea5905c // indirect
+	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.13.0 // indirect

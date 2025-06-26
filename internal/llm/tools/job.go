@@ -305,7 +305,11 @@ func (j *jobStartTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	jobID := hotdiva2000.Generate()
+	jobID := hotdiva2000.GenerateWithOptions(hotdiva2000.Options{
+		PrefixThreshold: 0.2,
+		SuffixThreshold: 0.2,
+		Results:         1,
+	})[0]
 
 	// Create temporary file for output
 	tempDir := os.TempDir()

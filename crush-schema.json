@@ -83,17 +83,11 @@
         },
         "reasoningEffort": {
           "description": "Reasoning effort for models that support it (OpenAI, Anthropic)",
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
+          "enum": ["low", "medium", "high"],
           "type": "string"
         }
       },
-      "required": [
-        "model"
-      ],
+      "required": ["model"],
       "type": "object"
     }
   },
@@ -182,17 +176,11 @@
           },
           "reasoningEffort": {
             "description": "Reasoning effort for models that support it (OpenAI, Anthropic)",
-            "enum": [
-              "low",
-              "medium",
-              "high"
-            ],
+            "enum": ["low", "medium", "high"],
             "type": "string"
           }
         },
-        "required": [
-          "model"
-        ],
+        "required": ["model"],
         "type": "object"
       },
       "description": "Agent configurations",
@@ -216,6 +204,8 @@
         ".cursor/rules/",
         "CLAUDE.md",
         "CLAUDE.local.md",
+        "GEMINI.md",
+        "gemini.md",
         "crush.md",
         "crush.local.md",
         "Crush.md",
@@ -238,9 +228,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "directory"
-      ],
+      "required": ["directory"],
       "type": "object"
     },
     "debug": {
@@ -278,9 +266,7 @@
             "type": "object"
           }
         },
-        "required": [
-          "command"
-        ],
+        "required": ["command"],
         "type": "object"
       },
       "description": "Language Server Protocol configurations",
@@ -318,10 +304,7 @@
           "type": {
             "default": "stdio",
             "description": "Type of MCP server",
-            "enum": [
-              "stdio",
-              "sse"
-            ],
+            "enum": ["stdio", "sse"],
             "type": "string"
           },
           "url": {
@@ -329,9 +312,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "command"
-        ],
+        "required": ["command"],
         "type": "object"
       },
       "description": "Model Control Protocol server configurations",

@@ -103,6 +103,8 @@ var defaultContextPaths = []string{
 	".cursor/rules/",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
+	"GEMINI.md",
+	"gemini.md",
 	"crush.md",
 	"crush.local.md",
 	"Crush.md",

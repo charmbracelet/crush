@@ -10,6 +10,28 @@
 
 Crush is a tool for building software with AI.
 
+## Getting Started
+
+For now, the quickest way to get started is to set an environment variable for
+your preferred provider. Note that you can switch between providers mid-
+sessions, so you're welcome to set environment variables for multiple
+providers.
+
+| Environment Variable       | Provider                                           |
+| -------------------------- | -------------------------------------------------- |
+| `ANTHROPIC_API_KEY`        | Anthropic                                          |
+| `OPENAI_API_KEY`           | OpenAI                                             |
+| `GEMINI_API_KEY`           | Google Gemini                                      |
+| `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
+| `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
+| `GROQ_API_KEY`             | Groq                                               |
+| `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
+| `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
+| `AWS_REGION`               | AWS Bedrock (Claude)                               |
+| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
+| `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
+| `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
+
 ## License
 
 [MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)

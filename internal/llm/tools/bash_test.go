@@ -94,4 +94,3 @@ func TestPlatformSpecificSafeCommands(t *testing.T) {
 		}
 	}
 }
-

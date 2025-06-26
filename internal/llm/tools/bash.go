@@ -52,7 +52,7 @@ func getSafeReadOnlyCommands() []string {
 	baseCommands := []string{
 		// Cross-platform commands
 		"echo", "hostname", "whoami",
-		
+
 		// Git commands (cross-platform)
 		"git status", "git log", "git diff", "git show", "git branch", "git tag", "git remote", "git ls-files", "git ls-remote",
 		"git rev-parse", "git config --get", "git config --list", "git describe", "git blame", "git grep", "git shortlog",

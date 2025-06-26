@@ -90,6 +90,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 			"status", res.Response.Status,
 			"endpoint", modelsEndpoint,
 		)
+		return []localModel{}
 	}
 
 	var modelList localModelList

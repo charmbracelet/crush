@@ -96,7 +96,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 
 		case message.Tool:
 			for _, result := range msg.ToolResults() {
-				response := map[string]interface{}{"result": result.Content}
+				response := map[string]any{"result": result.Content}
 				parsed, err := parseJsonToMap(result.Content)
 				if err == nil {
 					response = parsed
@@ -155,10 +155,10 @@ func (g *geminiClient) convertTools(tools []tools.BaseTool) []*genai.Tool {
 }
 
 func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishReason {
-	switch {
-	case reason == genai.FinishReasonStop:
+	switch reason {
+	case genai.FinishReasonStop:
 		return message.FinishReasonEndTurn
-	case reason == genai.FinishReasonMaxTokens:
+	case genai.FinishReasonMaxTokens:
 		return message.FinishReasonMaxTokens
 	default:
 		return message.FinishReasonUnknown
@@ -402,12 +402,9 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	}
 
 	errMsg := err.Error()
-	isRateLimit := false
+	isRateLimit := contains(errMsg, "rate limit", "quota exceeded", "too many requests")
 
 	// Check for common rate limit error messages
-	if contains(errMsg, "rate limit", "quota exceeded", "too many requests") {
-		isRateLimit = true
-	}
 
 	if !isRateLimit {
 		return false, 0, err
@@ -462,13 +459,13 @@ func WithGeminiDisableCache() GeminiOption {
 }
 
 // Helper functions
-func parseJsonToMap(jsonStr string) (map[string]interface{}, error) {
-	var result map[string]interface{}
+func parseJsonToMap(jsonStr string) (map[string]any, error) {
+	var result map[string]any
 	err := json.Unmarshal([]byte(jsonStr), &result)
 	return result, err
 }
 
-func convertSchemaProperties(parameters map[string]interface{}) map[string]*genai.Schema {
+func convertSchemaProperties(parameters map[string]any) map[string]*genai.Schema {
 	properties := make(map[string]*genai.Schema)
 
 	for name, param := range parameters {
@@ -478,10 +475,10 @@ func convertSchemaProperties(parameters map[string]interface{}) map[string]*gena
 	return properties
 }
 
-func convertToSchema(param interface{}) *genai.Schema {
+func convertToSchema(param any) *genai.Schema {
 	schema := &genai.Schema{Type: genai.TypeString}
 
-	paramMap, ok := param.(map[string]interface{})
+	paramMap, ok := param.(map[string]any)
 	if !ok {
 		return schema
 	}
@@ -506,7 +503,7 @@ func convertToSchema(param interface{}) *genai.Schema {
 	case "array":
 		schema.Items = processArrayItems(paramMap)
 	case "object":
-		if props, ok := paramMap["properties"].(map[string]interface{}); ok {
+		if props, ok := paramMap["properties"].(map[string]any); ok {
 			schema.Properties = convertSchemaProperties(props)
 		}
 	}
@@ -514,8 +511,8 @@ func convertToSchema(param interface{}) *genai.Schema {
 	return schema
 }
 
-func processArrayItems(paramMap map[string]interface{}) *genai.Schema {
-	items, ok := paramMap["items"].(map[string]interface{})
+func processArrayItems(paramMap map[string]any) *genai.Schema {
+	items, ok := paramMap["items"].(map[string]any)
 	if !ok {
 		return nil
 	}

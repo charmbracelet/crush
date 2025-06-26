@@ -112,7 +112,7 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 }
 
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
-func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
+func (br baseRenderer) makeNestedHeader(_ *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
 	return tool + renderParamList(true, width-lipgloss.Width(tool), params...)

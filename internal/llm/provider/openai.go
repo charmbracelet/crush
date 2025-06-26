@@ -284,7 +284,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			if err == nil || errors.Is(err, io.EOF) {
 				// Stream completed successfully
 				finishReason := o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
-				if len(acc.ChatCompletion.Choices[0].Message.ToolCalls) > 0 {
+				if len(acc.Choices[0].Message.ToolCalls) > 0 {
 					toolCalls = append(toolCalls, o.toolCalls(acc.ChatCompletion)...)
 				}
 				if len(toolCalls) > 0 {

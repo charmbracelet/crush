@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 )
 
@@ -199,21 +200,62 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	return cfg, nil
 }
 
+type configFinder struct {
+	appName   string
+	dotPrefix bool
+	paths     []string
+}
+
+func (f configFinder) Find(fsys afero.Fs) ([]string, error) {
+	var configFiles []string
+	configName := fmt.Sprintf("%s.json", f.appName)
+	if f.dotPrefix {
+		configName = fmt.Sprintf(".%s.json", f.appName)
+	}
+	paths := []string{}
+	for _, p := range f.paths {
+		if p == "" {
+			continue
+		}
+		paths = append(paths, os.ExpandEnv(p))
+	}
+
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+
+		configPath := filepath.Join(path, configName)
+		if exists, err := afero.Exists(fsys, configPath); err == nil && exists {
+			configFiles = append(configFiles, configPath)
+		}
+	}
+	return configFiles, nil
+}
+
 // configureViper sets up viper's configuration paths and environment variables.
 func configureViper() {
-	viper.SetConfigName(fmt.Sprintf(".%s", appName))
 	viper.SetConfigType("json")
 
-	// Unix-style paths
-	viper.AddConfigPath("$HOME")
-	viper.AddConfigPath(fmt.Sprintf("$XDG_CONFIG_HOME/%s", appName))
-	viper.AddConfigPath(fmt.Sprintf("$HOME/.config/%s", appName))
+	// Create the three finders
+	windowsFinder := configFinder{appName: appName, dotPrefix: false, paths: []string{
+		"$USERPROFILE",
+		fmt.Sprintf("$APPDATA/%s", appName),
+		fmt.Sprintf("$LOCALAPPDATA/%s", appName),
+	}}
 
-	// Windows-style paths
-	viper.AddConfigPath(fmt.Sprintf("$USERPROFILE"))
-	viper.AddConfigPath(fmt.Sprintf("$APPDATA/%s", appName))
-	viper.AddConfigPath(fmt.Sprintf("$LOCALAPPDATA/%s", appName))
+	unixFinder := configFinder{appName: appName, dotPrefix: false, paths: []string{
+		"$HOME",
+		fmt.Sprintf("$XDG_CONFIG_HOME/%s", appName),
+		fmt.Sprintf("$HOME/.config/%s", appName),
+	}}
 
+	localFinder := configFinder{appName: appName, dotPrefix: true, paths: []string{
+		".",
+	}}
+
+	// Use all finders with viper
+	viper.SetOptions(viper.WithFinder(viper.Finders(windowsFinder, unixFinder, localFinder)))
 	viper.SetEnvPrefix(strings.ToUpper(appName))
 	viper.AutomaticEnv()
 }

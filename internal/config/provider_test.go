@@ -115,7 +115,7 @@ func TestReasoningEffortSupport(t *testing.T) {
 
 	ResetProviders()
 	providers := Providers()
-	
+
 	var openaiProvider provider.Provider
 	for _, p := range providers {
 		if p.ID == provider.InferenceProviderOpenAI {
@@ -218,7 +218,7 @@ func TestO1ModelsInMockProvider(t *testing.T) {
 
 	ResetProviders()
 	providers := Providers()
-	
+
 	var openaiProvider provider.Provider
 	for _, p := range providers {
 		if p.ID == provider.InferenceProviderOpenAI {

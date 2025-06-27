@@ -5,17 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 )
 
 type agentTool struct {
-	sessions   session.Service
-	messages   message.Service
-	lspClients map[string]*lsp.Client
+	agent    Service
+	sessions session.Service
+	messages message.Service
 }
 
 const (
@@ -58,17 +56,12 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, fmt.Errorf("session_id and message_id are required")
 	}
 
-	agent, err := NewAgent(config.AgentTask, b.sessions, b.messages, TaskAgentTools(b.lspClients))
-	if err != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error creating agent: %s", err)
-	}
-
 	session, err := b.sessions.CreateTaskSession(ctx, call.ID, sessionID, "New Agent Session")
 	if err != nil {
 		return tools.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 	}
 
-	done, err := agent.Run(ctx, session.ID, params.Prompt)
+	done, err := b.agent.Run(ctx, session.ID, params.Prompt)
 	if err != nil {
 		return tools.ToolResponse{}, fmt.Errorf("error generating agent: %s", err)
 	}
@@ -101,13 +94,13 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 }
 
 func NewAgentTool(
-	Sessions session.Service,
-	Messages message.Service,
-	LspClients map[string]*lsp.Client,
+	agent Service,
+	sessions session.Service,
+	messages message.Service,
 ) tools.BaseTool {
 	return &agentTool{
-		sessions:   Sessions,
-		messages:   Messages,
-		lspClients: LspClients,
+		sessions: sessions,
+		messages: messages,
+		agent:    agent,
 	}
 }

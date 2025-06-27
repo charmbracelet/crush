@@ -1,4 +1,4 @@
-package configv2
+package config
 
 import (
 	"encoding/json"
@@ -28,7 +28,7 @@ func TestConfigWithEnv(t *testing.T) {
 	os.Setenv("GEMINI_API_KEY", "test-gemini-key")
 	os.Setenv("XAI_API_KEY", "test-xai-key")
 	os.Setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-	cfg := InitConfig(cwdDir)
+	cfg, _ := Init(cwdDir, false)
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	fmt.Println(string(data))
 	assert.Len(t, cfg.Providers, 5)

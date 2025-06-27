@@ -1,95 +1,21 @@
-// Package config manages application configuration from various sources.
 package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/logging"
-	"github.com/spf13/afero"
-	"github.com/spf13/viper"
 )
 
-// MCPType defines the type of MCP (Model Control Protocol) server.
-type MCPType string
-
-// Supported MCP types
-const (
-	MCPStdio MCPType = "stdio"
-	MCPSse   MCPType = "sse"
-)
-
-// MCPServer defines the configuration for a Model Control Protocol server.
-type MCPServer struct {
-	Command string            `json:"command"`
-	Env     []string          `json:"env"`
-	Args    []string          `json:"args"`
-	Type    MCPType           `json:"type"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
-}
-
-type AgentName string
-
-const (
-	AgentCoder      AgentName = "coder"
-	AgentSummarizer AgentName = "summarizer"
-	AgentTask       AgentName = "task"
-	AgentTitle      AgentName = "title"
-)
-
-// Agent defines configuration for different LLM models and their token limits.
-type Agent struct {
-	Model           models.ModelID `json:"model"`
-	MaxTokens       int64          `json:"maxTokens"`
-	ReasoningEffort string         `json:"reasoningEffort"` // For openai models low,medium,heigh
-}
-
-// Provider defines configuration for an LLM provider.
-type Provider struct {
-	APIKey   string `json:"apiKey"`
-	Disabled bool   `json:"disabled"`
-}
-
-// Data defines storage configuration.
-type Data struct {
-	Directory string `json:"directory,omitempty"`
-}
-
-// LSPConfig defines configuration for Language Server Protocol integration.
-type LSPConfig struct {
-	Disabled bool     `json:"enabled"`
-	Command  string   `json:"command"`
-	Args     []string `json:"args"`
-	Options  any      `json:"options"`
-}
-
-// TUIConfig defines the configuration for the Terminal User Interface.
-type TUIConfig struct {
-	Theme string `json:"theme,omitempty"`
-}
-
-// Config is the main configuration structure for the application.
-type Config struct {
-	Data         Data                                  `json:"data"`
-	WorkingDir   string                                `json:"wd,omitempty"`
-	MCPServers   map[string]MCPServer                  `json:"mcpServers,omitempty"`
-	Providers    map[models.InferenceProvider]Provider `json:"providers,omitempty"`
-	LSP          map[string]LSPConfig                  `json:"lsp,omitempty"`
-	Agents       map[AgentName]Agent                   `json:"agents,omitempty"`
-	Debug        bool                                  `json:"debug,omitempty"`
-	DebugLSP     bool                                  `json:"debugLSP,omitempty"`
-	ContextPaths []string                              `json:"contextPaths,omitempty"`
-	TUI          TUIConfig                             `json:"tui"`
-	AutoCompact  bool                                  `json:"autoCompact,omitempty"`
-}
-
-// Application constants
 const (
 	defaultDataDirectory = ".crush"
 	defaultLogLevel      = "info"
@@ -114,53 +40,166 @@ var defaultContextPaths = []string{
 	"CRUSH.local.md",
 }
 
-// Global configuration instance
-var cfg *Config
+type AgentID string
 
-// Load initializes the configuration from environment variables and config files.
-// If debug is true, debug mode is enabled and log level is set to debug.
-// It returns an error if configuration loading fails.
-func Load(workingDir string, debug bool) (*Config, error) {
-	if cfg != nil {
-		return cfg, nil
-	}
+const (
+	AgentCoder AgentID = "coder"
+	AgentTask  AgentID = "task"
+)
 
-	cfg = &Config{
-		WorkingDir: workingDir,
-		MCPServers: make(map[string]MCPServer),
-		Providers:  make(map[models.InferenceProvider]Provider),
-		LSP:        make(map[string]LSPConfig),
-	}
+type Model struct {
+	ID                 string  `json:"id"`
+	Name               string  `json:"model"`
+	CostPer1MIn        float64 `json:"cost_per_1m_in"`
+	CostPer1MOut       float64 `json:"cost_per_1m_out"`
+	CostPer1MInCached  float64 `json:"cost_per_1m_in_cached"`
+	CostPer1MOutCached float64 `json:"cost_per_1m_out_cached"`
+	ContextWindow      int64   `json:"context_window"`
+	DefaultMaxTokens   int64   `json:"default_max_tokens"`
+	CanReason          bool    `json:"can_reason"`
+	ReasoningEffort    string  `json:"reasoning_effort"`
+	SupportsImages     bool    `json:"supports_attachments"`
+}
 
-	configureViper()
-	setDefaults(debug)
+type VertexAIOptions struct {
+	APIKey   string `json:"api_key,omitempty"`
+	Project  string `json:"project,omitempty"`
+	Location string `json:"location,omitempty"`
+}
 
-	// Read global config
-	if err := readConfig(viper.ReadInConfig()); err != nil {
-		return cfg, err
-	}
+type ProviderConfig struct {
+	ID           provider.InferenceProvider `json:"id"`
+	BaseURL      string                     `json:"base_url,omitempty"`
+	ProviderType provider.Type              `json:"provider_type"`
+	APIKey       string                     `json:"api_key,omitempty"`
+	Disabled     bool                       `json:"disabled"`
+	ExtraHeaders map[string]string          `json:"extra_headers,omitempty"`
+	// used for e.x for vertex to set the project
+	ExtraParams map[string]string `json:"extra_params,omitempty"`
 
-	// Load and merge local config
-	mergeLocalConfig(workingDir)
+	DefaultLargeModel string `json:"default_large_model,omitempty"`
+	DefaultSmallModel string `json:"default_small_model,omitempty"`
 
-	setProviderDefaults()
+	Models []Model `json:"models,omitempty"`
+}
 
-	// Apply configuration to the struct
-	if err := viper.Unmarshal(cfg); err != nil {
-		return cfg, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
+type Agent struct {
+	ID          AgentID `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	// This is the id of the system prompt used by the agent
+	Disabled bool `json:"disabled"`
 
-	applyDefaultValues()
+	Provider provider.InferenceProvider `json:"provider"`
+	Model    string                     `json:"model"`
+
+	// The available tools for the agent
+	//  if this is nil, all tools are available
+	AllowedTools []string `json:"allowed_tools"`
+
+	// this tells us which MCPs are available for this agent
+	//  if this is empty all mcps are available
+	//  the string array is the list of tools from the AllowedMCP the agent has available
+	//  if the string array is nil, all tools from the AllowedMCP are available
+	AllowedMCP map[string][]string `json:"allowed_mcp"`
+
+	// The list of LSPs that this agent can use
+	//  if this is nil, all LSPs are available
+	AllowedLSP []string `json:"allowed_lsp"`
+
+	// Overrides the context paths for this agent
+	ContextPaths []string `json:"context_paths"`
+}
+
+type MCPType string
+
+const (
+	MCPStdio MCPType = "stdio"
+	MCPSse   MCPType = "sse"
+)
+
+type MCP struct {
+	Command string            `json:"command"`
+	Env     []string          `json:"env"`
+	Args    []string          `json:"args"`
+	Type    MCPType           `json:"type"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
+type LSPConfig struct {
+	Disabled bool     `json:"enabled"`
+	Command  string   `json:"command"`
+	Args     []string `json:"args"`
+	Options  any      `json:"options"`
+}
+
+type TUIOptions struct {
+	CompactMode bool `json:"compact_mode"`
+	// Here we can add themes later or any TUI related options
+}
+
+type Options struct {
+	ContextPaths         []string   `json:"context_paths"`
+	TUI                  TUIOptions `json:"tui"`
+	Debug                bool       `json:"debug"`
+	DebugLSP             bool       `json:"debug_lsp"`
+	DisableAutoSummarize bool       `json:"disable_auto_summarize"`
+	// Relative to the cwd
+	DataDirectory string `json:"data_directory"`
+}
+
+type PreferredModel struct {
+	ModelID  string                     `json:"model_id"`
+	Provider provider.InferenceProvider `json:"provider"`
+}
+
+type PreferredModels struct {
+	Large PreferredModel `json:"large"`
+	Small PreferredModel `json:"small"`
+}
+
+type Config struct {
+	Models PreferredModels `json:"models"`
+	// List of configured providers
+	Providers map[provider.InferenceProvider]ProviderConfig `json:"providers,omitempty"`
+
+	// List of configured agents
+	Agents map[AgentID]Agent `json:"agents,omitempty"`
+
+	// List of configured MCPs
+	MCP map[string]MCP `json:"mcp,omitempty"`
+
+	// List of configured LSPs
+	LSP map[string]LSPConfig `json:"lsp,omitempty"`
+
+	// Miscellaneous options
+	Options Options `json:"options"`
+}
+
+var (
+	instance *Config // The single instance of the Singleton
+	cwd      string
+	once     sync.Once // Ensures the initialization happens only once
+
+)
+
+func loadConfig(cwd string, debug bool) (*Config, error) {
+	// First read the global config file
+	cfgPath := ConfigPath()
+
+	cfg := defaultConfigBasedOnEnv()
+	cfg.Options.Debug = debug
 	defaultLevel := slog.LevelInfo
-	if cfg.Debug {
+	if cfg.Options.Debug {
 		defaultLevel = slog.LevelDebug
 	}
 	if os.Getenv("CRUSH_DEV_DEBUG") == "true" {
-		loggingFile := fmt.Sprintf("%s/%s", cfg.Data.Directory, "debug.log")
+		loggingFile := fmt.Sprintf("%s/%s", cfg.Options.DataDirectory, "debug.log")
 
 		// if file does not exist create it
 		if _, err := os.Stat(loggingFile); os.IsNotExist(err) {
-			if err := os.MkdirAll(cfg.Data.Directory, 0o755); err != nil {
+			if err := os.MkdirAll(cfg.Options.DataDirectory, 0o755); err != nil {
 				return cfg, fmt.Errorf("failed to create directory: %w", err)
 			}
 			if _, err := os.Create(loggingFile); err != nil {
@@ -184,237 +223,480 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		}))
 		slog.SetDefault(logger)
 	}
-
-	// Validate configuration
-	if err := Validate(); err != nil {
-		return cfg, fmt.Errorf("config validation failed: %w", err)
+	var globalCfg *Config
+	if _, err := os.Stat(cfgPath); err != nil && !os.IsNotExist(err) {
+		// some other error occurred while checking the file
+		return nil, err
+	} else if err == nil {
+		// config file exists, read it
+		file, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		globalCfg = &Config{}
+		if err := json.Unmarshal(file, globalCfg); err != nil {
+			return nil, err
+		}
+	} else {
+		// config file does not exist, create a new one
+		globalCfg = &Config{}
 	}
 
-	if cfg.Agents == nil {
-		cfg.Agents = make(map[AgentName]Agent)
+	var localConfig *Config
+	// Global config loaded, now read the local config file
+	localConfigPath := filepath.Join(cwd, "crush.json")
+	if _, err := os.Stat(localConfigPath); err != nil && !os.IsNotExist(err) {
+		// some other error occurred while checking the file
+		return nil, err
+	} else if err == nil {
+		// local config file exists, read it
+		file, err := os.ReadFile(localConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		localConfig = &Config{}
+		if err := json.Unmarshal(file, localConfig); err != nil {
+			return nil, err
+		}
 	}
 
-	// Override the max tokens for title agent
-	cfg.Agents[AgentTitle] = Agent{
-		Model:     cfg.Agents[AgentTitle].Model,
-		MaxTokens: 80,
+	// merge options
+	mergeOptions(cfg, globalCfg, localConfig)
+
+	mergeProviderConfigs(cfg, globalCfg, localConfig)
+	// no providers found the app is not initialized yet
+	if len(cfg.Providers) == 0 {
+		return cfg, nil
 	}
+	preferredProvider := getPreferredProvider(cfg.Providers)
+	cfg.Models = PreferredModels{
+		Large: PreferredModel{
+			ModelID:  preferredProvider.DefaultLargeModel,
+			Provider: preferredProvider.ID,
+		},
+		Small: PreferredModel{
+			ModelID:  preferredProvider.DefaultSmallModel,
+			Provider: preferredProvider.ID,
+		},
+	}
+
+	mergeModels(cfg, globalCfg, localConfig)
+
+	if preferredProvider == nil {
+		return nil, errors.New("no valid providers configured")
+	}
+
+	agents := map[AgentID]Agent{
+		AgentCoder: {
+			ID:           AgentCoder,
+			Name:         "Coder",
+			Description:  "An agent that helps with executing coding tasks.",
+			Provider:     cfg.Models.Large.Provider,
+			Model:        cfg.Models.Large.ModelID,
+			ContextPaths: cfg.Options.ContextPaths,
+			// All tools allowed
+		},
+		AgentTask: {
+			ID:           AgentTask,
+			Name:         "Task",
+			Description:  "An agent that helps with searching for context and finding implementation details.",
+			Provider:     cfg.Models.Large.Provider,
+			Model:        cfg.Models.Large.ModelID,
+			ContextPaths: cfg.Options.ContextPaths,
+			AllowedTools: []string{
+				"glob",
+				"grep",
+				"ls",
+				"sourcegraph",
+				"view",
+			},
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+			AllowedLSP: []string{},
+		},
+	}
+	cfg.Agents = agents
+	mergeAgents(cfg, globalCfg, localConfig)
+	mergeMCPs(cfg, globalCfg, localConfig)
+	mergeLSPs(cfg, globalCfg, localConfig)
+
 	return cfg, nil
 }
 
-type configFinder struct {
-	appName   string
-	dotPrefix bool
-	paths     []string
+func Init(workingDir string, debug bool) (*Config, error) {
+	var err error
+	once.Do(func() {
+		cwd = workingDir
+		instance, err = loadConfig(cwd, debug)
+		if err != nil {
+			logging.Error("Failed to load config", "error", err)
+		}
+	})
+
+	return instance, err
 }
 
-func (f configFinder) Find(fsys afero.Fs) ([]string, error) {
-	var configFiles []string
-	configName := fmt.Sprintf("%s.json", f.appName)
-	if f.dotPrefix {
-		configName = fmt.Sprintf(".%s.json", f.appName)
+func Get() *Config {
+	if instance == nil {
+		// TODO: Handle this better
+		panic("Config not initialized. Call InitConfig first.")
 	}
-	paths := []string{}
-	for _, p := range f.paths {
-		if p == "" {
+	return instance
+}
+
+func getPreferredProvider(configuredProviders map[provider.InferenceProvider]ProviderConfig) *ProviderConfig {
+	providers := Providers()
+	for _, p := range providers {
+		if providerConfig, ok := configuredProviders[p.ID]; ok && !providerConfig.Disabled {
+			return &providerConfig
+		}
+	}
+	// if none found return the first configured provider
+	for _, providerConfig := range configuredProviders {
+		if !providerConfig.Disabled {
+			return &providerConfig
+		}
+	}
+	return nil
+}
+
+func mergeProviderConfig(p provider.InferenceProvider, base, other ProviderConfig) ProviderConfig {
+	if other.APIKey != "" {
+		base.APIKey = other.APIKey
+	}
+	// Only change these options if the provider is not a known provider
+	if !slices.Contains(provider.KnownProviders(), p) {
+		if other.BaseURL != "" {
+			base.BaseURL = other.BaseURL
+		}
+		if other.ProviderType != "" {
+			base.ProviderType = other.ProviderType
+		}
+		if len(base.ExtraHeaders) > 0 {
+			if base.ExtraHeaders == nil {
+				base.ExtraHeaders = make(map[string]string)
+			}
+			maps.Copy(base.ExtraHeaders, other.ExtraHeaders)
+		}
+		if len(other.ExtraParams) > 0 {
+			if base.ExtraParams == nil {
+				base.ExtraParams = make(map[string]string)
+			}
+			maps.Copy(base.ExtraParams, other.ExtraParams)
+		}
+	}
+
+	if other.Disabled {
+		base.Disabled = other.Disabled
+	}
+
+	if other.DefaultLargeModel != "" {
+		base.DefaultLargeModel = other.DefaultLargeModel
+	}
+	// Add new models if they don't exist
+	if other.Models != nil {
+		for _, model := range other.Models {
+			// check if the model already exists
+			exists := false
+			for _, existingModel := range base.Models {
+				if existingModel.ID == model.ID {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				base.Models = append(base.Models, model)
+			}
+		}
+	}
+
+	return base
+}
+
+func validateProvider(p provider.InferenceProvider, providerConfig ProviderConfig) error {
+	if !slices.Contains(provider.KnownProviders(), p) {
+		if providerConfig.ProviderType != provider.TypeOpenAI {
+			return errors.New("invalid provider type: " + string(providerConfig.ProviderType))
+		}
+		if providerConfig.BaseURL == "" {
+			return errors.New("base URL must be set for custom providers")
+		}
+		if providerConfig.APIKey == "" {
+			return errors.New("API key must be set for custom providers")
+		}
+	}
+	return nil
+}
+
+func mergeModels(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
 			continue
 		}
-		paths = append(paths, os.ExpandEnv(p))
-	}
+		if cfg.Models.Large.ModelID != "" && cfg.Models.Large.Provider != "" {
+			base.Models.Large = cfg.Models.Large
+		}
 
-	for _, path := range paths {
-		if path == "" {
+		if cfg.Models.Small.ModelID != "" && cfg.Models.Small.Provider != "" {
+			base.Models.Small = cfg.Models.Small
+		}
+	}
+}
+
+func mergeOptions(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
 			continue
 		}
+		baseOptions := base.Options
+		other := cfg.Options
+		if len(other.ContextPaths) > 0 {
+			baseOptions.ContextPaths = append(baseOptions.ContextPaths, other.ContextPaths...)
+		}
 
-		configPath := filepath.Join(path, configName)
-		if exists, err := afero.Exists(fsys, configPath); err == nil && exists {
-			configFiles = append(configFiles, configPath)
+		if other.TUI.CompactMode {
+			baseOptions.TUI.CompactMode = other.TUI.CompactMode
+		}
+
+		if other.Debug {
+			baseOptions.Debug = other.Debug
+		}
+
+		if other.DebugLSP {
+			baseOptions.DebugLSP = other.DebugLSP
+		}
+
+		if other.DisableAutoSummarize {
+			baseOptions.DisableAutoSummarize = other.DisableAutoSummarize
+		}
+
+		if other.DataDirectory != "" {
+			baseOptions.DataDirectory = other.DataDirectory
+		}
+		base.Options = baseOptions
+	}
+}
+
+func mergeAgents(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
+			continue
+		}
+		for agentID, newAgent := range cfg.Agents {
+			if _, ok := base.Agents[agentID]; !ok {
+				newAgent.ID = agentID // Ensure the ID is set correctly
+				base.Agents[agentID] = newAgent
+			} else {
+				switch agentID {
+				case AgentCoder:
+					baseAgent := base.Agents[agentID]
+					if newAgent.Model != "" && newAgent.Provider != "" {
+						baseAgent.Model = newAgent.Model
+						baseAgent.Provider = newAgent.Provider
+					}
+					baseAgent.AllowedMCP = newAgent.AllowedMCP
+					baseAgent.AllowedLSP = newAgent.AllowedLSP
+					base.Agents[agentID] = baseAgent
+				default:
+					baseAgent := base.Agents[agentID]
+					baseAgent.Name = newAgent.Name
+					baseAgent.Description = newAgent.Description
+					baseAgent.Disabled = newAgent.Disabled
+					if newAgent.Model == "" || newAgent.Provider == "" {
+						baseAgent.Provider = base.Models.Large.Provider
+						baseAgent.Model = base.Models.Large.ModelID
+					}
+					baseAgent.AllowedTools = newAgent.AllowedTools
+					baseAgent.AllowedMCP = newAgent.AllowedMCP
+					baseAgent.AllowedLSP = newAgent.AllowedLSP
+					base.Agents[agentID] = baseAgent
+				}
+			}
 		}
 	}
-	return configFiles, nil
 }
 
-// configureViper sets up viper's configuration paths and environment variables.
-func configureViper() {
-	viper.SetConfigType("json")
-
-	// Create the three finders
-	windowsFinder := configFinder{appName: appName, dotPrefix: false, paths: []string{
-		"$USERPROFILE",
-		fmt.Sprintf("$APPDATA/%s", appName),
-		fmt.Sprintf("$LOCALAPPDATA/%s", appName),
-	}}
-
-	unixFinder := configFinder{appName: appName, dotPrefix: false, paths: []string{
-		"$HOME",
-		fmt.Sprintf("$XDG_CONFIG_HOME/%s", appName),
-		fmt.Sprintf("$HOME/.config/%s", appName),
-	}}
-
-	localFinder := configFinder{appName: appName, dotPrefix: true, paths: []string{
-		".",
-	}}
-
-	// Use all finders with viper
-	viper.SetOptions(viper.WithFinder(viper.Finders(windowsFinder, unixFinder, localFinder)))
-	viper.SetEnvPrefix(strings.ToUpper(appName))
-	viper.AutomaticEnv()
-}
-
-// setDefaults configures default values for configuration options.
-func setDefaults(debug bool) {
-	viper.SetDefault("data.directory", defaultDataDirectory)
-	viper.SetDefault("contextPaths", defaultContextPaths)
-	viper.SetDefault("tui.theme", "crush")
-	viper.SetDefault("autoCompact", true)
-
-	if debug {
-		viper.SetDefault("debug", true)
-		viper.Set("log.level", "debug")
-	} else {
-		viper.SetDefault("debug", false)
-		viper.SetDefault("log.level", defaultLogLevel)
+func mergeMCPs(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
+			continue
+		}
+		maps.Copy(base.MCP, cfg.MCP)
 	}
 }
 
-// setProviderDefaults configures LLM provider defaults based on provider provided by
-// environment variables and configuration file.
-func setProviderDefaults() {
-	// Set all API keys we can find in the environment
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.anthropic.apiKey", apiKey)
+func mergeLSPs(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
+			continue
+		}
+		maps.Copy(base.LSP, cfg.LSP)
 	}
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.openai.apiKey", apiKey)
-	}
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.gemini.apiKey", apiKey)
-	}
-	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.groq.apiKey", apiKey)
-	}
-	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.openrouter.apiKey", apiKey)
-	}
-	if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
-		viper.SetDefault("providers.xai.apiKey", apiKey)
-	}
-	if apiKey := os.Getenv("AZURE_OPENAI_ENDPOINT"); apiKey != "" {
-		// api-key may be empty when using Entra ID credentials – that's okay
-		viper.SetDefault("providers.azure.apiKey", os.Getenv("AZURE_OPENAI_API_KEY"))
+}
+
+func mergeProviderConfigs(base, global, local *Config) {
+	for _, cfg := range []*Config{global, local} {
+		if cfg == nil {
+			continue
+		}
+		for providerName, globalProvider := range cfg.Providers {
+			if _, ok := base.Providers[providerName]; !ok {
+				base.Providers[providerName] = globalProvider
+			} else {
+				base.Providers[providerName] = mergeProviderConfig(providerName, base.Providers[providerName], globalProvider)
+			}
+		}
 	}
 
-	// Use this order to set the default models
-	// 1. Anthropic
-	// 2. OpenAI
-	// 3. Google Gemini
-	// 4. Groq
-	// 5. OpenRouter
-	// 6. AWS Bedrock
-	// 7. Azure
-	// 8. Google Cloud VertexAI
+	finalProviders := make(map[provider.InferenceProvider]ProviderConfig)
+	for providerName, providerConfig := range base.Providers {
+		err := validateProvider(providerName, providerConfig)
+		if err != nil {
+			logging.Warn("Skipping provider", "name", providerName, "error", err)
+		}
+		finalProviders[providerName] = providerConfig
+	}
+	base.Providers = finalProviders
+}
 
-	// Anthropic configuration
-	if key := viper.GetString("providers.anthropic.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.Claude4Sonnet)
-		viper.SetDefault("agents.summarizer.model", models.Claude4Sonnet)
-		viper.SetDefault("agents.task.model", models.Claude4Sonnet)
-		viper.SetDefault("agents.title.model", models.Claude4Sonnet)
-		return
+func providerDefaultConfig(providerId provider.InferenceProvider) ProviderConfig {
+	switch providerId {
+	case provider.InferenceProviderAnthropic:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeAnthropic,
+		}
+	case provider.InferenceProviderOpenAI:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeOpenAI,
+		}
+	case provider.InferenceProviderGemini:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeGemini,
+		}
+	case provider.InferenceProviderBedrock:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeBedrock,
+		}
+	case provider.InferenceProviderAzure:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeAzure,
+		}
+	case provider.InferenceProviderOpenRouter:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeOpenAI,
+			BaseURL:      "https://openrouter.ai/api/v1",
+			ExtraHeaders: map[string]string{
+				"HTTP-Referer": "crush.charm.land",
+				"X-Title":      "Crush",
+			},
+		}
+	case provider.InferenceProviderXAI:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeXAI,
+			BaseURL:      "https://api.x.ai/v1",
+		}
+	case provider.InferenceProviderVertexAI:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeVertexAI,
+		}
+	default:
+		return ProviderConfig{
+			ID:           providerId,
+			ProviderType: provider.TypeOpenAI,
+		}
+	}
+}
+
+func defaultConfigBasedOnEnv() *Config {
+	cfg := &Config{
+		Options: Options{
+			DataDirectory: defaultDataDirectory,
+			ContextPaths:  defaultContextPaths,
+		},
+		Providers: make(map[provider.InferenceProvider]ProviderConfig),
 	}
 
-	// OpenAI configuration
-	if key := viper.GetString("providers.openai.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.GPT41)
-		viper.SetDefault("agents.summarizer.model", models.GPT41)
-		viper.SetDefault("agents.task.model", models.GPT41Mini)
-		viper.SetDefault("agents.title.model", models.GPT41Mini)
-		return
+	providers := Providers()
+
+	for _, p := range providers {
+		if strings.HasPrefix(p.APIKey, "$") {
+			envVar := strings.TrimPrefix(p.APIKey, "$")
+			if apiKey := os.Getenv(envVar); apiKey != "" {
+				providerConfig := providerDefaultConfig(p.ID)
+				providerConfig.APIKey = apiKey
+				providerConfig.DefaultLargeModel = p.DefaultLargeModelID
+				providerConfig.DefaultSmallModel = p.DefaultSmallModelID
+				baseURL := p.APIEndpoint
+				if strings.HasPrefix(baseURL, "$") {
+					envVar := strings.TrimPrefix(baseURL, "$")
+					if url := os.Getenv(envVar); url != "" {
+						baseURL = url
+					}
+				}
+				providerConfig.BaseURL = baseURL
+				for _, model := range p.Models {
+					providerConfig.Models = append(providerConfig.Models, Model{
+						ID:                 model.ID,
+						Name:               model.Name,
+						CostPer1MIn:        model.CostPer1MIn,
+						CostPer1MOut:       model.CostPer1MOut,
+						CostPer1MInCached:  model.CostPer1MInCached,
+						CostPer1MOutCached: model.CostPer1MOutCached,
+						ContextWindow:      model.ContextWindow,
+						DefaultMaxTokens:   model.DefaultMaxTokens,
+						CanReason:          model.CanReason,
+						SupportsImages:     model.SupportsImages,
+					})
+				}
+				cfg.Providers[p.ID] = providerConfig
+			}
+		}
+	}
+	// TODO: support local models
+
+	if useVertexAI := os.Getenv("GOOGLE_GENAI_USE_VERTEXAI"); useVertexAI == "true" {
+		providerConfig := providerDefaultConfig(provider.InferenceProviderVertexAI)
+		providerConfig.ExtraParams = map[string]string{
+			"project":  os.Getenv("GOOGLE_CLOUD_PROJECT"),
+			"location": os.Getenv("GOOGLE_CLOUD_LOCATION"),
+		}
+		cfg.Providers[provider.InferenceProviderVertexAI] = providerConfig
 	}
 
-	// Google Gemini configuration
-	if key := viper.GetString("providers.gemini.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.Gemini25)
-		viper.SetDefault("agents.summarizer.model", models.Gemini25)
-		viper.SetDefault("agents.task.model", models.Gemini25Flash)
-		viper.SetDefault("agents.title.model", models.Gemini25Flash)
-		return
-	}
-
-	// Groq configuration
-	if key := viper.GetString("providers.groq.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.QWENQwq)
-		viper.SetDefault("agents.summarizer.model", models.QWENQwq)
-		viper.SetDefault("agents.task.model", models.QWENQwq)
-		viper.SetDefault("agents.title.model", models.QWENQwq)
-		return
-	}
-
-	// OpenRouter configuration
-	if key := viper.GetString("providers.openrouter.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.OpenRouterClaude37Sonnet)
-		viper.SetDefault("agents.summarizer.model", models.OpenRouterClaude37Sonnet)
-		viper.SetDefault("agents.task.model", models.OpenRouterClaude37Sonnet)
-		viper.SetDefault("agents.title.model", models.OpenRouterClaude35Haiku)
-		return
-	}
-
-	// XAI configuration
-	if key := viper.GetString("providers.xai.apiKey"); strings.TrimSpace(key) != "" {
-		viper.SetDefault("agents.coder.model", models.XAIGrok3Beta)
-		viper.SetDefault("agents.summarizer.model", models.XAIGrok3Beta)
-		viper.SetDefault("agents.task.model", models.XAIGrok3Beta)
-		viper.SetDefault("agents.title.model", models.XAiGrok3MiniFastBeta)
-		return
-	}
-
-	// AWS Bedrock configuration
 	if hasAWSCredentials() {
-		viper.SetDefault("agents.coder.model", models.BedrockClaude37Sonnet)
-		viper.SetDefault("agents.summarizer.model", models.BedrockClaude37Sonnet)
-		viper.SetDefault("agents.task.model", models.BedrockClaude37Sonnet)
-		viper.SetDefault("agents.title.model", models.BedrockClaude37Sonnet)
-		return
+		providerConfig := providerDefaultConfig(provider.InferenceProviderBedrock)
+		providerConfig.ExtraParams = map[string]string{
+			"region": os.Getenv("AWS_DEFAULT_REGION"),
+		}
+		if providerConfig.ExtraParams["region"] == "" {
+			providerConfig.ExtraParams["region"] = os.Getenv("AWS_REGION")
+		}
+		cfg.Providers[provider.InferenceProviderBedrock] = providerConfig
 	}
-
-	// Azure OpenAI configuration
-	if os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
-		viper.SetDefault("agents.coder.model", models.AzureGPT41)
-		viper.SetDefault("agents.summarizer.model", models.AzureGPT41)
-		viper.SetDefault("agents.task.model", models.AzureGPT41Mini)
-		viper.SetDefault("agents.title.model", models.AzureGPT41Mini)
-		return
-	}
-
-	// Google Cloud VertexAI configuration
-	if hasVertexAICredentials() {
-		viper.SetDefault("agents.coder.model", models.VertexAIGemini25)
-		viper.SetDefault("agents.summarizer.model", models.VertexAIGemini25)
-		viper.SetDefault("agents.task.model", models.VertexAIGemini25Flash)
-		viper.SetDefault("agents.title.model", models.VertexAIGemini25Flash)
-		return
-	}
+	return cfg
 }
 
-// hasAWSCredentials checks if AWS credentials are available in the environment.
 func hasAWSCredentials() bool {
-	// Check for explicit AWS credentials
 	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
 		return true
 	}
 
-	// Check for AWS profile
 	if os.Getenv("AWS_PROFILE") != "" || os.Getenv("AWS_DEFAULT_PROFILE") != "" {
 		return true
 	}
 
-	// Check for AWS region
 	if os.Getenv("AWS_REGION") != "" || os.Getenv("AWS_DEFAULT_REGION") != "" {
 		return true
 	}
 
-	// Check if running on EC2 with instance profile
 	if os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" ||
 		os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
 		return true
@@ -423,495 +705,48 @@ func hasAWSCredentials() bool {
 	return false
 }
 
-// hasVertexAICredentials checks if VertexAI credentials are available in the environment.
-func hasVertexAICredentials() bool {
-	// Check for explicit VertexAI parameters
-	if os.Getenv("VERTEXAI_PROJECT") != "" && os.Getenv("VERTEXAI_LOCATION") != "" {
-		return true
-	}
-	// Check for Google Cloud project and location
-	if os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && (os.Getenv("GOOGLE_CLOUD_REGION") != "" || os.Getenv("GOOGLE_CLOUD_LOCATION") != "") {
-		return true
-	}
-	return false
-}
-
-// readConfig handles the result of reading a configuration file.
-func readConfig(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// It's okay if the config file doesn't exist
-	if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-		return nil
-	}
-
-	return fmt.Errorf("failed to read config: %w", err)
-}
-
-// mergeLocalConfig loads and merges configuration from the local directory.
-func mergeLocalConfig(workingDir string) {
-	local := viper.New()
-	local.SetConfigName(fmt.Sprintf(".%s", appName))
-	local.SetConfigType("json")
-	local.AddConfigPath(workingDir)
-
-	// Merge local config if it exists
-	if err := local.ReadInConfig(); err == nil {
-		viper.MergeConfigMap(local.AllSettings())
-	}
-}
-
-// applyDefaultValues sets default values for configuration fields that need processing.
-func applyDefaultValues() {
-	// Set default MCP type if not specified
-	for k, v := range cfg.MCPServers {
-		if v.Type == "" {
-			v.Type = MCPStdio
-			cfg.MCPServers[k] = v
-		}
-	}
-}
-
-// It validates model IDs and providers, ensuring they are supported.
-func validateAgent(cfg *Config, name AgentName, agent Agent) error {
-	// Check if model exists
-	model, modelExists := models.SupportedModels[agent.Model]
-	if !modelExists {
-		logging.Warn("unsupported model configured, reverting to default",
-			"agent", name,
-			"configured_model", agent.Model)
-
-		// Set default model based on available providers
-		if setDefaultModelForAgent(name) {
-			logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-		} else {
-			return fmt.Errorf("no valid provider available for agent %s", name)
-		}
-		return nil
-	}
-
-	// Check if provider for the model is configured
-	provider := model.Provider
-	providerCfg, providerExists := cfg.Providers[provider]
-
-	if !providerExists {
-		// Provider not configured, check if we have environment variables
-		apiKey := getProviderAPIKey(provider)
-		if apiKey == "" {
-			logging.Warn("provider not configured for model, reverting to default",
-				"agent", name,
-				"model", agent.Model,
-				"provider", provider)
-
-			// Set default model based on available providers
-			if setDefaultModelForAgent(name) {
-				logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-			} else {
-				return fmt.Errorf("no valid provider available for agent %s", name)
-			}
-		} else {
-			// Add provider with API key from environment
-			cfg.Providers[provider] = Provider{
-				APIKey: apiKey,
-			}
-			logging.Info("added provider from environment", "provider", provider)
-		}
-	} else if providerCfg.Disabled || providerCfg.APIKey == "" {
-		// Provider is disabled or has no API key
-		logging.Warn("provider is disabled or has no API key, reverting to default",
-			"agent", name,
-			"model", agent.Model,
-			"provider", provider)
-
-		// Set default model based on available providers
-		if setDefaultModelForAgent(name) {
-			logging.Info("set default model for agent", "agent", name, "model", cfg.Agents[name].Model)
-		} else {
-			return fmt.Errorf("no valid provider available for agent %s", name)
-		}
-	}
-
-	// Validate max tokens
-	if agent.MaxTokens <= 0 {
-		logging.Warn("invalid max tokens, setting to default",
-			"agent", name,
-			"model", agent.Model,
-			"max_tokens", agent.MaxTokens)
-
-		// Update the agent with default max tokens
-		updatedAgent := cfg.Agents[name]
-		if model.DefaultMaxTokens > 0 {
-			updatedAgent.MaxTokens = model.DefaultMaxTokens
-		} else {
-			updatedAgent.MaxTokens = MaxTokensFallbackDefault
-		}
-		cfg.Agents[name] = updatedAgent
-	} else if model.ContextWindow > 0 && agent.MaxTokens > model.ContextWindow/2 {
-		// Ensure max tokens doesn't exceed half the context window (reasonable limit)
-		logging.Warn("max tokens exceeds half the context window, adjusting",
-			"agent", name,
-			"model", agent.Model,
-			"max_tokens", agent.MaxTokens,
-			"context_window", model.ContextWindow)
-
-		// Update the agent with adjusted max tokens
-		updatedAgent := cfg.Agents[name]
-		updatedAgent.MaxTokens = model.ContextWindow / 2
-		cfg.Agents[name] = updatedAgent
-	}
-
-	// Validate reasoning effort for models that support reasoning
-	if model.CanReason && provider == models.ProviderOpenAI || provider == models.ProviderLocal {
-		if agent.ReasoningEffort == "" {
-			// Set default reasoning effort for models that support it
-			logging.Info("setting default reasoning effort for model that supports reasoning",
-				"agent", name,
-				"model", agent.Model)
-
-			// Update the agent with default reasoning effort
-			updatedAgent := cfg.Agents[name]
-			updatedAgent.ReasoningEffort = "medium"
-			cfg.Agents[name] = updatedAgent
-		} else {
-			// Check if reasoning effort is valid (low, medium, high)
-			effort := strings.ToLower(agent.ReasoningEffort)
-			if effort != "low" && effort != "medium" && effort != "high" {
-				logging.Warn("invalid reasoning effort, setting to medium",
-					"agent", name,
-					"model", agent.Model,
-					"reasoning_effort", agent.ReasoningEffort)
-
-				// Update the agent with valid reasoning effort
-				updatedAgent := cfg.Agents[name]
-				updatedAgent.ReasoningEffort = "medium"
-				cfg.Agents[name] = updatedAgent
-			}
-		}
-	} else if !model.CanReason && agent.ReasoningEffort != "" {
-		// Model doesn't support reasoning but reasoning effort is set
-		logging.Warn("model doesn't support reasoning but reasoning effort is set, ignoring",
-			"agent", name,
-			"model", agent.Model,
-			"reasoning_effort", agent.ReasoningEffort)
-
-		// Update the agent to remove reasoning effort
-		updatedAgent := cfg.Agents[name]
-		updatedAgent.ReasoningEffort = ""
-		cfg.Agents[name] = updatedAgent
-	}
-
-	return nil
-}
-
-// Validate checks if the configuration is valid and applies defaults where needed.
-func Validate() error {
-	if cfg == nil {
-		return fmt.Errorf("config not loaded")
-	}
-
-	// Validate agent models
-	for name, agent := range cfg.Agents {
-		if err := validateAgent(cfg, name, agent); err != nil {
-			return err
-		}
-	}
-
-	// Validate providers
-	for provider, providerCfg := range cfg.Providers {
-		if providerCfg.APIKey == "" && !providerCfg.Disabled {
-			logging.Warn("provider has no API key, marking as disabled", "provider", provider)
-			providerCfg.Disabled = true
-			cfg.Providers[provider] = providerCfg
-		}
-	}
-
-	// Validate LSP configurations
-	for language, lspConfig := range cfg.LSP {
-		if lspConfig.Command == "" && !lspConfig.Disabled {
-			logging.Warn("LSP configuration has no command, marking as disabled", "language", language)
-			lspConfig.Disabled = true
-			cfg.LSP[language] = lspConfig
-		}
-	}
-
-	return nil
-}
-
-// getProviderAPIKey gets the API key for a provider from environment variables
-func getProviderAPIKey(provider models.InferenceProvider) string {
-	switch provider {
-	case models.ProviderAnthropic:
-		return os.Getenv("ANTHROPIC_API_KEY")
-	case models.ProviderOpenAI:
-		return os.Getenv("OPENAI_API_KEY")
-	case models.ProviderGemini:
-		return os.Getenv("GEMINI_API_KEY")
-	case models.ProviderGROQ:
-		return os.Getenv("GROQ_API_KEY")
-	case models.ProviderAzure:
-		return os.Getenv("AZURE_OPENAI_API_KEY")
-	case models.ProviderOpenRouter:
-		return os.Getenv("OPENROUTER_API_KEY")
-	case models.ProviderBedrock:
-		if hasAWSCredentials() {
-			return "aws-credentials-available"
-		}
-	case models.ProviderVertexAI:
-		if hasVertexAICredentials() {
-			return "vertex-ai-credentials-available"
-		}
-	}
-	return ""
-}
-
-// setDefaultModelForAgent sets a default model for an agent based on available providers
-func setDefaultModelForAgent(agent AgentName) bool {
-	// Check providers in order of preference
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		maxTokens := int64(5000)
-		if agent == AgentTitle {
-			maxTokens = 80
-		}
-		cfg.Agents[agent] = Agent{
-			Model:     models.Claude37Sonnet,
-			MaxTokens: maxTokens,
-		}
-		return true
-	}
-
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
-		var model models.ModelID
-		maxTokens := int64(5000)
-		reasoningEffort := ""
-
-		switch agent {
-		case AgentTitle:
-			model = models.GPT41Mini
-			maxTokens = 80
-		case AgentTask:
-			model = models.GPT41Mini
-		default:
-			model = models.GPT41
-		}
-
-		// Check if model supports reasoning
-		if modelInfo, ok := models.SupportedModels[model]; ok && modelInfo.CanReason {
-			reasoningEffort = "medium"
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:           model,
-			MaxTokens:       maxTokens,
-			ReasoningEffort: reasoningEffort,
-		}
-		return true
-	}
-
-	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
-		var model models.ModelID
-		maxTokens := int64(5000)
-		reasoningEffort := ""
-
-		switch agent {
-		case AgentTitle:
-			model = models.OpenRouterClaude35Haiku
-			maxTokens = 80
-		case AgentTask:
-			model = models.OpenRouterClaude37Sonnet
-		default:
-			model = models.OpenRouterClaude37Sonnet
-		}
-
-		// Check if model supports reasoning
-		if modelInfo, ok := models.SupportedModels[model]; ok && modelInfo.CanReason {
-			reasoningEffort = "medium"
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:           model,
-			MaxTokens:       maxTokens,
-			ReasoningEffort: reasoningEffort,
-		}
-		return true
-	}
-
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
-		var model models.ModelID
-		maxTokens := int64(5000)
-
-		if agent == AgentTitle {
-			model = models.Gemini25Flash
-			maxTokens = 80
-		} else {
-			model = models.Gemini25
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:     model,
-			MaxTokens: maxTokens,
-		}
-		return true
-	}
-
-	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
-		maxTokens := int64(5000)
-		if agent == AgentTitle {
-			maxTokens = 80
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:     models.QWENQwq,
-			MaxTokens: maxTokens,
-		}
-		return true
-	}
-
-	if hasAWSCredentials() {
-		maxTokens := int64(5000)
-		if agent == AgentTitle {
-			maxTokens = 80
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:           models.BedrockClaude37Sonnet,
-			MaxTokens:       maxTokens,
-			ReasoningEffort: "medium", // Claude models support reasoning
-		}
-		return true
-	}
-
-	if hasVertexAICredentials() {
-		var model models.ModelID
-		maxTokens := int64(5000)
-
-		if agent == AgentTitle {
-			model = models.VertexAIGemini25Flash
-			maxTokens = 80
-		} else {
-			model = models.VertexAIGemini25
-		}
-
-		cfg.Agents[agent] = Agent{
-			Model:     model,
-			MaxTokens: maxTokens,
-		}
-		return true
-	}
-
-	return false
-}
-
-func updateCfgFile(updateCfg func(config *Config)) error {
-	if cfg == nil {
-		return fmt.Errorf("config not loaded")
-	}
-
-	// Get the config file path
-	configFile := viper.ConfigFileUsed()
-	var configData []byte
-	if configFile == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-		configFile = filepath.Join(homeDir, fmt.Sprintf(".%s.json", appName))
-		logging.Info("config file not found, creating new one", "path", configFile)
-		configData = []byte(`{}`)
-	} else {
-		// Read the existing config file
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-		configData = data
-	}
-
-	// Parse the JSON
-	var userCfg *Config
-	if err := json.Unmarshal(configData, &userCfg); err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	updateCfg(userCfg)
-
-	// Write the updated config back to file
-	updatedData, err := json.MarshalIndent(userCfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(configFile, updatedData, 0o644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
-}
-
-// Get returns the current configuration.
-// It's safe to call this function multiple times.
-func Get() *Config {
-	return cfg
-}
-
-// WorkingDirectory returns the current working directory from the configuration.
 func WorkingDirectory() string {
-	if cfg == nil {
-		panic("config not loaded")
-	}
-	return cfg.WorkingDir
+	return cwd
 }
 
-func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
-	if cfg == nil {
-		panic("config not loaded")
-	}
-
-	existingAgentCfg := cfg.Agents[agentName]
-
-	model, ok := models.SupportedModels[modelID]
+func GetAgentModel(agentID AgentID) Model {
+	cfg := Get()
+	agent, ok := cfg.Agents[agentID]
 	if !ok {
-		return fmt.Errorf("model %s not supported", modelID)
+		logging.Error("Agent not found", "agent_id", agentID)
+		return Model{}
 	}
 
-	maxTokens := existingAgentCfg.MaxTokens
-	if model.DefaultMaxTokens > 0 {
-		maxTokens = model.DefaultMaxTokens
+	providerConfig, ok := cfg.Providers[agent.Provider]
+	if !ok {
+		logging.Error("Provider not found for agent", "agent_id", agentID, "provider", agent.Provider)
+		return Model{}
 	}
 
-	newAgentCfg := Agent{
-		Model:           modelID,
-		MaxTokens:       maxTokens,
-		ReasoningEffort: existingAgentCfg.ReasoningEffort,
-	}
-	cfg.Agents[agentName] = newAgentCfg
-
-	if err := validateAgent(cfg, agentName, newAgentCfg); err != nil {
-		// revert config update on failure
-		cfg.Agents[agentName] = existingAgentCfg
-		return fmt.Errorf("failed to update agent model: %w", err)
-	}
-
-	return updateCfgFile(func(config *Config) {
-		if config.Agents == nil {
-			config.Agents = make(map[AgentName]Agent)
+	for _, model := range providerConfig.Models {
+		if model.ID == agent.Model {
+			return model
 		}
-		config.Agents[agentName] = newAgentCfg
-	})
+	}
+
+	logging.Error("Model not found for agent", "agent_id", agentID, "model", agent.Model)
+	return Model{}
 }
 
-// UpdateTheme updates the theme in the configuration and writes it to the config file.
-func UpdateTheme(themeName string) error {
-	if cfg == nil {
-		return fmt.Errorf("config not loaded")
+func GetProviderModel(provider provider.InferenceProvider, modelID string) Model {
+	cfg := Get()
+	providerConfig, ok := cfg.Providers[provider]
+	if !ok {
+		logging.Error("Provider not found", "provider", provider)
+		return Model{}
 	}
 
-	// Update the in-memory config
-	cfg.TUI.Theme = themeName
+	for _, model := range providerConfig.Models {
+		if model.ID == modelID {
+			return model
+		}
+	}
 
-	// Update the file config
-	return updateCfgFile(func(config *Config) {
-		config.TUI.Theme = themeName
-	})
+	logging.Error("Model not found for provider", "provider", provider, "model_id", modelID)
+	return Model{}
 }

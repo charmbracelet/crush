@@ -6,14 +6,13 @@ type Type string
 
 // All the supported AI provider types.
 const (
-	TypeOpenAI     Type = "openai"
-	TypeAnthropic  Type = "anthropic"
-	TypeGemini     Type = "gemini"
-	TypeAzure      Type = "azure"
-	TypeBedrock    Type = "bedrock"
-	TypeVertexAI   Type = "vertexai"
-	TypeXAI        Type = "xai"
-	TypeOpenRouter Type = "openrouter"
+	TypeOpenAI    Type = "openai"
+	TypeAnthropic Type = "anthropic"
+	TypeGemini    Type = "gemini"
+	TypeAzure     Type = "azure"
+	TypeBedrock   Type = "bedrock"
+	TypeVertexAI  Type = "vertexai"
+	TypeXAI       Type = "xai"
 )
 
 // InferenceProvider represents the inference provider identifier.

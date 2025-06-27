@@ -286,7 +286,7 @@ func (c *Client) SetServerState(state ServerState) {
 // WaitForServerReady waits for the server to be ready by polling the server
 // with a simple request until it responds successfully or times out
 func (c *Client) WaitForServerReady(ctx context.Context) error {
-	cnf := config.Get()
+	cfg := config.Get()
 
 	// Set initial state
 	c.SetServerState(StateStarting)
@@ -299,7 +299,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	if cnf.DebugLSP {
+	if cfg.Options.DebugLSP {
 		logging.Debug("Waiting for LSP server to be ready...")
 	}
 
@@ -308,7 +308,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 	// For TypeScript-like servers, we need to open some key files first
 	if serverType == ServerTypeTypeScript {
-		if cnf.DebugLSP {
+		if cfg.Options.DebugLSP {
 			logging.Debug("TypeScript-like server detected, opening key configuration files")
 		}
 		c.openKeyConfigFiles(ctx)
@@ -325,7 +325,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			if err == nil {
 				// Server responded successfully
 				c.SetServerState(StateReady)
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("LSP server is ready")
 				}
 				return nil
@@ -333,7 +333,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 				logging.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				logging.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 		}
@@ -496,7 +496,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 
 // openTypeScriptFiles finds and opens TypeScript files to help initialize the server
 func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
-	cnf := config.Get()
+	cfg := config.Get()
 	filesOpened := 0
 	maxFilesToOpen := 5 // Limit to a reasonable number of files
 
@@ -526,7 +526,7 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 			// Try to open the file
 			if err := c.OpenFile(ctx, path); err == nil {
 				filesOpened++
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Opened TypeScript file for initialization", "file", path)
 				}
 			}
@@ -535,11 +535,11 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 		return nil
 	})
 
-	if err != nil && cnf.DebugLSP {
+	if err != nil && cfg.Options.DebugLSP {
 		logging.Debug("Error walking directory for TypeScript files", "error", err)
 	}
 
-	if cnf.DebugLSP {
+	if cfg.Options.DebugLSP {
 		logging.Debug("Opened TypeScript files for initialization", "count", filesOpened)
 	}
 }
@@ -664,7 +664,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 }
 
 func (c *Client) CloseFile(ctx context.Context, filepath string) error {
-	cnf := config.Get()
+	cfg := config.Get()
 	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()
@@ -680,7 +680,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 		},
 	}
 
-	if cnf.DebugLSP {
+	if cfg.Options.DebugLSP {
 		logging.Debug("Closing file", "file", filepath)
 	}
 	if err := c.Notify(ctx, "textDocument/didClose", params); err != nil {
@@ -704,7 +704,7 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files
 func (c *Client) CloseAllFiles(ctx context.Context) {
-	cnf := config.Get()
+	cfg := config.Get()
 	c.openFilesMu.Lock()
 	filesToClose := make([]string, 0, len(c.openFiles))
 
@@ -719,12 +719,12 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// Then close them all
 	for _, filePath := range filesToClose {
 		err := c.CloseFile(ctx, filePath)
-		if err != nil && cnf.DebugLSP {
+		if err != nil && cfg.Options.DebugLSP {
 			logging.Warn("Error closing file", "file", filePath, "error", err)
 		}
 	}
 
-	if cnf.DebugLSP {
+	if cfg.Options.DebugLSP {
 		logging.Debug("Closed all files", "files", filesToClose)
 	}
 }

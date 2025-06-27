@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -19,14 +18,8 @@ type bedrockClient struct {
 type BedrockClient ProviderClient
 
 func newBedrockClient(opts providerClientOptions) BedrockClient {
-	// Apply bedrock specific options if they are added in the future
-
 	// Get AWS region from environment
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = os.Getenv("AWS_DEFAULT_REGION")
-	}
-
+	region := opts.extraParams["region"]
 	if region == "" {
 		region = "us-east-1" // default region
 	}
@@ -39,11 +32,11 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 
 	// Prefix the model name with region
 	regionPrefix := region[:2]
-	modelName := opts.model.APIModel
-	opts.model.APIModel = fmt.Sprintf("%s.%s", regionPrefix, modelName)
+	modelName := opts.model.ID
+	opts.model.ID = fmt.Sprintf("%s.%s", regionPrefix, modelName)
 
 	// Determine which provider to use based on the model
-	if strings.Contains(string(opts.model.APIModel), "anthropic") {
+	if strings.Contains(string(opts.model.ID), "anthropic") {
 		// Create Anthropic client with Bedrock configuration
 		anthropicOpts := opts
 		// TODO: later find a way to check if the AWS account has caching enabled

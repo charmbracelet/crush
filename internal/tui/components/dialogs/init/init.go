@@ -5,7 +5,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
-	"github.com/charmbracelet/crush/internal/config"
+	configv2 "github.com/charmbracelet/crush/internal/config"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -184,7 +184,7 @@ If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (
 Add the .crush directory to the .gitignore file if it's not already there.`
 
 		// Mark the project as initialized
-		if err := config.MarkProjectInitialized(); err != nil {
+		if err := configv2.MarkProjectInitialized(); err != nil {
 			return util.ReportError(err)
 		}
 
@@ -196,7 +196,7 @@ Add the .crush directory to the .gitignore file if it's not already there.`
 		)
 	} else {
 		// Mark the project as initialized without running the command
-		if err := config.MarkProjectInitialized(); err != nil {
+		if err := configv2.MarkProjectInitialized(); err != nil {
 			return util.ReportError(err)
 		}
 	}

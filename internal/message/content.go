@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
 type MessageRole string
@@ -71,9 +71,9 @@ type BinaryContent struct {
 	Data     []byte
 }
 
-func (bc BinaryContent) String(provider models.InferenceProvider) string {
+func (bc BinaryContent) String(p provider.InferenceProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	if provider == models.ProviderOpenAI {
+	if p == provider.InferenceProviderOpenAI {
 		return "data:" + bc.MIMEType + ";base64," + base64Encoded
 	}
 	return base64Encoded
@@ -113,7 +113,8 @@ type Message struct {
 	Role      MessageRole
 	SessionID string
 	Parts     []ContentPart
-	Model     models.ModelID
+	Model     string
+	Provider  string
 	CreatedAt int64
 	UpdatedAt int64
 }

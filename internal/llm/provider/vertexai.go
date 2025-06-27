@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"os"
 
 	"github.com/charmbracelet/crush/internal/logging"
 	"google.golang.org/genai"
@@ -11,9 +10,11 @@ import (
 type VertexAIClient ProviderClient
 
 func newVertexAIClient(opts providerClientOptions) VertexAIClient {
+	project := opts.extraHeaders["project"]
+	location := opts.extraHeaders["location"]
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Project:  os.Getenv("GOOGLE_CLOUD_PROJECT"),
-		Location: os.Getenv("GOOGLE_CLOUD_LOCATION"),
+		Project:  project,
+		Location: location,
 		Backend:  genai.BackendVertexAI,
 	})
 	if err != nil {

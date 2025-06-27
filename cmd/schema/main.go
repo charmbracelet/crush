@@ -1,3 +1,4 @@
+// TODO: FIX THIS
 package main
 
 import (
@@ -6,7 +7,6 @@ import (
 	"os"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
 )
 
 // JSONSchemaType represents a JSON Schema type
@@ -192,22 +192,10 @@ func generateSchema() map[string]any {
 		},
 	}
 
-	// Add known providers
-	knownProviders := []string{
-		string(models.ProviderAnthropic),
-		string(models.ProviderOpenAI),
-		string(models.ProviderGemini),
-		string(models.ProviderGROQ),
-		string(models.ProviderOpenRouter),
-		string(models.ProviderBedrock),
-		string(models.ProviderAzure),
-		string(models.ProviderVertexAI),
-	}
-
 	providerSchema["additionalProperties"].(map[string]any)["properties"].(map[string]any)["provider"] = map[string]any{
 		"type":        "string",
 		"description": "Provider type",
-		"enum":        knownProviders,
+		"enum":        []string{},
 	}
 
 	schema["properties"].(map[string]any)["providers"] = providerSchema
@@ -241,9 +229,7 @@ func generateSchema() map[string]any {
 
 	// Add model enum
 	modelEnum := []string{}
-	for modelID := range models.SupportedModels {
-		modelEnum = append(modelEnum, string(modelID))
-	}
+
 	agentSchema["additionalProperties"].(map[string]any)["properties"].(map[string]any)["model"].(map[string]any)["enum"] = modelEnum
 
 	// Add specific agent properties
@@ -251,7 +237,6 @@ func generateSchema() map[string]any {
 	knownAgents := []string{
 		string(config.AgentCoder),
 		string(config.AgentTask),
-		string(config.AgentTitle),
 	}
 
 	for _, agentName := range knownAgents {

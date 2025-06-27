@@ -1,13 +1,11 @@
 package models
 
 import (
-	"slices"
-
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
+	configv2 "github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
@@ -26,7 +24,7 @@ const (
 
 // ModelSelectedMsg is sent when a model is selected
 type ModelSelectedMsg struct {
-	Model models.Model
+	Model configv2.PreferredModel
 }
 
 // CloseModelDialogMsg is sent when a model is selected
@@ -35,6 +33,11 @@ type CloseModelDialogMsg struct{}
 // ModelDialog interface for the model selection dialog
 type ModelDialog interface {
 	dialogs.DialogModel
+}
+
+type ModelOption struct {
+	Provider provider.Provider
+	Model    provider.Model
 }
 
 type modelDialogCmp struct {
@@ -80,47 +83,31 @@ func NewModelDialogCmp() ModelDialog {
 	}
 }
 
-var ProviderPopularity = map[models.InferenceProvider]int{
-	models.ProviderAnthropic:  1,
-	models.ProviderOpenAI:     2,
-	models.ProviderGemini:     3,
-	models.ProviderGROQ:       4,
-	models.ProviderOpenRouter: 5,
-	models.ProviderBedrock:    6,
-	models.ProviderAzure:      7,
-	models.ProviderVertexAI:   8,
-	models.ProviderXAI:        9,
-}
-
-var ProviderName = map[models.InferenceProvider]string{
-	models.ProviderAnthropic:  "Anthropic",
-	models.ProviderOpenAI:     "OpenAI",
-	models.ProviderGemini:     "Gemini",
-	models.ProviderGROQ:       "Groq",
-	models.ProviderOpenRouter: "OpenRouter",
-	models.ProviderBedrock:    "AWS Bedrock",
-	models.ProviderAzure:      "Azure",
-	models.ProviderVertexAI:   "VertexAI",
-	models.ProviderXAI:        "xAI",
-}
-
 func (m *modelDialogCmp) Init() tea.Cmd {
-	cfg := config.Get()
-	enabledProviders := getEnabledProviders(cfg)
+	providers := configv2.Providers()
+	cfg := configv2.Get()
 
+	coderAgent := cfg.Agents[configv2.AgentCoder]
 	modelItems := []util.Model{}
-	for _, provider := range enabledProviders {
-		name, ok := ProviderName[provider]
-		if !ok {
-			name = string(provider) // Fallback to provider ID if name is not defined
+	selectIndex := 0
+	for _, provider := range providers {
+		name := provider.Name
+		if name == "" {
+			name = string(provider.ID)
 		}
 		modelItems = append(modelItems, commands.NewItemSection(name))
-		for _, model := range getModelsForProvider(provider) {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, model))
+		for _, model := range provider.Models {
+			if model.ID == coderAgent.Model && provider.ID == coderAgent.Provider {
+				selectIndex = len(modelItems) // Set the selected index to the current model
+			}
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				Provider: provider,
+				Model:    model,
+			}))
 		}
 	}
-	m.modelList.SetItems(modelItems)
-	return m.modelList.Init()
+
+	return tea.Sequence(m.modelList.Init(), m.modelList.SetItems(modelItems), m.modelList.SetSelected(selectIndex))
 }
 
 func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -137,11 +124,14 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil // No item selected, do nothing
 			}
 			items := m.modelList.Items()
-			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(models.Model)
+			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(ModelOption)
 
 			return m, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(ModelSelectedMsg{Model: selectedItem}),
+				util.CmdHandler(ModelSelectedMsg{Model: configv2.PreferredModel{
+					ModelID:  selectedItem.Model.ID,
+					Provider: selectedItem.Provider.ID,
+				}}),
 			)
 		case key.Matches(msg, m.keyMap.Close):
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
@@ -187,58 +177,6 @@ func (m *modelDialogCmp) listWidth() int {
 func (m *modelDialogCmp) listHeight() int {
 	listHeigh := len(m.modelList.Items()) + 2 + 4 // height based on items + 2 for the input + 4 for the sections
 	return min(listHeigh, m.wHeight/2)
-}
-
-func GetSelectedModel(cfg *config.Config) models.Model {
-	agentCfg := cfg.Agents[config.AgentCoder]
-	selectedModelID := agentCfg.Model
-	return models.SupportedModels[selectedModelID]
-}
-
-func getEnabledProviders(cfg *config.Config) []models.InferenceProvider {
-	var providers []models.InferenceProvider
-	for providerID, provider := range cfg.Providers {
-		if !provider.Disabled {
-			providers = append(providers, providerID)
-		}
-	}
-
-	// Sort by provider popularity
-	slices.SortFunc(providers, func(a, b models.InferenceProvider) int {
-		rA := ProviderPopularity[a]
-		rB := ProviderPopularity[b]
-
-		// models not included in popularity ranking default to last
-		if rA == 0 {
-			rA = 999
-		}
-		if rB == 0 {
-			rB = 999
-		}
-		return rA - rB
-	})
-	return providers
-}
-
-func getModelsForProvider(provider models.InferenceProvider) []models.Model {
-	var providerModels []models.Model
-	for _, model := range models.SupportedModels {
-		if model.Provider == provider {
-			providerModels = append(providerModels, model)
-		}
-	}
-
-	// reverse alphabetical order (if llm naming was consistent latest would appear first)
-	slices.SortFunc(providerModels, func(a, b models.Model) int {
-		if a.Name > b.Name {
-			return -1
-		} else if a.Name < b.Name {
-			return 1
-		}
-		return 0
-	})
-
-	return providerModels
 }
 
 func (m *modelDialogCmp) Position() (int, int) {

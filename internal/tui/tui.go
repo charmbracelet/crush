@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	configv2 "github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -69,7 +70,7 @@ func (a appModel) Init() tea.Cmd {
 
 	// Check if we should show the init dialog
 	cmds = append(cmds, func() tea.Msg {
-		shouldShow, err := config.ShouldShowInitDialog()
+		shouldShow, err := configv2.ProjectNeedsInitialization()
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -172,7 +173,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		model, err := a.app.CoderAgent.Update(config.AgentCoder, msg.Model.ID)
+		model, err := a.app.CoderAgent.Update(msg.Model)
 		if err != nil {
 			return a, util.ReportError(err)
 		}
@@ -222,7 +223,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				model := a.app.CoderAgent.Model()
 				contextWindow := model.ContextWindow
 				tokens := session.CompletionTokens + session.PromptTokens
-				if (tokens >= int64(float64(contextWindow)*0.95)) && config.Get().AutoCompact {
+				if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize {
 					// Show compact confirmation dialog
 					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
 						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),

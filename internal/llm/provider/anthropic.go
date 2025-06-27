@@ -13,7 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
@@ -59,7 +59,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			var contentBlocks []anthropic.ContentBlockParamUnion
 			contentBlocks = append(contentBlocks, content)
 			for _, binaryContent := range msg.BinaryContent() {
-				base64Image := binaryContent.String(models.ProviderAnthropic)
+				base64Image := binaryContent.String(provider.InferenceProviderAnthropic)
 				imageBlock := anthropic.NewImageBlockBase64(binaryContent.MIMEType, base64Image)
 				contentBlocks = append(contentBlocks, imageBlock)
 			}
@@ -164,7 +164,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	// }
 
 	return anthropic.MessageNewParams{
-		Model:       anthropic.Model(a.providerOptions.model.APIModel),
+		Model:       anthropic.Model(a.providerOptions.model.ID),
 		MaxTokens:   a.providerOptions.maxTokens,
 		Temperature: temperature,
 		Messages:    messages,
@@ -184,7 +184,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Debug {
+	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(preparedMessages)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
@@ -233,7 +233,7 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Debug {
+	if cfg.Options.Debug {
 		// jsonData, _ := json.Marshal(preparedMessages)
 		// logging.Debug("Prepared messages", "messages", string(jsonData))
 	}

@@ -1,60 +1,44 @@
 package prompt
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
-func GetAgentPrompt(agentName config.AgentName, provider models.InferenceProvider) string {
+type PromptID string
+
+const (
+	PromptCoder      PromptID = "coder"
+	PromptTitle      PromptID = "title"
+	PromptTask       PromptID = "task"
+	PromptSummarizer PromptID = "summarizer"
+	PromptDefault    PromptID = "default"
+)
+
+func GetPrompt(promptID PromptID, provider provider.InferenceProvider, contextPaths ...string) string {
 	basePrompt := ""
-	switch agentName {
-	case config.AgentCoder:
+	switch promptID {
+	case PromptCoder:
 		basePrompt = CoderPrompt(provider)
-	case config.AgentTitle:
+	case PromptTitle:
 		basePrompt = TitlePrompt(provider)
-	case config.AgentTask:
+	case PromptTask:
 		basePrompt = TaskPrompt(provider)
-	case config.AgentSummarizer:
+	case PromptSummarizer:
 		basePrompt = SummarizerPrompt(provider)
 	default:
 		basePrompt = "You are a helpful assistant"
 	}
-
-	if agentName == config.AgentCoder || agentName == config.AgentTask {
-		// Add context from project-specific instruction files if they exist
-		contextContent := getContextFromPaths()
-		logging.Debug("Context content", "Context", contextContent)
-		if contextContent != "" {
-			return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
-		}
-	}
 	return basePrompt
 }
 
-var (
-	onceContext    sync.Once
-	contextContent string
-)
-
-func getContextFromPaths() string {
-	onceContext.Do(func() {
-		var (
-			cfg          = config.Get()
-			workDir      = cfg.WorkingDir
-			contextPaths = cfg.ContextPaths
-		)
-
-		contextContent = processContextPaths(workDir, contextPaths)
-	})
-
-	return contextContent
+func getContextFromPaths(contextPaths []string) string {
+	return processContextPaths(config.WorkingDirectory(), contextPaths)
 }
 
 func processContextPaths(workDir string, paths []string) string {

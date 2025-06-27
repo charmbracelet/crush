@@ -72,7 +72,8 @@ to assist developers in writing, debugging, and understanding code directly from
 			}
 			cwd = c
 		}
-		_, err := config.Load(cwd, debug)
+
+		_, err := config.Init(cwd, debug)
 		if err != nil {
 			return err
 		}

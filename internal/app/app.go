@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
+	configv2 "github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -55,18 +55,21 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
 
+	cfg := configv2.Get()
+
+	coderAgentCfg := cfg.Agents[configv2.AgentCoder]
+	if coderAgentCfg.ID == "" {
+		return nil, fmt.Errorf("coder agent configuration is missing")
+	}
+
 	var err error
 	app.CoderAgent, err = agent.NewAgent(
-		config.AgentCoder,
+		coderAgentCfg,
+		app.Permissions,
 		app.Sessions,
 		app.Messages,
-		agent.CoderAgentTools(
-			app.Permissions,
-			app.Sessions,
-			app.Messages,
-			app.History,
-			app.LSPClients,
-		),
+		app.History,
+		app.LSPClients,
 	)
 	if err != nil {
 		logging.Error("Failed to create coder agent", err)

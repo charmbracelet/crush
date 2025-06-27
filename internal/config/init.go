@@ -17,23 +17,20 @@ type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-// ShouldShowInitDialog checks if the initialization dialog should be shown for the current directory
-func ShouldShowInitDialog() (bool, error) {
-	if cfg == nil {
+// ProjectNeedsInitialization checks if the current project needs initialization
+func ProjectNeedsInitialization() (bool, error) {
+	if instance == nil {
 		return false, fmt.Errorf("config not loaded")
 	}
 
-	// Create the flag file path
-	flagFilePath := filepath.Join(cfg.Data.Directory, InitFlagFilename)
+	flagFilePath := filepath.Join(instance.Options.DataDirectory, InitFlagFilename)
 
 	// Check if the flag file exists
 	_, err := os.Stat(flagFilePath)
 	if err == nil {
-		// File exists, don't show the dialog
 		return false, nil
 	}
 
-	// If the error is not "file not found", return the error
 	if !os.IsNotExist(err) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
@@ -44,11 +41,9 @@ func ShouldShowInitDialog() (bool, error) {
 		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
 	}
 	if crushExists {
-		// CRUSH.md already exists, don't show the dialog
 		return false, nil
 	}
 
-	// File doesn't exist, show the dialog
 	return true, nil
 }
 
@@ -75,13 +70,11 @@ func crushMdExists(dir string) (bool, error) {
 
 // MarkProjectInitialized marks the current project as initialized
 func MarkProjectInitialized() error {
-	if cfg == nil {
+	if instance == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	// Create the flag file path
-	flagFilePath := filepath.Join(cfg.Data.Directory, InitFlagFilename)
+	flagFilePath := filepath.Join(instance.Options.DataDirectory, InitFlagFilename)
 
-	// Create an empty file to mark the project as initialized
 	file, err := os.Create(flagFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to create init flag file: %w", err)

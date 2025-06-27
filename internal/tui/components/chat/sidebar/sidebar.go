@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -406,7 +405,7 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	mcpList := []string{section, ""}
 
-	mcp := config.Get().MCPServers
+	mcp := config.Get().MCP
 	if len(mcp) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -475,10 +474,7 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	cfg := config.Get()
-	agentCfg := cfg.Agents[config.AgentCoder]
-	selectedModelID := agentCfg.Model
-	model := models.SupportedModels[selectedModelID]
+	model := config.GetAgentModel(config.AgentCoder)
 
 	t := styles.CurrentTheme()
 

@@ -65,6 +65,7 @@ type Model struct {
 	DefaultMaxTokens   int64   `json:"default_max_tokens"`
 	CanReason          bool    `json:"can_reason"`
 	ReasoningEffort    string  `json:"reasoning_effort"`
+	HasReasoningEffort bool    `json:"has_reasoning_effort"`
 	SupportsImages     bool    `json:"supports_attachments"`
 }
 
@@ -156,8 +157,9 @@ type Options struct {
 }
 
 type PreferredModel struct {
-	ModelID  string                     `json:"model_id"`
-	Provider provider.InferenceProvider `json:"provider"`
+	ModelID         string                     `json:"model_id"`
+	Provider        provider.InferenceProvider `json:"provider"`
+	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 }
 
 type PreferredModels struct {
@@ -693,7 +695,7 @@ func defaultConfigBasedOnEnv() *Config {
 				}
 				providerConfig.BaseURL = baseURL
 				for _, model := range p.Models {
-					providerConfig.Models = append(providerConfig.Models, Model{
+					configModel := Model{
 						ID:                 model.ID,
 						Name:               model.Name,
 						CostPer1MIn:        model.CostPer1MIn,
@@ -704,7 +706,13 @@ func defaultConfigBasedOnEnv() *Config {
 						DefaultMaxTokens:   model.DefaultMaxTokens,
 						CanReason:          model.CanReason,
 						SupportsImages:     model.SupportsImages,
-					})
+					}
+					// Set reasoning effort for reasoning models
+					if model.HasReasoningEffort && model.DefaultReasoningEffort != "" {
+						configModel.HasReasoningEffort = model.HasReasoningEffort
+						configModel.ReasoningEffort = model.DefaultReasoningEffort
+					}
+					providerConfig.Models = append(providerConfig.Models, configModel)
 				}
 				cfg.Providers[p.ID] = providerConfig
 			}
@@ -980,25 +988,13 @@ func (c *Config) validateProviders(errors *ValidationErrors) {
 		}
 
 		// Validate provider type
-		validType := false
-		for _, vt := range validTypes {
-			if providerConfig.ProviderType == vt {
-				validType = true
-				break
-			}
-		}
+		validType := slices.Contains(validTypes, providerConfig.ProviderType)
 		if !validType {
 			errors.Add(fieldPrefix+".provider_type", fmt.Sprintf("invalid provider type: %s", providerConfig.ProviderType))
 		}
 
 		// Validate custom providers
-		isKnownProvider := false
-		for _, kp := range knownProviders {
-			if providerID == kp {
-				isKnownProvider = true
-				break
-			}
-		}
+		isKnownProvider := slices.Contains(knownProviders, providerID)
 
 		if !isKnownProvider {
 			// Custom provider validation
@@ -1200,13 +1196,7 @@ func (c *Config) validateAgents(errors *ValidationErrors) {
 		// Validate allowed tools
 		if agent.AllowedTools != nil {
 			for i, tool := range agent.AllowedTools {
-				validTool := false
-				for _, vt := range validTools {
-					if tool == vt {
-						validTool = true
-						break
-					}
-				}
+				validTool := slices.Contains(validTools, tool)
 				if !validTool {
 					errors.Add(fmt.Sprintf("%s.allowed_tools[%d]", fieldPrefix, i), fmt.Sprintf("unknown tool: %s", tool))
 				}

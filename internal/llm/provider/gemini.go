@@ -407,27 +407,6 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	return true, int64(retryMs), nil
 }
 
-func (g *geminiClient) toolCalls(resp *genai.GenerateContentResponse) []message.ToolCall {
-	var toolCalls []message.ToolCall
-
-	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-		for _, part := range resp.Candidates[0].Content.Parts {
-			if part.FunctionCall != nil {
-				id := "call_" + uuid.New().String()
-				args, _ := json.Marshal(part.FunctionCall.Args)
-				toolCalls = append(toolCalls, message.ToolCall{
-					ID:    id,
-					Name:  part.FunctionCall.Name,
-					Input: string(args),
-					Type:  "function",
-				})
-			}
-		}
-	}
-
-	return toolCalls
-}
-
 func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 	if resp == nil || resp.UsageMetadata == nil {
 		return TokenUsage{}

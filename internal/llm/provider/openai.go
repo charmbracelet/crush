@@ -18,23 +18,14 @@ import (
 	"github.com/openai/openai-go/shared"
 )
 
-type openaiOptions struct {
-	reasoningEffort string
-}
-
 type openaiClient struct {
 	providerOptions providerClientOptions
-	options         openaiOptions
 	client          openai.Client
 }
 
 type OpenAIClient ProviderClient
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
-	openaiOpts := openaiOptions{
-		reasoningEffort: "medium",
-	}
-
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
@@ -52,7 +43,6 @@ func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	client := openai.NewClient(openaiClientOptions...)
 	return &openaiClient{
 		providerOptions: opts,
-		options:         openaiOpts,
 		client:          client,
 	}
 }
@@ -153,6 +143,18 @@ func (o *openaiClient) finishReason(reason string) message.FinishReason {
 
 func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
 	model := o.providerOptions.model(o.providerOptions.modelType)
+	cfg := config.Get()
+
+	modelConfig := cfg.Models.Large
+	if o.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
+
+	reasoningEffort := model.ReasoningEffort
+	if modelConfig.ReasoningEffort != "" {
+		reasoningEffort = modelConfig.ReasoningEffort
+	}
+
 	params := openai.ChatCompletionNewParams{
 		Model:    openai.ChatModel(model.ID),
 		Messages: messages,
@@ -160,7 +162,7 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	}
 	if model.CanReason {
 		params.MaxCompletionTokens = openai.Int(o.providerOptions.maxTokens)
-		switch o.options.reasoningEffort {
+		switch reasoningEffort {
 		case "low":
 			params.ReasoningEffort = shared.ReasoningEffortLow
 		case "medium":

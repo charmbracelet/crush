@@ -4,10 +4,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
@@ -151,9 +152,9 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	}
 
 	applyDefaultValues()
-	defaultLevel := slog.LevelInfo
+	defaultLevel := log.InfoLevel
 	if cfg.Debug {
-		defaultLevel = slog.LevelDebug
+		defaultLevel = log.DebugLevel
 	}
 	if os.Getenv("CRUSH_DEV_DEBUG") == "true" {
 		loggingFile := fmt.Sprintf("%s/%s", cfg.Data.Directory, "debug.log")
@@ -168,21 +169,21 @@ func Load(workingDir string, debug bool) (*Config, error) {
 			}
 		}
 
-		sloggingFileWriter, err := os.OpenFile(loggingFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+		loggingFileWriter, err := os.OpenFile(loggingFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 		if err != nil {
 			return cfg, fmt.Errorf("failed to open log file: %w", err)
 		}
 		// Configure logger
-		logger := slog.New(slog.NewTextHandler(sloggingFileWriter, &slog.HandlerOptions{
+		logger := log.NewWithOptions(loggingFileWriter, log.Options{
 			Level: defaultLevel,
-		}))
-		slog.SetDefault(logger)
+		})
+		log.SetDefault(logger)
 	} else {
 		// Configure logger
-		logger := slog.New(slog.NewTextHandler(logging.NewWriter(), &slog.HandlerOptions{
+		logger := log.NewWithOptions(logging.NewWriter(), log.Options{
 			Level: defaultLevel,
-		}))
-		slog.SetDefault(logger)
+		})
+		log.SetDefault(logger)
 	}
 
 	// Validate configuration

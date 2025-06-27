@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/exp/diffview"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -18,6 +19,34 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// diffCacheKey represents the parameters that affect diff computation
+type diffCacheKey struct {
+	filePath   string
+	oldContent string
+	newContent string
+	splitMode  bool
+}
+
+// Equals checks if two cache keys are identical
+func (k diffCacheKey) Equals(other diffCacheKey) bool {
+	return k.filePath == other.filePath &&
+		k.oldContent == other.oldContent &&
+		k.newContent == other.newContent &&
+		k.splitMode == other.splitMode
+}
+
+// diffComputeMsg is sent when diff computation starts
+type diffComputeMsg struct {
+	key diffCacheKey
+}
+
+// diffResultMsg is sent when diff computation completes
+type diffResultMsg struct {
+	key    diffCacheKey
+	result *diffview.DiffView
+	err    error
+}
 
 type PermissionAction string
 
@@ -60,6 +89,18 @@ type permissionDialogCmp struct {
 	cachedContent string
 	contentDirty  bool
 
+	// Diff caching - cache the computed diff to avoid recomputing on scroll/resize
+	cachedDiff     *diffview.DiffView
+	lastDiffParams diffCacheKey
+
+	// Async diff computation
+	isComputingDiff bool
+	pendingDiffKey  diffCacheKey
+
+	// Scroll optimization - only regenerate content when viewport changes significantly
+	lastViewportHeight int
+	lastViewportWidth  int
+
 	keyMap KeyMap
 }
 
@@ -83,14 +124,56 @@ func (p *permissionDialogCmp) supportsDiffView() bool {
 	return p.permission.ToolName == tools.EditToolName || p.permission.ToolName == tools.WriteToolName
 }
 
+// invalidateDiffCache clears the cached diff when parameters change
+func (p *permissionDialogCmp) invalidateDiffCache() {
+	p.cachedDiff = nil
+	p.lastDiffParams = diffCacheKey{}
+	p.contentDirty = true
+}
+
+// shouldRegenerateContent checks if content needs regeneration based on viewport changes
+func (p *permissionDialogCmp) shouldRegenerateContent() bool {
+	if p.contentDirty {
+		return true
+	}
+
+	// Only regenerate if viewport size changed significantly (more than 10% or 5 lines/cols)
+	heightDiff := abs(p.contentViewPort.Height() - p.lastViewportHeight)
+	widthDiff := abs(p.contentViewPort.Width() - p.lastViewportWidth)
+
+	return heightDiff > max(5, p.lastViewportHeight/10) ||
+		widthDiff > max(5, p.lastViewportWidth/10)
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case diffResultMsg:
+		// Handle async diff computation result
+		if msg.key.Equals(p.pendingDiffKey) {
+			p.isComputingDiff = false
+			if msg.err == nil {
+				p.cachedDiff = msg.result
+				p.lastDiffParams = msg.key
+				p.contentDirty = true // Mark content dirty to trigger re-render
+			}
+		}
+		return p, nil
 	case tea.WindowSizeMsg:
 		p.wWidth = msg.Width
 		p.wHeight = msg.Height
-		p.contentDirty = true // Mark content as dirty on window resize
+		// Only mark content dirty if viewport size changed significantly
+		if p.shouldRegenerateContent() {
+			p.contentDirty = true
+		}
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
@@ -120,31 +203,31 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.supportsDiffView() {
 				p.diffSplitMode = !p.diffSplitMode
-				p.contentDirty = true // Mark content as dirty when diff mode changes
+				p.invalidateDiffCache() // Invalidate diff cache when mode changes
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			if p.supportsDiffView() {
 				p.diffYOffset += 1
-				p.contentDirty = true // Mark content as dirty when scrolling
+				// Don't invalidate cache for scroll - just update offset
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			if p.supportsDiffView() {
 				p.diffYOffset = max(0, p.diffYOffset-1)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				// Don't invalidate cache for scroll - just update offset
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
 			if p.supportsDiffView() {
 				p.diffXOffset = max(0, p.diffXOffset-5)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				// Don't invalidate cache for scroll - just update offset
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
 			if p.supportsDiffView() {
 				p.diffXOffset += 5
-				p.contentDirty = true // Mark content as dirty when scrolling
+				// Don't invalidate cache for scroll - just update offset
 				return p, nil
 			}
 		default:
@@ -153,6 +236,11 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.contentViewPort = viewPort
 			cmds = append(cmds, cmd)
 		}
+	}
+
+	// Check if we need to start async diff computation
+	if needsAsync, key := p.needsAsyncDiffComputation(); needsAsync {
+		cmds = append(cmds, p.computeDiffAsync(key))
 	}
 
 	return p, tea.Batch(cmds...)
@@ -274,7 +362,7 @@ func (p *permissionDialogCmp) renderHeader() string {
 
 func (p *permissionDialogCmp) getOrGenerateContent() string {
 	// Return cached content if available and not dirty
-	if !p.contentDirty && p.cachedContent != "" {
+	if !p.shouldRegenerateContent() && p.cachedContent != "" {
 		return p.cachedContent
 	}
 
@@ -284,18 +372,20 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 	case tools.BashToolName:
 		content = p.generateBashContent()
 	case tools.EditToolName:
-		content = p.generateEditContent()
+		content = p.generateEditContentOptimized()
 	case tools.WriteToolName:
-		content = p.generateWriteContent()
+		content = p.generateWriteContentOptimized()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
 	default:
 		content = p.generateDefaultContent()
 	}
 
-	// Cache the result
+	// Cache the result and update viewport tracking
 	p.cachedContent = content
 	p.contentDirty = false
+	p.lastViewportHeight = p.contentViewPort.Height()
+	p.lastViewportWidth = p.contentViewPort.Width()
 
 	return content
 }
@@ -335,47 +425,136 @@ func (p *permissionDialogCmp) generateBashContent() string {
 	return ""
 }
 
-func (p *permissionDialogCmp) generateEditContent() string {
+func (p *permissionDialogCmp) generateEditContentOptimized() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		formatter := core.DiffFormatter().
-			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
-			Height(p.contentViewPort.Height()).
-			Width(p.contentViewPort.Width()).
-			XOffset(p.diffXOffset).
-			YOffset(p.diffYOffset)
-		if p.diffSplitMode {
-			formatter = formatter.Split()
-		} else {
-			formatter = formatter.Unified()
-		}
-
-		diff := formatter.String()
-		return diff
+		return p.generateDiffContentOptimized(pr.FilePath, pr.OldContent, pr.NewContent)
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) generateWriteContent() string {
+func (p *permissionDialogCmp) generateWriteContentOptimized() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
-		// Use the cache for diff rendering
-		formatter := core.DiffFormatter().
-			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+		return p.generateDiffContentOptimized(pr.FilePath, pr.OldContent, pr.NewContent)
+	}
+	return ""
+}
+
+// generateDiffContentOptimized uses caching and async computation to avoid blocking UI
+func (p *permissionDialogCmp) generateDiffContentOptimized(filePath, oldContent, newContent string) string {
+	// Create cache key for current parameters
+	currentKey := diffCacheKey{
+		filePath:   filePath,
+		oldContent: oldContent,
+		newContent: newContent,
+		splitMode:  p.diffSplitMode,
+	}
+
+	// Check if we can reuse cached diff
+	if p.cachedDiff != nil && p.lastDiffParams.Equals(currentKey) {
+		// Update only the viewport parameters and offsets
+		diff := p.cachedDiff.
 			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
 			YOffset(p.diffYOffset)
-		if p.diffSplitMode {
+		return diff.String()
+	}
+
+	// If we're already computing this diff, show loading message
+	if p.isComputingDiff && p.pendingDiffKey.Equals(currentKey) {
+		return p.generateLoadingContent()
+	}
+
+	// For small files, compute synchronously
+	const maxAsyncSize = 10000 // 10KB threshold for async processing
+	if len(oldContent) < maxAsyncSize && len(newContent) < maxAsyncSize {
+		return p.generateDiffSync(filePath, oldContent, newContent, currentKey)
+	}
+
+	// For large files, show loading and mark for async computation
+	if !p.isComputingDiff {
+		p.isComputingDiff = true
+		p.pendingDiffKey = currentKey
+		// The async computation will be triggered in the next Update cycle
+		return p.generateLoadingContent()
+	}
+
+	return p.generateLoadingContent()
+}
+
+// needsAsyncDiffComputation checks if we need to start async diff computation
+func (p *permissionDialogCmp) needsAsyncDiffComputation() (bool, diffCacheKey) {
+	if !p.isComputingDiff {
+		return false, diffCacheKey{}
+	}
+
+	// Check if we have a pending diff computation
+	if p.pendingDiffKey.filePath != "" {
+		return true, p.pendingDiffKey
+	}
+
+	return false, diffCacheKey{}
+}
+
+// generateDiffSync performs synchronous diff generation for small files
+func (p *permissionDialogCmp) generateDiffSync(filePath, oldContent, newContent string, key diffCacheKey) string {
+	formatter := core.DiffFormatter().
+		Before(fsext.PrettyPath(filePath), oldContent).
+		After(fsext.PrettyPath(filePath), newContent).
+		Height(p.contentViewPort.Height()).
+		Width(p.contentViewPort.Width()).
+		XOffset(p.diffXOffset).
+		YOffset(p.diffYOffset)
+
+	if p.diffSplitMode {
+		formatter = formatter.Split()
+	} else {
+		formatter = formatter.Unified()
+	}
+
+	// Cache the formatter and parameters
+	p.cachedDiff = formatter
+	p.lastDiffParams = key
+
+	return formatter.String()
+}
+
+// generateLoadingContent shows a loading message while diff is being computed
+func (p *permissionDialogCmp) generateLoadingContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+
+	content := "Computing diff..."
+	return baseStyle.
+		Width(p.contentViewPort.Width()).
+		Height(p.contentViewPort.Height()).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(content)
+}
+
+// computeDiffAsync returns a command that computes the diff asynchronously
+func (p *permissionDialogCmp) computeDiffAsync(key diffCacheKey) tea.Cmd {
+	return func() tea.Msg {
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(key.filePath), key.oldContent).
+			After(fsext.PrettyPath(key.filePath), key.newContent).
+			Height(p.contentViewPort.Height()).
+			Width(p.contentViewPort.Width()).
+			XOffset(p.diffXOffset).
+			YOffset(p.diffYOffset)
+
+		if key.splitMode {
 			formatter = formatter.Split()
 		} else {
 			formatter = formatter.Unified()
 		}
 
-		diff := formatter.String()
-		return diff
+		return diffResultMsg{
+			key:    key,
+			result: formatter,
+			err:    nil,
+		}
 	}
-	return ""
 }
 
 func (p *permissionDialogCmp) generateFetchContent() string {

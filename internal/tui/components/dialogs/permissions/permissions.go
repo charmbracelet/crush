@@ -372,9 +372,9 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 	case tools.BashToolName:
 		content = p.generateBashContent()
 	case tools.EditToolName:
-		content = p.generateEditContentOptimized()
+		content = p.generateEditContent()
 	case tools.WriteToolName:
-		content = p.generateWriteContentOptimized()
+		content = p.generateWriteContent()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
 	default:
@@ -425,22 +425,22 @@ func (p *permissionDialogCmp) generateBashContent() string {
 	return ""
 }
 
-func (p *permissionDialogCmp) generateEditContentOptimized() string {
+func (p *permissionDialogCmp) generateEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
-		return p.generateDiffContentOptimized(pr.FilePath, pr.OldContent, pr.NewContent)
+		return p.generateDiffContent(pr.FilePath, pr.OldContent, pr.NewContent)
 	}
 	return ""
 }
 
-func (p *permissionDialogCmp) generateWriteContentOptimized() string {
+func (p *permissionDialogCmp) generateWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
-		return p.generateDiffContentOptimized(pr.FilePath, pr.OldContent, pr.NewContent)
+		return p.generateDiffContent(pr.FilePath, pr.OldContent, pr.NewContent)
 	}
 	return ""
 }
 
-// generateDiffContentOptimized uses caching and async computation to avoid blocking UI
-func (p *permissionDialogCmp) generateDiffContentOptimized(filePath, oldContent, newContent string) string {
+// generateDiffContent uses caching and async computation to avoid blocking UI
+func (p *permissionDialogCmp) generateDiffContent(filePath, oldContent, newContent string) string {
 	// Create cache key for current parameters
 	currentKey := diffCacheKey{
 		filePath:   filePath,

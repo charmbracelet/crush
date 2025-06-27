@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	configv2 "github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -55,9 +55,9 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
 
-	cfg := configv2.Get()
+	cfg := config.Get()
 
-	coderAgentCfg := cfg.Agents[configv2.AgentCoder]
+	coderAgentCfg := cfg.Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return nil, fmt.Errorf("coder agent configuration is missing")
 	}

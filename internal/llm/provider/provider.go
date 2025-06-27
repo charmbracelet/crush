@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	configv2 "github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
@@ -55,13 +55,14 @@ type Provider interface {
 
 	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() configv2.Model
+	Model() config.Model
 }
 
 type providerClientOptions struct {
 	baseURL       string
 	apiKey        string
-	model         configv2.Model
+	modelType     config.ModelType
+	model         func(config.ModelType) config.Model
 	disableCache  bool
 	maxTokens     int64
 	systemMessage string
@@ -74,6 +75,8 @@ type ProviderClientOption func(*providerClientOptions)
 type ProviderClient interface {
 	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
+
+	Model() config.Model
 }
 
 type baseProvider[C ProviderClient] struct {
@@ -97,18 +100,18 @@ func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.M
 	return p.client.send(ctx, messages, tools)
 }
 
-func (p *baseProvider[C]) Model() configv2.Model {
-	return p.options.model
-}
-
 func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	messages = p.cleanMessages(messages)
 	return p.client.stream(ctx, messages, tools)
 }
 
-func WithModel(model configv2.Model) ProviderClientOption {
+func (p *baseProvider[C]) Model() config.Model {
+	return p.client.Model()
+}
+
+func WithModel(model config.ModelType) ProviderClientOption {
 	return func(options *providerClientOptions) {
-		options.model = model
+		options.modelType = model
 	}
 }
 
@@ -130,11 +133,14 @@ func WithSystemMessage(systemMessage string) ProviderClientOption {
 	}
 }
 
-func NewProviderV2(cfg configv2.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+func NewProviderV2(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
 	clientOptions := providerClientOptions{
 		baseURL:      cfg.BaseURL,
 		apiKey:       cfg.APIKey,
 		extraHeaders: cfg.ExtraHeaders,
+		model: func(tp config.ModelType) config.Model {
+			return config.GetModel(tp)
+		},
 	}
 	for _, o := range opts {
 		o(&clientOptions)

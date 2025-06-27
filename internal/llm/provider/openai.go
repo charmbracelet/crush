@@ -152,13 +152,13 @@ func (o *openaiClient) finishReason(reason string) message.FinishReason {
 }
 
 func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
+	model := o.providerOptions.model(o.providerOptions.modelType)
 	params := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(o.providerOptions.model.ID),
+		Model:    openai.ChatModel(model.ID),
 		Messages: messages,
 		Tools:    tools,
 	}
-
-	if o.providerOptions.model.CanReason {
+	if model.CanReason {
 		params.MaxCompletionTokens = openai.Int(o.providerOptions.maxTokens)
 		switch o.options.reasoningEffort {
 		case "low":
@@ -383,4 +383,8 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 		CacheCreationTokens: 0, // OpenAI doesn't provide this directly
 		CacheReadTokens:     cachedTokens,
 	}
+}
+
+func (a *openaiClient) Model() config.Model {
+	return a.providerOptions.model(a.providerOptions.modelType)
 }

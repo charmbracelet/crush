@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	configv2 "github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
@@ -49,19 +49,18 @@ type AgentEvent struct {
 
 type Service interface {
 	pubsub.Suscriber[AgentEvent]
-	Model() configv2.Model
+	Model() config.Model
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
-	Update(model configv2.PreferredModel) (configv2.Model, error)
 	Summarize(ctx context.Context, sessionID string) error
 }
 
 type agent struct {
 	*pubsub.Broker[AgentEvent]
-	agentCfg configv2.Agent
+	agentCfg config.Agent
 	sessions session.Service
 	messages message.Service
 
@@ -76,13 +75,13 @@ type agent struct {
 	activeRequests sync.Map
 }
 
-var agentPromptMap = map[configv2.AgentID]prompt.PromptID{
-	configv2.AgentCoder: prompt.PromptCoder,
-	configv2.AgentTask:  prompt.PromptTask,
+var agentPromptMap = map[config.AgentID]prompt.PromptID{
+	config.AgentCoder: prompt.PromptCoder,
+	config.AgentTask:  prompt.PromptTask,
 }
 
 func NewAgent(
-	agentCfg configv2.Agent,
+	agentCfg config.Agent,
 	// These services are needed in the tools
 	permissions permission.Service,
 	sessions session.Service,
@@ -91,7 +90,7 @@ func NewAgent(
 	lspClients map[string]*lsp.Client,
 ) (Service, error) {
 	ctx := context.Background()
-	cfg := configv2.Get()
+	cfg := config.Get()
 	otherTools := GetMcpTools(ctx, permissions)
 	if len(lspClients) > 0 {
 		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
@@ -109,8 +108,8 @@ func NewAgent(
 		tools.NewWriteTool(lspClients, permissions, history),
 	}
 
-	if agentCfg.ID == configv2.AgentCoder {
-		taskAgentCfg := configv2.Get().Agents[configv2.AgentTask]
+	if agentCfg.ID == config.AgentCoder {
+		taskAgentCfg := config.Get().Agents[config.AgentTask]
 		if taskAgentCfg.ID == "" {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
@@ -130,26 +129,14 @@ func NewAgent(
 	}
 
 	allTools = append(allTools, otherTools...)
-	var providerCfg configv2.ProviderConfig
-	for _, p := range cfg.Providers {
-		if p.ID == agentCfg.Provider {
-			providerCfg = p
-			break
-		}
-	}
+	providerCfg := config.GetAgentProvider(agentCfg.ID)
 	if providerCfg.ID == "" {
-		return nil, fmt.Errorf("provider %s not found in config", agentCfg.Provider)
+		return nil, fmt.Errorf("provider for agent %s not found in config", agentCfg.Name)
 	}
+	model := config.GetAgentModel(agentCfg.ID)
 
-	var model configv2.Model
-	for _, m := range providerCfg.Models {
-		if m.ID == agentCfg.Model {
-			model = m
-			break
-		}
-	}
 	if model.ID == "" {
-		return nil, fmt.Errorf("model %s not found in provider %s", agentCfg.Model, agentCfg.Provider)
+		return nil, fmt.Errorf("model not found for agent %s", agentCfg.Name)
 	}
 
 	promptID := agentPromptMap[agentCfg.ID]
@@ -157,7 +144,7 @@ func NewAgent(
 		promptID = prompt.PromptDefault
 	}
 	opts := []provider.ProviderClientOption{
-		provider.WithModel(model),
+		provider.WithModel(agentCfg.Model),
 		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID)),
 		provider.WithMaxTokens(model.DefaultMaxTokens),
 	}
@@ -167,9 +154,9 @@ func NewAgent(
 	}
 
 	smallModelCfg := cfg.Models.Small
-	var smallModel configv2.Model
+	var smallModel config.Model
 
-	var smallModelProviderCfg configv2.ProviderConfig
+	var smallModelProviderCfg config.ProviderConfig
 	if smallModelCfg.Provider == providerCfg.ID {
 		smallModelProviderCfg = providerCfg
 	} else {
@@ -194,7 +181,7 @@ func NewAgent(
 	}
 
 	titleOpts := []provider.ProviderClientOption{
-		provider.WithModel(smallModel),
+		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
 		provider.WithMaxTokens(40),
 	}
@@ -203,7 +190,7 @@ func NewAgent(
 		return nil, err
 	}
 	summarizeOpts := []provider.ProviderClientOption{
-		provider.WithModel(smallModel),
+		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
 		provider.WithMaxTokens(smallModel.DefaultMaxTokens),
 	}
@@ -240,8 +227,8 @@ func NewAgent(
 	return agent, nil
 }
 
-func (a *agent) Model() configv2.Model {
-	return a.provider.Model()
+func (a *agent) Model() config.Model {
+	return config.GetAgentModel(a.agentCfg.ID)
 }
 
 func (a *agent) Cancel(sessionID string) {
@@ -336,7 +323,7 @@ func (a *agent) err(err error) AgentEvent {
 }
 
 func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error) {
-	if !a.provider.Model().SupportsImages && attachments != nil {
+	if !a.Model().SupportsImages && attachments != nil {
 		attachments = nil
 	}
 	events := make(chan AgentEvent)
@@ -458,7 +445,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
-		Model:    a.provider.Model().ID,
+		Model:    a.Model().ID,
 		Provider: a.providerID,
 	})
 	if err != nil {
@@ -609,13 +596,13 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)
 		}
-		return a.TrackUsage(ctx, sessionID, a.provider.Model(), event.Response.Usage)
+		return a.TrackUsage(ctx, sessionID, a.Model(), event.Response.Usage)
 	}
 
 	return nil
 }
 
-func (a *agent) TrackUsage(ctx context.Context, sessionID string, model configv2.Model, usage provider.TokenUsage) error {
+func (a *agent) TrackUsage(ctx context.Context, sessionID string, model config.Model, usage provider.TokenUsage) error {
 	sess, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -635,52 +622,6 @@ func (a *agent) TrackUsage(ctx context.Context, sessionID string, model configv2
 		return fmt.Errorf("failed to save session: %w", err)
 	}
 	return nil
-}
-
-func (a *agent) Update(modelCfg configv2.PreferredModel) (configv2.Model, error) {
-	if a.IsBusy() {
-		return configv2.Model{}, fmt.Errorf("cannot change model while processing requests")
-	}
-
-	cfg := configv2.Get()
-	var providerCfg configv2.ProviderConfig
-	for _, p := range cfg.Providers {
-		if p.ID == modelCfg.Provider {
-			providerCfg = p
-			break
-		}
-	}
-	if providerCfg.ID == "" {
-		return configv2.Model{}, fmt.Errorf("provider %s not found in config", modelCfg.Provider)
-	}
-
-	var model configv2.Model
-	for _, m := range providerCfg.Models {
-		if m.ID == modelCfg.ModelID {
-			model = m
-			break
-		}
-	}
-	if model.ID == "" {
-		return configv2.Model{}, fmt.Errorf("model %s not found in provider %s", modelCfg.ModelID, modelCfg.Provider)
-	}
-
-	promptID := agentPromptMap[a.agentCfg.ID]
-	if promptID == "" {
-		promptID = prompt.PromptDefault
-	}
-	opts := []provider.ProviderClientOption{
-		provider.WithModel(model),
-		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID)),
-		provider.WithMaxTokens(model.DefaultMaxTokens),
-	}
-	agentProvider, err := provider.NewProviderV2(providerCfg, opts...)
-	if err != nil {
-		return configv2.Model{}, err
-	}
-	a.provider = agentProvider
-
-	return a.provider.Model(), nil
 }
 
 func (a *agent) Summarize(ctx context.Context, sessionID string) error {

@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
-	configv2 "github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -70,7 +69,7 @@ func (a appModel) Init() tea.Cmd {
 
 	// Check if we should show the init dialog
 	cmds = append(cmds, func() tea.Msg {
-		shouldShow, err := configv2.ProjectNeedsInitialization()
+		shouldShow, err := config.ProjectNeedsInitialization()
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -173,12 +172,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		model, err := a.app.CoderAgent.Update(msg.Model)
-		if err != nil {
-			return a, util.ReportError(err)
-		}
-
-		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", model.Name))
+		config.UpdatePreferredModel(config.LargeModel, msg.Model)
+		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", msg.Model.ModelID))
 
 	// File Picker
 	case chat.OpenFilePickerMsg:

@@ -145,6 +145,7 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 }
 
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
+	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
 	// TODO: Implement a proper thinking function
 	// lastMessage := messages[len(messages)-1]
@@ -164,7 +165,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	// }
 
 	return anthropic.MessageNewParams{
-		Model:       anthropic.Model(a.providerOptions.model.ID),
+		Model:       anthropic.Model(model.ID),
 		MaxTokens:   a.providerOptions.maxTokens,
 		Temperature: temperature,
 		Messages:    messages,
@@ -423,6 +424,10 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 		CacheCreationTokens: msg.Usage.CacheCreationInputTokens,
 		CacheReadTokens:     msg.Usage.CacheReadInputTokens,
 	}
+}
+
+func (a *anthropicClient) Model() config.Model {
+	return a.providerOptions.model(a.providerOptions.modelType)
 }
 
 // TODO: check if we need

@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	configv2 "github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -24,7 +24,7 @@ const (
 
 // ModelSelectedMsg is sent when a model is selected
 type ModelSelectedMsg struct {
-	Model configv2.PreferredModel
+	Model config.PreferredModel
 }
 
 // CloseModelDialogMsg is sent when a model is selected
@@ -84,12 +84,12 @@ func NewModelDialogCmp() ModelDialog {
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
-	providers := configv2.Providers()
-	cfg := configv2.Get()
+	providers := config.Providers()
 
-	coderAgent := cfg.Agents[configv2.AgentCoder]
 	modelItems := []util.Model{}
 	selectIndex := 0
+	agentModel := config.GetAgentModel(config.AgentCoder)
+	agentProvider := config.GetAgentProvider(config.AgentCoder)
 	for _, provider := range providers {
 		name := provider.Name
 		if name == "" {
@@ -97,7 +97,7 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 		}
 		modelItems = append(modelItems, commands.NewItemSection(name))
 		for _, model := range provider.Models {
-			if model.ID == coderAgent.Model && provider.ID == coderAgent.Provider {
+			if model.ID == agentModel.ID && provider.ID == agentProvider.ID {
 				selectIndex = len(modelItems) // Set the selected index to the current model
 			}
 			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
@@ -128,7 +128,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(ModelSelectedMsg{Model: configv2.PreferredModel{
+				util.CmdHandler(ModelSelectedMsg{Model: config.PreferredModel{
 					ModelID:  selectedItem.Model.ID,
 					Provider: selectedItem.Provider.ID,
 				}}),

@@ -173,7 +173,8 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	if len(tools) > 0 {
 		config.Tools = g.convertTools(tools)
 	}
-	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.ID, config, history)
+	model := g.providerOptions.model(g.providerOptions.modelType)
+	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0
 	for {
@@ -261,7 +262,8 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	if len(tools) > 0 {
 		config.Tools = g.convertTools(tools)
 	}
-	chat, _ := g.client.Chats.Create(ctx, g.providerOptions.model.ID, config, history)
+	model := g.providerOptions.model(g.providerOptions.modelType)
+	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
@@ -437,6 +439,10 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 		CacheCreationTokens: 0, // Not directly provided by Gemini
 		CacheReadTokens:     int64(resp.UsageMetadata.CachedContentTokenCount),
 	}
+}
+
+func (g *geminiClient) Model() config.Model {
+	return g.providerOptions.model(g.providerOptions.modelType)
 }
 
 // Helper functions

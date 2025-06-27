@@ -47,6 +47,13 @@ const (
 	AgentTask  AgentID = "task"
 )
 
+type ModelType string
+
+const (
+	LargeModel ModelType = "large"
+	SmallModel ModelType = "small"
+)
+
 type Model struct {
 	ID                 string  `json:"id"`
 	Name               string  `json:"model"`
@@ -90,8 +97,7 @@ type Agent struct {
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled"`
 
-	Provider provider.InferenceProvider `json:"provider"`
-	Model    string                     `json:"model"`
+	Model ModelType `json:"model"`
 
 	// The available tools for the agent
 	//  if this is nil, all tools are available
@@ -291,8 +297,7 @@ func loadConfig(cwd string, debug bool) (*Config, error) {
 			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
-			Provider:     cfg.Models.Large.Provider,
-			Model:        cfg.Models.Large.ModelID,
+			Model:        LargeModel,
 			ContextPaths: cfg.Options.ContextPaths,
 			// All tools allowed
 		},
@@ -300,8 +305,7 @@ func loadConfig(cwd string, debug bool) (*Config, error) {
 			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Provider:     cfg.Models.Large.Provider,
-			Model:        cfg.Models.Large.ModelID,
+			Model:        LargeModel,
 			ContextPaths: cfg.Options.ContextPaths,
 			AllowedTools: []string{
 				"glob",
@@ -490,9 +494,8 @@ func mergeAgents(base, global, local *Config) {
 				switch agentID {
 				case AgentCoder:
 					baseAgent := base.Agents[agentID]
-					if newAgent.Model != "" && newAgent.Provider != "" {
+					if newAgent.Model != "" {
 						baseAgent.Model = newAgent.Model
-						baseAgent.Provider = newAgent.Provider
 					}
 					baseAgent.AllowedMCP = newAgent.AllowedMCP
 					baseAgent.AllowedLSP = newAgent.AllowedLSP
@@ -502,9 +505,8 @@ func mergeAgents(base, global, local *Config) {
 					baseAgent.Name = newAgent.Name
 					baseAgent.Description = newAgent.Description
 					baseAgent.Disabled = newAgent.Disabled
-					if newAgent.Model == "" || newAgent.Provider == "" {
-						baseAgent.Provider = base.Models.Large.Provider
-						baseAgent.Model = base.Models.Large.ModelID
+					if newAgent.Model == "" {
+						baseAgent.Model = LargeModel
 					}
 					baseAgent.AllowedTools = newAgent.AllowedTools
 					baseAgent.AllowedMCP = newAgent.AllowedMCP
@@ -709,6 +711,8 @@ func WorkingDirectory() string {
 	return cwd
 }
 
+// TODO: Handle error state
+
 func GetAgentModel(agentID AgentID) Model {
 	cfg := Get()
 	agent, ok := cfg.Agents[agentID]
@@ -717,20 +721,58 @@ func GetAgentModel(agentID AgentID) Model {
 		return Model{}
 	}
 
-	providerConfig, ok := cfg.Providers[agent.Provider]
+	var model PreferredModel
+	switch agent.Model {
+	case LargeModel:
+		model = cfg.Models.Large
+	case SmallModel:
+		model = cfg.Models.Small
+	default:
+		logging.Warn("Unknown model type for agent", "agent_id", agentID, "model_type", agent.Model)
+		model = cfg.Models.Large // Fallback to large model
+	}
+	providerConfig, ok := cfg.Providers[model.Provider]
 	if !ok {
-		logging.Error("Provider not found for agent", "agent_id", agentID, "provider", agent.Provider)
+		logging.Error("Provider not found for agent", "agent_id", agentID, "provider", model.Provider)
 		return Model{}
 	}
 
-	for _, model := range providerConfig.Models {
-		if model.ID == agent.Model {
-			return model
+	for _, m := range providerConfig.Models {
+		if m.ID == model.ModelID {
+			return m
 		}
 	}
 
 	logging.Error("Model not found for agent", "agent_id", agentID, "model", agent.Model)
 	return Model{}
+}
+
+func GetAgentProvider(agentID AgentID) ProviderConfig {
+	cfg := Get()
+	agent, ok := cfg.Agents[agentID]
+	if !ok {
+		logging.Error("Agent not found", "agent_id", agentID)
+		return ProviderConfig{}
+	}
+
+	var model PreferredModel
+	switch agent.Model {
+	case LargeModel:
+		model = cfg.Models.Large
+	case SmallModel:
+		model = cfg.Models.Small
+	default:
+		logging.Warn("Unknown model type for agent", "agent_id", agentID, "model_type", agent.Model)
+		model = cfg.Models.Large // Fallback to large model
+	}
+
+	providerConfig, ok := cfg.Providers[model.Provider]
+	if !ok {
+		logging.Error("Provider not found for agent", "agent_id", agentID, "provider", model.Provider)
+		return ProviderConfig{}
+	}
+
+	return providerConfig
 }
 
 func GetProviderModel(provider provider.InferenceProvider, modelID string) Model {
@@ -749,4 +791,41 @@ func GetProviderModel(provider provider.InferenceProvider, modelID string) Model
 
 	logging.Error("Model not found for provider", "provider", provider, "model_id", modelID)
 	return Model{}
+}
+
+func GetModel(modelType ModelType) Model {
+	cfg := Get()
+	var model PreferredModel
+	switch modelType {
+	case LargeModel:
+		model = cfg.Models.Large
+	case SmallModel:
+		model = cfg.Models.Small
+	default:
+		model = cfg.Models.Large // Fallback to large model
+	}
+	providerConfig, ok := cfg.Providers[model.Provider]
+	if !ok {
+		return Model{}
+	}
+
+	for _, m := range providerConfig.Models {
+		if m.ID == model.ModelID {
+			return m
+		}
+	}
+	return Model{}
+}
+
+func UpdatePreferredModel(modelType ModelType, model PreferredModel) error {
+	cfg := Get()
+	switch modelType {
+	case LargeModel:
+		cfg.Models.Large = model
+	case SmallModel:
+		cfg.Models.Small = model
+	default:
+		return fmt.Errorf("unknown model type: %s", modelType)
+	}
+	return nil
 }

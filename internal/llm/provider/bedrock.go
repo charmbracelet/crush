@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -30,13 +31,20 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		}
 	}
 
-	// Prefix the model name with region
-	regionPrefix := region[:2]
-	modelName := opts.model.ID
-	opts.model.ID = fmt.Sprintf("%s.%s", regionPrefix, modelName)
+	opts.model = func(modelType config.ModelType) config.Model {
+		model := config.GetModel(modelType)
+
+		// Prefix the model name with region
+		regionPrefix := region[:2]
+		modelName := model.ID
+		model.ID = fmt.Sprintf("%s.%s", regionPrefix, modelName)
+		return model
+	}
+
+	model := opts.model(opts.modelType)
 
 	// Determine which provider to use based on the model
-	if strings.Contains(string(opts.model.ID), "anthropic") {
+	if strings.Contains(string(model.ID), "anthropic") {
 		// Create Anthropic client with Bedrock configuration
 		anthropicOpts := opts
 		// TODO: later find a way to check if the AWS account has caching enabled
@@ -77,4 +85,8 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 	}
 
 	return b.childProvider.stream(ctx, messages, tools)
+}
+
+func (b *bedrockClient) Model() config.Model {
+	return b.providerOptions.model(b.providerOptions.modelType)
 }

@@ -209,25 +209,25 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			if p.supportsDiffView() {
 				p.diffYOffset += 1
-				// Don't invalidate cache for scroll - just update offset
+				p.contentDirty = true
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			if p.supportsDiffView() {
 				p.diffYOffset = max(0, p.diffYOffset-1)
-				// Don't invalidate cache for scroll - just update offset
+				p.contentDirty = true
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
 			if p.supportsDiffView() {
 				p.diffXOffset = max(0, p.diffXOffset-5)
-				// Don't invalidate cache for scroll - just update offset
+				p.contentDirty = true
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
 			if p.supportsDiffView() {
 				p.diffXOffset += 5
-				// Don't invalidate cache for scroll - just update offset
+				p.contentDirty = true
 				return p, nil
 			}
 		default:

@@ -173,6 +173,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Model Switch
 	case models.ModelSelectedMsg:
 		config.UpdatePreferredModel(config.LargeModel, msg.Model)
+
+		// Update the agent with the new model/provider configuration
+		if err := a.app.UpdateAgentModel(); err != nil {
+			logging.ErrorPersist(fmt.Sprintf("Failed to update agent model: %v", err))
+			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.ModelID, err))
+		}
+
 		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", msg.Model.ModelID))
 
 	// File Picker

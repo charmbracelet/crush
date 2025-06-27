@@ -168,3 +168,7 @@ func (app *App) Shutdown() {
 	}
 	app.CoderAgent.CancelAll()
 }
+
+func (app *App) UpdateAgentModel() error {
+	return app.CoderAgent.UpdateModel()
+}

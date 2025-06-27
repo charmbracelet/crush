@@ -97,13 +97,13 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 		}
 		modelItems = append(modelItems, commands.NewItemSection(name))
 		for _, model := range provider.Models {
-			if model.ID == agentModel.ID && provider.ID == agentProvider.ID {
-				selectIndex = len(modelItems) // Set the selected index to the current model
-			}
 			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))
+			if model.ID == agentModel.ID && provider.ID == agentProvider.ID {
+				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
+			}
 		}
 	}
 

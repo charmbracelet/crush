@@ -275,22 +275,23 @@ func loadConfig(cwd string, debug bool) (*Config, error) {
 		return cfg, nil
 	}
 	preferredProvider := getPreferredProvider(cfg.Providers)
-	cfg.Models = PreferredModels{
-		Large: PreferredModel{
-			ModelID:  preferredProvider.DefaultLargeModel,
-			Provider: preferredProvider.ID,
-		},
-		Small: PreferredModel{
-			ModelID:  preferredProvider.DefaultSmallModel,
-			Provider: preferredProvider.ID,
-		},
+	if preferredProvider != nil {
+		cfg.Models = PreferredModels{
+			Large: PreferredModel{
+				ModelID:  preferredProvider.DefaultLargeModel,
+				Provider: preferredProvider.ID,
+			},
+			Small: PreferredModel{
+				ModelID:  preferredProvider.DefaultSmallModel,
+				Provider: preferredProvider.ID,
+			},
+		}
+	} else {
+		// No valid providers found, set empty models
+		cfg.Models = PreferredModels{}
 	}
 
 	mergeModels(cfg, globalCfg, localConfig)
-
-	if preferredProvider == nil {
-		return nil, errors.New("no valid providers configured")
-	}
 
 	agents := map[AgentID]Agent{
 		AgentCoder: {
@@ -376,7 +377,7 @@ func mergeProviderConfig(p provider.InferenceProvider, base, other ProviderConfi
 		if other.ProviderType != "" {
 			base.ProviderType = other.ProviderType
 		}
-		if len(base.ExtraHeaders) > 0 {
+		if len(other.ExtraHeaders) > 0 {
 			if base.ExtraHeaders == nil {
 				base.ExtraHeaders = make(map[string]string)
 			}
@@ -488,31 +489,71 @@ func mergeAgents(base, global, local *Config) {
 		}
 		for agentID, newAgent := range cfg.Agents {
 			if _, ok := base.Agents[agentID]; !ok {
+				// New agent - apply defaults
 				newAgent.ID = agentID // Ensure the ID is set correctly
+				if newAgent.Model == "" {
+					newAgent.Model = LargeModel // Default model type
+				}
+				// Context paths are always additive - start with global, then add custom
+				if len(newAgent.ContextPaths) > 0 {
+					newAgent.ContextPaths = append(base.Options.ContextPaths, newAgent.ContextPaths...)
+				} else {
+					newAgent.ContextPaths = base.Options.ContextPaths // Use global context paths only
+				}
 				base.Agents[agentID] = newAgent
 			} else {
-				switch agentID {
-				case AgentCoder:
-					baseAgent := base.Agents[agentID]
+				baseAgent := base.Agents[agentID]
+				
+				// Special handling for known agents - only allow model changes
+				if agentID == AgentCoder || agentID == AgentTask {
 					if newAgent.Model != "" {
 						baseAgent.Model = newAgent.Model
 					}
-					baseAgent.AllowedMCP = newAgent.AllowedMCP
-					baseAgent.AllowedLSP = newAgent.AllowedLSP
-					base.Agents[agentID] = baseAgent
-				default:
-					baseAgent := base.Agents[agentID]
-					baseAgent.Name = newAgent.Name
-					baseAgent.Description = newAgent.Description
-					baseAgent.Disabled = newAgent.Disabled
-					if newAgent.Model == "" {
-						baseAgent.Model = LargeModel
+					// For known agents, only allow MCP and LSP configuration
+					if newAgent.AllowedMCP != nil {
+						baseAgent.AllowedMCP = newAgent.AllowedMCP
 					}
-					baseAgent.AllowedTools = newAgent.AllowedTools
-					baseAgent.AllowedMCP = newAgent.AllowedMCP
-					baseAgent.AllowedLSP = newAgent.AllowedLSP
-					base.Agents[agentID] = baseAgent
+					if newAgent.AllowedLSP != nil {
+						baseAgent.AllowedLSP = newAgent.AllowedLSP
+					}
+					// Context paths are additive for known agents too
+					if len(newAgent.ContextPaths) > 0 {
+						baseAgent.ContextPaths = append(baseAgent.ContextPaths, newAgent.ContextPaths...)
+					}
+				} else {
+					// Custom agents - allow full merging
+					if newAgent.Name != "" {
+						baseAgent.Name = newAgent.Name
+					}
+					if newAgent.Description != "" {
+						baseAgent.Description = newAgent.Description
+					}
+					if newAgent.Model != "" {
+						baseAgent.Model = newAgent.Model
+					} else if baseAgent.Model == "" {
+						baseAgent.Model = LargeModel // Default fallback
+					}
+					
+					// Boolean fields - always update (including false values)
+					baseAgent.Disabled = newAgent.Disabled
+					
+					// Slice/Map fields - update if provided (including empty slices/maps)
+					if newAgent.AllowedTools != nil {
+						baseAgent.AllowedTools = newAgent.AllowedTools
+					}
+					if newAgent.AllowedMCP != nil {
+						baseAgent.AllowedMCP = newAgent.AllowedMCP
+					}
+					if newAgent.AllowedLSP != nil {
+						baseAgent.AllowedLSP = newAgent.AllowedLSP
+					}
+					// Context paths are additive for custom agents too
+					if len(newAgent.ContextPaths) > 0 {
+						baseAgent.ContextPaths = append(baseAgent.ContextPaths, newAgent.ContextPaths...)
+					}
 				}
+				
+				base.Agents[agentID] = baseAgent
 			}
 		}
 	}
@@ -555,6 +596,7 @@ func mergeProviderConfigs(base, global, local *Config) {
 		err := validateProvider(providerName, providerConfig)
 		if err != nil {
 			logging.Warn("Skipping provider", "name", providerName, "error", err)
+			continue // Skip invalid providers
 		}
 		finalProviders[providerName] = providerConfig
 	}

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 )
 
@@ -16,13 +17,7 @@ func TestGetSafeReadOnlyCommands(t *testing.T) {
 	// Check for cross-platform commands that should always be present
 	crossPlatformCommands := []string{"echo", "hostname", "whoami", "git status", "go version"}
 	for _, cmd := range crossPlatformCommands {
-		found := false
-		for _, safeCmd := range commands {
-			if safeCmd == cmd {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(commands, cmd)
 		if !found {
 			t.Errorf("Expected cross-platform command %q to be in safe commands", cmd)
 		}
@@ -32,13 +27,7 @@ func TestGetSafeReadOnlyCommands(t *testing.T) {
 		// Check for Windows-specific commands
 		windowsCommands := []string{"dir", "type", "Get-Process"}
 		for _, cmd := range windowsCommands {
-			found := false
-			for _, safeCmd := range commands {
-				if safeCmd == cmd {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(commands, cmd)
 			if !found {
 				t.Errorf("Expected Windows command %q to be in safe commands on Windows", cmd)
 			}
@@ -47,13 +36,7 @@ func TestGetSafeReadOnlyCommands(t *testing.T) {
 		// Check that Unix commands are NOT present on Windows
 		unixCommands := []string{"ls", "pwd", "ps"}
 		for _, cmd := range unixCommands {
-			found := false
-			for _, safeCmd := range commands {
-				if safeCmd == cmd {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(commands, cmd)
 			if found {
 				t.Errorf("Unix command %q should not be in safe commands on Windows", cmd)
 			}
@@ -62,13 +45,7 @@ func TestGetSafeReadOnlyCommands(t *testing.T) {
 		// Check for Unix-specific commands
 		unixCommands := []string{"ls", "pwd", "ps"}
 		for _, cmd := range unixCommands {
-			found := false
-			for _, safeCmd := range commands {
-				if safeCmd == cmd {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(commands, cmd)
 			if !found {
 				t.Errorf("Expected Unix command %q to be in safe commands on Unix", cmd)
 			}
@@ -77,13 +54,7 @@ func TestGetSafeReadOnlyCommands(t *testing.T) {
 		// Check that Windows-specific commands are NOT present on Unix
 		windowsOnlyCommands := []string{"dir", "Get-Process", "systeminfo"}
 		for _, cmd := range windowsOnlyCommands {
-			found := false
-			for _, safeCmd := range commands {
-				if safeCmd == cmd {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(commands, cmd)
 			if found {
 				t.Errorf("Windows-only command %q should not be in safe commands on Unix", cmd)
 			}

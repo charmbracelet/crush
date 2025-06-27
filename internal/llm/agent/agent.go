@@ -135,7 +135,7 @@ func (a *agent) Cancel(sessionID string) {
 
 func (a *agent) IsBusy() bool {
 	busy := false
-	a.activeRequests.Range(func(key, value interface{}) bool {
+	a.activeRequests.Range(func(key, value any) bool {
 		if cancelFunc, ok := value.(context.CancelFunc); ok {
 			if cancelFunc != nil {
 				busy = true

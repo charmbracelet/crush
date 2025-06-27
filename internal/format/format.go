@@ -86,11 +86,11 @@ func formatAsJSON(content string) string {
 	jsonBytes, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		// In case of an error, return a manually formatted JSON
-		jsonEscaped := strings.Replace(content, "\\", "\\\\", -1)
-		jsonEscaped = strings.Replace(jsonEscaped, "\"", "\\\"", -1)
-		jsonEscaped = strings.Replace(jsonEscaped, "\n", "\\n", -1)
-		jsonEscaped = strings.Replace(jsonEscaped, "\r", "\\r", -1)
-		jsonEscaped = strings.Replace(jsonEscaped, "\t", "\\t", -1)
+		jsonEscaped := strings.ReplaceAll(content, "\\", "\\\\")
+		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\"", "\\\"")
+		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\n", "\\n")
+		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\r", "\\r")
+		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\t", "\\t")
 
 		return fmt.Sprintf("{\n  \"response\": \"%s\"\n}", jsonEscaped)
 	}

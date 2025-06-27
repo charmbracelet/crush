@@ -81,6 +81,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 			"error", err,
 			"endpoint", modelsEndpoint,
 		)
+		return []localModel{}
 	}
 	defer res.Body.Close()
 
@@ -89,6 +90,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 			"status", res.StatusCode,
 			"endpoint", modelsEndpoint,
 		)
+		return []localModel{}
 	}
 
 	var modelList localModelList
@@ -97,6 +99,7 @@ func listLocalModels(modelsEndpoint string) []localModel {
 			"error", err,
 			"endpoint", modelsEndpoint,
 		)
+		return []localModel{}
 	}
 
 	var supportedModels []localModel

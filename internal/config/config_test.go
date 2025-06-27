@@ -50,6 +50,10 @@ func reset() {
 	instance = nil
 	cwd = ""
 	testConfigDir = ""
+
+	// Enable mock providers for all tests to avoid API calls
+	UseMockProviders = true
+	ResetProviders()
 }
 
 // Core Configuration Loading Tests
@@ -133,9 +137,29 @@ func TestLoadConfig_OnlyGlobalConfig(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "test-key",
-				ProviderType: provider.TypeOpenAI,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "test-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						CostPer1MIn:      30.0,
+						CostPer1MOut:     60.0,
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						CostPer1MIn:      1.0,
+						CostPer1MOut:     2.0,
+						ContextWindow:    4096,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 		Options: Options{
@@ -167,9 +191,29 @@ func TestLoadConfig_OnlyLocalConfig(t *testing.T) {
 	localConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderAnthropic: {
-				ID:           provider.InferenceProviderAnthropic,
-				APIKey:       "local-key",
-				ProviderType: provider.TypeAnthropic,
+				ID:                provider.InferenceProviderAnthropic,
+				APIKey:            "local-key",
+				ProviderType:      provider.TypeAnthropic,
+				DefaultLargeModel: "claude-3-opus",
+				DefaultSmallModel: "claude-3-haiku",
+				Models: []Model{
+					{
+						ID:               "claude-3-opus",
+						Name:             "Claude 3 Opus",
+						CostPer1MIn:      15.0,
+						CostPer1MOut:     75.0,
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "claude-3-haiku",
+						Name:             "Claude 3 Haiku",
+						CostPer1MIn:      0.25,
+						CostPer1MOut:     1.25,
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 		Options: Options{
@@ -199,9 +243,29 @@ func TestLoadConfig_BothGlobalAndLocal(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "global-key",
-				ProviderType: provider.TypeOpenAI,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "global-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						CostPer1MIn:      30.0,
+						CostPer1MOut:     60.0,
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						CostPer1MIn:      1.0,
+						CostPer1MOut:     2.0,
+						ContextWindow:    4096,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 		Options: Options{
@@ -222,9 +286,29 @@ func TestLoadConfig_BothGlobalAndLocal(t *testing.T) {
 				APIKey: "local-key", // Override global
 			},
 			provider.InferenceProviderAnthropic: {
-				ID:           provider.InferenceProviderAnthropic,
-				APIKey:       "anthropic-key",
-				ProviderType: provider.TypeAnthropic,
+				ID:                provider.InferenceProviderAnthropic,
+				APIKey:            "anthropic-key",
+				ProviderType:      provider.TypeAnthropic,
+				DefaultLargeModel: "claude-3-opus",
+				DefaultSmallModel: "claude-3-haiku",
+				Models: []Model{
+					{
+						ID:               "claude-3-opus",
+						Name:             "Claude 3 Opus",
+						CostPer1MIn:      15.0,
+						CostPer1MOut:     75.0,
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "claude-3-haiku",
+						Name:             "Claude 3 Haiku",
+						CostPer1MIn:      0.25,
+						CostPer1MOut:     1.25,
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 		Options: Options{

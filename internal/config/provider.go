@@ -15,6 +15,8 @@ var fur = client.New()
 var (
 	providerOnc  sync.Once // Ensures the initialization happens only once
 	providerList []provider.Provider
+	// UseMockProviders can be set to true in tests to avoid API calls
+	UseMockProviders bool
 )
 
 func providersPath() string {
@@ -50,6 +52,12 @@ func loadProviders() ([]provider.Provider, error) {
 
 func Providers() []provider.Provider {
 	providerOnc.Do(func() {
+		// Use mock providers when testing
+		if UseMockProviders {
+			providerList = MockProviders()
+			return
+		}
+
 		// Try to get providers from upstream API
 		if providers, err := fur.GetProviders(); err == nil {
 			providerList = providers
@@ -66,4 +74,10 @@ func Providers() []provider.Provider {
 		}
 	})
 	return providerList
+}
+
+// ResetProviders resets the provider cache. Useful for testing.
+func ResetProviders() {
+	providerOnc = sync.Once{}
+	providerList = nil
 }

@@ -1,0 +1,7 @@
+{
+  "lsp": {
+    "Go": {
+      "command": "gopls"
+    }
+  }
+}

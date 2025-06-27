@@ -24,6 +24,34 @@
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
 - **Comments**: End comments in periods unless comments are at the end of the line.
 
+## Testing with Mock Providers
+
+When writing tests that involve provider configurations, use the mock providers to avoid API calls:
+
+```go
+func TestYourFunction(t *testing.T) {
+    // Enable mock providers for testing
+    originalUseMock := config.UseMockProviders
+    config.UseMockProviders = true
+    defer func() {
+        config.UseMockProviders = originalUseMock
+        config.ResetProviders()
+    }()
+
+    // Reset providers to ensure fresh mock data
+    config.ResetProviders()
+
+    // Your test code here - providers will now return mock data
+    providers := config.Providers()
+    // ... test logic
+}
+```
+
+The mock providers include:
+- **Anthropic**: claude-3-opus, claude-3-haiku, claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+- **OpenAI**: gpt-4, gpt-3.5-turbo, gpt-4-turbo, gpt-4o, gpt-4o-mini
+- **Gemini**: gemini-2.5-pro, gemini-2.5-flash
+
 ## Formatting
 
 - ALWAYS format any Go code you write.

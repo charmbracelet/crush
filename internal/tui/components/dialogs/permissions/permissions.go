@@ -457,7 +457,18 @@ func (p *permissionDialogCmp) generateDiffContent(filePath, oldContent, newConte
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
 			YOffset(p.diffYOffset)
-		return diff.String()
+		result := diff.String()
+		// Reset Y offset if result is empty (likely scrolled past content)
+		if strings.TrimSpace(result) == "" && p.diffYOffset > 0 {
+			p.diffYOffset = 0
+			diff = p.cachedDiff.
+				Height(p.contentViewPort.Height()).
+				Width(p.contentViewPort.Width()).
+				XOffset(p.diffXOffset).
+				YOffset(0)
+			result = diff.String()
+		}
+		return result
 	}
 
 	// If we're already computing this diff, show loading message

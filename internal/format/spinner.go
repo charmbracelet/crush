@@ -2,31 +2,28 @@ package format
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
 )
 
 // Spinner wraps the bubbles spinner for non-interactive mode
 type Spinner struct {
-	model  spinner.Model
-	done   chan struct{}
-	prog   *tea.Program
-	ctx    context.Context
-	cancel context.CancelFunc
+	done chan struct{}
+	prog *tea.Program
 }
 
 // spinnerModel is the tea.Model for the spinner
 type spinnerModel struct {
-	spinner  spinner.Model
-	message  string
-	quitting bool
+	animation anim.Animation
+	quitting  bool
 }
 
 func (m spinnerModel) Init() tea.Cmd {
-	return m.spinner.Tick
+	return m.animation.Init()
 }
 
 func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -34,15 +31,13 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.quitting = true
 		return m, tea.Quit
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
-	case quitMsg:
+	case tea.QuitMsg:
 		m.quitting = true
 		return m, tea.Quit
 	default:
-		return m, nil
+		a, cmd := m.animation.Update(msg)
+		m.animation = a.(anim.Animation)
+		return m, cmd
 	}
 }
 
@@ -50,53 +45,39 @@ func (m spinnerModel) View() string {
 	if m.quitting {
 		return ""
 	}
-	return fmt.Sprintf("%s %s", m.spinner.View(), m.message)
+	return m.animation.View().String()
 }
 
-// quitMsg is sent when we want to quit the spinner
-type quitMsg struct{}
-
 // NewSpinner creates a new spinner with the given message
-func NewSpinner(message string) *Spinner {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = s.Style.Foreground(s.Style.GetForeground())
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	model := spinnerModel{
-		spinner: s,
-		message: message,
-	}
-
-	prog := tea.NewProgram(model, tea.WithOutput(os.Stderr), tea.WithoutCatchPanics())
+func NewSpinner(ctx context.Context, message string) *Spinner {
+	prog := tea.NewProgram(
+		spinnerModel{
+			animation: anim.New(10, message),
+		},
+		tea.WithOutput(os.Stderr),
+		tea.WithContext(ctx),
+		tea.WithoutCatchPanics(),
+	)
 
 	return &Spinner{
-		model:  s,
-		done:   make(chan struct{}),
-		prog:   prog,
-		ctx:    ctx,
-		cancel: cancel,
+		prog: prog,
+		done: make(chan struct{}, 1),
 	}
 }
 
 // Start begins the spinner animation
 func (s *Spinner) Start() {
 	go func() {
-		defer close(s.done)
-		go func() {
-			<-s.ctx.Done()
-			s.prog.Send(quitMsg{})
-		}()
 		_, err := s.prog.Run()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "Error running spinner: %v\n", err)
 		}
+		close(s.done)
 	}()
 }
 
 // Stop ends the spinner animation
 func (s *Spinner) Stop() {
-	s.cancel()
+	s.prog.Quit()
 	<-s.done
 }

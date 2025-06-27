@@ -84,7 +84,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		}
 
 		// Create main context for the application
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
 		app, err := app.New(ctx, conn)
@@ -113,7 +113,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		)
 
 		// Setup the subscriptions, this will send services events to the TUI
-		ch, cancelSubs := setupSubscriptions(app, ctx)
+		ch, cancelSubs := setupSubscriptions(ctx, app)
 
 		// Create a context for the TUI message handler
 		tuiCtx, tuiCancel := context.WithCancel(ctx)
@@ -236,7 +236,7 @@ func setupSubscriber[T any](
 	}()
 }
 
-func setupSubscriptions(app *app.App, parentCtx context.Context) (chan tea.Msg, func()) {
+func setupSubscriptions(parentCtx context.Context, app *app.App) (chan tea.Msg, func()) {
 	ch := make(chan tea.Msg, 100)
 
 	wg := sync.WaitGroup{}
@@ -277,6 +277,7 @@ func Execute() {
 		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
+		fang.WithNotifySignal(os.Interrupt, os.Kill),
 	); err != nil {
 		os.Exit(1)
 	}

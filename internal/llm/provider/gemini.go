@@ -268,6 +268,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
+
+	// Override max tokens if set in provider options
+	if g.providerOptions.maxTokens > 0 {
+		maxTokens = g.providerOptions.maxTokens
+	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{

@@ -148,7 +148,7 @@ func NewAgent(
 		provider.WithModel(agentCfg.Model),
 		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID)),
 	}
-	agentProvider, err := provider.NewProviderV2(providerCfg, opts...)
+	agentProvider, err := provider.NewProvider(providerCfg, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func NewAgent(
 		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
 	}
-	titleProvider, err := provider.NewProviderV2(smallModelProviderCfg, titleOpts...)
+	titleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func NewAgent(
 		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
 	}
-	summarizeProvider, err := provider.NewProviderV2(smallModelProviderCfg, summarizeOpts...)
+	summarizeProvider, err := provider.NewProvider(smallModelProviderCfg, summarizeOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +277,9 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 	if err != nil {
 		return err
 	}
-	parts := []message.ContentPart{message.TextContent{Text: content}}
+	parts := []message.ContentPart{message.TextContent{
+		Text: fmt.Sprintf("Generate a concise title for the following content:\n\n%s", content),
+	}}
 
 	// Use streaming approach like summarization
 	response := a.titleProvider.StreamResponse(
@@ -831,7 +833,7 @@ func (a *agent) UpdateModel() error {
 			provider.WithSystemMessage(prompt.GetPrompt(promptID, currentProviderCfg.ID)),
 		}
 
-		newProvider, err := provider.NewProviderV2(currentProviderCfg, opts...)
+		newProvider, err := provider.NewProvider(currentProviderCfg, opts...)
 		if err != nil {
 			return fmt.Errorf("failed to create new provider: %w", err)
 		}
@@ -873,8 +875,10 @@ func (a *agent) UpdateModel() error {
 		titleOpts := []provider.ProviderClientOption{
 			provider.WithModel(config.SmallModel),
 			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
+			// We want the title to be short, so we limit the max tokens
+			provider.WithMaxTokens(40),
 		}
-		newTitleProvider, err := provider.NewProviderV2(smallModelProviderCfg, titleOpts...)
+		newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
 		if err != nil {
 			return fmt.Errorf("failed to create new title provider: %w", err)
 		}
@@ -884,7 +888,7 @@ func (a *agent) UpdateModel() error {
 			provider.WithModel(config.SmallModel),
 			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
 		}
-		newSummarizeProvider, err := provider.NewProviderV2(smallModelProviderCfg, summarizeOpts...)
+		newSummarizeProvider, err := provider.NewProvider(smallModelProviderCfg, summarizeOpts...)
 		if err != nil {
 			return fmt.Errorf("failed to create new summarize provider: %w", err)
 		}

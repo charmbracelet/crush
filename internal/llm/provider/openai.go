@@ -165,6 +165,11 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
+
+	// Override max tokens if set in provider options
+	if o.providerOptions.maxTokens > 0 {
+		maxTokens = o.providerOptions.maxTokens
+	}
 	if model.CanReason {
 		params.MaxCompletionTokens = openai.Int(maxTokens)
 		switch reasoningEffort {

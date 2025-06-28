@@ -65,6 +65,7 @@ type providerClientOptions struct {
 	model         func(config.ModelType) config.Model
 	disableCache  bool
 	systemMessage string
+	maxTokens     int64
 	extraHeaders  map[string]string
 	extraParams   map[string]string
 }
@@ -126,7 +127,13 @@ func WithSystemMessage(systemMessage string) ProviderClientOption {
 	}
 }
 
-func NewProviderV2(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+func WithMaxTokens(maxTokens int64) ProviderClientOption {
+	return func(options *providerClientOptions) {
+		options.maxTokens = maxTokens
+	}
+}
+
+func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
 	clientOptions := providerClientOptions{
 		baseURL:      cfg.BaseURL,
 		apiKey:       cfg.APIKey,

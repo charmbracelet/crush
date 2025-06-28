@@ -174,6 +174,11 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		maxTokens = modelConfig.MaxTokens
 	}
 
+	// Override max tokens if set in provider options
+	if a.providerOptions.maxTokens > 0 {
+		maxTokens = a.providerOptions.maxTokens
+	}
+
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(model.ID),
 		MaxTokens:   maxTokens,

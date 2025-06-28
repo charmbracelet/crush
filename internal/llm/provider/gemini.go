@@ -155,17 +155,26 @@ func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishRea
 func (g *geminiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
-
+	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
 	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(geminiMessages)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
+	modelConfig := cfg.Models.Large
+	if g.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
+
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(g.providerOptions.maxTokens),
+		MaxOutputTokens: int32(maxTokens),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
@@ -173,7 +182,6 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	if len(tools) > 0 {
 		config.Tools = g.convertTools(tools)
 	}
-	model := g.providerOptions.model(g.providerOptions.modelType)
 	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0
@@ -245,16 +253,25 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 
+	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
 	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(geminiMessages)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
+	modelConfig := cfg.Models.Large
+	if g.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(g.providerOptions.maxTokens),
+		MaxOutputTokens: int32(maxTokens),
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
@@ -262,7 +279,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	if len(tools) > 0 {
 		config.Tools = g.convertTools(tools)
 	}
-	model := g.providerOptions.model(g.providerOptions.modelType)
 	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0

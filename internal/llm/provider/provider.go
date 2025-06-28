@@ -64,7 +64,6 @@ type providerClientOptions struct {
 	modelType     config.ModelType
 	model         func(config.ModelType) config.Model
 	disableCache  bool
-	maxTokens     int64
 	systemMessage string
 	extraHeaders  map[string]string
 	extraParams   map[string]string
@@ -118,12 +117,6 @@ func WithModel(model config.ModelType) ProviderClientOption {
 func WithDisableCache(disableCache bool) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.disableCache = disableCache
-	}
-}
-
-func WithMaxTokens(maxTokens int64) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.maxTokens = maxTokens
 	}
 }
 

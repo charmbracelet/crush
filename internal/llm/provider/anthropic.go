@@ -164,9 +164,19 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	// 	}
 	// }
 
+	cfg := config.Get()
+	modelConfig := cfg.Models.Large
+	if a.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
+
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(model.ID),
-		MaxTokens:   a.providerOptions.maxTokens,
+		MaxTokens:   maxTokens,
 		Temperature: temperature,
 		Messages:    messages,
 		Tools:       tools,

@@ -157,9 +157,12 @@ type Options struct {
 }
 
 type PreferredModel struct {
-	ModelID         string                     `json:"model_id"`
-	Provider        provider.InferenceProvider `json:"provider"`
-	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
+	ModelID  string                     `json:"model_id"`
+	Provider provider.InferenceProvider `json:"provider"`
+	// Overrides the default reasoning effort for this model
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Overrides the default max tokens for this model
+	MaxTokens int64 `json:"max_tokens,omitempty"`
 }
 
 type PreferredModels struct {

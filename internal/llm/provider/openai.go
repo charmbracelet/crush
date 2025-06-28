@@ -160,8 +160,13 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		Messages: messages,
 		Tools:    tools,
 	}
+
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
 	if model.CanReason {
-		params.MaxCompletionTokens = openai.Int(o.providerOptions.maxTokens)
+		params.MaxCompletionTokens = openai.Int(maxTokens)
 		switch reasoningEffort {
 		case "low":
 			params.ReasoningEffort = shared.ReasoningEffortLow
@@ -173,7 +178,7 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 			params.ReasoningEffort = shared.ReasoningEffortMedium
 		}
 	} else {
-		params.MaxTokens = openai.Int(o.providerOptions.maxTokens)
+		params.MaxTokens = openai.Int(maxTokens)
 	}
 
 	return params

@@ -147,7 +147,6 @@ func NewAgent(
 	opts := []provider.ProviderClientOption{
 		provider.WithModel(agentCfg.Model),
 		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID)),
-		provider.WithMaxTokens(model.DefaultMaxTokens),
 	}
 	agentProvider, err := provider.NewProviderV2(providerCfg, opts...)
 	if err != nil {
@@ -184,7 +183,6 @@ func NewAgent(
 	titleOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-		provider.WithMaxTokens(40),
 	}
 	titleProvider, err := provider.NewProviderV2(smallModelProviderCfg, titleOpts...)
 	if err != nil {
@@ -193,7 +191,6 @@ func NewAgent(
 	summarizeOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SmallModel),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
-		provider.WithMaxTokens(smallModel.DefaultMaxTokens),
 	}
 	summarizeProvider, err := provider.NewProviderV2(smallModelProviderCfg, summarizeOpts...)
 	if err != nil {
@@ -832,7 +829,6 @@ func (a *agent) UpdateModel() error {
 		opts := []provider.ProviderClientOption{
 			provider.WithModel(a.agentCfg.Model),
 			provider.WithSystemMessage(prompt.GetPrompt(promptID, currentProviderCfg.ID)),
-			provider.WithMaxTokens(model.DefaultMaxTokens),
 		}
 
 		newProvider, err := provider.NewProviderV2(currentProviderCfg, opts...)
@@ -877,7 +873,6 @@ func (a *agent) UpdateModel() error {
 		titleOpts := []provider.ProviderClientOption{
 			provider.WithModel(config.SmallModel),
 			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-			provider.WithMaxTokens(40),
 		}
 		newTitleProvider, err := provider.NewProviderV2(smallModelProviderCfg, titleOpts...)
 		if err != nil {
@@ -888,7 +883,6 @@ func (a *agent) UpdateModel() error {
 		summarizeOpts := []provider.ProviderClientOption{
 			provider.WithModel(config.SmallModel),
 			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
-			provider.WithMaxTokens(smallModel.DefaultMaxTokens),
 		}
 		newSummarizeProvider, err := provider.NewProviderV2(smallModelProviderCfg, summarizeOpts...)
 		if err != nil {

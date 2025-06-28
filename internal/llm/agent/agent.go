@@ -253,10 +253,10 @@ func (a *agent) IsBusy() bool {
 		if cancelFunc, ok := value.(context.CancelFunc); ok {
 			if cancelFunc != nil {
 				busy = true
-				return false // Stop iterating
+				return false
 			}
 		}
-		return true // Continue iterating
+		return true
 	})
 	return busy
 }

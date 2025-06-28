@@ -592,11 +592,11 @@ func mergeProviderConfigs(base, global, local *Config) {
 		if cfg == nil {
 			continue
 		}
-		for providerName, globalProvider := range cfg.Providers {
+		for providerName, p := range cfg.Providers {
 			if _, ok := base.Providers[providerName]; !ok {
-				base.Providers[providerName] = globalProvider
+				base.Providers[providerName] = p
 			} else {
-				base.Providers[providerName] = mergeProviderConfig(providerName, base.Providers[providerName], globalProvider)
+				base.Providers[providerName] = mergeProviderConfig(providerName, base.Providers[providerName], p)
 			}
 		}
 	}

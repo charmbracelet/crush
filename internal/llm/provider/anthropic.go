@@ -21,12 +21,20 @@ import (
 
 type anthropicClient struct {
 	providerOptions providerClientOptions
+	useBedrock      bool
 	client          anthropic.Client
 }
 
 type AnthropicClient ProviderClient
 
 func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicClient {
+	return &anthropicClient{
+		providerOptions: opts,
+		client:          createAnthropicClient(opts, useBedrock),
+	}
+}
+
+func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropic.Client {
 	anthropicClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
@@ -34,12 +42,7 @@ func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicCl
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
-
-	client := anthropic.NewClient(anthropicClientOptions...)
-	return &anthropicClient{
-		providerOptions: opts,
-		client:          client,
-	}
+	return anthropic.NewClient(anthropicClientOptions...)
 }
 
 func (a *anthropicClient) convertMessages(messages []message.Message) (anthropicMessages []anthropic.MessageParam) {
@@ -385,12 +388,21 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 }
 
 func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, error) {
-	var apierr *anthropic.Error
-	if !errors.As(err, &apierr) {
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) {
 		return false, 0, err
 	}
 
-	if apierr.StatusCode != 429 && apierr.StatusCode != 529 {
+	if apiErr.StatusCode == 401 {
+		a.providerOptions.apiKey, err = config.ResolveAPIKey(a.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		a.client = createAnthropicClient(a.providerOptions, a.useBedrock)
+		return true, 0, nil
+	}
+
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
 		return false, 0, err
 	}
 
@@ -399,7 +411,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	retryMs := 0
-	retryAfterValues := apierr.Response.Header.Values("Retry-After")
+	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
 
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)

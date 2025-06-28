@@ -25,7 +25,7 @@ type geminiClient struct {
 type GeminiClient ProviderClient
 
 func newGeminiClient(opts providerClientOptions) GeminiClient {
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: opts.apiKey, Backend: genai.BackendGeminiAPI})
+	client, err := createGeminiClient(opts)
 	if err != nil {
 		logging.Error("Failed to create Gemini client", "error", err)
 		return nil
@@ -35,6 +35,14 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 		providerOptions: opts,
 		client:          client,
 	}
+}
+
+func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
+	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: opts.apiKey, Backend: genai.BackendGeminiAPI})
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Content {
@@ -413,6 +421,19 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	errMsg := err.Error()
 	isRateLimit := contains(errMsg, "rate limit", "quota exceeded", "too many requests")
+
+	// Check for token expiration (401 Unauthorized)
+	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
+		g.providerOptions.apiKey, err = config.ResolveAPIKey(g.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		g.client, err = createGeminiClient(g.providerOptions)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to create Gemini client after API key refresh: %w", err)
+		}
+		return true, 0, nil
+	}
 
 	// Check for common rate limit error messages
 

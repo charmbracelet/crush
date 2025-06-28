@@ -26,6 +26,13 @@ type openaiClient struct {
 type OpenAIClient ProviderClient
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
+	return &openaiClient{
+		providerOptions: opts,
+		client:          createOpenAIClient(opts),
+	}
+}
+
+func createOpenAIClient(opts providerClientOptions) openai.Client {
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
@@ -40,11 +47,7 @@ func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 		}
 	}
 
-	client := openai.NewClient(openaiClientOptions...)
-	return &openaiClient{
-		providerOptions: opts,
-		client:          client,
-	}
+	return openai.NewClient(openaiClientOptions...)
 }
 
 func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
@@ -339,12 +342,22 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 }
 
 func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error) {
-	var apierr *openai.Error
-	if !errors.As(err, &apierr) {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
 		return false, 0, err
 	}
 
-	if apierr.StatusCode != 429 && apierr.StatusCode != 500 {
+	// Check for token expiration (401 Unauthorized)
+	if apiErr.StatusCode == 401 {
+		o.providerOptions.apiKey, err = config.ResolveAPIKey(o.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		o.client = createOpenAIClient(o.providerOptions)
+		return true, 0, nil
+	}
+
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
 		return false, 0, err
 	}
 
@@ -353,7 +366,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	}
 
 	retryMs := 0
-	retryAfterValues := apierr.Response.Header.Values("Retry-After")
+	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
 
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)

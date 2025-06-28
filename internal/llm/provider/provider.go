@@ -60,6 +60,7 @@ type Provider interface {
 
 type providerClientOptions struct {
 	baseURL       string
+	config        config.ProviderConfig
 	apiKey        string
 	modelType     config.ModelType
 	model         func(config.ModelType) config.Model
@@ -134,9 +135,15 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 }
 
 func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+	resolvedAPIKey, err := config.ResolveAPIKey(cfg.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
+	}
+
 	clientOptions := providerClientOptions{
 		baseURL:      cfg.BaseURL,
-		apiKey:       cfg.APIKey,
+		config:       cfg,
+		apiKey:       resolvedAPIKey,
 		extraHeaders: cfg.ExtraHeaders,
 		model: func(tp config.ModelType) config.Model {
 			return config.GetModel(tp)

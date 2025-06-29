@@ -197,7 +197,7 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					// BlockPrefix: "\n",
 					// BlockSuffix: "\n",
-					Color: stringPtr(charmtone.Ash.Hex()),
+					Color: stringPtr(charmtone.Smoke.Hex()),
 				},
 				// Margin: uintPtr(defaultMargin),
 			},
@@ -303,7 +303,7 @@ func (t *Theme) buildStyles() *Styles {
 			CodeBlock: ansi.StyleCodeBlock{
 				StyleBlock: ansi.StyleBlock{
 					StylePrimitive: ansi.StylePrimitive{
-						Color: stringPtr("244"),
+						Color: stringPtr(charmtone.Charcoal.Hex()),
 					},
 					Margin: uintPtr(defaultMargin),
 				},
@@ -325,7 +325,7 @@ func (t *Theme) buildStyles() *Styles {
 						Color: stringPtr(charmtone.Malibu.Hex()),
 					},
 					KeywordReserved: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Dolly.Hex()),
+						Color: stringPtr(charmtone.Pony.Hex()),
 					},
 					KeywordNamespace: ansi.StylePrimitive{
 						Color: stringPtr(charmtone.Pony.Hex()),
@@ -334,7 +334,7 @@ func (t *Theme) buildStyles() *Styles {
 						Color: stringPtr(charmtone.Guppy.Hex()),
 					},
 					Operator: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Coral.Hex()),
+						Color: stringPtr(charmtone.Salmon.Hex()),
 					},
 					Punctuation: ansi.StylePrimitive{
 						Color: stringPtr(charmtone.Zest.Hex()),
@@ -366,7 +366,7 @@ func (t *Theme) buildStyles() *Styles {
 						Color: stringPtr(charmtone.Julep.Hex()),
 					},
 					LiteralString: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Paprika.Hex()),
+						Color: stringPtr(charmtone.Cumin.Hex()),
 					},
 					LiteralStringEscape: ansi.StylePrimitive{
 						Color: stringPtr(charmtone.Bok.Hex()),

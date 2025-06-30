@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -150,28 +149,18 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
 	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
-	// TODO: Implement a proper thinking function
-	// lastMessage := messages[len(messages)-1]
-	// isUser := lastMessage.Role == anthropic.MessageParamRoleUser
-	// messageContent := ""
-	temperature := anthropic.Float(0)
-	// if isUser {
-	// 	for _, m := range lastMessage.Content {
-	// 		if m.OfText != nil && m.OfText.Text != "" {
-	// 			messageContent = m.OfText.Text
-	// 		}
-	// 	}
-	// 	if messageContent != "" && a.shouldThink != nil && a.options.shouldThink(messageContent) {
-	// 		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
-	// 		temperature = anthropic.Float(1)
-	// 	}
-	// }
-
 	cfg := config.Get()
 	modelConfig := cfg.Models.Large
 	if a.providerOptions.modelType == config.SmallModel {
 		modelConfig = cfg.Models.Small
 	}
+	temperature := anthropic.Float(0)
+
+	if a.Model().CanReason && modelConfig.Think {
+		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
+		temperature = anthropic.Float(1)
+	}
+
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
@@ -455,9 +444,4 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 
 func (a *anthropicClient) Model() config.Model {
 	return a.providerOptions.model(a.providerOptions.modelType)
-}
-
-// TODO: check if we need
-func DefaultShouldThinkFn(s string) bool {
-	return strings.Contains(strings.ToLower(s), "think")
 }

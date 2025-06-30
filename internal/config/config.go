@@ -159,10 +159,13 @@ type Options struct {
 type PreferredModel struct {
 	ModelID  string                     `json:"model_id"`
 	Provider provider.InferenceProvider `json:"provider"`
-	// Overrides the default reasoning effort for this model
+	// ReasoningEffort overrides the default reasoning effort for this model
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Overrides the default max tokens for this model
+	// MaxTokens overrides the default max tokens for this model
 	MaxTokens int64 `json:"max_tokens,omitempty"`
+
+	// Think indicates if the model should think, only applicable for anthropic reasoning models
+	Think bool `json:"think,omitempty"`
 }
 
 type PreferredModels struct {

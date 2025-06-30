@@ -83,7 +83,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 	// Retry loop for transaction conflicts
 	for attempt := range maxRetries {
 		// Start a transaction
-		tx, txErr := s.db.Begin()
+		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr != nil {
 			return File{}, fmt.Errorf("failed to begin transaction: %w", txErr)
 		}

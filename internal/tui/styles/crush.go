@@ -13,6 +13,7 @@ func NewCrushTheme() *Theme {
 		Secondary: charmtone.Dolly,
 		Tertiary:  charmtone.Bok,
 		Accent:    charmtone.Zest,
+
 		// Backgrounds
 		BgBase:        charmtone.Pepper,
 		BgBaseLighter: Lighten(charmtone.Pepper, 2),

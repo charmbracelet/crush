@@ -22,9 +22,15 @@ const (
 	defaultWidth = 60
 )
 
+const (
+	LargeModelType int = iota
+	SmallModelType
+)
+
 // ModelSelectedMsg is sent when a model is selected
 type ModelSelectedMsg struct {
-	Model config.PreferredModel
+	Model     config.PreferredModel
+	ModelType config.ModelType
 }
 
 // CloseModelDialogMsg is sent when a model is selected
@@ -42,12 +48,13 @@ type ModelOption struct {
 
 type modelDialogCmp struct {
 	width   int
-	wWidth  int // Width of the terminal window
-	wHeight int // Height of the terminal window
+	wWidth  int
+	wHeight int
 
 	modelList list.ListModel
 	keyMap    KeyMap
 	help      help.Model
+	modelType int
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -80,34 +87,13 @@ func NewModelDialogCmp() ModelDialog {
 		width:     defaultWidth,
 		keyMap:    DefaultKeyMap(),
 		help:      help,
+		modelType: LargeModelType,
 	}
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
-	providers := config.Providers()
-
-	modelItems := []util.Model{}
-	selectIndex := 0
-	agentModel := config.GetAgentModel(config.AgentCoder)
-	agentProvider := config.GetAgentProvider(config.AgentCoder)
-	for _, provider := range providers {
-		name := provider.Name
-		if name == "" {
-			name = string(provider.ID)
-		}
-		modelItems = append(modelItems, commands.NewItemSection(name))
-		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
-				Provider: provider,
-				Model:    model,
-			}))
-			if model.ID == agentModel.ID && provider.ID == agentProvider.ID {
-				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
-			}
-		}
-	}
-
-	return tea.Sequence(m.modelList.Init(), m.modelList.SetItems(modelItems), m.modelList.SetSelected(selectIndex))
+	m.SetModelType(m.modelType)
+	return m.modelList.Init()
 }
 
 func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,24 +101,41 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.wWidth = msg.Width
 		m.wHeight = msg.Height
+		m.SetModelType(m.modelType)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Select):
 			selectedItemInx := m.modelList.SelectedIndex()
 			if selectedItemInx == list.NoSelection {
-				return m, nil // No item selected, do nothing
+				return m, nil
 			}
 			items := m.modelList.Items()
 			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(ModelOption)
 
+			var modelType config.ModelType
+			if m.modelType == LargeModelType {
+				modelType = config.LargeModel
+			} else {
+				modelType = config.SmallModel
+			}
+
 			return m, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				util.CmdHandler(ModelSelectedMsg{Model: config.PreferredModel{
-					ModelID:  selectedItem.Model.ID,
-					Provider: selectedItem.Provider.ID,
-				}}),
+				util.CmdHandler(ModelSelectedMsg{
+					Model: config.PreferredModel{
+						ModelID:  selectedItem.Model.ID,
+						Provider: selectedItem.Provider.ID,
+					},
+					ModelType: modelType,
+				}),
 			)
+		case key.Matches(msg, m.keyMap.Tab):
+			if m.modelType == LargeModelType {
+				return m, m.SetModelType(SmallModelType)
+			} else {
+				return m, m.SetModelType(LargeModelType)
+			}
 		case key.Matches(msg, m.keyMap.Close):
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
@@ -147,9 +150,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *modelDialogCmp) View() tea.View {
 	t := styles.CurrentTheme()
 	listView := m.modelList.View()
+	radio := m.modelTypeRadio()
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-4)),
+		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-lipgloss.Width(radio)-5)+" "+radio),
 		listView.String(),
 		"",
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
@@ -196,4 +200,50 @@ func (m *modelDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 
 func (m *modelDialogCmp) ID() dialogs.DialogID {
 	return ModelsDialogID
+}
+
+func (m *modelDialogCmp) modelTypeRadio() string {
+	t := styles.CurrentTheme()
+	choices := []string{"Large", "Small"}
+	iconSelected := "◉"
+	iconUnselected := "○"
+	if m.modelType == LargeModelType {
+		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + " " + iconUnselected + " " + choices[1])
+	}
+	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + " " + iconSelected + " " + choices[1])
+}
+
+func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
+	m.modelType = modelType
+
+	providers := config.Providers()
+	modelItems := []util.Model{}
+	selectIndex := 0
+	
+	cfg := config.Get()
+	var currentModel config.PreferredModel
+	if m.modelType == LargeModelType {
+		currentModel = cfg.Models.Large
+	} else {
+		currentModel = cfg.Models.Small
+	}
+	
+	for _, provider := range providers {
+		name := provider.Name
+		if name == "" {
+			name = string(provider.ID)
+		}
+		modelItems = append(modelItems, commands.NewItemSection(name))
+		for _, model := range provider.Models {
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				Provider: provider,
+				Model:    model,
+			}))
+			if model.ID == currentModel.ModelID && provider.ID == currentModel.Provider {
+				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
+			}
+		}
+	}
+
+	return tea.Sequence(m.modelList.SetItems(modelItems), m.modelList.SetSelected(selectIndex))
 }

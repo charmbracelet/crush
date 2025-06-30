@@ -172,7 +172,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		config.UpdatePreferredModel(config.LargeModel, msg.Model)
+		config.UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
@@ -180,7 +180,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.ModelID, err))
 		}
 
-		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", msg.Model.ModelID))
+		modelTypeName := "large"
+		if msg.ModelType == config.SmallModel {
+			modelTypeName = "small"
+		}
+		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.ModelID))
 
 	// File Picker
 	case chat.OpenFilePickerMsg:

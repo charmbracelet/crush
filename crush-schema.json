@@ -1,492 +1,47 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Crush Configuration",
-  "description": "Configuration schema for the Crush application",
-  "type": "object",
-  "properties": {
-    "agents": {
-      "description": "Agent configurations for different tasks",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "allowed_lsp": {
-            "description": "List of LSP servers this agent can use (if nil, all LSPs are allowed)",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "allowed_mcp": {
-            "description": "Map of MCP servers this agent can use and their allowed tools",
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "allowed_tools": {
-            "description": "List of tools this agent is allowed to use (if nil, all tools are allowed)",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "bash",
-                "edit",
-                "fetch",
-                "glob",
-                "grep",
-                "ls",
-                "sourcegraph",
-                "view",
-                "write",
-                "agent"
-              ]
-            }
-          },
-          "context_paths": {
-            "description": "Custom context paths for this agent (additive to global context paths)",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "description": {
-            "description": "Description",
-            "type": "string"
-          },
-          "disabled": {
-            "description": "Disabled",
-            "type": "boolean",
-            "default": false
-          },
-          "id": {
-            "description": "I D",
-            "type": "string",
-            "enum": [
-              "coder",
-              "task"
-            ]
-          },
-          "model": {
-            "description": "Model",
-            "type": "string",
-            "enum": [
-              "large",
-              "small"
-            ]
-          },
-          "name": {
-            "description": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "disabled",
-          "model",
-          "allowed_tools",
-          "allowed_mcp",
-          "allowed_lsp",
-          "context_paths"
-        ]
-      }
-    },
-    "lsp": {
-      "description": "Language Server Protocol configurations",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "args": {
-            "description": "Args",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "command": {
-            "description": "Command",
-            "type": "string"
-          },
-          "enabled": {
-            "description": "Disabled",
-            "type": "boolean",
-            "default": true
-          },
-          "options": {
-            "description": "Options"
-          }
-        },
-        "required": [
-          "enabled",
-          "command",
-          "args",
-          "options"
-        ]
-      }
-    },
-    "mcp": {
-      "description": "Model Control Protocol server configurations",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "args": {
-            "description": "Args",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "command": {
-            "description": "Command to execute for stdio MCP servers",
-            "type": "string"
-          },
-          "env": {
-            "description": "Env list",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "headers": {
-            "description": "HTTP headers for SSE MCP servers",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "type": {
-            "description": "Type",
-            "type": "string",
-            "enum": [
-              "stdio",
-              "sse"
-            ],
-            "default": "stdio"
-          },
-          "url": {
-            "description": "URL for SSE MCP servers",
-            "type": "string"
-          }
-        },
-        "required": [
-          "command",
-          "env",
-          "args",
-          "type",
-          "url",
-          "headers"
-        ]
-      }
-    },
-    "models": {
-      "description": "Preferred model configurations for large and small model types",
-      "type": "object",
-      "properties": {
-        "large": {
-          "description": "Large",
-          "type": "object",
-          "properties": {
-            "max_tokens": {
-              "description": "Max Tokens",
-              "type": "integer"
-            },
-            "model_id": {
-              "description": "Model I D",
-              "type": "string",
-              "enum": [
-                "claude-3-opus",
-                "claude-3-haiku",
-                "claude-3-5-sonnet-20241022",
-                "claude-3-5-haiku-20241022",
-                "gpt-4",
-                "gpt-3.5-turbo",
-                "gpt-4-turbo",
-                "gpt-4o",
-                "gpt-4o-mini",
-                "o1-preview",
-                "o1-mini",
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "grok-beta",
-                "anthropic/claude-3.5-sonnet",
-                "anthropic/claude-3.5-haiku"
-              ]
-            },
-            "provider": {
-              "description": "Provider",
-              "type": "string",
-              "enum": [
-                "anthropic",
-                "openai",
-                "gemini",
-                "xai",
-                "openrouter"
-              ]
-            },
-            "reasoning_effort": {
-              "description": "Reasoning Effort",
-              "type": "string"
-            },
-            "think": {
-              "description": "Enable think",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "model_id",
-            "provider"
-          ]
-        },
-        "small": {
-          "description": "Small",
-          "$ref": "#/definitions/PreferredModel"
-        }
-      },
-      "required": [
-        "large",
-        "small"
-      ]
-    },
-    "options": {
-      "description": "General application options and settings",
-      "type": "object",
-      "properties": {
-        "context_paths": {
-          "description": "Context Paths",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            ".github/copilot-instructions.md",
-            ".cursorrules",
-            ".cursor/rules/",
-            "CLAUDE.md",
-            "CLAUDE.local.md",
-            "GEMINI.md",
-            "gemini.md",
-            "crush.md",
-            "crush.local.md",
-            "Crush.md",
-            "Crush.local.md",
-            "CRUSH.md",
-            "CRUSH.local.md"
-          ]
-        },
-        "data_directory": {
-          "description": "Data Directory",
-          "type": "string",
-          "default": ".crush"
-        },
-        "debug": {
-          "description": "Enable debug",
-          "type": "boolean",
-          "default": false
-        },
-        "debug_lsp": {
-          "description": "Enable debug l s p",
-          "type": "boolean",
-          "default": false
-        },
-        "disable_auto_summarize": {
-          "description": "Disable Auto Summarize",
-          "type": "boolean",
-          "default": false
-        },
-        "tui": {
-          "description": "T U I",
-          "type": "object",
-          "properties": {
-            "compact_mode": {
-              "description": "Enable compact mode",
-              "type": "boolean",
-              "default": false
-            }
-          },
-          "required": [
-            "compact_mode"
-          ]
-        }
-      },
-      "required": [
-        "context_paths",
-        "tui",
-        "debug",
-        "debug_lsp",
-        "disable_auto_summarize",
-        "data_directory"
-      ]
-    },
-    "providers": {
-      "description": "LLM provider configurations",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "api_key": {
-            "description": "API key for authenticating with the provider",
-            "type": "string"
-          },
-          "base_url": {
-            "description": "Base URL for the provider API (required for custom providers)",
-            "type": "string"
-          },
-          "default_large_model": {
-            "description": "Default Large Model",
-            "type": "string"
-          },
-          "default_small_model": {
-            "description": "Default Small Model",
-            "type": "string"
-          },
-          "disabled": {
-            "description": "Disabled",
-            "type": "boolean",
-            "default": false
-          },
-          "extra_headers": {
-            "description": "Additional HTTP headers to send with requests",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "extra_params": {
-            "description": "Additional provider-specific parameters",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "id": {
-            "description": "I D",
-            "type": "string",
-            "enum": [
-              "anthropic",
-              "openai",
-              "gemini",
-              "xai",
-              "openrouter"
-            ]
-          },
-          "models": {
-            "description": "Models",
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "can_reason": {
-                  "description": "Enable can reason",
-                  "type": "boolean"
-                },
-                "context_window": {
-                  "description": "Context Window",
-                  "type": "integer"
-                },
-                "cost_per_1m_in": {
-                  "description": "Cost Per1 M In",
-                  "type": "number"
-                },
-                "cost_per_1m_in_cached": {
-                  "description": "Cost Per1 M In Cached",
-                  "type": "number"
-                },
-                "cost_per_1m_out": {
-                  "description": "Cost Per1 M Out",
-                  "type": "number"
-                },
-                "cost_per_1m_out_cached": {
-                  "description": "Cost Per1 M Out Cached",
-                  "type": "number"
-                },
-                "default_max_tokens": {
-                  "description": "Default Max Tokens",
-                  "type": "integer"
-                },
-                "has_reasoning_effort": {
-                  "description": "Enable has reasoning effort",
-                  "type": "boolean"
-                },
-                "id": {
-                  "description": "I D",
-                  "type": "string"
-                },
-                "model": {
-                  "description": "Name",
-                  "type": "string"
-                },
-                "reasoning_effort": {
-                  "description": "Reasoning Effort",
-                  "type": "string"
-                },
-                "supports_attachments": {
-                  "description": "Enable supports images",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "id",
-                "model",
-                "cost_per_1m_in",
-                "cost_per_1m_out",
-                "cost_per_1m_in_cached",
-                "cost_per_1m_out_cached",
-                "context_window",
-                "default_max_tokens",
-                "can_reason",
-                "reasoning_effort",
-                "has_reasoning_effort",
-                "supports_attachments"
-              ]
-            }
-          },
-          "provider_type": {
-            "description": "Provider Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "provider_type",
-          "disabled"
-        ]
-      }
-    }
-  },
-  "required": [
-    "models",
-    "options"
-  ],
-  "definitions": {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
     "Agent": {
-      "type": "object",
       "properties": {
-        "allowed_lsp": {
-          "description": "List of LSP servers this agent can use (if nil, all LSPs are allowed)",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "id": {
+          "type": "string",
+          "enum": [
+            "coder",
+            "task",
+            "coder",
+            "task"
+          ],
+          "title": "Agent ID",
+          "description": "Unique identifier for the agent"
         },
-        "allowed_mcp": {
-          "description": "Map of MCP servers this agent can use and their allowed tools",
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
+        "name": {
+          "type": "string",
+          "title": "Name",
+          "description": "Display name of the agent"
+        },
+        "description": {
+          "type": "string",
+          "title": "Description",
+          "description": "Description of what the agent does"
+        },
+        "disabled": {
+          "type": "boolean",
+          "title": "Disabled",
+          "description": "Whether this agent is disabled",
+          "default": false
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "large",
+            "small",
+            "large",
+            "small"
+          ],
+          "title": "Model Type",
+          "description": "Type of model to use (large or small)"
         },
         "allowed_tools": {
-          "description": "List of tools this agent is allowed to use (if nil, all tools are allowed)",
-          "type": "array",
           "items": {
             "type": "string",
             "enum": [
@@ -501,652 +56,200 @@
               "write",
               "agent"
             ]
-          }
-        },
-        "context_paths": {
-          "description": "Custom context paths for this agent (additive to global context paths)",
+          },
           "type": "array",
+          "title": "Allowed Tools",
+          "description": "List of tools this agent is allowed to use (if nil all tools are allowed)"
+        },
+        "allowed_mcp": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "title": "Allowed MCP",
+          "description": "Map of MCP servers this agent can use and their allowed tools"
+        },
+        "allowed_lsp": {
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array",
+          "title": "Allowed LSP",
+          "description": "List of LSP servers this agent can use (if nil all LSPs are allowed)"
         },
-        "description": {
-          "description": "Description",
-          "type": "string"
-        },
-        "disabled": {
-          "description": "Disabled",
-          "type": "boolean",
-          "default": false
-        },
-        "id": {
-          "description": "I D",
-          "type": "string",
-          "enum": [
-            "coder",
-            "task"
-          ]
-        },
-        "model": {
-          "description": "Model",
-          "type": "string",
-          "enum": [
-            "large",
-            "small"
-          ]
-        },
-        "name": {
-          "description": "Name",
-          "type": "string"
+        "context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Context Paths",
+          "description": "Custom context paths for this agent (additive to global context paths)"
         }
       },
-      "required": [
-        "id",
-        "name",
-        "disabled",
-        "model",
-        "allowed_tools",
-        "allowed_mcp",
-        "allowed_lsp",
-        "context_paths"
-      ]
-    },
-    "Config": {
       "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Agent configurations for different tasks",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "allowed_lsp": {
-                "description": "List of LSP servers this agent can use (if nil, all LSPs are allowed)",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "allowed_mcp": {
-                "description": "Map of MCP servers this agent can use and their allowed tools",
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "allowed_tools": {
-                "description": "List of tools this agent is allowed to use (if nil, all tools are allowed)",
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "bash",
-                    "edit",
-                    "fetch",
-                    "glob",
-                    "grep",
-                    "ls",
-                    "sourcegraph",
-                    "view",
-                    "write",
-                    "agent"
-                  ]
-                }
-              },
-              "context_paths": {
-                "description": "Custom context paths for this agent (additive to global context paths)",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "description": {
-                "description": "Description",
-                "type": "string"
-              },
-              "disabled": {
-                "description": "Disabled",
-                "type": "boolean",
-                "default": false
-              },
-              "id": {
-                "description": "I D",
-                "type": "string",
-                "enum": [
-                  "coder",
-                  "task"
-                ]
-              },
-              "model": {
-                "description": "Model",
-                "type": "string",
-                "enum": [
-                  "large",
-                  "small"
-                ]
-              },
-              "name": {
-                "description": "Name",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "name",
-              "disabled",
-              "model",
-              "allowed_tools",
-              "allowed_mcp",
-              "allowed_lsp",
-              "context_paths"
-            ]
-          }
-        },
-        "lsp": {
-          "description": "Language Server Protocol configurations",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "args": {
-                "description": "Args",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "command": {
-                "description": "Command",
-                "type": "string"
-              },
-              "enabled": {
-                "description": "Disabled",
-                "type": "boolean",
-                "default": true
-              },
-              "options": {
-                "description": "Options"
-              }
-            },
-            "required": [
-              "enabled",
-              "command",
-              "args",
-              "options"
-            ]
-          }
-        },
-        "mcp": {
-          "description": "Model Control Protocol server configurations",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "args": {
-                "description": "Args",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "command": {
-                "description": "Command to execute for stdio MCP servers",
-                "type": "string"
-              },
-              "env": {
-                "description": "Env list",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "headers": {
-                "description": "HTTP headers for SSE MCP servers",
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "description": "Type",
-                "type": "string",
-                "enum": [
-                  "stdio",
-                  "sse"
-                ],
-                "default": "stdio"
-              },
-              "url": {
-                "description": "URL for SSE MCP servers",
-                "type": "string"
-              }
-            },
-            "required": [
-              "command",
-              "env",
-              "args",
-              "type",
-              "url",
-              "headers"
-            ]
-          }
-        },
-        "models": {
-          "description": "Preferred model configurations for large and small model types",
-          "type": "object",
-          "properties": {
-            "large": {
-              "description": "Large",
-              "type": "object",
-              "properties": {
-                "max_tokens": {
-                  "description": "Max Tokens",
-                  "type": "integer"
-                },
-                "model_id": {
-                  "description": "Model I D",
-                  "type": "string",
-                  "enum": [
-                    "claude-3-opus",
-                    "claude-3-haiku",
-                    "claude-3-5-sonnet-20241022",
-                    "claude-3-5-haiku-20241022",
-                    "gpt-4",
-                    "gpt-3.5-turbo",
-                    "gpt-4-turbo",
-                    "gpt-4o",
-                    "gpt-4o-mini",
-                    "o1-preview",
-                    "o1-mini",
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "grok-beta",
-                    "anthropic/claude-3.5-sonnet",
-                    "anthropic/claude-3.5-haiku"
-                  ]
-                },
-                "provider": {
-                  "description": "Provider",
-                  "type": "string",
-                  "enum": [
-                    "anthropic",
-                    "openai",
-                    "gemini",
-                    "xai",
-                    "openrouter"
-                  ]
-                },
-                "reasoning_effort": {
-                  "description": "Reasoning Effort",
-                  "type": "string"
-                },
-                "think": {
-                  "description": "Enable think",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "model_id",
-                "provider"
-              ]
-            },
-            "small": {
-              "description": "Small",
-              "$ref": "#/definitions/PreferredModel"
-            }
-          },
-          "required": [
-            "large",
-            "small"
-          ]
-        },
-        "options": {
-          "description": "General application options and settings",
-          "type": "object",
-          "properties": {
-            "context_paths": {
-              "description": "Context Paths",
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "default": [
-                ".github/copilot-instructions.md",
-                ".cursorrules",
-                ".cursor/rules/",
-                "CLAUDE.md",
-                "CLAUDE.local.md",
-                "GEMINI.md",
-                "gemini.md",
-                "crush.md",
-                "crush.local.md",
-                "Crush.md",
-                "Crush.local.md",
-                "CRUSH.md",
-                "CRUSH.local.md"
-              ]
-            },
-            "data_directory": {
-              "description": "Data Directory",
-              "type": "string",
-              "default": ".crush"
-            },
-            "debug": {
-              "description": "Enable debug",
-              "type": "boolean",
-              "default": false
-            },
-            "debug_lsp": {
-              "description": "Enable debug l s p",
-              "type": "boolean",
-              "default": false
-            },
-            "disable_auto_summarize": {
-              "description": "Disable Auto Summarize",
-              "type": "boolean",
-              "default": false
-            },
-            "tui": {
-              "description": "T U I",
-              "type": "object",
-              "properties": {
-                "compact_mode": {
-                  "description": "Enable compact mode",
-                  "type": "boolean",
-                  "default": false
-                }
-              },
-              "required": [
-                "compact_mode"
-              ]
-            }
-          },
-          "required": [
-            "context_paths",
-            "tui",
-            "debug",
-            "debug_lsp",
-            "disable_auto_summarize",
-            "data_directory"
-          ]
-        },
-        "providers": {
-          "description": "LLM provider configurations",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "api_key": {
-                "description": "API key for authenticating with the provider",
-                "type": "string"
-              },
-              "base_url": {
-                "description": "Base URL for the provider API (required for custom providers)",
-                "type": "string"
-              },
-              "default_large_model": {
-                "description": "Default Large Model",
-                "type": "string"
-              },
-              "default_small_model": {
-                "description": "Default Small Model",
-                "type": "string"
-              },
-              "disabled": {
-                "description": "Disabled",
-                "type": "boolean",
-                "default": false
-              },
-              "extra_headers": {
-                "description": "Additional HTTP headers to send with requests",
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "extra_params": {
-                "description": "Additional provider-specific parameters",
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "id": {
-                "description": "I D",
-                "type": "string",
-                "enum": [
-                  "anthropic",
-                  "openai",
-                  "gemini",
-                  "xai",
-                  "openrouter"
-                ]
-              },
-              "models": {
-                "description": "Models",
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "can_reason": {
-                      "description": "Enable can reason",
-                      "type": "boolean"
-                    },
-                    "context_window": {
-                      "description": "Context Window",
-                      "type": "integer"
-                    },
-                    "cost_per_1m_in": {
-                      "description": "Cost Per1 M In",
-                      "type": "number"
-                    },
-                    "cost_per_1m_in_cached": {
-                      "description": "Cost Per1 M In Cached",
-                      "type": "number"
-                    },
-                    "cost_per_1m_out": {
-                      "description": "Cost Per1 M Out",
-                      "type": "number"
-                    },
-                    "cost_per_1m_out_cached": {
-                      "description": "Cost Per1 M Out Cached",
-                      "type": "number"
-                    },
-                    "default_max_tokens": {
-                      "description": "Default Max Tokens",
-                      "type": "integer"
-                    },
-                    "has_reasoning_effort": {
-                      "description": "Enable has reasoning effort",
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "description": "I D",
-                      "type": "string"
-                    },
-                    "model": {
-                      "description": "Name",
-                      "type": "string"
-                    },
-                    "reasoning_effort": {
-                      "description": "Reasoning Effort",
-                      "type": "string"
-                    },
-                    "supports_attachments": {
-                      "description": "Enable supports images",
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "model",
-                    "cost_per_1m_in",
-                    "cost_per_1m_out",
-                    "cost_per_1m_in_cached",
-                    "cost_per_1m_out_cached",
-                    "context_window",
-                    "default_max_tokens",
-                    "can_reason",
-                    "reasoning_effort",
-                    "has_reasoning_effort",
-                    "supports_attachments"
-                  ]
-                }
-              },
-              "provider_type": {
-                "description": "Provider Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "provider_type",
-              "disabled"
-            ]
-          }
-        }
-      },
       "required": [
-        "models",
-        "options"
+        "model"
       ]
     },
     "LSPConfig": {
-      "type": "object",
       "properties": {
-        "args": {
-          "description": "Args",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "command": {
-          "description": "Command",
-          "type": "string"
-        },
         "enabled": {
-          "description": "Disabled",
           "type": "boolean",
+          "title": "Enabled",
+          "description": "Whether this LSP server is enabled",
           "default": true
         },
+        "command": {
+          "type": "string",
+          "title": "Command",
+          "description": "Command to execute for the LSP server"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "title": "Arguments",
+          "description": "Command line arguments for the LSP server"
+        },
         "options": {
-          "description": "Options"
+          "title": "Options",
+          "description": "LSP server specific options"
         }
       },
+      "type": "object",
       "required": [
-        "enabled",
-        "command",
-        "args",
-        "options"
+        "command"
       ]
     },
     "MCP": {
-      "type": "object",
       "properties": {
-        "args": {
-          "description": "Args",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "command": {
-          "description": "Command to execute for stdio MCP servers",
-          "type": "string"
+          "type": "string",
+          "title": "Command",
+          "description": "Command to execute for stdio MCP servers"
         },
         "env": {
-          "description": "Env list",
-          "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array",
+          "title": "Environment",
+          "description": "Environment variables for the MCP server"
         },
-        "headers": {
-          "description": "HTTP headers for SSE MCP servers",
-          "type": "object",
-          "additionalProperties": {
+        "args": {
+          "items": {
             "type": "string"
-          }
+          },
+          "type": "array",
+          "title": "Arguments",
+          "description": "Command line arguments for the MCP server"
         },
         "type": {
-          "description": "Type",
           "type": "string",
           "enum": [
             "stdio",
+            "sse",
+            "stdio",
             "sse"
           ],
+          "title": "Type",
+          "description": "Type of MCP connection",
           "default": "stdio"
         },
         "url": {
-          "description": "URL for SSE MCP servers",
-          "type": "string"
+          "type": "string",
+          "title": "URL",
+          "description": "URL for SSE MCP servers"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "title": "Headers",
+          "description": "HTTP headers for SSE MCP servers"
         }
       },
+      "type": "object",
       "required": [
         "command",
-        "env",
-        "args",
-        "type",
-        "url",
-        "headers"
+        "type"
       ]
     },
     "Model": {
-      "type": "object",
       "properties": {
-        "can_reason": {
-          "description": "Enable can reason",
-          "type": "boolean"
-        },
-        "context_window": {
-          "description": "Context Window",
-          "type": "integer"
-        },
-        "cost_per_1m_in": {
-          "description": "Cost Per1 M In",
-          "type": "number"
-        },
-        "cost_per_1m_in_cached": {
-          "description": "Cost Per1 M In Cached",
-          "type": "number"
-        },
-        "cost_per_1m_out": {
-          "description": "Cost Per1 M Out",
-          "type": "number"
-        },
-        "cost_per_1m_out_cached": {
-          "description": "Cost Per1 M Out Cached",
-          "type": "number"
-        },
-        "default_max_tokens": {
-          "description": "Default Max Tokens",
-          "type": "integer"
-        },
-        "has_reasoning_effort": {
-          "description": "Enable has reasoning effort",
-          "type": "boolean"
-        },
         "id": {
-          "description": "I D",
-          "type": "string"
+          "type": "string",
+          "title": "Model ID",
+          "description": "Unique identifier for the model"
         },
         "model": {
-          "description": "Name",
-          "type": "string"
+          "type": "string",
+          "title": "Model Name",
+          "description": "Display name of the model"
+        },
+        "cost_per_1m_in": {
+          "type": "number",
+          "minimum": 0,
+          "title": "Input Cost",
+          "description": "Cost per 1 million input tokens"
+        },
+        "cost_per_1m_out": {
+          "type": "number",
+          "minimum": 0,
+          "title": "Output Cost",
+          "description": "Cost per 1 million output tokens"
+        },
+        "cost_per_1m_in_cached": {
+          "type": "number",
+          "minimum": 0,
+          "title": "Cached Input Cost",
+          "description": "Cost per 1 million cached input tokens"
+        },
+        "cost_per_1m_out_cached": {
+          "type": "number",
+          "minimum": 0,
+          "title": "Cached Output Cost",
+          "description": "Cost per 1 million cached output tokens"
+        },
+        "context_window": {
+          "type": "integer",
+          "minimum": 1,
+          "title": "Context Window",
+          "description": "Maximum context window size in tokens"
+        },
+        "default_max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "title": "Default Max Tokens",
+          "description": "Default maximum tokens for responses"
+        },
+        "can_reason": {
+          "type": "boolean",
+          "title": "Can Reason",
+          "description": "Whether the model supports reasoning capabilities"
         },
         "reasoning_effort": {
-          "description": "Reasoning Effort",
-          "type": "string"
+          "type": "string",
+          "title": "Reasoning Effort",
+          "description": "Default reasoning effort level for reasoning models"
+        },
+        "has_reasoning_effort": {
+          "type": "boolean",
+          "title": "Has Reasoning Effort",
+          "description": "Whether the model supports reasoning effort configuration"
         },
         "supports_attachments": {
-          "description": "Enable supports images",
-          "type": "boolean"
+          "type": "boolean",
+          "title": "Supports Images",
+          "description": "Whether the model supports image attachments"
         }
       },
+      "type": "object",
       "required": [
         "id",
         "model",
@@ -1163,15 +266,14 @@
       ]
     },
     "Options": {
-      "description": "General application options and settings",
-      "type": "object",
       "properties": {
         "context_paths": {
-          "description": "Context Paths",
-          "type": "array",
           "items": {
             "type": "string"
           },
+          "type": "array",
+          "title": "Context Paths",
+          "description": "List of paths to search for context files",
           "default": [
             ".github/copilot-instructions.md",
             ".cursorrules",
@@ -1188,318 +290,419 @@
             "CRUSH.local.md"
           ]
         },
-        "data_directory": {
-          "description": "Data Directory",
-          "type": "string",
-          "default": ".crush"
+        "tui": {
+          "$ref": "#/$defs/TUIOptions",
+          "title": "TUI Options",
+          "description": "Terminal UI configuration options"
         },
         "debug": {
-          "description": "Enable debug",
           "type": "boolean",
+          "title": "Debug",
+          "description": "Enable debug logging",
           "default": false
         },
         "debug_lsp": {
-          "description": "Enable debug l s p",
           "type": "boolean",
+          "title": "Debug LSP",
+          "description": "Enable LSP debug logging",
           "default": false
         },
         "disable_auto_summarize": {
-          "description": "Disable Auto Summarize",
           "type": "boolean",
+          "title": "Disable Auto Summarize",
+          "description": "Disable automatic conversation summarization",
           "default": false
         },
-        "tui": {
-          "description": "T U I",
-          "type": "object",
-          "properties": {
-            "compact_mode": {
-              "description": "Enable compact mode",
-              "type": "boolean",
-              "default": false
-            }
-          },
-          "required": [
-            "compact_mode"
-          ]
+        "data_directory": {
+          "type": "string",
+          "title": "Data Directory",
+          "description": "Directory for storing application data",
+          "default": ".crush"
         }
       },
-      "required": [
-        "context_paths",
-        "tui",
-        "debug",
-        "debug_lsp",
-        "disable_auto_summarize",
-        "data_directory"
-      ]
+      "type": "object"
     },
     "PreferredModel": {
-      "description": "Large",
-      "type": "object",
       "properties": {
-        "max_tokens": {
-          "description": "Max Tokens",
-          "type": "integer"
-        },
         "model_id": {
-          "description": "Model I D",
           "type": "string",
           "enum": [
-            "claude-3-opus",
-            "claude-3-haiku",
-            "claude-3-5-sonnet-20241022",
+            "claude-opus-4-20250514",
+            "claude-sonnet-4-20250514",
+            "claude-3-7-sonnet-20250219",
             "claude-3-5-haiku-20241022",
-            "gpt-4",
-            "gpt-3.5-turbo",
-            "gpt-4-turbo",
+            "claude-3-5-sonnet-20240620",
+            "claude-3-5-sonnet-20241022",
+            "codex-mini-latest",
+            "o4-mini",
+            "o3",
+            "o3-pro",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4.5-preview",
+            "o3-mini",
             "gpt-4o",
             "gpt-4o-mini",
-            "o1-preview",
-            "o1-mini",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
-            "grok-beta",
+            "codex-mini-latest",
+            "o4-mini",
+            "o3",
+            "o3-pro",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4.5-preview",
+            "o3-mini",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "anthropic.claude-opus-4-20250514-v1:0",
+            "anthropic.claude-sonnet-4-20250514-v1:0",
+            "anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "anthropic.claude-3-5-haiku-20241022-v1:0",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "grok-3-mini",
+            "grok-3",
+            "mistralai/mistral-small-3.2-24b-instruct:free",
+            "mistralai/mistral-small-3.2-24b-instruct",
+            "minimax/minimax-m1:extended",
+            "minimax/minimax-m1",
+            "google/gemini-2.5-flash-lite-preview-06-17",
+            "google/gemini-2.5-flash",
+            "google/gemini-2.5-pro",
+            "openai/o3-pro",
+            "x-ai/grok-3-mini",
+            "x-ai/grok-3",
+            "mistralai/magistral-small-2506",
+            "mistralai/magistral-medium-2506",
+            "mistralai/magistral-medium-2506:thinking",
+            "google/gemini-2.5-pro-preview",
+            "deepseek/deepseek-r1-0528",
+            "anthropic/claude-opus-4",
+            "anthropic/claude-sonnet-4",
+            "mistralai/devstral-small:free",
+            "mistralai/devstral-small",
+            "google/gemini-2.5-flash-preview-05-20",
+            "google/gemini-2.5-flash-preview-05-20:thinking",
+            "openai/codex-mini",
+            "mistralai/mistral-medium-3",
+            "google/gemini-2.5-pro-preview-05-06",
+            "arcee-ai/caller-large",
+            "arcee-ai/virtuoso-large",
+            "arcee-ai/virtuoso-medium-v2",
+            "qwen/qwen3-30b-a3b",
+            "qwen/qwen3-14b",
+            "qwen/qwen3-32b",
+            "qwen/qwen3-235b-a22b",
+            "google/gemini-2.5-flash-preview",
+            "google/gemini-2.5-flash-preview:thinking",
+            "openai/o4-mini-high",
+            "openai/o3",
+            "openai/o4-mini",
+            "openai/gpt-4.1",
+            "openai/gpt-4.1-mini",
+            "openai/gpt-4.1-nano",
+            "x-ai/grok-3-mini-beta",
+            "x-ai/grok-3-beta",
+            "meta-llama/llama-4-maverick",
+            "meta-llama/llama-4-scout",
+            "all-hands/openhands-lm-32b-v0.1",
+            "google/gemini-2.5-pro-exp-03-25",
+            "deepseek/deepseek-chat-v3-0324:free",
+            "deepseek/deepseek-chat-v3-0324",
+            "mistralai/mistral-small-3.1-24b-instruct:free",
+            "mistralai/mistral-small-3.1-24b-instruct",
+            "ai21/jamba-1.6-large",
+            "ai21/jamba-1.6-mini",
+            "openai/gpt-4.5-preview",
+            "google/gemini-2.0-flash-lite-001",
+            "anthropic/claude-3.7-sonnet",
+            "anthropic/claude-3.7-sonnet:beta",
+            "anthropic/claude-3.7-sonnet:thinking",
+            "mistralai/mistral-saba",
+            "openai/o3-mini-high",
+            "google/gemini-2.0-flash-001",
+            "qwen/qwen-turbo",
+            "qwen/qwen-plus",
+            "qwen/qwen-max",
+            "openai/o3-mini",
+            "mistralai/mistral-small-24b-instruct-2501",
+            "deepseek/deepseek-r1-distill-llama-70b",
+            "deepseek/deepseek-r1",
+            "mistralai/codestral-2501",
+            "deepseek/deepseek-chat",
+            "openai/o1",
+            "x-ai/grok-2-1212",
+            "meta-llama/llama-3.3-70b-instruct",
+            "amazon/nova-lite-v1",
+            "amazon/nova-micro-v1",
+            "amazon/nova-pro-v1",
+            "openai/gpt-4o-2024-11-20",
+            "mistralai/mistral-large-2411",
+            "mistralai/mistral-large-2407",
+            "mistralai/pixtral-large-2411",
+            "thedrummer/unslopnemo-12b",
+            "anthropic/claude-3.5-haiku:beta",
+            "anthropic/claude-3.5-haiku",
+            "anthropic/claude-3.5-haiku-20241022:beta",
+            "anthropic/claude-3.5-haiku-20241022",
+            "anthropic/claude-3.5-sonnet:beta",
             "anthropic/claude-3.5-sonnet",
-            "anthropic/claude-3.5-haiku"
-          ]
+            "x-ai/grok-beta",
+            "mistralai/ministral-8b",
+            "mistralai/ministral-3b",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+            "google/gemini-flash-1.5-8b",
+            "meta-llama/llama-3.2-11b-vision-instruct",
+            "meta-llama/llama-3.2-3b-instruct",
+            "qwen/qwen-2.5-72b-instruct",
+            "mistralai/pixtral-12b",
+            "cohere/command-r-plus-08-2024",
+            "cohere/command-r-08-2024",
+            "microsoft/phi-3.5-mini-128k-instruct",
+            "nousresearch/hermes-3-llama-3.1-70b",
+            "openai/gpt-4o-2024-08-06",
+            "meta-llama/llama-3.1-405b-instruct",
+            "meta-llama/llama-3.1-70b-instruct",
+            "meta-llama/llama-3.1-8b-instruct",
+            "mistralai/mistral-nemo",
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o-mini-2024-07-18",
+            "anthropic/claude-3.5-sonnet-20240620:beta",
+            "anthropic/claude-3.5-sonnet-20240620",
+            "mistralai/mistral-7b-instruct-v0.3",
+            "mistralai/mistral-7b-instruct:free",
+            "mistralai/mistral-7b-instruct",
+            "microsoft/phi-3-mini-128k-instruct",
+            "microsoft/phi-3-medium-128k-instruct",
+            "google/gemini-flash-1.5",
+            "openai/gpt-4o-2024-05-13",
+            "openai/gpt-4o",
+            "openai/gpt-4o:extended",
+            "meta-llama/llama-3-8b-instruct",
+            "meta-llama/llama-3-70b-instruct",
+            "mistralai/mixtral-8x22b-instruct",
+            "openai/gpt-4-turbo",
+            "google/gemini-pro-1.5",
+            "cohere/command-r-plus",
+            "cohere/command-r-plus-04-2024",
+            "cohere/command-r",
+            "anthropic/claude-3-haiku:beta",
+            "anthropic/claude-3-haiku",
+            "anthropic/claude-3-opus:beta",
+            "anthropic/claude-3-opus",
+            "anthropic/claude-3-sonnet:beta",
+            "anthropic/claude-3-sonnet",
+            "cohere/command-r-03-2024",
+            "mistralai/mistral-large",
+            "openai/gpt-3.5-turbo-0613",
+            "openai/gpt-4-turbo-preview",
+            "mistralai/mistral-small",
+            "mistralai/mistral-tiny",
+            "mistralai/mixtral-8x7b-instruct",
+            "openai/gpt-4-1106-preview",
+            "mistralai/mistral-7b-instruct-v0.1",
+            "openai/gpt-3.5-turbo-16k",
+            "openai/gpt-4",
+            "openai/gpt-4-0314"
+          ],
+          "title": "Model ID",
+          "description": "ID of the preferred model"
         },
         "provider": {
-          "description": "Provider",
           "type": "string",
           "enum": [
             "anthropic",
             "openai",
             "gemini",
+            "azure",
+            "bedrock",
+            "vertex",
             "xai",
             "openrouter"
-          ]
+          ],
+          "title": "Provider",
+          "description": "Provider for the preferred model"
         },
         "reasoning_effort": {
-          "description": "Reasoning Effort",
-          "type": "string"
+          "type": "string",
+          "title": "Reasoning Effort",
+          "description": "Override reasoning effort for this model"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "title": "Max Tokens",
+          "description": "Override max tokens for this model"
         },
         "think": {
-          "description": "Enable think",
-          "type": "boolean"
+          "type": "boolean",
+          "title": "Think",
+          "description": "Enable thinking for reasoning models",
+          "default": false
         }
       },
+      "type": "object",
       "required": [
         "model_id",
         "provider"
       ]
     },
     "PreferredModels": {
-      "description": "Preferred model configurations for large and small model types",
-      "type": "object",
       "properties": {
         "large": {
-          "description": "Large",
-          "type": "object",
-          "properties": {
-            "max_tokens": {
-              "description": "Max Tokens",
-              "type": "integer"
-            },
-            "model_id": {
-              "description": "Model I D",
-              "type": "string",
-              "enum": [
-                "claude-3-opus",
-                "claude-3-haiku",
-                "claude-3-5-sonnet-20241022",
-                "claude-3-5-haiku-20241022",
-                "gpt-4",
-                "gpt-3.5-turbo",
-                "gpt-4-turbo",
-                "gpt-4o",
-                "gpt-4o-mini",
-                "o1-preview",
-                "o1-mini",
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "grok-beta",
-                "anthropic/claude-3.5-sonnet",
-                "anthropic/claude-3.5-haiku"
-              ]
-            },
-            "provider": {
-              "description": "Provider",
-              "type": "string",
-              "enum": [
-                "anthropic",
-                "openai",
-                "gemini",
-                "xai",
-                "openrouter"
-              ]
-            },
-            "reasoning_effort": {
-              "description": "Reasoning Effort",
-              "type": "string"
-            },
-            "think": {
-              "description": "Enable think",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "model_id",
-            "provider"
-          ]
+          "$ref": "#/$defs/PreferredModel",
+          "title": "Large Model",
+          "description": "Preferred model configuration for large model type"
         },
         "small": {
-          "description": "Small",
-          "$ref": "#/definitions/PreferredModel"
+          "$ref": "#/$defs/PreferredModel",
+          "title": "Small Model",
+          "description": "Preferred model configuration for small model type"
         }
       },
-      "required": [
-        "large",
-        "small"
-      ]
+      "type": "object"
     },
     "ProviderConfig": {
-      "type": "object",
       "properties": {
-        "api_key": {
-          "description": "API key for authenticating with the provider",
-          "type": "string"
-        },
-        "base_url": {
-          "description": "Base URL for the provider API (required for custom providers)",
-          "type": "string"
-        },
-        "default_large_model": {
-          "description": "Default Large Model",
-          "type": "string"
-        },
-        "default_small_model": {
-          "description": "Default Small Model",
-          "type": "string"
-        },
-        "disabled": {
-          "description": "Disabled",
-          "type": "boolean",
-          "default": false
-        },
-        "extra_headers": {
-          "description": "Additional HTTP headers to send with requests",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "extra_params": {
-          "description": "Additional provider-specific parameters",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
         "id": {
-          "description": "I D",
           "type": "string",
           "enum": [
             "anthropic",
             "openai",
             "gemini",
+            "azure",
+            "bedrock",
+            "vertex",
             "xai",
             "openrouter"
-          ]
+          ],
+          "title": "Provider ID",
+          "description": "Unique identifier for the provider"
         },
-        "models": {
-          "description": "Models",
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "can_reason": {
-                "description": "Enable can reason",
-                "type": "boolean"
-              },
-              "context_window": {
-                "description": "Context Window",
-                "type": "integer"
-              },
-              "cost_per_1m_in": {
-                "description": "Cost Per1 M In",
-                "type": "number"
-              },
-              "cost_per_1m_in_cached": {
-                "description": "Cost Per1 M In Cached",
-                "type": "number"
-              },
-              "cost_per_1m_out": {
-                "description": "Cost Per1 M Out",
-                "type": "number"
-              },
-              "cost_per_1m_out_cached": {
-                "description": "Cost Per1 M Out Cached",
-                "type": "number"
-              },
-              "default_max_tokens": {
-                "description": "Default Max Tokens",
-                "type": "integer"
-              },
-              "has_reasoning_effort": {
-                "description": "Enable has reasoning effort",
-                "type": "boolean"
-              },
-              "id": {
-                "description": "I D",
-                "type": "string"
-              },
-              "model": {
-                "description": "Name",
-                "type": "string"
-              },
-              "reasoning_effort": {
-                "description": "Reasoning Effort",
-                "type": "string"
-              },
-              "supports_attachments": {
-                "description": "Enable supports images",
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "id",
-              "model",
-              "cost_per_1m_in",
-              "cost_per_1m_out",
-              "cost_per_1m_in_cached",
-              "cost_per_1m_out_cached",
-              "context_window",
-              "default_max_tokens",
-              "can_reason",
-              "reasoning_effort",
-              "has_reasoning_effort",
-              "supports_attachments"
-            ]
-          }
+        "base_url": {
+          "type": "string",
+          "title": "Base URL",
+          "description": "Base URL for the provider API (required for custom providers)"
         },
         "provider_type": {
-          "description": "Provider Type",
-          "type": "string"
+          "type": "string",
+          "title": "Provider Type",
+          "description": "Type of the provider (openai"
+        },
+        "api_key": {
+          "type": "string",
+          "title": "API Key",
+          "description": "API key for authenticating with the provider"
+        },
+        "disabled": {
+          "type": "boolean",
+          "title": "Disabled",
+          "description": "Whether this provider is disabled",
+          "default": false
+        },
+        "extra_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "title": "Extra Headers",
+          "description": "Additional HTTP headers to send with requests"
+        },
+        "extra_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "title": "Extra Parameters",
+          "description": "Additional provider-specific parameters"
+        },
+        "default_large_model": {
+          "type": "string",
+          "title": "Default Large Model",
+          "description": "Default model ID for large model type"
+        },
+        "default_small_model": {
+          "type": "string",
+          "title": "Default Small Model",
+          "description": "Default model ID for small model type"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/Model"
+          },
+          "type": "array",
+          "title": "Models",
+          "description": "List of available models for this provider"
         }
       },
+      "type": "object",
       "required": [
-        "id",
-        "provider_type",
-        "disabled"
+        "provider_type"
       ]
     },
     "TUIOptions": {
-      "description": "T U I",
-      "type": "object",
       "properties": {
         "compact_mode": {
-          "description": "Enable compact mode",
           "type": "boolean",
+          "title": "Compact Mode",
+          "description": "Enable compact mode for the TUI",
           "default": false
         }
       },
+      "type": "object",
       "required": [
         "compact_mode"
       ]
     }
-  }
+  },
+  "properties": {
+    "models": {
+      "$ref": "#/$defs/PreferredModels",
+      "title": "Models",
+      "description": "Preferred model configurations for large and small model types"
+    },
+    "providers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderConfig"
+      },
+      "type": "object",
+      "title": "Providers",
+      "description": "LLM provider configurations"
+    },
+    "agents": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Agent"
+      },
+      "type": "object",
+      "title": "Agents",
+      "description": "Agent configurations for different tasks"
+    },
+    "mcp": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MCP"
+      },
+      "type": "object",
+      "title": "MCP",
+      "description": "Model Control Protocol server configurations"
+    },
+    "lsp": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LSPConfig"
+      },
+      "type": "object",
+      "title": "LSP",
+      "description": "Language Server Protocol configurations"
+    },
+    "options": {
+      "$ref": "#/$defs/Options",
+      "title": "Options",
+      "description": "General application options and settings"
+    }
+  },
+  "type": "object",
+  "title": "Crush Configuration",
+  "description": "Configuration schema for the Crush application"
 }

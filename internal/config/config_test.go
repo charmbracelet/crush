@@ -1051,7 +1051,6 @@ func TestProviderValidation_KnownProviderValid(t *testing.T) {
 						DefaultMaxTokens: 2048,
 					},
 				},
-
 			},
 		},
 	}

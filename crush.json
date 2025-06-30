@@ -1,6 +1,7 @@
 {
+  "$schema": "./crush-schema.json",
   "lsp": {
-    "Go": {
+    "go": {
       "command": "gopls"
     }
   }

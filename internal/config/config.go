@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/invopop/jsonschema"
 )
 
 const (
@@ -55,18 +56,18 @@ const (
 )
 
 type Model struct {
-	ID                 string  `json:"id"`
-	Name               string  `json:"model"`
-	CostPer1MIn        float64 `json:"cost_per_1m_in"`
-	CostPer1MOut       float64 `json:"cost_per_1m_out"`
-	CostPer1MInCached  float64 `json:"cost_per_1m_in_cached"`
-	CostPer1MOutCached float64 `json:"cost_per_1m_out_cached"`
-	ContextWindow      int64   `json:"context_window"`
-	DefaultMaxTokens   int64   `json:"default_max_tokens"`
-	CanReason          bool    `json:"can_reason"`
-	ReasoningEffort    string  `json:"reasoning_effort"`
-	HasReasoningEffort bool    `json:"has_reasoning_effort"`
-	SupportsImages     bool    `json:"supports_attachments"`
+	ID                 string  `json:"id" jsonschema:"title=Model ID,description=Unique identifier for the model"`
+	Name               string  `json:"model" jsonschema:"title=Model Name,description=Display name of the model"`
+	CostPer1MIn        float64 `json:"cost_per_1m_in" jsonschema:"title=Input Cost,description=Cost per 1 million input tokens,minimum=0"`
+	CostPer1MOut       float64 `json:"cost_per_1m_out" jsonschema:"title=Output Cost,description=Cost per 1 million output tokens,minimum=0"`
+	CostPer1MInCached  float64 `json:"cost_per_1m_in_cached" jsonschema:"title=Cached Input Cost,description=Cost per 1 million cached input tokens,minimum=0"`
+	CostPer1MOutCached float64 `json:"cost_per_1m_out_cached" jsonschema:"title=Cached Output Cost,description=Cost per 1 million cached output tokens,minimum=0"`
+	ContextWindow      int64   `json:"context_window" jsonschema:"title=Context Window,description=Maximum context window size in tokens,minimum=1"`
+	DefaultMaxTokens   int64   `json:"default_max_tokens" jsonschema:"title=Default Max Tokens,description=Default maximum tokens for responses,minimum=1"`
+	CanReason          bool    `json:"can_reason" jsonschema:"title=Can Reason,description=Whether the model supports reasoning capabilities"`
+	ReasoningEffort    string  `json:"reasoning_effort" jsonschema:"title=Reasoning Effort,description=Default reasoning effort level for reasoning models"`
+	HasReasoningEffort bool    `json:"has_reasoning_effort" jsonschema:"title=Has Reasoning Effort,description=Whether the model supports reasoning effort configuration"`
+	SupportsImages     bool    `json:"supports_attachments" jsonschema:"title=Supports Images,description=Whether the model supports image attachments"`
 }
 
 type VertexAIOptions struct {
@@ -76,46 +77,46 @@ type VertexAIOptions struct {
 }
 
 type ProviderConfig struct {
-	ID           provider.InferenceProvider `json:"id"`
-	BaseURL      string                     `json:"base_url,omitempty"`
-	ProviderType provider.Type              `json:"provider_type"`
-	APIKey       string                     `json:"api_key,omitempty"`
-	Disabled     bool                       `json:"disabled"`
-	ExtraHeaders map[string]string          `json:"extra_headers,omitempty"`
+	ID           provider.InferenceProvider `json:"id,omitempty" jsonschema:"title=Provider ID,description=Unique identifier for the provider"`
+	BaseURL      string                     `json:"base_url,omitempty" jsonschema:"title=Base URL,description=Base URL for the provider API (required for custom providers)"`
+	ProviderType provider.Type              `json:"provider_type" jsonschema:"title=Provider Type,description=Type of the provider (openai, anthropic, etc.)"`
+	APIKey       string                     `json:"api_key,omitempty" jsonschema:"title=API Key,description=API key for authenticating with the provider"`
+	Disabled     bool                       `json:"disabled,omitempty" jsonschema:"title=Disabled,description=Whether this provider is disabled,default=false"`
+	ExtraHeaders map[string]string          `json:"extra_headers,omitempty" jsonschema:"title=Extra Headers,description=Additional HTTP headers to send with requests"`
 	// used for e.x for vertex to set the project
-	ExtraParams map[string]string `json:"extra_params,omitempty"`
+	ExtraParams map[string]string `json:"extra_params,omitempty" jsonschema:"title=Extra Parameters,description=Additional provider-specific parameters"`
 
-	DefaultLargeModel string `json:"default_large_model,omitempty"`
-	DefaultSmallModel string `json:"default_small_model,omitempty"`
+	DefaultLargeModel string `json:"default_large_model,omitempty" jsonschema:"title=Default Large Model,description=Default model ID for large model type"`
+	DefaultSmallModel string `json:"default_small_model,omitempty" jsonschema:"title=Default Small Model,description=Default model ID for small model type"`
 
-	Models []Model `json:"models,omitempty"`
+	Models []Model `json:"models,omitempty" jsonschema:"title=Models,description=List of available models for this provider"`
 }
 
 type Agent struct {
-	ID          AgentID `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description,omitempty"`
+	ID          AgentID `json:"id,omitempty" jsonschema:"title=Agent ID,description=Unique identifier for the agent,enum=coder,enum=task"`
+	Name        string  `json:"name,omitempty" jsonschema:"title=Name,description=Display name of the agent"`
+	Description string  `json:"description,omitempty" jsonschema:"title=Description,description=Description of what the agent does"`
 	// This is the id of the system prompt used by the agent
-	Disabled bool `json:"disabled"`
+	Disabled bool `json:"disabled,omitempty" jsonschema:"title=Disabled,description=Whether this agent is disabled,default=false"`
 
-	Model ModelType `json:"model"`
+	Model ModelType `json:"model" jsonschema:"title=Model Type,description=Type of model to use (large or small),enum=large,enum=small"`
 
 	// The available tools for the agent
 	//  if this is nil, all tools are available
-	AllowedTools []string `json:"allowed_tools"`
+	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"title=Allowed Tools,description=List of tools this agent is allowed to use (if nil all tools are allowed)"`
 
 	// this tells us which MCPs are available for this agent
 	//  if this is empty all mcps are available
 	//  the string array is the list of tools from the AllowedMCP the agent has available
 	//  if the string array is nil, all tools from the AllowedMCP are available
-	AllowedMCP map[string][]string `json:"allowed_mcp"`
+	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty" jsonschema:"title=Allowed MCP,description=Map of MCP servers this agent can use and their allowed tools"`
 
 	// The list of LSPs that this agent can use
 	//  if this is nil, all LSPs are available
-	AllowedLSP []string `json:"allowed_lsp"`
+	AllowedLSP []string `json:"allowed_lsp,omitempty" jsonschema:"title=Allowed LSP,description=List of LSP servers this agent can use (if nil all LSPs are allowed)"`
 
 	// Overrides the context paths for this agent
-	ContextPaths []string `json:"context_paths"`
+	ContextPaths []string `json:"context_paths,omitempty" jsonschema:"title=Context Paths,description=Custom context paths for this agent (additive to global context paths)"`
 }
 
 type MCPType string
@@ -126,69 +127,70 @@ const (
 )
 
 type MCP struct {
-	Command string            `json:"command"`
-	Env     []string          `json:"env"`
-	Args    []string          `json:"args"`
-	Type    MCPType           `json:"type"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
+	Command string   `json:"command" jsonschema:"title=Command,description=Command to execute for stdio MCP servers"`
+	Env     []string `json:"env,omitempty" jsonschema:"title=Environment,description=Environment variables for the MCP server"`
+	Args    []string `json:"args,omitempty" jsonschema:"title=Arguments,description=Command line arguments for the MCP server"`
+	Type    MCPType  `json:"type" jsonschema:"title=Type,description=Type of MCP connection,enum=stdio,enum=sse,default=stdio"`
+	URL     string   `json:"url,omitempty" jsonschema:"title=URL,description=URL for SSE MCP servers"`
+	// TODO: maybe make it possible to get the value from the env
+	Headers map[string]string `json:"headers,omitempty" jsonschema:"title=Headers,description=HTTP headers for SSE MCP servers"`
 }
 
 type LSPConfig struct {
-	Disabled bool     `json:"enabled"`
-	Command  string   `json:"command"`
-	Args     []string `json:"args"`
-	Options  any      `json:"options"`
+	Disabled bool     `json:"enabled,omitempty" jsonschema:"title=Enabled,description=Whether this LSP server is enabled,default=true"`
+	Command  string   `json:"command" jsonschema:"title=Command,description=Command to execute for the LSP server"`
+	Args     []string `json:"args,omitempty" jsonschema:"title=Arguments,description=Command line arguments for the LSP server"`
+	Options  any      `json:"options,omitempty" jsonschema:"title=Options,description=LSP server specific options"`
 }
 
 type TUIOptions struct {
-	CompactMode bool `json:"compact_mode"`
+	CompactMode bool `json:"compact_mode" jsonschema:"title=Compact Mode,description=Enable compact mode for the TUI,default=false"`
 	// Here we can add themes later or any TUI related options
 }
 
 type Options struct {
-	ContextPaths         []string   `json:"context_paths"`
-	TUI                  TUIOptions `json:"tui"`
-	Debug                bool       `json:"debug"`
-	DebugLSP             bool       `json:"debug_lsp"`
-	DisableAutoSummarize bool       `json:"disable_auto_summarize"`
+	ContextPaths         []string   `json:"context_paths,omitempty" jsonschema:"title=Context Paths,description=List of paths to search for context files"`
+	TUI                  TUIOptions `json:"tui,omitempty" jsonschema:"title=TUI Options,description=Terminal UI configuration options"`
+	Debug                bool       `json:"debug,omitempty" jsonschema:"title=Debug,description=Enable debug logging,default=false"`
+	DebugLSP             bool       `json:"debug_lsp,omitempty" jsonschema:"title=Debug LSP,description=Enable LSP debug logging,default=false"`
+	DisableAutoSummarize bool       `json:"disable_auto_summarize,omitempty" jsonschema:"title=Disable Auto Summarize,description=Disable automatic conversation summarization,default=false"`
 	// Relative to the cwd
-	DataDirectory string `json:"data_directory"`
+	DataDirectory string `json:"data_directory,omitempty" jsonschema:"title=Data Directory,description=Directory for storing application data,default=.crush"`
 }
 
 type PreferredModel struct {
-	ModelID  string                     `json:"model_id"`
-	Provider provider.InferenceProvider `json:"provider"`
+	ModelID  string                     `json:"model_id" jsonschema:"title=Model ID,description=ID of the preferred model"`
+	Provider provider.InferenceProvider `json:"provider" jsonschema:"title=Provider,description=Provider for the preferred model"`
 	// ReasoningEffort overrides the default reasoning effort for this model
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"title=Reasoning Effort,description=Override reasoning effort for this model"`
 	// MaxTokens overrides the default max tokens for this model
-	MaxTokens int64 `json:"max_tokens,omitempty"`
+	MaxTokens int64 `json:"max_tokens,omitempty" jsonschema:"title=Max Tokens,description=Override max tokens for this model,minimum=1"`
 
 	// Think indicates if the model should think, only applicable for anthropic reasoning models
-	Think bool `json:"think,omitempty"`
+	Think bool `json:"think,omitempty" jsonschema:"title=Think,description=Enable thinking for reasoning models,default=false"`
 }
 
 type PreferredModels struct {
-	Large PreferredModel `json:"large"`
-	Small PreferredModel `json:"small"`
+	Large PreferredModel `json:"large,omitempty" jsonschema:"title=Large Model,description=Preferred model configuration for large model type"`
+	Small PreferredModel `json:"small,omitempty" jsonschema:"title=Small Model,description=Preferred model configuration for small model type"`
 }
 
 type Config struct {
-	Models PreferredModels `json:"models"`
+	Models PreferredModels `json:"models,omitempty" jsonschema:"title=Models,description=Preferred model configurations for large and small model types"`
 	// List of configured providers
-	Providers map[provider.InferenceProvider]ProviderConfig `json:"providers,omitempty"`
+	Providers map[provider.InferenceProvider]ProviderConfig `json:"providers,omitempty" jsonschema:"title=Providers,description=LLM provider configurations"`
 
 	// List of configured agents
-	Agents map[AgentID]Agent `json:"agents,omitempty"`
+	Agents map[AgentID]Agent `json:"agents,omitempty" jsonschema:"title=Agents,description=Agent configurations for different tasks"`
 
 	// List of configured MCPs
-	MCP map[string]MCP `json:"mcp,omitempty"`
+	MCP map[string]MCP `json:"mcp,omitempty" jsonschema:"title=MCP,description=Model Control Protocol server configurations"`
 
 	// List of configured LSPs
-	LSP map[string]LSPConfig `json:"lsp,omitempty"`
+	LSP map[string]LSPConfig `json:"lsp,omitempty" jsonschema:"title=LSP,description=Language Server Protocol configurations"`
 
 	// Miscellaneous options
-	Options Options `json:"options"`
+	Options Options `json:"options,omitempty" jsonschema:"title=Options,description=General application options and settings"`
 }
 
 var (
@@ -502,27 +504,23 @@ func mergeAgents(base, global, local *Config) {
 		}
 		for agentID, newAgent := range cfg.Agents {
 			if _, ok := base.Agents[agentID]; !ok {
-				// New agent - apply defaults
-				newAgent.ID = agentID // Ensure the ID is set correctly
+				newAgent.ID = agentID
 				if newAgent.Model == "" {
-					newAgent.Model = LargeModel // Default model type
+					newAgent.Model = LargeModel
 				}
-				// Context paths are always additive - start with global, then add custom
 				if len(newAgent.ContextPaths) > 0 {
 					newAgent.ContextPaths = append(base.Options.ContextPaths, newAgent.ContextPaths...)
 				} else {
-					newAgent.ContextPaths = base.Options.ContextPaths // Use global context paths only
+					newAgent.ContextPaths = base.Options.ContextPaths
 				}
 				base.Agents[agentID] = newAgent
 			} else {
 				baseAgent := base.Agents[agentID]
 
-				// Special handling for known agents - only allow model changes
 				if agentID == AgentCoder || agentID == AgentTask {
 					if newAgent.Model != "" {
 						baseAgent.Model = newAgent.Model
 					}
-					// For known agents, only allow MCP and LSP configuration
 					if newAgent.AllowedMCP != nil {
 						baseAgent.AllowedMCP = newAgent.AllowedMCP
 					}
@@ -534,7 +532,6 @@ func mergeAgents(base, global, local *Config) {
 						baseAgent.ContextPaths = append(baseAgent.ContextPaths, newAgent.ContextPaths...)
 					}
 				} else {
-					// Custom agents - allow full merging
 					if newAgent.Name != "" {
 						baseAgent.Name = newAgent.Name
 					}
@@ -544,13 +541,11 @@ func mergeAgents(base, global, local *Config) {
 					if newAgent.Model != "" {
 						baseAgent.Model = newAgent.Model
 					} else if baseAgent.Model == "" {
-						baseAgent.Model = LargeModel // Default fallback
+						baseAgent.Model = LargeModel
 					}
 
-					// Boolean fields - always update (including false values)
 					baseAgent.Disabled = newAgent.Disabled
 
-					// Slice/Map fields - update if provided (including empty slices/maps)
 					if newAgent.AllowedTools != nil {
 						baseAgent.AllowedTools = newAgent.AllowedTools
 					}
@@ -560,7 +555,6 @@ func mergeAgents(base, global, local *Config) {
 					if newAgent.AllowedLSP != nil {
 						baseAgent.AllowedLSP = newAgent.AllowedLSP
 					}
-					// Context paths are additive for custom agents too
 					if len(newAgent.ContextPaths) > 0 {
 						baseAgent.ContextPaths = append(baseAgent.ContextPaths, newAgent.ContextPaths...)
 					}
@@ -596,6 +590,7 @@ func mergeProviderConfigs(base, global, local *Config) {
 			continue
 		}
 		for providerName, p := range cfg.Providers {
+			p.ID = providerName
 			if _, ok := base.Providers[providerName]; !ok {
 				base.Providers[providerName] = p
 			} else {
@@ -616,36 +611,36 @@ func mergeProviderConfigs(base, global, local *Config) {
 	base.Providers = finalProviders
 }
 
-func providerDefaultConfig(providerId provider.InferenceProvider) ProviderConfig {
-	switch providerId {
+func providerDefaultConfig(providerID provider.InferenceProvider) ProviderConfig {
+	switch providerID {
 	case provider.InferenceProviderAnthropic:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeAnthropic,
 		}
 	case provider.InferenceProviderOpenAI:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeOpenAI,
 		}
 	case provider.InferenceProviderGemini:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeGemini,
 		}
 	case provider.InferenceProviderBedrock:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeBedrock,
 		}
 	case provider.InferenceProviderAzure:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeAzure,
 		}
 	case provider.InferenceProviderOpenRouter:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeOpenAI,
 			BaseURL:      "https://openrouter.ai/api/v1",
 			ExtraHeaders: map[string]string{
@@ -655,18 +650,18 @@ func providerDefaultConfig(providerId provider.InferenceProvider) ProviderConfig
 		}
 	case provider.InferenceProviderXAI:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeXAI,
 			BaseURL:      "https://api.x.ai/v1",
 		}
 	case provider.InferenceProviderVertexAI:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeVertexAI,
 		}
 	default:
 		return ProviderConfig{
-			ID:           providerId,
+			ID:           providerID,
 			ProviderType: provider.TypeOpenAI,
 		}
 	}
@@ -1431,5 +1426,29 @@ func (c *Config) validateCompleteness(errors *ValidationErrors) {
 		if c.Models.Small.ModelID == "" || c.Models.Small.Provider == "" {
 			errors.Add("models.small", "small preferred model must be configured when providers are available")
 		}
+	}
+}
+
+// JSONSchemaExtend adds custom schema properties for AgentID
+func (AgentID) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Enum = []any{
+		string(AgentCoder),
+		string(AgentTask),
+	}
+}
+
+// JSONSchemaExtend adds custom schema properties for ModelType
+func (ModelType) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Enum = []any{
+		string(LargeModel),
+		string(SmallModel),
+	}
+}
+
+// JSONSchemaExtend adds custom schema properties for MCPType
+func (MCPType) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Enum = []any{
+		string(MCPStdio),
+		string(MCPSse),
 	}
 }

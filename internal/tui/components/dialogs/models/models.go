@@ -204,13 +204,13 @@ func (m *modelDialogCmp) ID() dialogs.DialogID {
 
 func (m *modelDialogCmp) modelTypeRadio() string {
 	t := styles.CurrentTheme()
-	choices := []string{"Large", "Small"}
+	choices := []string{"Large Task", "Small Task"}
 	iconSelected := "◉"
 	iconUnselected := "○"
 	if m.modelType == LargeModelType {
-		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + " " + iconUnselected + " " + choices[1])
+		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + "  " + iconUnselected + " " + choices[1])
 	}
-	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + " " + iconSelected + " " + choices[1])
+	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + "  " + iconSelected + " " + choices[1])
 }
 
 func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {

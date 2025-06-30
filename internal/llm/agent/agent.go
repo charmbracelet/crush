@@ -48,7 +48,7 @@ type AgentEvent struct {
 type Service interface {
 	pubsub.Suscriber[AgentEvent]
 	Model() models.Model
-	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
+	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (AgentEvent, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -206,39 +206,32 @@ func (a *agent) err(err error) AgentEvent {
 	}
 }
 
-func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error) {
+func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (AgentEvent, error) {
 	if !a.provider.Model().SupportsAttachments && attachments != nil {
 		attachments = nil
 	}
-	events := make(chan AgentEvent)
 	if a.IsSessionBusy(sessionID) {
-		return nil, ErrSessionBusy
+		return AgentEvent{}, ErrSessionBusy
 	}
 
-	genCtx, cancel := context.WithCancel(ctx)
-
-	a.activeRequests.Store(sessionID, cancel)
-	go func() {
-		logging.Debug("Request started", "sessionID", sessionID)
-		defer logging.RecoverPanic("agent.Run", func() {
-			events <- a.err(fmt.Errorf("panic while running the agent"))
+	a.activeRequests.Store(sessionID, nil)
+	logging.Debug("Request started", "sessionID", sessionID)
+	var attachmentParts []message.ContentPart
+	for _, attachment := range attachments {
+		attachmentParts = append(attachmentParts, message.BinaryContent{
+			Path:     attachment.FilePath,
+			MIMEType: attachment.MimeType,
+			Data:     attachment.Content,
 		})
-		var attachmentParts []message.ContentPart
-		for _, attachment := range attachments {
-			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
-		}
-		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
-		if result.Error != nil && !errors.Is(result.Error, ErrRequestCancelled) && !errors.Is(result.Error, context.Canceled) {
-			logging.ErrorPersist(result.Error.Error())
-		}
-		logging.Debug("Request completed", "sessionID", sessionID)
-		a.activeRequests.Delete(sessionID)
-		cancel()
-		a.Publish(pubsub.CreatedEvent, result)
-		events <- result
-		close(events)
-	}()
-	return events, nil
+	}
+	result := a.processGeneration(ctx, sessionID, content, attachmentParts)
+	if result.Error != nil && !errors.Is(result.Error, ErrRequestCancelled) && !errors.Is(result.Error, context.Canceled) {
+		logging.ErrorPersist(result.Error.Error())
+	}
+	logging.Debug("Request completed", "sessionID", sessionID)
+	a.activeRequests.Delete(sessionID)
+	a.Publish(pubsub.CreatedEvent, result)
+	return result, nil
 }
 
 func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
@@ -252,7 +245,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			defer logging.RecoverPanic("agent.Run", func() {
 				logging.ErrorPersist("panic while generating title")
 			})
-			titleErr := a.generateTitle(context.Background(), sessionID, content)
+			titleErr := a.generateTitle(ctx, sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
 				logging.ErrorPersist(fmt.Sprintf("failed to generate title: %v", titleErr))
 			}
@@ -289,27 +282,26 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		case <-ctx.Done():
 			return a.err(ctx.Err())
 		default:
-			// Continue processing
-		}
-		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				agentMessage.AddFinish(message.FinishReasonCanceled)
-				a.messages.Update(context.Background(), agentMessage)
-				return a.err(ErrRequestCancelled)
+			agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					agentMessage.AddFinish(message.FinishReasonCanceled)
+					a.messages.Update(context.Background(), agentMessage)
+					return a.err(ErrRequestCancelled)
+				}
+				return a.err(fmt.Errorf("failed to process events: %w", err))
 			}
-			return a.err(fmt.Errorf("failed to process events: %w", err))
-		}
-		logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
-		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
-			// We are not done, we need to respond with the tool response
-			msgHistory = append(msgHistory, agentMessage, *toolResults)
-			continue
-		}
-		return AgentEvent{
-			Type:    AgentEventTypeResponse,
-			Message: agentMessage,
-			Done:    true,
+			logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
+			if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
+				// We are not done, we need to respond with the tool response
+				msgHistory = append(msgHistory, agentMessage, *toolResults)
+				continue
+			}
+			return AgentEvent{
+				Type:    AgentEventTypeResponse,
+				Message: agentMessage,
+				Done:    true,
+			}
 		}
 	}
 }
@@ -325,7 +317,6 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
 	eventChan := a.provider.StreamResponse(ctx, msgHistory, a.tools)
-
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:  message.Assistant,
 		Parts: []message.ContentPart{},

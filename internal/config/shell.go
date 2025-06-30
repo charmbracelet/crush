@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/llm/tools/shell"
 	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // ExecuteCommand executes a shell command and returns the output
@@ -18,7 +18,7 @@ func ExecuteCommand(ctx context.Context, command string, workingDir string) (str
 		workingDir = WorkingDirectory()
 	}
 
-	persistentShell := shell.GetPersistentShell(workingDir)
+	persistentShell := shell.NewShell(&shell.Options{WorkingDir: workingDir})
 
 	stdout, stderr, err := persistentShell.Exec(ctx, command)
 	if err != nil {

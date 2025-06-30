@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func Connect() (*sql.DB, error) {
+func Connect(ctx context.Context) (*sql.DB, error) {
 	dataDir := config.Get().Data.Directory
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
@@ -31,7 +32,7 @@ func Connect() (*sql.DB, error) {
 	}
 
 	// Verify connection
-	if err = db.Ping(); err != nil {
+	if err = db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -46,7 +47,7 @@ func Connect() (*sql.DB, error) {
 	}
 
 	for _, pragma := range pragmas {
-		if _, err = db.Exec(pragma); err != nil {
+		if _, err = db.ExecContext(ctx, pragma); err != nil {
 			logging.Error("Failed to set pragma", pragma, err)
 		} else {
 			logging.Debug("Set pragma", "pragma", pragma)

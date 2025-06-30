@@ -77,15 +77,15 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		// Connect DB, this will also run migrations
-		conn, err := db.Connect()
-		if err != nil {
-			return err
-		}
-
 		// Create main context for the application
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		// Connect DB, this will also run migrations
+		conn, err := db.Connect(ctx)
+		if err != nil {
+			return err
+		}
 
 		app, err := app.New(ctx, conn)
 		if err != nil {

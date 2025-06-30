@@ -1,6 +1,8 @@
 package models
 
 import (
+	"slices"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -228,7 +230,75 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 		currentModel = cfg.Models.Small
 	}
 
+	// Create a map to track which providers we've already added
+	addedProviders := make(map[provider.InferenceProvider]bool)
+
+	// First, add any configured providers that are not in the known providers list
+	// These should appear at the top of the list
+	knownProviders := provider.KnownProviders()
+	for providerID, providerConfig := range cfg.Providers {
+		if providerConfig.Disabled {
+			continue
+		}
+
+		// Check if this provider is not in the known providers list
+		if !slices.Contains(knownProviders, providerID) {
+			// Convert config provider to provider.Provider format
+			configProvider := provider.Provider{
+				Name:   string(providerID), // Use provider ID as name for unknown providers
+				ID:     providerID,
+				Models: make([]provider.Model, len(providerConfig.Models)),
+			}
+
+			// Convert models
+			for i, model := range providerConfig.Models {
+				configProvider.Models[i] = provider.Model{
+					ID:                     model.ID,
+					Name:                   model.Name,
+					CostPer1MIn:            model.CostPer1MIn,
+					CostPer1MOut:           model.CostPer1MOut,
+					CostPer1MInCached:      model.CostPer1MInCached,
+					CostPer1MOutCached:     model.CostPer1MOutCached,
+					ContextWindow:          model.ContextWindow,
+					DefaultMaxTokens:       model.DefaultMaxTokens,
+					CanReason:              model.CanReason,
+					HasReasoningEffort:     model.HasReasoningEffort,
+					DefaultReasoningEffort: model.ReasoningEffort,
+					SupportsImages:         model.SupportsImages,
+				}
+			}
+
+			// Add this unknown provider to the list
+			name := configProvider.Name
+			if name == "" {
+				name = string(configProvider.ID)
+			}
+			modelItems = append(modelItems, commands.NewItemSection(name))
+			for _, model := range configProvider.Models {
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+					Provider: configProvider,
+					Model:    model,
+				}))
+				if model.ID == currentModel.ModelID && configProvider.ID == currentModel.Provider {
+					selectIndex = len(modelItems) - 1 // Set the selected index to the current model
+				}
+			}
+			addedProviders[providerID] = true
+		}
+	}
+
+	// Then add the known providers from the predefined list
 	for _, provider := range providers {
+		// Skip if we already added this provider as an unknown provider
+		if addedProviders[provider.ID] {
+			continue
+		}
+
+		// Check if this provider is configured and not disabled
+		if providerConfig, exists := cfg.Providers[provider.ID]; exists && providerConfig.Disabled {
+			continue
+		}
+
 		name := provider.Name
 		if name == "" {
 			name = string(provider.ID)

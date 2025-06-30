@@ -187,7 +187,7 @@
           "title": "Model ID",
           "description": "Unique identifier for the model"
         },
-        "model": {
+        "name": {
           "type": "string",
           "title": "Model Name",
           "description": "Display name of the model"
@@ -252,10 +252,7 @@
       "type": "object",
       "required": [
         "id",
-        "model",
-        "cost_per_1m_in",
-        "cost_per_1m_out",
-        "cost_per_1m_in_cached",
+        "name",
         "cost_per_1m_out_cached",
         "context_window",
         "default_max_tokens",

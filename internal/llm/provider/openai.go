@@ -183,7 +183,7 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		case "high":
 			params.ReasoningEffort = shared.ReasoningEffortHigh
 		default:
-			params.ReasoningEffort = shared.ReasoningEffortMedium
+			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
 		}
 	} else {
 		params.MaxTokens = openai.Int(maxTokens)

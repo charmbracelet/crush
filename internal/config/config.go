@@ -56,18 +56,18 @@ const (
 )
 
 type Model struct {
-	ID                 string  `json:"id" jsonschema:"title=Model ID,description=Unique identifier for the model"`
-	Name               string  `json:"model" jsonschema:"title=Model Name,description=Display name of the model"`
-	CostPer1MIn        float64 `json:"cost_per_1m_in" jsonschema:"title=Input Cost,description=Cost per 1 million input tokens,minimum=0"`
-	CostPer1MOut       float64 `json:"cost_per_1m_out" jsonschema:"title=Output Cost,description=Cost per 1 million output tokens,minimum=0"`
-	CostPer1MInCached  float64 `json:"cost_per_1m_in_cached" jsonschema:"title=Cached Input Cost,description=Cost per 1 million cached input tokens,minimum=0"`
-	CostPer1MOutCached float64 `json:"cost_per_1m_out_cached" jsonschema:"title=Cached Output Cost,description=Cost per 1 million cached output tokens,minimum=0"`
+	ID                 string  `json:"id" jsonschema:"title=Model ID,description=Unique identifier for the model, the API model"`
+	Name               string  `json:"name" jsonschema:"title=Model Name,description=Display name of the model"`
+	CostPer1MIn        float64 `json:"cost_per_1m_in,omitempty" jsonschema:"title=Input Cost,description=Cost per 1 million input tokens,minimum=0"`
+	CostPer1MOut       float64 `json:"cost_per_1m_out,omitempty" jsonschema:"title=Output Cost,description=Cost per 1 million output tokens,minimum=0"`
+	CostPer1MInCached  float64 `json:"cost_per_1m_in_cached,omitempty" jsonschema:"title=Cached Input Cost,description=Cost per 1 million cached input tokens,minimum=0"`
+	CostPer1MOutCached float64 `json:"cost_per_1m_out_cached,omitempty" jsonschema:"title=Cached Output Cost,description=Cost per 1 million cached output tokens,minimum=0"`
 	ContextWindow      int64   `json:"context_window" jsonschema:"title=Context Window,description=Maximum context window size in tokens,minimum=1"`
 	DefaultMaxTokens   int64   `json:"default_max_tokens" jsonschema:"title=Default Max Tokens,description=Default maximum tokens for responses,minimum=1"`
-	CanReason          bool    `json:"can_reason" jsonschema:"title=Can Reason,description=Whether the model supports reasoning capabilities"`
-	ReasoningEffort    string  `json:"reasoning_effort" jsonschema:"title=Reasoning Effort,description=Default reasoning effort level for reasoning models"`
-	HasReasoningEffort bool    `json:"has_reasoning_effort" jsonschema:"title=Has Reasoning Effort,description=Whether the model supports reasoning effort configuration"`
-	SupportsImages     bool    `json:"supports_attachments" jsonschema:"title=Supports Images,description=Whether the model supports image attachments"`
+	CanReason          bool    `json:"can_reason,omitempty" jsonschema:"title=Can Reason,description=Whether the model supports reasoning capabilities"`
+	ReasoningEffort    string  `json:"reasoning_effort,omitempty" jsonschema:"title=Reasoning Effort,description=Default reasoning effort level for reasoning models"`
+	HasReasoningEffort bool    `json:"has_reasoning_effort,omitempty" jsonschema:"title=Has Reasoning Effort,description=Whether the model supports reasoning effort configuration"`
+	SupportsImages     bool    `json:"supports_attachments,omitempty" jsonschema:"title=Supports Images,description=Whether the model supports image attachments"`
 }
 
 type VertexAIOptions struct {

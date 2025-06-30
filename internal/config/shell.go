@@ -71,4 +71,3 @@ func resolveCommandAPIKey(command string) (string, error) {
 	logging.Debug("Command executed successfully", "command", command, "result", result)
 	return result, nil
 }
-

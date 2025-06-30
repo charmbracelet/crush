@@ -732,6 +732,34 @@ func defaultConfigBasedOnEnv() *Config {
 			"project":  os.Getenv("GOOGLE_CLOUD_PROJECT"),
 			"location": os.Getenv("GOOGLE_CLOUD_LOCATION"),
 		}
+		// Find the VertexAI provider definition to get default models
+		for _, p := range providers {
+			if p.ID == provider.InferenceProviderVertexAI {
+				providerConfig.DefaultLargeModel = p.DefaultLargeModelID
+				providerConfig.DefaultSmallModel = p.DefaultSmallModelID
+				for _, model := range p.Models {
+					configModel := Model{
+						ID:                 model.ID,
+						Name:               model.Name,
+						CostPer1MIn:        model.CostPer1MIn,
+						CostPer1MOut:       model.CostPer1MOut,
+						CostPer1MInCached:  model.CostPer1MInCached,
+						CostPer1MOutCached: model.CostPer1MOutCached,
+						ContextWindow:      model.ContextWindow,
+						DefaultMaxTokens:   model.DefaultMaxTokens,
+						CanReason:          model.CanReason,
+						SupportsImages:     model.SupportsImages,
+					}
+					// Set reasoning effort for reasoning models
+					if model.HasReasoningEffort && model.DefaultReasoningEffort != "" {
+						configModel.HasReasoningEffort = model.HasReasoningEffort
+						configModel.ReasoningEffort = model.DefaultReasoningEffort
+					}
+					providerConfig.Models = append(providerConfig.Models, configModel)
+				}
+				break
+			}
+		}
 		cfg.Providers[provider.InferenceProviderVertexAI] = providerConfig
 	}
 
@@ -742,6 +770,34 @@ func defaultConfigBasedOnEnv() *Config {
 		}
 		if providerConfig.ExtraParams["region"] == "" {
 			providerConfig.ExtraParams["region"] = os.Getenv("AWS_REGION")
+		}
+		// Find the Bedrock provider definition to get default models
+		for _, p := range providers {
+			if p.ID == provider.InferenceProviderBedrock {
+				providerConfig.DefaultLargeModel = p.DefaultLargeModelID
+				providerConfig.DefaultSmallModel = p.DefaultSmallModelID
+				for _, model := range p.Models {
+					configModel := Model{
+						ID:                 model.ID,
+						Name:               model.Name,
+						CostPer1MIn:        model.CostPer1MIn,
+						CostPer1MOut:       model.CostPer1MOut,
+						CostPer1MInCached:  model.CostPer1MInCached,
+						CostPer1MOutCached: model.CostPer1MOutCached,
+						ContextWindow:      model.ContextWindow,
+						DefaultMaxTokens:   model.DefaultMaxTokens,
+						CanReason:          model.CanReason,
+						SupportsImages:     model.SupportsImages,
+					}
+					// Set reasoning effort for reasoning models
+					if model.HasReasoningEffort && model.DefaultReasoningEffort != "" {
+						configModel.HasReasoningEffort = model.HasReasoningEffort
+						configModel.ReasoningEffort = model.DefaultReasoningEffort
+					}
+					providerConfig.Models = append(providerConfig.Models, configModel)
+				}
+				break
+			}
 		}
 		cfg.Providers[provider.InferenceProviderBedrock] = providerConfig
 	}

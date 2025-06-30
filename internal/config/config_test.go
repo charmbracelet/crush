@@ -93,7 +93,7 @@ func TestInit_SingletonBehavior(t *testing.T) {
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	assert.Same(t, cfg1, cfg2) // Should be the same instance
+	assert.Same(t, cfg1, cfg2)
 }
 
 func TestGet_BeforeInitialization(t *testing.T) {
@@ -124,7 +124,7 @@ func TestLoadConfig_NoConfigFiles(t *testing.T) {
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
-	assert.Len(t, cfg.Providers, 0) // No providers without env vars or config files
+	assert.Len(t, cfg.Providers, 0)
 	assert.Equal(t, defaultContextPaths, cfg.Options.ContextPaths)
 }
 
@@ -133,7 +133,6 @@ func TestLoadConfig_OnlyGlobalConfig(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create global config file
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
@@ -187,7 +186,6 @@ func TestLoadConfig_OnlyLocalConfig(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create local config file
 	localConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderAnthropic: {
@@ -239,7 +237,6 @@ func TestLoadConfig_BothGlobalAndLocal(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create global config
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
@@ -279,7 +276,6 @@ func TestLoadConfig_BothGlobalAndLocal(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Create local config that overrides and adds
 	localConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
@@ -327,14 +323,11 @@ func TestLoadConfig_BothGlobalAndLocal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, cfg.Providers, 2)
 
-	// Check that local config overrode global
 	openaiProvider := cfg.Providers[provider.InferenceProviderOpenAI]
 	assert.Equal(t, "local-key", openaiProvider.APIKey)
 
-	// Check that local config added new provider
 	assert.Contains(t, cfg.Providers, provider.InferenceProviderAnthropic)
 
-	// Check that context paths were merged
 	assert.Contains(t, cfg.Options.ContextPaths, "global-context.md")
 	assert.Contains(t, cfg.Options.ContextPaths, "local-context.md")
 	assert.True(t, cfg.Options.TUI.CompactMode)
@@ -345,7 +338,6 @@ func TestLoadConfig_MalformedGlobalJSON(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create malformed global config
 	configPath := filepath.Join(testConfigDir, "crush.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
 	require.NoError(t, os.WriteFile(configPath, []byte(`{invalid json`), 0o644))
@@ -359,7 +351,6 @@ func TestLoadConfig_MalformedLocalJSON(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create malformed local config
 	localConfigPath := filepath.Join(cwdDir, "crush.json")
 	require.NoError(t, os.WriteFile(localConfigPath, []byte(`{invalid json`), 0o644))
 
@@ -409,7 +400,6 @@ func TestEnvVars_AllSupportedAPIKeys(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set all supported API keys
 	os.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 	os.Setenv("OPENAI_API_KEY", "test-openai-key")
 	os.Setenv("GEMINI_API_KEY", "test-gemini-key")
@@ -421,7 +411,6 @@ func TestEnvVars_AllSupportedAPIKeys(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, cfg.Providers, 5)
 
-	// Verify each provider is configured correctly
 	anthropicProvider := cfg.Providers[provider.InferenceProviderAnthropic]
 	assert.Equal(t, "test-anthropic-key", anthropicProvider.APIKey)
 	assert.Equal(t, provider.TypeAnthropic, anthropicProvider.ProviderType)
@@ -449,7 +438,6 @@ func TestEnvVars_PartialEnvironmentVariables(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set only some API keys
 	os.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
 	os.Setenv("OPENAI_API_KEY", "test-openai-key")
 
@@ -467,7 +455,6 @@ func TestEnvVars_VertexAIConfiguration(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set VertexAI environment variables
 	os.Setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
 	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	os.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -488,7 +475,6 @@ func TestEnvVars_VertexAIWithoutUseFlag(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set Google Cloud vars but not the use flag
 	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	os.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
@@ -503,7 +489,6 @@ func TestEnvVars_AWSBedrockWithAccessKeys(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set AWS credentials
 	os.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
 	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 	os.Setenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -523,7 +508,6 @@ func TestEnvVars_AWSBedrockWithProfile(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set AWS profile
 	os.Setenv("AWS_PROFILE", "test-profile")
 	os.Setenv("AWS_REGION", "eu-west-1")
 
@@ -541,7 +525,6 @@ func TestEnvVars_AWSBedrockWithContainerCredentials(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set AWS container credentials
 	os.Setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/test")
 	os.Setenv("AWS_DEFAULT_REGION", "ap-southeast-1")
 
@@ -556,7 +539,6 @@ func TestEnvVars_AWSBedrockRegionPriority(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set both region variables - AWS_DEFAULT_REGION should take priority
 	os.Setenv("AWS_ACCESS_KEY_ID", "test-key")
 	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
 	os.Setenv("AWS_DEFAULT_REGION", "us-west-2")
@@ -574,7 +556,6 @@ func TestEnvVars_AWSBedrockFallbackRegion(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set only AWS_REGION (not AWS_DEFAULT_REGION)
 	os.Setenv("AWS_ACCESS_KEY_ID", "test-key")
 	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
 	os.Setenv("AWS_REGION", "us-east-1")
@@ -591,7 +572,6 @@ func TestEnvVars_NoAWSCredentials(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Don't set any AWS credentials
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
@@ -603,15 +583,12 @@ func TestEnvVars_CustomEnvironmentVariables(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Test that environment variables are properly resolved from provider definitions
-	// This test assumes the provider system uses $VARIABLE_NAME format
 	os.Setenv("ANTHROPIC_API_KEY", "resolved-anthropic-key")
 
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
 	if len(cfg.Providers) > 0 {
-		// Verify that the environment variable was resolved
 		if anthropicProvider, exists := cfg.Providers[provider.InferenceProviderAnthropic]; exists {
 			assert.Equal(t, "resolved-anthropic-key", anthropicProvider.APIKey)
 		}
@@ -623,11 +600,11 @@ func TestEnvVars_CombinedEnvironmentVariables(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set multiple types of environment variables
 	os.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 	os.Setenv("OPENAI_API_KEY", "test-openai")
 	os.Setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
 	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	os.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 	os.Setenv("AWS_ACCESS_KEY_ID", "test-aws-key")
 	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-aws-secret")
 	os.Setenv("AWS_DEFAULT_REGION", "us-west-1")
@@ -636,7 +613,6 @@ func TestEnvVars_CombinedEnvironmentVariables(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Should have API key providers + VertexAI + Bedrock
 	expectedProviders := []provider.InferenceProvider{
 		provider.InferenceProviderAnthropic,
 		provider.InferenceProviderOpenAI,
@@ -696,14 +672,11 @@ func TestHasAWSCredentials_NoCredentials(t *testing.T) {
 	assert.False(t, hasAWSCredentials())
 }
 
-// Provider Configuration Tests
-
 func TestProviderMerging_GlobalToBase(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create global config with provider
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
@@ -718,6 +691,12 @@ func TestProviderMerging_GlobalToBase(t *testing.T) {
 						Name:             "GPT-4",
 						ContextWindow:    8192,
 						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
 					},
 				},
 			},
@@ -739,7 +718,7 @@ func TestProviderMerging_GlobalToBase(t *testing.T) {
 	assert.Equal(t, "global-openai-key", openaiProvider.APIKey)
 	assert.Equal(t, "gpt-4", openaiProvider.DefaultLargeModel)
 	assert.Equal(t, "gpt-3.5-turbo", openaiProvider.DefaultSmallModel)
-	assert.Len(t, openaiProvider.Models, 1)
+	assert.Len(t, openaiProvider.Models, 2)
 }
 
 func TestProviderMerging_LocalToBase(t *testing.T) {
@@ -747,7 +726,6 @@ func TestProviderMerging_LocalToBase(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create local config with provider
 	localConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderAnthropic: {
@@ -755,6 +733,25 @@ func TestProviderMerging_LocalToBase(t *testing.T) {
 				APIKey:            "local-anthropic-key",
 				ProviderType:      provider.TypeAnthropic,
 				DefaultLargeModel: "claude-3-opus",
+				DefaultSmallModel: "claude-3-haiku",
+				Models: []Model{
+					{
+						ID:               "claude-3-opus",
+						Name:             "Claude 3 Opus",
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+						CostPer1MIn:      15.0,
+						CostPer1MOut:     75.0,
+					},
+					{
+						ID:               "claude-3-haiku",
+						Name:             "Claude 3 Haiku",
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+						CostPer1MIn:      0.25,
+						CostPer1MOut:     1.25,
+					},
+				},
 			},
 		},
 	}
@@ -772,6 +769,8 @@ func TestProviderMerging_LocalToBase(t *testing.T) {
 	anthropicProvider := cfg.Providers[provider.InferenceProviderAnthropic]
 	assert.Equal(t, "local-anthropic-key", anthropicProvider.APIKey)
 	assert.Equal(t, "claude-3-opus", anthropicProvider.DefaultLargeModel)
+	assert.Equal(t, "claude-3-haiku", anthropicProvider.DefaultSmallModel)
+	assert.Len(t, anthropicProvider.Models, 2)
 }
 
 func TestProviderMerging_ConflictingSettings(t *testing.T) {
@@ -779,7 +778,6 @@ func TestProviderMerging_ConflictingSettings(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Create global config
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
@@ -788,6 +786,26 @@ func TestProviderMerging_ConflictingSettings(t *testing.T) {
 				ProviderType:      provider.TypeOpenAI,
 				DefaultLargeModel: "gpt-4",
 				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
+					},
+					{
+						ID:               "gpt-4-turbo",
+						Name:             "GPT-4 Turbo",
+						ContextWindow:    128000,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 	}
@@ -804,7 +822,6 @@ func TestProviderMerging_ConflictingSettings(t *testing.T) {
 			provider.InferenceProviderOpenAI: {
 				APIKey:            "local-key",
 				DefaultLargeModel: "gpt-4-turbo",
-				// Test disabled separately - don't disable here as it causes nil pointer
 			},
 		},
 	}
@@ -819,11 +836,9 @@ func TestProviderMerging_ConflictingSettings(t *testing.T) {
 	require.NoError(t, err)
 
 	openaiProvider := cfg.Providers[provider.InferenceProviderOpenAI]
-	// Local should override global
 	assert.Equal(t, "local-key", openaiProvider.APIKey)
 	assert.Equal(t, "gpt-4-turbo", openaiProvider.DefaultLargeModel)
-	assert.False(t, openaiProvider.Disabled) // Should not be disabled
-	// Global values should remain where not overridden
+	assert.False(t, openaiProvider.Disabled)
 	assert.Equal(t, "gpt-3.5-turbo", openaiProvider.DefaultSmallModel)
 }
 
@@ -834,22 +849,51 @@ func TestProviderMerging_CustomVsKnownProviders(t *testing.T) {
 
 	customProviderID := provider.InferenceProvider("custom-provider")
 
-	// Create config with both known and custom providers
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
-			// Known provider - some fields should not be overrideable
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				BaseURL:      "should-not-override",
-				ProviderType: provider.TypeAnthropic, // Should not override
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				BaseURL:           "should-not-override",
+				ProviderType:      provider.TypeAnthropic,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
+					},
+				},
 			},
-			// Custom provider - all fields should be configurable
 			customProviderID: {
-				ID:           customProviderID,
-				APIKey:       "custom-key",
-				BaseURL:      "https://custom.api.com",
-				ProviderType: provider.TypeOpenAI,
+				ID:                customProviderID,
+				APIKey:            "custom-key",
+				BaseURL:           "https://custom.api.com",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "custom-large",
+				DefaultSmallModel: "custom-small",
+				Models: []Model{
+					{
+						ID:               "custom-large",
+						Name:             "Custom Large",
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "custom-small",
+						Name:             "Custom Small",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
+					},
+				},
 			},
 		},
 	}
@@ -882,14 +926,12 @@ func TestProviderMerging_CustomVsKnownProviders(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Known provider should not have BaseURL/ProviderType overridden
 	openaiProvider := cfg.Providers[provider.InferenceProviderOpenAI]
 	assert.NotEqual(t, "https://should-not-change.com", openaiProvider.BaseURL)
 	assert.NotEqual(t, provider.TypeGemini, openaiProvider.ProviderType)
 
-	// Custom provider should have all fields configurable
 	customProvider := cfg.Providers[customProviderID]
-	assert.Equal(t, "custom-key", customProvider.APIKey) // Should preserve from global
+	assert.Equal(t, "custom-key", customProvider.APIKey)
 	assert.Equal(t, "https://updated-custom.api.com", customProvider.BaseURL)
 	assert.Equal(t, provider.TypeOpenAI, customProvider.ProviderType)
 }
@@ -901,14 +943,12 @@ func TestProviderValidation_CustomProviderMissingBaseURL(t *testing.T) {
 
 	customProviderID := provider.InferenceProvider("custom-provider")
 
-	// Create config with custom provider missing BaseURL
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			customProviderID: {
 				ID:           customProviderID,
 				APIKey:       "custom-key",
 				ProviderType: provider.TypeOpenAI,
-				// Missing BaseURL
 			},
 		},
 	}
@@ -922,7 +962,6 @@ func TestProviderValidation_CustomProviderMissingBaseURL(t *testing.T) {
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
-	// Provider should be filtered out due to validation failure
 	assert.NotContains(t, cfg.Providers, customProviderID)
 }
 
@@ -939,7 +978,6 @@ func TestProviderValidation_CustomProviderMissingAPIKey(t *testing.T) {
 				ID:           customProviderID,
 				BaseURL:      "https://custom.api.com",
 				ProviderType: provider.TypeOpenAI,
-				// Missing APIKey
 			},
 		},
 	}
@@ -994,10 +1032,26 @@ func TestProviderValidation_KnownProviderValid(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				ProviderType: provider.TypeOpenAI,
-				// BaseURL not required for known providers
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
+					},
+				},
+
 			},
 		},
 	}
@@ -1022,10 +1076,48 @@ func TestProviderValidation_DisabledProvider(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				ProviderType: provider.TypeOpenAI,
-				Disabled:     true,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				ProviderType:      provider.TypeOpenAI,
+				Disabled:          true,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-3.5-turbo",
+				Models: []Model{
+					{
+						ID:               "gpt-4",
+						Name:             "GPT-4",
+						ContextWindow:    8192,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "gpt-3.5-turbo",
+						Name:             "GPT-3.5 Turbo",
+						ContextWindow:    4096,
+						DefaultMaxTokens: 2048,
+					},
+				},
+			},
+			provider.InferenceProviderAnthropic: {
+				ID:                provider.InferenceProviderAnthropic,
+				APIKey:            "anthropic-key",
+				ProviderType:      provider.TypeAnthropic,
+				Disabled:          false, // This one is enabled
+				DefaultLargeModel: "claude-3-opus",
+				DefaultSmallModel: "claude-3-haiku",
+				Models: []Model{
+					{
+						ID:               "claude-3-opus",
+						Name:             "Claude 3 Opus",
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+					{
+						ID:               "claude-3-haiku",
+						Name:             "Claude 3 Haiku",
+						ContextWindow:    200000,
+						DefaultMaxTokens: 4096,
+					},
+				},
 			},
 		},
 	}
@@ -1039,9 +1131,10 @@ func TestProviderValidation_DisabledProvider(t *testing.T) {
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
-	// Disabled providers should still be in the config but marked as disabled
 	assert.Contains(t, cfg.Providers, provider.InferenceProviderOpenAI)
 	assert.True(t, cfg.Providers[provider.InferenceProviderOpenAI].Disabled)
+	assert.Contains(t, cfg.Providers, provider.InferenceProviderAnthropic)
+	assert.False(t, cfg.Providers[provider.InferenceProviderAnthropic].Disabled)
 }
 
 func TestProviderModels_AddingNewModels(t *testing.T) {
@@ -1052,9 +1145,11 @@ func TestProviderModels_AddingNewModels(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				ProviderType: provider.TypeOpenAI,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-4-turbo",
 				Models: []Model{
 					{
 						ID:               "gpt-4",
@@ -1098,7 +1193,7 @@ func TestProviderModels_AddingNewModels(t *testing.T) {
 	require.NoError(t, err)
 
 	openaiProvider := cfg.Providers[provider.InferenceProviderOpenAI]
-	assert.Len(t, openaiProvider.Models, 2) // Should have both models
+	assert.Len(t, openaiProvider.Models, 2)
 
 	modelIDs := make([]string, len(openaiProvider.Models))
 	for i, model := range openaiProvider.Models {
@@ -1116,9 +1211,11 @@ func TestProviderModels_DuplicateModelHandling(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				ProviderType: provider.TypeOpenAI,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-4",
 				Models: []Model{
 					{
 						ID:               "gpt-4",
@@ -1136,7 +1233,7 @@ func TestProviderModels_DuplicateModelHandling(t *testing.T) {
 			provider.InferenceProviderOpenAI: {
 				Models: []Model{
 					{
-						ID:               "gpt-4", // Same ID as global
+						ID:               "gpt-4",
 						Name:             "GPT-4 Updated",
 						ContextWindow:    16384,
 						DefaultMaxTokens: 8192,
@@ -1162,13 +1259,12 @@ func TestProviderModels_DuplicateModelHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	openaiProvider := cfg.Providers[provider.InferenceProviderOpenAI]
-	assert.Len(t, openaiProvider.Models, 1) // Should not duplicate
+	assert.Len(t, openaiProvider.Models, 1)
 
-	// Should keep the original model (global config)
 	model := openaiProvider.Models[0]
 	assert.Equal(t, "gpt-4", model.ID)
-	assert.Equal(t, "GPT-4", model.Name)              // Original name
-	assert.Equal(t, int64(8192), model.ContextWindow) // Original context window
+	assert.Equal(t, "GPT-4", model.Name)
+	assert.Equal(t, int64(8192), model.ContextWindow)
 }
 
 func TestProviderModels_ModelCostAndCapabilities(t *testing.T) {
@@ -1179,9 +1275,11 @@ func TestProviderModels_ModelCostAndCapabilities(t *testing.T) {
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
-				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "openai-key",
-				ProviderType: provider.TypeOpenAI,
+				ID:                provider.InferenceProviderOpenAI,
+				APIKey:            "openai-key",
+				ProviderType:      provider.TypeOpenAI,
+				DefaultLargeModel: "gpt-4",
+				DefaultSmallModel: "gpt-4",
 				Models: []Model{
 					{
 						ID:                 "gpt-4",
@@ -1224,14 +1322,11 @@ func TestProviderModels_ModelCostAndCapabilities(t *testing.T) {
 	assert.True(t, model.SupportsImages)
 }
 
-// Agent Configuration Tests
-
 func TestDefaultAgents_CoderAgent(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider so we can test agent configuration
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
 	cfg, err := Init(cwdDir, false)
@@ -1246,7 +1341,6 @@ func TestDefaultAgents_CoderAgent(t *testing.T) {
 	assert.Equal(t, LargeModel, coderAgent.Model)
 	assert.False(t, coderAgent.Disabled)
 	assert.Equal(t, cfg.Options.ContextPaths, coderAgent.ContextPaths)
-	// Coder agent should have all tools available (nil means all tools)
 	assert.Nil(t, coderAgent.AllowedTools)
 }
 
@@ -1255,7 +1349,6 @@ func TestDefaultAgents_TaskAgent(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider so we can test agent configuration
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
 	cfg, err := Init(cwdDir, false)
@@ -1271,11 +1364,9 @@ func TestDefaultAgents_TaskAgent(t *testing.T) {
 	assert.False(t, taskAgent.Disabled)
 	assert.Equal(t, cfg.Options.ContextPaths, taskAgent.ContextPaths)
 
-	// Task agent should have restricted tools
 	expectedTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
 	assert.Equal(t, expectedTools, taskAgent.AllowedTools)
 
-	// Task agent should have no MCPs or LSPs by default
 	assert.Equal(t, map[string][]string{}, taskAgent.AllowedMCP)
 	assert.Equal(t, []string{}, taskAgent.AllowedLSP)
 }
@@ -1285,10 +1376,8 @@ func TestAgentMerging_CustomAgent(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config with custom agent
 	globalConfig := Config{
 		Agents: map[AgentID]Agent{
 			AgentID("custom-agent"): {
@@ -1300,6 +1389,23 @@ func TestAgentMerging_CustomAgent(t *testing.T) {
 				AllowedMCP:   map[string][]string{"mcp1": {"tool1", "tool2"}},
 				AllowedLSP:   []string{"typescript", "go"},
 				ContextPaths: []string{"custom-context.md"},
+			},
+		},
+		MCP: map[string]MCP{
+			"mcp1": {
+				Type:    MCPStdio,
+				Command: "test-mcp-command",
+				Args:    []string{"--test"},
+			},
+		},
+		LSP: map[string]LSPConfig{
+			"typescript": {
+				Command: "typescript-language-server",
+				Args:    []string{"--stdio"},
+			},
+			"go": {
+				Command: "gopls",
+				Args:    []string{},
 			},
 		},
 	}
@@ -1314,7 +1420,6 @@ func TestAgentMerging_CustomAgent(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Should have default agents plus custom agent
 	assert.Contains(t, cfg.Agents, AgentCoder)
 	assert.Contains(t, cfg.Agents, AgentTask)
 	assert.Contains(t, cfg.Agents, AgentID("custom-agent"))
@@ -1326,7 +1431,6 @@ func TestAgentMerging_CustomAgent(t *testing.T) {
 	assert.Equal(t, []string{"glob", "grep"}, customAgent.AllowedTools)
 	assert.Equal(t, map[string][]string{"mcp1": {"tool1", "tool2"}}, customAgent.AllowedMCP)
 	assert.Equal(t, []string{"typescript", "go"}, customAgent.AllowedLSP)
-	// Context paths should be additive (default + custom)
 	expectedContextPaths := append(defaultContextPaths, "custom-context.md")
 	assert.Equal(t, expectedContextPaths, customAgent.ContextPaths)
 }
@@ -1336,17 +1440,28 @@ func TestAgentMerging_ModifyDefaultCoderAgent(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config that modifies the default coder agent
 	globalConfig := Config{
 		Agents: map[AgentID]Agent{
 			AgentCoder: {
-				Model:        SmallModel, // Change from default LargeModel
+				Model:        SmallModel,
 				AllowedMCP:   map[string][]string{"mcp1": {"tool1"}},
 				AllowedLSP:   []string{"typescript"},
-				ContextPaths: []string{"coder-specific.md"}, // Should be additive
+				ContextPaths: []string{"coder-specific.md"},
+			},
+		},
+		MCP: map[string]MCP{
+			"mcp1": {
+				Type:    MCPStdio,
+				Command: "test-mcp-command",
+				Args:    []string{"--test"},
+			},
+		},
+		LSP: map[string]LSPConfig{
+			"typescript": {
+				Command: "typescript-language-server",
+				Args:    []string{"--stdio"},
 			},
 		},
 	}
@@ -1362,16 +1477,13 @@ func TestAgentMerging_ModifyDefaultCoderAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	coderAgent := cfg.Agents[AgentCoder]
-	// Should preserve default values for unspecified fields
 	assert.Equal(t, AgentCoder, coderAgent.ID)
 	assert.Equal(t, "Coder", coderAgent.Name)
 	assert.Equal(t, "An agent that helps with executing coding tasks.", coderAgent.Description)
 
-	// Context paths should be additive (default + custom)
 	expectedContextPaths := append(cfg.Options.ContextPaths, "coder-specific.md")
 	assert.Equal(t, expectedContextPaths, coderAgent.ContextPaths)
 
-	// Should update specified fields
 	assert.Equal(t, SmallModel, coderAgent.Model)
 	assert.Equal(t, map[string][]string{"mcp1": {"tool1"}}, coderAgent.AllowedMCP)
 	assert.Equal(t, []string{"typescript"}, coderAgent.AllowedLSP)
@@ -1382,22 +1494,31 @@ func TestAgentMerging_ModifyDefaultTaskAgent(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config that modifies the default task agent
-	// Note: Only model, MCP, and LSP should be configurable for known agents
 	globalConfig := Config{
 		Agents: map[AgentID]Agent{
 			AgentTask: {
-				Model:      SmallModel,                             // Should be updated
-				AllowedMCP: map[string][]string{"search-mcp": nil}, // Should be updated
-				AllowedLSP: []string{"python"},                     // Should be updated
-				// These should be ignored for known agents:
-				Name:         "Search Agent",                   // Should be ignored
-				Description:  "Custom search agent",            // Should be ignored
-				Disabled:     true,                             // Should be ignored
-				AllowedTools: []string{"glob", "grep", "view"}, // Should be ignored
+				Model:        SmallModel,
+				AllowedMCP:   map[string][]string{"search-mcp": nil},
+				AllowedLSP:   []string{"python"},
+				Name:         "Search Agent",
+				Description:  "Custom search agent",
+				Disabled:     true,
+				AllowedTools: []string{"glob", "grep", "view"},
+			},
+		},
+		MCP: map[string]MCP{
+			"search-mcp": {
+				Type:    MCPStdio,
+				Command: "search-mcp-command",
+				Args:    []string{"--search"},
+			},
+		},
+		LSP: map[string]LSPConfig{
+			"python": {
+				Command: "pylsp",
+				Args:    []string{},
 			},
 		},
 	}
@@ -1413,13 +1534,11 @@ func TestAgentMerging_ModifyDefaultTaskAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	taskAgent := cfg.Agents[AgentTask]
-	// Should preserve default values for protected fields
-	assert.Equal(t, "Task", taskAgent.Name)                                                                                      // Should remain default
-	assert.Equal(t, "An agent that helps with searching for context and finding implementation details.", taskAgent.Description) // Should remain default
-	assert.False(t, taskAgent.Disabled)                                                                                          // Should remain default
-	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)                               // Should remain default
+	assert.Equal(t, "Task", taskAgent.Name)
+	assert.Equal(t, "An agent that helps with searching for context and finding implementation details.", taskAgent.Description)
+	assert.False(t, taskAgent.Disabled)
+	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
-	// Should update configurable fields
 	assert.Equal(t, SmallModel, taskAgent.Model)
 	assert.Equal(t, map[string][]string{"search-mcp": nil}, taskAgent.AllowedMCP)
 	assert.Equal(t, []string{"python"}, taskAgent.AllowedLSP)
@@ -1430,10 +1549,8 @@ func TestAgentMerging_LocalOverridesGlobal(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create global config with custom agent
 	globalConfig := Config{
 		Agents: map[AgentID]Agent{
 			AgentID("test-agent"): {
@@ -1464,6 +1581,13 @@ func TestAgentMerging_LocalOverridesGlobal(t *testing.T) {
 				AllowedMCP:   map[string][]string{"local-mcp": {"tool1"}},
 			},
 		},
+		MCP: map[string]MCP{
+			"local-mcp": {
+				Type:    MCPStdio,
+				Command: "local-mcp-command",
+				Args:    []string{"--local"},
+			},
+		},
 	}
 
 	localConfigPath := filepath.Join(cwdDir, "crush.json")
@@ -1476,7 +1600,6 @@ func TestAgentMerging_LocalOverridesGlobal(t *testing.T) {
 	require.NoError(t, err)
 
 	testAgent := cfg.Agents[AgentID("test-agent")]
-	// Local should override global
 	assert.Equal(t, "Local Agent", testAgent.Name)
 	assert.Equal(t, "Local description", testAgent.Description)
 	assert.Equal(t, SmallModel, testAgent.Model)
@@ -1490,10 +1613,8 @@ func TestAgentModelTypeAssignment(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config with agents using different model types
 	globalConfig := Config{
 		Agents: map[AgentID]Agent{
 			AgentID("large-agent"): {
@@ -1509,7 +1630,6 @@ func TestAgentModelTypeAssignment(t *testing.T) {
 			AgentID("default-agent"): {
 				ID:   AgentID("default-agent"),
 				Name: "Default Model Agent",
-				// No model specified - should default to LargeModel
 			},
 		},
 	}
@@ -1526,7 +1646,7 @@ func TestAgentModelTypeAssignment(t *testing.T) {
 
 	assert.Equal(t, LargeModel, cfg.Agents[AgentID("large-agent")].Model)
 	assert.Equal(t, SmallModel, cfg.Agents[AgentID("small-agent")].Model)
-	assert.Equal(t, LargeModel, cfg.Agents[AgentID("default-agent")].Model) // Should default to LargeModel
+	assert.Equal(t, LargeModel, cfg.Agents[AgentID("default-agent")].Model)
 }
 
 func TestAgentContextPathOverrides(t *testing.T) {
@@ -1534,10 +1654,8 @@ func TestAgentContextPathOverrides(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config with custom context paths
 	globalConfig := Config{
 		Options: Options{
 			ContextPaths: []string{"global-context.md", "shared-context.md"},
@@ -1551,7 +1669,6 @@ func TestAgentContextPathOverrides(t *testing.T) {
 			AgentID("default-context-agent"): {
 				ID:   AgentID("default-context-agent"),
 				Name: "Default Context Agent",
-				// No ContextPaths specified - should use global
 			},
 		},
 	}
@@ -1566,32 +1683,25 @@ func TestAgentContextPathOverrides(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Agent with custom context paths should have default + global + custom paths (additive)
 	customAgent := cfg.Agents[AgentID("custom-context-agent")]
 	expectedCustomPaths := append(defaultContextPaths, "global-context.md", "shared-context.md", "agent-specific.md", "custom.md")
 	assert.Equal(t, expectedCustomPaths, customAgent.ContextPaths)
 
-	// Agent without custom context paths should use global + defaults
 	defaultAgent := cfg.Agents[AgentID("default-context-agent")]
 	expectedContextPaths := append(defaultContextPaths, "global-context.md", "shared-context.md")
 	assert.Equal(t, expectedContextPaths, defaultAgent.ContextPaths)
 
-	// Default agents should also use the merged context paths
 	coderAgent := cfg.Agents[AgentCoder]
 	assert.Equal(t, expectedContextPaths, coderAgent.ContextPaths)
 }
-
-// Options and Settings Tests
 
 func TestOptionsMerging_ContextPaths(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create global config with context paths
 	globalConfig := Config{
 		Options: Options{
 			ContextPaths: []string{"global1.md", "global2.md"},
@@ -1604,7 +1714,6 @@ func TestOptionsMerging_ContextPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Create local config with additional context paths
 	localConfig := Config{
 		Options: Options{
 			ContextPaths: []string{"local1.md", "local2.md"},
@@ -1620,7 +1729,6 @@ func TestOptionsMerging_ContextPaths(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Context paths should be merged: defaults + global + local
 	expectedContextPaths := append(defaultContextPaths, "global1.md", "global2.md", "local1.md", "local2.md")
 	assert.Equal(t, expectedContextPaths, cfg.Options.ContextPaths)
 }
@@ -1630,14 +1738,12 @@ func TestOptionsMerging_TUIOptions(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create global config with TUI options
 	globalConfig := Config{
 		Options: Options{
 			TUI: TUIOptions{
-				CompactMode: false, // Default value
+				CompactMode: false,
 			},
 		},
 	}
@@ -1648,7 +1754,6 @@ func TestOptionsMerging_TUIOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Create local config that enables compact mode
 	localConfig := Config{
 		Options: Options{
 			TUI: TUIOptions{
@@ -1666,7 +1771,6 @@ func TestOptionsMerging_TUIOptions(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Local config should override global
 	assert.True(t, cfg.Options.TUI.CompactMode)
 }
 
@@ -1675,10 +1779,8 @@ func TestOptionsMerging_DebugFlags(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create global config with debug flags
 	globalConfig := Config{
 		Options: Options{
 			Debug:                false,
@@ -1693,7 +1795,6 @@ func TestOptionsMerging_DebugFlags(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Create local config that enables debug flags
 	localConfig := Config{
 		Options: Options{
 			DebugLSP:             true,
@@ -1710,10 +1811,9 @@ func TestOptionsMerging_DebugFlags(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Local config should override global for boolean flags
-	assert.False(t, cfg.Options.Debug)               // Not set in local, remains global value
-	assert.True(t, cfg.Options.DebugLSP)             // Set to true in local
-	assert.True(t, cfg.Options.DisableAutoSummarize) // Set to true in local
+	assert.False(t, cfg.Options.Debug)
+	assert.True(t, cfg.Options.DebugLSP)
+	assert.True(t, cfg.Options.DisableAutoSummarize)
 }
 
 func TestOptionsMerging_DataDirectory(t *testing.T) {
@@ -1721,10 +1821,8 @@ func TestOptionsMerging_DataDirectory(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create global config with custom data directory
 	globalConfig := Config{
 		Options: Options{
 			DataDirectory: "global-data",
@@ -1737,7 +1835,6 @@ func TestOptionsMerging_DataDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Create local config with different data directory
 	localConfig := Config{
 		Options: Options{
 			DataDirectory: "local-data",
@@ -1753,7 +1850,6 @@ func TestOptionsMerging_DataDirectory(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Local config should override global
 	assert.Equal(t, "local-data", cfg.Options.DataDirectory)
 }
 
@@ -1762,15 +1858,12 @@ func TestOptionsMerging_DefaultValues(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// No config files - should use defaults
 	cfg, err := Init(cwdDir, false)
 
 	require.NoError(t, err)
 
-	// Should have default values
 	assert.Equal(t, defaultDataDirectory, cfg.Options.DataDirectory)
 	assert.Equal(t, defaultContextPaths, cfg.Options.ContextPaths)
 	assert.False(t, cfg.Options.TUI.CompactMode)
@@ -1784,10 +1877,8 @@ func TestOptionsMerging_DebugFlagFromInit(t *testing.T) {
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	// Create config with debug false
 	globalConfig := Config{
 		Options: Options{
 			Debug: false,
@@ -1800,7 +1891,6 @@ func TestOptionsMerging_DebugFlagFromInit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Init with debug=true should override config
 	cfg, err := Init(cwdDir, true)
 
 	require.NoError(t, err)
@@ -1895,85 +1985,20 @@ func TestModelSelection_PreferredModelSelection(t *testing.T) {
 	assert.Equal(t, cfg.Models.Large.Provider, cfg.Models.Small.Provider)
 }
 
-func TestModelSelection_GetAgentModel(t *testing.T) {
+func TestValidation_InvalidModelReference(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider with known models
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
 				ID:                provider.InferenceProviderOpenAI,
 				APIKey:            "test-key",
 				ProviderType:      provider.TypeOpenAI,
-				DefaultLargeModel: "gpt-4",
+				DefaultLargeModel: "non-existent-model",
 				DefaultSmallModel: "gpt-3.5-turbo",
 				Models: []Model{
-					{
-						ID:               "gpt-4",
-						Name:             "GPT-4",
-						ContextWindow:    8192,
-						DefaultMaxTokens: 4096,
-						CanReason:        true,
-						SupportsImages:   true,
-					},
-					{
-						ID:               "gpt-3.5-turbo",
-						Name:             "GPT-3.5 Turbo",
-						ContextWindow:    4096,
-						DefaultMaxTokens: 2048,
-						CanReason:        false,
-						SupportsImages:   false,
-					},
-				},
-			},
-		},
-	}
-
-	configPath := filepath.Join(testConfigDir, "crush.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
-	data, err := json.Marshal(globalConfig)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(configPath, data, 0o644))
-
-	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Test GetAgentModel for default agents
-	coderModel := GetAgentModel(AgentCoder)
-	assert.Equal(t, "gpt-4", coderModel.ID) // Coder uses LargeModel
-	assert.Equal(t, "GPT-4", coderModel.Name)
-	assert.True(t, coderModel.CanReason)
-	assert.True(t, coderModel.SupportsImages)
-
-	taskModel := GetAgentModel(AgentTask)
-	assert.Equal(t, "gpt-4", taskModel.ID) // Task also uses LargeModel by default
-	assert.Equal(t, "GPT-4", taskModel.Name)
-}
-
-func TestModelSelection_GetAgentModelWithCustomModelType(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up provider and custom agent with SmallModel
-	globalConfig := Config{
-		Providers: map[provider.InferenceProvider]ProviderConfig{
-			provider.InferenceProviderOpenAI: {
-				ID:                provider.InferenceProviderOpenAI,
-				APIKey:            "test-key",
-				ProviderType:      provider.TypeOpenAI,
-				DefaultLargeModel: "gpt-4",
-				DefaultSmallModel: "gpt-3.5-turbo",
-				Models: []Model{
-					{
-						ID:               "gpt-4",
-						Name:             "GPT-4",
-						ContextWindow:    8192,
-						DefaultMaxTokens: 4096,
-					},
 					{
 						ID:               "gpt-3.5-turbo",
 						Name:             "GPT-3.5 Turbo",
@@ -1983,13 +2008,6 @@ func TestModelSelection_GetAgentModelWithCustomModelType(t *testing.T) {
 				},
 			},
 		},
-		Agents: map[AgentID]Agent{
-			AgentID("small-agent"): {
-				ID:    AgentID("small-agent"),
-				Name:  "Small Agent",
-				Model: SmallModel,
-			},
-		},
 	}
 
 	configPath := filepath.Join(testConfigDir, "crush.json")
@@ -1999,68 +2017,18 @@ func TestModelSelection_GetAgentModelWithCustomModelType(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
 	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Test GetAgentModel for custom agent with SmallModel
-	smallAgentModel := GetAgentModel(AgentID("small-agent"))
-	assert.Equal(t, "gpt-3.5-turbo", smallAgentModel.ID)
-	assert.Equal(t, "GPT-3.5 Turbo", smallAgentModel.Name)
+	assert.Error(t, err)
 }
 
-func TestModelSelection_GetAgentProvider(t *testing.T) {
+func TestValidation_EmptyAPIKey(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up multiple providers
-	globalConfig := Config{
-		Providers: map[provider.InferenceProvider]ProviderConfig{
-			provider.InferenceProviderOpenAI: {
-				ID:                provider.InferenceProviderOpenAI,
-				APIKey:            "openai-key",
-				ProviderType:      provider.TypeOpenAI,
-				DefaultLargeModel: "gpt-4",
-				DefaultSmallModel: "gpt-3.5-turbo",
-			},
-			provider.InferenceProviderAnthropic: {
-				ID:                provider.InferenceProviderAnthropic,
-				APIKey:            "anthropic-key",
-				ProviderType:      provider.TypeAnthropic,
-				DefaultLargeModel: "claude-3-opus",
-				DefaultSmallModel: "claude-3-haiku",
-			},
-		},
-	}
-
-	configPath := filepath.Join(testConfigDir, "crush.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
-	data, err := json.Marshal(globalConfig)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(configPath, data, 0o644))
-
-	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Test GetAgentProvider
-	coderProvider := GetAgentProvider(AgentCoder)
-	assert.NotEmpty(t, coderProvider.ID)
-	assert.NotEmpty(t, coderProvider.APIKey)
-	assert.NotEmpty(t, coderProvider.ProviderType)
-}
-
-func TestModelSelection_GetProviderModel(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up provider with specific models
 	globalConfig := Config{
 		Providers: map[provider.InferenceProvider]ProviderConfig{
 			provider.InferenceProviderOpenAI: {
 				ID:           provider.InferenceProviderOpenAI,
-				APIKey:       "test-key",
 				ProviderType: provider.TypeOpenAI,
 				Models: []Model{
 					{
@@ -2068,16 +2036,6 @@ func TestModelSelection_GetProviderModel(t *testing.T) {
 						Name:             "GPT-4",
 						ContextWindow:    8192,
 						DefaultMaxTokens: 4096,
-						CostPer1MIn:      30.0,
-						CostPer1MOut:     60.0,
-					},
-					{
-						ID:               "gpt-3.5-turbo",
-						Name:             "GPT-3.5 Turbo",
-						ContextWindow:    4096,
-						DefaultMaxTokens: 2048,
-						CostPer1MIn:      1.5,
-						CostPer1MOut:     2.0,
 					},
 				},
 			},
@@ -2091,209 +2049,32 @@ func TestModelSelection_GetProviderModel(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
 	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Test GetProviderModel
-	gpt4Model := GetProviderModel(provider.InferenceProviderOpenAI, "gpt-4")
-	assert.Equal(t, "gpt-4", gpt4Model.ID)
-	assert.Equal(t, "GPT-4", gpt4Model.Name)
-	assert.Equal(t, int64(8192), gpt4Model.ContextWindow)
-	assert.Equal(t, 30.0, gpt4Model.CostPer1MIn)
-
-	gpt35Model := GetProviderModel(provider.InferenceProviderOpenAI, "gpt-3.5-turbo")
-	assert.Equal(t, "gpt-3.5-turbo", gpt35Model.ID)
-	assert.Equal(t, "GPT-3.5 Turbo", gpt35Model.Name)
-	assert.Equal(t, 1.5, gpt35Model.CostPer1MIn)
-
-	// Test non-existent model
-	nonExistentModel := GetProviderModel(provider.InferenceProviderOpenAI, "non-existent")
-	assert.Empty(t, nonExistentModel.ID)
-}
-
-func TestModelSelection_GetModel(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up provider with models
-	globalConfig := Config{
-		Providers: map[provider.InferenceProvider]ProviderConfig{
-			provider.InferenceProviderOpenAI: {
-				ID:                provider.InferenceProviderOpenAI,
-				APIKey:            "test-key",
-				ProviderType:      provider.TypeOpenAI,
-				DefaultLargeModel: "gpt-4",
-				DefaultSmallModel: "gpt-3.5-turbo",
-				Models: []Model{
-					{
-						ID:               "gpt-4",
-						Name:             "GPT-4",
-						ContextWindow:    8192,
-						DefaultMaxTokens: 4096,
-					},
-					{
-						ID:               "gpt-3.5-turbo",
-						Name:             "GPT-3.5 Turbo",
-						ContextWindow:    4096,
-						DefaultMaxTokens: 2048,
-					},
-				},
-			},
-		},
-	}
-
-	configPath := filepath.Join(testConfigDir, "crush.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
-	data, err := json.Marshal(globalConfig)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(configPath, data, 0o644))
-
-	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Test GetModel
-	largeModel := GetModel(LargeModel)
-	assert.Equal(t, "gpt-4", largeModel.ID)
-	assert.Equal(t, "GPT-4", largeModel.Name)
-
-	smallModel := GetModel(SmallModel)
-	assert.Equal(t, "gpt-3.5-turbo", smallModel.ID)
-	assert.Equal(t, "GPT-3.5 Turbo", smallModel.Name)
-}
-
-func TestModelSelection_UpdatePreferredModel(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up multiple providers with OpenAI first to ensure it's selected initially
-	globalConfig := Config{
-		Providers: map[provider.InferenceProvider]ProviderConfig{
-			provider.InferenceProviderOpenAI: {
-				ID:                provider.InferenceProviderOpenAI,
-				APIKey:            "openai-key",
-				ProviderType:      provider.TypeOpenAI,
-				DefaultLargeModel: "gpt-4",
-				DefaultSmallModel: "gpt-3.5-turbo",
-				Models: []Model{
-					{ID: "gpt-4", Name: "GPT-4"},
-					{ID: "gpt-3.5-turbo", Name: "GPT-3.5 Turbo"},
-				},
-			},
-			provider.InferenceProviderAnthropic: {
-				ID:                provider.InferenceProviderAnthropic,
-				APIKey:            "anthropic-key",
-				ProviderType:      provider.TypeAnthropic,
-				DefaultLargeModel: "claude-3-opus",
-				DefaultSmallModel: "claude-3-haiku",
-				Models: []Model{
-					{ID: "claude-3-opus", Name: "Claude 3 Opus"},
-					{ID: "claude-3-haiku", Name: "Claude 3 Haiku"},
-				},
-			},
-		},
-	}
-
-	configPath := filepath.Join(testConfigDir, "crush.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
-	data, err := json.Marshal(globalConfig)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(configPath, data, 0o644))
-
-	_, err = Init(cwdDir, false)
-
-	require.NoError(t, err)
-
-	// Get initial preferred models (should be OpenAI since it's listed first)
-	initialLargeModel := GetModel(LargeModel)
-	initialSmallModel := GetModel(SmallModel)
-
-	// Verify initial models are OpenAI models
-	assert.Equal(t, "claude-3-opus", initialLargeModel.ID)
-	assert.Equal(t, "claude-3-haiku", initialSmallModel.ID)
-
-	// Update preferred models to Anthropic
-	newLargeModel := PreferredModel{
-		ModelID:  "gpt-4",
-		Provider: provider.InferenceProviderOpenAI,
-	}
-	newSmallModel := PreferredModel{
-		ModelID:  "gpt-3.5-turbo",
-		Provider: provider.InferenceProviderOpenAI,
-	}
-
-	err = UpdatePreferredModel(LargeModel, newLargeModel)
-	require.NoError(t, err)
-
-	err = UpdatePreferredModel(SmallModel, newSmallModel)
-	require.NoError(t, err)
-
-	// Verify models were updated
-	updatedLargeModel := GetModel(LargeModel)
-	assert.Equal(t, "gpt-4", updatedLargeModel.ID)
-	assert.NotEqual(t, initialLargeModel.ID, updatedLargeModel.ID)
-
-	updatedSmallModel := GetModel(SmallModel)
-	assert.Equal(t, "gpt-3.5-turbo", updatedSmallModel.ID)
-	assert.NotEqual(t, initialSmallModel.ID, updatedSmallModel.ID)
-}
-
-func TestModelSelection_InvalidModelType(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up a provider
-	os.Setenv("ANTHROPIC_API_KEY", "test-key")
-
-	_, err := Init(cwdDir, false)
-	require.NoError(t, err)
-
-	// Test UpdatePreferredModel with invalid model type
-	invalidModel := PreferredModel{
-		ModelID:  "some-model",
-		Provider: provider.InferenceProviderAnthropic,
-	}
-
-	err = UpdatePreferredModel(ModelType("invalid"), invalidModel)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown model type")
 }
 
-func TestModelSelection_NonExistentAgent(t *testing.T) {
+func TestValidation_InvalidAgentModelType(t *testing.T) {
 	reset()
 	testConfigDir = t.TempDir()
 	cwdDir := t.TempDir()
 
-	// Set up a provider
 	os.Setenv("ANTHROPIC_API_KEY", "test-key")
 
-	_, err := Init(cwdDir, false)
+	globalConfig := Config{
+		Agents: map[AgentID]Agent{
+			AgentID("invalid-agent"): {
+				ID:    AgentID("invalid-agent"),
+				Name:  "Invalid Agent",
+				Model: ModelType("invalid"),
+			},
+		},
+	}
+
+	configPath := filepath.Join(testConfigDir, "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	data, err := json.Marshal(globalConfig)
 	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(configPath, data, 0o644))
 
-	// Test GetAgentModel with non-existent agent
-	nonExistentModel := GetAgentModel(AgentID("non-existent"))
-	assert.Empty(t, nonExistentModel.ID)
-
-	// Test GetAgentProvider with non-existent agent
-	nonExistentProvider := GetAgentProvider(AgentID("non-existent"))
-	assert.Empty(t, nonExistentProvider.ID)
-}
-
-func TestModelSelection_NonExistentProvider(t *testing.T) {
-	reset()
-	testConfigDir = t.TempDir()
-	cwdDir := t.TempDir()
-
-	// Set up a provider
-	os.Setenv("ANTHROPIC_API_KEY", "test-key")
-
-	_, err := Init(cwdDir, false)
-	require.NoError(t, err)
-
-	// Test GetProviderModel with non-existent provider
-	nonExistentModel := GetProviderModel(provider.InferenceProvider("non-existent"), "some-model")
-	assert.Empty(t, nonExistentModel.ID)
+	_, err = Init(cwdDir, false)
+	assert.Error(t, err)
 }

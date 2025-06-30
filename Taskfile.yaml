@@ -44,3 +44,9 @@ tasks:
     desc: Allocations profile
     cmds:
       - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'
+
+  schema:
+    desc: Generate JSON schema for configuration
+    cmds:
+      - go run cmd/schema/main.go > crush-schema.json
+      - echo "Generated crush-schema.json"

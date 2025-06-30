@@ -230,20 +230,20 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				contextWindow := model.ContextWindow
 				usedTokens := session.CompletionTokens + session.PromptTokens
 				remainingTokens := contextWindow - usedTokens
-				
+
 				// Get effective max tokens for this agent (considering overrides)
 				maxTokens := a.app.CoderAgent.EffectiveMaxTokens()
-				
+
 				// Apply 10% margin to max tokens
 				maxTokensWithMargin := int64(float64(maxTokens) * 1.1)
-				
+
 				// Trigger auto-summarize if remaining tokens < max tokens + 10% margin
 				// Also ensure we have a reasonable minimum threshold to avoid too-frequent summaries
 				minThreshold := int64(1000) // Minimum 1000 tokens remaining before triggering
 				if maxTokensWithMargin < minThreshold {
 					maxTokensWithMargin = minThreshold
 				}
-				
+
 				if remainingTokens < maxTokensWithMargin && !config.Get().Options.DisableAutoSummarize {
 					// Show compact confirmation dialog
 					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func Connect() (*sql.DB, error) {
+func Connect(ctx context.Context) (*sql.DB, error) {
 	dataDir := config.Get().Options.DataDirectory
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")

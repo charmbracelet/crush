@@ -6,12 +6,12 @@ tasks:
   lint:
     desc: Run base linters
     cmds:
-      - golangci-lint run
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
 
   lint-fix:
     desc: Run base linters and fix issues
     cmds:
-      - golangci-lint run --fix
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
 
   test:
     desc: Run tests

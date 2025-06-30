@@ -219,7 +219,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 	providers := config.Providers()
 	modelItems := []util.Model{}
 	selectIndex := 0
-	
+
 	cfg := config.Get()
 	var currentModel config.PreferredModel
 	if m.modelType == LargeModelType {
@@ -227,7 +227,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 	} else {
 		currentModel = cfg.Models.Small
 	}
-	
+
 	for _, provider := range providers {
 		name := provider.Name
 		if name == "" {

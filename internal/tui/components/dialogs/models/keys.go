@@ -28,7 +28,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "toggle model type"),
+			key.WithHelp("tab", "toggle type"),
 		),
 		Close: key.NewBinding(
 			key.WithKeys("esc"),

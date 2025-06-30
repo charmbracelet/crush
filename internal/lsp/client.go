@@ -96,10 +96,10 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			fmt.Fprintf(os.Stderr, "LSP Server: %s\n", scanner.Text())
+			logging.Error("LSP Server", "err", scanner.Text())
 		}
 		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading stderr: %v\n", err)
+			logging.Error("Error reading", "err", err)
 		}
 	}()
 

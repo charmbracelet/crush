@@ -47,11 +47,6 @@ func TestYourFunction(t *testing.T) {
 }
 ```
 
-The mock providers include:
-- **Anthropic**: claude-3-opus, claude-3-haiku, claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
-- **OpenAI**: gpt-4, gpt-3.5-turbo, gpt-4-turbo, gpt-4o, gpt-4o-mini
-- **Gemini**: gemini-2.5-pro, gemini-2.5-flash
-
 ## Formatting
 
 - ALWAYS format any Go code you write.

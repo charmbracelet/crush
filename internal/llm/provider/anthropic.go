@@ -253,6 +253,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 	}
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
+	defer close(eventChan)
 	go func() {
 		for {
 			attempts++
@@ -347,14 +348,12 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 
 			err := anthropicStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
-				close(eventChan)
 				return
 			}
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {
 				eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
-				close(eventChan)
 				return
 			}
 			if retry {
@@ -365,7 +364,6 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
-					close(eventChan)
 					return
 				case <-time.After(time.Duration(after) * time.Millisecond):
 					continue
@@ -375,7 +373,6 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 			}
 
-			close(eventChan)
 			return
 		}
 	}()

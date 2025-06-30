@@ -50,6 +50,7 @@ type AgentEvent struct {
 type Service interface {
 	pubsub.Suscriber[AgentEvent]
 	Model() config.Model
+	EffectiveMaxTokens() int64
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	CancelAll()
@@ -227,6 +228,10 @@ func NewAgent(
 
 func (a *agent) Model() config.Model {
 	return config.GetAgentModel(a.agentCfg.ID)
+}
+
+func (a *agent) EffectiveMaxTokens() int64 {
+	return config.GetAgentEffectiveMaxTokens(a.agentCfg.ID)
 }
 
 func (a *agent) Cancel(sessionID string) {

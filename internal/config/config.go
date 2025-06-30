@@ -860,6 +860,44 @@ func GetAgentModel(agentID AgentID) Model {
 	return Model{}
 }
 
+// GetAgentEffectiveMaxTokens returns the effective max tokens for an agent,
+// considering any overrides from the preferred model configuration
+func GetAgentEffectiveMaxTokens(agentID AgentID) int64 {
+	cfg := Get()
+	agent, ok := cfg.Agents[agentID]
+	if !ok {
+		logging.Error("Agent not found", "agent_id", agentID)
+		return 0
+	}
+
+	var preferredModel PreferredModel
+	switch agent.Model {
+	case LargeModel:
+		preferredModel = cfg.Models.Large
+	case SmallModel:
+		preferredModel = cfg.Models.Small
+	default:
+		logging.Warn("Unknown model type for agent", "agent_id", agentID, "model_type", agent.Model)
+		preferredModel = cfg.Models.Large // Fallback to large model
+	}
+
+	// Get the base model configuration
+	baseModel := GetAgentModel(agentID)
+	if baseModel.ID == "" {
+		return 0
+	}
+
+	// Start with the default max tokens from the base model
+	maxTokens := baseModel.DefaultMaxTokens
+
+	// Override with preferred model max tokens if set
+	if preferredModel.MaxTokens > 0 {
+		maxTokens = preferredModel.MaxTokens
+	}
+
+	return maxTokens
+}
+
 func GetAgentProvider(agentID AgentID) ProviderConfig {
 	cfg := Get()
 	agent, ok := cfg.Agents[agentID]

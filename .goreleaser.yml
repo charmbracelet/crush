@@ -148,6 +148,8 @@ changelog:
       - Merge pull request
       - Merge remote-tracking branch
       - go mod tidy
+      - "^wip "
+      - "^wip:"
   groups:
     - title: "New Features"
       regexp: '^.*?feat(\(.+\))??!?:.+$'

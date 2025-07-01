@@ -2,9 +2,9 @@ module github.com/charmbracelet/crush
 
 go 1.24.3
 
-replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250701175101-b755bb725824
+replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250701203020-391d1c64a82c
 
-replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250701175244-80e997a194c5
+replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250701203048-e8bdbe186087
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0
@@ -45,7 +45,7 @@ require (
 )
 
 require (
-	github.com/charmbracelet/ultraviolet v0.0.0-20250630200803-d5a326545c60 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20250701202947-ebe225debf73 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 )
 

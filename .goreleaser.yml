@@ -77,6 +77,10 @@ checksum:
 aurs:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush-bin.git"
+    provides:
+      - crush
+    conflicts:
+      - crush
     package: |-
       cd "${srcdir}/crush_${pkgver}_Linux_${CARCH}"
       # bin

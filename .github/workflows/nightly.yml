@@ -1,0 +1,12 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # every day at midnight
+  workflow_dispatch: # allows manual triggering
+
+jobs:
+  nightly:
+    uses: charmbracelet/meta/.github/workflows/nightly.yml@main
+    secrets:
+      goreleaser_key: ${{ secrets.GORELEASER_KEY }}

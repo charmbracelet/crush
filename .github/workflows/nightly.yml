@@ -10,5 +10,3 @@ jobs:
     uses: charmbracelet/meta/.github/workflows/nightly.yml@main
     secrets:
       goreleaser_key: ${{ secrets.GORELEASER_KEY }}
-      docker_username: "" # unused
-      docker_token: "" # unused

@@ -79,6 +79,10 @@ func NewFetchTool(permissions permission.Service) BaseTool {
 	}
 }
 
+func (t *fetchTool) Name() string {
+	return FetchToolName
+}
+
 func (t *fetchTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        FetchToolName,

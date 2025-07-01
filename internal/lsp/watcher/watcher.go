@@ -43,7 +43,7 @@ func NewWorkspaceWatcher(client *lsp.Client) *WorkspaceWatcher {
 
 // AddRegistrations adds file watchers to track
 func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
-	cnf := config.Get()
+	cfg := config.Get()
 
 	logging.Debug("Adding file watcher registrations")
 	w.registrationMu.Lock()
@@ -53,7 +53,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 	w.registrations = append(w.registrations, watchers...)
 
 	// Print detailed registration information for debugging
-	if cnf.DebugLSP {
+	if cfg.Options.DebugLSP {
 		logging.Debug("Adding file watcher registrations",
 			"id", id,
 			"watchers", len(watchers),
@@ -122,7 +122,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 			highPriorityFilesOpened := w.openHighPriorityFiles(ctx, serverName)
 			filesOpened += highPriorityFilesOpened
 
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				logging.Debug("Opened high-priority files",
 					"count", highPriorityFilesOpened,
 					"serverName", serverName)
@@ -130,7 +130,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 
 			// If we've already opened enough high-priority files, we might not need more
 			if filesOpened >= maxFilesToOpen {
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Reached file limit with high-priority files",
 						"filesOpened", filesOpened,
 						"maxFiles", maxFilesToOpen)
@@ -148,7 +148,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 				// Skip directories that should be excluded
 				if d.IsDir() {
 					if path != w.workspacePath && shouldExcludeDir(path) {
-						if cnf.DebugLSP {
+						if cfg.Options.DebugLSP {
 							logging.Debug("Skipping excluded directory", "path", path)
 						}
 						return filepath.SkipDir
@@ -176,7 +176,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 			})
 
 			elapsedTime := time.Since(startTime)
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				logging.Debug("Limited workspace scan complete",
 					"filesOpened", filesOpened,
 					"maxFiles", maxFilesToOpen,
@@ -185,11 +185,11 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 				)
 			}
 
-			if err != nil && cnf.DebugLSP {
+			if err != nil && cfg.Options.DebugLSP {
 				logging.Debug("Error scanning workspace for files to open", "error", err)
 			}
 		}()
-	} else if cnf.DebugLSP {
+	} else if cfg.Options.DebugLSP {
 		logging.Debug("Using on-demand file loading for server", "server", serverName)
 	}
 }
@@ -197,7 +197,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 // openHighPriorityFiles opens important files for the server type
 // Returns the number of files opened
 func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName string) int {
-	cnf := config.Get()
+	cfg := config.Get()
 	filesOpened := 0
 
 	// Define patterns for high-priority files based on server type
@@ -265,7 +265,7 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 		// Use doublestar.Glob to find files matching the pattern (supports ** patterns)
 		matches, err := doublestar.Glob(os.DirFS(w.workspacePath), pattern)
 		if err != nil {
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				logging.Debug("Error finding high-priority files", "pattern", pattern, "error", err)
 			}
 			continue
@@ -299,12 +299,12 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 		for j := i; j < end; j++ {
 			fullPath := filesToOpen[j]
 			if err := w.client.OpenFile(ctx, fullPath); err != nil {
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Error opening high-priority file", "path", fullPath, "error", err)
 				}
 			} else {
 				filesOpened++
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Opened high-priority file", "path", fullPath)
 				}
 			}
@@ -321,7 +321,7 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 
 // WatchWorkspace sets up file watching for a workspace
 func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath string) {
-	cnf := config.Get()
+	cfg := config.Get()
 	w.workspacePath = workspacePath
 
 	// Store the watcher in the context for later use
@@ -356,7 +356,7 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 		// Skip excluded directories (except workspace root)
 		if d.IsDir() && path != workspacePath {
 			if shouldExcludeDir(path) {
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Skipping excluded directory", "path", path)
 				}
 				return filepath.SkipDir
@@ -409,7 +409,7 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 			}
 
 			// Debug logging
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				matched, kind := w.isPathWatched(event.Name)
 				logging.Debug("File event",
 					"path", event.Name,
@@ -676,8 +676,8 @@ func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, chan
 
 // notifyFileEvent sends a didChangeWatchedFiles notification for a file event
 func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) error {
-	cnf := config.Get()
-	if cnf.DebugLSP {
+	cfg := config.Get()
+	if cfg.Options.DebugLSP {
 		logging.Debug("Notifying file event",
 			"uri", uri,
 			"changeType", changeType,
@@ -826,7 +826,7 @@ func shouldExcludeDir(dirPath string) bool {
 // shouldExcludeFile returns true if the file should be excluded from opening
 func shouldExcludeFile(filePath string) bool {
 	fileName := filepath.Base(filePath)
-	cnf := config.Get()
+	cfg := config.Get()
 	// Skip dot files
 	if strings.HasPrefix(fileName, ".") {
 		return true
@@ -852,12 +852,12 @@ func shouldExcludeFile(filePath string) bool {
 
 	// Skip large files
 	if info.Size() > maxFileSize {
-		if cnf.DebugLSP {
+		if cfg.Options.DebugLSP {
 			logging.Debug("Skipping large file",
 				"path", filePath,
 				"size", info.Size(),
 				"maxSize", maxFileSize,
-				"debug", cnf.Debug,
+				"debug", cfg.Options.Debug,
 				"sizeMB", float64(info.Size())/(1024*1024),
 				"maxSizeMB", float64(maxFileSize)/(1024*1024),
 			)
@@ -870,7 +870,7 @@ func shouldExcludeFile(filePath string) bool {
 
 // openMatchingFile opens a file if it matches any of the registered patterns
 func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
-	cnf := config.Get()
+	cfg := config.Get()
 	// Skip directories
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
@@ -890,10 +890,10 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 		// Check if the file is a high-priority file that should be opened immediately
 		// This helps with project initialization for certain language servers
 		if isHighPriorityFile(path, serverName) {
-			if cnf.DebugLSP {
+			if cfg.Options.DebugLSP {
 				logging.Debug("Opening high-priority file", "path", path, "serverName", serverName)
 			}
-			if err := w.client.OpenFile(ctx, path); err != nil && cnf.DebugLSP {
+			if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
 				logging.Error("Error opening high-priority file", "path", path, "error", err)
 			}
 			return
@@ -905,7 +905,7 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 
 			// Check file size - for preloading we're more conservative
 			if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
-				if cnf.DebugLSP {
+				if cfg.Options.DebugLSP {
 					logging.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
 				}
 				return
@@ -937,7 +937,7 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 
 			if shouldOpen {
 				// Don't need to check if it's already open - the client.OpenFile handles that
-				if err := w.client.OpenFile(ctx, path); err != nil && cnf.DebugLSP {
+				if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
 					logging.Error("Error opening file", "path", path, "error", err)
 				}
 			}

@@ -3,9 +3,9 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -55,19 +55,20 @@ type Provider interface {
 
 	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() models.Model
+	Model() config.Model
 }
 
 type providerClientOptions struct {
+	baseURL       string
+	config        config.ProviderConfig
 	apiKey        string
-	model         models.Model
-	maxTokens     int64
+	modelType     config.ModelType
+	model         func(config.ModelType) config.Model
+	disableCache  bool
 	systemMessage string
-
-	anthropicOptions []AnthropicOption
-	openaiOptions    []OpenAIOption
-	geminiOptions    []GeminiOption
-	bedrockOptions   []BedrockOption
+	maxTokens     int64
+	extraHeaders  map[string]string
+	extraParams   map[string]string
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -75,90 +76,13 @@ type ProviderClientOption func(*providerClientOptions)
 type ProviderClient interface {
 	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
+
+	Model() config.Model
 }
 
 type baseProvider[C ProviderClient] struct {
 	options providerClientOptions
 	client  C
-}
-
-func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption) (Provider, error) {
-	clientOptions := providerClientOptions{}
-	for _, o := range opts {
-		o(&clientOptions)
-	}
-	switch providerName {
-	case models.ProviderAnthropic:
-		return &baseProvider[AnthropicClient]{
-			options: clientOptions,
-			client:  newAnthropicClient(clientOptions),
-		}, nil
-	case models.ProviderOpenAI:
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case models.ProviderGemini:
-		return &baseProvider[GeminiClient]{
-			options: clientOptions,
-			client:  newGeminiClient(clientOptions),
-		}, nil
-	case models.ProviderBedrock:
-		return &baseProvider[BedrockClient]{
-			options: clientOptions,
-			client:  newBedrockClient(clientOptions),
-		}, nil
-	case models.ProviderGROQ:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://api.groq.com/openai/v1"),
-		)
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case models.ProviderAzure:
-		return &baseProvider[AzureClient]{
-			options: clientOptions,
-			client:  newAzureClient(clientOptions),
-		}, nil
-	case models.ProviderVertexAI:
-		return &baseProvider[VertexAIClient]{
-			options: clientOptions,
-			client:  newVertexAIClient(clientOptions),
-		}, nil
-	case models.ProviderOpenRouter:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://openrouter.ai/api/v1"),
-			WithOpenAIExtraHeaders(map[string]string{
-				"HTTP-Referer": "crush.charm.land",
-				"X-Title":      "Crush",
-			}),
-		)
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case models.ProviderXAI:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL("https://api.x.ai/v1"),
-		)
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case models.ProviderLocal:
-		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL(os.Getenv("LOCAL_ENDPOINT")),
-		)
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case models.ProviderMock:
-		// TODO: implement mock client for test
-		panic("not implemented")
-	}
-	return nil, fmt.Errorf("provider not supported: %s", providerName)
 }
 
 func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []message.Message) {
@@ -177,30 +101,24 @@ func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.M
 	return p.client.send(ctx, messages, tools)
 }
 
-func (p *baseProvider[C]) Model() models.Model {
-	return p.options.model
-}
-
 func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	messages = p.cleanMessages(messages)
 	return p.client.stream(ctx, messages, tools)
 }
 
-func WithAPIKey(apiKey string) ProviderClientOption {
+func (p *baseProvider[C]) Model() config.Model {
+	return p.client.Model()
+}
+
+func WithModel(model config.ModelType) ProviderClientOption {
 	return func(options *providerClientOptions) {
-		options.apiKey = apiKey
+		options.modelType = model
 	}
 }
 
-func WithModel(model models.Model) ProviderClientOption {
+func WithDisableCache(disableCache bool) ProviderClientOption {
 	return func(options *providerClientOptions) {
-		options.model = model
-	}
-}
-
-func WithMaxTokens(maxTokens int64) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.maxTokens = maxTokens
+		options.disableCache = disableCache
 	}
 }
 
@@ -210,26 +128,67 @@ func WithSystemMessage(systemMessage string) ProviderClientOption {
 	}
 }
 
-func WithAnthropicOptions(anthropicOptions ...AnthropicOption) ProviderClientOption {
+func WithMaxTokens(maxTokens int64) ProviderClientOption {
 	return func(options *providerClientOptions) {
-		options.anthropicOptions = anthropicOptions
+		options.maxTokens = maxTokens
 	}
 }
 
-func WithOpenAIOptions(openaiOptions ...OpenAIOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.openaiOptions = openaiOptions
+func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+	resolvedAPIKey, err := config.ResolveAPIKey(cfg.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
-}
 
-func WithGeminiOptions(geminiOptions ...GeminiOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.geminiOptions = geminiOptions
+	clientOptions := providerClientOptions{
+		baseURL:      cfg.BaseURL,
+		config:       cfg,
+		apiKey:       resolvedAPIKey,
+		extraHeaders: cfg.ExtraHeaders,
+		model: func(tp config.ModelType) config.Model {
+			return config.GetModel(tp)
+		},
 	}
-}
-
-func WithBedrockOptions(bedrockOptions ...BedrockOption) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.bedrockOptions = bedrockOptions
+	for _, o := range opts {
+		o(&clientOptions)
 	}
+	switch cfg.ProviderType {
+	case provider.TypeAnthropic:
+		return &baseProvider[AnthropicClient]{
+			options: clientOptions,
+			client:  newAnthropicClient(clientOptions, false),
+		}, nil
+	case provider.TypeOpenAI:
+		return &baseProvider[OpenAIClient]{
+			options: clientOptions,
+			client:  newOpenAIClient(clientOptions),
+		}, nil
+	case provider.TypeGemini:
+		return &baseProvider[GeminiClient]{
+			options: clientOptions,
+			client:  newGeminiClient(clientOptions),
+		}, nil
+	case provider.TypeBedrock:
+		return &baseProvider[BedrockClient]{
+			options: clientOptions,
+			client:  newBedrockClient(clientOptions),
+		}, nil
+	case provider.TypeAzure:
+		return &baseProvider[AzureClient]{
+			options: clientOptions,
+			client:  newAzureClient(clientOptions),
+		}, nil
+	case provider.TypeVertexAI:
+		return &baseProvider[VertexAIClient]{
+			options: clientOptions,
+			client:  newVertexAIClient(clientOptions),
+		}, nil
+	case provider.TypeXAI:
+		clientOptions.baseURL = "https://api.x.ai/v1"
+		return &baseProvider[OpenAIClient]{
+			options: clientOptions,
+			client:  newOpenAIClient(clientOptions),
+		}, nil
+	}
+	return nil, fmt.Errorf("provider not supported: %s", cfg.ProviderType)
 }

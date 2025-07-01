@@ -17,7 +17,7 @@ import (
 )
 
 func Connect(ctx context.Context) (*sql.DB, error) {
-	dataDir := config.Get().Data.Directory
+	dataDir := config.Get().Options.DataDirectory
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
 	}

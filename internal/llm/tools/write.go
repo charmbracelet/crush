@@ -84,6 +84,10 @@ func NewWriteTool(lspClients map[string]*lsp.Client, permissions permission.Serv
 	}
 }
 
+func (w *writeTool) Name() string {
+	return WriteToolName
+}
+
 func (w *writeTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        WriteToolName,

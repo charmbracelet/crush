@@ -26,6 +26,7 @@ type Opts struct {
 	TitleColorB  color.Color // right gradient ramp point
 	CharmColor   color.Color // Charm™ text color
 	VersionColor color.Color // Version text color
+	Width        int         // width of the rendered logo, used for truncation
 }
 
 // Render renders the Crush logo. Set the argument to true to render the narrow
@@ -76,7 +77,7 @@ func Render(version string, compact bool, o Opts) string {
 	}
 
 	// Right field.
-	const rightWidth = 15
+	rightWidth := max(15, o.Width-crushWidth-leftWidth) // 2 for the gap.
 	const stepDownAt = 0
 	rightField := new(strings.Builder)
 	for i := range fieldHeight {

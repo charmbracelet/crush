@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
@@ -18,51 +18,36 @@ import (
 	"github.com/openai/openai-go/shared"
 )
 
-type openaiOptions struct {
-	baseURL         string
-	disableCache    bool
-	reasoningEffort string
-	extraHeaders    map[string]string
-}
-
-type OpenAIOption func(*openaiOptions)
-
 type openaiClient struct {
 	providerOptions providerClientOptions
-	options         openaiOptions
 	client          openai.Client
 }
 
 type OpenAIClient ProviderClient
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
-	openaiOpts := openaiOptions{
-		reasoningEffort: "medium",
+	return &openaiClient{
+		providerOptions: opts,
+		client:          createOpenAIClient(opts),
 	}
-	for _, o := range opts.openaiOptions {
-		o(&openaiOpts)
-	}
+}
 
+func createOpenAIClient(opts providerClientOptions) openai.Client {
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
 	}
-	if openaiOpts.baseURL != "" {
-		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(openaiOpts.baseURL))
+	if opts.baseURL != "" {
+		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(opts.baseURL))
 	}
 
-	if openaiOpts.extraHeaders != nil {
-		for key, value := range openaiOpts.extraHeaders {
+	if opts.extraHeaders != nil {
+		for key, value := range opts.extraHeaders {
 			openaiClientOptions = append(openaiClientOptions, option.WithHeader(key, value))
 		}
 	}
 
-	client := openai.NewClient(openaiClientOptions...)
-	return &openaiClient{
-		providerOptions: opts,
-		options:         openaiOpts,
-		client:          client,
-	}
+	return openai.NewClient(openaiClientOptions...)
 }
 
 func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
@@ -76,7 +61,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 			textBlock := openai.ChatCompletionContentPartTextParam{Text: msg.Content().String()}
 			content = append(content, openai.ChatCompletionContentPartUnionParam{OfText: &textBlock})
 			for _, binaryContent := range msg.BinaryContent() {
-				imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: binaryContent.String(models.ProviderOpenAI)}
+				imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: binaryContent.String(provider.InferenceProviderOpenAI)}
 				imageBlock := openai.ChatCompletionContentPartImageParam{ImageURL: imageURL}
 
 				content = append(content, openai.ChatCompletionContentPartUnionParam{OfImageURL: &imageBlock})
@@ -160,15 +145,37 @@ func (o *openaiClient) finishReason(reason string) message.FinishReason {
 }
 
 func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
+	model := o.providerOptions.model(o.providerOptions.modelType)
+	cfg := config.Get()
+
+	modelConfig := cfg.Models.Large
+	if o.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
+
+	reasoningEffort := model.ReasoningEffort
+	if modelConfig.ReasoningEffort != "" {
+		reasoningEffort = modelConfig.ReasoningEffort
+	}
+
 	params := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(o.providerOptions.model.APIModel),
+		Model:    openai.ChatModel(model.ID),
 		Messages: messages,
 		Tools:    tools,
 	}
 
-	if o.providerOptions.model.CanReason {
-		params.MaxCompletionTokens = openai.Int(o.providerOptions.maxTokens)
-		switch o.options.reasoningEffort {
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
+
+	// Override max tokens if set in provider options
+	if o.providerOptions.maxTokens > 0 {
+		maxTokens = o.providerOptions.maxTokens
+	}
+	if model.CanReason {
+		params.MaxCompletionTokens = openai.Int(maxTokens)
+		switch reasoningEffort {
 		case "low":
 			params.ReasoningEffort = shared.ReasoningEffortLow
 		case "medium":
@@ -176,10 +183,10 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		case "high":
 			params.ReasoningEffort = shared.ReasoningEffortHigh
 		default:
-			params.ReasoningEffort = shared.ReasoningEffortMedium
+			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
 		}
 	} else {
-		params.MaxTokens = openai.Int(o.providerOptions.maxTokens)
+		params.MaxTokens = openai.Int(maxTokens)
 	}
 
 	return params
@@ -188,7 +195,7 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Debug {
+	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
@@ -245,7 +252,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	}
 
 	cfg := config.Get()
-	if cfg.Debug {
+	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(params)
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
@@ -335,12 +342,22 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 }
 
 func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error) {
-	var apierr *openai.Error
-	if !errors.As(err, &apierr) {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
 		return false, 0, err
 	}
 
-	if apierr.StatusCode != 429 && apierr.StatusCode != 500 {
+	// Check for token expiration (401 Unauthorized)
+	if apiErr.StatusCode == 401 {
+		o.providerOptions.apiKey, err = config.ResolveAPIKey(o.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		o.client = createOpenAIClient(o.providerOptions)
+		return true, 0, nil
+	}
+
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
 		return false, 0, err
 	}
 
@@ -349,7 +366,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	}
 
 	retryMs := 0
-	retryAfterValues := apierr.Response.Header.Values("Retry-After")
+	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
 
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)
@@ -393,33 +410,6 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 	}
 }
 
-func WithOpenAIBaseURL(baseURL string) OpenAIOption {
-	return func(options *openaiOptions) {
-		options.baseURL = baseURL
-	}
-}
-
-func WithOpenAIExtraHeaders(headers map[string]string) OpenAIOption {
-	return func(options *openaiOptions) {
-		options.extraHeaders = headers
-	}
-}
-
-func WithOpenAIDisableCache() OpenAIOption {
-	return func(options *openaiOptions) {
-		options.disableCache = true
-	}
-}
-
-func WithReasoningEffort(effort string) OpenAIOption {
-	return func(options *openaiOptions) {
-		defaultReasoningEffort := "medium"
-		switch effort {
-		case "low", "medium", "high":
-			defaultReasoningEffort = effort
-		default:
-			logging.Warn("Invalid reasoning effort, using default: medium")
-		}
-		options.reasoningEffort = defaultReasoningEffort
-	}
+func (a *openaiClient) Model() config.Model {
+	return a.providerOptions.model(a.providerOptions.modelType)
 }

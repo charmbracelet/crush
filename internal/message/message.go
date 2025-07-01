@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
 
 type CreateMessageParams struct {
-	Role  MessageRole
-	Parts []ContentPart
-	Model models.ModelID
+	Role     MessageRole
+	Parts    []ContentPart
+	Model    string
+	Provider string
 }
 
 type Service interface {
@@ -70,6 +70,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Role:      string(params.Role),
 		Parts:     string(partsJSON),
 		Model:     sql.NullString{String: string(params.Model), Valid: true},
+		Provider:  sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 	})
 	if err != nil {
 		return Message{}, err
@@ -154,7 +155,8 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		SessionID: item.SessionID,
 		Role:      MessageRole(item.Role),
 		Parts:     parts,
-		Model:     models.ModelID(item.Model.String),
+		Model:     item.Model.String,
+		Provider:  item.Provider.String,
 		CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt,
 	}, nil

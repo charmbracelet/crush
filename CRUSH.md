@@ -24,6 +24,29 @@
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
 - **Comments**: End comments in periods unless comments are at the end of the line.
 
+## Testing with Mock Providers
+
+When writing tests that involve provider configurations, use the mock providers to avoid API calls:
+
+```go
+func TestYourFunction(t *testing.T) {
+    // Enable mock providers for testing
+    originalUseMock := config.UseMockProviders
+    config.UseMockProviders = true
+    defer func() {
+        config.UseMockProviders = originalUseMock
+        config.ResetProviders()
+    }()
+
+    // Reset providers to ensure fresh mock data
+    config.ResetProviders()
+
+    // Your test code here - providers will now return mock data
+    providers := config.Providers()
+    // ... test logic
+}
+```
+
 ## Formatting
 
 - ALWAYS format any Go code you write.

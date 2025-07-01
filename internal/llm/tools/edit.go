@@ -106,6 +106,10 @@ func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Servi
 	}
 }
 
+func (e *editTool) Name() string {
+	return EditToolName
+}
+
 func (e *editTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        EditToolName,

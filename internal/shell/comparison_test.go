@@ -9,7 +9,7 @@ import (
 )
 
 func TestShellPerformanceComparison(t *testing.T) {
-	shell := newPersistentShell(t.TempDir())
+	shell := NewShell(&Options{WorkingDir: t.TempDir()})
 
 	// Test quick command
 	start := time.Now()
@@ -27,7 +27,7 @@ func TestShellPerformanceComparison(t *testing.T) {
 
 // Benchmark CPU usage during polling
 func BenchmarkShellPolling(b *testing.B) {
-	shell := newPersistentShell(b.TempDir())
+	shell := NewShell(&Options{WorkingDir: b.TempDir()})
 
 	b.ReportAllocs()
 

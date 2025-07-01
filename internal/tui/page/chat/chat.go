@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -171,14 +170,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(ChatFocusedMsg{Focused: false}),
 			)
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			cfg := config.Get()
-			agentCfg := cfg.Agents[config.AgentCoder]
-			selectedModelID := agentCfg.Model
-			model := models.SupportedModels[selectedModelID]
-			if model.SupportsAttachments {
+			model := config.GetAgentModel(config.AgentCoder)
+			if model.SupportsImages {
 				return p, util.CmdHandler(OpenFilePickerMsg{})
 			} else {
-				return p, util.ReportWarn("File attachments are not supported by the current model: " + string(selectedModelID))
+				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {

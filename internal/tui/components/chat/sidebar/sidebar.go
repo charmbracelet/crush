@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/llm/models"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -76,7 +75,7 @@ func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client, c
 }
 
 func (m *sidebarCmp) Init() tea.Cmd {
-	m.logo = m.logoBlock(false)
+	m.logo = m.logoBlock()
 	m.cwd = cwd()
 	return nil
 }
@@ -229,9 +228,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
 	if width < logoBreakpoint && (m.width == 0 || m.width >= logoBreakpoint) {
-		m.logo = m.logoBlock(true)
+		m.logo = m.logoBlock()
 	} else if width >= logoBreakpoint && (m.width == 0 || m.width < logoBreakpoint) {
-		m.logo = m.logoBlock(false)
+		m.logo = m.logoBlock()
 	}
 
 	m.width = width
@@ -243,9 +242,9 @@ func (m *sidebarCmp) GetSize() (int, int) {
 	return m.width, m.height
 }
 
-func (m *sidebarCmp) logoBlock(compact bool) string {
+func (m *sidebarCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return logo.Render(version.Version, compact, logo.Opts{
+	return logo.Render(version.Version, true, logo.Opts{
 		FieldColor:   t.Primary,
 		TitleColorA:  t.Secondary,
 		TitleColorB:  t.Primary,
@@ -404,7 +403,7 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	mcpList := []string{section, ""}
 
-	mcp := config.Get().MCPServers
+	mcp := config.Get().MCP
 	if len(mcp) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -473,10 +472,7 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	cfg := config.Get()
-	agentCfg := cfg.Agents[config.AgentCoder]
-	selectedModelID := agentCfg.Model
-	model := models.SupportedModels[selectedModelID]
+	model := config.GetAgentModel(config.AgentCoder)
 
 	t := styles.CurrentTheme()
 

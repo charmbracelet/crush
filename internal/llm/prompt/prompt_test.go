@@ -15,15 +15,9 @@ func TestGetContextFromPaths(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	_, err := config.Load(tmpDir, false)
+	_, err := config.Init(tmpDir, false)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
-	}
-	cfg := config.Get()
-	cfg.WorkingDir = tmpDir
-	cfg.ContextPaths = []string{
-		"file.txt",
-		"directory/",
 	}
 	testFiles := []string{
 		"file.txt",
@@ -34,7 +28,12 @@ func TestGetContextFromPaths(t *testing.T) {
 
 	createTestFiles(t, tmpDir, testFiles)
 
-	context := getContextFromPaths()
+	context := getContextFromPaths(
+		[]string{
+			"file.txt",
+			"directory/",
+		},
+	)
 	expectedContext := fmt.Sprintf("# From:%s/file.txt\nfile.txt: test content\n# From:%s/directory/file_a.txt\ndirectory/file_a.txt: test content\n# From:%s/directory/file_b.txt\ndirectory/file_b.txt: test content\n# From:%s/directory/file_c.txt\ndirectory/file_c.txt: test content", tmpDir, tmpDir, tmpDir, tmpDir)
 	assert.Equal(t, expectedContext, context)
 }

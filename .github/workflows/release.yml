@@ -1,40 +1,22 @@
-name: release
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+name: goreleaser
 
 on:
-  workflow_dispatch:
   push:
     tags:
-      - "*"
+      - v*.*.*
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
-
-permissions:
-  contents: write
-  packages: write
+concurrency:
+  group: goreleaser
+  cancel-in-progress: true
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - run: git fetch --force --tags
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ">=1.23.2"
-          cache: true
-          cache-dependency-path: go.sum
-
-      - run: go mod download
-
-      - uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
-          AUR_KEY: ${{ secrets.AUR_KEY }}
+    uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
+    secrets:
+      gh_pat: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      goreleaser_key: ${{ secrets.GORELEASER_KEY }}
+      fury_token: ${{ secrets.FURY_TOKEN }}
+      nfpm_gpg_key: ${{ secrets.NFPM_GPG_KEY }}
+      nfpm_passphrase: ${{ secrets.NFPM_PASSPHRASE }}

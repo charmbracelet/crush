@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/tools/shell"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 type BashParams struct {
@@ -248,6 +248,10 @@ func NewBashTool(permission permission.Service) BaseTool {
 	return &bashTool{
 		permissions: permission,
 	}
+}
+
+func (b *bashTool) Name() string {
+	return BashToolName
 }
 
 func (b *bashTool) Info() ToolInfo {

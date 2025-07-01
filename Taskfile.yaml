@@ -6,12 +6,12 @@ tasks:
   lint:
     desc: Run base linters
     cmds:
-      - golangci-lint run
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
 
   lint-fix:
     desc: Run base linters and fix issues
     cmds:
-      - golangci-lint run --fix
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
 
   test:
     desc: Run tests
@@ -44,3 +44,9 @@ tasks:
     desc: Allocations profile
     cmds:
       - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'
+
+  schema:
+    desc: Generate JSON schema for configuration
+    cmds:
+      - go run cmd/schema/main.go > crush-schema.json
+      - echo "Generated crush-schema.json"

@@ -63,7 +63,7 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 
 	// Project directory
 	sources = append(sources, commandSource{
-		path:   filepath.Join(cfg.Data.Directory, "commands"),
+		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
 		prefix: ProjectCommandPrefix,
 	})
 

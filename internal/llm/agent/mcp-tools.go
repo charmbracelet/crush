@@ -18,7 +18,7 @@ import (
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	mcpConfig   config.MCPServer
+	mcpConfig   config.MCP
 	permissions permission.Service
 }
 
@@ -32,12 +32,20 @@ type MCPClient interface {
 	Close() error
 }
 
+func (b *mcpTool) Name() string {
+	return fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name)
+}
+
 func (b *mcpTool) Info() tools.ToolInfo {
+	required := b.tool.InputSchema.Required
+	if required == nil {
+		required = make([]string, 0)
+	}
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
 		Parameters:  b.tool.InputSchema.Properties,
-		Required:    b.tool.InputSchema.Required,
+		Required:    required,
 	}
 }
 
@@ -124,7 +132,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return tools.NewTextErrorResponse("invalid mcp type"), nil
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPServer) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCP) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
@@ -135,7 +143,7 @@ func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpC
 
 var mcpTools []tools.BaseTool
 
-func getTools(ctx context.Context, name string, m config.MCPServer, permissions permission.Service, c MCPClient) []tools.BaseTool {
+func getTools(ctx context.Context, name string, m config.MCP, permissions permission.Service, c MCPClient) []tools.BaseTool {
 	var stdioTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
@@ -166,7 +174,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 	if len(mcpTools) > 0 {
 		return mcpTools
 	}
-	for name, m := range config.Get().MCPServers {
+	for name, m := range config.Get().MCP {
 		switch m.Type {
 		case config.MCPStdio:
 			c, err := client.NewStdioMCPClient(

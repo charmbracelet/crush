@@ -4,65 +4,54 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-type bedrockOptions struct {
-	// Bedrock specific options can be added here
-}
-
-type BedrockOption func(*bedrockOptions)
-
 type bedrockClient struct {
 	providerOptions providerClientOptions
-	options         bedrockOptions
 	childProvider   ProviderClient
 }
 
 type BedrockClient ProviderClient
 
 func newBedrockClient(opts providerClientOptions) BedrockClient {
-	bedrockOpts := bedrockOptions{}
-	// Apply bedrock specific options if they are added in the future
-
 	// Get AWS region from environment
-	region := os.Getenv("AWS_REGION")
-	if region == "" {
-		region = os.Getenv("AWS_DEFAULT_REGION")
-	}
-
+	region := opts.extraParams["region"]
 	if region == "" {
 		region = "us-east-1" // default region
 	}
 	if len(region) < 2 {
 		return &bedrockClient{
 			providerOptions: opts,
-			options:         bedrockOpts,
 			childProvider:   nil, // Will cause an error when used
 		}
 	}
 
-	// Prefix the model name with region
-	regionPrefix := region[:2]
-	modelName := opts.model.APIModel
-	opts.model.APIModel = fmt.Sprintf("%s.%s", regionPrefix, modelName)
+	opts.model = func(modelType config.ModelType) config.Model {
+		model := config.GetModel(modelType)
+
+		// Prefix the model name with region
+		regionPrefix := region[:2]
+		modelName := model.ID
+		model.ID = fmt.Sprintf("%s.%s", regionPrefix, modelName)
+		return model
+	}
+
+	model := opts.model(opts.modelType)
 
 	// Determine which provider to use based on the model
-	if strings.Contains(string(opts.model.APIModel), "anthropic") {
+	if strings.Contains(string(model.ID), "anthropic") {
 		// Create Anthropic client with Bedrock configuration
 		anthropicOpts := opts
-		anthropicOpts.anthropicOptions = append(anthropicOpts.anthropicOptions,
-			WithAnthropicBedrock(true),
-			WithAnthropicDisableCache(),
-		)
+		// TODO: later find a way to check if the AWS account has caching enabled
+		opts.disableCache = true // Disable cache for Bedrock
 		return &bedrockClient{
 			providerOptions: opts,
-			options:         bedrockOpts,
-			childProvider:   newAnthropicClient(anthropicOpts),
+			childProvider:   newAnthropicClient(anthropicOpts, true),
 		}
 	}
 
@@ -70,7 +59,6 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 	// This will cause an error when used
 	return &bedrockClient{
 		providerOptions: opts,
-		options:         bedrockOpts,
 		childProvider:   nil,
 	}
 }
@@ -97,4 +85,8 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 	}
 
 	return b.childProvider.stream(ctx, messages, tools)
+}
+
+func (b *bedrockClient) Model() config.Model {
+	return b.providerOptions.model(b.providerOptions.modelType)
 }

@@ -161,7 +161,6 @@ func (i *detailCmp) GetSize() (int, int) {
 }
 
 func (i *detailCmp) SetSize(width int, height int) tea.Cmd {
-	logging.Info("Setting size for detail component", "width", width, "height", height)
 	i.width = width
 	i.height = height
 	i.viewport.SetWidth(i.width - 4)

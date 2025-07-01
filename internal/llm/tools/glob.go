@@ -74,6 +74,10 @@ func NewGlobTool() BaseTool {
 	return &globTool{}
 }
 
+func (g *globTool) Name() string {
+	return GlobToolName
+}
+
 func (g *globTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        GlobToolName,

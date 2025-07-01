@@ -1,0 +1,9 @@
+name: nightly
+
+on: push
+
+jobs:
+  nightly:
+    uses: charmbracelet/meta/.github/workflows/nightly.yml@main
+    secrets:
+      goreleaser_key: ${{ secrets.GORELEASER_KEY }}

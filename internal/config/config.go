@@ -223,6 +223,15 @@ func loadConfig(cwd string, debug bool) (*Config, error) {
 			}
 		}
 
+		messagesPath := fmt.Sprintf("%s/%s", cfg.Options.DataDirectory, "messages")
+
+		if _, err := os.Stat(messagesPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(messagesPath, 0o756); err != nil {
+				return cfg, fmt.Errorf("failed to create directory: %w", err)
+			}
+		}
+		logging.MessageDir = messagesPath
+
 		sloggingFileWriter, err := os.OpenFile(loggingFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 		if err != nil {
 			return cfg, fmt.Errorf("failed to open log file: %w", err)

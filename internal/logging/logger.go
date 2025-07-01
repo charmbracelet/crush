@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+
 	// "path/filepath"
 	"encoding/json"
 	"runtime"
@@ -22,6 +23,7 @@ func getCaller() string {
 	}
 	return caller
 }
+
 func Info(msg string, args ...any) {
 	source := getCaller()
 	slog.Info(msg, append([]any{"source", source}, args...)...)
@@ -122,7 +124,7 @@ func AppendToSessionLogFile(sessionId string, filename string, content string) s
 
 	filePath := fmt.Sprintf("%s/%s", sessionPath, filename)
 
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		Error("Failed to open session log file", "filepath", filePath, "error", err)
 		return ""

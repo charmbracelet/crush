@@ -102,7 +102,8 @@ aurs:
       install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
 
 furies:
-  - account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
+  - disable: "{{ .IsNightly }}"
+    account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
     secret_name: FURY_TOKEN
 
 homebrew_casks:
@@ -129,10 +130,36 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^doc:"
+      - "^(build|ci): "
+      - "^chore: auto-update generated files$"
+      - "^chore: docs$"
+      - "^chore: schema update$"
+      - "^chore: schema$"
+      - "^chore: typo$"
+      - "^chore: update schema$"
+      - "^chore: update$"
+      - "^chore\\(deps\\): "
+      - "^docs: update$"
       - "^test:"
-      - "^ci:"
-      - "^ignore:"
-      - "^example:"
-      - "^wip:"
+      - "^test\\("
+      - "merge conflict"
+      - "merge conflict"
+      - Merge branch
+      - Merge pull request
+      - Merge remote-tracking branch
+      - go mod tidy
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 100
+    - title: "Security updates"
+      regexp: '^.*?sec(\(.+\))??!?:.+$'
+      order: 150
+    - title: "Bug fixes and improvements"
+      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+      order: 200
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 400
+    - title: Other work
+      order: 9999

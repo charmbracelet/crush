@@ -196,7 +196,7 @@ func (m *messageCmp) markdownContent() string {
 			//  provides the requested question
 			content = ""
 		} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
-			content = "*Canceled*"
+			content = "*The provider seems to be offline at the moment. Please, try again later.*"
 		}
 	}
 	return m.toMarkdown(content)

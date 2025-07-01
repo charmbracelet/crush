@@ -33,11 +33,15 @@ type MCPClient interface {
 }
 
 func (b *mcpTool) Info() tools.ToolInfo {
+	required := b.tool.InputSchema.Required
+	if required == nil {
+		required = make([]string, 0)
+	}
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
 		Parameters:  b.tool.InputSchema.Properties,
-		Required:    b.tool.InputSchema.Required,
+		Required:    required,
 	}
 }
 

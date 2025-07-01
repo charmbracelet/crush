@@ -54,7 +54,7 @@ builds:
 
 archives:
   - name_template: >-
-      {{ .ProjectName }}_
+      crush_
       {{- .Version }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -92,9 +92,9 @@ aurs:
       mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
       mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
       mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
-      install -Dm644 "./completions/crush.ProjectName }}.bash" "${pkgdir}/usr/share/bash-completion/completions/crush"
-      install -Dm644 "./completions/crush.ProjectName }}.zsh" "${pkgdir}/usr/share/zsh/site-functions/_crush"
-      install -Dm644 "./completions/crush.ProjectName }}.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/crush.fish"
+      install -Dm644 "./completions/crush.bash" "${pkgdir}/usr/share/bash-completion/completions/crush"
+      install -Dm644 "./completions/crush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_crush"
+      install -Dm644 "./completions/crush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/crush.fish"
       # man pages
       install -Dm644 "./manpages/crush.1.gz" "${pkgdir}/usr/share/man/man1/crush.1.gz"
       # readme
@@ -116,14 +116,14 @@ nfpms:
       - rpm
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
-      - src: ./completions/{{ .ProjectName }}.bash
-        dst: /etc/bash_completion.d/{{ .ProjectName }}
-      - src: ./completions/{{ .ProjectName }}.fish
-        dst: /usr/share/fish/vendor_completions.d/{{ .ProjectName }}.fish
-      - src: ./completions/{{ .ProjectName }}.zsh
-        dst: /usr/share/zsh/site-functions/_{{ .ProjectName }}
-      - src: ./manpages/{{ .ProjectName }}.1.gz
-        dst: /usr/share/man/man1/{{ .ProjectName }}.1.gz
+      - src: ./completions/crush.bash
+        dst: /etc/bash_completion.d/crush
+      - src: ./completions/crush.fish
+        dst: /usr/share/fish/vendor_completions.d/crush.fish
+      - src: ./completions/crush.zsh
+        dst: /usr/share/zsh/site-functions/_crush
+      - src: ./manpages/crush.1.gz
+        dst: /usr/share/man/man1/crush.1.gz
 
 changelog:
   sort: asc

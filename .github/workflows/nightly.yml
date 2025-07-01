@@ -1,6 +1,9 @@
 name: nightly
 
-on: push
+on:
+  schedule:
+    - cron: "0 0 * * 0" # every Sunday at midnight
+  workflow_dispatch: # allows manual triggering
 
 jobs:
   nightly:

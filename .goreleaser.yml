@@ -53,10 +53,7 @@ builds:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
 
 archives:
-  - format_overrides:
-      - goos: windows
-        formats: zip
-    name_template: >-
+  - name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- title .Os }}_
@@ -70,6 +67,9 @@ archives:
       - LICENSE*
       - manpages/*
       - completions/*
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"

@@ -2,7 +2,7 @@ module github.com/charmbracelet/crush
 
 go 1.24.3
 
-replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250701203020-391d1c64a82c
+replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250701203855-46c5cdc968d5
 
 replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250701203048-e8bdbe186087
 

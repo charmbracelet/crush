@@ -109,8 +109,14 @@ func New(numChars int, label string, t *styles.Theme) (a Anim) {
 	// Pre-render initial characters.
 	a.initialChars = make([]string, a.width)
 	for i := range a.initialChars {
+		var c color.Color
+		if i <= a.cyclingCharWidth {
+			c = ramp[i]
+		} else {
+			c = t.FgBase
+		}
 		a.initialChars[i] = lipgloss.NewStyle().
-			Foreground(ramp[i]).
+			Foreground(c).
 			Render(string(initialChar))
 	}
 

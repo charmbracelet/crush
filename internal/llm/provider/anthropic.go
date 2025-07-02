@@ -382,6 +382,10 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return false, 0, err
 	}
 
+	if attempts > maxRetries {
+		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
+	}
+
 	if apiErr.StatusCode == 401 {
 		a.providerOptions.apiKey, err = config.ResolveAPIKey(a.providerOptions.config.APIKey)
 		if err != nil {
@@ -393,10 +397,6 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 
 	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
 		return false, 0, err
-	}
-
-	if attempts > maxRetries {
-		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
 	retryMs := 0

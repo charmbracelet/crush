@@ -65,7 +65,7 @@ func (s *splashCmp) View() tea.View {
 	return tea.NewView(content)
 }
 
-func (m *splashCmp) logoBlock() string {
+func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
 	return logo.Render(version.Version, false, logo.Opts{
 		FieldColor:   t.Primary,
@@ -73,7 +73,7 @@ func (m *splashCmp) logoBlock() string {
 		TitleColorB:  t.Primary,
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
-		Width:        m.width - 2, // -2 for padding
+		Width:        s.width - 2, // -2 for padding
 	})
 }
 

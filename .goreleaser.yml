@@ -115,6 +115,7 @@ nfpms:
   - formats:
       - deb
       - rpm
+      - archlinux
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash

@@ -41,7 +41,7 @@ Thumbs.db
 .env
 .env.local
 
-.crush/
+**/.crush/**
 
 crush
 

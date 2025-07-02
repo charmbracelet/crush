@@ -3,7 +3,6 @@ package messages
 import (
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -91,9 +90,10 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCal
 	for _, opt := range opts {
 		opt(m)
 	}
-	m.anim = anim.New(15, "Working")
+	t := styles.CurrentTheme()
+	m.anim = anim.New(15, "Working", t)
 	if m.isNested {
-		m.anim = anim.New(10, "")
+		m.anim = anim.New(10, "", t)
 	}
 	return m
 }
@@ -112,7 +112,7 @@ func (m *toolCallCmp) Init() tea.Cmd {
 // Manages animation updates for pending tool calls.
 func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
+	case anim.StepMsg:
 		var cmds []tea.Cmd
 		for i, nested := range m.nestedToolCalls {
 			if nested.Spinning() {

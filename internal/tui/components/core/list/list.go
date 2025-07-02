@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -271,7 +270,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
-	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
+	case anim.StepMsg:
 		return m.handleAnimationMsg(msg)
 	}
 	if m.selectionState.isValidIndex(len(m.filteredItems)) {

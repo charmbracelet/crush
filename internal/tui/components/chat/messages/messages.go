@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
@@ -52,7 +51,7 @@ var focusedMessageBorder = lipgloss.Border{
 func NewMessageCmp(msg message.Message) MessageCmp {
 	m := &messageCmp{
 		message: msg,
-		anim:    anim.New(15, ""),
+		anim:    anim.New(15, "", styles.CurrentTheme()),
 	}
 	return m
 }
@@ -71,7 +70,7 @@ func (m *messageCmp) Init() tea.Cmd {
 // Manages animation updates for spinning messages and stops animation when appropriate.
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
+	case anim.StepMsg:
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)

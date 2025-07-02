@@ -1,3 +1,4 @@
+// Package anim provides an animated spinner.
 package anim
 
 import (
@@ -5,302 +6,220 @@ import (
 	"image/color"
 	"math/rand/v2"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/google/uuid"
 	"github.com/lucasb-eyer/go-colorful"
 )
 
 const (
-	charCyclingFPS  = time.Second / 22
-	colorCycleFPS   = time.Second / 5
-	maxCyclingChars = 60
+	fps           = 20
+	initialChar   = '.'
+	labelGap      = " "
+	labelGapWidth = 1
+
+	// Periods of ellipsis animation speed in steps.
+	//
+	// If the FPS is 20 (50 milliseconds) this means that the ellipsis will
+	// change every 8 frames (400 milliseconds).
+	ellipsisAnimSpeed = 8
+
+	// The maximum amount of time that can pass before a character appears.
+	// This is used to create a staggered entrance effect.
+	maxBirthOffset = time.Second
+
+	// Number of frames to prerender for the animation. After this number
+	// of frames, the animation will loop.
+	prerenderedFrames = 10
 )
 
 var (
-	charRunes    = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
-	charRunePool = make([]rune, 1000) // Pre-generated pool of random characters
-	poolIndex    = 0
+	availableRunes = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
+	ellipsisFrames = []string{".", "..", "...", ""}
 )
 
-func init() {
-	// Pre-populate the character pool to avoid runtime random generation.
-	for i := range charRunePool {
-		charRunePool[i] = charRunes[rand.IntN(len(charRunes))]
-	}
+// Internal ID management. Used during animating to ensure that frame messages
+// are received only by spinner components that sent them.
+var lastID int64
+
+func nextID() int {
+	return int(atomic.AddInt64(&lastID, 1))
 }
 
-type charState int
+// StepMsg is a message type used to trigger the next step in the animation.
+type StepMsg struct{ id int }
 
-const (
-	charInitialState charState = iota
-	charCyclingState
-	charEndOfLifeState
-)
-
-// cyclingChar is a single animated character.
-type cyclingChar struct {
-	finalValue   rune // if < 0 cycle forever
-	currentValue rune
-	initialDelay time.Duration
-	lifetime     time.Duration
+// Anim is a Bubble for an animated spinner.
+type Anim struct {
+	width            int
+	cyclingCharWidth int
+	label            []string
+	labelWidth       int
+	startTime        time.Time
+	birthOffsets     []time.Duration
+	initialChars     []string
+	initialized      bool
+	cyclingFrames    [][]string // frames for the cycling characters
+	step             int        // current main frame step
+	ellipsisStep     int        // current ellipsis frame step
+	ellipsisFrames   []string   // ellipsis animation frames
+	id               int
 }
 
-func (c cyclingChar) randomRune() rune {
-	// Use pre-generated pool instead of runtime random generation.
-	poolIndex = (poolIndex + 1) % len(charRunePool)
-	return charRunePool[poolIndex]
-}
+// New creates a new Anim instance with the specified width and label.
+func New(numChars int, label string, t *styles.Theme) (a Anim) {
+	a.id = nextID()
 
-func (c cyclingChar) state(start time.Time) charState {
-	now := time.Now()
-	if now.Before(start.Add(c.initialDelay)) {
-		return charInitialState
-	}
-	if c.finalValue > 0 && now.After(start.Add(c.initialDelay)) {
-		return charEndOfLifeState
-	}
-	return charCyclingState
-}
+	a.startTime = time.Now()
+	a.cyclingCharWidth = numChars
+	a.labelWidth = lipgloss.Width(label)
 
-type StepCharsMsg struct {
-	id string
-}
-
-func stepChars(id string) tea.Cmd {
-	return tea.Tick(charCyclingFPS, func(time.Time) tea.Msg {
-		return StepCharsMsg{id}
-	})
-}
-
-type ColorCycleMsg struct {
-	id string
-}
-
-func cycleColors(id string) tea.Cmd {
-	return tea.Tick(colorCycleFPS, func(time.Time) tea.Msg {
-		return ColorCycleMsg{id}
-	})
-}
-
-type Animation interface {
-	util.Model
-	ID() string
-}
-
-// anim is the model that manages the animation that displays while the
-// output is being generated.
-type anim struct {
-	start           time.Time
-	cyclingChars    []cyclingChar
-	labelChars      []cyclingChar
-	ramp            []lipgloss.Style
-	label           []rune
-	ellipsis        spinner.Model
-	ellipsisStarted bool
-	id              string
-}
-
-type animOption func(*anim)
-
-func WithId(id string) animOption {
-	return func(a *anim) {
-		a.id = id
-	}
-}
-
-func New(cyclingCharsSize uint, label string, opts ...animOption) Animation {
-	// #nosec G115
-	n := min(int(cyclingCharsSize), maxCyclingChars)
-
-	gap := " "
-	if n == 0 {
-		gap = ""
+	// Total width of anim, in cells.
+	a.width = numChars
+	if label != "" {
+		a.width += labelGapWidth + lipgloss.Width(label)
 	}
 
-	id := uuid.New()
-	c := anim{
-		start:    time.Now(),
-		label:    []rune(gap + label),
-		ellipsis: spinner.New(spinner.WithSpinner(spinner.Ellipsis)),
-		id:       id.String(),
-	}
-
-	for _, opt := range opts {
-		opt(&c)
-	}
-
-	// If we're in truecolor mode (and there are enough cycling characters)
-	// color the cycling characters with a gradient ramp.
-	const minRampSize = 3
-	if n >= minRampSize {
-		// Optimized: single capacity allocation for color cycling.
-		c.ramp = make([]lipgloss.Style, 0, n*2)
-		ramp := makeGradientRamp(n)
-		for _, color := range ramp {
-			c.ramp = append(c.ramp, lipgloss.NewStyle().Foreground(color))
+	if a.labelWidth > 0 {
+		// Pre-render the label.
+		// XXX: We should really get the graphemes for the label, not the runes.
+		labelRunes := []rune(label)
+		a.label = make([]string, len(labelRunes))
+		for i := range a.label {
+			a.label[i] = lipgloss.NewStyle().
+				Foreground(t.FgBase).
+				Render(string(labelRunes[i]))
 		}
-		// Create reversed copy for seamless color cycling.
-		reversed := make([]lipgloss.Style, len(c.ramp))
-		for i, style := range c.ramp {
-			reversed[len(c.ramp)-1-i] = style
-		}
-		c.ramp = append(c.ramp, reversed...)
-	}
 
-	makeDelay := func(a int32, b time.Duration) time.Duration {
-		return time.Duration(rand.Int32N(a)) * (time.Millisecond * b) //nolint:gosec
-	}
-
-	makeInitialDelay := func() time.Duration {
-		return makeDelay(8, 60) //nolint:mnd
-	}
-
-	// Initial characters that cycle forever.
-	c.cyclingChars = make([]cyclingChar, n)
-
-	for i := range n {
-		c.cyclingChars[i] = cyclingChar{
-			finalValue:   -1, // cycle forever
-			initialDelay: makeInitialDelay(),
+		// Pre-render the ellipsis frames which come after the label.
+		a.ellipsisFrames = make([]string, len(ellipsisFrames))
+		for i, frame := range ellipsisFrames {
+			a.ellipsisFrames[i] = lipgloss.NewStyle().
+				Foreground(t.FgBase).
+				Render(frame)
 		}
 	}
 
-	// Label text that only cycles for a little while.
-	c.labelChars = make([]cyclingChar, len(c.label))
+	// Pre-generate gradient.
+	ramp := makeGradientRamp(a.width, t.Primary, t.Secondary)
 
-	for i, r := range c.label {
-		c.labelChars[i] = cyclingChar{
-			finalValue:   r,
-			initialDelay: makeInitialDelay(),
-			lifetime:     makeDelay(5, 180), //nolint:mnd
+	// Pre-render initial characters.
+	a.initialChars = make([]string, a.width)
+	for i := range a.initialChars {
+		var c color.Color
+		if i <= a.cyclingCharWidth {
+			c = ramp[i]
+		} else {
+			c = t.FgBase
+		}
+		a.initialChars[i] = lipgloss.NewStyle().
+			Foreground(c).
+			Render(string(initialChar))
+	}
+
+	// Prerender scrambled rune frames for the animation.
+	a.cyclingFrames = make([][]string, prerenderedFrames)
+	for i := range a.cyclingFrames {
+		a.cyclingFrames[i] = make([]string, a.width)
+		for j := range a.cyclingFrames[i] {
+			// NB: we also prerender the color with Lip Gloss here to avoid
+			// processing in the render loop.
+			r := availableRunes[rand.IntN(len(availableRunes))]
+			a.cyclingFrames[i][j] = lipgloss.NewStyle().
+				Foreground(ramp[j]).
+				Render(string(r))
 		}
 	}
 
-	return c
+	// Random assign a birth to each character for a stagged entrance effect.
+	a.birthOffsets = make([]time.Duration, a.width)
+	for i := range a.birthOffsets {
+		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond
+	}
+
+	return a
 }
 
-// Init initializes the animation.
-func (a anim) Init() tea.Cmd {
-	return tea.Batch(stepChars(a.id), cycleColors(a.id))
+// Init starts the animation.
+func (a Anim) Init() tea.Cmd {
+	return a.Step()
 }
 
-// Update handles messages.
-func (a anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+// Update processes animation steps (or not).
+func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case StepCharsMsg:
+	case StepMsg:
 		if msg.id != a.id {
+			// Reject messages that are not for this instance.
 			return a, nil
-		}
-		a.updateChars(&a.cyclingChars)
-		a.updateChars(&a.labelChars)
-
-		if !a.ellipsisStarted {
-			var eol int
-			for _, c := range a.labelChars {
-				if c.state(a.start) == charEndOfLifeState {
-					eol++
-				}
-			}
-			if eol == len(a.label) {
-				// If our entire label has reached end of life, start the
-				// ellipsis "spinner" after a short pause.
-				a.ellipsisStarted = true
-				cmd = tea.Tick(time.Millisecond*220, func(time.Time) tea.Msg { //nolint:mnd
-					return a.ellipsis.Tick()
-				})
-			}
 		}
 
-		return a, tea.Batch(stepChars(a.id), cmd)
-	case ColorCycleMsg:
-		if msg.id != a.id {
-			return a, nil
+		a.step++
+		if a.step >= len(a.cyclingFrames) {
+			a.step = 0
 		}
-		const minColorCycleSize = 2
-		if len(a.ramp) < minColorCycleSize {
-			return a, nil
+
+		if a.initialized && a.labelWidth > 0 {
+			// Manage the ellipsis animation.
+			a.ellipsisStep++
+			if a.ellipsisStep >= ellipsisAnimSpeed*len(ellipsisFrames) {
+				a.ellipsisStep = 0
+			}
+		} else if !a.initialized && time.Since(a.startTime) >= maxBirthOffset {
+			a.initialized = true
 		}
-		a.ramp = append(a.ramp[1:], a.ramp[0])
-		return a, cycleColors(a.id)
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		a.ellipsis, cmd = a.ellipsis.Update(msg)
-		return a, cmd
+		return a, a.Step()
 	default:
 		return a, nil
 	}
 }
 
-func (a anim) ID() string {
-	return a.id
-}
-
-func (a *anim) updateChars(chars *[]cyclingChar) {
-	charSlice := *chars // dereference to avoid repeated pointer access
-	for i, c := range charSlice {
-		switch c.state(a.start) {
-		case charInitialState:
-			charSlice[i].currentValue = '.'
-		case charCyclingState:
-			charSlice[i].currentValue = c.randomRune()
-		case charEndOfLifeState:
-			charSlice[i].currentValue = c.finalValue
+// View renders the current state of the animation.
+func (a Anim) View() string {
+	var b strings.Builder
+	for i := range a.width {
+		switch {
+		case !a.initialized && time.Since(a.startTime) < a.birthOffsets[i]:
+			// Birth offset not reached: render initial character.
+			b.WriteString(a.initialChars[i])
+		case i < a.cyclingCharWidth:
+			// Render a cycling character.
+			b.WriteString(a.cyclingFrames[a.step][i])
+		case i == a.cyclingCharWidth:
+			// Render label gap.
+			b.WriteString(labelGap)
+		case i > a.cyclingCharWidth:
+			// Label.
+			b.WriteString(a.label[i-a.cyclingCharWidth-labelGapWidth])
 		}
 	}
-}
-
-// View renders the animation.
-func (a anim) View() string {
-	var (
-		t = styles.CurrentTheme()
-		b strings.Builder
-	)
-
-	// Optimized capacity calculation to reduce allocations.
-	const (
-		bytesPerChar = 15 // Reduced estimate for ANSI styling
-		bufferSize   = 30 // Reduced safety margin
-	)
-	estimatedCap := len(a.cyclingChars)*bytesPerChar + len(a.labelChars)*bytesPerChar + bufferSize
-	b.Grow(estimatedCap)
-
-	// Render cycling characters with gradient (if available).
-	for i, c := range a.cyclingChars {
-		if len(a.ramp) > i {
-			b.WriteString(a.ramp[i].Render(string(c.currentValue)))
-		} else {
-			b.WriteRune(c.currentValue)
-		}
-	}
-
-	// Render label characters and ellipsis.
-	if len(a.labelChars) > 1 {
-		textStyle := t.S().Text
-		for _, c := range a.labelChars {
-			b.WriteString(textStyle.Render(string(c.currentValue)))
-		}
-		b.WriteString(textStyle.Render(a.ellipsis.View()))
+	// Render animated ellipsis at the end of the label if all characters
+	// have been initialized.
+	if a.initialized && a.labelWidth > 0 {
+		b.WriteString(a.ellipsisFrames[a.ellipsisStep/ellipsisAnimSpeed])
 	}
 
 	return b.String()
 }
 
-func GetColor(c color.Color) string {
-	rgba := color.RGBAModel.Convert(c).(color.RGBA)
-	return fmt.Sprintf("#%02x%02x%02x", rgba.R, rgba.G, rgba.B)
+// Step is a command that triggers the next step in the animation.
+func (a Anim) Step() tea.Cmd {
+	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
+		return StepMsg{id: a.id}
+	})
 }
 
-func makeGradientRamp(length int) []color.Color {
-	t := styles.CurrentTheme()
-	startColor := GetColor(t.Primary)
-	endColor := GetColor(t.Secondary)
+func colorToHex(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+}
+
+func makeGradientRamp(length int, from, to color.Color) []color.Color {
+	startColor := colorToHex(from)
+	endColor := colorToHex(to)
 	var (
 		c        = make([]color.Color, length)
 		start, _ = colorful.Hex(startColor)

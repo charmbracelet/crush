@@ -347,6 +347,10 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 		return false, 0, err
 	}
 
+	if attempts > maxRetries {
+		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
+	}
+
 	// Check for token expiration (401 Unauthorized)
 	if apiErr.StatusCode == 401 {
 		o.providerOptions.apiKey, err = config.ResolveAPIKey(o.providerOptions.config.APIKey)
@@ -359,10 +363,6 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
 		return false, 0, err
-	}
-
-	if attempts > maxRetries {
-		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
 	retryMs := 0

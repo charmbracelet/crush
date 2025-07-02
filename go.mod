@@ -45,7 +45,7 @@ require (
 )
 
 require (
-	github.com/charmbracelet/ultraviolet v0.0.0-20250702164536-3d34e5ecc446 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20250702190342-c2f25359be42 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 )
 

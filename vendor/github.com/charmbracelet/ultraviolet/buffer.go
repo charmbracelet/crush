@@ -575,9 +575,9 @@ func (b *Buffer) DeleteCellArea(x, y, n int, c *Cell, area Rectangle) {
 	// Shift the remaining cells to the left
 	for i := x; i < area.Max.X-n; i++ {
 		if i+n < area.Max.X {
-			// We don't need to clone c here because we're just moving cells to
-			// the left.
-			b.Lines[y][i] = b.Lines[y][i+n]
+			// We need to use SetCell here to ensure we blank out any wide
+			// cells we encounter.
+			b.SetCell(i, y, b.CellAt(i+n, y))
 		}
 	}
 	// Touch the line that was modified

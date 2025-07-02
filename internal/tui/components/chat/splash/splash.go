@@ -67,13 +67,14 @@ func (s *splashCmp) View() tea.View {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
+	const padding = 2
 	return logo.Render(version.Version, false, logo.Opts{
 		FieldColor:   t.Primary,
 		TitleColorA:  t.Secondary,
 		TitleColorB:  t.Primary,
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
-		Width:        s.width - 2, // -2 for padding
+		Width:        s.width - padding,
 	})
 }
 

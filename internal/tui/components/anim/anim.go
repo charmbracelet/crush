@@ -83,14 +83,24 @@ func New(numChars int, label string, t *styles.Theme) (a Anim) {
 		a.width += labelGapWidth + lipgloss.Width(label)
 	}
 
-	// Pre-render the label.
-	// XXX: We should really get the graphemes for the label, not the runes.
-	labelRunes := []rune(label)
-	a.label = make([]string, len(labelRunes))
-	for i := range a.label {
-		a.label[i] = lipgloss.NewStyle().
-			Foreground(t.FgBase).
-			Render(string(labelRunes[i]))
+	if a.labelWidth > 0 {
+		// Pre-render the label.
+		// XXX: We should really get the graphemes for the label, not the runes.
+		labelRunes := []rune(label)
+		a.label = make([]string, len(labelRunes))
+		for i := range a.label {
+			a.label[i] = lipgloss.NewStyle().
+				Foreground(t.FgBase).
+				Render(string(labelRunes[i]))
+		}
+
+		// Pre-render the ellipsis frames which come after the label.
+		a.ellipsisFrames = make([]string, len(ellipsisFrames))
+		for i, frame := range ellipsisFrames {
+			a.ellipsisFrames[i] = lipgloss.NewStyle().
+				Foreground(t.FgBase).
+				Render(frame)
+		}
 	}
 
 	// Pre-generate gradient.
@@ -102,14 +112,6 @@ func New(numChars int, label string, t *styles.Theme) (a Anim) {
 		a.initialChars[i] = lipgloss.NewStyle().
 			Foreground(ramp[i]).
 			Render(string(initialChar))
-	}
-
-	// Pre-render the ellipsis frames.
-	a.ellipsisFrames = make([]string, len(ellipsisFrames))
-	for i, frame := range ellipsisFrames {
-		a.ellipsisFrames[i] = lipgloss.NewStyle().
-			Foreground(t.FgBase).
-			Render(frame)
 	}
 
 	// Prerender scrambled rune frames for the animation.
@@ -154,7 +156,7 @@ func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.step = 0
 		}
 
-		if a.initialized {
+		if a.initialized && a.labelWidth > 0 {
 			// Manage the ellipsis animation.
 			a.ellipsisStep++
 			if a.ellipsisStep >= ellipsisAnimSpeed*len(ellipsisFrames) {
@@ -190,7 +192,7 @@ func (a Anim) View() tea.View {
 	}
 	// Render animated ellipsis at the end of the label if all characters
 	// have been initialized.
-	if a.initialized {
+	if a.initialized && a.labelWidth > 0 {
 		b.WriteString(a.ellipsisFrames[a.ellipsisStep/ellipsisAnimSpeed])
 	}
 	return tea.NewView(b.String())

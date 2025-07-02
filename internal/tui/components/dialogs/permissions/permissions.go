@@ -129,6 +129,9 @@ func (p *permissionDialogCmp) invalidateDiffCache() {
 	p.cachedDiff = nil
 	p.lastDiffParams = diffCacheKey{}
 	p.contentDirty = true
+	// Also cancel any pending async computation
+	p.isComputingDiff = false
+	p.pendingDiffKey = diffCacheKey{}
 }
 
 // shouldRegenerateContent checks if content needs regeneration based on viewport changes
@@ -160,6 +163,7 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle async diff computation result
 		if msg.key.Equals(p.pendingDiffKey) {
 			p.isComputingDiff = false
+			p.pendingDiffKey = diffCacheKey{} // Clear pending key
 			if msg.err == nil {
 				p.cachedDiff = msg.result
 				p.lastDiffParams = msg.key
@@ -173,6 +177,11 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only mark content dirty if viewport size changed significantly
 		if p.shouldRegenerateContent() {
 			p.contentDirty = true
+			// Cancel any pending async computation since viewport changed significantly
+			if p.isComputingDiff {
+				p.isComputingDiff = false
+				p.pendingDiffKey = diffCacheKey{}
+			}
 		}
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
@@ -490,6 +499,12 @@ func (p *permissionDialogCmp) generateDiffContent(filePath, oldContent, newConte
 		return p.generateLoadingContent()
 	}
 
+	// If we're computing a different diff than what's needed, cancel and restart
+	if !p.pendingDiffKey.Equals(currentKey) {
+		p.isComputingDiff = true
+		p.pendingDiffKey = currentKey
+	}
+
 	return p.generateLoadingContent()
 }
 
@@ -545,14 +560,21 @@ func (p *permissionDialogCmp) generateLoadingContent() string {
 
 // computeDiffAsync returns a command that computes the diff asynchronously
 func (p *permissionDialogCmp) computeDiffAsync(key diffCacheKey) tea.Cmd {
+	// Capture current viewport dimensions and offsets at command creation time
+	height := p.contentViewPort.Height()
+	width := p.contentViewPort.Width()
+	xOffset := p.diffXOffset
+	yOffset := p.diffYOffset
+
 	return func() tea.Msg {
+		// Use captured values instead of accessing struct fields
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(key.filePath), key.oldContent).
 			After(fsext.PrettyPath(key.filePath), key.newContent).
-			Height(p.contentViewPort.Height()).
-			Width(p.contentViewPort.Width()).
-			XOffset(p.diffXOffset).
-			YOffset(p.diffYOffset)
+			Height(height).
+			Width(width).
+			XOffset(xOffset).
+			YOffset(yOffset)
 
 		if key.splitMode {
 			formatter = formatter.Split()

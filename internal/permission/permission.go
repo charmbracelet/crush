@@ -116,10 +116,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	s.Publish(pubsub.CreatedEvent, permission)
 
 	// Wait for the response indefinitely
-	select {
-	case resp := <-respCh:
-		return resp
-	}
+	return <-respCh
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {

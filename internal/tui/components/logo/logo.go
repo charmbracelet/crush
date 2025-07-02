@@ -1,3 +1,4 @@
+// Package logo renders a Crush wordmark in a stylized way.
 package logo
 
 import (
@@ -42,7 +43,14 @@ func Render(version string, compact bool, o Opts) string {
 	}
 
 	// Title.
-	crush := renderWord(1, !compact, letterC, letterR, letterU, letterS, letterH)
+	const spacing = 1
+	crush := renderWord(spacing, !compact,
+		letterC,
+		letterR,
+		letterU,
+		letterSStylized,
+		letterH,
+	)
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
@@ -239,6 +247,42 @@ func letterS(stretch bool) string {
 	right := heredoc.Doc(`
 		▀
 		▄
+	`)
+	return joinLetterform(
+		left,
+		stretchLetterformPart(center, letterformProps{
+			stretch:    stretch,
+			width:      3,
+			minStretch: 7,
+			maxStretch: 12,
+		}),
+		right,
+	)
+}
+
+// letterSStylized renders the letter S in a stylized way, more so than
+// [letterS]. It takes an integer that determines how many cells to stretch the
+// letter. If the stretch is less than 1, it defaults to no stretching.
+func letterSStylized(stretch bool) string {
+	// Here's what we're making:
+	//
+	// ▄▀▀▀▀▀
+	// ▀▀▀▀▀█
+	// ▀▀▀▀▀
+
+	left := heredoc.Doc(`
+		▄
+		▀
+		▀
+	`)
+	center := heredoc.Doc(`
+		▀
+		▀
+		▀
+	`)
+	right := heredoc.Doc(`
+		▀
+		█
 	`)
 	return joinLetterform(
 		left,

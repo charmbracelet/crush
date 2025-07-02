@@ -60,9 +60,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements SplashPage.
-func (s *splashCmp) View() tea.View {
+func (s *splashCmp) View() string {
 	content := lipgloss.JoinVertical(lipgloss.Left, s.logoRendered)
-	return tea.NewView(content)
+	return content
 }
 
 func (m *splashCmp) logoBlock() string {

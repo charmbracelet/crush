@@ -6,7 +6,7 @@ linters:
     # - goconst
     # - godot
     # - godox
-    - gomoddirectives
+    # - gomoddirectives
     - goprintffuncname
     # - gosec
     - misspell

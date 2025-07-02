@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -25,6 +26,16 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
+
+type Editor interface {
+	util.Model
+	layout.Sizeable
+	layout.Focusable
+	layout.Help
+	layout.Positional
+
+	SetSession(session session.Session) tea.Cmd
+}
 
 type FileCompletionItem struct {
 	Path string // The file path
@@ -145,11 +156,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case chat.SessionSelectedMsg:
-		if msg.ID != m.session.ID {
-			m.session = msg
-		}
-		return m, nil
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
 			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
@@ -372,7 +378,14 @@ func (c *editorCmp) Bindings() []key.Binding {
 	return c.keyMap.KeyBindings()
 }
 
-func NewEditorCmp(app *app.App) util.Model {
+// TODO: most likely we do not need to have the session here
+// we need to move some functionality to the page level
+func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
+	c.session = session
+	return nil
+}
+
+func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
@@ -393,6 +406,7 @@ func NewEditorCmp(app *app.App) util.Model {
 	ta.Focus()
 
 	return &editorCmp{
+		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),

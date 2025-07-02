@@ -8,14 +8,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type SendMsg struct {
@@ -37,6 +38,9 @@ type MessageListCmp interface {
 	util.Model
 	layout.Sizeable
 	layout.Focusable
+	layout.Help
+
+	SetSession(session.Session) tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -53,9 +57,9 @@ type messageListCmp struct {
 	defaultListKeyMap   list.KeyMap
 }
 
-// NewMessagesListCmp creates a new message list component with custom keybindings
+// New creates a new message list component with custom keybindings
 // and reverse ordering (newest messages at bottom).
-func NewMessagesListCmp(app *app.App) MessageListCmp {
+func New(app *app.App) MessageListCmp {
 	defaultListKeyMap := list.DefaultKeyMap()
 	listCmp := list.New(
 		list.WithGapSize(1),
@@ -70,13 +74,14 @@ func NewMessagesListCmp(app *app.App) MessageListCmp {
 	}
 }
 
-// Init initializes the component (no initialization needed).
+// Init initializes the component.
 func (m *messageListCmp) Init() tea.Cmd {
 	return tea.Sequence(m.listCmp.Init(), m.listCmp.Blur())
 }
 
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	logging.Info("messageListCmp.Update", "msg", msg)
 	switch msg := msg.(type) {
 	case SessionSelectedMsg:
 		if msg.ID != m.session.ID {
@@ -102,11 +107,15 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() tea.View {
+	t := styles.CurrentTheme()
 	return tea.NewView(
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			m.listCmp.View().String(),
-		),
+		t.S().Base.
+			Padding(1).
+			Width(m.width).
+			Height(m.height).
+			Render(
+				m.listCmp.View().String(),
+			),
 	)
 }
 
@@ -371,6 +380,7 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 
 // SetSession loads and displays messages for a new session.
 func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
+	logging.Info("messageListCmp.SetSession", "sessionID", session.ID)
 	if m.session.ID == session.ID {
 		return nil
 	}
@@ -489,8 +499,8 @@ func (m *messageListCmp) GetSize() (int, int) {
 // SetSize updates the component dimensions and propagates to the list component.
 func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
-	m.height = height - 1
-	return m.listCmp.SetSize(width, height-1)
+	m.height = height
+	return m.listCmp.SetSize(width-2, height-2) // for padding
 }
 
 // Blur implements MessageListCmp.

@@ -17,6 +17,11 @@ type Splash interface {
 	layout.Help
 }
 
+const (
+	SplashScreenPaddingX = 2 // Padding X for the splash screen
+	SplashScreenPaddingY = 1 // Padding Y for the splash screen
+)
+
 type splashCmp struct {
 	width, height int
 	keyMap        KeyMap
@@ -61,8 +66,20 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements SplashPage.
 func (s *splashCmp) View() tea.View {
+	t := styles.CurrentTheme()
 	content := lipgloss.JoinVertical(lipgloss.Left, s.logoRendered)
-	return tea.NewView(content)
+	return tea.NewView(
+		t.S().Base.
+			Width(s.width).
+			Height(s.height).
+			PaddingTop(SplashScreenPaddingY).
+			PaddingLeft(SplashScreenPaddingX).
+			PaddingRight(SplashScreenPaddingX).
+			PaddingBottom(SplashScreenPaddingY).
+			Render(
+				content,
+			),
+	)
 }
 
 func (s *splashCmp) logoBlock() string {
@@ -74,7 +91,7 @@ func (s *splashCmp) logoBlock() string {
 		TitleColorB:  t.Primary,
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
-		Width:        s.width - padding,
+		Width:        s.width - (SplashScreenPaddingX * 2),
 	})
 }
 

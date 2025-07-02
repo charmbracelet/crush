@@ -1,11 +1,8 @@
 package layout
 
 import (
-	"log/slog"
-
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -156,8 +153,6 @@ func (s *splitPaneLayout) View() tea.View {
 func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	s.width = width
 	s.height = height
-	slog.Info("Setting split pane size", "width", width, "height", height)
-
 	var topHeight, bottomHeight int
 	var cmds []tea.Cmd
 	if s.bottomPanel != nil {

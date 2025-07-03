@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -19,9 +21,10 @@ import (
 )
 
 type anthropicClient struct {
-	providerOptions providerClientOptions
-	useBedrock      bool
-	client          anthropic.Client
+	providerOptions   providerClientOptions
+	useBedrock        bool
+	client            anthropic.Client
+	adjustedMaxTokens int // Used when context limit is hit
 }
 
 type AnthropicClient ProviderClient
@@ -171,6 +174,11 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		maxTokens = a.providerOptions.maxTokens
 	}
 
+	// Use adjusted max tokens if context limit was hit
+	if a.adjustedMaxTokens > 0 {
+		maxTokens = int64(a.adjustedMaxTokens)
+	}
+
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(model.ID),
 		MaxTokens:   maxTokens,
@@ -190,16 +198,18 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 }
 
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
-	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(preparedMessages)
-		logging.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	attempts := 0
 	for {
 		attempts++
+		// Prepare messages on each attempt in case max_tokens was adjusted
+		preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
+		if cfg.Options.Debug {
+			jsonData, _ := json.Marshal(preparedMessages)
+			logging.Debug("Prepared messages", "messages", string(jsonData))
+		}
+
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
@@ -239,17 +249,19 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 }
 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		// jsonData, _ := json.Marshal(preparedMessages)
-		// logging.Debug("Prepared messages", "messages", string(jsonData))
-	}
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
 	go func() {
 		for {
 			attempts++
+			// Prepare messages on each attempt in case max_tokens was adjusted
+			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
+			if cfg.Options.Debug {
+				jsonData, _ := json.Marshal(preparedMessages)
+				logging.Debug("Prepared messages", "messages", string(jsonData))
+			}
+
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
@@ -395,6 +407,15 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return true, 0, nil
 	}
 
+	// Handle context limit exceeded error (400 Bad Request)
+	if apiErr.StatusCode == 400 {
+		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
+			a.adjustedMaxTokens = adjusted
+			logging.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
+			return true, 0, nil
+		}
+	}
+
 	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
 		return false, 0, err
 	}
@@ -411,6 +432,33 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 	}
 	return true, int64(retryMs), nil
+}
+
+// handleContextLimitError parses context limit error and returns adjusted max_tokens
+func (a *anthropicClient) handleContextLimitError(apiErr *anthropic.Error) (int, bool) {
+	// Parse error message like: "input length and max_tokens exceed context limit: 154978 + 50000 > 200000"
+	errorMsg := apiErr.Error()
+	re := regexp.MustCompile(`input length and max_tokens exceed context limit: (\d+) \+ (\d+) > (\d+)`)
+	matches := re.FindStringSubmatch(errorMsg)
+
+	if len(matches) != 4 {
+		return 0, false
+	}
+
+	inputTokens, err1 := strconv.Atoi(matches[1])
+	contextLimit, err2 := strconv.Atoi(matches[3])
+
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+
+	// Calculate safe max_tokens with a buffer of 1000 tokens
+	safeMaxTokens := contextLimit - inputTokens - 1000
+
+	// Ensure we don't go below a minimum threshold
+	safeMaxTokens = max(safeMaxTokens, 1000)
+
+	return safeMaxTokens, true
 }
 
 func (a *anthropicClient) toolCalls(msg anthropic.Message) []message.ToolCall {

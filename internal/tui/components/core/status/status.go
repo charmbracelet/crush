@@ -109,6 +109,9 @@ func (m *statusCmp) infoMsg() string {
 	infoType := ""
 	switch m.info.Type {
 	case util.InfoTypeError:
+		// NOTE(@andreynering): We're not reaching this code!
+		panic("error!")
+
 		infoType = t.S().Base.Background(t.Red).Padding(0, 1).Render("ERROR")
 		width := m.width - lipgloss.Width(infoType)
 		message = t.S().Base.Background(t.Error).Foreground(t.White).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))

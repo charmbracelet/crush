@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/shell"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -21,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	initDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/init"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/lsp"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -170,6 +173,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
 
+	// Manage LSPs
+	case commands.ManageLSPMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: lsp.New(),
+		})
+
 	// Model Switch
 	case models.ModelSelectedMsg:
 		config.UpdatePreferredModel(msg.ModelType, msg.Model)
@@ -185,6 +194,30 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			modelTypeName = "small"
 		}
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.ModelID))
+
+	// LSP Installation
+	case lsp.LSPInstallationMsg:
+		if msg.Success {
+			return a, util.ReportInfo(msg.Message)
+		} else {
+			return a, util.ReportError(fmt.Errorf("%s", msg.Message))
+		}
+
+	// LSP Selected
+	case lsp.LSPSelectedMsg:
+		if !msg.Item.Installed {
+			// Show immediate message and start installation
+			return a, tea.Batch(
+				util.CmdHandler(util.InfoMsg{
+					Type: util.InfoTypeWarn,
+					Msg:  fmt.Sprintf("Attempting to install %s...", string(msg.Item.Server.Name)),
+					TTL:  time.Minute,
+				}),
+				a.installLSP(msg.Item),
+			)
+		}
+		// For installed LSPs, could add configuration logic here
+		return a, nil
 
 	// File Picker
 	case chat.OpenFilePickerMsg:
@@ -461,4 +494,49 @@ func New(app *app.App) tea.Model {
 	}
 
 	return model
+}
+
+func (a *appModel) installLSP(item lsp.Item) tea.Cmd {
+	return func() tea.Msg {
+		serverName := string(item.Server.Name)
+
+		if item.Server.InstallCmd != "" {
+			sh := shell.GetPersistentShell(".")
+			ctx := context.Background()
+
+			stdout, stderr, err := sh.Exec(ctx, item.Server.InstallCmd)
+			if err != nil {
+				message := fmt.Sprintf("Failed to install %s: %s", serverName, stderr)
+				return util.CmdHandler(util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  message,
+					TTL:  time.Minute,
+				})
+			}
+
+			message := fmt.Sprintf("Successfully installed %s", serverName)
+			if stdout != "" {
+				message += fmt.Sprintf(": %s", stdout)
+			}
+			return util.CmdHandler(util.InfoMsg{
+				Type: util.InfoTypeInfo,
+				Msg:  message,
+				TTL:  time.Minute,
+			})
+		} else if item.Server.InstallWebsite != "" {
+			message := fmt.Sprintf("To install %s, please visit: %s", serverName, item.Server.InstallWebsite)
+			return util.CmdHandler(util.InfoMsg{
+				Type: util.InfoTypeInfo,
+				Msg:  message,
+				TTL:  time.Minute,
+			})
+		} else {
+			message := fmt.Sprintf("No installation method available for %s", serverName)
+			return util.CmdHandler(util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  message,
+				TTL:  time.Minute,
+			})
+		}
+	}
 }

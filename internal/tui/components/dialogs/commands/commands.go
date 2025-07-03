@@ -56,6 +56,7 @@ type commandDialogCmp struct {
 type (
 	SwitchSessionsMsg    struct{}
 	SwitchModelMsg       struct{}
+	ManageLSPMsg         struct{}
 	ToggleCompactModeMsg struct{}
 	CompactMsg           struct {
 		SessionID string
@@ -289,6 +290,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Switch to a different model",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
+			},
+		},
+		{
+			ID:          "language_server_protocols",
+			Title:       "Language Server Protocols (LSP)",
+			Description: "View and manage language server protocols (LSP)",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ManageLSPMsg{})
 			},
 		},
 	}...)

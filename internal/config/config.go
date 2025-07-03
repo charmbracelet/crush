@@ -194,6 +194,15 @@ type Config struct {
 	Options Options `json:"options,omitempty" jsonschema:"title=Options,description=General application options and settings"`
 }
 
+func (c *Config) HasLSP(name string) bool {
+	for _, lsp := range c.LSP {
+		if !lsp.Disabled && strings.EqualFold(name, lsp.Command) {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	instance *Config // The single instance of the Singleton
 	cwd      string

@@ -10,6 +10,19 @@
 
 Crush is a tool for building software with AI.
 
+## Installation
+
+* [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
+* [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
+
+Or just install it with go:
+
+```
+git clone git@github.com:charmbracelet/crush.git
+cd crush
+go install
+```
+
 ## Getting Started
 
 For now, the quickest way to get started is to set an environment variable for
@@ -40,7 +53,7 @@ providers.
 
 Part of [Charm](https://charm.sh).
 
-<a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-badge.jpg" /></a>
+<a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
 
 <!--prettier-ignore-->
 Charm热爱开源 • Charm loves open source

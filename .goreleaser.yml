@@ -129,6 +129,7 @@ nfpms:
 
 changelog:
   sort: asc
+  disable: "{{ .IsNightly }}"
   filters:
     exclude:
       - "^(build|ci): "

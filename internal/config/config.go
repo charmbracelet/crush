@@ -124,13 +124,14 @@ type MCPType string
 const (
 	MCPStdio MCPType = "stdio"
 	MCPSse   MCPType = "sse"
+	MCPHttp  MCPType = "http"
 )
 
 type MCP struct {
-	Command string   `json:"command" jsonschema:"title=Command,description=Command to execute for stdio MCP servers"`
+	Command string   `json:"command,omitempty" jsonschema:"title=Command,description=Command to execute for stdio MCP servers"`
 	Env     []string `json:"env,omitempty" jsonschema:"title=Environment,description=Environment variables for the MCP server"`
 	Args    []string `json:"args,omitempty" jsonschema:"title=Arguments,description=Command line arguments for the MCP server"`
-	Type    MCPType  `json:"type" jsonschema:"title=Type,description=Type of MCP connection,enum=stdio,enum=sse,default=stdio"`
+	Type    MCPType  `json:"type" jsonschema:"title=Type,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
 	URL     string   `json:"url,omitempty" jsonschema:"title=URL,description=URL for SSE MCP servers"`
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"title=Headers,description=HTTP headers for SSE MCP servers"`
@@ -889,44 +890,6 @@ func GetAgentModel(agentID AgentID) Model {
 	return Model{}
 }
 
-// GetAgentEffectiveMaxTokens returns the effective max tokens for an agent,
-// considering any overrides from the preferred model configuration
-func GetAgentEffectiveMaxTokens(agentID AgentID) int64 {
-	cfg := Get()
-	agent, ok := cfg.Agents[agentID]
-	if !ok {
-		logging.Error("Agent not found", "agent_id", agentID)
-		return 0
-	}
-
-	var preferredModel PreferredModel
-	switch agent.Model {
-	case LargeModel:
-		preferredModel = cfg.Models.Large
-	case SmallModel:
-		preferredModel = cfg.Models.Small
-	default:
-		logging.Warn("Unknown model type for agent", "agent_id", agentID, "model_type", agent.Model)
-		preferredModel = cfg.Models.Large // Fallback to large model
-	}
-
-	// Get the base model configuration
-	baseModel := GetAgentModel(agentID)
-	if baseModel.ID == "" {
-		return 0
-	}
-
-	// Start with the default max tokens from the base model
-	maxTokens := baseModel.DefaultMaxTokens
-
-	// Override with preferred model max tokens if set
-	if preferredModel.MaxTokens > 0 {
-		maxTokens = preferredModel.MaxTokens
-	}
-
-	return maxTokens
-}
-
 func GetAgentProvider(agentID AgentID) ProviderConfig {
 	cfg := Get()
 	agent, ok := cfg.Agents[agentID]
@@ -1407,8 +1370,8 @@ func (c *Config) validateMCPs(errors *ValidationErrors) {
 		fieldPrefix := fmt.Sprintf("mcp.%s", mcpName)
 
 		// Validate MCP type
-		if mcpConfig.Type != MCPStdio && mcpConfig.Type != MCPSse {
-			errors.Add(fieldPrefix+".type", fmt.Sprintf("invalid MCP type: %s (must be 'stdio' or 'sse')", mcpConfig.Type))
+		if mcpConfig.Type != MCPStdio && mcpConfig.Type != MCPSse && mcpConfig.Type != MCPHttp {
+			errors.Add(fieldPrefix+".type", fmt.Sprintf("invalid MCP type: %s (must be 'stdio' or 'sse' or 'http')", mcpConfig.Type))
 		}
 
 		// Validate based on type

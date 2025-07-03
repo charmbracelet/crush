@@ -154,7 +154,8 @@
             "stdio",
             "sse",
             "stdio",
-            "sse"
+            "sse",
+            "http"
           ],
           "title": "Type",
           "description": "Type of MCP connection",
@@ -176,7 +177,6 @@
       },
       "type": "object",
       "required": [
-        "command",
         "type"
       ]
     },
@@ -253,13 +253,8 @@
       "required": [
         "id",
         "name",
-        "cost_per_1m_out_cached",
         "context_window",
-        "default_max_tokens",
-        "can_reason",
-        "reasoning_effort",
-        "has_reasoning_effort",
-        "supports_attachments"
+        "default_max_tokens"
       ]
     },
     "Options": {

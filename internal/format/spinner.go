@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
 // Spinner wraps the bubbles spinner for non-interactive mode
@@ -18,7 +19,7 @@ type Spinner struct {
 
 // spinnerModel is the tea.Model for the spinner
 type spinnerModel struct {
-	animation anim.Animation
+	animation anim.Anim
 	quitting  bool
 }
 
@@ -36,7 +37,7 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	default:
 		a, cmd := m.animation.Update(msg)
-		m.animation = a.(anim.Animation)
+		m.animation = a.(anim.Anim)
 		return m, cmd
 	}
 }
@@ -52,7 +53,7 @@ func (m spinnerModel) View() string {
 func NewSpinner(ctx context.Context, message string) *Spinner {
 	prog := tea.NewProgram(
 		spinnerModel{
-			animation: anim.New(10, message),
+			animation: anim.New(10, message, styles.CurrentTheme()),
 		},
 		tea.WithOutput(os.Stderr),
 		tea.WithContext(ctx),

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -98,6 +100,12 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		// Initialize MCP tools early for both modes
 		initMCPTools(ctx, app)
+
+		prompt, err = maybePrependStdin(prompt)
+		if err != nil {
+			logging.Error("Failed to read stdin: %v", err)
+			return err
+		}
 
 		// Non-interactive mode
 		if prompt != "" {
@@ -300,4 +308,22 @@ func init() {
 	rootCmd.RegisterFlagCompletionFunc("output-format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return format.SupportedFormats, cobra.ShellCompDirectiveNoFileComp
 	})
+}
+
+func maybePrependStdin(prompt string) (string, error) {
+	if term.IsTerminal(os.Stdin.Fd()) {
+		return prompt, nil
+	}
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return prompt, err
+	}
+	if fi.Mode()&os.ModeNamedPipe == 0 {
+		return prompt, nil
+	}
+	bts, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return prompt, err
+	}
+	return string(bts) + "\n\n" + prompt, nil
 }

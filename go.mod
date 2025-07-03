@@ -4,7 +4,7 @@ go 1.24.3
 
 replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250702164605-a991b583c0e7
 
-replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250702164623-bd5b9da8d487
+replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250703152138-ff346e83e819
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -118,6 +119,15 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 			return tools.NewTextErrorResponse(err.Error()), nil
 		}
 		return runTool(ctx, c, b.tool.Name, params.Input)
+	case config.MCPHttp:
+		c, err := client.NewStreamableHttpClient(
+			b.mcpConfig.URL,
+			transport.WithHTTPHeaders(b.mcpConfig.Headers),
+		)
+		if err != nil {
+			return tools.NewTextErrorResponse(err.Error()), nil
+		}
+		return runTool(ctx, c, b.tool.Name, params.Input)
 	case config.MCPSse:
 		c, err := client.NewSSEMCPClient(
 			b.mcpConfig.URL,
@@ -187,6 +197,16 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				continue
 			}
 
+			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+		case config.MCPHttp:
+			c, err := client.NewStreamableHttpClient(
+				m.URL,
+				transport.WithHTTPHeaders(m.Headers),
+			)
+			if err != nil {
+				logging.Error("error creating mcp client", "error", err)
+				continue
+			}
 			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
 		case config.MCPSse:
 			c, err := client.NewSSEMCPClient(

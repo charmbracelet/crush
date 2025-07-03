@@ -124,13 +124,14 @@ type MCPType string
 const (
 	MCPStdio MCPType = "stdio"
 	MCPSse   MCPType = "sse"
+	MCPHttp  MCPType = "http"
 )
 
 type MCP struct {
-	Command string   `json:"command" jsonschema:"title=Command,description=Command to execute for stdio MCP servers"`
+	Command string   `json:"command,omitempty" jsonschema:"title=Command,description=Command to execute for stdio MCP servers"`
 	Env     []string `json:"env,omitempty" jsonschema:"title=Environment,description=Environment variables for the MCP server"`
 	Args    []string `json:"args,omitempty" jsonschema:"title=Arguments,description=Command line arguments for the MCP server"`
-	Type    MCPType  `json:"type" jsonschema:"title=Type,description=Type of MCP connection,enum=stdio,enum=sse,default=stdio"`
+	Type    MCPType  `json:"type" jsonschema:"title=Type,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
 	URL     string   `json:"url,omitempty" jsonschema:"title=URL,description=URL for SSE MCP servers"`
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"title=Headers,description=HTTP headers for SSE MCP servers"`
@@ -1407,8 +1408,8 @@ func (c *Config) validateMCPs(errors *ValidationErrors) {
 		fieldPrefix := fmt.Sprintf("mcp.%s", mcpName)
 
 		// Validate MCP type
-		if mcpConfig.Type != MCPStdio && mcpConfig.Type != MCPSse {
-			errors.Add(fieldPrefix+".type", fmt.Sprintf("invalid MCP type: %s (must be 'stdio' or 'sse')", mcpConfig.Type))
+		if mcpConfig.Type != MCPStdio && mcpConfig.Type != MCPSse && mcpConfig.Type != MCPHttp {
+			errors.Add(fieldPrefix+".type", fmt.Sprintf("invalid MCP type: %s (must be 'stdio' or 'sse' or 'http')", mcpConfig.Type))
 		}
 
 		// Validate based on type

@@ -25,7 +25,7 @@ require (
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
-	github.com/mark3labs/mcp-go v0.17.0
+	github.com/mark3labs/mcp-go v0.32.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
@@ -39,6 +39,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	mvdan.cc/sh/v3 v3.11.0
 )
+
+require github.com/spf13/cast v1.7.1 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

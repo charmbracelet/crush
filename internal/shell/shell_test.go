@@ -10,7 +10,7 @@ import (
 
 // Benchmark to measure CPU efficiency
 func BenchmarkShellQuickCommands(b *testing.B) {
-	shell := newPersistentShell(b.TempDir())
+	shell := NewShell(&Options{WorkingDir: b.TempDir()})
 
 	b.ReportAllocs()
 
@@ -27,7 +27,7 @@ func TestTestTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	t.Cleanup(cancel)
 
-	shell := newPersistentShell(t.TempDir())
+	shell := NewShell(&Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(ctx, "sleep 10")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -44,7 +44,7 @@ func TestTestCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // immediately cancel the context
 
-	shell := newPersistentShell(t.TempDir())
+	shell := NewShell(&Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(ctx, "sleep 10")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -58,7 +58,7 @@ func TestTestCancel(t *testing.T) {
 }
 
 func TestRunCommandError(t *testing.T) {
-	shell := newPersistentShell(t.TempDir())
+	shell := NewShell(&Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(t.Context(), "nopenopenope")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -72,7 +72,7 @@ func TestRunCommandError(t *testing.T) {
 }
 
 func TestRunContinuity(t *testing.T) {
-	shell := newPersistentShell(t.TempDir())
+	shell := NewShell(&Options{WorkingDir: t.TempDir()})
 	shell.Exec(t.Context(), "export FOO=bar")
 	dst := t.TempDir()
 	shell.Exec(t.Context(), "cd "+dst)
@@ -141,10 +141,9 @@ func TestWindowsCDHandling(t *testing.T) {
 		t.Skip("Windows CD handling test only runs on Windows")
 	}
 
-	shell := &PersistentShell{
-		cwd: "C:\\Users",
-		env: []string{},
-	}
+	shell := NewShell(&Options{
+		WorkingDir: "C:\\Users",
+	})
 
 	tests := []struct {
 		command     string
@@ -159,7 +158,7 @@ func TestWindowsCDHandling(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.command, func(t *testing.T) {
-			originalCwd := shell.cwd
+			originalCwd := shell.GetWorkingDir()
 			stdout, stderr, err := shell.handleWindowsCD(test.command)
 
 			if test.shouldError {
@@ -170,13 +169,13 @@ func TestWindowsCDHandling(t *testing.T) {
 				if err != nil {
 					t.Errorf("Command %q failed: %v", test.command, err)
 				}
-				if shell.cwd != test.expectedCwd {
-					t.Errorf("Command %q: expected cwd %q, got %q", test.command, test.expectedCwd, shell.cwd)
+				if shell.GetWorkingDir() != test.expectedCwd {
+					t.Errorf("Command %q: expected cwd %q, got %q", test.command, test.expectedCwd, shell.GetWorkingDir())
 				}
 			}
 
 			// Reset for next test
-			shell.cwd = originalCwd
+			shell.SetWorkingDir(originalCwd)
 			_ = stdout
 			_ = stderr
 		})
@@ -184,7 +183,7 @@ func TestWindowsCDHandling(t *testing.T) {
 }
 
 func TestCrossPlatformExecution(t *testing.T) {
-	shell := newPersistentShell(".")
+	shell := NewShell(&Options{WorkingDir: "."})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -209,7 +208,7 @@ func TestWindowsNativeCommands(t *testing.T) {
 		t.Skip("Windows native command test only runs on Windows")
 	}
 
-	shell := newPersistentShell(".")
+	shell := NewShell(&Options{WorkingDir: "."})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

@@ -69,7 +69,7 @@ func (a appModel) Init() tea.Cmd {
 
 	// Check if we should show the init dialog
 	cmds = append(cmds, func() tea.Msg {
-		shouldShow, err := config.ShouldShowInitDialog()
+		shouldShow, err := config.ProjectNeedsInitialization()
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -172,12 +172,19 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		model, err := a.app.CoderAgent.Update(config.AgentCoder, msg.Model.ID)
-		if err != nil {
-			return a, util.ReportError(err)
+		config.UpdatePreferredModel(msg.ModelType, msg.Model)
+
+		// Update the agent with the new model/provider configuration
+		if err := a.app.UpdateAgentModel(); err != nil {
+			logging.ErrorPersist(fmt.Sprintf("Failed to update agent model: %v", err))
+			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.ModelID, err))
 		}
 
-		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", model.Name))
+		modelTypeName := "large"
+		if msg.ModelType == config.SmallModel {
+			modelTypeName = "small"
+		}
+		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.ModelID))
 
 	// File Picker
 	case chat.OpenFilePickerMsg:
@@ -222,8 +229,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				model := a.app.CoderAgent.Model()
 				contextWindow := model.ContextWindow
 				tokens := session.CompletionTokens + session.PromptTokens
-				if (tokens >= int64(float64(contextWindow)*0.95)) && config.Get().AutoCompact {
-					// Show compact confirmation dialog
+				if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
 					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
 						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),
 					}))

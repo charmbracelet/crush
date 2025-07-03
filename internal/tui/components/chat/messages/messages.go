@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -51,7 +51,7 @@ var focusedMessageBorder = lipgloss.Border{
 func NewMessageCmp(msg message.Message) MessageCmp {
 	m := &messageCmp{
 		message: msg,
-		anim:    anim.New(15, ""),
+		anim:    anim.New(15, "", styles.CurrentTheme()),
 	}
 	return m
 }
@@ -70,7 +70,7 @@ func (m *messageCmp) Init() tea.Cmd {
 // Manages animation updates for spinning messages and stops animation when appropriate.
 func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case anim.ColorCycleMsg, anim.StepCharsMsg, spinner.TickMsg:
+	case anim.StepMsg:
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
@@ -290,8 +290,9 @@ func (m *assistantSectionModel) View() tea.View {
 	duration := finishTime.Sub(m.lastUserMessageTime)
 	infoMsg := t.S().Subtle.Render(duration.String())
 	icon := t.S().Subtle.Render(styles.ModelIcon)
-	model := t.S().Muted.Render(models.SupportedModels[m.message.Model].Name)
-	assistant := fmt.Sprintf("%s %s %s", icon, model, infoMsg)
+	model := config.GetProviderModel(provider.InferenceProvider(m.message.Provider), m.message.Model)
+	modelFormatted := t.S().Muted.Render(model.Name)
+	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return tea.NewView(
 		t.S().Base.PaddingLeft(2).Render(
 			core.Section(assistant, m.width-2),

@@ -55,18 +55,21 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
 
+	cfg := config.Get()
+
+	coderAgentCfg := cfg.Agents[config.AgentCoder]
+	if coderAgentCfg.ID == "" {
+		return nil, fmt.Errorf("coder agent configuration is missing")
+	}
+
 	var err error
 	app.CoderAgent, err = agent.NewAgent(
-		config.AgentCoder,
+		coderAgentCfg,
+		app.Permissions,
 		app.Sessions,
 		app.Messages,
-		agent.CoderAgentTools(
-			app.Permissions,
-			app.Sessions,
-			app.Messages,
-			app.History,
-			app.LSPClients,
-		),
+		app.History,
+		app.LSPClients,
 	)
 	if err != nil {
 		logging.Error("Failed to create coder agent", err)
@@ -163,4 +166,8 @@ func (app *App) Shutdown() {
 		cancel()
 	}
 	app.CoderAgent.CancelAll()
+}
+
+func (app *App) UpdateAgentModel() error {
+	return app.CoderAgent.UpdateModel()
 }

@@ -82,13 +82,13 @@ func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatche
 // Notifications
 
 func HandleServerMessage(params json.RawMessage) {
-	cnf := config.Get()
+	cfg := config.Get()
 	var msg struct {
 		Type    int    `json:"type"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(params, &msg); err == nil {
-		if cnf.DebugLSP {
+		if cfg.Options.DebugLSP {
 			logging.Debug("Server message", "type", msg.Type, "message", msg.Message)
 		}
 	}

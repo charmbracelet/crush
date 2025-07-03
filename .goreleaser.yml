@@ -4,6 +4,10 @@ version: 2
 
 project_name: crush
 
+includes:
+  - from_url:
+      url: charmbracelet/meta/main/notarize.yaml
+
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
   license: "MIT"
@@ -11,6 +15,29 @@ metadata:
   description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
   maintainers:
     - "kujtimiihoxha <kujtim@charm.sh>"
+
+nightly:
+  publish_release: true
+  keep_single_release: true
+  version_template: "{{ incminor .Version }}-nightly"
+
+snapshot:
+  version_template: "0.0.0-{{ .Timestamp }}"
+
+before:
+  hooks:
+    - go mod tidy
+    - rm -rf completions
+    - mkdir completions
+    - rm -rf manpages
+    - mkdir manpages
+    - sh -c 'go run . completion bash >./completions/crush.bash'
+    - sh -c 'go run . completion zsh >./completions/crush.zsh'
+    - sh -c 'go run . completion fish >./completions/crush.fish'
+    - sh -c 'go run . man | gzip -c >./manpages/crush.1.gz'
+
+gomod:
+  proxy: true
 
 builds:
   - env:
@@ -24,19 +51,22 @@ builds:
       - arm64
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
-    main: ./main.go
 
 archives:
-  - formats: [tar.gz]
-    name_template: >-
-      crush-
-      {{- if eq .Os "darwin" }}mac-
-      {{- else if eq .Os "windows" }}windows-
-      {{- else if eq .Os "linux" }}linux-{{end}}
+  - name_template: >-
+      crush_
+      {{- .Version }}_
+      {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "#86" }}i386
+      {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
+      {{- with .Arm}}v{{ . }}{{ end }}
+    wrap_in_directory: true
+    files:
+      - README*
+      - LICENSE*
+      - manpages/*
+      - completions/*
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -44,18 +74,37 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-snapshot:
-  version_template: "0.0.0-{{ .Timestamp }}"
-
 aurs:
   - private_key: "{{ .Env.AUR_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/charmbracelet-bin.git"
+    git_url: "ssh://aur@aur.archlinux.org/crush-bin.git"
     provides:
       - crush
     conflicts:
       - crush
     package: |-
-      install -Dm755 ./crush "${pkgdir}/usr/bin/crush"
+      cd "${srcdir}/crush_${pkgver}_Linux_${CARCH}"
+      # bin
+      install -Dm755 "./crush" "${pkgdir}/usr/bin/crush"
+      # license
+      mkdir -p "${pkgdir}/usr/share/licenses/crush/"
+      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/crush/"
+      # completions
+      mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
+      mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
+      mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
+      install -Dm644 "./completions/crush.bash" "${pkgdir}/usr/share/bash-completion/completions/crush"
+      install -Dm644 "./completions/crush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_crush"
+      install -Dm644 "./completions/crush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/crush.fish"
+      # man pages
+      install -Dm644 "./manpages/crush.1.gz" "${pkgdir}/usr/share/man/man1/crush.1.gz"
+      # readme
+      mkdir -pv "${pkgdir}/usr/share/doc/crush/"
+      install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
+
+furies:
+  - disable: "{{ .IsNightly }}"
+    account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
+    secret_name: FURY_TOKEN
 
 homebrew_casks:
   - repository:
@@ -66,19 +115,54 @@ nfpms:
   - formats:
       - deb
       - rpm
-    file_name_template: >-
-      {{ .ProjectName }}-
-      {{- if eq .Os "darwin" }}mac
-      {{- else }}{{ .Os }}{{ end }}-{{ .Arch }}
+      - archlinux
+    file_name_template: "{{ .ConventionalFileName }}"
+    contents:
+      - src: ./completions/crush.bash
+        dst: /etc/bash_completion.d/crush
+      - src: ./completions/crush.fish
+        dst: /usr/share/fish/vendor_completions.d/crush.fish
+      - src: ./completions/crush.zsh
+        dst: /usr/share/zsh/site-functions/_crush
+      - src: ./manpages/crush.1.gz
+        dst: /usr/share/man/man1/crush.1.gz
 
 changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^doc:"
+      - "^(build|ci): "
+      - "^chore: auto-update generated files$"
+      - "^chore: docs$"
+      - "^chore: schema update$"
+      - "^chore: schema$"
+      - "^chore: typo$"
+      - "^chore: update schema$"
+      - "^chore: update$"
+      - "^chore\\(deps\\): "
+      - "^docs: update$"
       - "^test:"
-      - "^ci:"
-      - "^ignore:"
-      - "^example:"
+      - "^test\\("
+      - "merge conflict"
+      - "merge conflict"
+      - Merge branch
+      - Merge pull request
+      - Merge remote-tracking branch
+      - go mod tidy
+      - "^wip "
       - "^wip:"
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 100
+    - title: "Security updates"
+      regexp: '^.*?sec(\(.+\))??!?:.+$'
+      order: 150
+    - title: "Bug fixes and improvements"
+      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+      order: 200
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 400
+    - title: Other work
+      order: 9999

@@ -12,13 +12,14 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	mcpConfig   config.MCPServer
+	mcpConfig   config.MCP
 	permissions permission.Service
 }
 
@@ -32,12 +33,20 @@ type MCPClient interface {
 	Close() error
 }
 
+func (b *mcpTool) Name() string {
+	return fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name)
+}
+
 func (b *mcpTool) Info() tools.ToolInfo {
+	required := b.tool.InputSchema.Required
+	if required == nil {
+		required = make([]string, 0)
+	}
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
 		Parameters:  b.tool.InputSchema.Properties,
-		Required:    b.tool.InputSchema.Required,
+		Required:    required,
 	}
 }
 
@@ -110,6 +119,15 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 			return tools.NewTextErrorResponse(err.Error()), nil
 		}
 		return runTool(ctx, c, b.tool.Name, params.Input)
+	case config.MCPHttp:
+		c, err := client.NewStreamableHttpClient(
+			b.mcpConfig.URL,
+			transport.WithHTTPHeaders(b.mcpConfig.Headers),
+		)
+		if err != nil {
+			return tools.NewTextErrorResponse(err.Error()), nil
+		}
+		return runTool(ctx, c, b.tool.Name, params.Input)
 	case config.MCPSse:
 		c, err := client.NewSSEMCPClient(
 			b.mcpConfig.URL,
@@ -124,7 +142,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return tools.NewTextErrorResponse("invalid mcp type"), nil
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPServer) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCP) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
@@ -135,7 +153,7 @@ func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpC
 
 var mcpTools []tools.BaseTool
 
-func getTools(ctx context.Context, name string, m config.MCPServer, permissions permission.Service, c MCPClient) []tools.BaseTool {
+func getTools(ctx context.Context, name string, m config.MCP, permissions permission.Service, c MCPClient) []tools.BaseTool {
 	var stdioTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
@@ -166,7 +184,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 	if len(mcpTools) > 0 {
 		return mcpTools
 	}
-	for name, m := range config.Get().MCPServers {
+	for name, m := range config.Get().MCP {
 		switch m.Type {
 		case config.MCPStdio:
 			c, err := client.NewStdioMCPClient(
@@ -179,6 +197,16 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				continue
 			}
 
+			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+		case config.MCPHttp:
+			c, err := client.NewStreamableHttpClient(
+				m.URL,
+				transport.WithHTTPHeaders(m.Headers),
+			)
+			if err != nil {
+				logging.Error("error creating mcp client", "error", err)
+				continue
+			}
 			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
 		case config.MCPSse:
 			c, err := client.NewSSEMCPClient(

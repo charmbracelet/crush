@@ -51,6 +51,10 @@ func NewDiagnosticsTool(lspClients map[string]*lsp.Client) BaseTool {
 	}
 }
 
+func (b *diagnosticsTool) Name() string {
+	return DiagnosticsToolName
+}
+
 func (b *diagnosticsTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        DiagnosticsToolName,

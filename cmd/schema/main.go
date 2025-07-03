@@ -6,25 +6,29 @@ import (
 	"os"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/invopop/jsonschema"
 )
 
-// JSONSchemaType represents a JSON Schema type
-type JSONSchemaType struct {
-	Type                 string           `json:"type,omitempty"`
-	Description          string           `json:"description,omitempty"`
-	Properties           map[string]any   `json:"properties,omitempty"`
-	Required             []string         `json:"required,omitempty"`
-	AdditionalProperties any              `json:"additionalProperties,omitempty"`
-	Enum                 []any            `json:"enum,omitempty"`
-	Items                map[string]any   `json:"items,omitempty"`
-	OneOf                []map[string]any `json:"oneOf,omitempty"`
-	AnyOf                []map[string]any `json:"anyOf,omitempty"`
-	Default              any              `json:"default,omitempty"`
-}
-
 func main() {
-	schema := generateSchema()
+	// Create a new reflector
+	r := &jsonschema.Reflector{
+		// Use anonymous schemas to avoid ID conflicts
+		Anonymous: true,
+		// Expand the root struct instead of referencing it
+		ExpandedStruct:            true,
+		AllowAdditionalProperties: true,
+	}
+
+	// Generate schema for the main Config struct
+	schema := r.Reflect(&config.Config{})
+
+	// Enhance the schema with additional information
+	enhanceSchema(schema)
+
+	// Set the schema metadata
+	schema.Version = "https://json-schema.org/draft/2020-12/schema"
+	schema.Title = "Crush Configuration"
+	schema.Description = "Configuration schema for the Crush application"
 
 	// Pretty print the schema
 	encoder := json.NewEncoder(os.Stdout)
@@ -35,276 +39,117 @@ func main() {
 	}
 }
 
-func generateSchema() map[string]any {
-	schema := map[string]any{
-		"$schema":     "http://json-schema.org/draft-07/schema#",
-		"title":       "Crush Configuration",
-		"description": "Configuration schema for the Crush application",
-		"type":        "object",
-		"properties":  map[string]any{},
+// enhanceSchema adds additional enhancements to the generated schema
+func enhanceSchema(schema *jsonschema.Schema) {
+	// Add provider enums
+	addProviderEnums(schema)
+
+	// Add model enums
+	addModelEnums(schema)
+
+	// Add tool enums
+	addToolEnums(schema)
+
+	// Add default context paths
+	addDefaultContextPaths(schema)
+}
+
+// addProviderEnums adds provider enums to the schema
+func addProviderEnums(schema *jsonschema.Schema) {
+	providers := config.Providers()
+	var providerIDs []any
+	for _, p := range providers {
+		providerIDs = append(providerIDs, string(p.ID))
 	}
 
-	// Add Data configuration
-	schema["properties"].(map[string]any)["data"] = map[string]any{
-		"type":        "object",
-		"description": "Storage configuration",
-		"properties": map[string]any{
-			"directory": map[string]any{
-				"type":        "string",
-				"description": "Directory where application data is stored",
-				"default":     ".crush",
-			},
-		},
-		"required": []string{"directory"},
+	// Add to PreferredModel provider field
+	if schema.Definitions != nil {
+		if preferredModelDef, exists := schema.Definitions["PreferredModel"]; exists {
+			if providerProp, exists := preferredModelDef.Properties.Get("provider"); exists {
+				providerProp.Enum = providerIDs
+			}
+		}
+
+		// Add to ProviderConfig ID field
+		if providerConfigDef, exists := schema.Definitions["ProviderConfig"]; exists {
+			if idProp, exists := providerConfigDef.Properties.Get("id"); exists {
+				idProp.Enum = providerIDs
+			}
+		}
 	}
+}
 
-	// Add working directory
-	schema["properties"].(map[string]any)["wd"] = map[string]any{
-		"type":        "string",
-		"description": "Working directory for the application",
-	}
-
-	// Add debug flags
-	schema["properties"].(map[string]any)["debug"] = map[string]any{
-		"type":        "boolean",
-		"description": "Enable debug mode",
-		"default":     false,
-	}
-
-	schema["properties"].(map[string]any)["debugLSP"] = map[string]any{
-		"type":        "boolean",
-		"description": "Enable LSP debug mode",
-		"default":     false,
-	}
-
-	schema["properties"].(map[string]any)["contextPaths"] = map[string]any{
-		"type":        "array",
-		"description": "Context paths for the application",
-		"items": map[string]any{
-			"type": "string",
-		},
-		"default": []string{
-			".github/copilot-instructions.md",
-			".cursorrules",
-			".cursor/rules/",
-			"CLAUDE.md",
-			"CLAUDE.local.md",
-			"GEMINI.md",
-			"gemini.md",
-			"crush.md",
-			"crush.local.md",
-			"Crush.md",
-			"Crush.local.md",
-			"CRUSH.md",
-			"CRUSH.local.md",
-		},
-	}
-
-	schema["properties"].(map[string]any)["tui"] = map[string]any{
-		"type":        "object",
-		"description": "Terminal User Interface configuration",
-		"properties": map[string]any{
-			"theme": map[string]any{
-				"type":        "string",
-				"description": "TUI theme name",
-				"default":     "crush",
-				"enum": []string{
-					"crush",
-					"catppuccin",
-					"dracula",
-					"flexoki",
-					"gruvbox",
-					"monokai",
-					"onedark",
-					"tokyonight",
-					"tron",
-				},
-			},
-		},
-	}
-
-	// Add MCP servers
-	schema["properties"].(map[string]any)["mcpServers"] = map[string]any{
-		"type":        "object",
-		"description": "Model Control Protocol server configurations",
-		"additionalProperties": map[string]any{
-			"type":        "object",
-			"description": "MCP server configuration",
-			"properties": map[string]any{
-				"command": map[string]any{
-					"type":        "string",
-					"description": "Command to execute for the MCP server",
-				},
-				"env": map[string]any{
-					"type":        "array",
-					"description": "Environment variables for the MCP server",
-					"items": map[string]any{
-						"type": "string",
-					},
-				},
-				"args": map[string]any{
-					"type":        "array",
-					"description": "Command arguments for the MCP server",
-					"items": map[string]any{
-						"type": "string",
-					},
-				},
-				"type": map[string]any{
-					"type":        "string",
-					"description": "Type of MCP server",
-					"enum":        []string{"stdio", "sse"},
-					"default":     "stdio",
-				},
-				"url": map[string]any{
-					"type":        "string",
-					"description": "URL for SSE type MCP servers",
-				},
-				"headers": map[string]any{
-					"type":        "object",
-					"description": "HTTP headers for SSE type MCP servers",
-					"additionalProperties": map[string]any{
-						"type": "string",
-					},
-				},
-			},
-			"required": []string{"command"},
-		},
-	}
-
-	// Add providers
-	providerSchema := map[string]any{
-		"type":        "object",
-		"description": "LLM provider configurations",
-		"additionalProperties": map[string]any{
-			"type":        "object",
-			"description": "Provider configuration",
-			"properties": map[string]any{
-				"apiKey": map[string]any{
-					"type":        "string",
-					"description": "API key for the provider",
-				},
-				"disabled": map[string]any{
-					"type":        "boolean",
-					"description": "Whether the provider is disabled",
-					"default":     false,
-				},
-			},
-		},
-	}
-
-	// Add known providers
-	knownProviders := []string{
-		string(models.ProviderAnthropic),
-		string(models.ProviderOpenAI),
-		string(models.ProviderGemini),
-		string(models.ProviderGROQ),
-		string(models.ProviderOpenRouter),
-		string(models.ProviderBedrock),
-		string(models.ProviderAzure),
-		string(models.ProviderVertexAI),
-	}
-
-	providerSchema["additionalProperties"].(map[string]any)["properties"].(map[string]any)["provider"] = map[string]any{
-		"type":        "string",
-		"description": "Provider type",
-		"enum":        knownProviders,
-	}
-
-	schema["properties"].(map[string]any)["providers"] = providerSchema
-
-	// Add agents
-	agentSchema := map[string]any{
-		"type":        "object",
-		"description": "Agent configurations",
-		"additionalProperties": map[string]any{
-			"type":        "object",
-			"description": "Agent configuration",
-			"properties": map[string]any{
-				"model": map[string]any{
-					"type":        "string",
-					"description": "Model ID for the agent",
-				},
-				"maxTokens": map[string]any{
-					"type":        "integer",
-					"description": "Maximum tokens for the agent",
-					"minimum":     1,
-				},
-				"reasoningEffort": map[string]any{
-					"type":        "string",
-					"description": "Reasoning effort for models that support it (OpenAI, Anthropic)",
-					"enum":        []string{"low", "medium", "high"},
-				},
-			},
-			"required": []string{"model"},
-		},
-	}
-
-	// Add model enum
-	modelEnum := []string{}
-	for modelID := range models.SupportedModels {
-		modelEnum = append(modelEnum, string(modelID))
-	}
-	agentSchema["additionalProperties"].(map[string]any)["properties"].(map[string]any)["model"].(map[string]any)["enum"] = modelEnum
-
-	// Add specific agent properties
-	agentProperties := map[string]any{}
-	knownAgents := []string{
-		string(config.AgentCoder),
-		string(config.AgentTask),
-		string(config.AgentTitle),
-	}
-
-	for _, agentName := range knownAgents {
-		agentProperties[agentName] = map[string]any{
-			"$ref": "#/definitions/agent",
+// addModelEnums adds model enums to the schema
+func addModelEnums(schema *jsonschema.Schema) {
+	providers := config.Providers()
+	var modelIDs []any
+	for _, p := range providers {
+		for _, m := range p.Models {
+			modelIDs = append(modelIDs, m.ID)
 		}
 	}
 
-	// Create a combined schema that allows both specific agents and additional ones
-	combinedAgentSchema := map[string]any{
-		"type":                 "object",
-		"description":          "Agent configurations",
-		"properties":           agentProperties,
-		"additionalProperties": agentSchema["additionalProperties"],
+	// Add to PreferredModel model_id field
+	if schema.Definitions != nil {
+		if preferredModelDef, exists := schema.Definitions["PreferredModel"]; exists {
+			if modelIDProp, exists := preferredModelDef.Properties.Get("model_id"); exists {
+				modelIDProp.Enum = modelIDs
+			}
+		}
+	}
+}
+
+// addToolEnums adds tool enums to the schema
+func addToolEnums(schema *jsonschema.Schema) {
+	tools := []any{
+		"bash", "edit", "fetch", "glob", "grep", "ls", "sourcegraph", "view", "write", "agent",
 	}
 
-	schema["properties"].(map[string]any)["agents"] = combinedAgentSchema
-	schema["definitions"] = map[string]any{
-		"agent": agentSchema["additionalProperties"],
+	if schema.Definitions != nil {
+		if agentDef, exists := schema.Definitions["Agent"]; exists {
+			if allowedToolsProp, exists := agentDef.Properties.Get("allowed_tools"); exists {
+				if allowedToolsProp.Items != nil {
+					allowedToolsProp.Items.Enum = tools
+				}
+			}
+		}
+	}
+}
+
+// addDefaultContextPaths adds default context paths to the schema
+func addDefaultContextPaths(schema *jsonschema.Schema) {
+	defaultContextPaths := []any{
+		".github/copilot-instructions.md",
+		".cursorrules",
+		".cursor/rules/",
+		"CLAUDE.md",
+		"CLAUDE.local.md",
+		"GEMINI.md",
+		"gemini.md",
+		"crush.md",
+		"crush.local.md",
+		"Crush.md",
+		"Crush.local.md",
+		"CRUSH.md",
+		"CRUSH.local.md",
 	}
 
-	// Add LSP configuration
-	schema["properties"].(map[string]any)["lsp"] = map[string]any{
-		"type":        "object",
-		"description": "Language Server Protocol configurations",
-		"additionalProperties": map[string]any{
-			"type":        "object",
-			"description": "LSP configuration for a language",
-			"properties": map[string]any{
-				"disabled": map[string]any{
-					"type":        "boolean",
-					"description": "Whether the LSP is disabled",
-					"default":     false,
-				},
-				"command": map[string]any{
-					"type":        "string",
-					"description": "Command to execute for the LSP server",
-				},
-				"args": map[string]any{
-					"type":        "array",
-					"description": "Command arguments for the LSP server",
-					"items": map[string]any{
-						"type": "string",
-					},
-				},
-				"options": map[string]any{
-					"type":        "object",
-					"description": "Additional options for the LSP server",
-				},
-			},
-			"required": []string{"command"},
-		},
+	if schema.Definitions != nil {
+		if optionsDef, exists := schema.Definitions["Options"]; exists {
+			if contextPathsProp, exists := optionsDef.Properties.Get("context_paths"); exists {
+				contextPathsProp.Default = defaultContextPaths
+			}
+		}
 	}
 
-	return schema
+	// Also add to root properties if they exist
+	if schema.Properties != nil {
+		if optionsProp, exists := schema.Properties.Get("options"); exists {
+			if optionsProp.Properties != nil {
+				if contextPathsProp, exists := optionsProp.Properties.Get("context_paths"); exists {
+					contextPathsProp.Default = defaultContextPaths
+				}
+			}
+		}
+	}
 }

@@ -6,55 +6,45 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/models"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-type anthropicOptions struct {
-	useBedrock   bool
-	disableCache bool
-	shouldThink  func(userMessage string) bool
-}
-
-type AnthropicOption func(*anthropicOptions)
-
 type anthropicClient struct {
-	providerOptions providerClientOptions
-	options         anthropicOptions
-	client          anthropic.Client
+	providerOptions   providerClientOptions
+	useBedrock        bool
+	client            anthropic.Client
+	adjustedMaxTokens int // Used when context limit is hit
 }
 
 type AnthropicClient ProviderClient
 
-func newAnthropicClient(opts providerClientOptions) AnthropicClient {
-	anthropicOpts := anthropicOptions{}
-	for _, o := range opts.anthropicOptions {
-		o(&anthropicOpts)
+func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicClient {
+	return &anthropicClient{
+		providerOptions: opts,
+		client:          createAnthropicClient(opts, useBedrock),
 	}
+}
 
+func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropic.Client {
 	anthropicClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
 	}
-	if anthropicOpts.useBedrock {
+	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
-
-	client := anthropic.NewClient(anthropicClientOptions...)
-	return &anthropicClient{
-		providerOptions: opts,
-		options:         anthropicOpts,
-		client:          client,
-	}
+	return anthropic.NewClient(anthropicClientOptions...)
 }
 
 func (a *anthropicClient) convertMessages(messages []message.Message) (anthropicMessages []anthropic.MessageParam) {
@@ -66,7 +56,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 		switch msg.Role {
 		case message.User:
 			content := anthropic.NewTextBlock(msg.Content().String())
-			if cache && !a.options.disableCache {
+			if cache && !a.providerOptions.disableCache {
 				content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 					Type: "ephemeral",
 				}
@@ -74,7 +64,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			var contentBlocks []anthropic.ContentBlockParamUnion
 			contentBlocks = append(contentBlocks, content)
 			for _, binaryContent := range msg.BinaryContent() {
-				base64Image := binaryContent.String(models.ProviderAnthropic)
+				base64Image := binaryContent.String(provider.InferenceProviderAnthropic)
 				imageBlock := anthropic.NewImageBlockBase64(binaryContent.MIMEType, base64Image)
 				contentBlocks = append(contentBlocks, imageBlock)
 			}
@@ -84,7 +74,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			blocks := []anthropic.ContentBlockParamUnion{}
 			if msg.Content().String() != "" {
 				content := anthropic.NewTextBlock(msg.Content().String())
-				if cache && !a.options.disableCache {
+				if cache && !a.providerOptions.disableCache {
 					content.OfText.CacheControl = anthropic.CacheControlEphemeralParam{
 						Type: "ephemeral",
 					}
@@ -132,7 +122,7 @@ func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolU
 			},
 		}
 
-		if i == len(tools)-1 && !a.options.disableCache {
+		if i == len(tools)-1 && !a.providerOptions.disableCache {
 			toolParam.CacheControl = anthropic.CacheControlEphemeralParam{
 				Type: "ephemeral",
 			}
@@ -160,26 +150,38 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 }
 
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
+	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
-	lastMessage := messages[len(messages)-1]
-	isUser := lastMessage.Role == anthropic.MessageParamRoleUser
-	messageContent := ""
+	cfg := config.Get()
+	modelConfig := cfg.Models.Large
+	if a.providerOptions.modelType == config.SmallModel {
+		modelConfig = cfg.Models.Small
+	}
 	temperature := anthropic.Float(0)
-	if isUser {
-		for _, m := range lastMessage.Content {
-			if m.OfText != nil && m.OfText.Text != "" {
-				messageContent = m.OfText.Text
-			}
-		}
-		if messageContent != "" && a.options.shouldThink != nil && a.options.shouldThink(messageContent) {
-			thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
-			temperature = anthropic.Float(1)
-		}
+
+	if a.Model().CanReason && modelConfig.Think {
+		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
+		temperature = anthropic.Float(1)
+	}
+
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
+
+	// Override max tokens if set in provider options
+	if a.providerOptions.maxTokens > 0 {
+		maxTokens = a.providerOptions.maxTokens
+	}
+
+	// Use adjusted max tokens if context limit was hit
+	if a.adjustedMaxTokens > 0 {
+		maxTokens = int64(a.adjustedMaxTokens)
 	}
 
 	return anthropic.MessageNewParams{
-		Model:       anthropic.Model(a.providerOptions.model.APIModel),
-		MaxTokens:   a.providerOptions.maxTokens,
+		Model:       anthropic.Model(model.ID),
+		MaxTokens:   maxTokens,
 		Temperature: temperature,
 		Messages:    messages,
 		Tools:       tools,
@@ -196,16 +198,18 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 }
 
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
-	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Debug {
-		jsonData, _ := json.Marshal(preparedMessages)
-		logging.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	attempts := 0
 	for {
 		attempts++
+		// Prepare messages on each attempt in case max_tokens was adjusted
+		preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
+		if cfg.Options.Debug {
+			jsonData, _ := json.Marshal(preparedMessages)
+			logging.Debug("Prepared messages", "messages", string(jsonData))
+		}
+
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
@@ -245,17 +249,19 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 }
 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 	cfg := config.Get()
-	if cfg.Debug {
-		// jsonData, _ := json.Marshal(preparedMessages)
-		// logging.Debug("Prepared messages", "messages", string(jsonData))
-	}
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
 	go func() {
 		for {
 			attempts++
+			// Prepare messages on each attempt in case max_tokens was adjusted
+			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
+			if cfg.Options.Debug {
+				jsonData, _ := json.Marshal(preparedMessages)
+				logging.Debug("Prepared messages", "messages", string(jsonData))
+			}
+
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
@@ -383,12 +389,8 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 }
 
 func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, error) {
-	var apierr *anthropic.Error
-	if !errors.As(err, &apierr) {
-		return false, 0, err
-	}
-
-	if apierr.StatusCode != 429 && apierr.StatusCode != 529 {
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) {
 		return false, 0, err
 	}
 
@@ -396,8 +398,30 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
+	if apiErr.StatusCode == 401 {
+		a.providerOptions.apiKey, err = config.ResolveAPIKey(a.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		a.client = createAnthropicClient(a.providerOptions, a.useBedrock)
+		return true, 0, nil
+	}
+
+	// Handle context limit exceeded error (400 Bad Request)
+	if apiErr.StatusCode == 400 {
+		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
+			a.adjustedMaxTokens = adjusted
+			logging.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
+			return true, 0, nil
+		}
+	}
+
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
+		return false, 0, err
+	}
+
 	retryMs := 0
-	retryAfterValues := apierr.Response.Header.Values("Retry-After")
+	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
 
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)
@@ -408,6 +432,33 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 	}
 	return true, int64(retryMs), nil
+}
+
+// handleContextLimitError parses context limit error and returns adjusted max_tokens
+func (a *anthropicClient) handleContextLimitError(apiErr *anthropic.Error) (int, bool) {
+	// Parse error message like: "input length and max_tokens exceed context limit: 154978 + 50000 > 200000"
+	errorMsg := apiErr.Error()
+	re := regexp.MustCompile(`input length and max_tokens exceed context limit: (\d+) \+ (\d+) > (\d+)`)
+	matches := re.FindStringSubmatch(errorMsg)
+
+	if len(matches) != 4 {
+		return 0, false
+	}
+
+	inputTokens, err1 := strconv.Atoi(matches[1])
+	contextLimit, err2 := strconv.Atoi(matches[3])
+
+	if err1 != nil || err2 != nil {
+		return 0, false
+	}
+
+	// Calculate safe max_tokens with a buffer of 1000 tokens
+	safeMaxTokens := contextLimit - inputTokens - 1000
+
+	// Ensure we don't go below a minimum threshold
+	safeMaxTokens = max(safeMaxTokens, 1000)
+
+	return safeMaxTokens, true
 }
 
 func (a *anthropicClient) toolCalls(msg anthropic.Message) []message.ToolCall {
@@ -439,24 +490,6 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 	}
 }
 
-func WithAnthropicBedrock(useBedrock bool) AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.useBedrock = useBedrock
-	}
-}
-
-func WithAnthropicDisableCache() AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.disableCache = true
-	}
-}
-
-func DefaultShouldThinkFn(s string) bool {
-	return strings.Contains(strings.ToLower(s), "think")
-}
-
-func WithAnthropicShouldThinkFn(fn func(string) bool) AnthropicOption {
-	return func(options *anthropicOptions) {
-		options.shouldThink = fn
-	}
+func (a *anthropicClient) Model() config.Model {
+	return a.providerOptions.model(a.providerOptions.modelType)
 }

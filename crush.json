@@ -1,0 +1,15 @@
+{
+  "$schema": "./crush-schema.json",
+  "lsp": {
+    "go": {
+      "command": "gopls"
+    }
+  },
+  "mcp": {
+    "context7": {
+      "command": "",
+      "url": "https://mcp.context7.com/mcp",
+      "type": "http"
+    }
+  }
+}

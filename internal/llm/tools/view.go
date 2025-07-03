@@ -77,6 +77,10 @@ func NewViewTool(lspClients map[string]*lsp.Client) BaseTool {
 	}
 }
 
+func (v *viewTool) Name() string {
+	return ViewToolName
+}
+
 func (v *viewTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        ViewToolName,

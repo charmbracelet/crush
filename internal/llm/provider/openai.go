@@ -289,8 +289,18 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
+				if cfg.Options.Debug {
+					jsonData, _ := json.Marshal(acc.ChatCompletion)
+					logging.Debug("Response", "messages", string(jsonData))
+				}
+				resultFinishReason := acc.ChatCompletion.Choices[0].FinishReason
+				if resultFinishReason == "" {
+					// If the finish reason is empty, we assume it was a successful completion
+					// INFO: this is happening for openrouter for some reason
+					resultFinishReason = "stop"
+				}
 				// Stream completed successfully
-				finishReason := o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
+				finishReason := o.finishReason(resultFinishReason)
 				if len(acc.Choices[0].Message.ToolCalls) > 0 {
 					toolCalls = append(toolCalls, o.toolCalls(acc.ChatCompletion)...)
 				}

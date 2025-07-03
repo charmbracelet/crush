@@ -318,7 +318,7 @@ func maybePrependStdin(prompt string) (string, error) {
 	if err != nil {
 		return prompt, err
 	}
-	if fi.Size() == 0 {
+	if fi.Mode()&os.ModeNamedPipe == 0 {
 		return prompt, nil
 	}
 	bts, err := io.ReadAll(os.Stdin)

@@ -109,17 +109,18 @@ func New(app *app.App) ChatPage {
 
 		keyMap: DefaultKeyMap(),
 
-		header:  header.New(app.LSPClients),
-		sidebar: sidebar.New(app.History, app.LSPClients, false),
-		chat:    chat.New(app),
-		editor:  editor.New(app),
-		splash:  splash.New(),
+		header:      header.New(app.LSPClients),
+		sidebar:     sidebar.New(app.History, app.LSPClients, false),
+		chat:        chat.New(app),
+		editor:      editor.New(app),
+		splash:      splash.New(),
+		focusedPane: PanelTypeSplash,
 	}
 }
 
 func (p *chatPage) Init() tea.Cmd {
 	cfg := config.Get()
-	if cfg.IsReady() {
+	if config.HasInitialDataConfig() {
 		if b, _ := config.ProjectNeedsInitialization(); b {
 			p.state = ChatStateInitProject
 		} else {
@@ -248,6 +249,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := p.editor.Update(msg)
 			p.editor = u.(editor.Editor)
 			cmds = append(cmds, cmd)
+		case PanelTypeSplash:
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
 		}
 	}
 	return p, tea.Batch(cmds...)
@@ -258,11 +263,7 @@ func (p *chatPage) View() tea.View {
 	t := styles.CurrentTheme()
 	switch p.state {
 	case ChatStateOnboarding, ChatStateInitProject:
-		chatView = tea.NewView(
-			t.S().Base.Render(
-				p.splash.View().String(),
-			),
-		)
+		chatView = p.splash.View()
 	case ChatStateNewMessage:
 		editorView := p.editor.View()
 		chatView = tea.NewView(

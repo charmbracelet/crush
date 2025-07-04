@@ -208,6 +208,24 @@ func New(opts Settings) (a Anim) {
 	return a
 }
 
+// Width returns the total width of the animation.
+func (a Anim) Width() (w int) {
+	w = a.width
+	if a.labelWidth > 0 {
+		w += labelGapWidth + a.labelWidth
+
+		var widestEllipsisFrame int
+		for _, f := range ellipsisFrames {
+			fw := lipgloss.Width(f)
+			if fw > widestEllipsisFrame {
+				widestEllipsisFrame = fw
+			}
+		}
+		w += widestEllipsisFrame
+	}
+	return w
+}
+
 // Init starts the animation.
 func (a Anim) Init() tea.Cmd {
 	return a.Step()

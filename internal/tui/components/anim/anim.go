@@ -42,7 +42,7 @@ const (
 var (
 	defaultGradColorA = color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff}
 	defaultGradColorB = color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff}
-	deafultLabelColor = color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	defaultLabelColor = color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 )
 
 var (
@@ -104,7 +104,7 @@ func New(opts Settings) (a Anim) {
 		opts.GradColorB = defaultGradColorB
 	}
 	if colorIsUnset(opts.LabelColor) {
-		opts.LabelColor = deafultLabelColor
+		opts.LabelColor = defaultLabelColor
 	}
 
 	a.id = nextID()

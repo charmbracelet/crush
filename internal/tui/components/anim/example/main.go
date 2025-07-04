@@ -58,7 +58,14 @@ func main() {
 	t := styles.CurrentTheme()
 	p := tea.NewProgram(model{
 		bgColor: t.BgBase,
-		anim:    anim.New(50, "Hello", t),
+		anim: anim.New(anim.Settings{
+			Label:       "Hello",
+			Size:        50,
+			LabelColor:  t.FgBase,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		}),
 	})
 
 	if _, err := p.Run(); err != nil {

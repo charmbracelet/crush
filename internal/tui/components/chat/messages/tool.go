@@ -91,9 +91,21 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCal
 		opt(m)
 	}
 	t := styles.CurrentTheme()
-	m.anim = anim.New(15, "Working", t)
+	m.anim = anim.New(anim.Settings{
+		Size:        15,
+		Label:       "Working",
+		GradColorA:  t.Primary,
+		GradColorB:  t.Secondary,
+		LabelColor:  t.FgBase,
+		CycleColors: true,
+	})
 	if m.isNested {
-		m.anim = anim.New(10, "", t)
+		m.anim = anim.New(anim.Settings{
+			Size:        10,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
 	}
 	return m
 }

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
 )
@@ -31,8 +30,19 @@ const (
 	maxBirthOffset = time.Second
 
 	// Number of frames to prerender for the animation. After this number
-	// of frames, the animation will loop.
+	// of frames, the animation will loop. This only applies when color
+	// cycling is disabled.
 	prerenderedFrames = 10
+
+	// Default number of cycling chars.
+	defaultNumCyclingChars = 10
+)
+
+// Default colors for gradient.
+var (
+	defaultGradColorA = color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff}
+	defaultGradColorB = color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff}
+	deafultLabelColor = color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 )
 
 var (
@@ -51,6 +61,19 @@ func nextID() int {
 // StepMsg is a message type used to trigger the next step in the animation.
 type StepMsg struct{ id int }
 
+// Settings defines settings for the animation.
+type Settings struct {
+	Size        int
+	Label       string
+	LabelColor  color.Color
+	GradColorA  color.Color
+	GradColorB  color.Color
+	CycleColors bool
+}
+
+// Default settings.
+const ()
+
 // Anim is a Bubble for an animated spinner.
 type Anim struct {
 	width            int
@@ -59,7 +82,7 @@ type Anim struct {
 	labelWidth       int
 	startTime        time.Time
 	birthOffsets     []time.Duration
-	initialChars     []string
+	initialFrames    [][]string // frames for the initial characters
 	initialized      bool
 	cyclingFrames    [][]string // frames for the cycling characters
 	step             int        // current main frame step
@@ -69,27 +92,41 @@ type Anim struct {
 }
 
 // New creates a new Anim instance with the specified width and label.
-func New(numChars int, label string, t *styles.Theme) (a Anim) {
+func New(opts Settings) (a Anim) {
+	// Validate settings.
+	if opts.Size < 1 {
+		opts.Size = defaultNumCyclingChars
+	}
+	if colorIsUnset(opts.GradColorA) {
+		opts.GradColorA = defaultGradColorA
+	}
+	if colorIsUnset(opts.GradColorB) {
+		opts.GradColorB = defaultGradColorB
+	}
+	if colorIsUnset(opts.LabelColor) {
+		opts.LabelColor = deafultLabelColor
+	}
+
 	a.id = nextID()
 
 	a.startTime = time.Now()
-	a.cyclingCharWidth = numChars
-	a.labelWidth = lipgloss.Width(label)
+	a.cyclingCharWidth = opts.Size
+	a.labelWidth = lipgloss.Width(opts.Label)
 
 	// Total width of anim, in cells.
-	a.width = numChars
-	if label != "" {
-		a.width += labelGapWidth + lipgloss.Width(label)
+	a.width = opts.Size
+	if opts.Label != "" {
+		a.width += labelGapWidth + lipgloss.Width(opts.Label)
 	}
 
 	if a.labelWidth > 0 {
 		// Pre-render the label.
 		// XXX: We should really get the graphemes for the label, not the runes.
-		labelRunes := []rune(label)
+		labelRunes := []rune(opts.Label)
 		a.label = make([]string, len(labelRunes))
 		for i := range a.label {
 			a.label[i] = lipgloss.NewStyle().
-				Foreground(t.FgBase).
+				Foreground(opts.LabelColor).
 				Render(string(labelRunes[i]))
 		}
 
@@ -97,39 +134,68 @@ func New(numChars int, label string, t *styles.Theme) (a Anim) {
 		a.ellipsisFrames = make([]string, len(ellipsisFrames))
 		for i, frame := range ellipsisFrames {
 			a.ellipsisFrames[i] = lipgloss.NewStyle().
-				Foreground(t.FgBase).
+				Foreground(opts.LabelColor).
 				Render(frame)
 		}
 	}
 
 	// Pre-generate gradient.
-	ramp := makeGradientRamp(a.width, t.Primary, t.Secondary)
+	var ramp []color.Color
+	numFrames := prerenderedFrames
+	if opts.CycleColors {
+		ramp = makeGradientRamp(a.width*3, opts.GradColorA, opts.GradColorB, opts.GradColorA, opts.GradColorB)
+		numFrames = a.width * 2
+	} else {
+		ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
+	}
 
 	// Pre-render initial characters.
-	a.initialChars = make([]string, a.width)
-	for i := range a.initialChars {
-		var c color.Color
-		if i <= a.cyclingCharWidth {
-			c = ramp[i]
-		} else {
-			c = t.FgBase
+	a.initialFrames = make([][]string, numFrames)
+	offset := 0
+	for i := range a.initialFrames {
+		a.initialFrames[i] = make([]string, a.width+labelGapWidth+a.labelWidth)
+		for j := range a.initialFrames[i] {
+			if j+offset >= len(ramp) {
+				continue // skip if we run out of colors
+			}
+
+			var c color.Color
+			if i <= a.cyclingCharWidth {
+				c = ramp[j+offset]
+			} else {
+				c = opts.LabelColor
+			}
+
+			// Also prerender the initial character with Lip Gloss to avoid
+			// processing in the render loop.
+			a.initialFrames[i][j] = lipgloss.NewStyle().
+				Foreground(c).
+				Render(string(initialChar))
 		}
-		a.initialChars[i] = lipgloss.NewStyle().
-			Foreground(c).
-			Render(string(initialChar))
+		if opts.CycleColors {
+			offset++
+		}
 	}
 
 	// Prerender scrambled rune frames for the animation.
-	a.cyclingFrames = make([][]string, prerenderedFrames)
+	a.cyclingFrames = make([][]string, numFrames)
+	offset = 0
 	for i := range a.cyclingFrames {
 		a.cyclingFrames[i] = make([]string, a.width)
 		for j := range a.cyclingFrames[i] {
-			// NB: we also prerender the color with Lip Gloss here to avoid
-			// processing in the render loop.
+			if j+offset >= len(ramp) {
+				continue // skip if we run out of colors
+			}
+
+			// Also prerender the color with Lip Gloss here to avoid processing
+			// in the render loop.
 			r := availableRunes[rand.IntN(len(availableRunes))]
 			a.cyclingFrames[i][j] = lipgloss.NewStyle().
-				Foreground(ramp[j]).
+				Foreground(ramp[j+offset]).
 				Render(string(r))
+		}
+		if opts.CycleColors {
+			offset++
 		}
 	}
 
@@ -183,7 +249,7 @@ func (a Anim) View() tea.View {
 		switch {
 		case !a.initialized && time.Since(a.startTime) < a.birthOffsets[i]:
 			// Birth offset not reached: render initial character.
-			b.WriteString(a.initialChars[i])
+			b.WriteString(a.initialFrames[a.step][i])
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.
 			b.WriteString(a.cyclingFrames[a.step][i])
@@ -210,7 +276,7 @@ func (a Anim) Step() tea.Cmd {
 	})
 }
 
-// BlendColors returns a slice of colors blended between the given keys.
+// makeGradientRamp() returns a slice of colors blended between the given keys.
 // Blending is done as Hcl to stay in gamut.
 func makeGradientRamp(size int, stops ...color.Color) []color.Color {
 	if len(stops) < 2 {
@@ -258,4 +324,12 @@ func makeGradientRamp(size int, stops ...color.Color) []color.Color {
 	}
 
 	return blended
+}
+
+func colorIsUnset(c color.Color) bool {
+	if c == nil {
+		return false
+	}
+	_, _, _, a := c.RGBA()
+	return a == 0
 }

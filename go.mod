@@ -80,6 +80,7 @@ require (
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
+	github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86 // indirect
 	github.com/charmbracelet/x/windows v0.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect

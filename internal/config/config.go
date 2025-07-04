@@ -176,6 +176,30 @@ type PreferredModels struct {
 	Small PreferredModel `json:"small,omitempty" jsonschema:"title=Small Model,description=Preferred model configuration for small model type"`
 }
 
+// LSPConfigs is a map of LSP server configurations, keyed by the server name.
+type LSPConfigs map[string]LSPConfig
+
+// LSP represents a Language Server Protocol server configuration. For now,
+// it's only used to get a sorted set of LSPs (since maps are not ordered).
+type LSP struct {
+	Name   string
+	Config LSPConfig
+}
+
+// Sorted returns a sorted slice of LSPs from the LSPConfigs map.
+func (l LSPConfigs) Sorted() []LSP {
+	// Create a slice of LSPs from the map
+	lspList := make([]LSP, 0, len(l))
+	for name, config := range l {
+		lspList = append(lspList, LSP{Name: name, Config: config})
+	}
+	// Sort the slice by name
+	slices.SortFunc(lspList, func(a, b LSP) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return lspList
+}
+
 type Config struct {
 	Models PreferredModels `json:"models,omitempty" jsonschema:"title=Models,description=Preferred model configurations for large and small model types"`
 	// List of configured providers
@@ -188,7 +212,7 @@ type Config struct {
 	MCP map[string]MCP `json:"mcp,omitempty" jsonschema:"title=MCP,description=Model Control Protocol server configurations"`
 
 	// List of configured LSPs
-	LSP map[string]LSPConfig `json:"lsp,omitempty" jsonschema:"title=LSP,description=Language Server Protocol configurations"`
+	LSP LSPConfigs `json:"lsp,omitempty" jsonschema:"title=LSP,description=Language Server Protocol configurations"`
 
 	// Miscellaneous options
 	Options Options `json:"options,omitempty" jsonschema:"title=Options,description=General application options and settings"`

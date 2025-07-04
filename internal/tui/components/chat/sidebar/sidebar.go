@@ -331,8 +331,10 @@ func (m *sidebarCmp) lspBlock() string {
 
 	lspList := []string{section, ""}
 
-	lsp := config.Get().LSP
-	if len(lsp) == 0 {
+	// Get the sorted list of LSPs from the config.
+	lsps := config.Get().LSP.Sorted()
+
+	if len(lsps) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			section,
@@ -341,9 +343,9 @@ func (m *sidebarCmp) lspBlock() string {
 		)
 	}
 
-	for n, l := range lsp {
+	for _, l := range lsps {
 		iconColor := t.Success
-		if l.Disabled {
+		if l.Config.Disabled {
 			iconColor = t.FgMuted
 		}
 		lspErrs := map[protocol.DiagnosticSeverity]int{
@@ -352,7 +354,7 @@ func (m *sidebarCmp) lspBlock() string {
 			protocol.SeverityHint:        0,
 			protocol.SeverityInformation: 0,
 		}
-		if client, ok := m.lspClients[n]; ok {
+		if client, ok := m.lspClients[l.Name]; ok {
 			for _, diagnostics := range client.GetDiagnostics() {
 				for _, diagnostic := range diagnostics {
 					if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -380,8 +382,8 @@ func (m *sidebarCmp) lspBlock() string {
 			core.Status(
 				core.StatusOpts{
 					IconColor:    iconColor,
-					Title:        n,
-					Description:  l.Command,
+					Title:        l.Name,
+					Description:  l.Config.Command,
 					ExtraContent: strings.Join(errs, " "),
 				},
 				m.width,

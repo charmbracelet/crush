@@ -328,7 +328,7 @@ func makeGradientRamp(size int, stops ...color.Color) []color.Color {
 
 func colorIsUnset(c color.Color) bool {
 	if c == nil {
-		return false
+		return true
 	}
 	_, _, _, a := c.RGBA()
 	return a == 0

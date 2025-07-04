@@ -292,9 +292,10 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
+
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
-	rootCmd.Flags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")
 
 	// Add format flag with validation logic

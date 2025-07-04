@@ -41,9 +41,16 @@ require (
 )
 
 require (
+	github.com/charmbracelet/lipgloss v1.1.0 // indirect
+	github.com/charmbracelet/log v0.4.2 // indirect
+	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c // indirect
 	github.com/spf13/cast v1.7.1 // indirect
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
 
 require (

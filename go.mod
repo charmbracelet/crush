@@ -40,7 +40,11 @@ require (
 	mvdan.cc/sh/v3 v3.11.0
 )
 
-require github.com/spf13/cast v1.7.1 // indirect
+require (
+	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c // indirect
+	github.com/spf13/cast v1.7.1 // indirect
+)
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

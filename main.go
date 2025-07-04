@@ -6,6 +6,8 @@ import (
 
 	_ "net/http/pprof" // profiling
 
+	_ "github.com/joho/godotenv/autoload" // automatically load .env files
+
 	"github.com/charmbracelet/crush/cmd"
 	"github.com/charmbracelet/crush/internal/logging"
 )

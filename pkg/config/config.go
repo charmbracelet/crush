@@ -29,6 +29,13 @@ var defaultContextPaths = []string{
 	"CRUSH.local.md",
 }
 
+type SelectedModelType string
+
+const (
+	SelectedModelTypeLarge SelectedModelType = "large"
+	SelectedModelTypeSmall SelectedModelType = "small"
+)
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -48,6 +55,8 @@ type SelectedModel struct {
 }
 
 type ProviderConfig struct {
+	// The provider's id.
+	ID string `json:"id,omitempty"`
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
@@ -153,7 +162,7 @@ func (l LSPs) Sorted() []LSP {
 // Config holds the configuration for crush.
 type Config struct {
 	// We currently only support large/small as values here.
-	Models map[string]SelectedModel `json:"models,omitempty"`
+	Models map[SelectedModelType]SelectedModel `json:"models,omitempty"`
 
 	// The providers that are configured
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
@@ -170,4 +179,19 @@ type Config struct {
 
 func (c *Config) WorkingDir() string {
 	return c.workingDir
+}
+
+func (c *Config) EnabledProviders() []ProviderConfig {
+	enabled := make([]ProviderConfig, 0, len(c.Providers))
+	for _, p := range c.Providers {
+		if !p.Disable {
+			enabled = append(enabled, p)
+		}
+	}
+	return enabled
+}
+
+// IsConfigured  return true if at least one provider is configured
+func (c *Config) IsConfigured() bool {
+	return len(c.EnabledProviders()) > 0
 }

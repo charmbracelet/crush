@@ -2,6 +2,8 @@ package config
 
 import (
 	"io"
+	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -9,6 +11,13 @@ import (
 	"github.com/charmbracelet/crush/pkg/env"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	exitVal := m.Run()
+	os.Exit(exitVal)
+}
 
 func TestConfig_LoadFromReaders(t *testing.T) {
 	data1 := strings.NewReader(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
@@ -152,6 +161,8 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 
 	// We want to make sure that we keep the configured API key as a placeholder
 	assert.Equal(t, "xyz", cfg.Providers["custom"].APIKey)
+	// Make sure we set the ID correctly
+	assert.Equal(t, "custom", cfg.Providers["custom"].ID)
 	assert.Equal(t, "https://api.someendpoint.com/v2", cfg.Providers["custom"].BaseURL)
 	assert.Len(t, cfg.Providers["custom"].Models, 1)
 
@@ -314,4 +325,438 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	assert.NoError(t, err)
 	// Provider should not be configured without project
 	assert.Len(t, cfg.Providers, 0)
+}
+
+func TestConfig_configureProvidersSetProviderID(t *testing.T) {
+	knownProviders := []provider.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []provider.Model{{
+				ID: "test-model",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp")
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(env, resolver, knownProviders)
+	assert.NoError(t, err)
+	assert.Len(t, cfg.Providers, 1)
+
+	// Provider ID should be set
+	assert.Equal(t, "openai", cfg.Providers["openai"].ID)
+}
+
+func TestConfig_EnabledProviders(t *testing.T) {
+	t.Run("all providers enabled", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					ID:      "openai",
+					APIKey:  "key1",
+					Disable: false,
+				},
+				"anthropic": {
+					ID:      "anthropic",
+					APIKey:  "key2",
+					Disable: false,
+				},
+			},
+		}
+
+		enabled := cfg.EnabledProviders()
+		assert.Len(t, enabled, 2)
+	})
+
+	t.Run("some providers disabled", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					ID:      "openai",
+					APIKey:  "key1",
+					Disable: false,
+				},
+				"anthropic": {
+					ID:      "anthropic",
+					APIKey:  "key2",
+					Disable: true,
+				},
+			},
+		}
+
+		enabled := cfg.EnabledProviders()
+		assert.Len(t, enabled, 1)
+		assert.Equal(t, "openai", enabled[0].ID)
+	})
+
+	t.Run("empty providers map", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{},
+		}
+
+		enabled := cfg.EnabledProviders()
+		assert.Len(t, enabled, 0)
+	})
+}
+
+func TestConfig_IsConfigured(t *testing.T) {
+	t.Run("returns true when at least one provider is enabled", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					ID:      "openai",
+					APIKey:  "key1",
+					Disable: false,
+				},
+			},
+		}
+
+		assert.True(t, cfg.IsConfigured())
+	})
+
+	t.Run("returns false when no providers are configured", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{},
+		}
+
+		assert.False(t, cfg.IsConfigured())
+	})
+
+	t.Run("returns false when all providers are disabled", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					ID:      "openai",
+					APIKey:  "key1",
+					Disable: true,
+				},
+				"anthropic": {
+					ID:      "anthropic",
+					APIKey:  "key2",
+					Disable: true,
+				},
+			},
+		}
+
+		assert.False(t, cfg.IsConfigured())
+	})
+}
+
+func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
+	knownProviders := []provider.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []provider.Model{{
+				ID: "test-model",
+			}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				Disable: true,
+			},
+		},
+	}
+	cfg.setDefaults("/tmp")
+
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(env, resolver, knownProviders)
+	assert.NoError(t, err)
+
+	// Provider should be removed from config when disabled
+	assert.Len(t, cfg.Providers, 0)
+	_, exists := cfg.Providers["openai"]
+	assert.False(t, exists)
+}
+
+func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
+	t.Run("custom provider with missing API key is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					BaseURL: "https://api.custom.com/v1",
+					Models: []provider.Model{{
+						ID: "test-model",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["custom"]
+		assert.False(t, exists)
+	})
+
+	t.Run("custom provider with missing BaseURL is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey: "test-key",
+					Models: []provider.Model{{
+						ID: "test-model",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["custom"]
+		assert.False(t, exists)
+	})
+
+	t.Run("custom provider with no models is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Models:  []provider.Model{},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["custom"]
+		assert.False(t, exists)
+	})
+
+	t.Run("custom provider with unsupported type is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Type:    "unsupported",
+					Models: []provider.Model{{
+						ID: "test-model",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["custom"]
+		assert.False(t, exists)
+	})
+
+	t.Run("valid custom provider is kept and ID is set", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Type:    provider.TypeOpenAI,
+					Models: []provider.Model{{
+						ID: "test-model",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 1)
+		customProvider, exists := cfg.Providers["custom"]
+		assert.True(t, exists)
+		assert.Equal(t, "custom", customProvider.ID)
+		assert.Equal(t, "test-key", customProvider.APIKey)
+		assert.Equal(t, "https://api.custom.com/v1", customProvider.BaseURL)
+	})
+
+	t.Run("disabled custom provider is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Type:    provider.TypeOpenAI,
+					Disable: true,
+					Models: []provider.Model{{
+						ID: "test-model",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["custom"]
+		assert.False(t, exists)
+	})
+}
+
+func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
+	t.Run("VertexAI provider removed when credentials missing with existing config", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:          provider.InferenceProviderVertexAI,
+				APIKey:      "",
+				APIEndpoint: "",
+				Models: []provider.Model{{
+					ID: "gemini-pro",
+				}},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"vertexai": {
+					BaseURL: "custom-url",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{
+			"GOOGLE_GENAI_USE_VERTEXAI": "false",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["vertexai"]
+		assert.False(t, exists)
+	})
+
+	t.Run("Bedrock provider removed when AWS credentials missing with existing config", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:          provider.InferenceProviderBedrock,
+				APIKey:      "",
+				APIEndpoint: "",
+				Models: []provider.Model{{
+					ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+				}},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"bedrock": {
+					BaseURL: "custom-url",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["bedrock"]
+		assert.False(t, exists)
+	})
+
+	t.Run("provider removed when API key missing with existing config", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:          "openai",
+				APIKey:      "$MISSING_API_KEY",
+				APIEndpoint: "https://api.openai.com/v1",
+				Models: []provider.Model{{
+					ID: "test-model",
+				}},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					BaseURL: "custom-url",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 0)
+		_, exists := cfg.Providers["openai"]
+		assert.False(t, exists)
+	})
+
+	t.Run("known provider should still be added if the endpoint is missing the client will use default endpoints", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:          "openai",
+				APIKey:      "$OPENAI_API_KEY",
+				APIEndpoint: "$MISSING_ENDPOINT",
+				Models: []provider.Model{{
+					ID: "test-model",
+				}},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"openai": {
+					APIKey: "test-key",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{
+			"OPENAI_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 1)
+		_, exists := cfg.Providers["openai"]
+		assert.True(t, exists)
+	})
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/pkg/env"
 	"github.com/charmbracelet/crush/pkg/log"
+	"golang.org/x/exp/slog"
 )
 
 // LoadReader config via io.Reader.
@@ -55,15 +56,12 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	// TODO: maybe add a validation step here right after loading
-	// e.x validate the models
-	// e.x validate provider config
 
 	cfg.setDefaults(workingDir)
 
 	// Load known providers, this loads the config from fur
 	providers, err := LoadProviders(client.New())
-	if err != nil {
+	if err != nil || len(providers) == 0 {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}
 
@@ -74,15 +72,35 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
+	if !cfg.IsConfigured() {
+		slog.Warn("No providers configured")
+		return cfg, nil
+	}
+
+	// largeModel, ok := cfg.Models[SelectedModelTypeLarge]
+	// if !ok {
+	// 	// set default
+	// }
+	// smallModel, ok := cfg.Models[SelectedModelTypeSmall]
+	// if !ok {
+	// 	// set default
+	// }
+	//
 	return cfg, nil
 }
 
 func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []provider.Provider) error {
+	knownProviderNames := make(map[string]bool)
 	for _, p := range knownProviders {
-
-		config, ok := cfg.Providers[string(p.ID)]
+		knownProviderNames[string(p.ID)] = true
+		config, configExists := cfg.Providers[string(p.ID)]
 		// if the user configured a known provider we need to allow it to override a couple of parameters
-		if ok {
+		if configExists {
+			if config.Disable {
+				slog.Debug("Skipping provider due to disable flag", "provider", p.ID)
+				delete(cfg.Providers, string(p.ID))
+				continue
+			}
 			if config.BaseURL != "" {
 				p.APIEndpoint = config.BaseURL
 			}
@@ -112,6 +130,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			}
 		}
 		prepared := ProviderConfig{
+			ID:           string(p.ID),
 			BaseURL:      p.APIEndpoint,
 			APIKey:       p.APIKey,
 			Type:         p.Type,
@@ -125,12 +144,20 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 		// Handle specific providers that require additional configuration
 		case provider.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
+				if configExists {
+					slog.Warn("Skipping Vertex AI provider due to missing credentials")
+					delete(cfg.Providers, string(p.ID))
+				}
 				continue
 			}
 			prepared.ExtraParams["project"] = env.Get("GOOGLE_CLOUD_PROJECT")
 			prepared.ExtraParams["location"] = env.Get("GOOGLE_CLOUD_LOCATION")
 		case provider.InferenceProviderBedrock:
 			if !hasAWSCredentials(env) {
+				if configExists {
+					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
+					delete(cfg.Providers, string(p.ID))
+				}
 				continue
 			}
 			for _, model := range p.Models {
@@ -142,14 +169,69 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
 			if v == "" || err != nil {
-				continue
-			}
-			v, err = resolver.ResolveValue(p.APIEndpoint)
-			if v == "" || err != nil {
+				if configExists {
+					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
+					delete(cfg.Providers, string(p.ID))
+				}
 				continue
 			}
 		}
 		cfg.Providers[string(p.ID)] = prepared
+	}
+
+	// validate the custom providers
+	for id, providerConfig := range cfg.Providers {
+		if knownProviderNames[id] {
+			continue
+		}
+
+		// Make sure the provider ID is set
+		providerConfig.ID = id
+		// default to OpenAI if not set
+		if providerConfig.Type == "" {
+			providerConfig.Type = provider.TypeOpenAI
+		}
+
+		if providerConfig.Disable {
+			slog.Debug("Skipping custom provider due to disable flag", "provider", id)
+			delete(cfg.Providers, id)
+			continue
+		}
+		if providerConfig.APIKey == "" {
+			slog.Warn("Skipping custom provider due to missing API key", "provider", id)
+			delete(cfg.Providers, id)
+			continue
+		}
+		if providerConfig.BaseURL == "" {
+			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
+			delete(cfg.Providers, id)
+			continue
+		}
+		if len(providerConfig.Models) == 0 {
+			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
+			delete(cfg.Providers, id)
+			continue
+		}
+		if providerConfig.Type != provider.TypeOpenAI {
+			slog.Warn("Skipping custom provider because the provider type is not supported", "provider", id, "type", providerConfig.Type)
+			delete(cfg.Providers, id)
+			continue
+		}
+
+		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
+		if apiKey == "" || err != nil {
+			slog.Warn("Skipping custom provider due to missing API key", "provider", id, "error", err)
+			delete(cfg.Providers, id)
+			continue
+		}
+		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
+		if baseURL == "" || err != nil {
+			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
+			delete(cfg.Providers, id)
+			continue
+		}
+
+		cfg.Providers[id] = providerConfig
 	}
 	return nil
 }
@@ -200,7 +282,7 @@ func (cfg *Config) setDefaults(workingDir string) {
 		cfg.Providers = make(map[string]ProviderConfig)
 	}
 	if cfg.Models == nil {
-		cfg.Models = make(map[string]SelectedModel)
+		cfg.Models = make(map[SelectedModelType]SelectedModel)
 	}
 	if cfg.MCP == nil {
 		cfg.MCP = make(map[string]MCPConfig)

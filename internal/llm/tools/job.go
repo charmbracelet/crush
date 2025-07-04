@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/tools/shell"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/hotdiva2000"
 )
 
@@ -100,17 +100,22 @@ func (jm *jobManager) cleanupCompletedJobs() {
 
 	for range ticker.C {
 		jm.mu.Lock()
-		now := time.Now()
 		for jobID, job := range jm.jobs {
 			job.mu.RLock()
 			shouldCleanup := job.completed && job.completeTime != nil &&
-				now.Sub(*job.completeTime) > time.Hour
+				time.Since(*job.completeTime) > time.Hour
 			job.mu.RUnlock()
 
 			if shouldCleanup {
+				job.mu.Lock()
 				// Clean up resources
-				job.outputFile.Close()
-				os.Remove(job.outputFile.Name())
+				if err := job.outputFile.Close(); err != nil {
+					fmt.Printf("Error closing output file for job %s: %v\n", jobID, err)
+				}
+				if err := os.Remove(job.outputFile.Name()); err != nil {
+					fmt.Printf("Error removing output file for job %s: %v\n", jobID, err)
+				}
+				job.mu.Unlock()
 				delete(jm.jobs, jobID)
 				fmt.Printf("Cleaned up completed job %s\n", jobID)
 			}
@@ -144,6 +149,10 @@ func NewJobEndTool() BaseTool {
 
 func NewJobViewTool() BaseTool {
 	return &jobViewTool{}
+}
+
+func (j *jobStartTool) Name() string {
+	return JobStartToolName
 }
 
 func (j *jobStartTool) Info() ToolInfo {
@@ -188,6 +197,10 @@ EXAMPLES:
 	}
 }
 
+func (j *jobEndTool) Name() string {
+	return JobEndToolName
+}
+
 func (j *jobEndTool) Info() ToolInfo {
 	return ToolInfo{
 		Name: JobEndToolName,
@@ -213,6 +226,10 @@ IMPORTANT NOTES:
 		},
 		Required: []string{"job_id"},
 	}
+}
+
+func (j *jobViewTool) Name() string {
+	return JobViewToolName
 }
 
 func (j *jobViewTool) Info() ToolInfo {

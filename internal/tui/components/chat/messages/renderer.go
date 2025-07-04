@@ -1005,7 +1005,7 @@ func (jr jobViewRenderer) Render(v *toolCallCmp) string {
 		header := fmt.Sprintf("%s Job %s", statusTag, jobID)
 
 		details := fmt.Sprintf("Command: %s\nRuntime: %s", response.Command, response.Runtime)
-		
+
 		// Add exit error if present
 		if response.ExitError != "" {
 			details += fmt.Sprintf("\nExit Error: %s", response.ExitError)

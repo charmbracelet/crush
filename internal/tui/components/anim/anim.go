@@ -160,7 +160,7 @@ func New(opts Settings) (a Anim) {
 			}
 
 			var c color.Color
-			if i <= a.cyclingCharWidth {
+			if j <= a.cyclingCharWidth {
 				c = ramp[j+offset]
 			} else {
 				c = opts.LabelColor

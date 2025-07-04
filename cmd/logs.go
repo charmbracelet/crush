@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/crush/pkg/config"
@@ -44,12 +45,17 @@ var logsCmd = &cobra.Command{
 			msg := data["msg"]
 			level := data["level"]
 			otherData := []any{}
-			for k, v := range data {
+			keys := []string{}
+			for k := range data {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
 				switch k {
 				case "msg", "level", "time":
 					continue
 				case "source":
-					source, ok := v.(map[string]any)
+					source, ok := data[k].(map[string]any)
 					if !ok {
 						continue
 					}
@@ -57,7 +63,7 @@ var logsCmd = &cobra.Command{
 					otherData = append(otherData, "source", sourceFile)
 
 				default:
-					otherData = append(otherData, k, v)
+					otherData = append(otherData, k, data[k])
 				}
 			}
 			log.SetTimeFunction(func(_ time.Time) time.Time {

@@ -2,20 +2,17 @@ package log
 
 import (
 	"log/slog"
-	"path/filepath"
 	"sync"
-
-	"github.com/charmbracelet/crush/pkg/config"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var initOnce sync.Once
 
-func Init(cfg *config.Config) {
+func Init(logFile string, debug bool) {
 	initOnce.Do(func() {
 		logRotator := &lumberjack.Logger{
-			Filename:   filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log"),
+			Filename:   logFile,
 			MaxSize:    10,    // Max size in MB
 			MaxBackups: 0,     // Number of backups
 			MaxAge:     30,    // Days
@@ -23,7 +20,7 @@ func Init(cfg *config.Config) {
 		}
 
 		level := slog.LevelInfo
-		if cfg.Options.Debug {
+		if debug {
 			level = slog.LevelDebug
 		}
 

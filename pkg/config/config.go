@@ -1,6 +1,11 @@
 package config
 
-import "github.com/charmbracelet/crush/internal/fur/provider"
+import (
+	"slices"
+	"strings"
+
+	"github.com/charmbracelet/crush/internal/fur/provider"
+)
 
 const (
 	appName              = "crush"
@@ -70,7 +75,7 @@ const (
 	MCPHttp  MCPType = "http"
 )
 
-type MCP struct {
+type MCPConfig struct {
 	Command string   `json:"command,omitempty" `
 	Env     []string `json:"env,omitempty"`
 	Args    []string `json:"args,omitempty"`
@@ -103,20 +108,64 @@ type Options struct {
 	DataDirectory string `json:"data_directory,omitempty"`
 }
 
+type MCPs map[string]MCPConfig
+
+type MCP struct {
+	Name string    `json:"name"`
+	MCP  MCPConfig `json:"mcp"`
+}
+
+func (m MCPs) Sorted() []MCP {
+	sorted := make([]MCP, 0, len(m))
+	for k, v := range m {
+		sorted = append(sorted, MCP{
+			Name: k,
+			MCP:  v,
+		})
+	}
+	slices.SortFunc(sorted, func(a, b MCP) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return sorted
+}
+
+type LSPs map[string]LSPConfig
+
+type LSP struct {
+	Name string    `json:"name"`
+	LSP  LSPConfig `json:"lsp"`
+}
+
+func (l LSPs) Sorted() []LSP {
+	sorted := make([]LSP, 0, len(l))
+	for k, v := range l {
+		sorted = append(sorted, LSP{
+			Name: k,
+			LSP:  v,
+		})
+	}
+	slices.SortFunc(sorted, func(a, b LSP) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return sorted
+}
+
 // Config holds the configuration for crush.
 type Config struct {
-	workingDir string `json:"-"`
 	// We currently only support large/small as values here.
 	Models map[string]SelectedModel `json:"models,omitempty"`
 
 	// The providers that are configured
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 
-	MCP map[string]MCP `json:"mcp,omitempty"`
+	MCP MCPs `json:"mcp,omitempty"`
 
-	LSP map[string]LSPConfig `json:"lsp,omitempty"`
+	LSP LSPs `json:"lsp,omitempty"`
 
 	Options *Options `json:"options,omitempty"`
+
+	// Internal
+	workingDir string `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {

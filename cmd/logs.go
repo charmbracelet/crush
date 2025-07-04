@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/pkg/config"
-	"github.com/charmbracelet/crush/pkg/env"
 	"github.com/charmbracelet/log/v2"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
@@ -27,7 +26,7 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get current working directory: %v", err)
 		}
-		cfg, err := config.Load(cwd, env.New())
+		cfg, err := config.Load(cwd, false)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}

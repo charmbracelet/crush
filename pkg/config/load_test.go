@@ -27,7 +27,7 @@ func TestConfig_LoadFromReaders(t *testing.T) {
 func TestConfig_setDefaults(t *testing.T) {
 	cfg := &Config{}
 
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 
 	assert.NotNil(t, cfg.Options)
 	assert.NotNil(t, cfg.Options.TUI)
@@ -56,12 +56,12 @@ func TestConfig_configureProviders(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Len(t, cfg.Providers, 1)
 
@@ -98,12 +98,13 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 			},
 		},
 	}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
+
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Len(t, cfg.Providers, 1)
 
@@ -139,12 +140,12 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 			},
 		},
 	}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Should be to because of the env variable
 	assert.Len(t, cfg.Providers, 2)
@@ -171,13 +172,13 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"AWS_ACCESS_KEY_ID":     "test-key-id",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Len(t, cfg.Providers, 1)
 
@@ -200,10 +201,10 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without credentials
 	assert.Len(t, cfg.Providers, 0)
@@ -222,13 +223,13 @@ func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"AWS_ACCESS_KEY_ID":     "test-key-id",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.Error(t, err)
 }
 
@@ -245,14 +246,14 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"GOOGLE_GENAI_USE_VERTEXAI": "true",
 		"GOOGLE_CLOUD_PROJECT":      "test-project",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Len(t, cfg.Providers, 1)
 
@@ -277,14 +278,14 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"GOOGLE_GENAI_USE_VERTEXAI": "false",
 		"GOOGLE_CLOUD_PROJECT":      "test-project",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without proper credentials
 	assert.Len(t, cfg.Providers, 0)
@@ -303,13 +304,13 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	setDefaults("/tmp", cfg)
+	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
 		"GOOGLE_GENAI_USE_VERTEXAI": "true",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := configureProviders(cfg, env, resolver, knownProviders)
+	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without project
 	assert.Len(t, cfg.Providers, 0)

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fur/client"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/pkg/env"
+	"github.com/charmbracelet/crush/pkg/log"
 )
 
 // LoadReader config via io.Reader.
@@ -31,7 +32,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 }
 
 // Load loads the configuration from the default paths.
-func Load(workingDir string, env env.Env) (*Config, error) {
+func Load(workingDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
@@ -40,6 +41,17 @@ func Load(workingDir string, env env.Env) (*Config, error) {
 		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
 	}
 	cfg, err := loadFromConfigPaths(configPaths)
+
+	if debug {
+		cfg.Options.Debug = true
+	}
+
+	// Init logs
+	log.Init(
+		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+		cfg.Options.Debug,
+	)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
@@ -47,7 +59,7 @@ func Load(workingDir string, env env.Env) (*Config, error) {
 	// e.x validate the models
 	// e.x validate provider config
 
-	setDefaults(workingDir, cfg)
+	cfg.setDefaults(workingDir)
 
 	// Load known providers, this loads the config from fur
 	providers, err := LoadProviders(client.New())
@@ -55,16 +67,17 @@ func Load(workingDir string, env env.Env) (*Config, error) {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}
 
+	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
-	if err := configureProviders(cfg, env, valueResolver, providers); err != nil {
+	if err := cfg.configureProviders(env, valueResolver, providers); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
 	return cfg, nil
 }
 
-func configureProviders(cfg *Config, env env.Env, resolver VariableResolver, knownProviders []provider.Provider) error {
+func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []provider.Provider) error {
 	for _, p := range knownProviders {
 
 		config, ok := cfg.Providers[string(p.ID)]
@@ -169,7 +182,7 @@ func hasAWSCredentials(env env.Env) bool {
 	return false
 }
 
-func setDefaults(workingDir string, cfg *Config) {
+func (cfg *Config) setDefaults(workingDir string) {
 	cfg.workingDir = workingDir
 	if cfg.Options == nil {
 		cfg.Options = &Options{}
@@ -190,7 +203,7 @@ func setDefaults(workingDir string, cfg *Config) {
 		cfg.Models = make(map[string]SelectedModel)
 	}
 	if cfg.MCP == nil {
-		cfg.MCP = make(map[string]MCP)
+		cfg.MCP = make(map[string]MCPConfig)
 	}
 	if cfg.LSP == nil {
 		cfg.LSP = make(map[string]LSPConfig)

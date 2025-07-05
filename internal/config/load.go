@@ -493,7 +493,7 @@ func hasAWSCredentials(env env.Env) bool {
 func globalConfig() string {
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome != "" {
-		return filepath.Join(xdgConfigHome, "crush")
+		return filepath.Join(xdgConfigHome, appName, fmt.Sprintf("%s.json", appName))
 	}
 
 	// return the path to the main config directory
@@ -504,7 +504,7 @@ func globalConfig() string {
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		return filepath.Join(localAppData, appName)
+		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
 	}
 
 	return filepath.Join(os.Getenv("HOME"), ".config", appName, fmt.Sprintf("%s.json", appName))
@@ -515,7 +515,7 @@ func globalConfig() string {
 func globalConfigData() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName)
+		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
 	}
 
 	// return the path to the main data directory
@@ -526,7 +526,7 @@ func globalConfigData() string {
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		return filepath.Join(localAppData, appName)
+		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
 	}
 
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))

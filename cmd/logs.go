@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -26,16 +27,22 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get current working directory: %v", err)
 		}
+		log.SetLevel(log.DebugLevel)
 		cfg, err := config.Load(cwd, false)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		t, err := tail.TailFile(filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log"), tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
+		logsFile := filepath.Join(cfg.WorkingDir(), cfg.Options.DataDirectory, "logs", "crush.log")
+		_, err = os.Stat(logsFile)
+		if os.IsNotExist(err) {
+			log.Warn("Looks like you are not in a crush project. No logs found.")
+			return nil
+		}
+		t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
 		if err != nil {
 			return fmt.Errorf("failed to tail log file: %v", err)
 		}
 
-		log.SetLevel(log.DebugLevel)
 		// Print the text of each received line
 		for line := range t.Lines {
 			var data map[string]any

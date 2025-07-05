@@ -451,7 +451,7 @@ func loadFromConfigPaths(configPaths []string) (*Config, error) {
 
 func loadFromReaders(readers []io.Reader) (*Config, error) {
 	if len(readers) == 0 {
-		return nil, fmt.Errorf("no configuration readers provided")
+		return &Config{}, nil
 	}
 
 	merged, err := Merge(readers)

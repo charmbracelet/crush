@@ -100,7 +100,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		defer app.Shutdown()
 
 		// Initialize MCP tools early for both modes
-		initMCPTools(ctx, app)
+		initMCPTools(ctx, app, cfg)
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
@@ -192,7 +192,7 @@ func attemptTUIRecovery(program *tea.Program) {
 	program.Quit()
 }
 
-func initMCPTools(ctx context.Context, app *app.App) {
+func initMCPTools(ctx context.Context, app *app.App, cfg *config.Config) {
 	go func() {
 		defer log.RecoverPanic("MCP-goroutine", nil)
 
@@ -201,7 +201,7 @@ func initMCPTools(ctx context.Context, app *app.App) {
 		defer cancel()
 
 		// Set this up once with proper error handling
-		agent.GetMcpTools(ctxWithTimeout, app.Permissions)
+		agent.GetMcpTools(ctxWithTimeout, app.Permissions, cfg)
 		slog.Info("MCP message handling goroutine exiting")
 	}()
 }

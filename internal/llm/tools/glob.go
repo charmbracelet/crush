@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
@@ -68,10 +67,14 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-type globTool struct{}
+type globTool struct {
+	workingDir string
+}
 
-func NewGlobTool() BaseTool {
-	return &globTool{}
+func NewGlobTool(workingDir string) BaseTool {
+	return &globTool{
+		workingDir: workingDir,
+	}
 }
 
 func (g *globTool) Name() string {
@@ -108,7 +111,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.Get().WorkingDir()
+		searchPath = g.workingDir
 	}
 
 	files, truncated, err := globFiles(params.Pattern, searchPath, 100)

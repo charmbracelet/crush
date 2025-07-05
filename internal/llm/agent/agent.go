@@ -94,21 +94,22 @@ func NewAgent(
 ) (Service, error) {
 	ctx := context.Background()
 	cfg := config.Get()
-	otherTools := GetMcpTools(ctx, permissions)
+	otherTools := GetMcpTools(ctx, permissions, cfg)
 	if len(lspClients) > 0 {
 		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
 	}
 
+	cwd := cfg.WorkingDir()
 	allTools := []tools.BaseTool{
-		tools.NewBashTool(permissions),
-		tools.NewEditTool(lspClients, permissions, history),
-		tools.NewFetchTool(permissions),
-		tools.NewGlobTool(),
-		tools.NewGrepTool(),
-		tools.NewLsTool(),
+		tools.NewBashTool(permissions, cwd),
+		tools.NewEditTool(lspClients, permissions, history, cwd),
+		tools.NewFetchTool(permissions, cwd),
+		tools.NewGlobTool(cwd),
+		tools.NewGrepTool(cwd),
+		tools.NewLsTool(cwd),
 		tools.NewSourcegraphTool(),
-		tools.NewViewTool(lspClients),
-		tools.NewWriteTool(lspClients, permissions, history),
+		tools.NewViewTool(lspClients, cwd),
+		tools.NewWriteTool(lspClients, permissions, history, cwd),
 	}
 
 	if agentCfg.ID == "coder" {

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -29,6 +28,7 @@ type BashResponseMetadata struct {
 }
 type bashTool struct {
 	permissions permission.Service
+	workingDir  string
 }
 
 const (
@@ -244,9 +244,10 @@ Important:
 - Never update git config`, bannedCommandsStr, MaxOutputLength)
 }
 
-func NewBashTool(permission permission.Service) BaseTool {
+func NewBashTool(permission permission.Service, workingDir string) BaseTool {
 	return &bashTool{
 		permissions: permission,
+		workingDir:  workingDir,
 	}
 }
 
@@ -317,7 +318,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		p := b.permissions.Request(
 			permission.CreatePermissionRequest{
 				SessionID:   sessionID,
-				Path:        config.Get().WorkingDir(),
+				Path:        b.workingDir,
 				ToolName:    BashToolName,
 				Action:      "execute",
 				Description: fmt.Sprintf("Execute command: %s", params.Command),
@@ -337,7 +338,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		defer cancel()
 	}
 	stdout, stderr, err := shell.
-		GetPersistentShell(config.Get().WorkingDir()).
+		GetPersistentShell(b.workingDir).
 		Exec(ctx, params.Command)
 	interrupted := shell.IsInterrupt(err)
 	exitCode := shell.ExitCode(err)

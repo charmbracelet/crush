@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -41,6 +40,7 @@ type editTool struct {
 	lspClients  map[string]*lsp.Client
 	permissions permission.Service
 	files       history.Service
+	workingDir  string
 }
 
 const (
@@ -99,11 +99,12 @@ WINDOWS NOTES:
 Remember: when making multiple file edits in a row to the same file, you should prefer to send all edits in a single message with multiple calls to this tool, rather than multiple messages with a single call each.`
 )
 
-func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service) BaseTool {
+func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &editTool{
 		lspClients:  lspClients,
 		permissions: permissions,
 		files:       files,
+		workingDir:  workingDir,
 	}
 }
 
@@ -144,8 +145,7 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	}
 
 	if !filepath.IsAbs(params.FilePath) {
-		wd := config.Get().WorkingDir()
-		params.FilePath = filepath.Join(wd, params.FilePath)
+		params.FilePath = filepath.Join(e.workingDir, params.FilePath)
 	}
 
 	var response ToolResponse
@@ -206,9 +206,9 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	_, additions, removals := diff.GenerateDiff(
 		"",
 		content,
-		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := config.Get().WorkingDir()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir
@@ -318,10 +318,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	rootDir := config.Get().WorkingDir()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir
@@ -441,9 +441,9 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := config.Get().WorkingDir()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir

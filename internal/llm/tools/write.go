@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -33,6 +32,7 @@ type writeTool struct {
 	lspClients  map[string]*lsp.Client
 	permissions permission.Service
 	files       history.Service
+	workingDir  string
 }
 
 type WriteResponseMetadata struct {
@@ -77,11 +77,12 @@ TIPS:
 - Always include descriptive comments when making changes to existing code`
 )
 
-func NewWriteTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service) BaseTool {
+func NewWriteTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &writeTool{
 		lspClients:  lspClients,
 		permissions: permissions,
 		files:       files,
+		workingDir:  workingDir,
 	}
 }
 
@@ -123,7 +124,7 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 
 	filePath := params.FilePath
 	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(config.Get().WorkingDir(), filePath)
+		filePath = filepath.Join(w.workingDir, filePath)
 	}
 
 	fileInfo, err := os.Stat(filePath)
@@ -168,10 +169,10 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	diff, additions, removals := diff.GenerateDiff(
 		oldContent,
 		params.Content,
-		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
+		strings.TrimPrefix(filePath, w.workingDir),
 	)
 
-	rootDir := config.Get().WorkingDir()
+	rootDir := w.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir

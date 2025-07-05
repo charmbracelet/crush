@@ -22,6 +22,7 @@ type mcpTool struct {
 	tool        mcp.Tool
 	mcpConfig   config.MCPConfig
 	permissions permission.Service
+	workingDir  string
 }
 
 type MCPClient interface {
@@ -98,7 +99,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	p := b.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        config.Get().WorkingDir(),
+			Path:        b.workingDir,
 			ToolName:    b.Info().Name,
 			Action:      "execute",
 			Description: permissionDescription,
@@ -143,18 +144,19 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return tools.NewTextErrorResponse("invalid mcp type"), nil
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig, workingDir string) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
 		mcpConfig:   mcpConfig,
 		permissions: permissions,
+		workingDir:  workingDir,
 	}
 }
 
 var mcpTools []tools.BaseTool
 
-func getTools(ctx context.Context, name string, m config.MCPConfig, permissions permission.Service, c MCPClient) []tools.BaseTool {
+func getTools(ctx context.Context, name string, m config.MCPConfig, permissions permission.Service, c MCPClient, workingDir string) []tools.BaseTool {
 	var stdioTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
@@ -175,17 +177,17 @@ func getTools(ctx context.Context, name string, m config.MCPConfig, permissions 
 		return stdioTools
 	}
 	for _, t := range tools.Tools {
-		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m))
+		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m, workingDir))
 	}
 	defer c.Close()
 	return stdioTools
 }
 
-func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.BaseTool {
+func GetMcpTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
 	if len(mcpTools) > 0 {
 		return mcpTools
 	}
-	for name, m := range config.Get().MCP {
+	for name, m := range cfg.MCP {
 		switch m.Type {
 		case config.MCPStdio:
 			c, err := client.NewStdioMCPClient(
@@ -198,7 +200,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				continue
 			}
 
-			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 		case config.MCPHttp:
 			c, err := client.NewStreamableHttpClient(
 				m.URL,
@@ -208,7 +210,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				slog.Error("error creating mcp client", "error", err)
 				continue
 			}
-			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 		case config.MCPSse:
 			c, err := client.NewSSEMCPClient(
 				m.URL,
@@ -218,7 +220,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				slog.Error("error creating mcp client", "error", err)
 				continue
 			}
-			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
+			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 		}
 	}
 

@@ -11,13 +11,10 @@ import (
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
 
-	"github.com/charmbracelet/crush/internal/config"
-
 	"github.com/pressly/goose/v3"
 )
 
-func Connect(ctx context.Context) (*sql.DB, error) {
-	dataDir := config.Get().Options.DataDirectory
+func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
 	}

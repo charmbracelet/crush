@@ -76,7 +76,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			cwd = c
 		}
 
-		_, err := config.Init(cwd, debug)
+		cfg, err := config.Init(cwd, debug)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		defer cancel()
 
 		// Connect DB, this will also run migrations
-		conn, err := db.Connect(ctx)
+		conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
 		if err != nil {
 			return err
 		}

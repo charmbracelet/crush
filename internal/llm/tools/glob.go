@@ -12,7 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 )
 
 const (
@@ -143,7 +143,7 @@ func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
 		if err == nil {
 			return matches, len(matches) >= limit && limit > 0, nil
 		}
-		logging.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
+		slog.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
 	}
 
 	return fsext.GlobWithDoubleStar(pattern, searchPath, limit)

@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 	"google.golang.org/genai"
 )
 
@@ -18,7 +18,7 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 		Backend:  genai.BackendVertexAI,
 	})
 	if err != nil {
-		logging.Error("Failed to create VertexAI client", "error", err)
+		slog.Error("Failed to create VertexAI client", "error", err)
 		return nil
 	}
 

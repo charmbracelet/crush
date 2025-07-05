@@ -11,7 +11,7 @@ import (
 	_ "github.com/ncruces/go-sqlite3/embed"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 
 	"github.com/pressly/goose/v3"
 )
@@ -48,21 +48,21 @@ func Connect(ctx context.Context) (*sql.DB, error) {
 
 	for _, pragma := range pragmas {
 		if _, err = db.ExecContext(ctx, pragma); err != nil {
-			logging.Error("Failed to set pragma", pragma, err)
+			slog.Error("Failed to set pragma", pragma, err)
 		} else {
-			logging.Debug("Set pragma", "pragma", pragma)
+			slog.Debug("Set pragma", "pragma", pragma)
 		}
 	}
 
 	goose.SetBaseFS(FS)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		logging.Error("Failed to set dialect", "error", err)
+		slog.Error("Failed to set dialect", "error", err)
 		return nil, fmt.Errorf("failed to set dialect: %w", err)
 	}
 
 	if err := goose.Up(db, "migrations"); err != nil {
-		logging.Error("Failed to apply migrations", "error", err)
+		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 	return db, nil

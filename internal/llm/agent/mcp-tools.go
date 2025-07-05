@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/version"
 
@@ -164,13 +164,13 @@ func getTools(ctx context.Context, name string, m config.MCPConfig, permissions 
 
 	_, err := c.Initialize(ctx, initRequest)
 	if err != nil {
-		logging.Error("error initializing mcp client", "error", err)
+		slog.Error("error initializing mcp client", "error", err)
 		return stdioTools
 	}
 	toolsRequest := mcp.ListToolsRequest{}
 	tools, err := c.ListTools(ctx, toolsRequest)
 	if err != nil {
-		logging.Error("error listing tools", "error", err)
+		slog.Error("error listing tools", "error", err)
 		return stdioTools
 	}
 	for _, t := range tools.Tools {
@@ -193,7 +193,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				m.Args...,
 			)
 			if err != nil {
-				logging.Error("error creating mcp client", "error", err)
+				slog.Error("error creating mcp client", "error", err)
 				continue
 			}
 
@@ -204,7 +204,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				transport.WithHTTPHeaders(m.Headers),
 			)
 			if err != nil {
-				logging.Error("error creating mcp client", "error", err)
+				slog.Error("error creating mcp client", "error", err)
 				continue
 			}
 			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)
@@ -214,7 +214,7 @@ func GetMcpTools(ctx context.Context, permissions permission.Service) []tools.Ba
 				client.WithHeaders(m.Headers),
 			)
 			if err != nil {
-				logging.Error("error creating mcp client", "error", err)
+				slog.Error("error creating mcp client", "error", err)
 				continue
 			}
 			mcpTools = append(mcpTools, getTools(ctx, name, m, permissions, c)...)

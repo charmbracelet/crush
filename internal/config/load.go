@@ -42,6 +42,11 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
 	}
 	cfg, err := loadFromConfigPaths(configPaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
+	}
+
+	cfg.setDefaults(workingDir)
 
 	if debug {
 		cfg.Options.Debug = true
@@ -56,8 +61,6 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-
-	cfg.setDefaults(workingDir)
 
 	// Load known providers, this loads the config from fur
 	providers, err := LoadProviders(client.New())

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
@@ -36,7 +37,7 @@ to assist developers in writing, debugging, and understanding code directly from
   # Run with debug logging
   crush -d
 
-  # Run with debug logging in a specific directory
+  # Run with debug slog.in a specific directory
   crush -d -c /path/to/project
 
   # Print version
@@ -92,7 +93,7 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		app, err := app.New(ctx, conn)
 		if err != nil {
-			logging.Error("Failed to create app: %v", err)
+			slog.Error("Failed to create app: %v", err)
 			return err
 		}
 		// Defer shutdown here so it runs for both interactive and non-interactive modes
@@ -103,7 +104,7 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
-			logging.Error("Failed to read stdin: %v", err)
+			slog.Error("Failed to read stdin: %v", err)
 			return err
 		}
 
@@ -132,18 +133,18 @@ to assist developers in writing, debugging, and understanding code directly from
 		// Set up message handling for the TUI
 		go func() {
 			defer tuiWg.Done()
-			defer logging.RecoverPanic("TUI-message-handler", func() {
+			defer log.RecoverPanic("TUI-message-handler", func() {
 				attemptTUIRecovery(program)
 			})
 
 			for {
 				select {
 				case <-tuiCtx.Done():
-					logging.Info("TUI message handler shutting down")
+					slog.Info("TUI message handler shutting down")
 					return
 				case msg, ok := <-ch:
 					if !ok {
-						logging.Info("TUI message channel closed")
+						slog.Info("TUI message channel closed")
 						return
 					}
 					program.Send(msg)
@@ -165,7 +166,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			// Wait for TUI message handler to finish
 			tuiWg.Wait()
 
-			logging.Info("All goroutines cleaned up")
+			slog.Info("All goroutines cleaned up")
 		}
 
 		// Run the TUI
@@ -173,18 +174,18 @@ to assist developers in writing, debugging, and understanding code directly from
 		cleanup()
 
 		if err != nil {
-			logging.Error("TUI error: %v", err)
+			slog.Error("TUI error: %v", err)
 			return fmt.Errorf("TUI error: %v", err)
 		}
 
-		logging.Info("TUI exited with result: %v", result)
+		slog.Info("TUI exited with result: %v", result)
 		return nil
 	},
 }
 
 // attemptTUIRecovery tries to recover the TUI after a panic
 func attemptTUIRecovery(program *tea.Program) {
-	logging.Info("Attempting to recover TUI after panic")
+	slog.Info("Attempting to recover TUI after panic")
 
 	// We could try to restart the TUI or gracefully exit
 	// For now, we'll just quit the program to avoid further issues
@@ -193,7 +194,7 @@ func attemptTUIRecovery(program *tea.Program) {
 
 func initMCPTools(ctx context.Context, app *app.App) {
 	go func() {
-		defer logging.RecoverPanic("MCP-goroutine", nil)
+		defer log.RecoverPanic("MCP-goroutine", nil)
 
 		// Create a context with timeout for the initial MCP tools fetch
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -201,7 +202,7 @@ func initMCPTools(ctx context.Context, app *app.App) {
 
 		// Set this up once with proper error handling
 		agent.GetMcpTools(ctxWithTimeout, app.Permissions)
-		logging.Info("MCP message handling goroutine exiting")
+		slog.Info("MCP message handling goroutine exiting")
 	}()
 }
 
@@ -215,7 +216,7 @@ func setupSubscriber[T any](
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer logging.RecoverPanic(fmt.Sprintf("subscription-%s", name), nil)
+		defer log.RecoverPanic(fmt.Sprintf("subscription-%s", name), nil)
 
 		subCh := subscriber(ctx)
 
@@ -223,7 +224,7 @@ func setupSubscriber[T any](
 			select {
 			case event, ok := <-subCh:
 				if !ok {
-					logging.Info("subscription channel closed", "name", name)
+					slog.Info("subscription channel closed", "name", name)
 					return
 				}
 
@@ -232,13 +233,13 @@ func setupSubscriber[T any](
 				select {
 				case outputCh <- msg:
 				case <-time.After(2 * time.Second):
-					logging.Warn("message dropped due to slow consumer", "name", name)
+					slog.Warn("message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
-					logging.Info("subscription cancelled", "name", name)
+					slog.Info("subscription cancelled", "name", name)
 					return
 				}
 			case <-ctx.Done():
-				logging.Info("subscription cancelled", "name", name)
+				slog.Info("subscription cancelled", "name", name)
 				return
 			}
 		}
@@ -251,7 +252,6 @@ func setupSubscriptions(app *app.App, parentCtx context.Context) (chan tea.Msg, 
 	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(parentCtx) // Inherit from parent context
 
-	setupSubscriber(ctx, &wg, "logging", logging.Subscribe, ch)
 	setupSubscriber(ctx, &wg, "sessions", app.Sessions.Subscribe, ch)
 	setupSubscriber(ctx, &wg, "messages", app.Messages.Subscribe, ch)
 	setupSubscriber(ctx, &wg, "permissions", app.Permissions.Subscribe, ch)
@@ -259,22 +259,22 @@ func setupSubscriptions(app *app.App, parentCtx context.Context) (chan tea.Msg, 
 	setupSubscriber(ctx, &wg, "history", app.History.Subscribe, ch)
 
 	cleanupFunc := func() {
-		logging.Info("Cancelling all subscriptions")
+		slog.Info("Cancelling all subscriptions")
 		cancel() // Signal all goroutines to stop
 
 		waitCh := make(chan struct{})
 		go func() {
-			defer logging.RecoverPanic("subscription-cleanup", nil)
+			defer log.RecoverPanic("subscription-cleanup", nil)
 			wg.Wait()
 			close(waitCh)
 		}()
 
 		select {
 		case <-waitCh:
-			logging.Info("All subscription goroutines completed successfully")
+			slog.Info("All subscription goroutines completed successfully")
 			close(ch) // Only close after all writers are confirmed done
 		case <-time.After(5 * time.Second):
-			logging.Warn("Timed out waiting for some subscription goroutines to complete")
+			slog.Warn("Timed out waiting for some subscription goroutines to complete")
 			close(ch)
 		}
 	}

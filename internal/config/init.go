@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 )
 
 const (
@@ -32,7 +32,7 @@ func Init(workingDir string, debug bool) (*Config, error) {
 		cwd = workingDir
 		cfg, err := Load(cwd, debug)
 		if err != nil {
-			logging.Error("Failed to load config", "error", err)
+			slog.Error("Failed to load config", "error", err)
 		}
 		instance.Store(cfg)
 	})

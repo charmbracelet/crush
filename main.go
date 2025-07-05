@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -9,19 +10,19 @@ import (
 	_ "github.com/joho/godotenv/autoload" // automatically load .env files
 
 	"github.com/charmbracelet/crush/cmd"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/log"
 )
 
 func main() {
-	defer logging.RecoverPanic("main", func() {
-		logging.ErrorPersist("Application terminated due to unhandled panic")
+	defer log.RecoverPanic("main", func() {
+		slog.Error("Application terminated due to unhandled panic")
 	})
 
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
-			logging.Info("Serving pprof at localhost:6060")
+			slog.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {
-				logging.Error("Failed to pprof listen: %v", httpErr)
+				slog.Error("Failed to pprof listen: %v", httpErr)
 			}
 		}()
 	}

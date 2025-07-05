@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 )
 
 func CoderPrompt(p string, contextFiles ...string) string {
@@ -29,7 +29,7 @@ func CoderPrompt(p string, contextFiles ...string) string {
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
 	contextContent := getContextFromPaths(contextFiles)
-	logging.Debug("Context content", "Context", contextContent)
+	slog.Debug("Context content", "Context", contextContent)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
 	}

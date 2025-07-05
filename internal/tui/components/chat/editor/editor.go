@@ -14,7 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -153,8 +152,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
-			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
-			return m, cmd
+			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil

@@ -35,6 +35,7 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("failed to tail log file: %v", err)
 		}
 
+		log.SetLevel(log.DebugLevel)
 		// Print the text of each received line
 		for line := range t.Lines {
 			var data map[string]any

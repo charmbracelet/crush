@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -15,7 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -223,7 +224,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Cancel regular requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			logging.InfoPersist(fmt.Sprintf("Request cancellation initiated for session: %s", sessionID))
+			slog.Info(fmt.Sprintf("Request cancellation initiated for session: %s", sessionID))
 			cancel()
 		}
 	}
@@ -231,7 +232,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Also check for summarize requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID + "-summarize"); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			logging.InfoPersist(fmt.Sprintf("Summarize cancellation initiated for session: %s", sessionID))
+			slog.Info(fmt.Sprintf("Summarize cancellation initiated for session: %s", sessionID))
 			cancel()
 		}
 	}
@@ -325,8 +326,8 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 
 	a.activeRequests.Store(sessionID, cancel)
 	go func() {
-		logging.Debug("Request started", "sessionID", sessionID)
-		defer logging.RecoverPanic("agent.Run", func() {
+		slog.Debug("Request started", "sessionID", sessionID)
+		defer log.RecoverPanic("agent.Run", func() {
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
 		var attachmentParts []message.ContentPart
@@ -335,9 +336,9 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		}
 		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
 		if result.Error != nil && !errors.Is(result.Error, ErrRequestCancelled) && !errors.Is(result.Error, context.Canceled) {
-			logging.ErrorPersist(result.Error.Error())
+			slog.Error(result.Error.Error())
 		}
-		logging.Debug("Request completed", "sessionID", sessionID)
+		slog.Debug("Request completed", "sessionID", sessionID)
 		a.activeRequests.Delete(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
@@ -356,12 +357,12 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 	}
 	if len(msgs) == 0 {
 		go func() {
-			defer logging.RecoverPanic("agent.Run", func() {
-				logging.ErrorPersist("panic while generating title")
+			defer log.RecoverPanic("agent.Run", func() {
+				slog.Error("panic while generating title")
 			})
 			titleErr := a.generateTitle(context.Background(), sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
-				logging.ErrorPersist(fmt.Sprintf("failed to generate title: %v", titleErr))
+				slog.Error(fmt.Sprintf("failed to generate title: %v", titleErr))
 			}
 		}()
 	}
@@ -408,11 +409,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			return a.err(fmt.Errorf("failed to process events: %w", err))
 		}
 		if cfg.Options.Debug {
-			seqId := (len(msgHistory) + 1) / 2
-			toolResultFilepath := logging.WriteToolResultsJson(sessionID, seqId, toolResults)
-			logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", "{}", "filepath", toolResultFilepath)
-		} else {
-			logging.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
+			slog.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
 		}
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
 			// We are not done, we need to respond with the tool response
@@ -571,22 +568,22 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		assistantMsg.AppendContent(event.Content)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStart:
-		logging.Info("Tool call started", "toolCall", event.ToolCall)
+		slog.Info("Tool call started", "toolCall", event.ToolCall)
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseDelta:
 		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStop:
-		logging.Info("Finished tool call", "toolCall", event.ToolCall)
+		slog.Info("Finished tool call", "toolCall", event.ToolCall)
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventError:
 		if errors.Is(event.Error, context.Canceled) {
-			logging.InfoPersist(fmt.Sprintf("Event processing canceled for session: %s", sessionID))
+			slog.Info(fmt.Sprintf("Event processing canceled for session: %s", sessionID))
 			return context.Canceled
 		}
-		logging.ErrorPersist(event.Error.Error())
+		slog.Error(event.Error.Error())
 		return event.Error
 	case provider.EventComplete:
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)

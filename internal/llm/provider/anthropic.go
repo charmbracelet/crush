@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -92,7 +92,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 
 			if len(blocks) == 0 {
-				logging.Warn("There is a message without content, investigate, this should not happen")
+				slog.Warn("There is a message without content, investigate, this should not happen")
 				continue
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
@@ -207,7 +207,7 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 		if cfg.Options.Debug {
 			jsonData, _ := json.Marshal(preparedMessages)
-			logging.Debug("Prepared messages", "messages", string(jsonData))
+			slog.Debug("Prepared messages", "messages", string(jsonData))
 		}
 
 		anthropicResponse, err := a.client.Messages.New(
@@ -216,13 +216,13 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
-			logging.Error("Error in Anthropic API call", "error", err)
+			slog.Error("Error in Anthropic API call", "error", err)
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {
 				return nil, retryErr
 			}
 			if retry {
-				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
+				slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -259,7 +259,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 			if cfg.Options.Debug {
 				jsonData, _ := json.Marshal(preparedMessages)
-				logging.Debug("Prepared messages", "messages", string(jsonData))
+				slog.Debug("Prepared messages", "messages", string(jsonData))
 			}
 
 			anthropicStream := a.client.Messages.NewStreaming(
@@ -273,7 +273,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				event := anthropicStream.Current()
 				err := accumulatedMessage.Accumulate(event)
 				if err != nil {
-					logging.Warn("Error accumulating message", "error", err)
+					slog.Warn("Error accumulating message", "error", err)
 					continue
 				}
 
@@ -364,7 +364,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				return
 			}
 			if retry {
-				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
+				slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
 				select {
 				case <-ctx.Done():
 					// context cancelled
@@ -411,7 +411,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	if apiErr.StatusCode == 400 {
 		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
 			a.adjustedMaxTokens = adjusted
-			logging.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
+			slog.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
 			return true, 0, nil
 		}
 	}

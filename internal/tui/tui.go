@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -27,7 +26,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
-	"github.com/charmbracelet/crush/internal/tui/page/logs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -135,20 +133,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.selectedSessionID = msg.ID
 	case cmpChat.SessionClearedMsg:
 		a.selectedSessionID = ""
-	// Logs
-	case pubsub.Event[logging.LogMessage]:
-		// Send to the status component
-		s, statusCmd := a.status.Update(msg)
-		a.status = s.(status.StatusCmp)
-		cmds = append(cmds, statusCmd)
-
-		// If the current page is logs, update the logs view
-		if a.currentPage == logs.LogsPage {
-			updated, pageCmd := a.pages[a.currentPage].Update(msg)
-			a.pages[a.currentPage] = updated.(util.Model)
-			cmds = append(cmds, pageCmd)
-		}
-		return a, tea.Batch(cmds...)
 	// Commands
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {
@@ -176,7 +160,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
-			logging.ErrorPersist(fmt.Sprintf("Failed to update agent model: %v", err))
 			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.Model, err))
 		}
 
@@ -348,10 +331,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
-	// Page navigation
-	case key.Matches(msg, a.keyMap.Logs):
-		return a.moveToPage(logs.LogsPage)
-
 	default:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
@@ -453,7 +432,6 @@ func New(app *app.App) tea.Model {
 
 		pages: map[page.PageID]util.Model{
 			chat.ChatPageID: chatPage,
-			logs.LogsPage:   logs.NewLogsPage(),
 		},
 
 		dialog:      dialogs.NewDialogCmp(),

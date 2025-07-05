@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/logging"
+	"log/slog"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -211,13 +211,13 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		// User Manually changed the content store an intermediate version
 		_, err = w.files.CreateVersion(ctx, sessionID, filePath, oldContent)
 		if err != nil {
-			logging.Debug("Error creating file history version", "error", err)
+			slog.Debug("Error creating file history version", "error", err)
 		}
 	}
 	// Store the new version
 	_, err = w.files.CreateVersion(ctx, sessionID, filePath, params.Content)
 	if err != nil {
-		logging.Debug("Error creating file history version", "error", err)
+		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)

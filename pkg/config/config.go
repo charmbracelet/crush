@@ -206,3 +206,19 @@ func (c *Config) GetModel(provider, model string) *provider.Model {
 	}
 	return nil
 }
+
+func (c *Config) LargeModel() *provider.Model {
+	model, ok := c.Models[SelectedModelTypeLarge]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}
+
+func (c *Config) SmallModel() *provider.Model {
+	model, ok := c.Models[SelectedModelTypeSmall]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}

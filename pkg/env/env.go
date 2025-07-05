@@ -51,5 +51,8 @@ func (m *mapEnv) Env() []string {
 }
 
 func NewFromMap(m map[string]string) Env {
+	if m == nil {
+		m = make(map[string]string)
+	}
 	return &mapEnv{m: m}
 }

@@ -760,3 +760,390 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		assert.True(t, exists)
 	})
 }
+
+func TestConfig_defaultModelSelection(t *testing.T) {
+	t.Run("default behavior uses the default models for given provider", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		large, small, err := cfg.defaultModelSelection(knownProviders)
+		assert.NoError(t, err)
+		assert.Equal(t, "large-model", large.Model)
+		assert.Equal(t, "openai", large.Provider)
+		assert.Equal(t, int64(1000), large.MaxTokens)
+		assert.Equal(t, "small-model", small.Model)
+		assert.Equal(t, "openai", small.Provider)
+		assert.Equal(t, int64(500), small.MaxTokens)
+	})
+	t.Run("should error if no providers configured", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "$MISSING_KEY",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		_, _, err = cfg.defaultModelSelection(knownProviders)
+		assert.Error(t, err)
+	})
+	t.Run("should error if model is missing", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "not-large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+		_, _, err = cfg.defaultModelSelection(knownProviders)
+		assert.Error(t, err)
+	})
+
+	t.Run("should configure the default models with a custom provider", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "$MISSING", // will not be included in the config
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "not-large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Models: []provider.Model{
+						{
+							ID:               "model",
+							DefaultMaxTokens: 600,
+						},
+					},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+		large, small, err := cfg.defaultModelSelection(knownProviders)
+		assert.NoError(t, err)
+		assert.Equal(t, "model", large.Model)
+		assert.Equal(t, "custom", large.Provider)
+		assert.Equal(t, int64(600), large.MaxTokens)
+		assert.Equal(t, "model", small.Model)
+		assert.Equal(t, "custom", small.Provider)
+		assert.Equal(t, int64(600), small.MaxTokens)
+	})
+
+	t.Run("should fail if no model configured", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "$MISSING", // will not be included in the config
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "not-large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Models:  []provider.Model{},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+		_, _, err = cfg.defaultModelSelection(knownProviders)
+		assert.Error(t, err)
+	})
+	t.Run("should use the default provider first", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "set",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Models: []provider.Model{
+						{
+							ID:               "large-model",
+							DefaultMaxTokens: 1000,
+						},
+					},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+		large, small, err := cfg.defaultModelSelection(knownProviders)
+		assert.NoError(t, err)
+		assert.Equal(t, "large-model", large.Model)
+		assert.Equal(t, "openai", large.Provider)
+		assert.Equal(t, int64(1000), large.MaxTokens)
+		assert.Equal(t, "small-model", small.Model)
+		assert.Equal(t, "openai", small.Provider)
+		assert.Equal(t, int64(500), small.MaxTokens)
+	})
+}
+
+func TestConfig_configureSelectedModels(t *testing.T) {
+	t.Run("should override defaults", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "larger-model",
+						DefaultMaxTokens: 2000,
+					},
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					Model: "larger-model",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		err = cfg.configureSelectedModels(knownProviders)
+		assert.NoError(t, err)
+		large := cfg.Models[SelectedModelTypeLarge]
+		small := cfg.Models[SelectedModelTypeSmall]
+		assert.Equal(t, "larger-model", large.Model)
+		assert.Equal(t, "openai", large.Provider)
+		assert.Equal(t, int64(2000), large.MaxTokens)
+		assert.Equal(t, "small-model", small.Model)
+		assert.Equal(t, "openai", small.Provider)
+		assert.Equal(t, int64(500), small.MaxTokens)
+	})
+	t.Run("should be possible to use multiple providers", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+			{
+				ID:                  "anthropic",
+				APIKey:              "abc",
+				DefaultLargeModelID: "a-large-model",
+				DefaultSmallModelID: "a-small-model",
+				Models: []provider.Model{
+					{
+						ID:               "a-large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "a-small-model",
+						DefaultMaxTokens: 200,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"small": {
+					Model:     "a-small-model",
+					Provider:  "anthropic",
+					MaxTokens: 300,
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		err = cfg.configureSelectedModels(knownProviders)
+		assert.NoError(t, err)
+		large := cfg.Models[SelectedModelTypeLarge]
+		small := cfg.Models[SelectedModelTypeSmall]
+		assert.Equal(t, "large-model", large.Model)
+		assert.Equal(t, "openai", large.Provider)
+		assert.Equal(t, int64(1000), large.MaxTokens)
+		assert.Equal(t, "a-small-model", small.Model)
+		assert.Equal(t, "anthropic", small.Provider)
+		assert.Equal(t, int64(300), small.MaxTokens)
+	})
+
+	t.Run("should override the max tokens only", func(t *testing.T) {
+		knownProviders := []provider.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []provider.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					MaxTokens: 100,
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		assert.NoError(t, err)
+
+		err = cfg.configureSelectedModels(knownProviders)
+		assert.NoError(t, err)
+		large := cfg.Models[SelectedModelTypeLarge]
+		assert.Equal(t, "large-model", large.Model)
+		assert.Equal(t, "openai", large.Provider)
+		assert.Equal(t, int64(100), large.MaxTokens)
+	})
+}

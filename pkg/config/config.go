@@ -195,3 +195,14 @@ func (c *Config) EnabledProviders() []ProviderConfig {
 func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
+
+func (c *Config) GetModel(provider, model string) *provider.Model {
+	if providerConfig, ok := c.Providers[provider]; ok {
+		for _, m := range providerConfig.Models {
+			if m.ID == model {
+				return &m
+			}
+		}
+	}
+	return nil
+}

@@ -91,7 +91,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		app, err := app.New(ctx, conn)
+		app, err := app.New(ctx, conn, cfg)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err

@@ -5,17 +5,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/watcher"
 )
 
 func (app *App) initLSPClients(ctx context.Context) {
-	cfg := config.Get()
-
 	// Initialize LSP clients
-	for name, clientConfig := range cfg.LSP {
+	for name, clientConfig := range app.config.LSP {
 		// Start each client initialization in its own goroutine
 		go app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
 	}
@@ -39,7 +36,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	defer cancel()
 
 	// Initialize with the initialization context
-	_, err = lspClient.InitializeLSPClient(initCtx, config.Get().WorkingDir())
+	_, err = lspClient.InitializeLSPClient(initCtx, app.config.WorkingDir())
 	if err != nil {
 		slog.Error("Initialize failed", "name", name, "error", err)
 		// Clean up the client to prevent resource leaks
@@ -92,15 +89,14 @@ func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceW
 		app.restartLSPClient(ctx, name)
 	})
 
-	workspaceWatcher.WatchWorkspace(ctx, config.Get().WorkingDir())
+	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
 	slog.Info("Workspace watcher stopped", "client", name)
 }
 
 // restartLSPClient attempts to restart a crashed or failed LSP client
 func (app *App) restartLSPClient(ctx context.Context, name string) {
 	// Get the original configuration
-	cfg := config.Get()
-	clientConfig, exists := cfg.LSP[name]
+	clientConfig, exists := app.config.LSP[name]
 	if !exists {
 		slog.Error("Cannot restart client, configuration not found", "client", name)
 		return

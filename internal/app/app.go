@@ -37,15 +37,15 @@ type App struct {
 	watcherCancelFuncs []context.CancelFunc
 	cancelFuncsMutex   sync.Mutex
 	watcherWG          sync.WaitGroup
+
+	config *config.Config
 }
 
-func New(ctx context.Context, conn *sql.DB) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
-
-	cfg := config.Get()
 
 	app := &App{
 		Sessions:    sessions,
@@ -53,6 +53,7 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir()),
 		LSPClients:  make(map[string]*lsp.Client),
+		config:      cfg,
 	}
 
 	// Initialize LSP clients in the background

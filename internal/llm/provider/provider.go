@@ -55,15 +55,15 @@ type Provider interface {
 
 	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() config.Model
+	Model() provider.Model
 }
 
 type providerClientOptions struct {
 	baseURL       string
 	config        config.ProviderConfig
 	apiKey        string
-	modelType     config.ModelType
-	model         func(config.ModelType) config.Model
+	modelType     config.SelectedModelType
+	model         func(config.SelectedModelType) provider.Model
 	disableCache  bool
 	systemMessage string
 	maxTokens     int64
@@ -77,7 +77,7 @@ type ProviderClient interface {
 	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() config.Model
+	Model() provider.Model
 }
 
 type baseProvider[C ProviderClient] struct {
@@ -106,11 +106,11 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 	return p.client.stream(ctx, messages, tools)
 }
 
-func (p *baseProvider[C]) Model() config.Model {
+func (p *baseProvider[C]) Model() provider.Model {
 	return p.client.Model()
 }
 
-func WithModel(model config.ModelType) ProviderClientOption {
+func WithModel(model config.SelectedModelType) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.modelType = model
 	}
@@ -135,7 +135,7 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 }
 
 func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
-	resolvedAPIKey, err := config.ResolveAPIKey(cfg.APIKey)
+	resolvedAPIKey, err := config.Get().Resolve(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
@@ -145,14 +145,14 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		config:       cfg,
 		apiKey:       resolvedAPIKey,
 		extraHeaders: cfg.ExtraHeaders,
-		model: func(tp config.ModelType) config.Model {
-			return config.GetModel(tp)
+		model: func(tp config.SelectedModelType) provider.Model {
+			return *config.Get().GetModelByType(tp)
 		},
 	}
 	for _, o := range opts {
 		o(&clientOptions)
 	}
-	switch cfg.ProviderType {
+	switch cfg.Type {
 	case provider.TypeAnthropic:
 		return &baseProvider[AnthropicClient]{
 			options: clientOptions,
@@ -190,5 +190,5 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 			client:  newOpenAIClient(clientOptions),
 		}, nil
 	}
-	return nil, fmt.Errorf("provider not supported: %s", cfg.ProviderType)
+	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)
 }

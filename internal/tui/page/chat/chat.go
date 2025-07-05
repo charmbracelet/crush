@@ -170,7 +170,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(ChatFocusedMsg{Focused: false}),
 			)
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			model := config.GetAgentModel(config.AgentCoder)
+			agentCfg := config.Get().Agents["coder"]
+			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
 				return p, util.CmdHandler(OpenFilePickerMsg{})
 			} else {

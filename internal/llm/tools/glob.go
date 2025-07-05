@@ -108,7 +108,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = config.Get().WorkingDir()
 	}
 
 	files, truncated, err := globFiles(params.Pattern, searchPath, 100)

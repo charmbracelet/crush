@@ -376,7 +376,7 @@ func (c *Client) detectServerType() ServerType {
 
 // openKeyConfigFiles opens important configuration files that help initialize the server
 func (c *Client) openKeyConfigFiles(ctx context.Context) {
-	workDir := config.WorkingDirectory()
+	workDir := config.Get().WorkingDir()
 	serverType := c.detectServerType()
 
 	var filesToOpen []string
@@ -464,7 +464,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 	}
 
 	// If we have no open TypeScript files, try to find and open one
-	workDir := config.WorkingDirectory()
+	workDir := config.Get().WorkingDir()
 	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

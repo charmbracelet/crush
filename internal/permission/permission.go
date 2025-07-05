@@ -87,7 +87,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	dir := filepath.Dir(opts.Path)
 	if dir == "." {
-		dir = config.WorkingDirectory()
+		dir = config.Get().WorkingDir()
 	}
 	permission := PermissionRequest{
 		ID:          uuid.New().String(),

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/pkg/env"
+	"github.com/charmbracelet/crush/internal/env"
 )
 
 type VariableResolver interface {

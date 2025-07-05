@@ -107,11 +107,11 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = config.Get().WorkingDir()
 	}
 
 	if !filepath.IsAbs(searchPath) {
-		searchPath = filepath.Join(config.WorkingDirectory(), searchPath)
+		searchPath = filepath.Join(config.Get().WorkingDir(), searchPath)
 	}
 
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {

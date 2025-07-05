@@ -11,7 +11,7 @@ import (
 func GenerateDiff(beforeContent, afterContent, fileName string) (string, int, int) {
 	// remove the cwd prefix and ensure consistent path format
 	// this prevents issues with absolute paths in different environments
-	cwd := config.WorkingDirectory()
+	cwd := config.Get().WorkingDir()
 	fileName = strings.TrimPrefix(fileName, cwd)
 	fileName = strings.TrimPrefix(fileName, "/")
 

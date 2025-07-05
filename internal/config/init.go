@@ -5,27 +5,53 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/charmbracelet/crush/internal/logging"
 )
 
 const (
-	// InitFlagFilename is the name of the file that indicates whether the project has been initialized
 	InitFlagFilename = "init"
 )
 
-// ProjectInitFlag represents the initialization status for a project directory
 type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-// ProjectNeedsInitialization checks if the current project needs initialization
+// TODO: we need to remove the global config instance keeping it now just until everything is migrated
+var (
+	instance atomic.Pointer[Config]
+	cwd      string
+	once     sync.Once // Ensures the initialization happens only once
+)
+
+func Init(workingDir string, debug bool) (*Config, error) {
+	var err error
+	once.Do(func() {
+		cwd = workingDir
+		cfg, err := Load(cwd, debug)
+		if err != nil {
+			logging.Error("Failed to load config", "error", err)
+		}
+		instance.Store(cfg)
+	})
+
+	return instance.Load(), err
+}
+
+func Get() *Config {
+	return instance.Load()
+}
+
 func ProjectNeedsInitialization() (bool, error) {
-	if instance == nil {
+	cfg := Get()
+	if cfg == nil {
 		return false, fmt.Errorf("config not loaded")
 	}
 
-	flagFilePath := filepath.Join(instance.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
 
-	// Check if the flag file exists
 	_, err := os.Stat(flagFilePath)
 	if err == nil {
 		return false, nil
@@ -35,8 +61,7 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	// Check if any variation of CRUSH.md already exists in working directory
-	crushExists, err := crushMdExists(WorkingDirectory())
+	crushExists, err := crushMdExists(cfg.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
 	}
@@ -47,7 +72,6 @@ func ProjectNeedsInitialization() (bool, error) {
 	return true, nil
 }
 
-// crushMdExists checks if any case variation of crush.md exists in the directory
 func crushMdExists(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -68,12 +92,12 @@ func crushMdExists(dir string) (bool, error) {
 	return false, nil
 }
 
-// MarkProjectInitialized marks the current project as initialized
 func MarkProjectInitialized() error {
-	if instance == nil {
+	cfg := Get()
+	if cfg == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	flagFilePath := filepath.Join(instance.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
 
 	file, err := os.Create(flagFilePath)
 	if err != nil {

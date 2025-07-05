@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -296,7 +295,7 @@ func (m *assistantSectionModel) View() tea.View {
 	duration := finishTime.Sub(m.lastUserMessageTime)
 	infoMsg := t.S().Subtle.Render(duration.String())
 	icon := t.S().Subtle.Render(styles.ModelIcon)
-	model := config.GetProviderModel(provider.InferenceProvider(m.message.Provider), m.message.Model)
+	model := config.Get().GetModel(m.message.Provider, m.message.Model)
 	modelFormatted := t.S().Muted.Render(model.Name)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return tea.NewView(

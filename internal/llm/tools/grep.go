@@ -200,7 +200,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = config.Get().WorkingDir()
 	}
 
 	matches, truncated, err := searchFiles(searchPattern, searchPath, params.Include, 100)

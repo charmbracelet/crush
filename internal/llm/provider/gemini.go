@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
@@ -170,9 +171,9 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models.Large
-	if g.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
 	maxTokens := model.DefaultMaxTokens
@@ -268,9 +269,9 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 		logging.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models.Large
-	if g.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
@@ -424,7 +425,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = config.ResolveAPIKey(g.providerOptions.config.APIKey)
+		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
@@ -462,7 +463,7 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 	}
 }
 
-func (g *geminiClient) Model() config.Model {
+func (g *geminiClient) Model() provider.Model {
 	return g.providerOptions.model(g.providerOptions.modelType)
 }
 

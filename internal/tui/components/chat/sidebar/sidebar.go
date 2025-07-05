@@ -297,7 +297,7 @@ func (m *sidebarCmp) filesBlock() string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		cwd := config.WorkingDirectory() + string(os.PathSeparator)
+		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
 		filePath := file.FilePath
 		filePath = strings.TrimPrefix(filePath, cwd)
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
@@ -474,7 +474,8 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	model := config.GetAgentModel(config.AgentCoder)
+	agentCfg := config.Get().Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
@@ -507,7 +508,7 @@ func (m *sidebarCmp) SetSession(session session.Session) tea.Cmd {
 }
 
 func cwd() string {
-	cwd := config.WorkingDirectory()
+	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
 	// Replace home directory with ~, unless we're at the top level of the
 	// home directory).

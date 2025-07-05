@@ -153,9 +153,9 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
 	cfg := config.Get()
-	modelConfig := cfg.Models.Large
-	if a.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if a.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 	temperature := anthropic.Float(0)
 
@@ -399,7 +399,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	if apiErr.StatusCode == 401 {
-		a.providerOptions.apiKey, err = config.ResolveAPIKey(a.providerOptions.config.APIKey)
+		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
@@ -490,6 +490,6 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 	}
 }
 
-func (a *anthropicClient) Model() config.Model {
+func (a *anthropicClient) Model() provider.Model {
 	return a.providerOptions.model(a.providerOptions.modelType)
 }

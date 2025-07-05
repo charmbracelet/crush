@@ -177,14 +177,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
 			logging.ErrorPersist(fmt.Sprintf("Failed to update agent model: %v", err))
-			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.ModelID, err))
+			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.Model, err))
 		}
 
 		modelTypeName := "large"
-		if msg.ModelType == config.SmallModel {
+		if msg.ModelType == config.SelectedModelTypeSmall {
 			modelTypeName = "small"
 		}
-		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.ModelID))
+		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker
 	case chat.OpenFilePickerMsg:

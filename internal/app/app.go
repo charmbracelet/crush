@@ -57,7 +57,8 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 
 	cfg := config.Get()
 
-	coderAgentCfg := cfg.Agents[config.AgentCoder]
+	// TODO: remove the concept of agent config most likely
+	coderAgentCfg := cfg.Agents["coder"]
 	if coderAgentCfg.ID == "" {
 		return nil, fmt.Errorf("coder agent configuration is missing")
 	}

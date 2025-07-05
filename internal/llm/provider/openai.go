@@ -148,15 +148,12 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	model := o.providerOptions.model(o.providerOptions.modelType)
 	cfg := config.Get()
 
-	modelConfig := cfg.Models.Large
-	if o.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
-	reasoningEffort := model.ReasoningEffort
-	if modelConfig.ReasoningEffort != "" {
-		reasoningEffort = modelConfig.ReasoningEffort
-	}
+	reasoningEffort := modelConfig.ReasoningEffort
 
 	params := openai.ChatCompletionNewParams{
 		Model:    openai.ChatModel(model.ID),
@@ -363,7 +360,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if apiErr.StatusCode == 401 {
-		o.providerOptions.apiKey, err = config.ResolveAPIKey(o.providerOptions.config.APIKey)
+		o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
@@ -420,6 +417,6 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 	}
 }
 
-func (a *openaiClient) Model() config.Model {
+func (a *openaiClient) Model() provider.Model {
 	return a.providerOptions.model(a.providerOptions.modelType)
 }

@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
 type PromptID string
@@ -20,17 +19,17 @@ const (
 	PromptDefault    PromptID = "default"
 )
 
-func GetPrompt(promptID PromptID, provider provider.InferenceProvider, contextPaths ...string) string {
+func GetPrompt(promptID PromptID, provider string, contextPaths ...string) string {
 	basePrompt := ""
 	switch promptID {
 	case PromptCoder:
 		basePrompt = CoderPrompt(provider)
 	case PromptTitle:
-		basePrompt = TitlePrompt(provider)
+		basePrompt = TitlePrompt()
 	case PromptTask:
-		basePrompt = TaskPrompt(provider)
+		basePrompt = TaskPrompt()
 	case PromptSummarizer:
-		basePrompt = SummarizerPrompt(provider)
+		basePrompt = SummarizerPrompt()
 	default:
 		basePrompt = "You are a helpful assistant"
 	}
@@ -38,7 +37,7 @@ func GetPrompt(promptID PromptID, provider provider.InferenceProvider, contextPa
 }
 
 func getContextFromPaths(contextPaths []string) string {
-	return processContextPaths(config.WorkingDirectory(), contextPaths)
+	return processContextPaths(config.Get().WorkingDir(), contextPaths)
 }
 
 func processContextPaths(workDir string, paths []string) string {

@@ -17,6 +17,7 @@ require (
 	github.com/charmbracelet/fang v0.1.0
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71
+	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
 	github.com/charmbracelet/x/ansi v0.9.3-0.20250602153603-fb931ed90413
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250627134340-c144409e381c
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
@@ -25,31 +26,28 @@ require (
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
+	github.com/joho/godotenv v1.5.1
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go v1.8.2
 	github.com/pressly/goose/v3 v3.24.2
+	github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.9.1
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
 	github.com/stretchr/testify v1.10.0
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/v3 v3.11.0
 )
 
 require (
-	github.com/charmbracelet/lipgloss v1.1.0 // indirect
-	github.com/charmbracelet/log v0.4.2 // indirect
-	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/nxadm/tail v1.4.11 // indirect
-	github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c // indirect
 	github.com/spf13/cast v1.7.1 // indirect
-	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
 
@@ -84,7 +82,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef
 	github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86 // indirect
-	github.com/charmbracelet/x/term v0.2.1 // indirect
+	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/windows v0.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect

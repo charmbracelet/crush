@@ -38,7 +38,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	defer cancel()
 
 	// Initialize with the initialization context
-	_, err = lspClient.InitializeLSPClient(initCtx, config.WorkingDirectory())
+	_, err = lspClient.InitializeLSPClient(initCtx, config.Get().WorkingDir())
 	if err != nil {
 		logging.Error("Initialize failed", "name", name, "error", err)
 		// Clean up the client to prevent resource leaks
@@ -91,7 +91,7 @@ func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceW
 		app.restartLSPClient(ctx, name)
 	})
 
-	workspaceWatcher.WatchWorkspace(ctx, config.WorkingDirectory())
+	workspaceWatcher.WatchWorkspace(ctx, config.Get().WorkingDir())
 	logging.Info("Workspace watcher stopped", "client", name)
 }
 

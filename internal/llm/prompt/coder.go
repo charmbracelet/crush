@@ -14,12 +14,12 @@ import (
 	"github.com/charmbracelet/crush/internal/logging"
 )
 
-func CoderPrompt(p provider.InferenceProvider, contextFiles ...string) string {
+func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 	switch p {
-	case provider.InferenceProviderOpenAI:
+	case string(provider.InferenceProviderOpenAI):
 		basePrompt = baseOpenAICoderPrompt
-	case provider.InferenceProviderGemini, provider.InferenceProviderVertexAI:
+	case string(provider.InferenceProviderGemini), string(provider.InferenceProviderVertexAI):
 		basePrompt = baseGeminiCoderPrompt
 	default:
 		basePrompt = baseAnthropicCoderPrompt
@@ -380,7 +380,7 @@ Your core function is efficient and safe assistance. Balance extreme conciseness
 `
 
 func getEnvironmentInfo() string {
-	cwd := config.WorkingDirectory()
+	cwd := config.Get().WorkingDir()
 	isGit := isGitRepo(cwd)
 	platform := runtime.GOOS
 	date := time.Now().Format("1/2/2006")

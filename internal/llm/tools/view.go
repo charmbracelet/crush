@@ -117,7 +117,7 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	// Handle relative paths
 	filePath := params.FilePath
 	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(config.WorkingDirectory(), filePath)
+		filePath = filepath.Join(config.Get().WorkingDir(), filePath)
 	}
 
 	// Check if file exists

@@ -19,7 +19,7 @@ import (
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	mcpConfig   config.MCP
+	mcpConfig   config.MCPConfig
 	permissions permission.Service
 }
 
@@ -97,7 +97,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	p := b.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        config.WorkingDirectory(),
+			Path:        config.Get().WorkingDir(),
 			ToolName:    b.Info().Name,
 			Action:      "execute",
 			Description: permissionDescription,
@@ -142,7 +142,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return tools.NewTextErrorResponse("invalid mcp type"), nil
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCP) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
@@ -153,7 +153,7 @@ func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpC
 
 var mcpTools []tools.BaseTool
 
-func getTools(ctx context.Context, name string, m config.MCP, permissions permission.Service, c MCPClient) []tools.BaseTool {
+func getTools(ctx context.Context, name string, m config.MCPConfig, permissions permission.Service, c MCPClient) []tools.BaseTool {
 	var stdioTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION

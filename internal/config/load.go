@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/client"
 	"github.com/charmbracelet/crush/internal/fur/provider"
-	"github.com/charmbracelet/crush/pkg/env"
-	"github.com/charmbracelet/crush/pkg/log"
+	"github.com/charmbracelet/crush/internal/log"
 	"golang.org/x/exp/slog"
 )
 
@@ -68,6 +68,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
+	cfg.resolver = valueResolver
 	if err := cfg.configureProviders(env, valueResolver, providers); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -80,6 +81,36 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err := cfg.configureSelectedModels(providers); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
+
+	// TODO: remove the agents concept from the config
+	agents := map[string]Agent{
+		"coder": {
+			ID:           "coder",
+			Name:         "Coder",
+			Description:  "An agent that helps with executing coding tasks.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: cfg.Options.ContextPaths,
+			// All tools allowed
+		},
+		"task": {
+			ID:           "task",
+			Name:         "Task",
+			Description:  "An agent that helps with searching for context and finding implementation details.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: cfg.Options.ContextPaths,
+			AllowedTools: []string{
+				"glob",
+				"grep",
+				"ls",
+				"sourcegraph",
+				"view",
+			},
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+			AllowedLSP: []string{},
+		},
+	}
+	cfg.Agents = agents
 
 	return cfg, nil
 }

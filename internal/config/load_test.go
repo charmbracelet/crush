@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
-	"github.com/charmbracelet/crush/pkg/env"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -317,9 +317,10 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 			return
 		}
 		largeModel = SelectedModel{
-			Provider:  string(p.ID),
-			Model:     defaultLargeModel.ID,
-			MaxTokens: defaultLargeModel.DefaultMaxTokens,
+			Provider:        string(p.ID),
+			Model:           defaultLargeModel.ID,
+			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
+			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
 		}
 
 		defaultSmallModel := cfg.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -327,9 +328,10 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
 		}
 		smallModel = SelectedModel{
-			Provider:  string(p.ID),
-			Model:     defaultSmallModel.ID,
-			MaxTokens: defaultSmallModel.DefaultMaxTokens,
+			Provider:        string(p.ID),
+			Model:           defaultSmallModel.ID,
+			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
+			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
 		}
 		return
 	}
@@ -387,7 +389,9 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 		} else {
 			large.MaxTokens = model.DefaultMaxTokens
 		}
-		large.ReasoningEffort = largeModelSelected.ReasoningEffort
+		if largeModelSelected.ReasoningEffort != "" {
+			large.ReasoningEffort = largeModelSelected.ReasoningEffort
+		}
 		large.Think = largeModelSelected.Think
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]

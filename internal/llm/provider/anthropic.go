@@ -438,7 +438,8 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 func (a *anthropicClient) handleContextLimitError(apiErr *anthropic.Error) (int, bool) {
 	// Parse error message like: "input length and max_tokens exceed context limit: 154978 + 50000 > 200000"
 	errorMsg := apiErr.Error()
-	re := regexp.MustCompile(`input length and max_tokens exceed context limit: (\d+) \+ (\d+) > (\d+)`)
+
+	re := regexp.MustCompile("input length and `max_tokens` exceed context limit: (\\d+) \\+ (\\d+) > (\\d+)")
 	matches := re.FindStringSubmatch(errorMsg)
 
 	if len(matches) != 4 {

@@ -175,4 +175,3 @@ func TestNewEnvironmentVariableResolver(t *testing.T) {
 	assert.NotNil(t, resolver)
 	assert.Implements(t, (*VariableResolver)(nil), resolver)
 }
-

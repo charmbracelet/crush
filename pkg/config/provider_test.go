@@ -71,4 +71,3 @@ func TestProvider_loadProvidersWithIssuesAndNoCache(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, providers, "Expected nil providers when loading fails and no cache exists")
 }
-

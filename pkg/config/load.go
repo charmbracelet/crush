@@ -355,7 +355,6 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 		}
 		large.ReasoningEffort = largeModelSelected.ReasoningEffort
 		large.Think = largeModelSelected.Think
-
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
 	if smallModelConfigured {

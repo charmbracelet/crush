@@ -168,7 +168,7 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	diff, additions, removals := diff.GenerateDiff(
 		oldContent,
 		params.Content,
-		filePath,
+		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
 	)
 
 	rootDir := config.Get().WorkingDir()

@@ -160,6 +160,8 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 				before := existing.History.initialVersion.Content
 				after := existing.History.latestVersion.Content
 				path := existing.History.initialVersion.Path
+				cwd := config.Get().WorkingDir()
+				path = strings.TrimPrefix(path, cwd)
 				_, additions, deletions := diff.GenerateDiff(before, after, path)
 				existing.Additions = additions
 				existing.Deletions = deletions
@@ -213,7 +215,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 	sessionFiles := make([]SessionFile, 0, len(fileMap))
 	for path, fh := range fileMap {
-		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
+		cwd := config.Get().WorkingDir()
+		path = strings.TrimPrefix(path, cwd)
+		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, path)
 		sessionFiles = append(sessionFiles, SessionFile{
 			History:   fh,
 			FilePath:  path,

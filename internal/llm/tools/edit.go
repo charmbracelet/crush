@@ -206,7 +206,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	_, additions, removals := diff.GenerateDiff(
 		"",
 		content,
-		filePath,
+		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
 	)
 	rootDir := config.Get().WorkingDir()
 	permissionPath := filepath.Dir(filePath)
@@ -318,7 +318,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		filePath,
+		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
 	)
 
 	rootDir := config.Get().WorkingDir()
@@ -441,7 +441,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		filePath,
+		strings.TrimPrefix(filePath, config.Get().WorkingDir()),
 	)
 	rootDir := config.Get().WorkingDir()
 	permissionPath := filepath.Dir(filePath)

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,10 +28,8 @@ func Init(workingDir string, debug bool) (*Config, error) {
 	var err error
 	once.Do(func() {
 		cwd = workingDir
-		cfg, err := Load(cwd, debug)
-		if err != nil {
-			slog.Error("Failed to load config", "error", err)
-		}
+		var cfg *Config
+		cfg, err = Load(cwd, debug)
 		instance.Store(cfg)
 	})
 

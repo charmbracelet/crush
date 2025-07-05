@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
-	"log/slog"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/fsnotify/fsnotify"

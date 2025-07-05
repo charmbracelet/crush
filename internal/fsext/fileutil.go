@@ -2,6 +2,7 @@ package fsext
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"log/slog"
+
 	ignore "github.com/sabhiram/go-gitignore"
 )
 

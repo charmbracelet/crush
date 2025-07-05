@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"log/slog"
 )
 
 // Write writes an LSP message to the given writer

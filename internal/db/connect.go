@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -11,7 +12,6 @@ import (
 	_ "github.com/ncruces/go-sqlite3/embed"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"log/slog"
 
 	"github.com/pressly/goose/v3"
 )

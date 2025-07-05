@@ -2,13 +2,12 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"log/slog"
 )
 
 const (

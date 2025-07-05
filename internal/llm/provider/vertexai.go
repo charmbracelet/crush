@@ -2,8 +2,8 @@ package provider
 
 import (
 	"context"
-
 	"log/slog"
+
 	"google.golang.org/genai"
 )
 

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"log/slog"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -94,7 +94,6 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
 	case pubsub.Event[history.File]:
-		slog.Info("sidebar", "Received file history event", "file", msg.Payload.Path, "session", msg.Payload.SessionID)
 		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {

@@ -56,7 +56,6 @@ func (m *statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clearMessageCmd(ttl)
 	case util.ClearStatusMsg:
 		m.info = util.InfoMsg{}
-
 	}
 	return m, nil
 }

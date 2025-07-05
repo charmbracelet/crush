@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"log/slog"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -73,7 +74,7 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 		app.LSPClients,
 	)
 	if err != nil {
-		slog.Error("Failed to create coder agent", err)
+		slog.Error("Failed to create coder agent", "err", err)
 		return nil, err
 	}
 

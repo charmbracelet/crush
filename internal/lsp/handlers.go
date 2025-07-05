@@ -2,9 +2,10 @@ package lsp
 
 import (
 	"encoding/json"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"log/slog"
+
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/lsp/util"
 )

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +23,7 @@ func main() {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {
-				slog.Error("Failed to pprof listen: %v", httpErr)
+				slog.Error(fmt.Sprintf("Failed to pprof listen: %v", httpErr))
 			}
 		}()
 	}

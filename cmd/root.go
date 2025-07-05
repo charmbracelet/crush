@@ -93,7 +93,7 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		app, err := app.New(ctx, conn)
 		if err != nil {
-			slog.Error("Failed to create app: %v", err)
+			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err
 		}
 		// Defer shutdown here so it runs for both interactive and non-interactive modes
@@ -104,7 +104,7 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
-			slog.Error("Failed to read stdin: %v", err)
+			slog.Error(fmt.Sprintf("Failed to read from stdin: %v", err))
 			return err
 		}
 
@@ -174,11 +174,11 @@ to assist developers in writing, debugging, and understanding code directly from
 		cleanup()
 
 		if err != nil {
-			slog.Error("TUI error: %v", err)
+			slog.Error(fmt.Sprintf("TUI run error: %v", err))
 			return fmt.Errorf("TUI error: %v", err)
 		}
 
-		slog.Info("TUI exited with result: %v", result)
+		slog.Info(fmt.Sprintf("TUI exited with result: %v", result))
 		return nil
 	},
 }

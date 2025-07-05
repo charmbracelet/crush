@@ -45,18 +45,18 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 
+	cfg := config.Get()
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir()),
 		LSPClients:  make(map[string]*lsp.Client),
 	}
 
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
-
-	cfg := config.Get()
 
 	// TODO: remove the concept of agent config most likely
 	coderAgentCfg := cfg.Agents["coder"]

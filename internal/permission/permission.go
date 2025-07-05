@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -44,6 +43,7 @@ type Service interface {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
+	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
 	pendingRequests       sync.Map
@@ -87,7 +87,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	dir := filepath.Dir(opts.Path)
 	if dir == "." {
-		dir = config.Get().WorkingDir()
+		dir = s.workingDir
 	}
 	permission := PermissionRequest{
 		ID:          uuid.New().String(),
@@ -125,9 +125,10 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func NewPermissionService() Service {
+func NewPermissionService(workingDir string) Service {
 	return &permissionService{
 		Broker:             pubsub.NewBroker[PermissionRequest](),
+		workingDir:         workingDir,
 		sessionPermissions: make([]PermissionRequest, 0),
 	}
 }

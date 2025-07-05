@@ -155,6 +155,7 @@ type Options struct {
 	Debug                bool       `json:"debug,omitempty" jsonschema:"title=Debug,description=Enable debug logging,default=false"`
 	DebugLSP             bool       `json:"debug_lsp,omitempty" jsonschema:"title=Debug LSP,description=Enable LSP debug logging,default=false"`
 	DisableAutoSummarize bool       `json:"disable_auto_summarize,omitempty" jsonschema:"title=Disable Auto Summarize,description=Disable automatic conversation summarization,default=false"`
+	AutoOpenVSCodeDiff   bool       `json:"auto_open_vscode_diff,omitempty" jsonschema:"title=Auto Open VS Code Diff,description=Automatically open VS Code diff view when showing file changes,default=false"`
 	// Relative to the cwd
 	DataDirectory string `json:"data_directory,omitempty" jsonschema:"title=Data Directory,description=Directory for storing application data,default=.crush"`
 }
@@ -349,6 +350,11 @@ func loadConfig(cwd string, debug bool) (*Config, error) {
 	mergeMCPs(cfg, configs...)
 	mergeLSPs(cfg, configs...)
 
+	// Force enable VS Code diff when running inside VS Code
+	if os.Getenv("VSCODE_INJECTION") == "1" {
+		cfg.Options.AutoOpenVSCodeDiff = true
+	}
+
 	// Validate the final configuration
 	if err := cfg.Validate(); err != nil {
 		return cfg, fmt.Errorf("configuration validation failed: %w", err)
@@ -502,6 +508,10 @@ func mergeOptions(base *Config, others ...*Config) {
 
 		if other.DisableAutoSummarize {
 			baseOptions.DisableAutoSummarize = other.DisableAutoSummarize
+		}
+
+		if other.AutoOpenVSCodeDiff {
+			baseOptions.AutoOpenVSCodeDiff = other.AutoOpenVSCodeDiff
 		}
 
 		if other.DataDirectory != "" {
@@ -728,10 +738,14 @@ func getDefaultProviderConfig(p provider.Provider, apiKey string) ProviderConfig
 }
 
 func defaultConfigBasedOnEnv() *Config {
+	// VS Code diff is disabled by default
+	autoOpenVSCodeDiff := false
+
 	cfg := &Config{
 		Options: Options{
-			DataDirectory: defaultDataDirectory,
-			ContextPaths:  defaultContextPaths,
+			DataDirectory:      defaultDataDirectory,
+			ContextPaths:       defaultContextPaths,
+			AutoOpenVSCodeDiff: autoOpenVSCodeDiff,
 		},
 		Providers: make(map[provider.InferenceProvider]ProviderConfig),
 		Agents:    make(map[AgentID]Agent),
@@ -1256,7 +1270,7 @@ func (c *Config) validateAgents(errors *ValidationErrors) {
 	}
 
 	validTools := []string{
-		"bash", "edit", "fetch", "glob", "grep", "ls", "sourcegraph", "view", "write", "agent",
+		"bash", "edit", "fetch", "glob", "grep", "ls", "sourcegraph", "view", "vscode_diff", "write", "agent",
 	}
 
 	for agentID, agent := range c.Agents {

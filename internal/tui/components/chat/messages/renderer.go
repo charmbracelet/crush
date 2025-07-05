@@ -160,6 +160,7 @@ func init() {
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
+	registry.register(tools.VSCodeDiffToolName, func() renderer { return vscodeDiffRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
 
@@ -268,6 +269,11 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 	return er.renderWithParams(v, "Edit", args, func() string {
 		var meta tools.EditResponseMetadata
 		if err := er.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		// If metadata is empty (VS Code diff was opened), show plain content
+		if meta.OldContent == "" && meta.NewContent == "" {
 			return renderPlainContent(v, v.result.Content)
 		}
 
@@ -725,6 +731,31 @@ func truncateHeight(s string, h int) string {
 	return s
 }
 
+// -----------------------------------------------------------------------------
+//  VS Code Diff renderer
+// -----------------------------------------------------------------------------
+
+type vscodeDiffRenderer struct {
+	baseRenderer
+}
+
+// Render displays the VS Code diff tool call with parameters
+func (vr vscodeDiffRenderer) Render(v *toolCallCmp) string {
+	var params tools.VSCodeDiffParams
+	var args []string
+	if err := vr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addKeyValue("left", params.LeftTitle).
+			addKeyValue("right", params.RightTitle).
+			addKeyValue("language", params.Language).
+			build()
+	}
+
+	return vr.renderWithParams(v, "VS Code Diff", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
+}
+
 func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
@@ -745,6 +776,8 @@ func prettifyToolName(name string) string {
 		return "Sourcegraph"
 	case tools.ViewToolName:
 		return "View"
+	case tools.VSCodeDiffToolName:
+		return "VS Code Diff"
 	case tools.WriteToolName:
 		return "Write"
 	default:

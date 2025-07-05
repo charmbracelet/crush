@@ -224,14 +224,26 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	recordFileRead(filePath)
 	waitForLspDiagnostics(ctx, filePath, w.lspClients)
 
+	// Auto-open VS Code diff if enabled and there are changes
+	vscodeDiffOpened := false
+	if additions > 0 || removals > 0 {
+		language := getLanguageFromExtension(filePath)
+		vscodeDiffOpened = AutoOpenVSCodeDiff(ctx, w.permissions, oldContent, params.Content, filePath, language)
+	}
+
 	result := fmt.Sprintf("File successfully written: %s", filePath)
 	result = fmt.Sprintf("<result>\n%s\n</result>", result)
 	result += getDiagnostics(filePath, w.lspClients)
-	return WithResponseMetadata(NewTextResponse(result),
-		WriteResponseMetadata{
+
+	// Only include diff metadata if VS Code diff wasn't opened
+	var metadata WriteResponseMetadata
+	if !vscodeDiffOpened {
+		metadata = WriteResponseMetadata{
 			Diff:      diff,
 			Additions: additions,
 			Removals:  removals,
-		},
-	), nil
+		}
+	}
+
+	return WithResponseMetadata(NewTextResponse(result), metadata), nil
 }

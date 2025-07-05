@@ -252,14 +252,27 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
-	return WithResponseMetadata(
-		NewTextResponse("File created: "+filePath),
-		EditResponseMetadata{
+	// Auto-open VS Code diff if enabled and there are changes (new file creation)
+	vscodeDiffOpened := false
+	if additions > 0 {
+		language := getLanguageFromExtension(filePath)
+		vscodeDiffOpened = AutoOpenVSCodeDiff(ctx, e.permissions, "", content, filePath, language)
+	}
+
+	// Only include diff metadata if VS Code diff wasn't opened
+	var metadata EditResponseMetadata
+	if !vscodeDiffOpened {
+		metadata = EditResponseMetadata{
 			OldContent: "",
 			NewContent: content,
 			Additions:  additions,
 			Removals:   removals,
-		},
+		}
+	}
+
+	return WithResponseMetadata(
+		NewTextResponse("File created: "+filePath),
+		metadata,
 	), nil
 }
 
@@ -373,14 +386,27 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
-	return WithResponseMetadata(
-		NewTextResponse("Content deleted from file: "+filePath),
-		EditResponseMetadata{
+	// Auto-open VS Code diff if enabled and there are changes (content deletion)
+	vscodeDiffOpened := false
+	if additions > 0 || removals > 0 {
+		language := getLanguageFromExtension(filePath)
+		vscodeDiffOpened = AutoOpenVSCodeDiff(ctx, e.permissions, oldContent, newContent, filePath, language)
+	}
+
+	// Only include diff metadata if VS Code diff wasn't opened
+	var metadata EditResponseMetadata
+	if !vscodeDiffOpened {
+		metadata = EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,
 			Additions:  additions,
 			Removals:   removals,
-		},
+		}
+	}
+
+	return WithResponseMetadata(
+		NewTextResponse("Content deleted from file: "+filePath),
+		metadata,
 	), nil
 }
 
@@ -495,12 +521,26 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
-	return WithResponseMetadata(
-		NewTextResponse("Content replaced in file: "+filePath),
-		EditResponseMetadata{
+	// Auto-open VS Code diff if enabled and there are changes (content replacement)
+	vscodeDiffOpened := false
+	if additions > 0 || removals > 0 {
+		language := getLanguageFromExtension(filePath)
+		vscodeDiffOpened = AutoOpenVSCodeDiff(ctx, e.permissions, oldContent, newContent, filePath, language)
+	}
+
+	// Only include diff metadata if VS Code diff wasn't opened
+	var metadata EditResponseMetadata
+	if !vscodeDiffOpened {
+		metadata = EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,
 			Additions:  additions,
 			Removals:   removals,
-		}), nil
+		}
+	}
+
+	return WithResponseMetadata(
+		NewTextResponse("Content replaced in file: "+filePath),
+		metadata,
+	), nil
 }

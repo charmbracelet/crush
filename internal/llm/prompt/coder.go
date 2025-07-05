@@ -28,7 +28,7 @@ func CoderPrompt(p string, contextFiles ...string) string {
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
-	contextContent := getContextFromPaths(contextFiles)
+	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
 	slog.Debug("Context content", "Context", contextContent)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)

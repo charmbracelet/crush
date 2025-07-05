@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/charmbracelet/crush/internal/config"
 )
 
 type PromptID string
@@ -36,8 +34,8 @@ func GetPrompt(promptID PromptID, provider string, contextPaths ...string) strin
 	return basePrompt
 }
 
-func getContextFromPaths(contextPaths []string) string {
-	return processContextPaths(config.Get().WorkingDir(), contextPaths)
+func getContextFromPaths(workingDir string, contextPaths []string) string {
+	return processContextPaths(workingDir, contextPaths)
 }
 
 func processContextPaths(workDir string, paths []string) string {

@@ -296,7 +296,7 @@ func (m *assistantSectionModel) View() string {
 	infoMsg := t.S().Subtle.Render(duration.String())
 	icon := t.S().Subtle.Render(styles.ModelIcon)
 	model := config.Get().GetModel(m.message.Provider, m.message.Model)
-	modelFormatted := t.S().Muted.Render(model.Name)
+	modelFormatted := t.S().Muted.Render(model.Model)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return t.S().Base.PaddingLeft(2).Render(
 		core.Section(assistant, m.width-2),

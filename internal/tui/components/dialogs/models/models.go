@@ -264,7 +264,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 			for i, model := range providerConfig.Models {
 				configProvider.Models[i] = provider.Model{
 					ID:                     model.ID,
-					Name:                   model.Name,
+					Model:                  model.Model,
 					CostPer1MIn:            model.CostPer1MIn,
 					CostPer1MOut:           model.CostPer1MOut,
 					CostPer1MInCached:      model.CostPer1MInCached,
@@ -285,7 +285,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 			}
 			modelItems = append(modelItems, commands.NewItemSection(name))
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}))
@@ -315,7 +315,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 		}
 		modelItems = append(modelItems, commands.NewItemSection(name))
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))

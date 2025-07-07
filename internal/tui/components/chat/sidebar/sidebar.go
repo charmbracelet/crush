@@ -481,7 +481,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
+	modelName := t.S().Text.Render(model.Model)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,

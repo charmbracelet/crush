@@ -145,6 +145,9 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 						continue
 					}
 					seen[model.ID] = true
+					if model.Model == "" {
+						model.Model = model.ID
+					}
 					models = append(models, model)
 				}
 				for _, model := range p.Models {
@@ -152,6 +155,9 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 						continue
 					}
 					seen[model.ID] = true
+					if model.Model == "" {
+						model.Model = model.ID
+					}
 					models = append(models, model)
 				}
 

@@ -80,7 +80,7 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ### OpenAI-Compatible APIs
 
-Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API:
+Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
 {
@@ -88,7 +88,6 @@ Crush supports all OpenAI-compatible APIs. Here's an example configuration for D
     "deepseek": {
       "provider_type": "openai",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "Hello",
       "models": [
         {
           "id": "deepseek-chat",

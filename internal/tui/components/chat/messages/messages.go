@@ -49,9 +49,15 @@ var focusedMessageBorder = lipgloss.Border{
 
 // NewMessageCmp creates a new message component with the given message and options
 func NewMessageCmp(msg message.Message) MessageCmp {
+	t := styles.CurrentTheme()
 	m := &messageCmp{
 		message: msg,
-		anim:    anim.New(15, "", styles.CurrentTheme()),
+		anim: anim.New(anim.Settings{
+			Size:        15,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		}),
 	}
 	return m
 }

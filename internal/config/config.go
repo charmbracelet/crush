@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -274,6 +276,14 @@ func (c *Config) SmallModel() *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+func (c *Config) SetCompactMode(enabled bool) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	c.Options.TUI.CompactMode = enabled
+	return c.SetConfigField("options.tui.compact_mode", enabled)
+}
+
 func (c *Config) Resolve(key string) (string, error) {
 	if c.resolver == nil {
 		return "", fmt.Errorf("no variable resolver configured")
@@ -285,5 +295,27 @@ func (c *Config) Resolve(key string) (string, error) {
 func UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
 	cfg := Get()
 	cfg.Models[modelType] = model
+	return nil
+}
+
+func (c *Config) SetConfigField(key string, value any) error {
+	configPath := globalConfigData()
+	// read the data
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			data = []byte("{}")
+		} else {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+	}
+
+	newValue, err := sjson.Set(string(data), key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set config field %s: %w", key, err)
+	}
+	if err := os.WriteFile(configPath, []byte(newValue), 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
 	return nil
 }

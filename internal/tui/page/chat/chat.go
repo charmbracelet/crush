@@ -156,12 +156,15 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, p.setSession(msg)
 	case commands.ToggleCompactModeMsg:
 		p.forceCompact = !p.forceCompact
+		var cmd tea.Cmd
 		if p.forceCompact {
 			p.setCompactMode(true)
+			cmd = p.updateCompactConfig(true)
 		} else if p.width >= CompactModeBreakpoint {
 			p.setCompactMode(false)
+			cmd = p.updateCompactConfig(false)
 		}
-		return p, p.SetSize(p.width, p.height)
+		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case pubsub.Event[session.Session]:
 		// this needs to go to header/sidebar
 		u, cmd := p.header.Update(msg)
@@ -335,6 +338,19 @@ func (p *chatPage) View() tea.View {
 	view := tea.NewView(canvas.Render())
 	view.SetCursor(chatView.Cursor())
 	return view
+}
+
+func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
+	return func() tea.Msg {
+		err := config.Get().SetCompactMode(compact)
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update compact mode configuration: " + err.Error(),
+			}
+		}
+		return nil
+	}
 }
 
 func (p *chatPage) setCompactMode(compact bool) {

@@ -37,7 +37,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
-		globalConfigData(),
+		GlobalConfigData(),
 		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
 		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
 	}
@@ -510,9 +510,9 @@ func globalConfig() string {
 	return filepath.Join(os.Getenv("HOME"), ".config", appName, fmt.Sprintf("%s.json", appName))
 }
 
-// globalConfigData returns the path to the main data directory for the application.
+// GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
-func globalConfigData() string {
+func GlobalConfigData() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
 		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
@@ -530,4 +530,15 @@ func globalConfigData() string {
 	}
 
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+}
+
+func HomeDir() string {
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = os.Getenv("USERPROFILE") // For Windows compatibility
+	}
+	if homeDir == "" {
+		homeDir = os.Getenv("HOMEPATH") // Fallback for some environments
+	}
+	return homeDir
 }

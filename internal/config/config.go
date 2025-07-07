@@ -299,7 +299,7 @@ func UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) erro
 }
 
 func (c *Config) SetConfigField(key string, value any) error {
-	configPath := globalConfigData()
+	configPath := GlobalConfigData()
 	// read the data
 	data, err := os.ReadFile(configPath)
 	if err != nil {

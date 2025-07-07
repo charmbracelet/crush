@@ -2,7 +2,7 @@ module github.com/charmbracelet/crush
 
 go 1.24.3
 
-replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250702164605-a991b583c0e7
+replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250703182356-a42fb608faaf
 
 replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250703152138-ff346e83e819
 
@@ -47,7 +47,7 @@ require (
 require github.com/spf13/cast v1.7.1 // indirect
 
 require (
-	github.com/charmbracelet/ultraviolet v0.0.0-20250702190342-c2f25359be42 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20250707134318-0fdaa64b8c5e // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 )
 

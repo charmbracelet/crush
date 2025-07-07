@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestConfig_setDefaults(t *testing.T) {
 	assert.NotNil(t, cfg.Models)
 	assert.NotNil(t, cfg.LSP)
 	assert.NotNil(t, cfg.MCP)
-	assert.Equal(t, "/tmp/.crush", cfg.Options.DataDirectory)
+	assert.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
 	for _, path := range defaultContextPaths {
 		assert.Contains(t, cfg.Options.ContextPaths, path)
 	}

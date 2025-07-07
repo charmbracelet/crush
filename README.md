@@ -12,16 +12,20 @@ Crush is a tool for building software with AI.
 
 ## Installation
 
+Nightly builds are available while Crush is in development.
+
 * [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
 * [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
 
-Or just install it with go:
+You can also just install it with go:
 
 ```
 git clone git@github.com:charmbracelet/crush.git
 cd crush
 go install
 ```
+
+Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 
@@ -45,13 +49,54 @@ providers.
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
 
+## Configuration
+
+For many use cases, Crush can be run with no config. That said, if you do need config, it can be added either local to the project iself, or globally. Configuration has the following pritory: 
+
+1. `.crush.json`
+2. `crush.json`
+3. `$HOME/.config/crush/crush.json`
+
+### LSPs
+
+Crush can use LSPs for additionaly context to help inform its decisions. LSPs can be added manually like so:
+
+```json
+{
+  "lsp": {
+    "go": {
+      "disabled": false,
+      "command": "gopls"
+    },
+    "typescript": {
+      "disabled": false,
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "nix": {
+      "command": "alejandra"
+    },
+  }
+}
+```
+
+### Amazon Bedrock
+
+
+### Google Vertex
+
+
+### OpenAI-Compatible APIs
+
+Crush supports all OpenAI compatible APIs.
+
 ## License
 
 [MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)
 
 ---
 
-Part of [Charm](https://charm.sh).
+Part of [Charm](https://charm.land).
 
 <a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
 

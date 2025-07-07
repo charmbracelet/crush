@@ -51,7 +51,7 @@ providers.
 
 ## Configuration
 
-For many use cases, Crush can be run with no config. That said, if you do need config, it can be added either local to the project iself, or globally. Configuration has the following pritory:
+For many use cases, Crush can be run with no config. That said, if you do need config, it can be added either local to the project itself, or globally. Configuration has the following priority:
 
 1. `.crush.json`
 2. `crush.json`

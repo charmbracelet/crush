@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -81,7 +80,6 @@ func (m *messageListCmp) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	logging.Info("messageListCmp.Update", "msg", msg)
 	switch msg := msg.(type) {
 	case SessionSelectedMsg:
 		if msg.ID != m.session.ID {
@@ -380,7 +378,6 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 
 // SetSession loads and displays messages for a new session.
 func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
-	logging.Info("messageListCmp.SetSession", "sessionID", session.ID)
 	if m.session.ID == session.ID {
 		return nil
 	}

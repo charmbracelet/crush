@@ -61,34 +61,43 @@ func (m *ModelListComponent) SelectedIndex() int {
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	m.modelType = modelType
 
-	providers := config.Providers()
+	providers, err := config.Providers()
+	if err != nil {
+		return util.ReportError(err)
+	}
+
 	modelItems := []util.Model{}
 	selectIndex := 0
 
 	cfg := config.Get()
-	var currentModel config.PreferredModel
+	var currentModel config.SelectedModel
 	if m.modelType == LargeModelType {
-		currentModel = cfg.Models.Large
+		currentModel = cfg.Models[config.SelectedModelTypeLarge]
 	} else {
-		currentModel = cfg.Models.Small
+		currentModel = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
-	addedProviders := make(map[provider.InferenceProvider]bool)
+	// Create a map to track which providers we've already added
+	addedProviders := make(map[string]bool)
 
+	// First, add any configured providers that are not in the known providers list
+	// These should appear at the top of the list
 	knownProviders := provider.KnownProviders()
 	for providerID, providerConfig := range cfg.Providers {
-		if providerConfig.Disabled {
+		if providerConfig.Disable {
 			continue
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.Contains(knownProviders, providerID) {
+		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
+			// Convert config provider to provider.Provider format
 			configProvider := provider.Provider{
-				Name:   string(providerID),
-				ID:     providerID,
+				Name:   string(providerID), // Use provider ID as name for unknown providers
+				ID:     provider.InferenceProvider(providerID),
 				Models: make([]provider.Model, len(providerConfig.Models)),
 			}
 
+			// Convert models
 			for i, model := range providerConfig.Models {
 				configProvider.Models[i] = provider.Model{
 					ID:                     model.ID,
@@ -101,11 +110,12 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 					DefaultMaxTokens:       model.DefaultMaxTokens,
 					CanReason:              model.CanReason,
 					HasReasoningEffort:     model.HasReasoningEffort,
-					DefaultReasoningEffort: model.ReasoningEffort,
+					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					SupportsImages:         model.SupportsImages,
 				}
 			}
 
+			// Add this unknown provider to the list
 			name := configProvider.Name
 			if name == "" {
 				name = string(configProvider.ID)
@@ -116,20 +126,23 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 					Provider: configProvider,
 					Model:    model,
 				}))
-				if model.ID == currentModel.ModelID && configProvider.ID == currentModel.Provider {
-					selectIndex = len(modelItems) - 1
+				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
+					selectIndex = len(modelItems) - 1 // Set the selected index to the current model
 				}
 			}
 			addedProviders[providerID] = true
 		}
 	}
 
+	// Then add the known providers from the predefined list
 	for _, provider := range providers {
-		if addedProviders[provider.ID] {
+		// Skip if we already added this provider as an unknown provider
+		if addedProviders[string(provider.ID)] {
 			continue
 		}
 
-		if providerConfig, exists := cfg.Providers[provider.ID]; exists && providerConfig.Disabled {
+		// Check if this provider is configured and not disabled
+		if providerConfig, exists := cfg.Providers[string(provider.ID)]; exists && providerConfig.Disable {
 			continue
 		}
 
@@ -143,8 +156,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				Provider: provider,
 				Model:    model,
 			}))
-			if model.ID == currentModel.ModelID && provider.ID == currentModel.Provider {
-				selectIndex = len(modelItems) - 1
+			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
 			}
 		}
 	}
@@ -156,4 +169,3 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 func (m *ModelListComponent) GetModelType() int {
 	return m.modelType
 }
-

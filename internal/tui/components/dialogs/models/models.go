@@ -105,7 +105,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			var modelType config.SelectedModelType
 			if m.modelList.GetModelType() == LargeModelType {
-				modelType = config.LargeModel
+				modelType = config.SelectedModelTypeLarge
 			} else {
 				modelType = config.SelectedModelTypeSmall
 			}

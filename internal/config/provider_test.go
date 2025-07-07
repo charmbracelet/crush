@@ -1,81 +1,73 @@
 package config
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestProviders_MockEnabled(t *testing.T) {
-	originalUseMock := UseMockProviders
-	UseMockProviders = true
-	defer func() {
-		UseMockProviders = originalUseMock
-		ResetProviders()
-	}()
-
-	ResetProviders()
-	providers := Providers()
-	require.NotEmpty(t, providers)
-
-	providerIDs := make(map[provider.InferenceProvider]bool)
-	for _, p := range providers {
-		providerIDs[p.ID] = true
-	}
-
-	assert.True(t, providerIDs[provider.InferenceProviderAnthropic])
-	assert.True(t, providerIDs[provider.InferenceProviderOpenAI])
-	assert.True(t, providerIDs[provider.InferenceProviderGemini])
+type mockProviderClient struct {
+	shouldFail bool
 }
 
-func TestProviders_ResetFunctionality(t *testing.T) {
-	UseMockProviders = true
-	defer func() {
-		UseMockProviders = false
-		ResetProviders()
-	}()
-
-	providers1 := Providers()
-	require.NotEmpty(t, providers1)
-
-	ResetProviders()
-	providers2 := Providers()
-	require.NotEmpty(t, providers2)
-
-	assert.Equal(t, len(providers1), len(providers2))
+func (m *mockProviderClient) GetProviders() ([]provider.Provider, error) {
+	if m.shouldFail {
+		return nil, errors.New("failed to load providers")
+	}
+	return []provider.Provider{
+		{
+			Name: "Mock",
+		},
+	}, nil
 }
 
-func TestProviders_ModelCapabilities(t *testing.T) {
-	originalUseMock := UseMockProviders
-	UseMockProviders = true
-	defer func() {
-		UseMockProviders = originalUseMock
-		ResetProviders()
-	}()
+func TestProvider_loadProvidersNoIssues(t *testing.T) {
+	client := &mockProviderClient{shouldFail: false}
+	tmpPath := t.TempDir() + "/providers.json"
+	providers, err := loadProviders(tmpPath, client)
+	assert.NoError(t, err)
+	assert.NotNil(t, providers)
+	assert.Len(t, providers, 1)
 
-	ResetProviders()
-	providers := Providers()
+	// check if file got saved
+	fileInfo, err := os.Stat(tmpPath)
+	assert.NoError(t, err)
+	assert.False(t, fileInfo.IsDir(), "Expected a file, not a directory")
+}
 
-	var openaiProvider provider.Provider
-	for _, p := range providers {
-		if p.ID == provider.InferenceProviderOpenAI {
-			openaiProvider = p
-			break
-		}
+func TestProvider_loadProvidersWithIssues(t *testing.T) {
+	client := &mockProviderClient{shouldFail: true}
+	tmpPath := t.TempDir() + "/providers.json"
+	// store providers to a temporary file
+	oldProviders := []provider.Provider{
+		{
+			Name: "OldProvider",
+		},
 	}
-	require.NotEmpty(t, openaiProvider.ID)
-
-	var foundReasoning, foundNonReasoning bool
-	for _, model := range openaiProvider.Models {
-		if model.CanReason && model.HasReasoningEffort {
-			foundReasoning = true
-		} else if !model.CanReason {
-			foundNonReasoning = true
-		}
+	data, err := json.Marshal(oldProviders)
+	if err != nil {
+		t.Fatalf("Failed to marshal old providers: %v", err)
 	}
 
-	assert.True(t, foundReasoning)
-	assert.True(t, foundNonReasoning)
+	err = os.WriteFile(tmpPath, data, 0o644)
+	if err != nil {
+		t.Fatalf("Failed to write old providers to file: %v", err)
+	}
+	providers, err := loadProviders(tmpPath, client)
+	assert.NoError(t, err)
+	assert.NotNil(t, providers)
+	assert.Len(t, providers, 1)
+	assert.Equal(t, "OldProvider", providers[0].Name, "Expected to keep old provider when loading fails")
+}
+
+func TestProvider_loadProvidersWithIssuesAndNoCache(t *testing.T) {
+	client := &mockProviderClient{shouldFail: true}
+	tmpPath := t.TempDir() + "/providers.json"
+	providers, err := loadProviders(tmpPath, client)
+	assert.Error(t, err)
+	assert.Nil(t, providers, "Expected nil providers when loading fails and no cache exists")
 }

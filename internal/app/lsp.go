@@ -2,34 +2,32 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/watcher"
 )
 
 func (app *App) initLSPClients(ctx context.Context) {
-	cfg := config.Get()
-
 	// Initialize LSP clients
-	for name, clientConfig := range cfg.LSP {
+	for name, clientConfig := range app.config.LSP {
 		// Start each client initialization in its own goroutine
 		go app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
 	}
-	logging.Info("LSP clients initialization started in background")
+	slog.Info("LSP clients initialization started in background")
 }
 
 // createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
 func (app *App) createAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
 	// Create a specific context for initialization with a timeout
-	logging.Info("Creating LSP client", "name", name, "command", command, "args", args)
+	slog.Info("Creating LSP client", "name", name, "command", command, "args", args)
 
 	// Create the LSP client
 	lspClient, err := lsp.NewClient(ctx, command, args...)
 	if err != nil {
-		logging.Error("Failed to create LSP client for", name, err)
+		slog.Error("Failed to create LSP client for", name, err)
 		return
 	}
 
@@ -38,9 +36,9 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	defer cancel()
 
 	// Initialize with the initialization context
-	_, err = lspClient.InitializeLSPClient(initCtx, config.WorkingDirectory())
+	_, err = lspClient.InitializeLSPClient(initCtx, app.config.WorkingDir())
 	if err != nil {
-		logging.Error("Initialize failed", "name", name, "error", err)
+		slog.Error("Initialize failed", "name", name, "error", err)
 		// Clean up the client to prevent resource leaks
 		lspClient.Close()
 		return
@@ -48,15 +46,15 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 
 	// Wait for the server to be ready
 	if err := lspClient.WaitForServerReady(initCtx); err != nil {
-		logging.Error("Server failed to become ready", "name", name, "error", err)
+		slog.Error("Server failed to become ready", "name", name, "error", err)
 		// We'll continue anyway, as some functionality might still work
 		lspClient.SetServerState(lsp.StateError)
 	} else {
-		logging.Info("LSP server is ready", "name", name)
+		slog.Info("LSP server is ready", "name", name)
 		lspClient.SetServerState(lsp.StateReady)
 	}
 
-	logging.Info("LSP client initialized", "name", name)
+	slog.Info("LSP client initialized", "name", name)
 
 	// Create a child context that can be canceled when the app is shutting down
 	watchCtx, cancelFunc := context.WithCancel(ctx)
@@ -86,22 +84,21 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 // runWorkspaceWatcher executes the workspace watcher for an LSP client
 func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.WorkspaceWatcher) {
 	defer app.watcherWG.Done()
-	defer logging.RecoverPanic("LSP-"+name, func() {
+	defer log.RecoverPanic("LSP-"+name, func() {
 		// Try to restart the client
 		app.restartLSPClient(ctx, name)
 	})
 
-	workspaceWatcher.WatchWorkspace(ctx, config.WorkingDirectory())
-	logging.Info("Workspace watcher stopped", "client", name)
+	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
+	slog.Info("Workspace watcher stopped", "client", name)
 }
 
 // restartLSPClient attempts to restart a crashed or failed LSP client
 func (app *App) restartLSPClient(ctx context.Context, name string) {
 	// Get the original configuration
-	cfg := config.Get()
-	clientConfig, exists := cfg.LSP[name]
+	clientConfig, exists := app.config.LSP[name]
 	if !exists {
-		logging.Error("Cannot restart client, configuration not found", "client", name)
+		slog.Error("Cannot restart client, configuration not found", "client", name)
 		return
 	}
 
@@ -122,5 +119,5 @@ func (app *App) restartLSPClient(ctx context.Context, name string) {
 
 	// Create a new client using the shared function
 	app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
-	logging.Info("Successfully restarted LSP client", "client", name)
+	slog.Info("Successfully restarted LSP client", "client", name)
 }

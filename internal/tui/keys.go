@@ -5,7 +5,6 @@ import (
 )
 
 type KeyMap struct {
-	Logs     key.Binding
 	Quit     key.Binding
 	Help     key.Binding
 	Commands key.Binding
@@ -16,10 +15,6 @@ type KeyMap struct {
 
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Logs: key.NewBinding(
-			key.WithKeys("ctrl+l"),
-			key.WithHelp("ctrl+l", "logs"),
-		),
 		Quit: key.NewBinding(
 			key.WithKeys("ctrl+c"),
 			key.WithHelp("ctrl+c", "quit"),
@@ -47,7 +42,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Sessions,
 		k.Quit,
 		k.Help,
-		k.Logs,
 	}
 	slice = k.prependEscAndTab(slice)
 	slice = append(slice, k.pageBindings...)

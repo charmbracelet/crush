@@ -1,10 +1,6 @@
 package prompt
 
-import (
-	"github.com/charmbracelet/crush/internal/fur/provider"
-)
-
-func SummarizerPrompt(_ provider.InferenceProvider) string {
+func SummarizerPrompt() string {
 	return `You are a helpful AI assistant tasked with summarizing conversations.
 
 When asked to summarize, provide a detailed but concise summary of the conversation. 

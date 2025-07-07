@@ -11,7 +11,6 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -30,6 +29,7 @@ type FetchPermissionsParams struct {
 type fetchTool struct {
 	client      *http.Client
 	permissions permission.Service
+	workingDir  string
 }
 
 const (
@@ -65,7 +65,7 @@ TIPS:
 - Set appropriate timeouts for potentially slow websites`
 )
 
-func NewFetchTool(permissions permission.Service) BaseTool {
+func NewFetchTool(permissions permission.Service, workingDir string) BaseTool {
 	return &fetchTool{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -76,6 +76,7 @@ func NewFetchTool(permissions permission.Service) BaseTool {
 			},
 		},
 		permissions: permissions,
+		workingDir:  workingDir,
 	}
 }
 
@@ -133,7 +134,7 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	p := t.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        config.WorkingDirectory(),
+			Path:        t.workingDir,
 			ToolName:    FetchToolName,
 			Action:      "fetch",
 			Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),

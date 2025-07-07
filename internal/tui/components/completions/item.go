@@ -75,7 +75,7 @@ func (c *completionItemCmp) Update(tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements CommandItem.
-func (c *completionItemCmp) View() tea.View {
+func (c *completionItemCmp) View() string {
 	t := styles.CurrentTheme()
 
 	itemStyle := t.S().Base.Padding(0, 1).Width(c.width)
@@ -135,7 +135,7 @@ func (c *completionItemCmp) View() tea.View {
 			parts...,
 		),
 	)
-	return tea.NewView(item)
+	return item
 }
 
 // Blur implements CommandItem.

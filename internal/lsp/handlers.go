@@ -2,9 +2,10 @@ package lsp
 
 import (
 	"encoding/json"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/logging"
+
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/lsp/util"
 )
@@ -18,7 +19,7 @@ func HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
 func HandleRegisterCapability(params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
 	if err := json.Unmarshal(params, &registerParams); err != nil {
-		logging.Error("Error unmarshaling registration params", "error", err)
+		slog.Error("Error unmarshaling registration params", "error", err)
 		return nil, err
 	}
 
@@ -28,13 +29,13 @@ func HandleRegisterCapability(params json.RawMessage) (any, error) {
 			// Parse the registration options
 			optionsJSON, err := json.Marshal(reg.RegisterOptions)
 			if err != nil {
-				logging.Error("Error marshaling registration options", "error", err)
+				slog.Error("Error marshaling registration options", "error", err)
 				continue
 			}
 
 			var options protocol.DidChangeWatchedFilesRegistrationOptions
 			if err := json.Unmarshal(optionsJSON, &options); err != nil {
-				logging.Error("Error unmarshaling registration options", "error", err)
+				slog.Error("Error unmarshaling registration options", "error", err)
 				continue
 			}
 
@@ -54,7 +55,7 @@ func HandleApplyEdit(params json.RawMessage) (any, error) {
 
 	err := util.ApplyWorkspaceEdit(edit.Edit)
 	if err != nil {
-		logging.Error("Error applying workspace edit", "error", err)
+		slog.Error("Error applying workspace edit", "error", err)
 		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
 	}
 
@@ -89,7 +90,7 @@ func HandleServerMessage(params json.RawMessage) {
 	}
 	if err := json.Unmarshal(params, &msg); err == nil {
 		if cfg.Options.DebugLSP {
-			logging.Debug("Server message", "type", msg.Type, "message", msg.Message)
+			slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
 		}
 	}
 }
@@ -97,7 +98,7 @@ func HandleServerMessage(params json.RawMessage) {
 func HandleDiagnostics(client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
-		logging.Error("Error unmarshaling diagnostics params", "error", err)
+		slog.Error("Error unmarshaling diagnostics params", "error", err)
 		return
 	}
 

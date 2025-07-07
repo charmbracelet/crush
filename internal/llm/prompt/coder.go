@@ -3,6 +3,7 @@ package prompt
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,15 +12,14 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
 )
 
-func CoderPrompt(p provider.InferenceProvider, contextFiles ...string) string {
+func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 	switch p {
-	case provider.InferenceProviderOpenAI:
+	case string(provider.InferenceProviderOpenAI):
 		basePrompt = baseOpenAICoderPrompt
-	case provider.InferenceProviderGemini, provider.InferenceProviderVertexAI:
+	case string(provider.InferenceProviderGemini), string(provider.InferenceProviderVertexAI):
 		basePrompt = baseGeminiCoderPrompt
 	default:
 		basePrompt = baseAnthropicCoderPrompt
@@ -28,8 +28,8 @@ func CoderPrompt(p provider.InferenceProvider, contextFiles ...string) string {
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
-	contextContent := getContextFromPaths(contextFiles)
-	logging.Debug("Context content", "Context", contextContent)
+	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
+	slog.Debug("Context content", "Context", contextContent)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
 	}
@@ -380,11 +380,11 @@ Your core function is efficient and safe assistance. Balance extreme conciseness
 `
 
 func getEnvironmentInfo() string {
-	cwd := config.WorkingDirectory()
+	cwd := config.Get().WorkingDir()
 	isGit := isGitRepo(cwd)
 	platform := runtime.GOOS
 	date := time.Now().Format("1/2/2006")
-	ls := tools.NewLsTool()
+	ls := tools.NewLsTool(cwd)
 	r, _ := ls.Run(context.Background(), tools.ToolCall{
 		Input: `{"path":"."}`,
 	})

@@ -55,7 +55,7 @@ type ApplyWorkspaceEditResult struct {
 	// Indicates whether the edit was applied or not.
 	Applied bool `json:"applied"`
 	// An optional textual description for why the edit was not applied.
-	// This may be used by the server for diagnostic logging or to provide
+	// This may be used by the server for diagnostic slog.or to provide
 	// a suitable error for a request that triggered the edit.
 	FailureReason string `json:"failureReason,omitempty"`
 	// Depending on the client's failure handling strategy `failedChange` might

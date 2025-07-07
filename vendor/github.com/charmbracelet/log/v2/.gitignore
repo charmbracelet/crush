@@ -1,0 +1,17 @@
+*.txt
+*.gif
+
+examples/batch2/batch2
+examples/chocolate-chips/chocolate-chips
+examples/cookie/cookie
+examples/error/error
+examples/format/format
+examples/log/log
+examples/new/new
+examples/options/options
+examples/oven/oven
+examples/temperature/temperature
+
+.vscode
+.history
+go.work

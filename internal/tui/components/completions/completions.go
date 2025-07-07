@@ -157,15 +157,12 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements Completions.
-func (c *completionsCmp) View() tea.View {
+func (c *completionsCmp) View() string {
 	if len(c.list.Items()) == 0 {
-		return tea.NewView(c.style().Render("No completions found"))
+		return c.style().Render("No completions found")
 	}
 
-	view := tea.NewView(
-		c.style().Render(c.list.View().String()),
-	)
-	return view
+	return c.style().Render(c.list.View())
 }
 
 func (c *completionsCmp) style() lipgloss.Style {

@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -119,18 +118,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			func() tea.Msg {
 				isFileLarge, err := ValidateFileSize(path, maxAttachmentSize)
 				if err != nil {
-					logging.ErrorPersist("unable to read the image")
-					return nil
+					return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
 				}
 				if isFileLarge {
-					logging.ErrorPersist("file too large, max 5MB")
-					return nil
+					return util.ReportError(fmt.Errorf("file too large, max 5MB"))
 				}
 
 				content, err := os.ReadFile(path)
 				if err != nil {
-					logging.ErrorPersist("Unable read selected file")
-					return nil
+					return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
 				}
 
 				mimeBufferSize := min(512, len(content))
@@ -148,7 +144,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) View() tea.View {
+func (m *model) View() string {
 	t := styles.CurrentTheme()
 
 	content := lipgloss.JoinVertical(
@@ -158,7 +154,7 @@ func (m *model) View() tea.View {
 		m.filePicker.View(),
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
-	return tea.NewView(m.style().Render(content))
+	return m.style().Render(content)
 }
 
 func (m *model) currentImage() string {

@@ -57,9 +57,9 @@ func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, nil
 }
 
-func (p *header) View() tea.View {
+func (p *header) View() string {
 	if p.session.ID == "" {
-		return tea.NewView("")
+		return ""
 	}
 
 	t := styles.CurrentTheme()
@@ -86,12 +86,12 @@ func (p *header) View() tea.View {
 			parts...,
 		),
 	)
-	return tea.NewView(content)
+	return content
 }
 
 func (h *header) details() string {
 	t := styles.CurrentTheme()
-	cwd := fsext.DirTrim(fsext.PrettyPath(config.WorkingDirectory()), 4)
+	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), 4)
 	parts := []string{
 		t.S().Muted.Render(cwd),
 	}
@@ -111,7 +111,8 @@ func (h *header) details() string {
 		parts = append(parts, t.S().Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
 	}
 
-	model := config.GetAgentModel(config.AgentCoder)
+	agentCfg := config.Get().Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
 	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.S().Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

@@ -45,7 +45,7 @@ type Provider struct {
 // Model represents an AI model configuration.
 type Model struct {
 	ID                     string  `json:"id"`
-	Name                   string  `json:"model"`
+	Model                  string  `json:"model"`
 	CostPer1MIn            float64 `json:"cost_per_1m_in"`
 	CostPer1MOut           float64 `json:"cost_per_1m_out"`
 	CostPer1MInCached      float64 `json:"cost_per_1m_in_cached"`

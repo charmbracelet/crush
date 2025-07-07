@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
@@ -29,7 +28,9 @@ type LSResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-type lsTool struct{}
+type lsTool struct {
+	workingDir string
+}
 
 const (
 	LSToolName    = "ls"
@@ -70,8 +71,10 @@ TIPS:
 - Combine with other tools for more effective exploration`
 )
 
-func NewLsTool() BaseTool {
-	return &lsTool{}
+func NewLsTool(workingDir string) BaseTool {
+	return &lsTool{
+		workingDir: workingDir,
+	}
 }
 
 func (l *lsTool) Name() string {
@@ -107,11 +110,11 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = l.workingDir
 	}
 
 	if !filepath.IsAbs(searchPath) {
-		searchPath = filepath.Join(config.WorkingDirectory(), searchPath)
+		searchPath = filepath.Join(l.workingDir, searchPath)
 	}
 
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {

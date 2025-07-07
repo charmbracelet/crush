@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
@@ -89,7 +88,9 @@ type GrepResponseMetadata struct {
 	Truncated       bool `json:"truncated"`
 }
 
-type grepTool struct{}
+type grepTool struct {
+	workingDir string
+}
 
 const (
 	GrepToolName    = "grep"
@@ -136,8 +137,10 @@ TIPS:
 - Use literal_text=true when searching for exact text containing special characters like dots, parentheses, etc.`
 )
 
-func NewGrepTool() BaseTool {
-	return &grepTool{}
+func NewGrepTool(workingDir string) BaseTool {
+	return &grepTool{
+		workingDir: workingDir,
+	}
 }
 
 func (g *grepTool) Name() string {
@@ -200,7 +203,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = g.workingDir
 	}
 
 	matches, truncated, err := searchFiles(searchPattern, searchPath, params.Include, 100)

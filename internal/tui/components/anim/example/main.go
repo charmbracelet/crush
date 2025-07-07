@@ -50,20 +50,20 @@ func (m model) View() tea.View {
 	}
 
 	v := tea.NewView("")
-	v.SetBackgroundColor(m.bgColor)
+	v.BackgroundColor = m.bgColor
 
 	if m.quitting {
 		return v
 	}
 
 	if a, ok := m.anim.(anim.Anim); ok {
-		l := lipgloss.NewLayer(a.View().String()).
+		l := lipgloss.NewLayer(a.View()).
 			Width(a.Width()).
 			X(m.w/2 - a.Width()/2).
 			Y(m.h / 2)
 
 		v = tea.NewView(lipgloss.NewCanvas(l))
-		v.SetBackgroundColor(m.bgColor)
+		v.BackgroundColor = m.bgColor
 		return v
 	}
 	return v

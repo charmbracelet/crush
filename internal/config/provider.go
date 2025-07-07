@@ -4,27 +4,44 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/fur/client"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
-var fur = client.New()
-
-var (
-	providerOnc  sync.Once // Ensures the initialization happens only once
-	providerList []provider.Provider
-	// UseMockProviders can be set to true in tests to avoid API calls
-	UseMockProviders bool
-)
-
-func providersPath() string {
-	return filepath.Join(baseDataPath(), "providers.json")
+type ProviderClient interface {
+	GetProviders() ([]provider.Provider, error)
 }
 
-func saveProviders(providers []provider.Provider) error {
-	path := providersPath()
+var (
+	providerOnce sync.Once
+	providerList []provider.Provider
+)
+
+// file to cache provider data
+func providerCacheFileData() string {
+	xdgDataHome := os.Getenv("XDG_DATA_HOME")
+	if xdgDataHome != "" {
+		return filepath.Join(xdgDataHome, appName, "providers.json")
+	}
+
+	// return the path to the main data directory
+	// for windows, it should be in `%LOCALAPPDATA%/crush/`
+	// for linux and macOS, it should be in `$HOME/.local/share/crush/`
+	if runtime.GOOS == "windows" {
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
+		}
+		return filepath.Join(localAppData, appName, "providers.json")
+	}
+
+	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, "providers.json")
+}
+
+func saveProvidersInCache(path string, providers []provider.Provider) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -38,8 +55,7 @@ func saveProviders(providers []provider.Provider) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func loadProviders() ([]provider.Provider, error) {
-	path := providersPath()
+func loadProvidersFromCache(path string) ([]provider.Provider, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -50,34 +66,33 @@ func loadProviders() ([]provider.Provider, error) {
 	return providers, err
 }
 
-func Providers() []provider.Provider {
-	providerOnc.Do(func() {
-		// Use mock providers when testing
-		if UseMockProviders {
-			providerList = MockProviders()
-			return
+func loadProviders(path string, client ProviderClient) ([]provider.Provider, error) {
+	providers, err := client.GetProviders()
+	if err != nil {
+		fallbackToCache, err := loadProvidersFromCache(path)
+		if err != nil {
+			return nil, err
 		}
-
-		// Try to get providers from upstream API
-		if providers, err := fur.GetProviders(); err == nil {
-			providerList = providers
-			// Save providers locally for future fallback
-			_ = saveProviders(providers)
-		} else {
-			// If upstream fails, try to load from local cache
-			if localProviders, localErr := loadProviders(); localErr == nil {
-				providerList = localProviders
-			} else {
-				// If both fail, return empty list
-				providerList = []provider.Provider{}
-			}
+		providers = fallbackToCache
+	} else {
+		if err := saveProvidersInCache(path, providerList); err != nil {
+			return nil, err
 		}
-	})
-	return providerList
+	}
+	return providers, nil
 }
 
-// ResetProviders resets the provider cache. Useful for testing.
-func ResetProviders() {
-	providerOnc = sync.Once{}
-	providerList = nil
+func Providers() ([]provider.Provider, error) {
+	return LoadProviders(client.New())
+}
+
+func LoadProviders(client ProviderClient) ([]provider.Provider, error) {
+	var err error
+	providerOnce.Do(func() {
+		providerList, err = loadProviders(providerCacheFileData(), client)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return providerList, nil
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/logging"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -94,7 +94,6 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
 	case pubsub.Event[history.File]:
-		logging.Info("sidebar", "Received file history event", "file", msg.Payload.Path, "session", msg.Payload.SessionID)
 		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
@@ -106,7 +105,7 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *sidebarCmp) View() tea.View {
+func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 	if !m.compactMode {
@@ -138,9 +137,7 @@ func (m *sidebarCmp) View() tea.View {
 		m.mcpBlock(),
 	)
 
-	return tea.NewView(
-		lipgloss.JoinVertical(lipgloss.Left, parts...),
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
@@ -161,6 +158,8 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 				before := existing.History.initialVersion.Content
 				after := existing.History.latestVersion.Content
 				path := existing.History.initialVersion.Path
+				cwd := config.Get().WorkingDir()
+				path = strings.TrimPrefix(path, cwd)
 				_, additions, deletions := diff.GenerateDiff(before, after, path)
 				existing.Additions = additions
 				existing.Deletions = deletions
@@ -214,7 +213,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 	sessionFiles := make([]SessionFile, 0, len(fileMap))
 	for path, fh := range fileMap {
-		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, fh.initialVersion.Path)
+		cwd := config.Get().WorkingDir()
+		path = strings.TrimPrefix(path, cwd)
+		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, path)
 		sessionFiles = append(sessionFiles, SessionFile{
 			History:   fh,
 			FilePath:  path,
@@ -297,7 +298,7 @@ func (m *sidebarCmp) filesBlock() string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		cwd := config.WorkingDirectory() + string(os.PathSeparator)
+		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
 		filePath := file.FilePath
 		filePath = strings.TrimPrefix(filePath, cwd)
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
@@ -474,12 +475,13 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	model := config.GetAgentModel(config.AgentCoder)
+	agentCfg := config.Get().Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
+	modelName := t.S().Text.Render(model.Model)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,
@@ -507,7 +509,7 @@ func (m *sidebarCmp) SetSession(session session.Session) tea.Cmd {
 }
 
 func cwd() string {
-	cwd := config.WorkingDirectory()
+	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
 	// Replace home directory with ~, unless we're at the top level of the
 	// home directory).

@@ -31,8 +31,8 @@ const (
 
 // ModelSelectedMsg is sent when a model is selected
 type ModelSelectedMsg struct {
-	Model     config.PreferredModel
-	ModelType config.ModelType
+	Model     config.SelectedModel
+	ModelType config.SelectedModelType
 }
 
 // CloseModelDialogMsg is sent when a model is selected
@@ -115,19 +115,19 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items := m.modelList.Items()
 			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(ModelOption)
 
-			var modelType config.ModelType
+			var modelType config.SelectedModelType
 			if m.modelType == LargeModelType {
-				modelType = config.LargeModel
+				modelType = config.SelectedModelTypeLarge
 			} else {
-				modelType = config.SmallModel
+				modelType = config.SelectedModelTypeSmall
 			}
 
 			return m, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(ModelSelectedMsg{
-					Model: config.PreferredModel{
-						ModelID:  selectedItem.Model.ID,
-						Provider: selectedItem.Provider.ID,
+					Model: config.SelectedModel{
+						Model:    selectedItem.Model.ID,
+						Provider: string(selectedItem.Provider.ID),
 					},
 					ModelType: modelType,
 				}),
@@ -149,23 +149,29 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *modelDialogCmp) View() tea.View {
+func (m *modelDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := m.modelList.View()
 	radio := m.modelTypeRadio()
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-lipgloss.Width(radio)-5)+" "+radio),
-		listView.String(),
+		listView,
 		"",
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
-	v := tea.NewView(m.style().Render(content))
-	if listView.Cursor() != nil {
-		c := m.moveCursor(listView.Cursor())
-		v.SetCursor(c)
+	return m.style().Render(content)
+}
+
+func (m *modelDialogCmp) Cursor() *tea.Cursor {
+	if cursor, ok := m.modelList.(util.Cursor); ok {
+		cursor := cursor.Cursor()
+		if cursor != nil {
+			cursor = m.moveCursor(cursor)
+			return cursor
+		}
 	}
-	return v
+	return nil
 }
 
 func (m *modelDialogCmp) style() lipgloss.Style {
@@ -218,35 +224,39 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 	m.modelType = modelType
 
-	providers := config.Providers()
+	providers, err := config.Providers()
+	if err != nil {
+		return util.ReportError(err)
+	}
+
 	modelItems := []util.Model{}
 	selectIndex := 0
 
 	cfg := config.Get()
-	var currentModel config.PreferredModel
+	var currentModel config.SelectedModel
 	if m.modelType == LargeModelType {
-		currentModel = cfg.Models.Large
+		currentModel = cfg.Models[config.SelectedModelTypeLarge]
 	} else {
-		currentModel = cfg.Models.Small
+		currentModel = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
 	// Create a map to track which providers we've already added
-	addedProviders := make(map[provider.InferenceProvider]bool)
+	addedProviders := make(map[string]bool)
 
 	// First, add any configured providers that are not in the known providers list
 	// These should appear at the top of the list
 	knownProviders := provider.KnownProviders()
 	for providerID, providerConfig := range cfg.Providers {
-		if providerConfig.Disabled {
+		if providerConfig.Disable {
 			continue
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.Contains(knownProviders, providerID) {
+		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
 			// Convert config provider to provider.Provider format
 			configProvider := provider.Provider{
 				Name:   string(providerID), // Use provider ID as name for unknown providers
-				ID:     providerID,
+				ID:     provider.InferenceProvider(providerID),
 				Models: make([]provider.Model, len(providerConfig.Models)),
 			}
 
@@ -254,7 +264,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 			for i, model := range providerConfig.Models {
 				configProvider.Models[i] = provider.Model{
 					ID:                     model.ID,
-					Name:                   model.Name,
+					Model:                  model.Model,
 					CostPer1MIn:            model.CostPer1MIn,
 					CostPer1MOut:           model.CostPer1MOut,
 					CostPer1MInCached:      model.CostPer1MInCached,
@@ -263,7 +273,7 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 					DefaultMaxTokens:       model.DefaultMaxTokens,
 					CanReason:              model.CanReason,
 					HasReasoningEffort:     model.HasReasoningEffort,
-					DefaultReasoningEffort: model.ReasoningEffort,
+					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					SupportsImages:         model.SupportsImages,
 				}
 			}
@@ -275,11 +285,11 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 			}
 			modelItems = append(modelItems, commands.NewItemSection(name))
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}))
-				if model.ID == currentModel.ModelID && configProvider.ID == currentModel.Provider {
+				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
 					selectIndex = len(modelItems) - 1 // Set the selected index to the current model
 				}
 			}
@@ -290,12 +300,12 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 	// Then add the known providers from the predefined list
 	for _, provider := range providers {
 		// Skip if we already added this provider as an unknown provider
-		if addedProviders[provider.ID] {
+		if addedProviders[string(provider.ID)] {
 			continue
 		}
 
 		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers[provider.ID]; exists && providerConfig.Disabled {
+		if providerConfig, exists := cfg.Providers[string(provider.ID)]; exists && providerConfig.Disable {
 			continue
 		}
 
@@ -305,11 +315,11 @@ func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
 		}
 		modelItems = append(modelItems, commands.NewItemSection(name))
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))
-			if model.ID == currentModel.ModelID && provider.ID == currentModel.Provider {
+			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
 				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
 			}
 		}

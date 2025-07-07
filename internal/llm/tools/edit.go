@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/logging"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -40,6 +40,7 @@ type editTool struct {
 	lspClients  map[string]*lsp.Client
 	permissions permission.Service
 	files       history.Service
+	workingDir  string
 }
 
 const (
@@ -98,11 +99,12 @@ WINDOWS NOTES:
 Remember: when making multiple file edits in a row to the same file, you should prefer to send all edits in a single message with multiple calls to this tool, rather than multiple messages with a single call each.`
 )
 
-func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service) BaseTool {
+func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &editTool{
 		lspClients:  lspClients,
 		permissions: permissions,
 		files:       files,
+		workingDir:  workingDir,
 	}
 }
 
@@ -143,8 +145,7 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	}
 
 	if !filepath.IsAbs(params.FilePath) {
-		wd := config.WorkingDirectory()
-		params.FilePath = filepath.Join(wd, params.FilePath)
+		params.FilePath = filepath.Join(e.workingDir, params.FilePath)
 	}
 
 	var response ToolResponse
@@ -205,9 +206,9 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	_, additions, removals := diff.GenerateDiff(
 		"",
 		content,
-		filePath,
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := config.WorkingDirectory()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir
@@ -246,7 +247,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	_, err = e.files.CreateVersion(ctx, sessionID, filePath, content)
 	if err != nil {
 		// Log error but don't fail the operation
-		logging.Debug("Error creating file history version", "error", err)
+		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)
@@ -317,10 +318,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		filePath,
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	rootDir := config.WorkingDirectory()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir
@@ -361,13 +362,13 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		// User Manually changed the content store an intermediate version
 		_, err = e.files.CreateVersion(ctx, sessionID, filePath, oldContent)
 		if err != nil {
-			logging.Debug("Error creating file history version", "error", err)
+			slog.Debug("Error creating file history version", "error", err)
 		}
 	}
 	// Store the new version
 	_, err = e.files.CreateVersion(ctx, sessionID, filePath, "")
 	if err != nil {
-		logging.Debug("Error creating file history version", "error", err)
+		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)
@@ -440,9 +441,9 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
-		filePath,
+		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := config.WorkingDirectory()
+	rootDir := e.workingDir
 	permissionPath := filepath.Dir(filePath)
 	if strings.HasPrefix(filePath, rootDir) {
 		permissionPath = rootDir
@@ -483,13 +484,13 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		// User Manually changed the content store an intermediate version
 		_, err = e.files.CreateVersion(ctx, sessionID, filePath, oldContent)
 		if err != nil {
-			logging.Debug("Error creating file history version", "error", err)
+			slog.Debug("Error creating file history version", "error", err)
 		}
 	}
 	// Store the new version
 	_, err = e.files.CreateVersion(ctx, sessionID, filePath, newContent)
 	if err != nil {
-		logging.Debug("Error creating file history version", "error", err)
+		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)

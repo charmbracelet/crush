@@ -65,7 +65,7 @@ func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the quit dialog with Yes/No buttons.
-func (q *quitDialogCmp) View() tea.View {
+func (q *quitDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
 	yesStyle := t.S().Text
@@ -100,9 +100,7 @@ func (q *quitDialogCmp) View() tea.View {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus)
 
-	return tea.NewView(
-		quitDialogStyle.Render(content),
-	)
+	return quitDialogStyle.Render(content)
 }
 
 func (q *quitDialogCmp) Position() (int, int) {

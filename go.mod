@@ -2,6 +2,10 @@ module github.com/charmbracelet/crush
 
 go 1.24.3
 
+replace github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250703182356-a42fb608faaf
+
+replace github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250703152138-ff346e83e819
+
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -13,34 +17,47 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/charlievieth/fastwalk v1.0.11
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.3.0.20250609143341-c76fa36f1b94
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1
 	github.com/charmbracelet/fang v0.1.0
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71
-	github.com/charmbracelet/x/ansi v0.9.3-0.20250602153603-fb931ed90413
+	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
+	github.com/charmbracelet/x/ansi v0.9.3
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250627134340-c144409e381c
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/fsnotify/fsnotify v1.8.0
-	github.com/go-logfmt/logfmt v0.6.0
 	github.com/google/uuid v1.6.0
-	github.com/invopop/jsonschema v0.13.0
+	github.com/joho/godotenv v1.5.1
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go v1.8.2
 	github.com/pressly/goose/v3 v3.24.2
+	github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.9.1
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
 	github.com/stretchr/testify v1.10.0
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/v3 v3.11.0
 )
 
-require github.com/spf13/cast v1.7.1 // indirect
+require (
+	github.com/go-logfmt/logfmt v0.6.0 // indirect
+	github.com/spf13/cast v1.7.1 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
+)
+
+require (
+	github.com/charmbracelet/ultraviolet v0.0.0-20250707134318-0fdaa64b8c5e // indirect
+	github.com/charmbracelet/x/termios v0.1.1 // indirect
+)
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
@@ -67,13 +84,10 @@ require (
 	github.com/aws/smithy-go v1.20.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef
-	github.com/charmbracelet/x/input v0.3.5-0.20250509021451-13796e822d86 // indirect
-	github.com/charmbracelet/x/term v0.2.1 // indirect
+	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/windows v0.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect
@@ -92,7 +106,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0
-	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
@@ -114,7 +127,6 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
@@ -128,8 +140,8 @@ require (
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/image v0.26.0 // indirect
 	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/sync v0.15.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/genai v1.3.0

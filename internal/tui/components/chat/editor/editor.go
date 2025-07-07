@@ -14,7 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -153,8 +152,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
-			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
-			return m, cmd
+			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
@@ -265,20 +263,22 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *editorCmp) View() tea.View {
-	t := styles.CurrentTheme()
+func (m *editorCmp) Cursor() *tea.Cursor {
 	cursor := m.textarea.Cursor()
 	if cursor != nil {
 		cursor.X = cursor.X + m.x + 1
 		cursor.Y = cursor.Y + m.y + 1 // adjust for padding
 	}
+	return cursor
+}
+
+func (m *editorCmp) View() string {
+	t := styles.CurrentTheme()
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),
 		)
-		view := tea.NewView(content)
-		view.SetCursor(cursor)
-		return view
+		return content
 	}
 	content := t.S().Base.Padding(0, 1, 1, 1).Render(
 		lipgloss.JoinVertical(lipgloss.Top,
@@ -286,9 +286,7 @@ func (m *editorCmp) View() tea.View {
 			m.textarea.View(),
 		),
 	)
-	view := tea.NewView(content)
-	view.SetCursor(cursor)
-	return view
+	return content
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {

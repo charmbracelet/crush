@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/logging"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
 	"google.golang.org/genai"
@@ -27,7 +28,7 @@ type GeminiClient ProviderClient
 func newGeminiClient(opts providerClientOptions) GeminiClient {
 	client, err := createGeminiClient(opts)
 	if err != nil {
-		logging.Error("Failed to create Gemini client", "error", err)
+		slog.Error("Failed to create Gemini client", "error", err)
 		return nil
 	}
 
@@ -167,12 +168,12 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	cfg := config.Get()
 	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(geminiMessages)
-		logging.Debug("Prepared messages", "messages", string(jsonData))
+		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models.Large
-	if g.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
 	maxTokens := model.DefaultMaxTokens
@@ -209,7 +210,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 				return nil, retryErr
 			}
 			if retry {
-				logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
+				slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -265,12 +266,12 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	cfg := config.Get()
 	if cfg.Options.Debug {
 		jsonData, _ := json.Marshal(geminiMessages)
-		logging.Debug("Prepared messages", "messages", string(jsonData))
+		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models.Large
-	if g.providerOptions.modelType == config.SmallModel {
-		modelConfig = cfg.Models.Small
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
@@ -322,7 +323,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 						return
 					}
 					if retry {
-						logging.WarnPersist(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries), logging.PersistTimeArg, time.Millisecond*time.Duration(after+100))
+						slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
 						select {
 						case <-ctx.Done():
 							if ctx.Err() != nil {
@@ -424,7 +425,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = config.ResolveAPIKey(g.providerOptions.config.APIKey)
+		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
@@ -462,7 +463,7 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 	}
 }
 
-func (g *geminiClient) Model() config.Model {
+func (g *geminiClient) Model() provider.Model {
 	return g.providerOptions.model(g.providerOptions.modelType)
 }
 

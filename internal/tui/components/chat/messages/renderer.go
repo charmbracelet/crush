@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/highlight"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
+	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss/v2/tree"
@@ -542,7 +542,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 	if v.result.ToolCallID == "" {
 		v.spinning = true
-		parts = append(parts, v.anim.View().String())
+		parts = append(parts, v.anim.View())
 	} else {
 		v.spinning = false
 	}

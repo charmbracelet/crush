@@ -145,19 +145,19 @@ func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the tool call component based on its current state.
 // Shows either a pending animation or the tool-specific rendered result.
-func (m *toolCallCmp) View() tea.View {
+func (m *toolCallCmp) View() string {
 	box := m.style()
 
 	if !m.call.Finished && !m.cancelled {
-		return tea.NewView(box.Render(m.renderPending()))
+		return box.Render(m.renderPending())
 	}
 
 	r := registry.lookup(m.call.Name)
 
 	if m.isNested {
-		return tea.NewView(box.Render(r.Render(m)))
+		return box.Render(r.Render(m))
 	}
-	return tea.NewView(box.Render(r.Render(m)))
+	return box.Render(r.Render(m))
 }
 
 // State management methods

@@ -1,0 +1,2 @@
+*.golden linguist-generated=true -text
+*.png filter=lfs diff=lfs merge=lfs -text

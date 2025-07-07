@@ -1,9 +1,8 @@
 package shell
 
 import (
+	"log/slog"
 	"sync"
-
-	"github.com/charmbracelet/crush/internal/logging"
 )
 
 // PersistentShell is a singleton shell instance that maintains state across the application
@@ -30,9 +29,9 @@ func GetPersistentShell(cwd string) *PersistentShell {
 	return shellInstance
 }
 
-// loggingAdapter adapts the internal logging package to the Logger interface
+// slog.dapter adapts the internal slog.package to the Logger interface
 type loggingAdapter struct{}
 
 func (l *loggingAdapter) InfoPersist(msg string, keysAndValues ...interface{}) {
-	logging.InfoPersist(msg, keysAndValues...)
+	slog.Info(msg, keysAndValues...)
 }

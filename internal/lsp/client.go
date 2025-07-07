@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/logging"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 )
 
@@ -96,17 +97,17 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			logging.Error("LSP Server", "err", scanner.Text())
+			slog.Error("LSP Server", "err", scanner.Text())
 		}
 		if err := scanner.Err(); err != nil {
-			logging.Error("Error reading", "err", err)
+			slog.Error("Error reading", "err", err)
 		}
 	}()
 
 	// Start message handling loop
 	go func() {
-		defer logging.RecoverPanic("LSP-message-handler", func() {
-			logging.ErrorPersist("LSP message handler crashed, LSP functionality may be impaired")
+		defer log.RecoverPanic("LSP-message-handler", func() {
+			slog.Error("LSP message handler crashed, LSP functionality may be impaired")
 		})
 		client.handleMessages()
 	}()
@@ -300,7 +301,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	defer ticker.Stop()
 
 	if cfg.Options.DebugLSP {
-		logging.Debug("Waiting for LSP server to be ready...")
+		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
 	// Determine server type for specialized initialization
@@ -309,7 +310,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	// For TypeScript-like servers, we need to open some key files first
 	if serverType == ServerTypeTypeScript {
 		if cfg.Options.DebugLSP {
-			logging.Debug("TypeScript-like server detected, opening key configuration files")
+			slog.Debug("TypeScript-like server detected, opening key configuration files")
 		}
 		c.openKeyConfigFiles(ctx)
 	}
@@ -326,15 +327,15 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 				// Server responded successfully
 				c.SetServerState(StateReady)
 				if cfg.Options.DebugLSP {
-					logging.Debug("LSP server is ready")
+					slog.Debug("LSP server is ready")
 				}
 				return nil
 			} else {
-				logging.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
+				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 
 			if cfg.Options.DebugLSP {
-				logging.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
+				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 		}
 	}
@@ -376,7 +377,7 @@ func (c *Client) detectServerType() ServerType {
 
 // openKeyConfigFiles opens important configuration files that help initialize the server
 func (c *Client) openKeyConfigFiles(ctx context.Context) {
-	workDir := config.WorkingDirectory()
+	workDir := config.Get().WorkingDir()
 	serverType := c.detectServerType()
 
 	var filesToOpen []string
@@ -409,9 +410,9 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 		if _, err := os.Stat(file); err == nil {
 			// File exists, try to open it
 			if err := c.OpenFile(ctx, file); err != nil {
-				logging.Debug("Failed to open key config file", "file", file, "error", err)
+				slog.Debug("Failed to open key config file", "file", file, "error", err)
 			} else {
-				logging.Debug("Opened key config file for initialization", "file", file)
+				slog.Debug("Opened key config file for initialization", "file", file)
 			}
 		}
 	}
@@ -464,7 +465,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 	}
 
 	// If we have no open TypeScript files, try to find and open one
-	workDir := config.WorkingDirectory()
+	workDir := config.Get().WorkingDir()
 	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -487,7 +488,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
-		logging.Debug("Error walking directory for TypeScript files", "error", err)
+		slog.Debug("Error walking directory for TypeScript files", "error", err)
 	}
 
 	// Final fallback - just try a generic capability
@@ -527,7 +528,7 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 			if err := c.OpenFile(ctx, path); err == nil {
 				filesOpened++
 				if cfg.Options.DebugLSP {
-					logging.Debug("Opened TypeScript file for initialization", "file", path)
+					slog.Debug("Opened TypeScript file for initialization", "file", path)
 				}
 			}
 		}
@@ -536,11 +537,11 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 	})
 
 	if err != nil && cfg.Options.DebugLSP {
-		logging.Debug("Error walking directory for TypeScript files", "error", err)
+		slog.Debug("Error walking directory for TypeScript files", "error", err)
 	}
 
 	if cfg.Options.DebugLSP {
-		logging.Debug("Opened TypeScript files for initialization", "count", filesOpened)
+		slog.Debug("Opened TypeScript files for initialization", "count", filesOpened)
 	}
 }
 
@@ -681,7 +682,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	}
 
 	if cfg.Options.DebugLSP {
-		logging.Debug("Closing file", "file", filepath)
+		slog.Debug("Closing file", "file", filepath)
 	}
 	if err := c.Notify(ctx, "textDocument/didClose", params); err != nil {
 		return err
@@ -720,12 +721,12 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	for _, filePath := range filesToClose {
 		err := c.CloseFile(ctx, filePath)
 		if err != nil && cfg.Options.DebugLSP {
-			logging.Warn("Error closing file", "file", filePath, "error", err)
+			slog.Warn("Error closing file", "file", filePath, "error", err)
 		}
 	}
 
 	if cfg.Options.DebugLSP {
-		logging.Debug("Closed all files", "files", filesToClose)
+		slog.Debug("Closed all files", "files", filesToClose)
 	}
 }
 

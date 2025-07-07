@@ -6,8 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/logging"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -58,49 +56,17 @@ func (m *statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.clearMessageCmd(ttl)
 	case util.ClearStatusMsg:
 		m.info = util.InfoMsg{}
-
-	// Handle persistent logs
-	case pubsub.Event[logging.LogMessage]:
-		if msg.Payload.Persist {
-			switch msg.Payload.Level {
-			case "error":
-				m.info = util.InfoMsg{
-					Type: util.InfoTypeError,
-					Msg:  msg.Payload.Message,
-					TTL:  msg.Payload.PersistTime,
-				}
-			case "info":
-				m.info = util.InfoMsg{
-					Type: util.InfoTypeInfo,
-					Msg:  msg.Payload.Message,
-					TTL:  msg.Payload.PersistTime,
-				}
-			case "warn":
-				m.info = util.InfoMsg{
-					Type: util.InfoTypeWarn,
-					Msg:  msg.Payload.Message,
-					TTL:  msg.Payload.PersistTime,
-				}
-			default:
-				m.info = util.InfoMsg{
-					Type: util.InfoTypeInfo,
-					Msg:  msg.Payload.Message,
-					TTL:  msg.Payload.PersistTime,
-				}
-			}
-			return m, m.clearMessageCmd(m.info.TTL)
-		}
 	}
 	return m, nil
 }
 
-func (m *statusCmp) View() tea.View {
+func (m *statusCmp) View() string {
 	t := styles.CurrentTheme()
 	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(m.keyMap))
 	if m.info.Msg != "" {
 		status = m.infoMsg()
 	}
-	return tea.NewView(status)
+	return status
 }
 
 func (m *statusCmp) infoMsg() string {

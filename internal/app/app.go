@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/logging"
+
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -36,9 +37,11 @@ type App struct {
 	watcherCancelFuncs []context.CancelFunc
 	cancelFuncsMutex   sync.Mutex
 	watcherWG          sync.WaitGroup
+
+	config *config.Config
 }
 
-func New(ctx context.Context, conn *sql.DB) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
@@ -48,16 +51,16 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir()),
 		LSPClients:  make(map[string]*lsp.Client),
+		config:      cfg,
 	}
 
 	// Initialize LSP clients in the background
 	go app.initLSPClients(ctx)
 
-	cfg := config.Get()
-
-	coderAgentCfg := cfg.Agents[config.AgentCoder]
+	// TODO: remove the concept of agent config most likely
+	coderAgentCfg := cfg.Agents["coder"]
 	if coderAgentCfg.ID == "" {
 		return nil, fmt.Errorf("coder agent configuration is missing")
 	}
@@ -72,7 +75,7 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 		app.LSPClients,
 	)
 	if err != nil {
-		logging.Error("Failed to create coder agent", err)
+		slog.Error("Failed to create coder agent", "err", err)
 		return nil, err
 	}
 
@@ -81,7 +84,7 @@ func New(ctx context.Context, conn *sql.DB) (*App, error) {
 
 // RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.
 func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat string, quiet bool) error {
-	logging.Info("Running in non-interactive mode")
+	slog.Info("Running in non-interactive mode")
 
 	// Start spinner if not in quiet mode
 	var spinner *format.Spinner
@@ -106,7 +109,7 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
-	logging.Info("Created session for non-interactive run", "session_id", sess.ID)
+	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive session
 	a.Permissions.AutoApproveSession(sess.ID)
@@ -119,7 +122,7 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 	result := <-done
 	if result.Error != nil {
 		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-			logging.Info("Agent processing cancelled", "session_id", sess.ID)
+			slog.Info("Agent processing cancelled", "session_id", sess.ID)
 			return nil
 		}
 		return fmt.Errorf("agent processing failed: %w", result.Error)
@@ -138,7 +141,7 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 
 	fmt.Println(format.FormatOutput(content, outputFormat))
 
-	logging.Info("Non-interactive run completed", "session_id", sess.ID)
+	slog.Info("Non-interactive run completed", "session_id", sess.ID)
 
 	return nil
 }
@@ -162,7 +165,7 @@ func (app *App) Shutdown() {
 	for name, client := range clients {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := client.Shutdown(shutdownCtx); err != nil {
-			logging.Error("Failed to shutdown LSP client", "name", name, "error", err)
+			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()
 	}

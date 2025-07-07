@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
 )
 
@@ -22,6 +21,7 @@ type ViewParams struct {
 
 type viewTool struct {
 	lspClients map[string]*lsp.Client
+	workingDir string
 }
 
 type ViewResponseMetadata struct {
@@ -71,9 +71,10 @@ TIPS:
 - When viewing large files, use the offset parameter to read specific sections`
 )
 
-func NewViewTool(lspClients map[string]*lsp.Client) BaseTool {
+func NewViewTool(lspClients map[string]*lsp.Client, workingDir string) BaseTool {
 	return &viewTool{
-		lspClients,
+		lspClients: lspClients,
+		workingDir: workingDir,
 	}
 }
 
@@ -117,7 +118,7 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	// Handle relative paths
 	filePath := params.FilePath
 	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(config.WorkingDirectory(), filePath)
+		filePath = filepath.Join(v.workingDir, filePath)
 	}
 
 	// Check if file exists

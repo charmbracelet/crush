@@ -5,14 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/logging"
 )
 
 const (
@@ -68,10 +67,14 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-type globTool struct{}
+type globTool struct {
+	workingDir string
+}
 
-func NewGlobTool() BaseTool {
-	return &globTool{}
+func NewGlobTool(workingDir string) BaseTool {
+	return &globTool{
+		workingDir: workingDir,
+	}
 }
 
 func (g *globTool) Name() string {
@@ -108,7 +111,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = g.workingDir
 	}
 
 	files, truncated, err := globFiles(params.Pattern, searchPath, 100)
@@ -143,7 +146,7 @@ func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
 		if err == nil {
 			return matches, len(matches) >= limit && limit > 0, nil
 		}
-		logging.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
+		slog.Warn(fmt.Sprintf("Ripgrep execution failed: %v. Falling back to doublestar.", err))
 	}
 
 	return fsext.GlobWithDoubleStar(pattern, searchPath, limit)

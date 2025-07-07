@@ -1,9 +1,11 @@
 package layout
 
 import (
+	"log/slog"
+
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/logging"
+
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -104,17 +106,34 @@ func (s *splitPaneLayout) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, tea.Batch(cmds...)
 }
 
-func (s *splitPaneLayout) View() tea.View {
+func (s *splitPaneLayout) Cursor() *tea.Cursor {
+	if s.bottomPanel != nil {
+		if c, ok := s.bottomPanel.(util.Cursor); ok {
+			return c.Cursor()
+		}
+	} else if s.rightPanel != nil {
+		if c, ok := s.rightPanel.(util.Cursor); ok {
+			return c.Cursor()
+		}
+	} else if s.leftPanel != nil {
+		if c, ok := s.leftPanel.(util.Cursor); ok {
+			return c.Cursor()
+		}
+	}
+	return nil
+}
+
+func (s *splitPaneLayout) View() string {
 	var topSection string
 
 	if s.leftPanel != nil && s.rightPanel != nil {
 		leftView := s.leftPanel.View()
 		rightView := s.rightPanel.View()
-		topSection = lipgloss.JoinHorizontal(lipgloss.Top, leftView.String(), rightView.String())
+		topSection = lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 	} else if s.leftPanel != nil {
-		topSection = s.leftPanel.View().String()
+		topSection = s.leftPanel.View()
 	} else if s.rightPanel != nil {
-		topSection = s.rightPanel.View().String()
+		topSection = s.rightPanel.View()
 	} else {
 		topSection = ""
 	}
@@ -123,21 +142,11 @@ func (s *splitPaneLayout) View() tea.View {
 
 	if s.bottomPanel != nil && topSection != "" {
 		bottomView := s.bottomPanel.View()
-		finalView = lipgloss.JoinVertical(lipgloss.Left, topSection, bottomView.String())
+		finalView = lipgloss.JoinVertical(lipgloss.Left, topSection, bottomView)
 	} else if s.bottomPanel != nil {
-		finalView = s.bottomPanel.View().String()
+		finalView = s.bottomPanel.View()
 	} else {
 		finalView = topSection
-	}
-
-	// TODO: think of a better way to handle multiple cursors
-	var cursor *tea.Cursor
-	if s.bottomPanel != nil {
-		cursor = s.bottomPanel.View().Cursor()
-	} else if s.rightPanel != nil {
-		cursor = s.rightPanel.View().Cursor()
-	} else if s.leftPanel != nil {
-		cursor = s.leftPanel.View().Cursor()
 	}
 
 	t := styles.CurrentTheme()
@@ -146,15 +155,13 @@ func (s *splitPaneLayout) View() tea.View {
 		Width(s.width).
 		Height(s.height)
 
-	view := tea.NewView(style.Render(finalView))
-	view.SetCursor(cursor)
-	return view
+	return style.Render(finalView)
 }
 
 func (s *splitPaneLayout) SetSize(width, height int) tea.Cmd {
 	s.width = width
 	s.height = height
-	logging.Info("Setting split pane size", "width", width, "height", height)
+	slog.Info("Setting split pane size", "width", width, "height", height)
 
 	var topHeight, bottomHeight int
 	var cmds []tea.Cmd

@@ -478,8 +478,8 @@ func (p *permissionDialogCmp) render() string {
 		)
 }
 
-func (p *permissionDialogCmp) View() tea.View {
-	return tea.NewView(p.render())
+func (p *permissionDialogCmp) View() string {
+	return p.render()
 }
 
 func (p *permissionDialogCmp) SetSize() tea.Cmd {

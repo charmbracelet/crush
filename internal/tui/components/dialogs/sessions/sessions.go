@@ -122,23 +122,29 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s *sessionDialogCmp) View() tea.View {
+func (s *sessionDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := s.sessionsList.View()
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Session", s.width-4)),
-		listView.String(),
+		listView,
 		"",
 		t.S().Base.Width(s.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(s.help.View(s.keyMap)),
 	)
 
-	v := tea.NewView(s.style().Render(content))
-	if listView.Cursor() != nil {
-		c := s.moveCursor(listView.Cursor())
-		v.SetCursor(c)
+	return s.style().Render(content)
+}
+
+func (s *sessionDialogCmp) Cursor() *tea.Cursor {
+	if cursor, ok := s.sessionsList.(util.Cursor); ok {
+		cursor := cursor.Cursor()
+		if cursor != nil {
+			cursor = s.moveCursor(cursor)
+		}
+		return cursor
 	}
-	return v
+	return nil
 }
 
 func (s *sessionDialogCmp) style() lipgloss.Style {

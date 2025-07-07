@@ -6,9 +6,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
+type Cursor interface {
+	Cursor() *tea.Cursor
+}
+
 type Model interface {
 	tea.Model
-	tea.Viewable
+	tea.ViewModel
 }
 
 func CmdHandler(msg tea.Msg) tea.Cmd {

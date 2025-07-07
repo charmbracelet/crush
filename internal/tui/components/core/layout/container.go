@@ -72,7 +72,14 @@ func (c *container) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (c *container) View() tea.View {
+func (c *container) Cursor() *tea.Cursor {
+	if cursor, ok := c.content.(util.Cursor); ok {
+		return cursor.Cursor()
+	}
+	return nil
+}
+
+func (c *container) View() string {
 	t := styles.CurrentTheme()
 	width := c.width
 	height := c.height
@@ -106,10 +113,7 @@ func (c *container) View() tea.View {
 		PaddingLeft(c.paddingLeft)
 
 	contentView := c.content.View()
-	view := tea.NewView(style.Render(contentView.String()))
-	cursor := contentView.Cursor()
-	view.SetCursor(cursor)
-	return view
+	return style.Render(contentView)
 }
 
 func (c *container) SetSize(width, height int) tea.Cmd {

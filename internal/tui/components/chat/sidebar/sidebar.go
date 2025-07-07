@@ -105,7 +105,7 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *sidebarCmp) View() tea.View {
+func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 	if !m.compactMode {
@@ -137,9 +137,7 @@ func (m *sidebarCmp) View() tea.View {
 		m.mcpBlock(),
 	)
 
-	return tea.NewView(
-		lipgloss.JoinVertical(lipgloss.Left, parts...),
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {

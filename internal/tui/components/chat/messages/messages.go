@@ -88,20 +88,20 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
-func (m *messageCmp) View() tea.View {
+func (m *messageCmp) View() string {
 	if m.spinning {
-		return tea.NewView(m.style().PaddingLeft(1).Render(m.anim.View().String()))
+		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {
 		// this is a user or assistant message
 		switch m.message.Role {
 		case message.User:
-			return tea.NewView(m.renderUserMessage())
+			return m.renderUserMessage()
 		default:
-			return tea.NewView(m.renderAssistantMessage())
+			return m.renderAssistantMessage()
 		}
 	}
-	return tea.NewView(m.style().Render("No message content"))
+	return m.style().Render("No message content")
 }
 
 // GetMessage returns the underlying message data
@@ -288,7 +288,7 @@ func (m *assistantSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *assistantSectionModel) View() tea.View {
+func (m *assistantSectionModel) View() string {
 	t := styles.CurrentTheme()
 	finishData := m.message.FinishPart()
 	finishTime := time.Unix(finishData.Time, 0)
@@ -298,10 +298,8 @@ func (m *assistantSectionModel) View() tea.View {
 	model := config.Get().GetModel(m.message.Provider, m.message.Model)
 	modelFormatted := t.S().Muted.Render(model.Name)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
-	return tea.NewView(
-		t.S().Base.PaddingLeft(2).Render(
-			core.Section(assistant, m.width-2),
-		),
+	return t.S().Base.PaddingLeft(2).Render(
+		core.Section(assistant, m.width-2),
 	)
 }
 

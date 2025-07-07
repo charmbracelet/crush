@@ -144,7 +144,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) View() tea.View {
+func (m *model) View() string {
 	t := styles.CurrentTheme()
 
 	content := lipgloss.JoinVertical(
@@ -154,7 +154,7 @@ func (m *model) View() tea.View {
 		m.filePicker.View(),
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
-	return tea.NewView(m.style().Render(content))
+	return m.style().Render(content)
 }
 
 func (m *model) currentImage() string {

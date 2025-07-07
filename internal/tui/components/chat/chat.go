@@ -101,12 +101,10 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the message list or an initial screen if empty.
-func (m *messageListCmp) View() tea.View {
-	return tea.NewView(
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			m.listCmp.View().String(),
-		),
+func (m *messageListCmp) View() string {
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.listCmp.View(),
 	)
 }
 

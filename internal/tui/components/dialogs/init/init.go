@@ -147,8 +147,8 @@ func (m *initDialogCmp) render() string {
 }
 
 // View implements tea.Model.
-func (m *initDialogCmp) View() tea.View {
-	return tea.NewView(m.render())
+func (m *initDialogCmp) View() string {
+	return m.render()
 }
 
 // SetSize sets the size of the component.

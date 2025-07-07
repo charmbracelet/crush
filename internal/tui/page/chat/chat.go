@@ -303,7 +303,7 @@ func (p *chatPage) GetSize() (int, int) {
 	return p.layout.GetSize()
 }
 
-func (p *chatPage) View() tea.View {
+func (p *chatPage) View() string {
 	if !p.compactMode || p.session.ID == "" {
 		// If not in compact mode or there is no session, we don't show the header
 		return p.layout.View()
@@ -311,8 +311,8 @@ func (p *chatPage) View() tea.View {
 	layoutView := p.layout.View()
 	chatView := strings.Join(
 		[]string{
-			p.header.View().String(),
-			layoutView.String(),
+			p.header.View(),
+			layoutView,
 		}, "\n",
 	)
 	layers := []*lipgloss.Layer{
@@ -327,7 +327,7 @@ func (p *chatPage) View() tea.View {
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				p.compactSidebar.View().String(),
+				p.compactSidebar.View(),
 				version,
 			),
 		)
@@ -336,9 +336,14 @@ func (p *chatPage) View() tea.View {
 	canvas := lipgloss.NewCanvas(
 		layers...,
 	)
-	view := tea.NewView(canvas.Render())
-	view.SetCursor(layoutView.Cursor())
-	return view
+	return canvas.Render()
+}
+
+func (p *chatPage) Cursor() *tea.Cursor {
+	if v, ok := p.layout.(util.Cursor); ok {
+		return v.Cursor()
+	}
+	return nil
 }
 
 func (p *chatPage) Bindings() []key.Binding {

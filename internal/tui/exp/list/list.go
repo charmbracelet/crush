@@ -84,6 +84,6 @@ func (l *list) Update(tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements List.
-func (l *list) View() tea.View {
+func (l *list) View() string {
 	panic("unimplemented")
 }

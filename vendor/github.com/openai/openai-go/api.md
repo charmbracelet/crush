@@ -5,7 +5,7 @@
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#CompoundFilterParam">CompoundFilterParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#FunctionDefinitionParam">FunctionDefinitionParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#FunctionParameters">FunctionParameters</a>
-- <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#MetadataParam">MetadataParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#Metadata">Metadata</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#ReasoningParam">ReasoningParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#ReasoningEffort">ReasoningEffort</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/shared">shared</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/shared#ResponseFormatJSONObjectParam">ResponseFormatJSONObjectParam</a>
@@ -221,6 +221,26 @@ Methods:
 
 # FineTuning
 
+## Methods
+
+Params Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#DpoHyperparameters">DpoHyperparameters</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#DpoMethodParam">DpoMethodParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ReinforcementHyperparameters">ReinforcementHyperparameters</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ReinforcementMethodParam">ReinforcementMethodParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#SupervisedHyperparameters">SupervisedHyperparameters</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#SupervisedMethodParam">SupervisedMethodParam</a>
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#DpoHyperparametersResp">DpoHyperparametersResp</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#DpoMethod">DpoMethod</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ReinforcementHyperparametersResp">ReinforcementHyperparametersResp</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ReinforcementMethod">ReinforcementMethod</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#SupervisedHyperparametersResp">SupervisedHyperparametersResp</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#SupervisedMethod">SupervisedMethod</a>
+
 ## Jobs
 
 Response Types:
@@ -237,6 +257,8 @@ Methods:
 - <code title="get /fine_tuning/jobs">client.FineTuning.Jobs.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobService.List">List</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobListParams">FineTuningJobListParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJob">FineTuningJob</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="post /fine_tuning/jobs/{fine_tuning_job_id}/cancel">client.FineTuning.Jobs.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobService.Cancel">Cancel</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTuningJobID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJob">FineTuningJob</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="get /fine_tuning/jobs/{fine_tuning_job_id}/events">client.FineTuning.Jobs.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobService.ListEvents">ListEvents</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTuningJobID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobListEventsParams">FineTuningJobListEventsParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobEvent">FineTuningJobEvent</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="post /fine_tuning/jobs/{fine_tuning_job_id}/pause">client.FineTuning.Jobs.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobService.Pause">Pause</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTuningJobID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJob">FineTuningJob</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="post /fine_tuning/jobs/{fine_tuning_job_id}/resume">client.FineTuning.Jobs.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobService.Resume">Resume</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTuningJobID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJob">FineTuningJob</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 
 ### Checkpoints
 
@@ -247,6 +269,58 @@ Response Types:
 Methods:
 
 - <code title="get /fine_tuning/jobs/{fine_tuning_job_id}/checkpoints">client.FineTuning.Jobs.Checkpoints.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobCheckpointService.List">List</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTuningJobID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobCheckpointListParams">FineTuningJobCheckpointListParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningJobCheckpoint">FineTuningJobCheckpoint</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+
+## Checkpoints
+
+### Permissions
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionNewResponse">FineTuningCheckpointPermissionNewResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionGetResponse">FineTuningCheckpointPermissionGetResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionDeleteResponse">FineTuningCheckpointPermissionDeleteResponse</a>
+
+Methods:
+
+- <code title="post /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions">client.FineTuning.Checkpoints.Permissions.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionService.New">New</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTunedModelCheckpoint <a href="https://pkg.go.dev/builtin#string">string</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionNewParams">FineTuningCheckpointPermissionNewParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#Page">Page</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionNewResponse">FineTuningCheckpointPermissionNewResponse</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="get /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions">client.FineTuning.Checkpoints.Permissions.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTunedModelCheckpoint <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionGetParams">FineTuningCheckpointPermissionGetParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionGetResponse">FineTuningCheckpointPermissionGetResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="delete /fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions/{permission_id}">client.FineTuning.Checkpoints.Permissions.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionService.Delete">Delete</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, fineTunedModelCheckpoint <a href="https://pkg.go.dev/builtin#string">string</a>, permissionID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningCheckpointPermissionDeleteResponse">FineTuningCheckpointPermissionDeleteResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+
+## Alpha
+
+### Graders
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderRunResponse">FineTuningAlphaGraderRunResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderValidateResponse">FineTuningAlphaGraderValidateResponse</a>
+
+Methods:
+
+- <code title="post /fine_tuning/alpha/graders/run">client.FineTuning.Alpha.Graders.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderService.Run">Run</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderRunParams">FineTuningAlphaGraderRunParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderRunResponse">FineTuningAlphaGraderRunResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="post /fine_tuning/alpha/graders/validate">client.FineTuning.Alpha.Graders.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderService.Validate">Validate</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderValidateParams">FineTuningAlphaGraderValidateParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#FineTuningAlphaGraderValidateResponse">FineTuningAlphaGraderValidateResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+
+# Graders
+
+## GraderModels
+
+Params Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#LabelModelGraderParam">LabelModelGraderParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#MultiGraderParam">MultiGraderParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#PythonGraderParam">PythonGraderParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ScoreModelGraderParam">ScoreModelGraderParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#StringCheckGraderParam">StringCheckGraderParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#TextSimilarityGraderParam">TextSimilarityGraderParam</a>
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#LabelModelGrader">LabelModelGrader</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#MultiGrader">MultiGrader</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#PythonGrader">PythonGrader</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ScoreModelGrader">ScoreModelGrader</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#StringCheckGrader">StringCheckGrader</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#TextSimilarityGrader">TextSimilarityGrader</a>
 
 # VectorStores
 
@@ -305,6 +379,35 @@ Methods:
 - <code title="get /vector_stores/{vector_store_id}/file_batches/{batch_id}">client.VectorStores.FileBatches.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatchService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, vectorStoreID <a href="https://pkg.go.dev/builtin#string">string</a>, batchID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatch">VectorStoreFileBatch</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="post /vector_stores/{vector_store_id}/file_batches/{batch_id}/cancel">client.VectorStores.FileBatches.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatchService.Cancel">Cancel</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, vectorStoreID <a href="https://pkg.go.dev/builtin#string">string</a>, batchID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatch">VectorStoreFileBatch</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="get /vector_stores/{vector_store_id}/file_batches/{batch_id}/files">client.VectorStores.FileBatches.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatchService.ListFiles">ListFiles</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, vectorStoreID <a href="https://pkg.go.dev/builtin#string">string</a>, batchID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFileBatchListFilesParams">VectorStoreFileBatchListFilesParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#VectorStoreFile">VectorStoreFile</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+
+# Webhooks
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#BatchCancelledWebhookEvent">BatchCancelledWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#BatchCompletedWebhookEvent">BatchCompletedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#BatchExpiredWebhookEvent">BatchExpiredWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#BatchFailedWebhookEvent">BatchFailedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#EvalRunCanceledWebhookEvent">EvalRunCanceledWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#EvalRunFailedWebhookEvent">EvalRunFailedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#EvalRunSucceededWebhookEvent">EvalRunSucceededWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#FineTuningJobCancelledWebhookEvent">FineTuningJobCancelledWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#FineTuningJobFailedWebhookEvent">FineTuningJobFailedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#FineTuningJobSucceededWebhookEvent">FineTuningJobSucceededWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#ResponseCancelledWebhookEvent">ResponseCancelledWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#ResponseCompletedWebhookEvent">ResponseCompletedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#ResponseFailedWebhookEvent">ResponseFailedWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#ResponseIncompleteWebhookEvent">ResponseIncompleteWebhookEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#UnwrapWebhookEventUnion">UnwrapWebhookEventUnion</a>
+
+Methods:
+
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.Unwrap">Unwrap</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) (*<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#UnwrapWebhookEventUnion">UnwrapWebhookEventUnion</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.UnwrapWithTolerance">UnwrapWithTolerance</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, tolerance <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Duration">Duration</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) (*<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#UnwrapWebhookEventUnion">UnwrapWebhookEventUnion</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.UnwrapWithToleranceAndTime">UnwrapWithToleranceAndTime</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, tolerance <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Duration">Duration</a>, now <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Time">Time</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) (*<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks">webhooks</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#UnwrapWebhookEventUnion">UnwrapWebhookEventUnion</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.VerifySignature">VerifySignature</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.VerifySignatureWithTolerance">VerifySignatureWithTolerance</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, tolerance <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Duration">Duration</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
+- <code>client.Webhooks.<a href="https://pkg.go.dev/github.com/openai/openai-go/webhooks#WebhookService.VerifySignatureWithToleranceAndTime">VerifySignatureWithToleranceAndTime</a>(body []<a href="https://pkg.go.dev/builtin#byte">byte</a>, headers <a href="https://pkg.go.dev/net/http">http</a>.<a href="https://pkg.go.dev/net/http#Header">Header</a>, tolerance <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Duration">Duration</a>, now <a href="https://pkg.go.dev/time">time</a>.<a href="https://pkg.go.dev/time#Time">Time</a>, opts ...<a href="https://pkg.go.dev/github.com/openai/openai-go/option">option</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/option#RequestOption">RequestOption</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
 
 # Beta
 
@@ -502,6 +605,7 @@ Params Types:
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#EasyInputMessageParam">EasyInputMessageParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#FileSearchToolParam">FileSearchToolParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#FunctionToolParam">FunctionToolParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseCodeInterpreterToolCallParam">ResponseCodeInterpreterToolCallParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseComputerToolCallParam">ResponseComputerToolCallParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseComputerToolCallOutputScreenshotParam">ResponseComputerToolCallOutputScreenshotParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseFileSearchToolCallParam">ResponseFileSearchToolCallParam</a>
@@ -520,10 +624,12 @@ Params Types:
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputMessageParam">ResponseOutputMessageParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputRefusalParam">ResponseOutputRefusalParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputTextParam">ResponseOutputTextParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponsePromptParam">ResponsePromptParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningItemParam">ResponseReasoningItemParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseTextConfigParam">ResponseTextConfigParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolUnionParam">ToolUnionParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceFunctionParam">ToolChoiceFunctionParam</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceMcpParam">ToolChoiceMcpParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceOptions">ToolChoiceOptions</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceTypesParam">ToolChoiceTypesParam</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#WebSearchToolParam">WebSearchToolParam</a>
@@ -531,6 +637,7 @@ Params Types:
 Response Types:
 
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ComputerTool">ComputerTool</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#EasyInputMessage">EasyInputMessage</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#FileSearchTool">FileSearchTool</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#FunctionTool">FunctionTool</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#Response">Response</a>
@@ -566,27 +673,50 @@ Response Types:
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseFunctionToolCallItem">ResponseFunctionToolCallItem</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseFunctionToolCallOutputItem">ResponseFunctionToolCallOutputItem</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseFunctionWebSearch">ResponseFunctionWebSearch</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseImageGenCallCompletedEvent">ResponseImageGenCallCompletedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseImageGenCallGeneratingEvent">ResponseImageGenCallGeneratingEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseImageGenCallInProgressEvent">ResponseImageGenCallInProgressEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseImageGenCallPartialImageEvent">ResponseImageGenCallPartialImageEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInProgressEvent">ResponseInProgressEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseIncompleteEvent">ResponseIncompleteEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputContentUnion">ResponseInputContentUnion</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputFile">ResponseInputFile</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputImage">ResponseInputImage</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputItemUnion">ResponseInputItemUnion</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputMessageContentList">ResponseInputMessageContentList</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputMessageItem">ResponseInputMessageItem</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseInputText">ResponseInputText</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseItemUnion">ResponseItemUnion</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpCallArgumentsDeltaEvent">ResponseMcpCallArgumentsDeltaEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpCallArgumentsDoneEvent">ResponseMcpCallArgumentsDoneEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpCallCompletedEvent">ResponseMcpCallCompletedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpCallFailedEvent">ResponseMcpCallFailedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpCallInProgressEvent">ResponseMcpCallInProgressEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpListToolsCompletedEvent">ResponseMcpListToolsCompletedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpListToolsFailedEvent">ResponseMcpListToolsFailedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseMcpListToolsInProgressEvent">ResponseMcpListToolsInProgressEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputItemUnion">ResponseOutputItemUnion</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputItemAddedEvent">ResponseOutputItemAddedEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputItemDoneEvent">ResponseOutputItemDoneEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputMessage">ResponseOutputMessage</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputRefusal">ResponseOutputRefusal</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputText">ResponseOutputText</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseOutputTextAnnotationAddedEvent">ResponseOutputTextAnnotationAddedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponsePrompt">ResponsePrompt</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseQueuedEvent">ResponseQueuedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningDeltaEvent">ResponseReasoningDeltaEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningDoneEvent">ResponseReasoningDoneEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningItem">ResponseReasoningItem</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryDeltaEvent">ResponseReasoningSummaryDeltaEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryDoneEvent">ResponseReasoningSummaryDoneEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryPartAddedEvent">ResponseReasoningSummaryPartAddedEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryPartDoneEvent">ResponseReasoningSummaryPartDoneEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryTextDeltaEvent">ResponseReasoningSummaryTextDeltaEvent</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseReasoningSummaryTextDoneEvent">ResponseReasoningSummaryTextDoneEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseRefusalDeltaEvent">ResponseRefusalDeltaEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseRefusalDoneEvent">ResponseRefusalDoneEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseStatus">ResponseStatus</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseStreamEventUnion">ResponseStreamEventUnion</a>
-- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseTextAnnotationDeltaEvent">ResponseTextAnnotationDeltaEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseTextConfig">ResponseTextConfig</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseTextDeltaEvent">ResponseTextDeltaEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseTextDoneEvent">ResponseTextDoneEvent</a>
@@ -596,6 +726,7 @@ Response Types:
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseWebSearchCallSearchingEvent">ResponseWebSearchCallSearchingEvent</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolUnion">ToolUnion</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceFunction">ToolChoiceFunction</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceMcp">ToolChoiceMcp</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceOptions">ToolChoiceOptions</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ToolChoiceTypes">ToolChoiceTypes</a>
 - <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#WebSearchTool">WebSearchTool</a>
@@ -605,6 +736,7 @@ Methods:
 - <code title="post /responses">client.Responses.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseService.New">New</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseNewParams">ResponseNewParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#Response">Response</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="get /responses/{response_id}">client.Responses.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, responseID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseGetParams">ResponseGetParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#Response">Response</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 - <code title="delete /responses/{response_id}">client.Responses.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseService.Delete">Delete</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, responseID <a href="https://pkg.go.dev/builtin#string">string</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
+- <code title="post /responses/{response_id}/cancel">client.Responses.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseService.Cancel">Cancel</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, responseID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#Response">Response</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
 
 ## InputItems
 
@@ -615,3 +747,39 @@ Response Types:
 Methods:
 
 - <code title="get /responses/{response_id}/input_items">client.Responses.InputItems.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#InputItemService.List">List</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, responseID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#InputItemListParams">InputItemListParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go/responses">responses</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/responses#ResponseItemUnion">ResponseItemUnion</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+
+# Containers
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerNewResponse">ContainerNewResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerGetResponse">ContainerGetResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerListResponse">ContainerListResponse</a>
+
+Methods:
+
+- <code title="post /containers">client.Containers.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerService.New">New</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerNewParams">ContainerNewParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerNewResponse">ContainerNewResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="get /containers/{container_id}">client.Containers.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerGetResponse">ContainerGetResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="get /containers">client.Containers.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerService.List">List</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerListParams">ContainerListParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerListResponse">ContainerListResponse</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="delete /containers/{container_id}">client.Containers.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerService.Delete">Delete</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
+
+## Files
+
+Response Types:
+
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileNewResponse">ContainerFileNewResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileGetResponse">ContainerFileGetResponse</a>
+- <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileListResponse">ContainerFileListResponse</a>
+
+Methods:
+
+- <code title="post /containers/{container_id}/files">client.Containers.Files.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileService.New">New</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>, body <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileNewParams">ContainerFileNewParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileNewResponse">ContainerFileNewResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="get /containers/{container_id}/files/{file_id}">client.Containers.Files.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>, fileID <a href="https://pkg.go.dev/builtin#string">string</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileGetResponse">ContainerFileGetResponse</a>, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="get /containers/{container_id}/files">client.Containers.Files.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileService.List">List</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>, query <a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileListParams">ContainerFileListParams</a>) (<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination">pagination</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go/packages/pagination#CursorPage">CursorPage</a>[<a href="https://pkg.go.dev/github.com/openai/openai-go">openai</a>.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileListResponse">ContainerFileListResponse</a>], <a href="https://pkg.go.dev/builtin#error">error</a>)</code>
+- <code title="delete /containers/{container_id}/files/{file_id}">client.Containers.Files.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileService.Delete">Delete</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>, fileID <a href="https://pkg.go.dev/builtin#string">string</a>) <a href="https://pkg.go.dev/builtin#error">error</a></code>
+
+### Content
+
+Methods:
+
+- <code title="get /containers/{container_id}/files/{file_id}/content">client.Containers.Files.Content.<a href="https://pkg.go.dev/github.com/openai/openai-go#ContainerFileContentService.Get">Get</a>(ctx <a href="https://pkg.go.dev/context">context</a>.<a href="https://pkg.go.dev/context#Context">Context</a>, containerID <a href="https://pkg.go.dev/builtin#string">string</a>, fileID <a href="https://pkg.go.dev/builtin#string">string</a>) (http.Response, <a href="https://pkg.go.dev/builtin#error">error</a>)</code>

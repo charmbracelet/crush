@@ -15,7 +15,8 @@ import (
 type BetaService struct {
 	Options    []option.RequestOption
 	Assistants BetaAssistantService
-	Threads    BetaThreadService
+	// Deprecated: The Assistants API is deprecated in favor of the Responses API
+	Threads BetaThreadService
 }
 
 // NewBetaService generates a new service that applies the given options to each

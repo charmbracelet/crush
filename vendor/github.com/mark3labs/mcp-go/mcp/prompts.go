@@ -19,12 +19,14 @@ type ListPromptsResult struct {
 // server.
 type GetPromptRequest struct {
 	Request
-	Params struct {
-		// The name of the prompt or prompt template.
-		Name string `json:"name"`
-		// Arguments to use for templating the prompt.
-		Arguments map[string]string `json:"arguments,omitempty"`
-	} `json:"params"`
+	Params GetPromptParams `json:"params"`
+}
+
+type GetPromptParams struct {
+	// The name of the prompt or prompt template.
+	Name string `json:"name"`
+	// Arguments to use for templating the prompt.
+	Arguments map[string]string `json:"arguments,omitempty"`
 }
 
 // GetPromptResult is the server's response to a prompts/get request from the
@@ -48,6 +50,11 @@ type Prompt struct {
 	// A list of arguments to use for templating the prompt.
 	// The presence of arguments indicates this is a template prompt.
 	Arguments []PromptArgument `json:"arguments,omitempty"`
+}
+
+// GetName returns the name of the prompt.
+func (p Prompt) GetName() string {
+	return p.Name
 }
 
 // PromptArgument describes an argument that a prompt template can accept.
@@ -78,7 +85,7 @@ const (
 // resources from the MCP server.
 type PromptMessage struct {
 	Role    Role    `json:"role"`
-	Content Content `json:"content"` // Can be TextContent, ImageContent, or EmbeddedResource
+	Content Content `json:"content"` // Can be TextContent, ImageContent, AudioContent or EmbeddedResource
 }
 
 // PromptListChangedNotification is an optional notification from the server

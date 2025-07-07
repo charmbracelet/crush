@@ -16,7 +16,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -238,19 +238,18 @@ type VectorStoreFile struct {
 	Attributes map[string]VectorStoreFileAttributeUnion `json:"attributes,nullable"`
 	// The strategy used to chunk the file.
 	ChunkingStrategy FileChunkingStrategyUnion `json:"chunking_strategy"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID               resp.Field
-		CreatedAt        resp.Field
-		LastError        resp.Field
-		Object           resp.Field
-		Status           resp.Field
-		UsageBytes       resp.Field
-		VectorStoreID    resp.Field
-		Attributes       resp.Field
-		ChunkingStrategy resp.Field
-		ExtraFields      map[string]resp.Field
+		ID               respjson.Field
+		CreatedAt        respjson.Field
+		LastError        respjson.Field
+		Object           respjson.Field
+		Status           respjson.Field
+		UsageBytes       respjson.Field
+		VectorStoreID    respjson.Field
+		Attributes       respjson.Field
+		ChunkingStrategy respjson.Field
+		ExtraFields      map[string]respjson.Field
 		raw              string
 	} `json:"-"`
 }
@@ -270,12 +269,11 @@ type VectorStoreFileLastError struct {
 	Code string `json:"code,required"`
 	// A human-readable description of the error.
 	Message string `json:"message,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Code        resp.Field
-		Message     resp.Field
-		ExtraFields map[string]resp.Field
+		Code        respjson.Field
+		Message     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -313,9 +311,9 @@ type VectorStoreFileAttributeUnion struct {
 	// This field will be present if the value is a [bool] instead of an object.
 	OfBool bool `json:",inline"`
 	JSON   struct {
-		OfString resp.Field
-		OfFloat  resp.Field
-		OfBool   resp.Field
+		OfString respjson.Field
+		OfFloat  respjson.Field
+		OfBool   respjson.Field
 		raw      string
 	} `json:"-"`
 }
@@ -346,13 +344,12 @@ type VectorStoreFileDeleted struct {
 	ID      string                          `json:"id,required"`
 	Deleted bool                            `json:"deleted,required"`
 	Object  constant.VectorStoreFileDeleted `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Deleted     resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Deleted     respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -368,12 +365,11 @@ type VectorStoreFileContentResponse struct {
 	Text string `json:"text"`
 	// The content type (currently only `"text"`)
 	Type string `json:"type"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -401,13 +397,12 @@ type VectorStoreFileNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreFileNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r VectorStoreFileNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreFileNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreFileNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
@@ -420,13 +415,11 @@ type VectorStoreFileNewParamsAttributeUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u VectorStoreFileNewParamsAttributeUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u VectorStoreFileNewParamsAttributeUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[VectorStoreFileNewParamsAttributeUnion](u.OfString, u.OfFloat, u.OfBool)
+	return param.MarshalUnion(u, u.OfString, u.OfFloat, u.OfBool)
+}
+func (u *VectorStoreFileNewParamsAttributeUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *VectorStoreFileNewParamsAttributeUnion) asAny() any {
@@ -450,13 +443,12 @@ type VectorStoreFileUpdateParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreFileUpdateParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r VectorStoreFileUpdateParams) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreFileUpdateParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreFileUpdateParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
@@ -469,13 +461,11 @@ type VectorStoreFileUpdateParamsAttributeUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u VectorStoreFileUpdateParamsAttributeUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u VectorStoreFileUpdateParamsAttributeUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[VectorStoreFileUpdateParamsAttributeUnion](u.OfString, u.OfFloat, u.OfBool)
+	return param.MarshalUnion(u, u.OfString, u.OfFloat, u.OfBool)
+}
+func (u *VectorStoreFileUpdateParamsAttributeUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *VectorStoreFileUpdateParamsAttributeUnion) asAny() any {
@@ -515,13 +505,9 @@ type VectorStoreFileListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreFileListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [VectorStoreFileListParams]'s query parameters as
 // `url.Values`.
-func (r VectorStoreFileListParams) URLQuery() (v url.Values) {
+func (r VectorStoreFileListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

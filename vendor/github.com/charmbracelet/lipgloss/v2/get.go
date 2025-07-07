@@ -543,6 +543,7 @@ func (s Style) getAsTransform(propKey) func(string) string {
 // line.
 func getLines(s string) (lines []string, widest int) {
 	s = strings.ReplaceAll(s, "\t", "    ")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
 	lines = strings.Split(s, "\n")
 
 	for _, l := range lines {

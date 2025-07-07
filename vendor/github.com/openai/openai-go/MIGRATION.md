@@ -227,15 +227,15 @@ var name *string = animal.GetName()
 
 The old SDK had a function `param.Null[T]()` which could set `param.Field[T]` to `null`.
 
-The new SDK uses `param.NullOpt[T]()` for to set a `param.Opt[T]` to `null`,
-and `param.NullObj[T]()` to set a param struct `T` to `null`.
+The new SDK uses `param.Null[T]()` for to set a `param.Opt[T]` to `null`,
+but `param.NullStruct[T]()` to set a param struct `T` to `null`.
 
 ```diff
-- var nullObj param.Field[BarParam] = param.Null[BarParam]()
-+ var nullObj BarParam              = param.NullObj[BarParam]()
-
 - var nullPrimitive param.Field[int64] = param.Null[int64]()
-+ var nullPrimitive param.Opt[int64]   = param.NullOpt[int64]()
++ var nullPrimitive param.Opt[int64]   = param.Null[int64]()
+
+- var nullStruct param.Field[BarParam] = param.Null[BarParam]()
++ var nullStruct BarParam              = param.NullStruct[BarParam]()
 ```
 
 ## Sending custom values
@@ -248,7 +248,7 @@ foo := FooParams{
      A: param.String("hello"),
 -    B: param.Raw[string](12) // sending `12` instead of a string
 }
-+ foo.WithExtraFields(map[string]any{
++ foo.SetExtraFields(map[string]any{
 +    "B": 12,
 + })
 ```
@@ -257,20 +257,20 @@ foo := FooParams{
 
 ## Checking for presence of optional fields
 
-The `.IsNull()` method has been changed to `.IsPresent()` to better reflect its behavior.
+The `.IsNull()` method has been changed to `.Valid()` to better reflect its behavior.
 
 ```diff
 - if !resp.Foo.JSON.Bar.IsNull() {
-+ if resp.Foo.JSON.Bar.IsPresent() {
++ if resp.Foo.JSON.Bar.Valid() {
     println("bar is present:", resp.Foo.Bar)
 }
 ```
 
-| Previous       | New                 | Returns true for values |
-| -------------- | ------------------- | ----------------------- |
-| `.IsNull()`    | `!.IsPresent()`     | `null` or Omitted       |
-| `.IsMissing()` | `.Raw() == ""`      | Omitted                 |
-|                | `.IsExplicitNull()` | `null`                  |
+| Previous       | New                      | Returns true for values |
+| -------------- | ------------------------ | ----------------------- |
+| `.IsNull()`    | `!.Valid()`              | `null` or Omitted       |
+| `.IsMissing()` | `.Raw() == resp.Omitted` | Omitted                 |
+|                | `.Raw() == resp.Null`    |
 
 ## Checking Raw JSON of a response
 

@@ -776,7 +776,7 @@ type mapEncoder struct {
 }
 
 func (me mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
-	if v.IsNil() {
+	if v.IsNil() /* EDIT(begin) */ || sentinel.IsValueNull(v) /* EDIT(end) */ {
 		e.WriteString("null")
 		return
 	}
@@ -855,7 +855,7 @@ type sliceEncoder struct {
 }
 
 func (se sliceEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
-	if v.IsNil() {
+	if v.IsNil() /* EDIT(begin) */ || sentinel.IsValueNull(v) /* EDIT(end) */ {
 		e.WriteString("null")
 		return
 	}
@@ -916,14 +916,7 @@ type ptrEncoder struct {
 }
 
 func (pe ptrEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
-	// EDIT(begin)
-	//
-	// if v.IsNil()  {
-	// 	e.WriteString("null")
-	// 	return
-	// }
-
-	if v.IsNil() || sentinel.IsValueNullPtr(v) || sentinel.IsValueNullSlice(v) {
+	if v.IsNil() {
 		e.WriteString("null")
 		return
 	}

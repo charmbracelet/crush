@@ -32,7 +32,7 @@ func (r *VectorStoreFileService) PollStatus(ctx context.Context, vectorStoreID s
 	opts = append(opts, mkPollingOptions(pollIntervalMs)...)
 	opts = append(opts, option.WithResponseInto(&raw))
 	for {
-		file, err := r.Get(ctx, vectorStoreID, fileID, opts...)
+		file, err := r.Get(ctx, fileID, vectorStoreID, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("vector store file poll: received %w", err)
 		}
@@ -67,7 +67,7 @@ func (r *VectorStoreFileBatchService) PollStatus(ctx context.Context, vectorStor
 	opts = append(opts, option.WithResponseInto(&raw))
 	opts = append(opts, mkPollingOptions(pollIntervalMs)...)
 	for {
-		batch, err := r.Get(ctx, vectorStoreID, batchID, opts...)
+		batch, err := r.Get(ctx, batchID, vectorStoreID, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("vector store file batch poll: received %w", err)
 		}
@@ -90,45 +90,6 @@ func (r *VectorStoreFileBatchService) PollStatus(ctx context.Context, vectorStor
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-		}
-	}
-}
-
-// PollStatus waits until a Run is no longer in an incomplete state and returns it.
-// Pass 0 as pollIntervalMs to use the default polling interval of 1 second.
-func (r *BetaThreadRunService) PollStatus(ctx context.Context, threadID string, runID string, pollIntervalMs int, opts ...option.RequestOption) (res *Run, err error) {
-	var raw *http.Response
-	opts = append(opts, mkPollingOptions(pollIntervalMs)...)
-	opts = append(opts, option.WithResponseInto(&raw))
-	for {
-		run, err := r.Get(ctx, threadID, runID, opts...)
-		if err != nil {
-			return nil, fmt.Errorf("thread run poll: received %w", err)
-		}
-
-		switch run.Status {
-		case RunStatusInProgress,
-			RunStatusQueued:
-			if pollIntervalMs <= 0 {
-				pollIntervalMs = getPollInterval(raw)
-			}
-			time.Sleep(time.Duration(pollIntervalMs) * time.Millisecond)
-		case RunStatusRequiresAction,
-			RunStatusCancelled,
-			RunStatusCompleted,
-			RunStatusFailed,
-			RunStatusExpired,
-			RunStatusIncomplete:
-			return run, nil
-		default:
-			return nil, fmt.Errorf("invalid thread run status during polling: received %s", run.Status)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-			break
 		}
 	}
 }

@@ -12,18 +12,16 @@ import (
 	"time"
 
 	"github.com/tidwall/sjson"
-
-	"github.com/openai/openai-go/internal/param"
 )
 
 var encoders sync.Map // map[encoderEntry]encoderFunc
 
-func Marshal(value interface{}) ([]byte, error) {
+func Marshal(value any) ([]byte, error) {
 	e := &encoder{dateFormat: time.RFC3339}
 	return e.marshal(value)
 }
 
-func MarshalRoot(value interface{}) ([]byte, error) {
+func MarshalRoot(value any) ([]byte, error) {
 	e := &encoder{root: true, dateFormat: time.RFC3339}
 	return e.marshal(value)
 }
@@ -47,7 +45,7 @@ type encoderEntry struct {
 	root       bool
 }
 
-func (e *encoder) marshal(value interface{}) ([]byte, error) {
+func (e *encoder) marshal(value any) ([]byte, error) {
 	val := reflect.ValueOf(value)
 	if !val.IsValid() {
 		return nil, nil
@@ -202,10 +200,6 @@ func (e *encoder) newArrayTypeEncoder(t reflect.Type) encoderFunc {
 }
 
 func (e *encoder) newStructTypeEncoder(t reflect.Type) encoderFunc {
-	if t.Implements(reflect.TypeOf((*param.FieldLike)(nil)).Elem()) {
-		return e.newFieldTypeEncoder(t)
-	}
-
 	encoderFields := []encoderField{}
 	extraEncoder := (*encoderField)(nil)
 

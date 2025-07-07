@@ -5,15 +5,13 @@ package openai
 import (
 	"context"
 	"net/http"
-	"reflect"
 
 	"github.com/openai/openai-go/internal/apijson"
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
-	"github.com/tidwall/gjson"
 )
 
 // ModerationService contains methods and other services that help with interacting
@@ -53,14 +51,13 @@ type Moderation struct {
 	CategoryScores ModerationCategoryScores `json:"category_scores,required"`
 	// Whether any of the below categories are flagged.
 	Flagged bool `json:"flagged,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Categories                resp.Field
-		CategoryAppliedInputTypes resp.Field
-		CategoryScores            resp.Field
-		Flagged                   resp.Field
-		ExtraFields               map[string]resp.Field
+		Categories                respjson.Field
+		CategoryAppliedInputTypes respjson.Field
+		CategoryScores            respjson.Field
+		Flagged                   respjson.Field
+		ExtraFields               map[string]respjson.Field
 		raw                       string
 	} `json:"-"`
 }
@@ -116,23 +113,22 @@ type ModerationCategories struct {
 	Violence bool `json:"violence,required"`
 	// Content that depicts death, violence, or physical injury in graphic detail.
 	ViolenceGraphic bool `json:"violence/graphic,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Harassment            resp.Field
-		HarassmentThreatening resp.Field
-		Hate                  resp.Field
-		HateThreatening       resp.Field
-		Illicit               resp.Field
-		IllicitViolent        resp.Field
-		SelfHarm              resp.Field
-		SelfHarmInstructions  resp.Field
-		SelfHarmIntent        resp.Field
-		Sexual                resp.Field
-		SexualMinors          resp.Field
-		Violence              resp.Field
-		ViolenceGraphic       resp.Field
-		ExtraFields           map[string]resp.Field
+		Harassment            respjson.Field
+		HarassmentThreatening respjson.Field
+		Hate                  respjson.Field
+		HateThreatening       respjson.Field
+		Illicit               respjson.Field
+		IllicitViolent        respjson.Field
+		SelfHarm              respjson.Field
+		SelfHarmInstructions  respjson.Field
+		SelfHarmIntent        respjson.Field
+		Sexual                respjson.Field
+		SexualMinors          respjson.Field
+		Violence              respjson.Field
+		ViolenceGraphic       respjson.Field
+		ExtraFields           map[string]respjson.Field
 		raw                   string
 	} `json:"-"`
 }
@@ -146,48 +142,73 @@ func (r *ModerationCategories) UnmarshalJSON(data []byte) error {
 // A list of the categories along with the input type(s) that the score applies to.
 type ModerationCategoryAppliedInputTypes struct {
 	// The applied input type(s) for the category 'harassment'.
+	//
+	// Any of "text".
 	Harassment []string `json:"harassment,required"`
 	// The applied input type(s) for the category 'harassment/threatening'.
+	//
+	// Any of "text".
 	HarassmentThreatening []string `json:"harassment/threatening,required"`
 	// The applied input type(s) for the category 'hate'.
+	//
+	// Any of "text".
 	Hate []string `json:"hate,required"`
 	// The applied input type(s) for the category 'hate/threatening'.
+	//
+	// Any of "text".
 	HateThreatening []string `json:"hate/threatening,required"`
 	// The applied input type(s) for the category 'illicit'.
+	//
+	// Any of "text".
 	Illicit []string `json:"illicit,required"`
 	// The applied input type(s) for the category 'illicit/violent'.
+	//
+	// Any of "text".
 	IllicitViolent []string `json:"illicit/violent,required"`
 	// The applied input type(s) for the category 'self-harm'.
+	//
+	// Any of "text", "image".
 	SelfHarm []string `json:"self-harm,required"`
 	// The applied input type(s) for the category 'self-harm/instructions'.
+	//
+	// Any of "text", "image".
 	SelfHarmInstructions []string `json:"self-harm/instructions,required"`
 	// The applied input type(s) for the category 'self-harm/intent'.
+	//
+	// Any of "text", "image".
 	SelfHarmIntent []string `json:"self-harm/intent,required"`
 	// The applied input type(s) for the category 'sexual'.
+	//
+	// Any of "text", "image".
 	Sexual []string `json:"sexual,required"`
 	// The applied input type(s) for the category 'sexual/minors'.
+	//
+	// Any of "text".
 	SexualMinors []string `json:"sexual/minors,required"`
 	// The applied input type(s) for the category 'violence'.
+	//
+	// Any of "text", "image".
 	Violence []string `json:"violence,required"`
 	// The applied input type(s) for the category 'violence/graphic'.
+	//
+	// Any of "text", "image".
 	ViolenceGraphic []string `json:"violence/graphic,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Harassment            resp.Field
-		HarassmentThreatening resp.Field
-		Hate                  resp.Field
-		HateThreatening       resp.Field
-		Illicit               resp.Field
-		IllicitViolent        resp.Field
-		SelfHarm              resp.Field
-		SelfHarmInstructions  resp.Field
-		SelfHarmIntent        resp.Field
-		Sexual                resp.Field
-		SexualMinors          resp.Field
-		Violence              resp.Field
-		ViolenceGraphic       resp.Field
-		ExtraFields           map[string]resp.Field
+		Harassment            respjson.Field
+		HarassmentThreatening respjson.Field
+		Hate                  respjson.Field
+		HateThreatening       respjson.Field
+		Illicit               respjson.Field
+		IllicitViolent        respjson.Field
+		SelfHarm              respjson.Field
+		SelfHarmInstructions  respjson.Field
+		SelfHarmIntent        respjson.Field
+		Sexual                respjson.Field
+		SexualMinors          respjson.Field
+		Violence              respjson.Field
+		ViolenceGraphic       respjson.Field
+		ExtraFields           map[string]respjson.Field
 		raw                   string
 	} `json:"-"`
 }
@@ -226,23 +247,22 @@ type ModerationCategoryScores struct {
 	Violence float64 `json:"violence,required"`
 	// The score for the category 'violence/graphic'.
 	ViolenceGraphic float64 `json:"violence/graphic,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Harassment            resp.Field
-		HarassmentThreatening resp.Field
-		Hate                  resp.Field
-		HateThreatening       resp.Field
-		Illicit               resp.Field
-		IllicitViolent        resp.Field
-		SelfHarm              resp.Field
-		SelfHarmInstructions  resp.Field
-		SelfHarmIntent        resp.Field
-		Sexual                resp.Field
-		SexualMinors          resp.Field
-		Violence              resp.Field
-		ViolenceGraphic       resp.Field
-		ExtraFields           map[string]resp.Field
+		Harassment            respjson.Field
+		HarassmentThreatening respjson.Field
+		Hate                  respjson.Field
+		HateThreatening       respjson.Field
+		Illicit               respjson.Field
+		IllicitViolent        respjson.Field
+		SelfHarm              respjson.Field
+		SelfHarmInstructions  respjson.Field
+		SelfHarmIntent        respjson.Field
+		Sexual                respjson.Field
+		SexualMinors          respjson.Field
+		Violence              respjson.Field
+		ViolenceGraphic       respjson.Field
+		ExtraFields           map[string]respjson.Field
 		raw                   string
 	} `json:"-"`
 }
@@ -266,12 +286,12 @@ type ModerationImageURLInputParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ModerationImageURLInputParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ModerationImageURLInputParam) MarshalJSON() (data []byte, err error) {
 	type shadow ModerationImageURLInputParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ModerationImageURLInputParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Contains either an image URL or a data URL for a base64 encoded image.
@@ -283,14 +303,12 @@ type ModerationImageURLInputImageURLParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ModerationImageURLInputImageURLParam) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r ModerationImageURLInputImageURLParam) MarshalJSON() (data []byte, err error) {
 	type shadow ModerationImageURLInputImageURLParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ModerationImageURLInputImageURLParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type ModerationModel = string
@@ -323,13 +341,11 @@ type ModerationMultiModalInputUnionParam struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u ModerationMultiModalInputUnionParam) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u ModerationMultiModalInputUnionParam) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[ModerationMultiModalInputUnionParam](u.OfImageURL, u.OfText)
+	return param.MarshalUnion(u, u.OfImageURL, u.OfText)
+}
+func (u *ModerationMultiModalInputUnionParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *ModerationMultiModalInputUnionParam) asAny() any {
@@ -370,16 +386,8 @@ func (u ModerationMultiModalInputUnionParam) GetType() *string {
 func init() {
 	apijson.RegisterUnion[ModerationMultiModalInputUnionParam](
 		"type",
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(ModerationImageURLInputParam{}),
-			DiscriminatorValue: "image_url",
-		},
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(ModerationTextInputParam{}),
-			DiscriminatorValue: "text",
-		},
+		apijson.Discriminator[ModerationImageURLInputParam]("image_url"),
+		apijson.Discriminator[ModerationTextInputParam]("text"),
 	)
 }
 
@@ -396,12 +404,12 @@ type ModerationTextInputParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ModerationTextInputParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ModerationTextInputParam) MarshalJSON() (data []byte, err error) {
 	type shadow ModerationTextInputParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ModerationTextInputParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Represents if a given text input is potentially harmful.
@@ -412,13 +420,12 @@ type ModerationNewResponse struct {
 	Model string `json:"model,required"`
 	// A list of moderation objects.
 	Results []Moderation `json:"results,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Model       resp.Field
-		Results     resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Model       respjson.Field
+		Results     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -441,13 +448,12 @@ type ModerationNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ModerationNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r ModerationNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow ModerationNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ModerationNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
@@ -455,23 +461,23 @@ func (r ModerationNewParams) MarshalJSON() (data []byte, err error) {
 // Use [param.IsOmitted] to confirm if a field is set.
 type ModerationNewParamsInputUnion struct {
 	OfString                    param.Opt[string]                     `json:",omitzero,inline"`
-	OfModerationNewsInputArray  []string                              `json:",omitzero,inline"`
+	OfStringArray               []string                              `json:",omitzero,inline"`
 	OfModerationMultiModalArray []ModerationMultiModalInputUnionParam `json:",omitzero,inline"`
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u ModerationNewParamsInputUnion) IsPresent() bool { return !param.IsOmitted(u) && !u.IsNull() }
 func (u ModerationNewParamsInputUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[ModerationNewParamsInputUnion](u.OfString, u.OfModerationNewsInputArray, u.OfModerationMultiModalArray)
+	return param.MarshalUnion(u, u.OfString, u.OfStringArray, u.OfModerationMultiModalArray)
+}
+func (u *ModerationNewParamsInputUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *ModerationNewParamsInputUnion) asAny() any {
 	if !param.IsOmitted(u.OfString) {
 		return &u.OfString.Value
-	} else if !param.IsOmitted(u.OfModerationNewsInputArray) {
-		return &u.OfModerationNewsInputArray
+	} else if !param.IsOmitted(u.OfStringArray) {
+		return &u.OfStringArray
 	} else if !param.IsOmitted(u.OfModerationMultiModalArray) {
 		return &u.OfModerationMultiModalArray
 	}

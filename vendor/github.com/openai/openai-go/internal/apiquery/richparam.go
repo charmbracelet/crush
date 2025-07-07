@@ -6,15 +6,15 @@ import (
 	"github.com/openai/openai-go/packages/param"
 )
 
-func (e *encoder) newRichFieldTypeEncoder(t reflect.Type, underlyingValueIdx []int) encoderFunc {
-	underlying := t.FieldByIndex(underlyingValueIdx)
-	primitiveEncoder := e.newPrimitiveTypeEncoder(underlying.Type)
-	return func(key string, value reflect.Value) []Pair {
-		if fielder, ok := value.Interface().(param.Optional); ok && fielder.IsPresent() {
-			return primitiveEncoder(key, value.FieldByIndex(underlyingValueIdx))
-		} else if ok && fielder.IsNull() {
-			return []Pair{{key, "null"}}
+func (e *encoder) newRichFieldTypeEncoder(t reflect.Type) encoderFunc {
+	f, _ := t.FieldByName("Value")
+	enc := e.typeEncoder(f.Type)
+	return func(key string, value reflect.Value) ([]Pair, error) {
+		if opt, ok := value.Interface().(param.Optional); ok && opt.Valid() {
+			return enc(key, value.FieldByIndex(f.Index))
+		} else if ok && param.IsNull(opt) {
+			return []Pair{{key, "null"}}, nil
 		}
-		return nil
+		return nil, nil
 	}
 }

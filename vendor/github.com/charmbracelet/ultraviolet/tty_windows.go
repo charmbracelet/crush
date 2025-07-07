@@ -19,3 +19,9 @@ func openTTY() (inTty, outTty *os.File, err error) {
 	}
 	return inTty, outTty, nil
 }
+
+func suspend() (err error) {
+	// On Windows, suspending the process group is not supported in the same
+	// way as Unix-like systems.
+	return nil
+}

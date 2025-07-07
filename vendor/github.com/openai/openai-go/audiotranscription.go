@@ -15,7 +15,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/shared/constant"
 )
@@ -54,7 +54,9 @@ func (r *AudioTranscriptionService) NewStreaming(ctx context.Context, body Audio
 		err error
 	)
 	opts = append(r.Options[:], opts...)
-	opts = append([]option.RequestOption{option.WithJSONSet("stream", true)}, opts...)
+	body.SetExtraFields(map[string]any{
+		"stream": "true",
+	})
 	path := "audio/transcriptions"
 	err = requestconfig.ExecuteNewRequest(ctx, http.MethodPost, path, body, &raw, opts...)
 	return ssestream.NewStream[TranscriptionStreamEventUnion](ssestream.NewDecoder(raw), err)
@@ -69,12 +71,14 @@ type Transcription struct {
 	// models `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` if `logprobs` is added
 	// to the `include` array.
 	Logprobs []TranscriptionLogprob `json:"logprobs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// Token usage statistics for the request.
+	Usage TranscriptionUsageUnion `json:"usage"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Logprobs    resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Logprobs    respjson.Field
+		Usage       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -92,13 +96,12 @@ type TranscriptionLogprob struct {
 	Bytes []float64 `json:"bytes"`
 	// The log probability of the token.
 	Logprob float64 `json:"logprob"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Token       resp.Field
-		Bytes       resp.Field
-		Logprob     resp.Field
-		ExtraFields map[string]resp.Field
+		Token       respjson.Field
+		Bytes       respjson.Field
+		Logprob     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -106,6 +109,153 @@ type TranscriptionLogprob struct {
 // Returns the unmodified JSON received from the API
 func (r TranscriptionLogprob) RawJSON() string { return r.JSON.raw }
 func (r *TranscriptionLogprob) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// TranscriptionUsageUnion contains all possible properties and values from
+// [TranscriptionUsageTokens], [TranscriptionUsageDuration].
+//
+// Use the [TranscriptionUsageUnion.AsAny] method to switch on the variant.
+//
+// Use the methods beginning with 'As' to cast the union to one of its variants.
+type TranscriptionUsageUnion struct {
+	// This field is from variant [TranscriptionUsageTokens].
+	InputTokens int64 `json:"input_tokens"`
+	// This field is from variant [TranscriptionUsageTokens].
+	OutputTokens int64 `json:"output_tokens"`
+	// This field is from variant [TranscriptionUsageTokens].
+	TotalTokens int64 `json:"total_tokens"`
+	// Any of "tokens", "duration".
+	Type string `json:"type"`
+	// This field is from variant [TranscriptionUsageTokens].
+	InputTokenDetails TranscriptionUsageTokensInputTokenDetails `json:"input_token_details"`
+	// This field is from variant [TranscriptionUsageDuration].
+	Duration float64 `json:"duration"`
+	JSON     struct {
+		InputTokens       respjson.Field
+		OutputTokens      respjson.Field
+		TotalTokens       respjson.Field
+		Type              respjson.Field
+		InputTokenDetails respjson.Field
+		Duration          respjson.Field
+		raw               string
+	} `json:"-"`
+}
+
+// anyTranscriptionUsage is implemented by each variant of
+// [TranscriptionUsageUnion] to add type safety for the return type of
+// [TranscriptionUsageUnion.AsAny]
+type anyTranscriptionUsage interface {
+	implTranscriptionUsageUnion()
+}
+
+func (TranscriptionUsageTokens) implTranscriptionUsageUnion()   {}
+func (TranscriptionUsageDuration) implTranscriptionUsageUnion() {}
+
+// Use the following switch statement to find the correct variant
+//
+//	switch variant := TranscriptionUsageUnion.AsAny().(type) {
+//	case openai.TranscriptionUsageTokens:
+//	case openai.TranscriptionUsageDuration:
+//	default:
+//	  fmt.Errorf("no variant present")
+//	}
+func (u TranscriptionUsageUnion) AsAny() anyTranscriptionUsage {
+	switch u.Type {
+	case "tokens":
+		return u.AsTokens()
+	case "duration":
+		return u.AsDuration()
+	}
+	return nil
+}
+
+func (u TranscriptionUsageUnion) AsTokens() (v TranscriptionUsageTokens) {
+	apijson.UnmarshalRoot(json.RawMessage(u.JSON.raw), &v)
+	return
+}
+
+func (u TranscriptionUsageUnion) AsDuration() (v TranscriptionUsageDuration) {
+	apijson.UnmarshalRoot(json.RawMessage(u.JSON.raw), &v)
+	return
+}
+
+// Returns the unmodified JSON received from the API
+func (u TranscriptionUsageUnion) RawJSON() string { return u.JSON.raw }
+
+func (r *TranscriptionUsageUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// Usage statistics for models billed by token usage.
+type TranscriptionUsageTokens struct {
+	// Number of input tokens billed for this request.
+	InputTokens int64 `json:"input_tokens,required"`
+	// Number of output tokens generated.
+	OutputTokens int64 `json:"output_tokens,required"`
+	// Total number of tokens used (input + output).
+	TotalTokens int64 `json:"total_tokens,required"`
+	// The type of the usage object. Always `tokens` for this variant.
+	Type constant.Tokens `json:"type,required"`
+	// Details about the input tokens billed for this request.
+	InputTokenDetails TranscriptionUsageTokensInputTokenDetails `json:"input_token_details"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		InputTokens       respjson.Field
+		OutputTokens      respjson.Field
+		TotalTokens       respjson.Field
+		Type              respjson.Field
+		InputTokenDetails respjson.Field
+		ExtraFields       map[string]respjson.Field
+		raw               string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r TranscriptionUsageTokens) RawJSON() string { return r.JSON.raw }
+func (r *TranscriptionUsageTokens) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// Details about the input tokens billed for this request.
+type TranscriptionUsageTokensInputTokenDetails struct {
+	// Number of audio tokens billed for this request.
+	AudioTokens int64 `json:"audio_tokens"`
+	// Number of text tokens billed for this request.
+	TextTokens int64 `json:"text_tokens"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		AudioTokens respjson.Field
+		TextTokens  respjson.Field
+		ExtraFields map[string]respjson.Field
+		raw         string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r TranscriptionUsageTokensInputTokenDetails) RawJSON() string { return r.JSON.raw }
+func (r *TranscriptionUsageTokensInputTokenDetails) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// Usage statistics for models billed by audio input duration.
+type TranscriptionUsageDuration struct {
+	// Duration of the input audio in seconds.
+	Duration float64 `json:"duration,required"`
+	// The type of the usage object. Always `duration` for this variant.
+	Type constant.Duration `json:"type,required"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		Duration    respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
+		raw         string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r TranscriptionUsageDuration) RawJSON() string { return r.JSON.raw }
+func (r *TranscriptionUsageDuration) UnmarshalJSON(data []byte) error {
 	return apijson.UnmarshalRoot(data, r)
 }
 
@@ -131,24 +281,37 @@ type TranscriptionStreamEventUnion struct {
 	Logprobs TranscriptionStreamEventUnionLogprobs `json:"logprobs"`
 	// This field is from variant [TranscriptionTextDoneEvent].
 	Text string `json:"text"`
-	JSON struct {
-		Delta    resp.Field
-		Type     resp.Field
-		Logprobs resp.Field
-		Text     resp.Field
+	// This field is from variant [TranscriptionTextDoneEvent].
+	Usage TranscriptionTextDoneEventUsage `json:"usage"`
+	JSON  struct {
+		Delta    respjson.Field
+		Type     respjson.Field
+		Logprobs respjson.Field
+		Text     respjson.Field
+		Usage    respjson.Field
 		raw      string
 	} `json:"-"`
 }
 
+// anyTranscriptionStreamEvent is implemented by each variant of
+// [TranscriptionStreamEventUnion] to add type safety for the return type of
+// [TranscriptionStreamEventUnion.AsAny]
+type anyTranscriptionStreamEvent interface {
+	implTranscriptionStreamEventUnion()
+}
+
+func (TranscriptionTextDeltaEvent) implTranscriptionStreamEventUnion() {}
+func (TranscriptionTextDoneEvent) implTranscriptionStreamEventUnion()  {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := TranscriptionStreamEventUnion.AsAny().(type) {
-//	case TranscriptionTextDeltaEvent:
-//	case TranscriptionTextDoneEvent:
+//	case openai.TranscriptionTextDeltaEvent:
+//	case openai.TranscriptionTextDoneEvent:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u TranscriptionStreamEventUnion) AsAny() any {
+func (u TranscriptionStreamEventUnion) AsAny() anyTranscriptionStreamEvent {
 	switch u.Type {
 	case "transcript.text.delta":
 		return u.AsTranscriptTextDelta()
@@ -193,8 +356,8 @@ type TranscriptionStreamEventUnionLogprobs struct {
 	// [[]TranscriptionTextDoneEventLogprob] instead of an object.
 	OfTranscriptionTextDoneEventLogprobs []TranscriptionTextDoneEventLogprob `json:",inline"`
 	JSON                                 struct {
-		OfTranscriptionTextDeltaEventLogprobs resp.Field
-		OfTranscriptionTextDoneEventLogprobs  resp.Field
+		OfTranscriptionTextDeltaEventLogprobs respjson.Field
+		OfTranscriptionTextDoneEventLogprobs  respjson.Field
 		raw                                   string
 	} `json:"-"`
 }
@@ -216,13 +379,12 @@ type TranscriptionTextDeltaEvent struct {
 	// [create a transcription](https://platform.openai.com/docs/api-reference/audio/create-transcription)
 	// with the `include[]` parameter set to `logprobs`.
 	Logprobs []TranscriptionTextDeltaEventLogprob `json:"logprobs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Delta       resp.Field
-		Type        resp.Field
-		Logprobs    resp.Field
-		ExtraFields map[string]resp.Field
+		Delta       respjson.Field
+		Type        respjson.Field
+		Logprobs    respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -237,16 +399,15 @@ type TranscriptionTextDeltaEventLogprob struct {
 	// The token that was used to generate the log probability.
 	Token string `json:"token"`
 	// The bytes that were used to generate the log probability.
-	Bytes []interface{} `json:"bytes"`
+	Bytes []int64 `json:"bytes"`
 	// The log probability of the token.
 	Logprob float64 `json:"logprob"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Token       resp.Field
-		Bytes       resp.Field
-		Logprob     resp.Field
-		ExtraFields map[string]resp.Field
+		Token       respjson.Field
+		Bytes       respjson.Field
+		Logprob     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -271,13 +432,15 @@ type TranscriptionTextDoneEvent struct {
 	// [create a transcription](https://platform.openai.com/docs/api-reference/audio/create-transcription)
 	// with the `include[]` parameter set to `logprobs`.
 	Logprobs []TranscriptionTextDoneEventLogprob `json:"logprobs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// Usage statistics for models billed by token usage.
+	Usage TranscriptionTextDoneEventUsage `json:"usage"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Type        resp.Field
-		Logprobs    resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		Logprobs    respjson.Field
+		Usage       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -292,16 +455,15 @@ type TranscriptionTextDoneEventLogprob struct {
 	// The token that was used to generate the log probability.
 	Token string `json:"token"`
 	// The bytes that were used to generate the log probability.
-	Bytes []interface{} `json:"bytes"`
+	Bytes []int64 `json:"bytes"`
 	// The log probability of the token.
 	Logprob float64 `json:"logprob"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Token       resp.Field
-		Bytes       resp.Field
-		Logprob     resp.Field
-		ExtraFields map[string]resp.Field
+		Token       respjson.Field
+		Bytes       respjson.Field
+		Logprob     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -312,10 +474,61 @@ func (r *TranscriptionTextDoneEventLogprob) UnmarshalJSON(data []byte) error {
 	return apijson.UnmarshalRoot(data, r)
 }
 
+// Usage statistics for models billed by token usage.
+type TranscriptionTextDoneEventUsage struct {
+	// Number of input tokens billed for this request.
+	InputTokens int64 `json:"input_tokens,required"`
+	// Number of output tokens generated.
+	OutputTokens int64 `json:"output_tokens,required"`
+	// Total number of tokens used (input + output).
+	TotalTokens int64 `json:"total_tokens,required"`
+	// The type of the usage object. Always `tokens` for this variant.
+	Type constant.Tokens `json:"type,required"`
+	// Details about the input tokens billed for this request.
+	InputTokenDetails TranscriptionTextDoneEventUsageInputTokenDetails `json:"input_token_details"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		InputTokens       respjson.Field
+		OutputTokens      respjson.Field
+		TotalTokens       respjson.Field
+		Type              respjson.Field
+		InputTokenDetails respjson.Field
+		ExtraFields       map[string]respjson.Field
+		raw               string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r TranscriptionTextDoneEventUsage) RawJSON() string { return r.JSON.raw }
+func (r *TranscriptionTextDoneEventUsage) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// Details about the input tokens billed for this request.
+type TranscriptionTextDoneEventUsageInputTokenDetails struct {
+	// Number of audio tokens billed for this request.
+	AudioTokens int64 `json:"audio_tokens"`
+	// Number of text tokens billed for this request.
+	TextTokens int64 `json:"text_tokens"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		AudioTokens respjson.Field
+		TextTokens  respjson.Field
+		ExtraFields map[string]respjson.Field
+		raw         string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r TranscriptionTextDoneEventUsageInputTokenDetails) RawJSON() string { return r.JSON.raw }
+func (r *TranscriptionTextDoneEventUsageInputTokenDetails) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
 type AudioTranscriptionNewParams struct {
 	// The audio file object (not file name) to transcribe, in one of these formats:
 	// flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.
-	File io.Reader `json:"file,required" format:"binary"`
+	File io.Reader `json:"file,omitzero,required" format:"binary"`
 	// ID of the model to use. The options are `gpt-4o-transcribe`,
 	// `gpt-4o-mini-transcribe`, and `whisper-1` (which is powered by our open source
 	// Whisper V2 model).
@@ -335,6 +548,11 @@ type AudioTranscriptionNewParams struct {
 	// [log probability](https://en.wikipedia.org/wiki/Log_probability) to
 	// automatically increase the temperature until certain thresholds are hit.
 	Temperature param.Opt[float64] `json:"temperature,omitzero"`
+	// Controls how the audio is cut into chunks. When set to `"auto"`, the server
+	// first normalizes loudness and then uses voice activity detection (VAD) to choose
+	// boundaries. `server_vad` object can be provided to tweak VAD detection
+	// parameters manually. If unset, the audio is transcribed as a single block.
+	ChunkingStrategy AudioTranscriptionNewParamsChunkingStrategyUnion `json:"chunking_strategy,omitzero"`
 	// Additional information to include in the transcription response. `logprobs` will
 	// return the log probabilities of the tokens in the response to understand the
 	// model's confidence in the transcription. `logprobs` only works with
@@ -352,18 +570,19 @@ type AudioTranscriptionNewParams struct {
 	// Either or both of these options are supported: `word`, or `segment`. Note: There
 	// is no additional latency for segment timestamps, but generating word timestamps
 	// incurs additional latency.
+	//
+	// Any of "word", "segment".
 	TimestampGranularities []string `json:"timestamp_granularities,omitzero"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f AudioTranscriptionNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r AudioTranscriptionNewParams) MarshalMultipart() (data []byte, contentType string, err error) {
 	buf := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(buf)
 	err = apiform.MarshalRoot(r, writer)
+	if err == nil {
+		err = apiform.WriteExtras(writer, r.ExtraFields())
+	}
 	if err != nil {
 		writer.Close()
 		return nil, "", err
@@ -373,4 +592,63 @@ func (r AudioTranscriptionNewParams) MarshalMultipart() (data []byte, contentTyp
 		return nil, "", err
 	}
 	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+// Only one field can be non-zero.
+//
+// Use [param.IsOmitted] to confirm if a field is set.
+type AudioTranscriptionNewParamsChunkingStrategyUnion struct {
+	// Construct this variant with constant.ValueOf[constant.Auto]()
+	OfAuto                                            constant.Auto                                         `json:",omitzero,inline"`
+	OfAudioTranscriptionNewsChunkingStrategyVadConfig *AudioTranscriptionNewParamsChunkingStrategyVadConfig `json:",omitzero,inline"`
+	paramUnion
+}
+
+func (u AudioTranscriptionNewParamsChunkingStrategyUnion) MarshalJSON() ([]byte, error) {
+	return param.MarshalUnion(u, u.OfAuto, u.OfAudioTranscriptionNewsChunkingStrategyVadConfig)
+}
+func (u *AudioTranscriptionNewParamsChunkingStrategyUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
+}
+
+func (u *AudioTranscriptionNewParamsChunkingStrategyUnion) asAny() any {
+	if !param.IsOmitted(u.OfAuto) {
+		return &u.OfAuto
+	} else if !param.IsOmitted(u.OfAudioTranscriptionNewsChunkingStrategyVadConfig) {
+		return u.OfAudioTranscriptionNewsChunkingStrategyVadConfig
+	}
+	return nil
+}
+
+// The property Type is required.
+type AudioTranscriptionNewParamsChunkingStrategyVadConfig struct {
+	// Must be set to `server_vad` to enable manual chunking using server side VAD.
+	//
+	// Any of "server_vad".
+	Type string `json:"type,omitzero,required"`
+	// Amount of audio to include before the VAD detected speech (in milliseconds).
+	PrefixPaddingMs param.Opt[int64] `json:"prefix_padding_ms,omitzero"`
+	// Duration of silence to detect speech stop (in milliseconds). With shorter values
+	// the model will respond more quickly, but may jump in on short pauses from the
+	// user.
+	SilenceDurationMs param.Opt[int64] `json:"silence_duration_ms,omitzero"`
+	// Sensitivity threshold (0.0 to 1.0) for voice activity detection. A higher
+	// threshold will require louder audio to activate the model, and thus might
+	// perform better in noisy environments.
+	Threshold param.Opt[float64] `json:"threshold,omitzero"`
+	paramObj
+}
+
+func (r AudioTranscriptionNewParamsChunkingStrategyVadConfig) MarshalJSON() (data []byte, err error) {
+	type shadow AudioTranscriptionNewParamsChunkingStrategyVadConfig
+	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *AudioTranscriptionNewParamsChunkingStrategyVadConfig) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+func init() {
+	apijson.RegisterFieldValidator[AudioTranscriptionNewParamsChunkingStrategyVadConfig](
+		"type", "server_vad",
+	)
 }

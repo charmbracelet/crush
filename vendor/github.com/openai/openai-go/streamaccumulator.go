@@ -13,7 +13,7 @@ type ChatCompletionAccumulator struct {
 type FinishedChatCompletionToolCall struct {
 	ChatCompletionMessageToolCallFunction
 	Index int
-	Id    string
+	ID    string
 }
 
 type chatCompletionResponseState struct {
@@ -52,7 +52,7 @@ func (acc *ChatCompletionAccumulator) AddChunk(chunk ChatCompletionChunk) bool {
 	return true
 }
 
-// JustFinishedRefusal retrieves the chat completion refusal when it is known to have just been completed.
+// JustFinishedContent retrieves the chat completion content when it is known to have just been completed.
 // The content is "just completed" when the last added chunk no longer contains a content
 // delta. If the content is just completed, the content is returned and the boolean is true. Otherwise,
 // an empty string is returned and the boolean will be false.
@@ -86,7 +86,7 @@ func (acc *ChatCompletionAccumulator) JustFinishedToolCall() (toolcall FinishedC
 		f := acc.Choices[0].Message.ToolCalls[acc.justFinished.index].Function
 		id := acc.Choices[0].Message.ToolCalls[acc.justFinished.index].ID
 		return FinishedChatCompletionToolCall{
-			Id:    id,
+			ID:    id,
 			Index: acc.justFinished.index,
 			ChatCompletionMessageToolCallFunction: ChatCompletionMessageToolCallFunction{
 				Name:      f.Name,
@@ -163,11 +163,11 @@ func (prev *chatCompletionResponseState) update(chunk ChatCompletionChunk) (just
 	delta := chunk.Choices[0].Delta
 	new := chatCompletionResponseState{}
 	switch {
-	case delta.JSON.Content.IsPresent():
+	case delta.JSON.Content.Valid():
 		new.state = contentResponseState
-	case delta.JSON.Refusal.IsPresent():
+	case delta.JSON.Refusal.Valid():
 		new.state = refusalResponseState
-	case delta.JSON.ToolCalls.IsPresent():
+	case delta.JSON.ToolCalls.Valid():
 		new.state = toolResponseState
 		new.index = int(delta.ToolCalls[0].Index)
 	default:

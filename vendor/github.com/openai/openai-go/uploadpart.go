@@ -15,8 +15,7 @@ import (
 	"github.com/openai/openai-go/internal/apijson"
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -71,14 +70,13 @@ type UploadPart struct {
 	Object constant.UploadPart `json:"object,required"`
 	// The ID of the Upload object that this Part was added to.
 	UploadID string `json:"upload_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		CreatedAt   resp.Field
-		Object      resp.Field
-		UploadID    resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		CreatedAt   respjson.Field
+		Object      respjson.Field
+		UploadID    respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -91,18 +89,17 @@ func (r *UploadPart) UnmarshalJSON(data []byte) error {
 
 type UploadPartNewParams struct {
 	// The chunk of bytes for this Part.
-	Data io.Reader `json:"data,required" format:"binary"`
+	Data io.Reader `json:"data,omitzero,required" format:"binary"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f UploadPartNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r UploadPartNewParams) MarshalMultipart() (data []byte, contentType string, err error) {
 	buf := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(buf)
 	err = apiform.MarshalRoot(r, writer)
+	if err == nil {
+		err = apiform.WriteExtras(writer, r.ExtraFields())
+	}
 	if err != nil {
 		writer.Close()
 		return nil, "", err

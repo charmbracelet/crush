@@ -6,26 +6,31 @@ import (
 	"time"
 )
 
-func MarshalWithSettings(value interface{}, settings QuerySettings) url.Values {
+func MarshalWithSettings(value any, settings QuerySettings) (url.Values, error) {
 	e := encoder{time.RFC3339, true, settings}
 	kv := url.Values{}
 	val := reflect.ValueOf(value)
 	if !val.IsValid() {
-		return nil
+		return nil, nil
 	}
 	typ := val.Type()
-	for _, pair := range e.typeEncoder(typ)("", val) {
+
+	pairs, err := e.typeEncoder(typ)("", val)
+	if err != nil {
+		return nil, err
+	}
+	for _, pair := range pairs {
 		kv.Add(pair.key, pair.value)
 	}
-	return kv
+	return kv, nil
 }
 
-func Marshal(value interface{}) url.Values {
+func Marshal(value any) (url.Values, error) {
 	return MarshalWithSettings(value, QuerySettings{})
 }
 
 type Queryer interface {
-	URLQuery() url.Values
+	URLQuery() (url.Values, error)
 }
 
 type QuerySettings struct {

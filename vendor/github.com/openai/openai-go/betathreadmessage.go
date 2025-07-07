@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"reflect"
 
 	"github.com/openai/openai-go/internal/apijson"
 	"github.com/openai/openai-go/internal/apiquery"
@@ -17,10 +16,9 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared"
 	"github.com/openai/openai-go/shared/constant"
-	"github.com/tidwall/gjson"
 )
 
 // BetaThreadMessageService contains methods and other services that help with
@@ -29,6 +27,8 @@ import (
 // Note, unlike clients, this service does not read variables from the environment
 // automatically. You should not instantiate this service directly, and instead use
 // the [NewBetaThreadMessageService] method instead.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 type BetaThreadMessageService struct {
 	Options []option.RequestOption
 }
@@ -43,6 +43,8 @@ func NewBetaThreadMessageService(opts ...option.RequestOption) (r BetaThreadMess
 }
 
 // Create a message.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) New(ctx context.Context, threadID string, body BetaThreadMessageNewParams, opts ...option.RequestOption) (res *Message, err error) {
 	opts = append(r.Options[:], opts...)
 	opts = append([]option.RequestOption{option.WithHeader("OpenAI-Beta", "assistants=v2")}, opts...)
@@ -56,6 +58,8 @@ func (r *BetaThreadMessageService) New(ctx context.Context, threadID string, bod
 }
 
 // Retrieve a message.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) Get(ctx context.Context, threadID string, messageID string, opts ...option.RequestOption) (res *Message, err error) {
 	opts = append(r.Options[:], opts...)
 	opts = append([]option.RequestOption{option.WithHeader("OpenAI-Beta", "assistants=v2")}, opts...)
@@ -73,6 +77,8 @@ func (r *BetaThreadMessageService) Get(ctx context.Context, threadID string, mes
 }
 
 // Modifies a message.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) Update(ctx context.Context, threadID string, messageID string, body BetaThreadMessageUpdateParams, opts ...option.RequestOption) (res *Message, err error) {
 	opts = append(r.Options[:], opts...)
 	opts = append([]option.RequestOption{option.WithHeader("OpenAI-Beta", "assistants=v2")}, opts...)
@@ -90,6 +96,8 @@ func (r *BetaThreadMessageService) Update(ctx context.Context, threadID string, 
 }
 
 // Returns a list of messages for a given thread.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) List(ctx context.Context, threadID string, query BetaThreadMessageListParams, opts ...option.RequestOption) (res *pagination.CursorPage[Message], err error) {
 	var raw *http.Response
 	opts = append(r.Options[:], opts...)
@@ -112,11 +120,15 @@ func (r *BetaThreadMessageService) List(ctx context.Context, threadID string, qu
 }
 
 // Returns a list of messages for a given thread.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) ListAutoPaging(ctx context.Context, threadID string, query BetaThreadMessageListParams, opts ...option.RequestOption) *pagination.CursorPageAutoPager[Message] {
 	return pagination.NewCursorPageAutoPager(r.List(ctx, threadID, query, opts...))
 }
 
 // Deletes a message.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadMessageService) Delete(ctx context.Context, threadID string, messageID string, opts ...option.RequestOption) (res *MessageDeleted, err error) {
 	opts = append(r.Options[:], opts...)
 	opts = append([]option.RequestOption{option.WithHeader("OpenAI-Beta", "assistants=v2")}, opts...)
@@ -150,25 +162,34 @@ type AnnotationUnion struct {
 	// This field is from variant [FilePathAnnotation].
 	FilePath FilePathAnnotationFilePath `json:"file_path"`
 	JSON     struct {
-		EndIndex     resp.Field
-		FileCitation resp.Field
-		StartIndex   resp.Field
-		Text         resp.Field
-		Type         resp.Field
-		FilePath     resp.Field
+		EndIndex     respjson.Field
+		FileCitation respjson.Field
+		StartIndex   respjson.Field
+		Text         respjson.Field
+		Type         respjson.Field
+		FilePath     respjson.Field
 		raw          string
 	} `json:"-"`
 }
 
+// anyAnnotation is implemented by each variant of [AnnotationUnion] to add type
+// safety for the return type of [AnnotationUnion.AsAny]
+type anyAnnotation interface {
+	implAnnotationUnion()
+}
+
+func (FileCitationAnnotation) implAnnotationUnion() {}
+func (FilePathAnnotation) implAnnotationUnion()     {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := AnnotationUnion.AsAny().(type) {
-//	case FileCitationAnnotation:
-//	case FilePathAnnotation:
+//	case openai.FileCitationAnnotation:
+//	case openai.FilePathAnnotation:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u AnnotationUnion) AsAny() any {
+func (u AnnotationUnion) AsAny() anyAnnotation {
 	switch u.Type {
 	case "file_citation":
 		return u.AsFileCitation()
@@ -213,26 +234,35 @@ type AnnotationDeltaUnion struct {
 	// This field is from variant [FilePathDeltaAnnotation].
 	FilePath FilePathDeltaAnnotationFilePath `json:"file_path"`
 	JSON     struct {
-		Index        resp.Field
-		Type         resp.Field
-		EndIndex     resp.Field
-		FileCitation resp.Field
-		StartIndex   resp.Field
-		Text         resp.Field
-		FilePath     resp.Field
+		Index        respjson.Field
+		Type         respjson.Field
+		EndIndex     respjson.Field
+		FileCitation respjson.Field
+		StartIndex   respjson.Field
+		Text         respjson.Field
+		FilePath     respjson.Field
 		raw          string
 	} `json:"-"`
 }
 
+// anyAnnotationDelta is implemented by each variant of [AnnotationDeltaUnion] to
+// add type safety for the return type of [AnnotationDeltaUnion.AsAny]
+type anyAnnotationDelta interface {
+	implAnnotationDeltaUnion()
+}
+
+func (FileCitationDeltaAnnotation) implAnnotationDeltaUnion() {}
+func (FilePathDeltaAnnotation) implAnnotationDeltaUnion()     {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := AnnotationDeltaUnion.AsAny().(type) {
-//	case FileCitationDeltaAnnotation:
-//	case FilePathDeltaAnnotation:
+//	case openai.FileCitationDeltaAnnotation:
+//	case openai.FilePathDeltaAnnotation:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u AnnotationDeltaUnion) AsAny() any {
+func (u AnnotationDeltaUnion) AsAny() anyAnnotationDelta {
 	switch u.Type {
 	case "file_citation":
 		return u.AsFileCitation()
@@ -270,15 +300,14 @@ type FileCitationAnnotation struct {
 	Text string `json:"text,required"`
 	// Always `file_citation`.
 	Type constant.FileCitation `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		EndIndex     resp.Field
-		FileCitation resp.Field
-		StartIndex   resp.Field
-		Text         resp.Field
-		Type         resp.Field
-		ExtraFields  map[string]resp.Field
+		EndIndex     respjson.Field
+		FileCitation respjson.Field
+		StartIndex   respjson.Field
+		Text         respjson.Field
+		Type         respjson.Field
+		ExtraFields  map[string]respjson.Field
 		raw          string
 	} `json:"-"`
 }
@@ -292,11 +321,10 @@ func (r *FileCitationAnnotation) UnmarshalJSON(data []byte) error {
 type FileCitationAnnotationFileCitation struct {
 	// The ID of the specific File the citation is from.
 	FileID string `json:"file_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -320,16 +348,15 @@ type FileCitationDeltaAnnotation struct {
 	StartIndex   int64                                   `json:"start_index"`
 	// The text in the message content that needs to be replaced.
 	Text string `json:"text"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index        resp.Field
-		Type         resp.Field
-		EndIndex     resp.Field
-		FileCitation resp.Field
-		StartIndex   resp.Field
-		Text         resp.Field
-		ExtraFields  map[string]resp.Field
+		Index        respjson.Field
+		Type         respjson.Field
+		EndIndex     respjson.Field
+		FileCitation respjson.Field
+		StartIndex   respjson.Field
+		Text         respjson.Field
+		ExtraFields  map[string]respjson.Field
 		raw          string
 	} `json:"-"`
 }
@@ -345,12 +372,11 @@ type FileCitationDeltaAnnotationFileCitation struct {
 	FileID string `json:"file_id"`
 	// The specific quote in the file.
 	Quote string `json:"quote"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		Quote       resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		Quote       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -371,15 +397,14 @@ type FilePathAnnotation struct {
 	Text string `json:"text,required"`
 	// Always `file_path`.
 	Type constant.FilePath `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		EndIndex    resp.Field
-		FilePath    resp.Field
-		StartIndex  resp.Field
-		Text        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		EndIndex    respjson.Field
+		FilePath    respjson.Field
+		StartIndex  respjson.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -393,11 +418,10 @@ func (r *FilePathAnnotation) UnmarshalJSON(data []byte) error {
 type FilePathAnnotationFilePath struct {
 	// The ID of the file that was generated.
 	FileID string `json:"file_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -420,16 +444,15 @@ type FilePathDeltaAnnotation struct {
 	StartIndex int64                           `json:"start_index"`
 	// The text in the message content that needs to be replaced.
 	Text string `json:"text"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		EndIndex    resp.Field
-		FilePath    resp.Field
-		StartIndex  resp.Field
-		Text        resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		EndIndex    respjson.Field
+		FilePath    respjson.Field
+		StartIndex  respjson.Field
+		Text        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -443,11 +466,10 @@ func (r *FilePathDeltaAnnotation) UnmarshalJSON(data []byte) error {
 type FilePathDeltaAnnotationFilePath struct {
 	// The ID of the file that was generated.
 	FileID string `json:"file_id"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -468,12 +490,11 @@ type ImageFile struct {
 	//
 	// Any of "auto", "low", "high".
 	Detail ImageFileDetail `json:"detail"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		Detail      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		Detail      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -488,9 +509,9 @@ func (r *ImageFile) UnmarshalJSON(data []byte) error {
 //
 // Warning: the fields of the param type will not be present. ToParam should only
 // be used at the last possible moment before sending a request. Test for this with
-// ImageFileParam.IsOverridden()
+// ImageFileParam.Overrides()
 func (r ImageFile) ToParam() ImageFileParam {
-	return param.OverrideObj[ImageFileParam](r.RawJSON())
+	return param.Override[ImageFileParam](json.RawMessage(r.RawJSON()))
 }
 
 // Specifies the detail level of the image if specified by the user. `low` uses
@@ -517,12 +538,12 @@ type ImageFileParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ImageFileParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ImageFileParam) MarshalJSON() (data []byte, err error) {
 	type shadow ImageFileParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ImageFileParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // References an image [File](https://platform.openai.com/docs/api-reference/files)
@@ -531,12 +552,11 @@ type ImageFileContentBlock struct {
 	ImageFile ImageFile `json:"image_file,required"`
 	// Always `image_file`.
 	Type constant.ImageFile `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ImageFile   resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		ImageFile   respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -551,9 +571,9 @@ func (r *ImageFileContentBlock) UnmarshalJSON(data []byte) error {
 //
 // Warning: the fields of the param type will not be present. ToParam should only
 // be used at the last possible moment before sending a request. Test for this with
-// ImageFileContentBlockParam.IsOverridden()
+// ImageFileContentBlockParam.Overrides()
 func (r ImageFileContentBlock) ToParam() ImageFileContentBlockParam {
-	return param.OverrideObj[ImageFileContentBlockParam](r.RawJSON())
+	return param.Override[ImageFileContentBlockParam](json.RawMessage(r.RawJSON()))
 }
 
 // References an image [File](https://platform.openai.com/docs/api-reference/files)
@@ -569,12 +589,12 @@ type ImageFileContentBlockParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ImageFileContentBlockParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ImageFileContentBlockParam) MarshalJSON() (data []byte, err error) {
 	type shadow ImageFileContentBlockParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ImageFileContentBlockParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type ImageFileDelta struct {
@@ -587,12 +607,11 @@ type ImageFileDelta struct {
 	// in the message content. Set `purpose="vision"` when uploading the File if you
 	// need to later display the file content.
 	FileID string `json:"file_id"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Detail      resp.Field
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		Detail      respjson.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -621,13 +640,12 @@ type ImageFileDeltaBlock struct {
 	// Always `image_file`.
 	Type      constant.ImageFile `json:"type,required"`
 	ImageFile ImageFileDelta     `json:"image_file"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		ImageFile   resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		ImageFile   respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -647,12 +665,11 @@ type ImageURL struct {
 	//
 	// Any of "auto", "low", "high".
 	Detail ImageURLDetail `json:"detail"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		URL         resp.Field
-		Detail      resp.Field
-		ExtraFields map[string]resp.Field
+		URL         respjson.Field
+		Detail      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -667,9 +684,9 @@ func (r *ImageURL) UnmarshalJSON(data []byte) error {
 //
 // Warning: the fields of the param type will not be present. ToParam should only
 // be used at the last possible moment before sending a request. Test for this with
-// ImageURLParam.IsOverridden()
+// ImageURLParam.Overrides()
 func (r ImageURL) ToParam() ImageURLParam {
-	return param.OverrideObj[ImageURLParam](r.RawJSON())
+	return param.Override[ImageURLParam](json.RawMessage(r.RawJSON()))
 }
 
 // Specifies the detail level of the image. `low` uses fewer tokens, you can opt in
@@ -695,12 +712,12 @@ type ImageURLParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ImageURLParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ImageURLParam) MarshalJSON() (data []byte, err error) {
 	type shadow ImageURLParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ImageURLParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // References an image URL in the content of a message.
@@ -708,12 +725,11 @@ type ImageURLContentBlock struct {
 	ImageURL ImageURL `json:"image_url,required"`
 	// The type of the content part.
 	Type constant.ImageURL `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ImageURL    resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		ImageURL    respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -728,9 +744,9 @@ func (r *ImageURLContentBlock) UnmarshalJSON(data []byte) error {
 //
 // Warning: the fields of the param type will not be present. ToParam should only
 // be used at the last possible moment before sending a request. Test for this with
-// ImageURLContentBlockParam.IsOverridden()
+// ImageURLContentBlockParam.Overrides()
 func (r ImageURLContentBlock) ToParam() ImageURLContentBlockParam {
-	return param.OverrideObj[ImageURLContentBlockParam](r.RawJSON())
+	return param.Override[ImageURLContentBlockParam](json.RawMessage(r.RawJSON()))
 }
 
 // References an image URL in the content of a message.
@@ -745,12 +761,12 @@ type ImageURLContentBlockParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ImageURLContentBlockParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r ImageURLContentBlockParam) MarshalJSON() (data []byte, err error) {
 	type shadow ImageURLContentBlockParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *ImageURLContentBlockParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type ImageURLDelta struct {
@@ -762,12 +778,11 @@ type ImageURLDelta struct {
 	// The URL of the image, must be a supported image types: jpeg, jpg, png, gif,
 	// webp.
 	URL string `json:"url"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Detail      resp.Field
-		URL         resp.Field
-		ExtraFields map[string]resp.Field
+		Detail      respjson.Field
+		URL         respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -795,13 +810,12 @@ type ImageURLDeltaBlock struct {
 	// Always `image_url`.
 	Type     constant.ImageURL `json:"type,required"`
 	ImageURL ImageURLDelta     `json:"image_url"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		ImageURL    resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		ImageURL    respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -858,24 +872,23 @@ type Message struct {
 	// The [thread](https://platform.openai.com/docs/api-reference/threads) ID that
 	// this message belongs to.
 	ThreadID string `json:"thread_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID                resp.Field
-		AssistantID       resp.Field
-		Attachments       resp.Field
-		CompletedAt       resp.Field
-		Content           resp.Field
-		CreatedAt         resp.Field
-		IncompleteAt      resp.Field
-		IncompleteDetails resp.Field
-		Metadata          resp.Field
-		Object            resp.Field
-		Role              resp.Field
-		RunID             resp.Field
-		Status            resp.Field
-		ThreadID          resp.Field
-		ExtraFields       map[string]resp.Field
+		ID                respjson.Field
+		AssistantID       respjson.Field
+		Attachments       respjson.Field
+		CompletedAt       respjson.Field
+		Content           respjson.Field
+		CreatedAt         respjson.Field
+		IncompleteAt      respjson.Field
+		IncompleteDetails respjson.Field
+		Metadata          respjson.Field
+		Object            respjson.Field
+		Role              respjson.Field
+		RunID             respjson.Field
+		Status            respjson.Field
+		ThreadID          respjson.Field
+		ExtraFields       map[string]respjson.Field
 		raw               string
 	} `json:"-"`
 }
@@ -891,12 +904,11 @@ type MessageAttachment struct {
 	FileID string `json:"file_id"`
 	// The tools to add this file to.
 	Tools []MessageAttachmentToolUnion `json:"tools"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		Tools       resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		Tools       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -908,13 +920,13 @@ func (r *MessageAttachment) UnmarshalJSON(data []byte) error {
 }
 
 // MessageAttachmentToolUnion contains all possible properties and values from
-// [CodeInterpreterTool], [MessageAttachmentToolAssistantToolsFileSearchTypeOnly].
+// [CodeInterpreterTool], [MessageAttachmentToolFileSearchTool].
 //
 // Use the methods beginning with 'As' to cast the union to one of its variants.
 type MessageAttachmentToolUnion struct {
 	Type string `json:"type"`
 	JSON struct {
-		Type resp.Field
+		Type respjson.Field
 		raw  string
 	} `json:"-"`
 }
@@ -924,7 +936,7 @@ func (u MessageAttachmentToolUnion) AsCodeInterpreterTool() (v CodeInterpreterTo
 	return
 }
 
-func (u MessageAttachmentToolUnion) AsFileSearchTool() (v MessageAttachmentToolAssistantToolsFileSearchTypeOnly) {
+func (u MessageAttachmentToolUnion) AsFileSearchTool() (v MessageAttachmentToolFileSearchTool) {
 	apijson.UnmarshalRoot(json.RawMessage(u.JSON.raw), &v)
 	return
 }
@@ -936,21 +948,20 @@ func (r *MessageAttachmentToolUnion) UnmarshalJSON(data []byte) error {
 	return apijson.UnmarshalRoot(data, r)
 }
 
-type MessageAttachmentToolAssistantToolsFileSearchTypeOnly struct {
+type MessageAttachmentToolFileSearchTool struct {
 	// The type of tool being defined: `file_search`
 	Type constant.FileSearch `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
 
 // Returns the unmodified JSON received from the API
-func (r MessageAttachmentToolAssistantToolsFileSearchTypeOnly) RawJSON() string { return r.JSON.raw }
-func (r *MessageAttachmentToolAssistantToolsFileSearchTypeOnly) UnmarshalJSON(data []byte) error {
+func (r MessageAttachmentToolFileSearchTool) RawJSON() string { return r.JSON.raw }
+func (r *MessageAttachmentToolFileSearchTool) UnmarshalJSON(data []byte) error {
 	return apijson.UnmarshalRoot(data, r)
 }
 
@@ -961,11 +972,10 @@ type MessageIncompleteDetails struct {
 	// Any of "content_filter", "max_tokens", "run_cancelled", "run_expired",
 	// "run_failed".
 	Reason string `json:"reason,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Reason      resp.Field
-		ExtraFields map[string]resp.Field
+		Reason      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1013,26 +1023,37 @@ type MessageContentUnion struct {
 	// This field is from variant [RefusalContentBlock].
 	Refusal string `json:"refusal"`
 	JSON    struct {
-		ImageFile resp.Field
-		Type      resp.Field
-		ImageURL  resp.Field
-		Text      resp.Field
-		Refusal   resp.Field
+		ImageFile respjson.Field
+		Type      respjson.Field
+		ImageURL  respjson.Field
+		Text      respjson.Field
+		Refusal   respjson.Field
 		raw       string
 	} `json:"-"`
 }
 
+// anyMessageContent is implemented by each variant of [MessageContentUnion] to add
+// type safety for the return type of [MessageContentUnion.AsAny]
+type anyMessageContent interface {
+	implMessageContentUnion()
+}
+
+func (ImageFileContentBlock) implMessageContentUnion() {}
+func (ImageURLContentBlock) implMessageContentUnion()  {}
+func (TextContentBlock) implMessageContentUnion()      {}
+func (RefusalContentBlock) implMessageContentUnion()   {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := MessageContentUnion.AsAny().(type) {
-//	case ImageFileContentBlock:
-//	case ImageURLContentBlock:
-//	case TextContentBlock:
-//	case RefusalContentBlock:
+//	case openai.ImageFileContentBlock:
+//	case openai.ImageURLContentBlock:
+//	case openai.TextContentBlock:
+//	case openai.RefusalContentBlock:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u MessageContentUnion) AsAny() any {
+func (u MessageContentUnion) AsAny() anyMessageContent {
 	switch u.Type {
 	case "image_file":
 		return u.AsImageFile()
@@ -1093,27 +1114,39 @@ type MessageContentDeltaUnion struct {
 	// This field is from variant [ImageURLDeltaBlock].
 	ImageURL ImageURLDelta `json:"image_url"`
 	JSON     struct {
-		Index     resp.Field
-		Type      resp.Field
-		ImageFile resp.Field
-		Text      resp.Field
-		Refusal   resp.Field
-		ImageURL  resp.Field
+		Index     respjson.Field
+		Type      respjson.Field
+		ImageFile respjson.Field
+		Text      respjson.Field
+		Refusal   respjson.Field
+		ImageURL  respjson.Field
 		raw       string
 	} `json:"-"`
 }
 
+// anyMessageContentDelta is implemented by each variant of
+// [MessageContentDeltaUnion] to add type safety for the return type of
+// [MessageContentDeltaUnion.AsAny]
+type anyMessageContentDelta interface {
+	implMessageContentDeltaUnion()
+}
+
+func (ImageFileDeltaBlock) implMessageContentDeltaUnion() {}
+func (TextDeltaBlock) implMessageContentDeltaUnion()      {}
+func (RefusalDeltaBlock) implMessageContentDeltaUnion()   {}
+func (ImageURLDeltaBlock) implMessageContentDeltaUnion()  {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := MessageContentDeltaUnion.AsAny().(type) {
-//	case ImageFileDeltaBlock:
-//	case TextDeltaBlock:
-//	case RefusalDeltaBlock:
-//	case ImageURLDeltaBlock:
+//	case openai.ImageFileDeltaBlock:
+//	case openai.TextDeltaBlock:
+//	case openai.RefusalDeltaBlock:
+//	case openai.ImageURLDeltaBlock:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u MessageContentDeltaUnion) AsAny() any {
+func (u MessageContentDeltaUnion) AsAny() anyMessageContentDelta {
 	switch u.Type {
 	case "image_file":
 		return u.AsImageFile()
@@ -1182,11 +1215,11 @@ type MessageContentPartParamUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u MessageContentPartParamUnion) IsPresent() bool { return !param.IsOmitted(u) && !u.IsNull() }
 func (u MessageContentPartParamUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[MessageContentPartParamUnion](u.OfImageFile, u.OfImageURL, u.OfText)
+	return param.MarshalUnion(u, u.OfImageFile, u.OfImageURL, u.OfText)
+}
+func (u *MessageContentPartParamUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *MessageContentPartParamUnion) asAny() any {
@@ -1239,21 +1272,9 @@ func (u MessageContentPartParamUnion) GetType() *string {
 func init() {
 	apijson.RegisterUnion[MessageContentPartParamUnion](
 		"type",
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(ImageFileContentBlockParam{}),
-			DiscriminatorValue: "image_file",
-		},
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(ImageURLContentBlockParam{}),
-			DiscriminatorValue: "image_url",
-		},
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(TextContentBlockParam{}),
-			DiscriminatorValue: "text",
-		},
+		apijson.Discriminator[ImageFileContentBlockParam]("image_file"),
+		apijson.Discriminator[ImageURLContentBlockParam]("image_url"),
+		apijson.Discriminator[TextContentBlockParam]("text"),
 	)
 }
 
@@ -1261,13 +1282,12 @@ type MessageDeleted struct {
 	ID      string                        `json:"id,required"`
 	Deleted bool                          `json:"deleted,required"`
 	Object  constant.ThreadMessageDeleted `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Deleted     resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Deleted     respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1286,12 +1306,11 @@ type MessageDelta struct {
 	//
 	// Any of "user", "assistant".
 	Role MessageDeltaRole `json:"role"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Content     resp.Field
-		Role        resp.Field
-		ExtraFields map[string]resp.Field
+		Content     respjson.Field
+		Role        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1319,13 +1338,12 @@ type MessageDeltaEvent struct {
 	Delta MessageDelta `json:"delta,required"`
 	// The object type, which is always `thread.message.delta`.
 	Object constant.ThreadMessageDelta `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Delta       resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Delta       respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1341,12 +1359,11 @@ type RefusalContentBlock struct {
 	Refusal string `json:"refusal,required"`
 	// Always `refusal`.
 	Type constant.Refusal `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Refusal     resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Refusal     respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1364,13 +1381,12 @@ type RefusalDeltaBlock struct {
 	// Always `refusal`.
 	Type    constant.Refusal `json:"type,required"`
 	Refusal string           `json:"refusal"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		Refusal     resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		Refusal     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1385,12 +1401,11 @@ type Text struct {
 	Annotations []AnnotationUnion `json:"annotations,required"`
 	// The data that makes up the text.
 	Value string `json:"value,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Annotations resp.Field
-		Value       resp.Field
-		ExtraFields map[string]resp.Field
+		Annotations respjson.Field
+		Value       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1406,12 +1421,11 @@ type TextContentBlock struct {
 	Text Text `json:"text,required"`
 	// Always `text`.
 	Type constant.Text `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1435,24 +1449,23 @@ type TextContentBlockParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f TextContentBlockParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r TextContentBlockParam) MarshalJSON() (data []byte, err error) {
 	type shadow TextContentBlockParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *TextContentBlockParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type TextDelta struct {
 	Annotations []AnnotationDeltaUnion `json:"annotations"`
 	// The data that makes up the text.
 	Value string `json:"value"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Annotations resp.Field
-		Value       resp.Field
-		ExtraFields map[string]resp.Field
+		Annotations respjson.Field
+		Value       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1470,13 +1483,12 @@ type TextDeltaBlock struct {
 	// Always `text`.
 	Type constant.Text `json:"type,required"`
 	Text TextDelta     `json:"text"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		Text        resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		Text        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1507,17 +1519,16 @@ type BetaThreadMessageNewParams struct {
 	//
 	// Keys are strings with a maximum length of 64 characters. Values are strings with
 	// a maximum length of 512 characters.
-	Metadata shared.MetadataParam `json:"metadata,omitzero"`
+	Metadata shared.Metadata `json:"metadata,omitzero"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadMessageNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r BetaThreadMessageNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow BetaThreadMessageNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *BetaThreadMessageNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
@@ -1529,13 +1540,11 @@ type BetaThreadMessageNewParamsContentUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u BetaThreadMessageNewParamsContentUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u BetaThreadMessageNewParamsContentUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[BetaThreadMessageNewParamsContentUnion](u.OfString, u.OfArrayOfContentParts)
+	return param.MarshalUnion(u, u.OfString, u.OfArrayOfContentParts)
+}
+func (u *BetaThreadMessageNewParamsContentUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *BetaThreadMessageNewParamsContentUnion) asAny() any {
@@ -1568,14 +1577,12 @@ type BetaThreadMessageNewParamsAttachment struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadMessageNewParamsAttachment) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r BetaThreadMessageNewParamsAttachment) MarshalJSON() (data []byte, err error) {
 	type shadow BetaThreadMessageNewParamsAttachment
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *BetaThreadMessageNewParamsAttachment) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
@@ -1587,13 +1594,11 @@ type BetaThreadMessageNewParamsAttachmentToolUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u BetaThreadMessageNewParamsAttachmentToolUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u BetaThreadMessageNewParamsAttachmentToolUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[BetaThreadMessageNewParamsAttachmentToolUnion](u.OfCodeInterpreter, u.OfFileSearch)
+	return param.MarshalUnion(u, u.OfCodeInterpreter, u.OfFileSearch)
+}
+func (u *BetaThreadMessageNewParamsAttachmentToolUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *BetaThreadMessageNewParamsAttachmentToolUnion) asAny() any {
@@ -1618,36 +1623,31 @@ func (u BetaThreadMessageNewParamsAttachmentToolUnion) GetType() *string {
 func init() {
 	apijson.RegisterUnion[BetaThreadMessageNewParamsAttachmentToolUnion](
 		"type",
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(CodeInterpreterToolParam{}),
-			DiscriminatorValue: "code_interpreter",
-		},
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(BetaThreadMessageNewParamsAttachmentToolFileSearch{}),
-			DiscriminatorValue: "file_search",
-		},
+		apijson.Discriminator[CodeInterpreterToolParam]("code_interpreter"),
+		apijson.Discriminator[BetaThreadMessageNewParamsAttachmentToolFileSearch]("file_search"),
 	)
 }
 
-// The property Type is required.
+func NewBetaThreadMessageNewParamsAttachmentToolFileSearch() BetaThreadMessageNewParamsAttachmentToolFileSearch {
+	return BetaThreadMessageNewParamsAttachmentToolFileSearch{
+		Type: "file_search",
+	}
+}
+
+// This struct has a constant value, construct it with
+// [NewBetaThreadMessageNewParamsAttachmentToolFileSearch].
 type BetaThreadMessageNewParamsAttachmentToolFileSearch struct {
 	// The type of tool being defined: `file_search`
-	//
-	// This field can be elided, and will marshal its zero value as "file_search".
 	Type constant.FileSearch `json:"type,required"`
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadMessageNewParamsAttachmentToolFileSearch) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r BetaThreadMessageNewParamsAttachmentToolFileSearch) MarshalJSON() (data []byte, err error) {
 	type shadow BetaThreadMessageNewParamsAttachmentToolFileSearch
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *BetaThreadMessageNewParamsAttachmentToolFileSearch) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type BetaThreadMessageUpdateParams struct {
@@ -1657,17 +1657,16 @@ type BetaThreadMessageUpdateParams struct {
 	//
 	// Keys are strings with a maximum length of 64 characters. Values are strings with
 	// a maximum length of 512 characters.
-	Metadata shared.MetadataParam `json:"metadata,omitzero"`
+	Metadata shared.Metadata `json:"metadata,omitzero"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadMessageUpdateParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r BetaThreadMessageUpdateParams) MarshalJSON() (data []byte, err error) {
 	type shadow BetaThreadMessageUpdateParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *BetaThreadMessageUpdateParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type BetaThreadMessageListParams struct {
@@ -1694,13 +1693,9 @@ type BetaThreadMessageListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadMessageListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [BetaThreadMessageListParams]'s query parameters as
 // `url.Values`.
-func (r BetaThreadMessageListParams) URLQuery() (v url.Values) {
+func (r BetaThreadMessageListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

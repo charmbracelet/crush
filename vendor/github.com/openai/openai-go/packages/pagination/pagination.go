@@ -10,7 +10,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 )
 
 // aliased to make [param.APIUnion] private when embedding
@@ -22,12 +22,11 @@ type paramObj = param.APIObject
 type Page[T any] struct {
 	Data   []T    `json:"data"`
 	Object string `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Data        resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		Data        respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 	cfg *requestconfig.RequestConfig
@@ -44,6 +43,9 @@ func (r *Page[T]) UnmarshalJSON(data []byte) error {
 // there is no next page, this function will return a 'nil' for the page value, but
 // will not return an error
 func (r *Page[T]) GetNextPage() (res *Page[T], err error) {
+	if len(r.Data) == 0 {
+		return nil, nil
+	}
 	// This page represents a response that isn't actually paginated at the API level
 	// so there will never be a next page.
 	cfg := (*requestconfig.RequestConfig)(nil)
@@ -117,12 +119,11 @@ func (r *PageAutoPager[T]) Index() int {
 type CursorPage[T any] struct {
 	Data    []T  `json:"data"`
 	HasMore bool `json:"has_more"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Data        resp.Field
-		HasMore     resp.Field
-		ExtraFields map[string]resp.Field
+		Data        respjson.Field
+		HasMore     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 	cfg *requestconfig.RequestConfig
@@ -139,7 +140,11 @@ func (r *CursorPage[T]) UnmarshalJSON(data []byte) error {
 // there is no next page, this function will return a 'nil' for the page value, but
 // will not return an error
 func (r *CursorPage[T]) GetNextPage() (res *CursorPage[T], err error) {
-	if r.JSON.HasMore.IsPresent() && r.HasMore == false {
+	if len(r.Data) == 0 {
+		return nil, nil
+	}
+
+	if r.JSON.HasMore.Valid() && r.HasMore == false {
 		return nil, nil
 	}
 	items := r.Data
@@ -149,7 +154,10 @@ func (r *CursorPage[T]) GetNextPage() (res *CursorPage[T], err error) {
 	cfg := r.cfg.Clone(r.cfg.Context)
 	value := reflect.ValueOf(items[len(items)-1])
 	field := value.FieldByName("ID")
-	cfg.Apply(option.WithQuery("after", field.Interface().(string)))
+	err = cfg.Apply(option.WithQuery("after", field.Interface().(string)))
+	if err != nil {
+		return nil, err
+	}
 	var raw *http.Response
 	cfg.ResponseInto = &raw
 	cfg.ResponseBodyInto = &res

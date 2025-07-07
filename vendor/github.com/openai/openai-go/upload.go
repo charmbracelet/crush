@@ -12,7 +12,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -123,19 +123,18 @@ type Upload struct {
 	Status UploadStatus `json:"status,required"`
 	// The `File` object represents a document that has been uploaded to OpenAI.
 	File FileObject `json:"file,nullable"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Bytes       resp.Field
-		CreatedAt   resp.Field
-		ExpiresAt   resp.Field
-		Filename    resp.Field
-		Object      resp.Field
-		Purpose     resp.Field
-		Status      resp.Field
-		File        resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Bytes       respjson.Field
+		CreatedAt   respjson.Field
+		ExpiresAt   respjson.Field
+		Filename    respjson.Field
+		Object      respjson.Field
+		Purpose     respjson.Field
+		Status      respjson.Field
+		File        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -176,13 +175,12 @@ type UploadNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f UploadNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r UploadNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow UploadNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *UploadNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type UploadCompleteParams struct {
@@ -194,11 +192,10 @@ type UploadCompleteParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f UploadCompleteParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r UploadCompleteParams) MarshalJSON() (data []byte, err error) {
 	type shadow UploadCompleteParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *UploadCompleteParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }

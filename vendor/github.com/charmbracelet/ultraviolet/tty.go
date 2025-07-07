@@ -11,3 +11,8 @@ import "os"
 func OpenTTY() (inTty, outTty *os.File, err error) {
 	return openTTY()
 }
+
+// Suspend suspends the current process group.
+func Suspend() error {
+	return suspend()
+}

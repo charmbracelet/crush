@@ -10,7 +10,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/shared/constant"
 )
@@ -75,17 +75,16 @@ type Completion struct {
 	SystemFingerprint string `json:"system_fingerprint"`
 	// Usage statistics for the completion request.
 	Usage CompletionUsage `json:"usage"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID                resp.Field
-		Choices           resp.Field
-		Created           resp.Field
-		Model             resp.Field
-		Object            resp.Field
-		SystemFingerprint resp.Field
-		Usage             resp.Field
-		ExtraFields       map[string]resp.Field
+		ID                respjson.Field
+		Choices           respjson.Field
+		Created           respjson.Field
+		Model             respjson.Field
+		Object            respjson.Field
+		SystemFingerprint respjson.Field
+		Usage             respjson.Field
+		ExtraFields       map[string]respjson.Field
 		raw               string
 	} `json:"-"`
 }
@@ -107,14 +106,13 @@ type CompletionChoice struct {
 	Index        int64                        `json:"index,required"`
 	Logprobs     CompletionChoiceLogprobs     `json:"logprobs,required"`
 	Text         string                       `json:"text,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FinishReason resp.Field
-		Index        resp.Field
-		Logprobs     resp.Field
-		Text         resp.Field
-		ExtraFields  map[string]resp.Field
+		FinishReason respjson.Field
+		Index        respjson.Field
+		Logprobs     respjson.Field
+		Text         respjson.Field
+		ExtraFields  map[string]respjson.Field
 		raw          string
 	} `json:"-"`
 }
@@ -142,14 +140,13 @@ type CompletionChoiceLogprobs struct {
 	TokenLogprobs []float64            `json:"token_logprobs"`
 	Tokens        []string             `json:"tokens"`
 	TopLogprobs   []map[string]float64 `json:"top_logprobs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		TextOffset    resp.Field
-		TokenLogprobs resp.Field
-		Tokens        resp.Field
-		TopLogprobs   resp.Field
-		ExtraFields   map[string]resp.Field
+		TextOffset    respjson.Field
+		TokenLogprobs respjson.Field
+		Tokens        respjson.Field
+		TopLogprobs   respjson.Field
+		ExtraFields   map[string]respjson.Field
 		raw           string
 	} `json:"-"`
 }
@@ -172,15 +169,14 @@ type CompletionUsage struct {
 	CompletionTokensDetails CompletionUsageCompletionTokensDetails `json:"completion_tokens_details"`
 	// Breakdown of tokens used in the prompt.
 	PromptTokensDetails CompletionUsagePromptTokensDetails `json:"prompt_tokens_details"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		CompletionTokens        resp.Field
-		PromptTokens            resp.Field
-		TotalTokens             resp.Field
-		CompletionTokensDetails resp.Field
-		PromptTokensDetails     resp.Field
-		ExtraFields             map[string]resp.Field
+		CompletionTokens        respjson.Field
+		PromptTokens            respjson.Field
+		TotalTokens             respjson.Field
+		CompletionTokensDetails respjson.Field
+		PromptTokensDetails     respjson.Field
+		ExtraFields             map[string]respjson.Field
 		raw                     string
 	} `json:"-"`
 }
@@ -205,14 +201,13 @@ type CompletionUsageCompletionTokensDetails struct {
 	// still counted in the total completion tokens for purposes of billing, output,
 	// and context window limits.
 	RejectedPredictionTokens int64 `json:"rejected_prediction_tokens"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		AcceptedPredictionTokens resp.Field
-		AudioTokens              resp.Field
-		ReasoningTokens          resp.Field
-		RejectedPredictionTokens resp.Field
-		ExtraFields              map[string]resp.Field
+		AcceptedPredictionTokens respjson.Field
+		AudioTokens              respjson.Field
+		ReasoningTokens          respjson.Field
+		RejectedPredictionTokens respjson.Field
+		ExtraFields              map[string]respjson.Field
 		raw                      string
 	} `json:"-"`
 }
@@ -229,12 +224,11 @@ type CompletionUsagePromptTokensDetails struct {
 	AudioTokens int64 `json:"audio_tokens"`
 	// Cached tokens present in the prompt.
 	CachedTokens int64 `json:"cached_tokens"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		AudioTokens  resp.Field
-		CachedTokens resp.Field
-		ExtraFields  map[string]resp.Field
+		AudioTokens  respjson.Field
+		CachedTokens respjson.Field
+		ExtraFields  map[string]respjson.Field
 		raw          string
 	} `json:"-"`
 }
@@ -258,7 +252,7 @@ type CompletionNewParams struct {
 	// see all of your available models, or see our
 	// [Model overview](https://platform.openai.com/docs/models) for descriptions of
 	// them.
-	Model string `json:"model,omitzero,required"`
+	Model CompletionNewParamsModel `json:"model,omitzero,required"`
 	// Generates `best_of` completions server-side and returns the "best" (the one with
 	// the highest log probability per token). Results cannot be streamed.
 	//
@@ -344,6 +338,8 @@ type CompletionNewParams struct {
 	// As an example, you can pass `{"50256": -100}` to prevent the <|endoftext|> token
 	// from being generated.
 	LogitBias map[string]int64 `json:"logit_bias,omitzero"`
+	// Not supported with latest reasoning models `o3` and `o4-mini`.
+	//
 	// Up to 4 sequences where the API will stop generating further tokens. The
 	// returned text will not contain the stop sequence.
 	Stop CompletionNewParamsStopUnion `json:"stop,omitzero"`
@@ -352,14 +348,26 @@ type CompletionNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f CompletionNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r CompletionNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow CompletionNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
 }
+func (r *CompletionNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// ID of the model to use. You can use the
+// [List models](https://platform.openai.com/docs/api-reference/models/list) API to
+// see all of your available models, or see our
+// [Model overview](https://platform.openai.com/docs/models) for descriptions of
+// them.
+type CompletionNewParamsModel string
+
+const (
+	CompletionNewParamsModelGPT3_5TurboInstruct CompletionNewParamsModel = "gpt-3.5-turbo-instruct"
+	CompletionNewParamsModelDavinci002          CompletionNewParamsModel = "davinci-002"
+	CompletionNewParamsModelBabbage002          CompletionNewParamsModel = "babbage-002"
+)
 
 // Only one field can be non-zero.
 //
@@ -372,11 +380,11 @@ type CompletionNewParamsPromptUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u CompletionNewParamsPromptUnion) IsPresent() bool { return !param.IsOmitted(u) && !u.IsNull() }
 func (u CompletionNewParamsPromptUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[CompletionNewParamsPromptUnion](u.OfString, u.OfArrayOfStrings, u.OfArrayOfTokens, u.OfArrayOfTokenArrays)
+	return param.MarshalUnion(u, u.OfString, u.OfArrayOfStrings, u.OfArrayOfTokens, u.OfArrayOfTokenArrays)
+}
+func (u *CompletionNewParamsPromptUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *CompletionNewParamsPromptUnion) asAny() any {
@@ -396,23 +404,23 @@ func (u *CompletionNewParamsPromptUnion) asAny() any {
 //
 // Use [param.IsOmitted] to confirm if a field is set.
 type CompletionNewParamsStopUnion struct {
-	OfString                  param.Opt[string] `json:",omitzero,inline"`
-	OfCompletionNewsStopArray []string          `json:",omitzero,inline"`
+	OfString      param.Opt[string] `json:",omitzero,inline"`
+	OfStringArray []string          `json:",omitzero,inline"`
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u CompletionNewParamsStopUnion) IsPresent() bool { return !param.IsOmitted(u) && !u.IsNull() }
 func (u CompletionNewParamsStopUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[CompletionNewParamsStopUnion](u.OfString, u.OfCompletionNewsStopArray)
+	return param.MarshalUnion(u, u.OfString, u.OfStringArray)
+}
+func (u *CompletionNewParamsStopUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *CompletionNewParamsStopUnion) asAny() any {
 	if !param.IsOmitted(u.OfString) {
 		return &u.OfString.Value
-	} else if !param.IsOmitted(u.OfCompletionNewsStopArray) {
-		return &u.OfCompletionNewsStopArray
+	} else if !param.IsOmitted(u.OfStringArray) {
+		return &u.OfStringArray
 	}
 	return nil
 }

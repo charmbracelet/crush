@@ -15,7 +15,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -77,15 +77,14 @@ type ResponseItemList struct {
 	LastID string `json:"last_id,required"`
 	// The type of object returned, must be `list`.
 	Object constant.List `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Data        resp.Field
-		FirstID     resp.Field
-		HasMore     resp.Field
-		LastID      resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		Data        respjson.Field
+		FirstID     respjson.Field
+		HasMore     respjson.Field
+		LastID      respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -104,7 +103,10 @@ type InputItemListParams struct {
 	// A limit on the number of objects to be returned. Limit can range between 1 and
 	// 100, and the default is 20.
 	Limit param.Opt[int64] `query:"limit,omitzero" json:"-"`
-	// The order to return the input items in. Default is `asc`.
+	// Additional fields to include in the response. See the `include` parameter for
+	// Response creation above for more information.
+	Include []ResponseIncludable `query:"include,omitzero" json:"-"`
+	// The order to return the input items in. Default is `desc`.
 	//
 	// - `asc`: Return the input items in ascending order.
 	// - `desc`: Return the input items in descending order.
@@ -114,19 +116,15 @@ type InputItemListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f InputItemListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [InputItemListParams]'s query parameters as `url.Values`.
-func (r InputItemListParams) URLQuery() (v url.Values) {
+func (r InputItemListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,
 	})
 }
 
-// The order to return the input items in. Default is `asc`.
+// The order to return the input items in. Default is `desc`.
 //
 // - `asc`: Return the input items in ascending order.
 // - `desc`: Return the input items in descending order.

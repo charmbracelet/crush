@@ -8,3 +8,7 @@ import "os"
 func openTTY() (*os.File, *os.File, error) {
 	return nil, nil, ErrPlatformNotSupported
 }
+
+func suspend() error {
+	return ErrPlatformNotSupported
+}

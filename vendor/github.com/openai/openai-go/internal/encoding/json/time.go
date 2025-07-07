@@ -11,21 +11,23 @@ type TimeMarshaler interface {
 	MarshalJSONWithTimeLayout(string) []byte
 }
 
-var timeType = shims.TypeFor[time.Time]()
+func TimeLayout(fmt string) string {
+	switch fmt {
+	case "", "date-time":
+		return time.RFC3339
+	case "date":
+		return time.DateOnly
+	default:
+		return fmt
+	}
+}
 
-const DateFmt = "2006-01-02"
+var timeType = shims.TypeFor[time.Time]()
 
 func newTimeEncoder() encoderFunc {
 	return func(e *encodeState, v reflect.Value, opts encOpts) {
 		t := v.Interface().(time.Time)
-		fmtted := t.Format(opts.timefmt)
-		if opts.timefmt == "date" {
-			fmtted = t.Format(DateFmt)
-		}
-		// Default to RFC3339 if format is invalid
-		if fmtted == "" {
-			fmtted = t.Format(time.RFC3339)
-		}
+		fmtted := t.Format(TimeLayout(opts.timefmt))
 		stringEncoder(e, reflect.ValueOf(fmtted), opts)
 	}
 }

@@ -261,7 +261,7 @@ github.com/charmbracelet/bubbles/v2/table
 github.com/charmbracelet/bubbles/v2/textarea
 github.com/charmbracelet/bubbles/v2/textinput
 github.com/charmbracelet/bubbles/v2/viewport
-# github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250702164605-a991b583c0e7
+# github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250703182356-a42fb608faaf
 ## explicit; go 1.24.3
 github.com/charmbracelet/bubbletea/v2
 # github.com/charmbracelet/colorprofile v0.3.1
@@ -276,12 +276,12 @@ github.com/charmbracelet/glamour/v2
 github.com/charmbracelet/glamour/v2/ansi
 github.com/charmbracelet/glamour/v2/internal/autolink
 github.com/charmbracelet/glamour/v2/styles
-# github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.1.0.20250513162854-28902d027c40 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250702164623-bd5b9da8d487
+# github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250703152138-ff346e83e819
 ## explicit; go 1.24.2
 github.com/charmbracelet/lipgloss/v2
 github.com/charmbracelet/lipgloss/v2/table
 github.com/charmbracelet/lipgloss/v2/tree
-# github.com/charmbracelet/ultraviolet v0.0.0-20250702190342-c2f25359be42
+# github.com/charmbracelet/ultraviolet v0.0.0-20250707134318-0fdaa64b8c5e
 ## explicit; go 1.24.0
 github.com/charmbracelet/ultraviolet
 # github.com/charmbracelet/x/ansi v0.9.3
@@ -410,10 +410,13 @@ github.com/lucasb-eyer/go-colorful
 ## explicit; go 1.12
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jwriter
-# github.com/mark3labs/mcp-go v0.17.0
+# github.com/mark3labs/mcp-go v0.32.0
 ## explicit; go 1.23
 github.com/mark3labs/mcp-go/client
+github.com/mark3labs/mcp-go/client/transport
 github.com/mark3labs/mcp-go/mcp
+github.com/mark3labs/mcp-go/server
+github.com/mark3labs/mcp-go/util
 # github.com/mattn/go-isatty v0.0.20
 ## explicit; go 1.15
 github.com/mattn/go-isatty
@@ -461,7 +464,7 @@ github.com/ncruces/julianday
 # github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 ## explicit
 github.com/nfnt/resize
-# github.com/openai/openai-go v0.1.0-beta.2
+# github.com/openai/openai-go v1.8.2
 ## explicit; go 1.21
 github.com/openai/openai-go
 github.com/openai/openai-go/azure
@@ -473,16 +476,17 @@ github.com/openai/openai-go/internal/apiquery
 github.com/openai/openai-go/internal/encoding/json
 github.com/openai/openai-go/internal/encoding/json/sentinel
 github.com/openai/openai-go/internal/encoding/json/shims
-github.com/openai/openai-go/internal/param
+github.com/openai/openai-go/internal/paramutil
 github.com/openai/openai-go/internal/requestconfig
 github.com/openai/openai-go/option
 github.com/openai/openai-go/packages/pagination
 github.com/openai/openai-go/packages/param
-github.com/openai/openai-go/packages/resp
+github.com/openai/openai-go/packages/respjson
 github.com/openai/openai-go/packages/ssestream
 github.com/openai/openai-go/responses
 github.com/openai/openai-go/shared
 github.com/openai/openai-go/shared/constant
+github.com/openai/openai-go/webhooks
 # github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 ## explicit; go 1.14
 github.com/pkg/browser
@@ -513,6 +517,9 @@ github.com/sahilm/fuzzy
 # github.com/sethvargo/go-retry v0.3.0
 ## explicit; go 1.21
 github.com/sethvargo/go-retry
+# github.com/spf13/cast v1.7.1
+## explicit; go 1.19
+github.com/spf13/cast
 # github.com/spf13/cobra v1.9.1
 ## explicit; go 1.15
 github.com/spf13/cobra
@@ -817,5 +824,5 @@ mvdan.cc/sh/v3/fileutil
 mvdan.cc/sh/v3/interp
 mvdan.cc/sh/v3/pattern
 mvdan.cc/sh/v3/syntax
-# github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250702164605-a991b583c0e7
-# github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250702164623-bd5b9da8d487
+# github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250703182356-a42fb608faaf
+# github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250703152138-ff346e83e819

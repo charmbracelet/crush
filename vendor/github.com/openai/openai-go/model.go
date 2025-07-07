@@ -12,7 +12,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -96,14 +96,13 @@ type Model struct {
 	Object constant.Model `json:"object,required"`
 	// The organization that owns the model.
 	OwnedBy string `json:"owned_by,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Created     resp.Field
-		Object      resp.Field
-		OwnedBy     resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Created     respjson.Field
+		Object      respjson.Field
+		OwnedBy     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -118,13 +117,12 @@ type ModelDeleted struct {
 	ID      string `json:"id,required"`
 	Deleted bool   `json:"deleted,required"`
 	Object  string `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Deleted     resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Deleted     respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }

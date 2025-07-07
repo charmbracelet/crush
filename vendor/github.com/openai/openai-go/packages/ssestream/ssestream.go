@@ -31,8 +31,9 @@ func NewDecoder(res *http.Response) Decoder {
 	if t, ok := decoderTypes[contentType]; ok {
 		decoder = t(res.Body)
 	} else {
-		scanner := bufio.NewScanner(res.Body)
-		decoder = &eventStreamDecoder{rc: res.Body, scn: scanner}
+		scn := bufio.NewScanner(res.Body)
+		scn.Buffer(nil, bufio.MaxScanTokenSize<<4)
+		decoder = &eventStreamDecoder{rc: res.Body, scn: scn}
 	}
 	return decoder
 }
@@ -162,16 +163,18 @@ func (s *Stream[T]) Next() bool {
 			continue
 		}
 
+		var nxt T
 		if s.decoder.Event().Type == "" || strings.HasPrefix(s.decoder.Event().Type, "response.") {
 			ep := gjson.GetBytes(s.decoder.Event().Data, "error")
 			if ep.Exists() {
 				s.err = fmt.Errorf("received error while streaming: %s", ep.String())
 				return false
 			}
-			s.err = json.Unmarshal(s.decoder.Event().Data, &s.cur)
+			s.err = json.Unmarshal(s.decoder.Event().Data, &nxt)
 			if s.err != nil {
 				return false
 			}
+			s.cur = nxt
 			return true
 		} else {
 			ep := gjson.GetBytes(s.decoder.Event().Data, "error")
@@ -181,10 +184,11 @@ func (s *Stream[T]) Next() bool {
 			}
 			event := s.decoder.Event().Type
 			data := s.decoder.Event().Data
-			s.err = json.Unmarshal([]byte(fmt.Sprintf(`{ "event": %q, "data": %s }`, event, data)), &s.cur)
+			s.err = json.Unmarshal([]byte(fmt.Sprintf(`{ "event": %q, "data": %s }`, event, data)), &nxt)
 			if s.err != nil {
 				return false
 			}
+			s.cur = nxt
 			return true
 		}
 	}

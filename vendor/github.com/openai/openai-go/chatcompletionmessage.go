@@ -77,13 +77,9 @@ type ChatCompletionMessageListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f ChatCompletionMessageListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [ChatCompletionMessageListParams]'s query parameters as
 // `url.Values`.
-func (r ChatCompletionMessageListParams) URLQuery() (v url.Values) {
+func (r ChatCompletionMessageListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

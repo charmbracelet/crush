@@ -4,7 +4,7 @@ To set up the repository, run:
 
 ```sh
 $ ./scripts/bootstrap
-$ ./scripts/build
+$ ./scripts/lint
 ```
 
 This will install all the required dependencies and build the SDK.

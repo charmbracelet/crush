@@ -5,7 +5,6 @@ package openai
 import (
 	"github.com/openai/openai-go/internal/apierror"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
 	"github.com/openai/openai-go/shared"
 )
 
@@ -19,6 +18,36 @@ type Error = apierror.Error
 
 // This is an alias to an internal type.
 type ChatModel = shared.ChatModel
+
+// Equals "gpt-4.1"
+const ChatModelGPT4_1 = shared.ChatModelGPT4_1
+
+// Equals "gpt-4.1-mini"
+const ChatModelGPT4_1Mini = shared.ChatModelGPT4_1Mini
+
+// Equals "gpt-4.1-nano"
+const ChatModelGPT4_1Nano = shared.ChatModelGPT4_1Nano
+
+// Equals "gpt-4.1-2025-04-14"
+const ChatModelGPT4_1_2025_04_14 = shared.ChatModelGPT4_1_2025_04_14
+
+// Equals "gpt-4.1-mini-2025-04-14"
+const ChatModelGPT4_1Mini2025_04_14 = shared.ChatModelGPT4_1Mini2025_04_14
+
+// Equals "gpt-4.1-nano-2025-04-14"
+const ChatModelGPT4_1Nano2025_04_14 = shared.ChatModelGPT4_1Nano2025_04_14
+
+// Equals "o4-mini"
+const ChatModelO4Mini = shared.ChatModelO4Mini
+
+// Equals "o4-mini-2025-04-16"
+const ChatModelO4Mini2025_04_16 = shared.ChatModelO4Mini2025_04_16
+
+// Equals "o3"
+const ChatModelO3 = shared.ChatModelO3
+
+// Equals "o3-2025-04-16"
+const ChatModelO3_2025_04_16 = shared.ChatModelO3_2025_04_16
 
 // Equals "o3-mini"
 const ChatModelO3Mini = shared.ChatModelO3Mini
@@ -65,6 +94,9 @@ const ChatModelGPT4oAudioPreview2024_10_01 = shared.ChatModelGPT4oAudioPreview20
 // Equals "gpt-4o-audio-preview-2024-12-17"
 const ChatModelGPT4oAudioPreview2024_12_17 = shared.ChatModelGPT4oAudioPreview2024_12_17
 
+// Equals "gpt-4o-audio-preview-2025-06-03"
+const ChatModelGPT4oAudioPreview2025_06_03 = shared.ChatModelGPT4oAudioPreview2025_06_03
+
 // Equals "gpt-4o-mini-audio-preview"
 const ChatModelGPT4oMiniAudioPreview = shared.ChatModelGPT4oMiniAudioPreview
 
@@ -85,6 +117,9 @@ const ChatModelGPT4oMiniSearchPreview2025_03_11 = shared.ChatModelGPT4oMiniSearc
 
 // Equals "chatgpt-4o-latest"
 const ChatModelChatgpt4oLatest = shared.ChatModelChatgpt4oLatest
+
+// Equals "codex-mini-latest"
+const ChatModelCodexMiniLatest = shared.ChatModelCodexMiniLatest
 
 // Equals "gpt-4o-mini"
 const ChatModelGPT4oMini = shared.ChatModelGPT4oMini
@@ -254,16 +289,6 @@ type FunctionParameters = shared.FunctionParameters
 // This is an alias to an internal type.
 type Metadata = shared.Metadata
 
-// Set of 16 key-value pairs that can be attached to an object. This can be useful
-// for storing additional information about the object in a structured format, and
-// querying for objects via API or the dashboard.
-//
-// Keys are strings with a maximum length of 64 characters. Values are strings with
-// a maximum length of 512 characters.
-//
-// This is an alias to an internal type.
-type MetadataParam = shared.MetadataParam
-
 // **o-series models only**
 //
 // Configuration options for
@@ -272,20 +297,39 @@ type MetadataParam = shared.MetadataParam
 // This is an alias to an internal type.
 type Reasoning = shared.Reasoning
 
-// **computer_use_preview only**
+// **Deprecated:** use `summary` instead.
 //
 // A summary of the reasoning performed by the model. This can be useful for
-// debugging and understanding the model's reasoning process. One of `concise` or
-// `detailed`.
+// debugging and understanding the model's reasoning process. One of `auto`,
+// `concise`, or `detailed`.
 //
 // This is an alias to an internal type.
 type ReasoningGenerateSummary = shared.ReasoningGenerateSummary
+
+// Equals "auto"
+const ReasoningGenerateSummaryAuto = shared.ReasoningGenerateSummaryAuto
 
 // Equals "concise"
 const ReasoningGenerateSummaryConcise = shared.ReasoningGenerateSummaryConcise
 
 // Equals "detailed"
 const ReasoningGenerateSummaryDetailed = shared.ReasoningGenerateSummaryDetailed
+
+// A summary of the reasoning performed by the model. This can be useful for
+// debugging and understanding the model's reasoning process. One of `auto`,
+// `concise`, or `detailed`.
+//
+// This is an alias to an internal type.
+type ReasoningSummary = shared.ReasoningSummary
+
+// Equals "auto"
+const ReasoningSummaryAuto = shared.ReasoningSummaryAuto
+
+// Equals "concise"
+const ReasoningSummaryConcise = shared.ReasoningSummaryConcise
+
+// Equals "detailed"
+const ReasoningSummaryDetailed = shared.ReasoningSummaryDetailed
 
 // **o-series models only**
 //
@@ -371,18 +415,26 @@ const ResponsesModelO1Pro = shared.ResponsesModelO1Pro
 // Equals "o1-pro-2025-03-19"
 const ResponsesModelO1Pro2025_03_19 = shared.ResponsesModelO1Pro2025_03_19
 
+// Equals "o3-pro"
+const ResponsesModelO3Pro = shared.ResponsesModelO3Pro
+
+// Equals "o3-pro-2025-06-10"
+const ResponsesModelO3Pro2025_06_10 = shared.ResponsesModelO3Pro2025_06_10
+
+// Equals "o3-deep-research"
+const ResponsesModelO3DeepResearch = shared.ResponsesModelO3DeepResearch
+
+// Equals "o3-deep-research-2025-06-26"
+const ResponsesModelO3DeepResearch2025_06_26 = shared.ResponsesModelO3DeepResearch2025_06_26
+
+// Equals "o4-mini-deep-research"
+const ResponsesModelO4MiniDeepResearch = shared.ResponsesModelO4MiniDeepResearch
+
+// Equals "o4-mini-deep-research-2025-06-26"
+const ResponsesModelO4MiniDeepResearch2025_06_26 = shared.ResponsesModelO4MiniDeepResearch2025_06_26
+
 // Equals "computer-use-preview"
 const ResponsesModelComputerUsePreview = shared.ResponsesModelComputerUsePreview
 
 // Equals "computer-use-preview-2025-03-11"
 const ResponsesModelComputerUsePreview2025_03_11 = shared.ResponsesModelComputerUsePreview2025_03_11
-
-func toParam[T comparable](value T, meta resp.Field) param.Opt[T] {
-	if meta.IsPresent() {
-		return param.NewOpt(value)
-	}
-	if meta.IsExplicitNull() {
-		return param.NullOpt[T]()
-	}
-	return param.Opt[T]{}
-}

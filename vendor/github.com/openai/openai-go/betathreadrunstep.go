@@ -16,7 +16,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared"
 	"github.com/openai/openai-go/shared/constant"
 )
@@ -27,6 +27,8 @@ import (
 // Note, unlike clients, this service does not read variables from the environment
 // automatically. You should not instantiate this service directly, and instead use
 // the [NewBetaThreadRunStepService] method instead.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 type BetaThreadRunStepService struct {
 	Options []option.RequestOption
 }
@@ -41,6 +43,8 @@ func NewBetaThreadRunStepService(opts ...option.RequestOption) (r BetaThreadRunS
 }
 
 // Retrieves a run step.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadRunStepService) Get(ctx context.Context, threadID string, runID string, stepID string, query BetaThreadRunStepGetParams, opts ...option.RequestOption) (res *RunStep, err error) {
 	opts = append(r.Options[:], opts...)
 	opts = append([]option.RequestOption{option.WithHeader("OpenAI-Beta", "assistants=v2")}, opts...)
@@ -62,6 +66,8 @@ func (r *BetaThreadRunStepService) Get(ctx context.Context, threadID string, run
 }
 
 // Returns a list of run steps belonging to a run.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadRunStepService) List(ctx context.Context, threadID string, runID string, query BetaThreadRunStepListParams, opts ...option.RequestOption) (res *pagination.CursorPage[RunStep], err error) {
 	var raw *http.Response
 	opts = append(r.Options[:], opts...)
@@ -88,6 +94,8 @@ func (r *BetaThreadRunStepService) List(ctx context.Context, threadID string, ru
 }
 
 // Returns a list of run steps belonging to a run.
+//
+// Deprecated: The Assistants API is deprecated in favor of the Responses API
 func (r *BetaThreadRunStepService) ListAutoPaging(ctx context.Context, threadID string, runID string, query BetaThreadRunStepListParams, opts ...option.RequestOption) *pagination.CursorPageAutoPager[RunStep] {
 	return pagination.NewCursorPageAutoPager(r.List(ctx, threadID, runID, query, opts...))
 }
@@ -100,13 +108,12 @@ type CodeInterpreterLogs struct {
 	Type constant.Logs `json:"type,required"`
 	// The text output from the Code Interpreter tool call.
 	Logs string `json:"logs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		Logs        resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		Logs        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -123,13 +130,12 @@ type CodeInterpreterOutputImage struct {
 	// Always `image`.
 	Type  constant.Image                  `json:"type,required"`
 	Image CodeInterpreterOutputImageImage `json:"image"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		Image       resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		Image       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -144,11 +150,10 @@ type CodeInterpreterOutputImageImage struct {
 	// The [file](https://platform.openai.com/docs/api-reference/files) ID of the
 	// image.
 	FileID string `json:"file_id"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -168,13 +173,12 @@ type CodeInterpreterToolCall struct {
 	// The type of tool call. This is always going to be `code_interpreter` for this
 	// type of tool call.
 	Type constant.CodeInterpreter `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID              resp.Field
-		CodeInterpreter resp.Field
-		Type            resp.Field
-		ExtraFields     map[string]resp.Field
+		ID              respjson.Field
+		CodeInterpreter respjson.Field
+		Type            respjson.Field
+		ExtraFields     map[string]respjson.Field
 		raw             string
 	} `json:"-"`
 }
@@ -193,12 +197,11 @@ type CodeInterpreterToolCallCodeInterpreter struct {
 	// or more items, including text (`logs`) or images (`image`). Each of these are
 	// represented by a different object type.
 	Outputs []CodeInterpreterToolCallCodeInterpreterOutputUnion `json:"outputs,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Input       resp.Field
-		Outputs     resp.Field
-		ExtraFields map[string]resp.Field
+		Input       respjson.Field
+		Outputs     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -225,22 +228,34 @@ type CodeInterpreterToolCallCodeInterpreterOutputUnion struct {
 	// This field is from variant [CodeInterpreterToolCallCodeInterpreterOutputImage].
 	Image CodeInterpreterToolCallCodeInterpreterOutputImageImage `json:"image"`
 	JSON  struct {
-		Logs  resp.Field
-		Type  resp.Field
-		Image resp.Field
+		Logs  respjson.Field
+		Type  respjson.Field
+		Image respjson.Field
 		raw   string
 	} `json:"-"`
+}
+
+// anyCodeInterpreterToolCallCodeInterpreterOutput is implemented by each variant
+// of [CodeInterpreterToolCallCodeInterpreterOutputUnion] to add type safety for
+// the return type of [CodeInterpreterToolCallCodeInterpreterOutputUnion.AsAny]
+type anyCodeInterpreterToolCallCodeInterpreterOutput interface {
+	implCodeInterpreterToolCallCodeInterpreterOutputUnion()
+}
+
+func (CodeInterpreterToolCallCodeInterpreterOutputLogs) implCodeInterpreterToolCallCodeInterpreterOutputUnion() {
+}
+func (CodeInterpreterToolCallCodeInterpreterOutputImage) implCodeInterpreterToolCallCodeInterpreterOutputUnion() {
 }
 
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := CodeInterpreterToolCallCodeInterpreterOutputUnion.AsAny().(type) {
-//	case CodeInterpreterToolCallCodeInterpreterOutputLogs:
-//	case CodeInterpreterToolCallCodeInterpreterOutputImage:
+//	case openai.CodeInterpreterToolCallCodeInterpreterOutputLogs:
+//	case openai.CodeInterpreterToolCallCodeInterpreterOutputImage:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u CodeInterpreterToolCallCodeInterpreterOutputUnion) AsAny() any {
+func (u CodeInterpreterToolCallCodeInterpreterOutputUnion) AsAny() anyCodeInterpreterToolCallCodeInterpreterOutput {
 	switch u.Type {
 	case "logs":
 		return u.AsLogs()
@@ -273,12 +288,11 @@ type CodeInterpreterToolCallCodeInterpreterOutputLogs struct {
 	Logs string `json:"logs,required"`
 	// Always `logs`.
 	Type constant.Logs `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Logs        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Logs        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -293,12 +307,11 @@ type CodeInterpreterToolCallCodeInterpreterOutputImage struct {
 	Image CodeInterpreterToolCallCodeInterpreterOutputImageImage `json:"image,required"`
 	// Always `image`.
 	Type constant.Image `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Image       resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Image       respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -313,11 +326,10 @@ type CodeInterpreterToolCallCodeInterpreterOutputImageImage struct {
 	// The [file](https://platform.openai.com/docs/api-reference/files) ID of the
 	// image.
 	FileID string `json:"file_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -339,14 +351,13 @@ type CodeInterpreterToolCallDelta struct {
 	ID string `json:"id"`
 	// The Code Interpreter tool call definition.
 	CodeInterpreter CodeInterpreterToolCallDeltaCodeInterpreter `json:"code_interpreter"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index           resp.Field
-		Type            resp.Field
-		ID              resp.Field
-		CodeInterpreter resp.Field
-		ExtraFields     map[string]resp.Field
+		Index           respjson.Field
+		Type            respjson.Field
+		ID              respjson.Field
+		CodeInterpreter respjson.Field
+		ExtraFields     map[string]respjson.Field
 		raw             string
 	} `json:"-"`
 }
@@ -365,12 +376,11 @@ type CodeInterpreterToolCallDeltaCodeInterpreter struct {
 	// or more items, including text (`logs`) or images (`image`). Each of these are
 	// represented by a different object type.
 	Outputs []CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion `json:"outputs"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Input       resp.Field
-		Outputs     resp.Field
-		ExtraFields map[string]resp.Field
+		Input       respjson.Field
+		Outputs     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -397,23 +407,34 @@ type CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion struct {
 	// This field is from variant [CodeInterpreterOutputImage].
 	Image CodeInterpreterOutputImageImage `json:"image"`
 	JSON  struct {
-		Index resp.Field
-		Type  resp.Field
-		Logs  resp.Field
-		Image resp.Field
+		Index respjson.Field
+		Type  respjson.Field
+		Logs  respjson.Field
+		Image respjson.Field
 		raw   string
 	} `json:"-"`
 }
 
+// anyCodeInterpreterToolCallDeltaCodeInterpreterOutput is implemented by each
+// variant of [CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion] to add type
+// safety for the return type of
+// [CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion.AsAny]
+type anyCodeInterpreterToolCallDeltaCodeInterpreterOutput interface {
+	implCodeInterpreterToolCallDeltaCodeInterpreterOutputUnion()
+}
+
+func (CodeInterpreterLogs) implCodeInterpreterToolCallDeltaCodeInterpreterOutputUnion()        {}
+func (CodeInterpreterOutputImage) implCodeInterpreterToolCallDeltaCodeInterpreterOutputUnion() {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion.AsAny().(type) {
-//	case CodeInterpreterLogs:
-//	case CodeInterpreterOutputImage:
+//	case openai.CodeInterpreterLogs:
+//	case openai.CodeInterpreterOutputImage:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion) AsAny() any {
+func (u CodeInterpreterToolCallDeltaCodeInterpreterOutputUnion) AsAny() anyCodeInterpreterToolCallDeltaCodeInterpreterOutput {
 	switch u.Type {
 	case "logs":
 		return u.AsLogs()
@@ -448,13 +469,12 @@ type FileSearchToolCall struct {
 	// The type of tool call. This is always going to be `file_search` for this type of
 	// tool call.
 	Type constant.FileSearch `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		FileSearch  resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		FileSearch  respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -471,12 +491,11 @@ type FileSearchToolCallFileSearch struct {
 	RankingOptions FileSearchToolCallFileSearchRankingOptions `json:"ranking_options"`
 	// The results of the file search.
 	Results []FileSearchToolCallFileSearchResult `json:"results"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		RankingOptions resp.Field
-		Results        resp.Field
-		ExtraFields    map[string]resp.Field
+		RankingOptions respjson.Field
+		Results        respjson.Field
+		ExtraFields    map[string]respjson.Field
 		raw            string
 	} `json:"-"`
 }
@@ -497,12 +516,11 @@ type FileSearchToolCallFileSearchRankingOptions struct {
 	// The score threshold for the file search. All values must be a floating point
 	// number between 0 and 1.
 	ScoreThreshold float64 `json:"score_threshold,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Ranker         resp.Field
-		ScoreThreshold resp.Field
-		ExtraFields    map[string]resp.Field
+		Ranker         respjson.Field
+		ScoreThreshold respjson.Field
+		ExtraFields    map[string]respjson.Field
 		raw            string
 	} `json:"-"`
 }
@@ -525,14 +543,13 @@ type FileSearchToolCallFileSearchResult struct {
 	// The content of the result that was found. The content is only included if
 	// requested via the include query parameter.
 	Content []FileSearchToolCallFileSearchResultContent `json:"content"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileID      resp.Field
-		FileName    resp.Field
-		Score       resp.Field
-		Content     resp.Field
-		ExtraFields map[string]resp.Field
+		FileID      respjson.Field
+		FileName    respjson.Field
+		Score       respjson.Field
+		Content     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -550,12 +567,11 @@ type FileSearchToolCallFileSearchResultContent struct {
 	//
 	// Any of "text".
 	Type string `json:"type"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -568,7 +584,7 @@ func (r *FileSearchToolCallFileSearchResultContent) UnmarshalJSON(data []byte) e
 
 type FileSearchToolCallDelta struct {
 	// For now, this is always going to be an empty object.
-	FileSearch interface{} `json:"file_search,required"`
+	FileSearch any `json:"file_search,required"`
 	// The index of the tool call in the tool calls array.
 	Index int64 `json:"index,required"`
 	// The type of tool call. This is always going to be `file_search` for this type of
@@ -576,14 +592,13 @@ type FileSearchToolCallDelta struct {
 	Type constant.FileSearch `json:"type,required"`
 	// The ID of the tool call object.
 	ID string `json:"id"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FileSearch  resp.Field
-		Index       resp.Field
-		Type        resp.Field
-		ID          resp.Field
-		ExtraFields map[string]resp.Field
+		FileSearch  respjson.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		ID          respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -602,13 +617,12 @@ type FunctionToolCall struct {
 	// The type of tool call. This is always going to be `function` for this type of
 	// tool call.
 	Type constant.Function `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Function    resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Function    respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -629,13 +643,12 @@ type FunctionToolCallFunction struct {
 	// [submitted](https://platform.openai.com/docs/api-reference/runs/submitToolOutputs)
 	// yet.
 	Output string `json:"output,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Arguments   resp.Field
-		Name        resp.Field
-		Output      resp.Field
-		ExtraFields map[string]resp.Field
+		Arguments   respjson.Field
+		Name        respjson.Field
+		Output      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -656,14 +669,13 @@ type FunctionToolCallDelta struct {
 	ID string `json:"id"`
 	// The definition of the function that was called.
 	Function FunctionToolCallDeltaFunction `json:"function"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Index       resp.Field
-		Type        resp.Field
-		ID          resp.Field
-		Function    resp.Field
-		ExtraFields map[string]resp.Field
+		Index       respjson.Field
+		Type        respjson.Field
+		ID          respjson.Field
+		Function    respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -684,13 +696,12 @@ type FunctionToolCallDeltaFunction struct {
 	// [submitted](https://platform.openai.com/docs/api-reference/runs/submitToolOutputs)
 	// yet.
 	Output string `json:"output,nullable"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Arguments   resp.Field
-		Name        resp.Field
-		Output      resp.Field
-		ExtraFields map[string]resp.Field
+		Arguments   respjson.Field
+		Name        respjson.Field
+		Output      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -706,12 +717,11 @@ type MessageCreationStepDetails struct {
 	MessageCreation MessageCreationStepDetailsMessageCreation `json:"message_creation,required"`
 	// Always `message_creation`.
 	Type constant.MessageCreation `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		MessageCreation resp.Field
-		Type            resp.Field
-		ExtraFields     map[string]resp.Field
+		MessageCreation respjson.Field
+		Type            respjson.Field
+		ExtraFields     map[string]respjson.Field
 		raw             string
 	} `json:"-"`
 }
@@ -725,11 +735,10 @@ func (r *MessageCreationStepDetails) UnmarshalJSON(data []byte) error {
 type MessageCreationStepDetailsMessageCreation struct {
 	// The ID of the message that was created by this run step.
 	MessageID string `json:"message_id,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		MessageID   resp.Field
-		ExtraFields map[string]resp.Field
+		MessageID   respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -791,26 +800,25 @@ type RunStep struct {
 	// Usage statistics related to the run step. This value will be `null` while the
 	// run step's status is `in_progress`.
 	Usage RunStepUsage `json:"usage,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		AssistantID resp.Field
-		CancelledAt resp.Field
-		CompletedAt resp.Field
-		CreatedAt   resp.Field
-		ExpiredAt   resp.Field
-		FailedAt    resp.Field
-		LastError   resp.Field
-		Metadata    resp.Field
-		Object      resp.Field
-		RunID       resp.Field
-		Status      resp.Field
-		StepDetails resp.Field
-		ThreadID    resp.Field
-		Type        resp.Field
-		Usage       resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		AssistantID respjson.Field
+		CancelledAt respjson.Field
+		CompletedAt respjson.Field
+		CreatedAt   respjson.Field
+		ExpiredAt   respjson.Field
+		FailedAt    respjson.Field
+		LastError   respjson.Field
+		Metadata    respjson.Field
+		Object      respjson.Field
+		RunID       respjson.Field
+		Status      respjson.Field
+		StepDetails respjson.Field
+		ThreadID    respjson.Field
+		Type        respjson.Field
+		Usage       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -830,12 +838,11 @@ type RunStepLastError struct {
 	Code string `json:"code,required"`
 	// A human-readable description of the error.
 	Message string `json:"message,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Code        resp.Field
-		Message     resp.Field
-		ExtraFields map[string]resp.Field
+		Code        respjson.Field
+		Message     respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -872,22 +879,32 @@ type RunStepStepDetailsUnion struct {
 	// This field is from variant [ToolCallsStepDetails].
 	ToolCalls []ToolCallUnion `json:"tool_calls"`
 	JSON      struct {
-		MessageCreation resp.Field
-		Type            resp.Field
-		ToolCalls       resp.Field
+		MessageCreation respjson.Field
+		Type            respjson.Field
+		ToolCalls       respjson.Field
 		raw             string
 	} `json:"-"`
 }
 
+// anyRunStepStepDetails is implemented by each variant of
+// [RunStepStepDetailsUnion] to add type safety for the return type of
+// [RunStepStepDetailsUnion.AsAny]
+type anyRunStepStepDetails interface {
+	implRunStepStepDetailsUnion()
+}
+
+func (MessageCreationStepDetails) implRunStepStepDetailsUnion() {}
+func (ToolCallsStepDetails) implRunStepStepDetailsUnion()       {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := RunStepStepDetailsUnion.AsAny().(type) {
-//	case MessageCreationStepDetails:
-//	case ToolCallsStepDetails:
+//	case openai.MessageCreationStepDetails:
+//	case openai.ToolCallsStepDetails:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u RunStepStepDetailsUnion) AsAny() any {
+func (u RunStepStepDetailsUnion) AsAny() anyRunStepStepDetails {
 	switch u.Type {
 	case "message_creation":
 		return u.AsMessageCreation()
@@ -931,13 +948,12 @@ type RunStepUsage struct {
 	PromptTokens int64 `json:"prompt_tokens,required"`
 	// Total number of tokens used (prompt + completion).
 	TotalTokens int64 `json:"total_tokens,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		CompletionTokens resp.Field
-		PromptTokens     resp.Field
-		TotalTokens      resp.Field
-		ExtraFields      map[string]resp.Field
+		CompletionTokens respjson.Field
+		PromptTokens     respjson.Field
+		TotalTokens      respjson.Field
+		ExtraFields      map[string]respjson.Field
 		raw              string
 	} `json:"-"`
 }
@@ -952,11 +968,10 @@ func (r *RunStepUsage) UnmarshalJSON(data []byte) error {
 type RunStepDelta struct {
 	// The details of the run step.
 	StepDetails RunStepDeltaStepDetailsUnion `json:"step_details"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		StepDetails resp.Field
-		ExtraFields map[string]resp.Field
+		StepDetails respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -981,22 +996,32 @@ type RunStepDeltaStepDetailsUnion struct {
 	// This field is from variant [ToolCallDeltaObject].
 	ToolCalls []ToolCallDeltaUnion `json:"tool_calls"`
 	JSON      struct {
-		Type            resp.Field
-		MessageCreation resp.Field
-		ToolCalls       resp.Field
+		Type            respjson.Field
+		MessageCreation respjson.Field
+		ToolCalls       respjson.Field
 		raw             string
 	} `json:"-"`
 }
 
+// anyRunStepDeltaStepDetails is implemented by each variant of
+// [RunStepDeltaStepDetailsUnion] to add type safety for the return type of
+// [RunStepDeltaStepDetailsUnion.AsAny]
+type anyRunStepDeltaStepDetails interface {
+	implRunStepDeltaStepDetailsUnion()
+}
+
+func (RunStepDeltaMessageDelta) implRunStepDeltaStepDetailsUnion() {}
+func (ToolCallDeltaObject) implRunStepDeltaStepDetailsUnion()      {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := RunStepDeltaStepDetailsUnion.AsAny().(type) {
-//	case RunStepDeltaMessageDelta:
-//	case ToolCallDeltaObject:
+//	case openai.RunStepDeltaMessageDelta:
+//	case openai.ToolCallDeltaObject:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u RunStepDeltaStepDetailsUnion) AsAny() any {
+func (u RunStepDeltaStepDetailsUnion) AsAny() anyRunStepDeltaStepDetails {
 	switch u.Type {
 	case "message_creation":
 		return u.AsMessageCreation()
@@ -1032,13 +1057,12 @@ type RunStepDeltaEvent struct {
 	Delta RunStepDelta `json:"delta,required"`
 	// The object type, which is always `thread.run.step.delta`.
 	Object constant.ThreadRunStepDelta `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Delta       resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Delta       respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1054,12 +1078,11 @@ type RunStepDeltaMessageDelta struct {
 	// Always `message_creation`.
 	Type            constant.MessageCreation                `json:"type,required"`
 	MessageCreation RunStepDeltaMessageDeltaMessageCreation `json:"message_creation"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Type            resp.Field
-		MessageCreation resp.Field
-		ExtraFields     map[string]resp.Field
+		Type            respjson.Field
+		MessageCreation respjson.Field
+		ExtraFields     map[string]respjson.Field
 		raw             string
 	} `json:"-"`
 }
@@ -1073,11 +1096,10 @@ func (r *RunStepDeltaMessageDelta) UnmarshalJSON(data []byte) error {
 type RunStepDeltaMessageDeltaMessageCreation struct {
 	// The ID of the message that was created by this run step.
 	MessageID string `json:"message_id"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		MessageID   resp.Field
-		ExtraFields map[string]resp.Field
+		MessageID   respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1111,25 +1133,35 @@ type ToolCallUnion struct {
 	// This field is from variant [FunctionToolCall].
 	Function FunctionToolCallFunction `json:"function"`
 	JSON     struct {
-		ID              resp.Field
-		CodeInterpreter resp.Field
-		Type            resp.Field
-		FileSearch      resp.Field
-		Function        resp.Field
+		ID              respjson.Field
+		CodeInterpreter respjson.Field
+		Type            respjson.Field
+		FileSearch      respjson.Field
+		Function        respjson.Field
 		raw             string
 	} `json:"-"`
 }
 
+// anyToolCall is implemented by each variant of [ToolCallUnion] to add type safety
+// for the return type of [ToolCallUnion.AsAny]
+type anyToolCall interface {
+	implToolCallUnion()
+}
+
+func (CodeInterpreterToolCall) implToolCallUnion() {}
+func (FileSearchToolCall) implToolCallUnion()      {}
+func (FunctionToolCall) implToolCallUnion()        {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := ToolCallUnion.AsAny().(type) {
-//	case CodeInterpreterToolCall:
-//	case FileSearchToolCall:
-//	case FunctionToolCall:
+//	case openai.CodeInterpreterToolCall:
+//	case openai.FileSearchToolCall:
+//	case openai.FunctionToolCall:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u ToolCallUnion) AsAny() any {
+func (u ToolCallUnion) AsAny() anyToolCall {
 	switch u.Type {
 	case "code_interpreter":
 		return u.AsCodeInterpreter()
@@ -1178,30 +1210,40 @@ type ToolCallDeltaUnion struct {
 	// This field is from variant [CodeInterpreterToolCallDelta].
 	CodeInterpreter CodeInterpreterToolCallDeltaCodeInterpreter `json:"code_interpreter"`
 	// This field is from variant [FileSearchToolCallDelta].
-	FileSearch interface{} `json:"file_search"`
+	FileSearch any `json:"file_search"`
 	// This field is from variant [FunctionToolCallDelta].
 	Function FunctionToolCallDeltaFunction `json:"function"`
 	JSON     struct {
-		Index           resp.Field
-		Type            resp.Field
-		ID              resp.Field
-		CodeInterpreter resp.Field
-		FileSearch      resp.Field
-		Function        resp.Field
+		Index           respjson.Field
+		Type            respjson.Field
+		ID              respjson.Field
+		CodeInterpreter respjson.Field
+		FileSearch      respjson.Field
+		Function        respjson.Field
 		raw             string
 	} `json:"-"`
 }
 
+// anyToolCallDelta is implemented by each variant of [ToolCallDeltaUnion] to add
+// type safety for the return type of [ToolCallDeltaUnion.AsAny]
+type anyToolCallDelta interface {
+	implToolCallDeltaUnion()
+}
+
+func (CodeInterpreterToolCallDelta) implToolCallDeltaUnion() {}
+func (FileSearchToolCallDelta) implToolCallDeltaUnion()      {}
+func (FunctionToolCallDelta) implToolCallDeltaUnion()        {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := ToolCallDeltaUnion.AsAny().(type) {
-//	case CodeInterpreterToolCallDelta:
-//	case FileSearchToolCallDelta:
-//	case FunctionToolCallDelta:
+//	case openai.CodeInterpreterToolCallDelta:
+//	case openai.FileSearchToolCallDelta:
+//	case openai.FunctionToolCallDelta:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u ToolCallDeltaUnion) AsAny() any {
+func (u ToolCallDeltaUnion) AsAny() anyToolCallDelta {
 	switch u.Type {
 	case "code_interpreter":
 		return u.AsCodeInterpreter()
@@ -1243,12 +1285,11 @@ type ToolCallDeltaObject struct {
 	// with one of three types of tools: `code_interpreter`, `file_search`, or
 	// `function`.
 	ToolCalls []ToolCallDeltaUnion `json:"tool_calls"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Type        resp.Field
-		ToolCalls   resp.Field
-		ExtraFields map[string]resp.Field
+		Type        respjson.Field
+		ToolCalls   respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1267,12 +1308,11 @@ type ToolCallsStepDetails struct {
 	ToolCalls []ToolCallUnion `json:"tool_calls,required"`
 	// Always `tool_calls`.
 	Type constant.ToolCalls `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ToolCalls   resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		ToolCalls   respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -1295,13 +1335,9 @@ type BetaThreadRunStepGetParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadRunStepGetParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [BetaThreadRunStepGetParams]'s query parameters as
 // `url.Values`.
-func (r BetaThreadRunStepGetParams) URLQuery() (v url.Values) {
+func (r BetaThreadRunStepGetParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,
@@ -1338,13 +1374,9 @@ type BetaThreadRunStepListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BetaThreadRunStepListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [BetaThreadRunStepListParams]'s query parameters as
 // `url.Values`.
-func (r BetaThreadRunStepListParams) URLQuery() (v url.Values) {
+func (r BetaThreadRunStepListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

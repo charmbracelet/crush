@@ -43,10 +43,7 @@ func WithMIMEType(mimeType string) ResourceOption {
 func WithAnnotations(audience []Role, priority float64) ResourceOption {
 	return func(r *Resource) {
 		if r.Annotations == nil {
-			r.Annotations = &struct {
-				Audience []Role  `json:"audience,omitempty"`
-				Priority float64 `json:"priority,omitempty"`
-			}{}
+			r.Annotations = &Annotations{}
 		}
 		r.Annotations.Audience = audience
 		r.Annotations.Priority = priority
@@ -94,10 +91,7 @@ func WithTemplateMIMEType(mimeType string) ResourceTemplateOption {
 func WithTemplateAnnotations(audience []Role, priority float64) ResourceTemplateOption {
 	return func(t *ResourceTemplate) {
 		if t.Annotations == nil {
-			t.Annotations = &struct {
-				Audience []Role  `json:"audience,omitempty"`
-				Priority float64 `json:"priority,omitempty"`
-			}{}
+			t.Annotations = &Annotations{}
 		}
 		t.Annotations.Audience = audience
 		t.Annotations.Priority = priority

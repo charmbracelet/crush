@@ -15,7 +15,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared/constant"
 )
 
@@ -82,17 +82,16 @@ type FineTuningJobCheckpoint struct {
 	Object constant.FineTuningJobCheckpoint `json:"object,required"`
 	// The step number that the checkpoint was created at.
 	StepNumber int64 `json:"step_number,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID                       resp.Field
-		CreatedAt                resp.Field
-		FineTunedModelCheckpoint resp.Field
-		FineTuningJobID          resp.Field
-		Metrics                  resp.Field
-		Object                   resp.Field
-		StepNumber               resp.Field
-		ExtraFields              map[string]resp.Field
+		ID                       respjson.Field
+		CreatedAt                respjson.Field
+		FineTunedModelCheckpoint respjson.Field
+		FineTuningJobID          respjson.Field
+		Metrics                  respjson.Field
+		Object                   respjson.Field
+		StepNumber               respjson.Field
+		ExtraFields              map[string]respjson.Field
 		raw                      string
 	} `json:"-"`
 }
@@ -112,17 +111,16 @@ type FineTuningJobCheckpointMetrics struct {
 	TrainMeanTokenAccuracy     float64 `json:"train_mean_token_accuracy"`
 	ValidLoss                  float64 `json:"valid_loss"`
 	ValidMeanTokenAccuracy     float64 `json:"valid_mean_token_accuracy"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		FullValidLoss              resp.Field
-		FullValidMeanTokenAccuracy resp.Field
-		Step                       resp.Field
-		TrainLoss                  resp.Field
-		TrainMeanTokenAccuracy     resp.Field
-		ValidLoss                  resp.Field
-		ValidMeanTokenAccuracy     resp.Field
-		ExtraFields                map[string]resp.Field
+		FullValidLoss              respjson.Field
+		FullValidMeanTokenAccuracy respjson.Field
+		Step                       respjson.Field
+		TrainLoss                  respjson.Field
+		TrainMeanTokenAccuracy     respjson.Field
+		ValidLoss                  respjson.Field
+		ValidMeanTokenAccuracy     respjson.Field
+		ExtraFields                map[string]respjson.Field
 		raw                        string
 	} `json:"-"`
 }
@@ -141,15 +139,9 @@ type FineTuningJobCheckpointListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f FineTuningJobCheckpointListParams) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
-
 // URLQuery serializes [FineTuningJobCheckpointListParams]'s query parameters as
 // `url.Values`.
-func (r FineTuningJobCheckpointListParams) URLQuery() (v url.Values) {
+func (r FineTuningJobCheckpointListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

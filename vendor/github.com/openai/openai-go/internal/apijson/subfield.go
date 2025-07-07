@@ -1,7 +1,7 @@
 package apijson
 
 import (
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"reflect"
 )
 
@@ -45,7 +45,7 @@ func setMetadataExtraFields(root reflect.Value, index []int, name string, metaEx
 		return
 	}
 
-	newMap := make(map[string]resp.Field, len(metaExtras))
+	newMap := make(map[string]respjson.Field, len(metaExtras))
 	if target.Type() == reflect.TypeOf(newMap) {
 		for k, v := range metaExtras {
 			newMap[k] = v.toRespField()
@@ -54,14 +54,14 @@ func setMetadataExtraFields(root reflect.Value, index []int, name string, metaEx
 	}
 }
 
-func (f Field) toRespField() resp.Field {
-	if f.IsNull() {
-		return resp.NewNullField()
-	} else if f.IsMissing() {
-		return resp.Field{}
+func (f Field) toRespField() respjson.Field {
+	if f.IsMissing() {
+		return respjson.Field{}
+	} else if f.IsNull() {
+		return respjson.NewField("null")
 	} else if f.IsInvalid() {
-		return resp.NewInvalidField(f.raw)
+		return respjson.NewInvalidField(f.raw)
 	} else {
-		return resp.NewValidField(f.raw)
+		return respjson.NewField(f.raw)
 	}
 }

@@ -13,23 +13,38 @@ import (
 	"sync"
 	"time"
 
-	internalparam "github.com/openai/openai-go/internal/param"
 	"github.com/openai/openai-go/packages/param"
 )
 
 var encoders sync.Map // map[encoderEntry]encoderFunc
 
-func Marshal(value interface{}, writer *multipart.Writer) error {
-	e := &encoder{dateFormat: time.RFC3339}
+func Marshal(value any, writer *multipart.Writer) error {
+	e := &encoder{
+		dateFormat: time.RFC3339,
+		arrayFmt:   "brackets",
+	}
 	return e.marshal(value, writer)
 }
 
-func MarshalRoot(value interface{}, writer *multipart.Writer) error {
-	e := &encoder{root: true, dateFormat: time.RFC3339}
+func MarshalRoot(value any, writer *multipart.Writer) error {
+	e := &encoder{
+		root:       true,
+		dateFormat: time.RFC3339,
+		arrayFmt:   "brackets",
+	}
+	return e.marshal(value, writer)
+}
+
+func MarshalWithSettings(value any, writer *multipart.Writer, arrayFormat string) error {
+	e := &encoder{
+		arrayFmt:   arrayFormat,
+		dateFormat: time.RFC3339,
+	}
 	return e.marshal(value, writer)
 }
 
 type encoder struct {
+	arrayFmt   string
 	dateFormat string
 	root       bool
 }
@@ -48,7 +63,7 @@ type encoderEntry struct {
 	root       bool
 }
 
-func (e *encoder) marshal(value interface{}, writer *multipart.Writer) error {
+func (e *encoder) marshal(value any, writer *multipart.Writer) error {
 	val := reflect.ValueOf(value)
 	if !val.IsValid() {
 		return nil
@@ -97,7 +112,7 @@ func (e *encoder) newTypeEncoder(t reflect.Type) encoderFunc {
 	if t.ConvertibleTo(reflect.TypeOf(time.Time{})) {
 		return e.newTimeTypeEncoder()
 	}
-	if t.ConvertibleTo(reflect.TypeOf((*io.Reader)(nil)).Elem()) {
+	if t.Implements(reflect.TypeOf((*io.Reader)(nil)).Elem()) {
 		return e.newReaderTypeEncoder()
 	}
 	e.root = false
@@ -163,15 +178,40 @@ func (e *encoder) newPrimitiveTypeEncoder(t reflect.Type) encoderFunc {
 	}
 }
 
+func arrayKeyEncoder(arrayFmt string) func(string, int) string {
+	var keyFn func(string, int) string
+	switch arrayFmt {
+	case "comma", "repeat":
+		keyFn = func(k string, _ int) string { return k }
+	case "brackets":
+		keyFn = func(key string, _ int) string { return key + "[]" }
+	case "indices:dots":
+		keyFn = func(k string, i int) string {
+			if k == "" {
+				return strconv.Itoa(i)
+			}
+			return k + "." + strconv.Itoa(i)
+		}
+	case "indices:brackets":
+		keyFn = func(k string, i int) string {
+			if k == "" {
+				return strconv.Itoa(i)
+			}
+			return k + "[" + strconv.Itoa(i) + "]"
+		}
+	}
+	return keyFn
+}
+
 func (e *encoder) newArrayTypeEncoder(t reflect.Type) encoderFunc {
 	itemEncoder := e.typeEncoder(t.Elem())
-
+	keyFn := arrayKeyEncoder(e.arrayFmt)
 	return func(key string, v reflect.Value, writer *multipart.Writer) error {
-		if key != "" {
-			key = key + "."
+		if keyFn == nil {
+			return fmt.Errorf("apiform: unsupported array format")
 		}
 		for i := 0; i < v.Len(); i++ {
-			err := itemEncoder(key+strconv.Itoa(i), v.Index(i), writer)
+			err := itemEncoder(keyFn(key, i), v.Index(i), writer)
 			if err != nil {
 				return err
 			}
@@ -181,12 +221,14 @@ func (e *encoder) newArrayTypeEncoder(t reflect.Type) encoderFunc {
 }
 
 func (e *encoder) newStructTypeEncoder(t reflect.Type) encoderFunc {
-	if t.Implements(reflect.TypeOf((*internalparam.FieldLike)(nil)).Elem()) {
-		return e.newFieldTypeEncoder(t)
+	if t.Implements(reflect.TypeOf((*param.Optional)(nil)).Elem()) {
+		return e.newRichFieldTypeEncoder(t)
 	}
 
-	if idx, ok := param.OptionalPrimitiveTypes[t]; ok {
-		return e.newRichFieldTypeEncoder(t, idx)
+	for i := 0; i < t.NumField(); i++ {
+		if t.Field(i).Type == paramUnionType && t.Field(i).Anonymous {
+			return e.newStructUnionTypeEncoder(t)
+		}
 	}
 
 	encoderFields := []encoderField{}
@@ -284,24 +326,29 @@ func (e *encoder) newStructTypeEncoder(t reflect.Type) encoderFunc {
 	}
 }
 
-func (e *encoder) newFieldTypeEncoder(t reflect.Type) encoderFunc {
-	f, _ := t.FieldByName("Value")
-	enc := e.typeEncoder(f.Type)
+var paramUnionType = reflect.TypeOf((*param.APIUnion)(nil)).Elem()
+
+func (e *encoder) newStructUnionTypeEncoder(t reflect.Type) encoderFunc {
+	var fieldEncoders []encoderFunc
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.Type == paramUnionType && field.Anonymous {
+			fieldEncoders = append(fieldEncoders, nil)
+			continue
+		}
+		fieldEncoders = append(fieldEncoders, e.typeEncoder(field.Type))
+	}
 
 	return func(key string, value reflect.Value, writer *multipart.Writer) error {
-		present := value.FieldByName("Present")
-		if !present.Bool() {
-			return nil
+		for i := 0; i < t.NumField(); i++ {
+			if value.Field(i).Type() == paramUnionType {
+				continue
+			}
+			if !value.Field(i).IsZero() {
+				return fieldEncoders[i](key, value.Field(i), writer)
+			}
 		}
-		null := value.FieldByName("Null")
-		if null.Bool() {
-			return nil
-		}
-		raw := value.FieldByName("Raw")
-		if !raw.IsNil() {
-			return e.typeEncoder(raw.Type())(key, raw, writer)
-		}
-		return enc(key, value.FieldByName("Value"), writer)
+		return fmt.Errorf("apiform: union %s has no field set", t.String())
 	}
 }
 
@@ -330,7 +377,10 @@ func escapeQuotes(s string) string {
 
 func (e *encoder) newReaderTypeEncoder() encoderFunc {
 	return func(key string, value reflect.Value, writer *multipart.Writer) error {
-		reader := value.Convert(reflect.TypeOf((*io.Reader)(nil)).Elem()).Interface().(io.Reader)
+		reader, ok := value.Convert(reflect.TypeOf((*io.Reader)(nil)).Elem()).Interface().(io.Reader)
+		if !ok {
+			return nil
+		}
 		filename := "anonymous_file"
 		contentType := "application/octet-stream"
 		if named, ok := reader.(interface{ Filename() string }); ok {
@@ -394,8 +444,22 @@ func (e *encoder) encodeMapEntries(key string, v reflect.Value, writer *multipar
 	return nil
 }
 
-func (e *encoder) newMapEncoder(t reflect.Type) encoderFunc {
+func (e *encoder) newMapEncoder(_ reflect.Type) encoderFunc {
 	return func(key string, value reflect.Value, writer *multipart.Writer) error {
 		return e.encodeMapEntries(key, value, writer)
 	}
+}
+
+func WriteExtras(writer *multipart.Writer, extras map[string]any) (err error) {
+	for k, v := range extras {
+		str, ok := v.(string)
+		if !ok {
+			break
+		}
+		err = writer.WriteField(k, str)
+		if err != nil {
+			break
+		}
+	}
+	return
 }

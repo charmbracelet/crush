@@ -14,7 +14,7 @@ import (
 	"github.com/openai/openai-go/internal/requestconfig"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 )
 
 // AudioTranslationService contains methods and other services that help with
@@ -46,11 +46,10 @@ func (r *AudioTranslationService) New(ctx context.Context, body AudioTranslation
 
 type Translation struct {
 	Text string `json:"text,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -64,7 +63,7 @@ func (r *Translation) UnmarshalJSON(data []byte) error {
 type AudioTranslationNewParams struct {
 	// The audio file object (not file name) translate, in one of these formats: flac,
 	// mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.
-	File io.Reader `json:"file,required" format:"binary"`
+	File io.Reader `json:"file,omitzero,required" format:"binary"`
 	// ID of the model to use. Only `whisper-1` (which is powered by our open source
 	// Whisper V2 model) is currently available.
 	Model AudioModel `json:"model,omitzero,required"`
@@ -87,14 +86,13 @@ type AudioTranslationNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f AudioTranslationNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r AudioTranslationNewParams) MarshalMultipart() (data []byte, contentType string, err error) {
 	buf := bytes.NewBuffer(nil)
 	writer := multipart.NewWriter(buf)
 	err = apiform.MarshalRoot(r, writer)
+	if err == nil {
+		err = apiform.WriteExtras(writer, r.ExtraFields())
+	}
 	if err != nil {
 		writer.Close()
 		return nil, "", err

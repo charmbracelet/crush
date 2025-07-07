@@ -24,9 +24,6 @@ const newIndex = -1
 // updateHashmap updates the hashmap with the new hash value.
 func (s *TerminalRenderer) updateHashmap(newbuf *Buffer) {
 	height := newbuf.Height()
-	if s.hashtab == nil || height >= len(s.hashtab) {
-		s.hashtab = make([]hashmap, (height+1)*2)
-	}
 
 	if len(s.oldhash) >= height && len(s.newhash) >= height {
 		// rehash changed lines
@@ -53,10 +50,7 @@ func (s *TerminalRenderer) updateHashmap(newbuf *Buffer) {
 		}
 	}
 
-	for i := 0; i < len(s.hashtab); i++ {
-		s.hashtab[i] = hashmap{}
-	}
-
+	s.hashtab = make([]hashmap, (height+1)*2)
 	for i := 0; i < height; i++ {
 		hashval := s.oldhash[i]
 

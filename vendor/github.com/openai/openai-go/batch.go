@@ -15,7 +15,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared"
 	"github.com/openai/openai-go/shared/constant"
 )
@@ -143,30 +143,29 @@ type Batch struct {
 	OutputFileID string `json:"output_file_id"`
 	// The request counts for different statuses within the batch.
 	RequestCounts BatchRequestCounts `json:"request_counts"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID               resp.Field
-		CompletionWindow resp.Field
-		CreatedAt        resp.Field
-		Endpoint         resp.Field
-		InputFileID      resp.Field
-		Object           resp.Field
-		Status           resp.Field
-		CancelledAt      resp.Field
-		CancellingAt     resp.Field
-		CompletedAt      resp.Field
-		ErrorFileID      resp.Field
-		Errors           resp.Field
-		ExpiredAt        resp.Field
-		ExpiresAt        resp.Field
-		FailedAt         resp.Field
-		FinalizingAt     resp.Field
-		InProgressAt     resp.Field
-		Metadata         resp.Field
-		OutputFileID     resp.Field
-		RequestCounts    resp.Field
-		ExtraFields      map[string]resp.Field
+		ID               respjson.Field
+		CompletionWindow respjson.Field
+		CreatedAt        respjson.Field
+		Endpoint         respjson.Field
+		InputFileID      respjson.Field
+		Object           respjson.Field
+		Status           respjson.Field
+		CancelledAt      respjson.Field
+		CancellingAt     respjson.Field
+		CompletedAt      respjson.Field
+		ErrorFileID      respjson.Field
+		Errors           respjson.Field
+		ExpiredAt        respjson.Field
+		ExpiresAt        respjson.Field
+		FailedAt         respjson.Field
+		FinalizingAt     respjson.Field
+		InProgressAt     respjson.Field
+		Metadata         respjson.Field
+		OutputFileID     respjson.Field
+		RequestCounts    respjson.Field
+		ExtraFields      map[string]respjson.Field
 		raw              string
 	} `json:"-"`
 }
@@ -195,12 +194,11 @@ type BatchErrors struct {
 	Data []BatchError `json:"data"`
 	// The object type, which is always `list`.
 	Object string `json:"object"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Data        resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		Data        respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -220,14 +218,13 @@ type BatchError struct {
 	Message string `json:"message"`
 	// The name of the parameter that caused the error, if applicable.
 	Param string `json:"param,nullable"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Code        resp.Field
-		Line        resp.Field
-		Message     resp.Field
-		Param       resp.Field
-		ExtraFields map[string]resp.Field
+		Code        respjson.Field
+		Line        respjson.Field
+		Message     respjson.Field
+		Param       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -246,13 +243,12 @@ type BatchRequestCounts struct {
 	Failed int64 `json:"failed,required"`
 	// Total number of requests in the batch.
 	Total int64 `json:"total,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Completed   resp.Field
-		Failed      resp.Field
-		Total       resp.Field
-		ExtraFields map[string]resp.Field
+		Completed   respjson.Field
+		Failed      respjson.Field
+		Total       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -293,17 +289,16 @@ type BatchNewParams struct {
 	//
 	// Keys are strings with a maximum length of 64 characters. Values are strings with
 	// a maximum length of 512 characters.
-	Metadata shared.MetadataParam `json:"metadata,omitzero"`
+	Metadata shared.Metadata `json:"metadata,omitzero"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BatchNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r BatchNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow BatchNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *BatchNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // The time frame within which the batch should be processed. Currently only `24h`
@@ -339,12 +334,8 @@ type BatchListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f BatchListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [BatchListParams]'s query parameters as `url.Values`.
-func (r BatchListParams) URLQuery() (v url.Values) {
+func (r BatchListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,

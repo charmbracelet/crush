@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"reflect"
 
 	"github.com/openai/openai-go/internal/apijson"
 	"github.com/openai/openai-go/internal/apiquery"
@@ -17,10 +16,9 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/pagination"
 	"github.com/openai/openai-go/packages/param"
-	"github.com/openai/openai-go/packages/resp"
+	"github.com/openai/openai-go/packages/respjson"
 	"github.com/openai/openai-go/shared"
 	"github.com/openai/openai-go/shared/constant"
-	"github.com/tidwall/gjson"
 )
 
 // VectorStoreService contains methods and other services that help with
@@ -146,24 +144,29 @@ func (r *VectorStoreService) SearchAutoPaging(ctx context.Context, vectorStoreID
 	return pagination.NewPageAutoPager(r.Search(ctx, vectorStoreID, body, opts...))
 }
 
+func NewAutoFileChunkingStrategyParam() AutoFileChunkingStrategyParam {
+	return AutoFileChunkingStrategyParam{
+		Type: "auto",
+	}
+}
+
 // The default strategy. This strategy currently uses a `max_chunk_size_tokens` of
 // `800` and `chunk_overlap_tokens` of `400`.
 //
-// The property Type is required.
+// This struct has a constant value, construct it with
+// [NewAutoFileChunkingStrategyParam].
 type AutoFileChunkingStrategyParam struct {
 	// Always `auto`.
-	//
-	// This field can be elided, and will marshal its zero value as "auto".
 	Type constant.Auto `json:"type,required"`
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f AutoFileChunkingStrategyParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r AutoFileChunkingStrategyParam) MarshalJSON() (data []byte, err error) {
 	type shadow AutoFileChunkingStrategyParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *AutoFileChunkingStrategyParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // FileChunkingStrategyUnion contains all possible properties and values from
@@ -178,21 +181,31 @@ type FileChunkingStrategyUnion struct {
 	// Any of "static", "other".
 	Type string `json:"type"`
 	JSON struct {
-		Static resp.Field
-		Type   resp.Field
+		Static respjson.Field
+		Type   respjson.Field
 		raw    string
 	} `json:"-"`
 }
 
+// anyFileChunkingStrategy is implemented by each variant of
+// [FileChunkingStrategyUnion] to add type safety for the return type of
+// [FileChunkingStrategyUnion.AsAny]
+type anyFileChunkingStrategy interface {
+	implFileChunkingStrategyUnion()
+}
+
+func (StaticFileChunkingStrategyObject) implFileChunkingStrategyUnion() {}
+func (OtherFileChunkingStrategyObject) implFileChunkingStrategyUnion()  {}
+
 // Use the following switch statement to find the correct variant
 //
 //	switch variant := FileChunkingStrategyUnion.AsAny().(type) {
-//	case StaticFileChunkingStrategyObject:
-//	case OtherFileChunkingStrategyObject:
+//	case openai.StaticFileChunkingStrategyObject:
+//	case openai.OtherFileChunkingStrategyObject:
 //	default:
 //	  fmt.Errorf("no variant present")
 //	}
-func (u FileChunkingStrategyUnion) AsAny() any {
+func (u FileChunkingStrategyUnion) AsAny() anyFileChunkingStrategy {
 	switch u.Type {
 	case "static":
 		return u.AsStatic()
@@ -234,11 +247,11 @@ type FileChunkingStrategyParamUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u FileChunkingStrategyParamUnion) IsPresent() bool { return !param.IsOmitted(u) && !u.IsNull() }
 func (u FileChunkingStrategyParamUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[FileChunkingStrategyParamUnion](u.OfAuto, u.OfStatic)
+	return param.MarshalUnion(u, u.OfAuto, u.OfStatic)
+}
+func (u *FileChunkingStrategyParamUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *FileChunkingStrategyParamUnion) asAny() any {
@@ -271,16 +284,8 @@ func (u FileChunkingStrategyParamUnion) GetType() *string {
 func init() {
 	apijson.RegisterUnion[FileChunkingStrategyParamUnion](
 		"type",
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(AutoFileChunkingStrategyParam{}),
-			DiscriminatorValue: "auto",
-		},
-		apijson.UnionVariant{
-			TypeFilter:         gjson.JSON,
-			Type:               reflect.TypeOf(StaticFileChunkingStrategyObjectParam{}),
-			DiscriminatorValue: "static",
-		},
+		apijson.Discriminator[AutoFileChunkingStrategyParam]("auto"),
+		apijson.Discriminator[StaticFileChunkingStrategyObjectParam]("static"),
 	)
 }
 
@@ -290,11 +295,10 @@ func init() {
 type OtherFileChunkingStrategyObject struct {
 	// Always `other`.
 	Type constant.Other `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -313,12 +317,11 @@ type StaticFileChunkingStrategy struct {
 	// The maximum number of tokens in each chunk. The default value is `800`. The
 	// minimum value is `100` and the maximum value is `4096`.
 	MaxChunkSizeTokens int64 `json:"max_chunk_size_tokens,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ChunkOverlapTokens resp.Field
-		MaxChunkSizeTokens resp.Field
-		ExtraFields        map[string]resp.Field
+		ChunkOverlapTokens respjson.Field
+		MaxChunkSizeTokens respjson.Field
+		ExtraFields        map[string]respjson.Field
 		raw                string
 	} `json:"-"`
 }
@@ -334,9 +337,9 @@ func (r *StaticFileChunkingStrategy) UnmarshalJSON(data []byte) error {
 //
 // Warning: the fields of the param type will not be present. ToParam should only
 // be used at the last possible moment before sending a request. Test for this with
-// StaticFileChunkingStrategyParam.IsOverridden()
+// StaticFileChunkingStrategyParam.Overrides()
 func (r StaticFileChunkingStrategy) ToParam() StaticFileChunkingStrategyParam {
-	return param.OverrideObj[StaticFileChunkingStrategyParam](r.RawJSON())
+	return param.Override[StaticFileChunkingStrategyParam](json.RawMessage(r.RawJSON()))
 }
 
 // The properties ChunkOverlapTokens, MaxChunkSizeTokens are required.
@@ -351,24 +354,23 @@ type StaticFileChunkingStrategyParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f StaticFileChunkingStrategyParam) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r StaticFileChunkingStrategyParam) MarshalJSON() (data []byte, err error) {
 	type shadow StaticFileChunkingStrategyParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *StaticFileChunkingStrategyParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type StaticFileChunkingStrategyObject struct {
 	Static StaticFileChunkingStrategy `json:"static,required"`
 	// Always `static`.
 	Type constant.Static `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Static      resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Static      respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -391,14 +393,12 @@ type StaticFileChunkingStrategyObjectParam struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f StaticFileChunkingStrategyObjectParam) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r StaticFileChunkingStrategyObjectParam) MarshalJSON() (data []byte, err error) {
 	type shadow StaticFileChunkingStrategyObjectParam
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *StaticFileChunkingStrategyObjectParam) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // A vector store is a collection of processed files can be used by the
@@ -434,21 +434,20 @@ type VectorStore struct {
 	ExpiresAfter VectorStoreExpiresAfter `json:"expires_after"`
 	// The Unix timestamp (in seconds) for when the vector store will expire.
 	ExpiresAt int64 `json:"expires_at,nullable"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID           resp.Field
-		CreatedAt    resp.Field
-		FileCounts   resp.Field
-		LastActiveAt resp.Field
-		Metadata     resp.Field
-		Name         resp.Field
-		Object       resp.Field
-		Status       resp.Field
-		UsageBytes   resp.Field
-		ExpiresAfter resp.Field
-		ExpiresAt    resp.Field
-		ExtraFields  map[string]resp.Field
+		ID           respjson.Field
+		CreatedAt    respjson.Field
+		FileCounts   respjson.Field
+		LastActiveAt respjson.Field
+		Metadata     respjson.Field
+		Name         respjson.Field
+		Object       respjson.Field
+		Status       respjson.Field
+		UsageBytes   respjson.Field
+		ExpiresAfter respjson.Field
+		ExpiresAt    respjson.Field
+		ExtraFields  map[string]respjson.Field
 		raw          string
 	} `json:"-"`
 }
@@ -470,15 +469,14 @@ type VectorStoreFileCounts struct {
 	InProgress int64 `json:"in_progress,required"`
 	// The total number of files.
 	Total int64 `json:"total,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Cancelled   resp.Field
-		Completed   resp.Field
-		Failed      resp.Field
-		InProgress  resp.Field
-		Total       resp.Field
-		ExtraFields map[string]resp.Field
+		Cancelled   respjson.Field
+		Completed   respjson.Field
+		Failed      respjson.Field
+		InProgress  respjson.Field
+		Total       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -507,12 +505,11 @@ type VectorStoreExpiresAfter struct {
 	Anchor constant.LastActiveAt `json:"anchor,required"`
 	// The number of days after the anchor time that the vector store will expire.
 	Days int64 `json:"days,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Anchor      resp.Field
-		Days        resp.Field
-		ExtraFields map[string]resp.Field
+		Anchor      respjson.Field
+		Days        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -527,13 +524,12 @@ type VectorStoreDeleted struct {
 	ID      string                      `json:"id,required"`
 	Deleted bool                        `json:"deleted,required"`
 	Object  constant.VectorStoreDeleted `json:"object,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		ID          resp.Field
-		Deleted     resp.Field
-		Object      resp.Field
-		ExtraFields map[string]resp.Field
+		ID          respjson.Field
+		Deleted     respjson.Field
+		Object      respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -559,15 +555,14 @@ type VectorStoreSearchResponse struct {
 	Filename string `json:"filename,required"`
 	// The similarity score for the result.
 	Score float64 `json:"score,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Attributes  resp.Field
-		Content     resp.Field
-		FileID      resp.Field
-		Filename    resp.Field
-		Score       resp.Field
-		ExtraFields map[string]resp.Field
+		Attributes  respjson.Field
+		Content     respjson.Field
+		FileID      respjson.Field
+		Filename    respjson.Field
+		Score       respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -593,9 +588,9 @@ type VectorStoreSearchResponseAttributeUnion struct {
 	// This field will be present if the value is a [bool] instead of an object.
 	OfBool bool `json:",inline"`
 	JSON   struct {
-		OfString resp.Field
-		OfFloat  resp.Field
-		OfBool   resp.Field
+		OfString respjson.Field
+		OfFloat  respjson.Field
+		OfBool   respjson.Field
 		raw      string
 	} `json:"-"`
 }
@@ -629,12 +624,11 @@ type VectorStoreSearchResponseContent struct {
 	//
 	// Any of "text".
 	Type string `json:"type,required"`
-	// Metadata for the response, check the presence of optional fields with the
-	// [resp.Field.IsPresent] method.
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
 	JSON struct {
-		Text        resp.Field
-		Type        resp.Field
-		ExtraFields map[string]resp.Field
+		Text        respjson.Field
+		Type        respjson.Field
+		ExtraFields map[string]respjson.Field
 		raw         string
 	} `json:"-"`
 }
@@ -654,7 +648,7 @@ type VectorStoreNewParams struct {
 	//
 	// Keys are strings with a maximum length of 64 characters. Values are strings with
 	// a maximum length of 512 characters.
-	Metadata shared.MetadataParam `json:"metadata,omitzero"`
+	Metadata shared.Metadata `json:"metadata,omitzero"`
 	// The chunking strategy used to chunk the file(s). If not set, will use the `auto`
 	// strategy. Only applicable if `file_ids` is non-empty.
 	ChunkingStrategy FileChunkingStrategyParamUnion `json:"chunking_strategy,omitzero"`
@@ -667,13 +661,12 @@ type VectorStoreNewParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreNewParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r VectorStoreNewParams) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreNewParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreNewParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // The expiration policy for a vector store.
@@ -690,12 +683,12 @@ type VectorStoreNewParamsExpiresAfter struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreNewParamsExpiresAfter) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 func (r VectorStoreNewParamsExpiresAfter) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreNewParamsExpiresAfter
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreNewParamsExpiresAfter) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type VectorStoreUpdateParams struct {
@@ -709,17 +702,16 @@ type VectorStoreUpdateParams struct {
 	//
 	// Keys are strings with a maximum length of 64 characters. Values are strings with
 	// a maximum length of 512 characters.
-	Metadata shared.MetadataParam `json:"metadata,omitzero"`
+	Metadata shared.Metadata `json:"metadata,omitzero"`
 	paramObj
 }
-
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreUpdateParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
 
 func (r VectorStoreUpdateParams) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreUpdateParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreUpdateParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // The expiration policy for a vector store.
@@ -736,14 +728,12 @@ type VectorStoreUpdateParamsExpiresAfter struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreUpdateParamsExpiresAfter) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r VectorStoreUpdateParamsExpiresAfter) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreUpdateParamsExpiresAfter
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreUpdateParamsExpiresAfter) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 type VectorStoreListParams struct {
@@ -768,12 +758,8 @@ type VectorStoreListParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreListParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 // URLQuery serializes [VectorStoreListParams]'s query parameters as `url.Values`.
-func (r VectorStoreListParams) URLQuery() (v url.Values) {
+func (r VectorStoreListParams) URLQuery() (v url.Values, err error) {
 	return apiquery.MarshalWithSettings(r, apiquery.QuerySettings{
 		ArrayFormat:  apiquery.ArrayQueryFormatBrackets,
 		NestedFormat: apiquery.NestedQueryFormatBrackets,
@@ -804,38 +790,35 @@ type VectorStoreSearchParams struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreSearchParams) IsPresent() bool { return !param.IsOmitted(f) && !f.IsNull() }
-
 func (r VectorStoreSearchParams) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreSearchParams
 	return param.MarshalObject(r, (*shadow)(&r))
+}
+func (r *VectorStoreSearchParams) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
 }
 
 // Only one field can be non-zero.
 //
 // Use [param.IsOmitted] to confirm if a field is set.
 type VectorStoreSearchParamsQueryUnion struct {
-	OfString                       param.Opt[string] `json:",omitzero,inline"`
-	OfVectorStoreSearchsQueryArray []string          `json:",omitzero,inline"`
+	OfString      param.Opt[string] `json:",omitzero,inline"`
+	OfStringArray []string          `json:",omitzero,inline"`
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u VectorStoreSearchParamsQueryUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u VectorStoreSearchParamsQueryUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[VectorStoreSearchParamsQueryUnion](u.OfString, u.OfVectorStoreSearchsQueryArray)
+	return param.MarshalUnion(u, u.OfString, u.OfStringArray)
+}
+func (u *VectorStoreSearchParamsQueryUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *VectorStoreSearchParamsQueryUnion) asAny() any {
 	if !param.IsOmitted(u.OfString) {
 		return &u.OfString.Value
-	} else if !param.IsOmitted(u.OfVectorStoreSearchsQueryArray) {
-		return &u.OfVectorStoreSearchsQueryArray
+	} else if !param.IsOmitted(u.OfStringArray) {
+		return &u.OfStringArray
 	}
 	return nil
 }
@@ -849,13 +832,11 @@ type VectorStoreSearchParamsFiltersUnion struct {
 	paramUnion
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (u VectorStoreSearchParamsFiltersUnion) IsPresent() bool {
-	return !param.IsOmitted(u) && !u.IsNull()
-}
 func (u VectorStoreSearchParamsFiltersUnion) MarshalJSON() ([]byte, error) {
-	return param.MarshalUnion[VectorStoreSearchParamsFiltersUnion](u.OfComparisonFilter, u.OfCompoundFilter)
+	return param.MarshalUnion(u, u.OfComparisonFilter, u.OfCompoundFilter)
+}
+func (u *VectorStoreSearchParamsFiltersUnion) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, u)
 }
 
 func (u *VectorStoreSearchParamsFiltersUnion) asAny() any {
@@ -909,18 +890,16 @@ type VectorStoreSearchParamsRankingOptions struct {
 	paramObj
 }
 
-// IsPresent returns true if the field's value is not omitted and not the JSON
-// "null". To check if this field is omitted, use [param.IsOmitted].
-func (f VectorStoreSearchParamsRankingOptions) IsPresent() bool {
-	return !param.IsOmitted(f) && !f.IsNull()
-}
 func (r VectorStoreSearchParamsRankingOptions) MarshalJSON() (data []byte, err error) {
 	type shadow VectorStoreSearchParamsRankingOptions
 	return param.MarshalObject(r, (*shadow)(&r))
 }
+func (r *VectorStoreSearchParamsRankingOptions) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
 
 func init() {
 	apijson.RegisterFieldValidator[VectorStoreSearchParamsRankingOptions](
-		"Ranker", false, "auto", "default-2024-11-15",
+		"ranker", "auto", "default-2024-11-15",
 	)
 }

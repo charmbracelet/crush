@@ -2,8 +2,8 @@
 
 <a href="https://pkg.go.dev/github.com/openai/openai-go"><img src="https://pkg.go.dev/badge/github.com/openai/openai-go.svg" alt="Go Reference"></a>
 
-The OpenAI Go library provides convenient access to [the OpenAI REST
-API](https://platform.openai.com/docs) from applications written in Go. The full API of this library can be found in [api.md](api.md).
+The OpenAI Go library provides convenient access to the [OpenAI REST API](https://platform.openai.com/docs)
+from applications written in Go.
 
 > [!WARNING]
 > The latest version of this package uses a new design with significant breaking changes.
@@ -26,7 +26,7 @@ Or to pin the version:
 <!-- x-release-please-start-version -->
 
 ```sh
-go get -u 'github.com/openai/openai-go@v0.1.0-beta.2'
+go get -u 'github.com/openai/openai-go@v1.8.2'
 ```
 
 <!-- x-release-please-end -->
@@ -295,51 +295,58 @@ func main() {
 The openai library uses the [`omitzero`](https://tip.golang.org/doc/go1.24#encodingjsonpkgencodingjson)
 semantics from the Go 1.24+ `encoding/json` release for request fields.
 
-Required primitive fields (`int64`, `string`, etc.) feature the tag <code>\`json:...,required\`</code>. These
+Required primitive fields (`int64`, `string`, etc.) feature the tag <code>\`json:"...,required"\`</code>. These
 fields are always serialized, even their zero values.
 
-Optional primitive types are wrapped in a `param.Opt[T]`. Use the provided constructors set `param.Opt[T]` fields such as `openai.String(string)`, `openai.Int(int64)`, etc.
+Optional primitive types are wrapped in a `param.Opt[T]`. These fields can be set with the provided constructors, `openai.String(string)`, `openai.Int(int64)`, etc.
 
-Optional primitives, maps, slices and structs and string enums (represented as `string`) always feature the
-tag <code>\`json:"...,omitzero"\`</code>. Their zero values are considered omitted.
+Any `param.Opt[T]`, map, slice, struct or string enum uses the
+tag <code>\`json:"...,omitzero"\`</code>. Its zero value is considered omitted.
 
-Any non-nil slice of length zero will serialize as an empty JSON array, `"[]"`. Similarly, any non-nil map with length zero with serialize as an empty JSON object, `"{}"`.
-
-To send `null` instead of an `param.Opt[T]`, use `param.NullOpt[T]()`.
-To send `null` instead of a struct, use `param.NullObj[T]()`, where `T` is a struct.
-To send a custom value instead of a struct, use `param.OverrideObj[T](value)`.
-
-To override request structs contain a `.WithExtraFields(map[string]any)` method which can be used to
-send non-conforming fields in the request body. Extra fields take higher precedence than normal
-fields.
+The `param.IsOmitted(any)` function can confirm the presence of any `omitzero` field.
 
 ```go
-params := FooParams{
-	ID: "id_xxx",                          // required property
-	Name: openai.String("hello"), // optional property
-	Description: param.NullOpt[string](),  // explicit null property
+p := openai.ExampleParams{
+	ID:   "id_xxx",             // required property
+	Name: openai.String("..."), // optional property
 
 	Point: openai.Point{
-		X: 0, // required field will serialize as 0
+		X: 0,             // required field will serialize as 0
 		Y: openai.Int(1), // optional field will serialize as 1
-	  // ... omitted non-required fields will not be serialized
-	}),
+		// ... omitted non-required fields will not be serialized
+	},
 
 	Origin: openai.Origin{}, // the zero value of [Origin] is considered omitted
 }
+```
 
+To send `null` instead of a `param.Opt[T]`, use `param.Null[T]()`.
+To send `null` instead of a struct `T`, use `param.NullStruct[T]()`.
+
+```go
+p.Name = param.Null[string]()       // 'null' instead of string
+p.Point = param.NullStruct[Point]() // 'null' instead of struct
+
+param.IsNull(p.Name)  // true
+param.IsNull(p.Point) // true
+```
+
+Request structs contain a `.SetExtraFields(map[string]any)` method which can send non-conforming
+fields in the request body. Extra fields overwrite any struct fields with a matching
+key. For security reasons, only use `SetExtraFields` with trusted data.
+
+To send a custom value instead of a struct, use `param.Override[T](value)`.
+
+```go
 // In cases where the API specifies a given type,
-// but you want to send something else, use [WithExtraFields]:
-params.WithExtraFields(map[string]any{
+// but you want to send something else, use [SetExtraFields]:
+p.SetExtraFields(map[string]any{
 	"x": 0.01, // send "x" as a float instead of int
 })
 
 // Send a number instead of an object
-custom := param.OverrideObj[openai.FooParams](12)
+custom := param.Override[openai.FooParams](12)
 ```
-
-When available, use the `.IsPresent()` method to check if an optional parameter is not omitted or `null`.
-Otherwise, the `param.IsOmitted(any)` function can confirm the presence of any `omitzero` field.
 
 ### Request unions
 
@@ -352,8 +359,8 @@ These methods return a mutable pointer to the underlying data, if present.
 ```go
 // Only one field can be non-zero, use param.IsOmitted() to check if a field is set
 type AnimalUnionParam struct {
-	OfCat 	 *Cat              `json:",omitzero,inline`
-	OfDog    *Dog              `json:",omitzero,inline`
+	OfCat *Cat `json:",omitzero,inline`
+	OfDog *Dog `json:",omitzero,inline`
 }
 
 animal := AnimalUnionParam{
@@ -373,34 +380,54 @@ if address := animal.GetOwner().GetAddress(); address != nil {
 
 ### Response objects
 
-All fields in response structs are value types (not pointers or wrappers).
-
-If a given field is `null`, not present, or invalid, the corresponding field
-will simply be its zero value.
-
-All response structs also include a special `JSON` field, containing more detailed
-information about each property, which you can use like so:
+All fields in response structs are ordinary value types (not pointers or wrappers).
+Response structs also include a special `JSON` field containing metadata about
+each property.
 
 ```go
-if res.Name == "" {
-	// true if `"name"` was unmarshalled successfully
-	res.JSON.Name.IsPresent()
-
-	res.JSON.Name.IsExplicitNull() // true if `"name"` is explicitly null
-	res.JSON.Name.Raw() == ""          // true if `"name"` field does not exist
-
-	// When the API returns data that cannot be coerced to the expected type:
-	if !res.JSON.Name.IsPresent() && res.JSON.Name.Raw() != "" {
-		raw := res.JSON.Name.Raw()
-
-		legacyName := struct{
-			First string `json:"first"`
-			Last  string `json:"last"`
-		}{}
-		json.Unmarshal([]byte(raw), &legacyName)
-		name = legacyName.First + " " + legacyName.Last
-	}
+type Animal struct {
+	Name   string `json:"name,nullable"`
+	Owners int    `json:"owners"`
+	Age    int    `json:"age"`
+	JSON   struct {
+		Name        respjson.Field
+		Owner       respjson.Field
+		Age         respjson.Field
+		ExtraFields map[string]respjson.Field
+	} `json:"-"`
 }
+```
+
+To handle optional data, use the `.Valid()` method on the JSON field.
+`.Valid()` returns true if a field is not `null`, not present, or couldn't be marshaled.
+
+If `.Valid()` is false, the corresponding field will simply be its zero value.
+
+```go
+raw := `{"owners": 1, "name": null}`
+
+var res Animal
+json.Unmarshal([]byte(raw), &res)
+
+// Accessing regular fields
+
+res.Owners // 1
+res.Name   // ""
+res.Age    // 0
+
+// Optional field checks
+
+res.JSON.Owners.Valid() // true
+res.JSON.Name.Valid()   // false
+res.JSON.Age.Valid()    // false
+
+// Raw JSON values
+
+res.JSON.Owners.Raw()                  // "1"
+res.JSON.Name.Raw() == "null"          // true
+res.JSON.Name.Raw() == respjson.Null   // true
+res.JSON.Age.Raw() == ""               // true
+res.JSON.Age.Raw() == respjson.Omitted // true
 ```
 
 These `.JSON` structs also include an `ExtraFields` map containing
@@ -423,31 +450,27 @@ the properties but prefixed with `Of` and feature the tag `json:"...,inline"`.
 
 ```go
 type AnimalUnion struct {
-	OfString string `json:",inline"`
-	Name     string `json:"name"`
-	Owner    Person `json:"owner"`
+	// From variants [Dog], [Cat]
+	Owner Person `json:"owner"`
+	// From variant [Dog]
+	DogBreed string `json:"dog_breed"`
+	// From variant [Cat]
+	CatBreed string `json:"cat_breed"`
 	// ...
+
 	JSON struct {
-		OfString resp.Field
-		Name     resp.Field
-		Owner    resp.Field
+		Owner respjson.Field
 		// ...
-	}
+	} `json:"-"`
 }
 
 // If animal variant
-if animal.Owner.Address.JSON.ZipCode == "" {
+if animal.Owner.Address.ZipCode == "" {
 	panic("missing zip code")
 }
 
-// If string variant
-if !animal.OfString == "" {
-	panic("expected a name")
-}
-
 // Switch on the variant
-switch variant := animalOrName.AsAny().(type) {
-case string:
+switch variant := animal.AsAny().(type) {
 case Dog:
 case Cat:
 default:
@@ -475,6 +498,8 @@ client.Chat.Completions.New(context.TODO(), ...,
 	option.WithJSONSet("some.json.path", map[string]string{"my": "object"}),
 )
 ```
+
+The request option `option.WithDebugLog(nil)` may be helpful while debugging.
 
 See the [full list of request options](https://pkg.go.dev/github.com/openai/openai-go/option).
 
@@ -527,7 +552,7 @@ To handle errors, we recommend that you use the `errors.As` pattern:
 
 ```go
 _, err := client.FineTuning.Jobs.New(context.TODO(), openai.FineTuningJobNewParams{
-	Model:        "babbage-002",
+	Model:        openai.FineTuningJobNewParamsModelBabbage002,
 	TrainingFile: "file-abc123",
 })
 if err != nil {
@@ -564,7 +589,7 @@ client.Chat.Completions.New(
 				},
 			},
 		}},
-		Model: shared.ChatModelO3Mini,
+		Model: shared.ChatModelGPT4_1,
 	},
 	// This sets the per-retry timeout
 	option.WithRequestTimeout(20*time.Second),
@@ -581,27 +606,142 @@ The file name and content-type can be customized by implementing `Name() string`
 string` on the run-time type of `io.Reader`. Note that `os.File` implements `Name() string`, so a
 file returned by `os.Open` will be sent with the file name on disk.
 
-We also provide a helper `openai.FileParam(reader io.Reader, filename string, contentType string)`
+We also provide a helper `openai.File(reader io.Reader, filename string, contentType string)`
 which can be used to wrap any `io.Reader` with the appropriate file name and content type.
 
 ```go
 // A file from the file system
 file, err := os.Open("input.jsonl")
 openai.FileNewParams{
-	File:    openai.F[io.Reader](file),
+	File:    file,
 	Purpose: openai.FilePurposeFineTune,
 }
 
 // A file from a string
 openai.FileNewParams{
-	File:    openai.F[io.Reader](strings.NewReader("my file contents")),
+	File:    strings.NewReader("my file contents"),
 	Purpose: openai.FilePurposeFineTune,
 }
 
 // With a custom filename and contentType
 openai.FileNewParams{
-	File:    openai.FileParam(strings.NewReader(`{"hello": "foo"}`), "file.go", "application/json"),
+	File:    openai.File(strings.NewReader(`{"hello": "foo"}`), "file.go", "application/json"),
 	Purpose: openai.FilePurposeFineTune,
+}
+```
+
+## Webhook Verification
+
+Verifying webhook signatures is _optional but encouraged_.
+
+For more information about webhooks, see [the API docs](https://platform.openai.com/docs/guides/webhooks).
+
+### Parsing webhook payloads
+
+For most use cases, you will likely want to verify the webhook and parse the payload at the same time. To achieve this, we provide the method `client.Webhooks.Unwrap()`, which parses a webhook request and verifies that it was sent by OpenAI. This method will return an error if the signature is invalid.
+
+Note that the `body` parameter should be the raw JSON bytes sent from the server (do not parse it first). The `Unwrap()` method will parse this JSON for you into an event object after verifying the webhook was sent from OpenAI.
+
+```go
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/webhooks"
+)
+
+func main() {
+	client := openai.NewClient(
+		option.WithWebhookSecret(os.Getenv("OPENAI_WEBHOOK_SECRET")), // env var used by default; explicit here.
+	)
+
+	r := gin.Default()
+	
+	r.POST("/webhook", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error reading request body"})
+			return
+		}
+		defer c.Request.Body.Close()
+
+		webhookEvent, err := client.Webhooks.Unwrap(body, c.Request.Header)
+		if err != nil {
+			log.Printf("Invalid webhook signature: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid signature"})
+			return
+		}
+
+		switch event := webhookEvent.AsAny().(type) {
+		case webhooks.ResponseCompletedWebhookEvent:
+			log.Printf("Response completed: %+v", event.Data)
+		case webhooks.ResponseFailedWebhookEvent:
+			log.Printf("Response failed: %+v", event.Data)
+		default:
+			log.Printf("Unhandled event type: %T", event)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	})
+
+	r.Run(":8000")
+}
+```
+
+### Verifying webhook payloads directly
+
+In some cases, you may want to verify the webhook separately from parsing the payload. If you prefer to handle these steps separately, we provide the method `client.Webhooks.VerifySignature()` to _only verify_ the signature of a webhook request. Like `Unwrap()`, this method will return an error if the signature is invalid.
+
+Note that the `body` parameter should be the raw JSON bytes sent from the server (do not parse it first). You will then need to parse the body after verifying the signature.
+
+```go
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+)
+
+func main() {
+	client := openai.NewClient(
+		option.WithWebhookSecret(os.Getenv("OPENAI_WEBHOOK_SECRET")), // env var used by default; explicit here.
+	)
+
+	r := gin.Default()
+	
+	r.POST("/webhook", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error reading request body"})
+			return
+		}
+		defer c.Request.Body.Close()
+
+		err = client.Webhooks.VerifySignature(body, c.Request.Header)
+		if err != nil {
+			log.Printf("Invalid webhook signature: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid signature"})
+			return
+		}
+		
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	})
+
+	r.Run(":8000")
 }
 ```
 
@@ -630,7 +770,7 @@ client.Chat.Completions.New(
 				},
 			},
 		}},
-		Model: shared.ChatModelO3Mini,
+		Model: shared.ChatModelGPT4_1,
 	},
 	option.WithMaxRetries(5),
 )
@@ -654,7 +794,7 @@ chatCompletion, err := client.Chat.Completions.New(
 				},
 			},
 		}},
-		Model: shared.ChatModelO3Mini,
+		Model: shared.ChatModelGPT4_1,
 	},
 	option.WithResponseInto(&response),
 )
@@ -681,7 +821,7 @@ To make requests to undocumented endpoints, you can use `client.Get`, `client.Po
 var (
     // params can be an io.Reader, a []byte, an encoding/json serializable object,
     // or a "…Params" struct defined in this library.
-    params map[string]interface{}
+    params map[string]any
 
     // result can be an []byte, *http.Response, a encoding/json deserializable object,
     // or a model defined in this library.

@@ -24,6 +24,9 @@ const (
 const (
 	LargeModelType int = iota
 	SmallModelType
+
+	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
 )
 
 // ModelSelectedMsg is sent when a model is selected
@@ -71,7 +74,7 @@ func NewModelDialogCmp() ModelDialog {
 
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := NewModelListComponent(listKeyMap, inputStyle)
+	modelList := NewModelListComponent(listKeyMap, inputStyle, "Choose a model for large, complex tasks")
 	help := help.New()
 	help.Styles = t.S().Help
 
@@ -122,8 +125,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.modelList.GetModelType() == LargeModelType {
+				m.modelList.SetInputPlaceholder(smallModelInputPlaceholder)
 				return m, m.modelList.SetModelType(SmallModelType)
 			} else {
+				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
 		case key.Matches(msg, m.keyMap.Close):

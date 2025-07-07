@@ -23,6 +23,22 @@ func Section(text string, width int) string {
 	return text
 }
 
+func SectionWithInfo(text string, width int, info string) string {
+	t := styles.CurrentTheme()
+	char := "─"
+	length := lipgloss.Width(text) + 1
+	remainingWidth := width - length
+
+	if info != "" {
+		remainingWidth -= lipgloss.Width(info) + 1 // 1 for the space before info
+	}
+	lineStyle := t.S().Base.Foreground(t.Border)
+	if remainingWidth > 0 {
+		text = text + " " + lineStyle.Render(strings.Repeat(char, remainingWidth)) + " " + info
+	}
+	return text
+}
+
 func Title(title string, width int) string {
 	t := styles.CurrentTheme()
 	char := "╱"

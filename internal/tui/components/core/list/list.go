@@ -41,6 +41,7 @@ type ListModel interface {
 	SelectedIndex() int             // Get the index of the currently selected item
 	SetSelected(int) tea.Cmd        // Set the selected item by index and scroll to it
 	Filter(string) tea.Cmd          // Filter items based on a search term
+	SetFilterPlaceholder(string)    // Set the placeholder text for the filter input
 }
 
 // HasAnim interface identifies items that support animation.
@@ -1354,4 +1355,8 @@ func (m *model) Focus() tea.Cmd {
 // IsFocused implements ListModel.
 func (m *model) IsFocused() bool {
 	return m.isFocused
+}
+
+func (m *model) SetFilterPlaceholder(placeholder string) {
+	m.input.Placeholder = placeholder
 }

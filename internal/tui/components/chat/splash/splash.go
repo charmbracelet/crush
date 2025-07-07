@@ -59,7 +59,7 @@ func New() Splash {
 
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := models.NewModelListComponent(listKeyMap, inputStyle)
+	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
 	return &splashCmp{
 		width:        0,
 		height:       0,

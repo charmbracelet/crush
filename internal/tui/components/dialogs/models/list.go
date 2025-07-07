@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
@@ -18,11 +20,12 @@ type ModelListComponent struct {
 	modelType int
 }
 
-func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style) *ModelListComponent {
+func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputPlaceholder string) *ModelListComponent {
 	modelList := list.New(
 		list.WithFilterable(true),
 		list.WithKeyMap(keyMap),
 		list.WithInputStyle(inputStyle),
+		list.WithFilterPlaceholder(inputPlaceholder),
 		list.WithWrapNavigation(true),
 	)
 
@@ -59,6 +62,7 @@ func (m *ModelListComponent) SelectedIndex() int {
 }
 
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
+	t := styles.CurrentTheme()
 	m.modelType = modelType
 
 	providers, err := config.Providers()
@@ -76,6 +80,9 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	} else {
 		currentModel = cfg.Models[config.SelectedModelTypeSmall]
 	}
+
+	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
+	configured := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))
 
 	// Create a map to track which providers we've already added
 	addedProviders := make(map[string]bool)
@@ -120,7 +127,9 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			if name == "" {
 				name = string(configProvider.ID)
 			}
-			modelItems = append(modelItems, commands.NewItemSection(name))
+			section := commands.NewItemSection(name)
+			section.SetInfo(configured)
+			modelItems = append(modelItems, section)
 			for _, model := range configProvider.Models {
 				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 					Provider: configProvider,
@@ -150,7 +159,12 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		if name == "" {
 			name = string(provider.ID)
 		}
-		modelItems = append(modelItems, commands.NewItemSection(name))
+
+		section := commands.NewItemSection(name)
+		if _, ok := cfg.Providers[string(provider.ID)]; ok {
+			section.SetInfo(configured)
+		}
+		modelItems = append(modelItems, section)
 		for _, model := range provider.Models {
 			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
@@ -168,4 +182,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 // GetModelType returns the current model type
 func (m *ModelListComponent) GetModelType() int {
 	return m.modelType
+}
+
+func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
+	m.list.SetFilterPlaceholder(placeholder)
 }

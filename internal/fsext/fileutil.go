@@ -12,6 +12,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/log"
 
 	ignore "github.com/sabhiram/go-gitignore"
 )
@@ -25,11 +26,15 @@ func init() {
 	var err error
 	rgPath, err = exec.LookPath("rg")
 	if err != nil {
-		slog.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
+		if log.IsInitialized() {
+			slog.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
+		}
 	}
 	fzfPath, err = exec.LookPath("fzf")
 	if err != nil {
-		slog.Warn("FZF not found in $PATH. Some features might be limited or slower.")
+		if log.IsInitialized() {
+			slog.Warn("FZF not found in $PATH. Some features might be limited or slower.")
+		}
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -31,8 +30,6 @@ type FileCompletionItem struct {
 	Path string // The file path
 }
 
-type CompletionDebounceMsg struct{}
-
 type editorCmp struct {
 	width       int
 	height      int
@@ -49,9 +46,6 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
-
-	// Debouncing for completions
-	debounceTimer *time.Timer
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -147,22 +141,6 @@ func (m *editorCmp) send() tea.Cmd {
 	)
 }
 
-// debouncedCompletionFilter creates a debounced command for filtering completions
-func (m *editorCmp) debouncedCompletionFilter() tea.Cmd {
-	// Cancel existing timer if any
-	if m.debounceTimer != nil {
-		m.debounceTimer.Stop()
-	}
-
-	// Create new timer for debouncing
-	m.debounceTimer = time.NewTimer(150 * time.Millisecond)
-
-	return func() tea.Msg {
-		<-m.debounceTimer.C
-		return CompletionDebounceMsg{}
-	}
-}
-
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -182,18 +160,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
 		m.completionsStartIndex = 0
-		// Cancel any pending debounce timer
-		if m.debounceTimer != nil {
-			m.debounceTimer.Stop()
-			m.debounceTimer = nil
-		}
-	case CompletionDebounceMsg:
-		// Handle debounced completion filtering
-		if m.isCompletionsOpen {
-			return m, util.CmdHandler(completions.FilterCompletionsMsg{
-				Query: m.currentQuery,
-			})
-		}
 	case completions.SelectCompletionMsg:
 		if !m.isCompletionsOpen {
 			return m, nil
@@ -230,8 +196,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.String() == "backspace" && m.isCompletionsOpen:
 			if len(m.currentQuery) > 0 {
 				m.currentQuery = m.currentQuery[:len(m.currentQuery)-1]
-				// Use debounced filtering instead of immediate filtering
-				cmds = append(cmds, m.debouncedCompletionFilter())
+				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+					Query: m.currentQuery,
+				}))
 			} else {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
@@ -241,8 +208,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			if m.isCompletionsOpen {
 				m.currentQuery += msg.String()
-				// Use debounced filtering instead of immediate filtering
-				cmds = append(cmds, m.debouncedCompletionFilter())
+				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+					Query: m.currentQuery,
+				}))
 			}
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
@@ -388,11 +356,6 @@ func (m *editorCmp) startCompletions() tea.Msg {
 // Blur implements Container.
 func (c *editorCmp) Blur() tea.Cmd {
 	c.textarea.Blur()
-	// Clean up debounce timer when losing focus
-	if c.debounceTimer != nil {
-		c.debounceTimer.Stop()
-		c.debounceTimer = nil
-	}
 	return nil
 }
 

@@ -35,18 +35,9 @@ var ChatPageID page.PageID = "chat"
 type (
 	OpenFilePickerMsg struct{}
 	ChatFocusedMsg    struct {
-		Focused bool // True if the chat input is focused, false otherwise
+		Focused bool
 	}
 	CancelTimerExpiredMsg struct{}
-)
-
-type ChatState string
-
-const (
-	ChatStateOnboarding  ChatState = "onboarding"
-	ChatStateInitProject ChatState = "init_project"
-	ChatStateNewMessage  ChatState = "new_message"
-	ChatStateInSession   ChatState = "in_session"
 )
 
 type PanelType string
@@ -63,6 +54,15 @@ const (
 	SideBarWidth          = 31  // Width of the sidebar
 	SideBarDetailsPadding = 1   // Padding for the sidebar details section
 	HeaderHeight          = 1   // Height of the header
+	
+	// Layout constants for borders and padding
+	BorderWidth        = 1 // Width of component borders
+	LeftRightBorders   = 2 // Left + right border width (1 + 1)
+	TopBottomBorders   = 2 // Top + bottom border width (1 + 1)
+	DetailsPositioning = 2 // Positioning adjustment for details panel
+	
+	// Timing constants
+	CancelTimerDuration = 2 * time.Second // Duration before cancel timer expires
 )
 
 type ChatPage interface {
@@ -70,9 +70,9 @@ type ChatPage interface {
 	layout.Help
 }
 
-// cancelTimerCmd creates a command that expires the cancel timer after 2 seconds
+// cancelTimerCmd creates a command that expires the cancel timer
 func cancelTimerCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(CancelTimerDuration, func(time.Time) tea.Msg {
 		return CancelTimerExpiredMsg{}
 	})
 }
@@ -81,34 +81,33 @@ type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int
 	app                         *app.App
-	state                       ChatState
-	session                     session.Session
-	keyMap                      KeyMap
-	focusedPane                 PanelType
-	// Compact mode
-	compact        bool
-	header         header.Header
-	showingDetails bool
-
-	sidebar   sidebar.Sidebar
-	chat      chat.MessageListCmp
-	editor    editor.Editor
-	splash    splash.Splash
-	canceling bool
-
-	// This will force the compact mode even in big screens
-	// usually triggered by the user command
-	// this will also be set when the user config is set to compact mode
+	
+	// Layout state
+	compact      bool
 	forceCompact bool
+	focusedPane  PanelType
+	
+	// Session
+	session session.Session
+	keyMap  KeyMap
+	
+	// Components
+	header  header.Header
+	sidebar sidebar.Sidebar
+	chat    chat.MessageListCmp
+	editor  editor.Editor
+	splash  splash.Splash
+	
+	// Simple state flags
+	showingDetails   bool
+	isCanceling      bool
+	splashFullScreen bool
 }
 
 func New(app *app.App) ChatPage {
 	return &chatPage{
-		app:   app,
-		state: ChatStateOnboarding,
-
-		keyMap: DefaultKeyMap(),
-
+		app:         app,
+		keyMap:      DefaultKeyMap(),
 		header:      header.New(app.LSPClients),
 		sidebar:     sidebar.New(app.History, app.LSPClients, false),
 		chat:        chat.New(app),
@@ -120,19 +119,26 @@ func New(app *app.App) ChatPage {
 
 func (p *chatPage) Init() tea.Cmd {
 	cfg := config.Get()
-	if config.HasInitialDataConfig() {
-		if b, _ := config.ProjectNeedsInitialization(); b {
-			p.state = ChatStateInitProject
-		} else {
-			p.state = ChatStateNewMessage
-			p.focusedPane = PanelTypeEditor
-		}
-	}
-
 	compact := cfg.Options.TUI.CompactMode
 	p.compact = compact
 	p.forceCompact = compact
 	p.sidebar.SetCompactMode(p.compact)
+	
+	// Set splash state based on config
+	if !config.HasInitialDataConfig() {
+		// First-time setup: show model selection
+		p.splash.SetOnboarding(true)
+		p.splashFullScreen = true
+	} else if b, _ := config.ProjectNeedsInitialization(); b {
+		// Project needs CRUSH.md initialization
+		p.splash.SetProjectInit(true)
+		p.splashFullScreen = true
+	} else {
+		// Ready to chat: focus editor, splash in background
+		p.focusedPane = PanelTypeEditor
+		p.splashFullScreen = false
+	}
+	
 	return tea.Batch(
 		p.header.Init(),
 		p.sidebar.Init(),
@@ -148,7 +154,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return p, p.SetSize(msg.Width, msg.Height)
 	case CancelTimerExpiredMsg:
-		p.canceling = false
+		p.isCanceling = false
 		return p, nil
 	case chat.SendMsg:
 		return p, p.sendMessage(msg.Text, msg.Attachments)
@@ -166,7 +172,6 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case pubsub.Event[session.Session]:
-		// this needs to go to header/sidebar
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
 		cmds = append(cmds, cmd)
@@ -196,32 +201,33 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
-		// this needs to go to chat
 		u, cmd := p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
-		// this needs to go to sidebar
 		u, cmd := p.sidebar.Update(msg)
 		p.sidebar = u.(sidebar.Sidebar)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
 	case commands.CommandRunCustomMsg:
-		// Check if the agent is busy before executing custom commands
 		if p.app.CoderAgent.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 
-		// Handle custom command execution
 		cmd := p.sendMessage(msg.Content, nil)
 		if cmd != nil {
 			return p, cmd
 		}
 	case splash.OnboardingCompleteMsg:
-		p.state = ChatStateNewMessage
+		p.splashFullScreen = false
+		if b, _ := config.ProjectNeedsInitialization(); b {
+			p.splash.SetProjectInit(true)
+			p.splashFullScreen = true
+			return p, p.SetSize(p.width, p.height)
+		}
 		err := p.app.InitCoderAgent()
 		if err != nil {
 			return p, util.ReportError(err)
@@ -241,7 +247,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
-			if p.state == ChatStateOnboarding || p.state == ChatStateInitProject {
+			if p.session.ID == "" {
 				u, cmd := p.splash.Update(msg)
 				p.splash = u.(splash.Splash)
 				return p, cmd
@@ -255,7 +261,6 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, nil
 		}
 
-		// Send the key press to the focused pane
 		switch p.focusedPane {
 		case PanelTypeChat:
 			u, cmd := p.chat.Update(msg)
@@ -277,22 +282,25 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (p *chatPage) View() tea.View {
 	var chatView tea.View
 	t := styles.CurrentTheme()
-	switch p.state {
-	case ChatStateOnboarding, ChatStateInitProject:
-		chatView = p.splash.View()
-	case ChatStateNewMessage:
-		editorView := p.editor.View()
-		chatView = tea.NewView(
-			lipgloss.JoinVertical(
-				lipgloss.Left,
-				t.S().Base.Render(
-					p.splash.View().String(),
+	
+	if p.session.ID == "" {
+		splashView := p.splash.View()
+		// Full screen during onboarding or project initialization
+		if p.splashFullScreen {
+			chatView = splashView
+		} else {
+			// Show splash + editor for new message state
+			editorView := p.editor.View()
+			chatView = tea.NewView(
+				lipgloss.JoinVertical(
+					lipgloss.Left,
+					t.S().Base.Render(splashView.String()),
+					editorView.String(),
 				),
-				editorView.String(),
-			),
-		)
-		chatView.SetCursor(editorView.Cursor())
-	case ChatStateInSession:
+			)
+			chatView.SetCursor(editorView.Cursor())
+		}
+	} else {
 		messagesView := p.chat.View()
 		editorView := p.editor.View()
 		if p.compact {
@@ -322,8 +330,6 @@ func (p *chatPage) View() tea.View {
 			)
 			chatView.SetCursor(editorView.Cursor())
 		}
-	default:
-		chatView = tea.NewView("Unknown chat state")
 	}
 
 	layers := []*lipgloss.Layer{
@@ -398,22 +404,22 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 	p.width = width
 	p.height = height
 	var cmds []tea.Cmd
-	switch p.state {
-	case ChatStateOnboarding, ChatStateInitProject:
-		// here we should just have the splash screen
-		cmds = append(cmds, p.splash.SetSize(width, height))
-	case ChatStateNewMessage:
-		cmds = append(cmds, p.splash.SetSize(width, height-EditorHeight))
-		cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
-		cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
-	case ChatStateInSession:
+	
+	if p.session.ID == "" {
+		if p.splashFullScreen {
+			cmds = append(cmds, p.splash.SetSize(width, height))
+		} else {
+			cmds = append(cmds, p.splash.SetSize(width, height-EditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
+			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
+		}
+	} else {
 		if p.compact {
 			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight))
-			// In compact mode, the sidebar is shown in the details section, the width needs to be adjusted for the padding and border
-			p.detailsWidth = width - 2                                                  // because of position
-			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-2, p.detailsHeight-2)) // adjust for border
+			p.detailsWidth = width - DetailsPositioning
+			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
-			cmds = append(cmds, p.header.SetWidth(width-1))
+			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
 		} else {
 			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
@@ -425,17 +431,13 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 }
 
 func (p *chatPage) newSession() tea.Cmd {
-	if p.state != ChatStateInSession {
-		// Cannot start a new session if we are not in the session state
+	if p.session.ID == "" {
 		return nil
 	}
 
-	// blank session
 	p.session = session.Session{}
-	p.state = ChatStateNewMessage
 	p.focusedPane = PanelTypeEditor
-	p.canceling = false
-	// Reset the chat and editor components
+	p.isCanceling = false
 	return tea.Batch(
 		util.CmdHandler(chat.SessionClearedMsg{}),
 		p.SetSize(p.width, p.height),
@@ -449,11 +451,8 @@ func (p *chatPage) setSession(session session.Session) tea.Cmd {
 
 	var cmds []tea.Cmd
 	p.session = session
-	// We want to first resize the components
-	if p.state != ChatStateInSession {
-		p.state = ChatStateInSession
-		cmds = append(cmds, p.SetSize(p.width, p.height))
-	}
+	
+	cmds = append(cmds, p.SetSize(p.width, p.height))
 	cmds = append(cmds, p.chat.SetSession(session))
 	cmds = append(cmds, p.sidebar.SetSession(session))
 	cmds = append(cmds, p.header.SetSession(session))
@@ -463,8 +462,7 @@ func (p *chatPage) setSession(session session.Session) tea.Cmd {
 }
 
 func (p *chatPage) changeFocus() {
-	if p.state != ChatStateInSession {
-		// Cannot change focus if we are not in the session state
+	if p.session.ID == "" {
 		return
 	}
 	switch p.focusedPane {
@@ -480,25 +478,22 @@ func (p *chatPage) changeFocus() {
 }
 
 func (p *chatPage) cancel() tea.Cmd {
-	if p.state != ChatStateInSession || !p.app.CoderAgent.IsBusy() {
-		// Cannot cancel if we are not in the session state
+	if p.session.ID == "" || !p.app.CoderAgent.IsBusy() {
 		return nil
 	}
 
-	// second press of cancel key will actually cancel the session
-	if p.canceling {
-		p.canceling = false
+	if p.isCanceling {
+		p.isCanceling = false
 		p.app.CoderAgent.Cancel(p.session.ID)
 		return nil
 	}
 
-	p.canceling = true
+	p.isCanceling = true
 	return cancelTimerCmd()
 }
 
 func (p *chatPage) showDetails() {
-	if p.state != ChatStateInSession || !p.compact {
-		// Cannot show details if we are not in the session state or if we are not in compact mode
+	if p.session.ID == "" || !p.compact {
 		return
 	}
 	p.showingDetails = !p.showingDetails
@@ -508,8 +503,7 @@ func (p *chatPage) showDetails() {
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
 	session := p.session
 	var cmds []tea.Cmd
-	if p.state != ChatStateInSession {
-		// branch new session
+	if p.session.ID == "" {
 		newSession, err := p.app.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
@@ -531,7 +525,7 @@ func (p *chatPage) Bindings() []key.Binding {
 	}
 	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
-		if p.canceling {
+		if p.isCanceling {
 			cancelBinding = key.NewBinding(
 				key.WithKeys("esc"),
 				key.WithHelp("esc", "press again to cancel"),

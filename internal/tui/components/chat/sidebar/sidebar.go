@@ -418,6 +418,9 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	for _, l := range mcps {
 		iconColor := t.Success
+		if l.MCP.Disabled {
+			iconColor = t.FgMuted
+		}
 		mcpList = append(mcpList,
 			core.Status(
 				core.StatusOpts{

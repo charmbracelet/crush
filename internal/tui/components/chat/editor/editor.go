@@ -245,7 +245,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleteMode = false
 			return m, nil
 		}
-		// Hanlde Enter key
+		if key.Matches(msg, m.keyMap.Newline) {
+			m.textarea.InsertRune('\n')
+			return m, nil
+		}
+		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {

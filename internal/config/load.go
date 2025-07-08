@@ -162,6 +162,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 		}
 		prepared := ProviderConfig{
 			ID:           string(p.ID),
+			Name:         p.Name,
 			BaseURL:      p.APIEndpoint,
 			APIKey:       p.APIKey,
 			Type:         p.Type,
@@ -218,6 +219,9 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 
 		// Make sure the provider ID is set
 		providerConfig.ID = id
+		if providerConfig.Name == "" {
+			providerConfig.Name = id // Use ID as name if not set
+		}
 		// default to OpenAI if not set
 		if providerConfig.Type == "" {
 			providerConfig.Type = provider.TypeOpenAI
@@ -229,9 +233,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			continue
 		}
 		if providerConfig.APIKey == "" {
-			slog.Warn("Skipping custom provider due to missing API key", "provider", id)
-			delete(cfg.Providers, id)
-			continue
+			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		if providerConfig.BaseURL == "" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
@@ -251,9 +253,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
-			slog.Warn("Skipping custom provider due to missing API key", "provider", id, "error", err)
-			delete(cfg.Providers, id)
-			continue
+			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {

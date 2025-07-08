@@ -60,6 +60,8 @@ type SelectedModel struct {
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty"`
+	// The provider's name, used for display purposes.
+	Name string `json:"name,omitempty"`
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.

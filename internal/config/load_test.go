@@ -483,7 +483,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 }
 
 func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
-	t.Run("custom provider with missing API key is removed", func(t *testing.T) {
+	t.Run("custom provider with missing API key is allowed, but not known providers", func(t *testing.T) {
 		cfg := &Config{
 			Providers: map[string]ProviderConfig{
 				"custom": {
@@ -491,6 +491,9 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 					Models: []provider.Model{{
 						ID: "test-model",
 					}},
+				},
+				"openai": {
+					APIKey: "$MISSING",
 				},
 			},
 		}
@@ -501,9 +504,9 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		err := cfg.configureProviders(env, resolver, []provider.Provider{})
 		assert.NoError(t, err)
 
-		assert.Len(t, cfg.Providers, 0)
+		assert.Len(t, cfg.Providers, 1)
 		_, exists := cfg.Providers["custom"]
-		assert.False(t, exists)
+		assert.True(t, exists)
 	})
 
 	t.Run("custom provider with missing BaseURL is removed", func(t *testing.T) {

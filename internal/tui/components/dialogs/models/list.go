@@ -104,7 +104,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
 			// Convert config provider to provider.Provider format
 			configProvider := provider.Provider{
-				Name:   string(providerID), // Use provider ID as name for unknown providers
+				Name:   providerConfig.Name,
 				ID:     provider.InferenceProvider(providerID),
 				Models: make([]provider.Model, len(providerConfig.Models)),
 			}

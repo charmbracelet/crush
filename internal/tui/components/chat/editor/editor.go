@@ -67,7 +67,7 @@ const (
 	maxAttachments = 5
 )
 
-func (m *editorCmp) openEditor() tea.Cmd {
+func (m *editorCmp) openEditor(value string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		// Use platform-appropriate default editor
@@ -82,6 +82,7 @@ func (m *editorCmp) openEditor() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
+	_, _ = tmpfile.WriteString(value)
 	tmpfile.Close()
 	c := exec.Command(editor, tmpfile.Name())
 	c.Stdin = os.Stdin
@@ -239,7 +240,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
-			return m, m.openEditor()
+			return m, m.openEditor(m.textarea.Value())
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {
 			m.deleteMode = false

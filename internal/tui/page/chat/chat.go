@@ -39,6 +39,7 @@ type (
 type ChatPage interface {
 	util.Model
 	layout.Help
+	IsChatFocused() bool
 }
 
 type chatPage struct {
@@ -414,4 +415,9 @@ func NewChatPage(app *app.App) ChatPage {
 		keyMap:         DefaultKeyMap(),
 		header:         header.New(app.LSPClients),
 	}
+}
+
+// IsChatFocused returns whether the chat messages are focused (true) or editor is focused (false)
+func (p *chatPage) IsChatFocused() bool {
+	return p.chatFocused
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/pubsub"
 
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -230,6 +231,11 @@ func (app *App) InitCoderAgent() error {
 }
 
 func (app *App) Subscribe(program *tea.Program) {
+	defer log.RecoverPanic("app.Subscribe", func() {
+		slog.Info("TUI subscription panic - attempting graceful shutdown")
+		program.Quit()
+	})
+	
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
 	app.cleanupFuncs = append(app.cleanupFuncs, func() {

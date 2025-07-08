@@ -540,9 +540,9 @@ func (p *SequenceParser) parseWin32InputKeyEvent(state *win32InputState, vkc uin
 
 	var text string
 	keyCode := baseCode
-	if unicode.IsControl(r) {
+	if isCc := unicode.IsControl(r); vkc == 0 && isCc {
 		return p.parseControl(byte(r))
-	} else {
+	} else if !isCc {
 		rw := utf8.EncodeRune(utf8Buf[:], r)
 		keyCode, _ = utf8.DecodeRune(utf8Buf[:rw])
 		if unicode.IsPrint(keyCode) && (cks == 0 ||
@@ -553,18 +553,18 @@ func (p *SequenceParser) parseWin32InputKeyEvent(state *win32InputState, vkc uin
 			// then the key event is a printable event i.e. [text] is not empty.
 			text = string(keyCode)
 		}
-
-		key.Code = keyCode
-		key.Text = text
-		key.Mod = translateControlKeyState(cks)
-		key.BaseCode = baseCode
-		key = ensureKeyCase(key, cks)
-		if keyDown {
-			return KeyPressEvent(key)
-		}
-
-		return KeyReleaseEvent(key)
 	}
+
+	key.Code = keyCode
+	key.Text = text
+	key.Mod = translateControlKeyState(cks)
+	key.BaseCode = baseCode
+	key = ensureKeyCase(key, cks)
+	if keyDown {
+		return KeyPressEvent(key)
+	}
+
+	return KeyReleaseEvent(key)
 }
 
 // ensureKeyCase ensures that the key's text is in the correct case based on the

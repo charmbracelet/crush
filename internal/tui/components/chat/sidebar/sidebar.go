@@ -332,7 +332,7 @@ func (m *sidebarCmp) lspBlock() string {
 
 	lspList := []string{section, ""}
 
-	lsp := config.Get().LSP
+	lsp := config.Get().LSP.Sorted()
 	if len(lsp) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -342,9 +342,9 @@ func (m *sidebarCmp) lspBlock() string {
 		)
 	}
 
-	for n, l := range lsp {
+	for _, l := range lsp {
 		iconColor := t.Success
-		if l.Disabled {
+		if l.LSP.Disabled {
 			iconColor = t.FgMuted
 		}
 		lspErrs := map[protocol.DiagnosticSeverity]int{
@@ -353,7 +353,7 @@ func (m *sidebarCmp) lspBlock() string {
 			protocol.SeverityHint:        0,
 			protocol.SeverityInformation: 0,
 		}
-		if client, ok := m.lspClients[n]; ok {
+		if client, ok := m.lspClients[l.Name]; ok {
 			for _, diagnostics := range client.GetDiagnostics() {
 				for _, diagnostic := range diagnostics {
 					if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -381,8 +381,8 @@ func (m *sidebarCmp) lspBlock() string {
 			core.Status(
 				core.StatusOpts{
 					IconColor:    iconColor,
-					Title:        n,
-					Description:  l.Command,
+					Title:        l.Name,
+					Description:  l.LSP.Command,
 					ExtraContent: strings.Join(errs, " "),
 				},
 				m.width,
@@ -406,8 +406,8 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	mcpList := []string{section, ""}
 
-	mcp := config.Get().MCP
-	if len(mcp) == 0 {
+	mcps := config.Get().MCP.Sorted()
+	if len(mcps) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			section,
@@ -416,14 +416,17 @@ func (m *sidebarCmp) mcpBlock() string {
 		)
 	}
 
-	for n, l := range mcp {
+	for _, l := range mcps {
 		iconColor := t.Success
+		if l.MCP.Disabled {
+			iconColor = t.FgMuted
+		}
 		mcpList = append(mcpList,
 			core.Status(
 				core.StatusOpts{
 					IconColor:   iconColor,
-					Title:       n,
-					Description: l.Command,
+					Title:       l.Name,
+					Description: l.MCP.Command,
 				},
 				m.width,
 			),

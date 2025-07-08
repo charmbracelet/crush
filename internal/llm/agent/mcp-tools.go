@@ -188,6 +188,10 @@ func GetMcpTools(ctx context.Context, permissions permission.Service, cfg *confi
 		return mcpTools
 	}
 	for name, m := range cfg.MCP {
+		if m.Disabled {
+			slog.Debug("skipping disabled mcp", "name", name)
+			continue
+		}
 		switch m.Type {
 		case config.MCPStdio:
 			c, err := client.NewStdioMCPClient(

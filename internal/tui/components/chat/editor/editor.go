@@ -49,7 +49,7 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
-	
+
 	// Debouncing for completions
 	debounceTimer *time.Timer
 }
@@ -153,10 +153,10 @@ func (m *editorCmp) debouncedCompletionFilter() tea.Cmd {
 	if m.debounceTimer != nil {
 		m.debounceTimer.Stop()
 	}
-	
+
 	// Create new timer for debouncing
 	m.debounceTimer = time.NewTimer(150 * time.Millisecond)
-	
+
 	return func() tea.Msg {
 		<-m.debounceTimer.C
 		return CompletionDebounceMsg{}
@@ -290,7 +290,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	
+
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)

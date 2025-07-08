@@ -748,10 +748,12 @@ func (p *SequenceParser) parseSs3(b []byte) (int, Event) {
 }
 
 func (p *SequenceParser) parseOsc(b []byte) (int, Event) {
-	defaultKey := KeyPressEvent{Code: rune(b[1]), Mod: ModAlt}
+	defaultKey := func() KeyPressEvent {
+		return KeyPressEvent{Code: rune(b[1]), Mod: ModAlt}
+	}
 	if len(b) == 2 && b[0] == ansi.ESC {
 		// short cut if this is an alt+] key
-		return 2, defaultKey
+		return 2, defaultKey()
 	}
 
 	var i int
@@ -802,7 +804,7 @@ func (p *SequenceParser) parseOsc(b []byte) (int, Event) {
 	case ansi.ESC:
 		if i >= len(b) || b[i] != '\\' {
 			if cmd == -1 || (start == 0 && end == 2) {
-				return 2, defaultKey
+				return 2, defaultKey()
 			}
 
 			// If we don't have a valid ST terminator, then this is a

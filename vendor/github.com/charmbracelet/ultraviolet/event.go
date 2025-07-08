@@ -131,6 +131,24 @@ func (k KeyPressEvent) String() string {
 	return Key(k).String()
 }
 
+// Keystroke returns the keystroke representation of the [Key]. While less type
+// safe than looking at the individual fields, it will usually be more
+// convenient and readable to use this method when matching against keys.
+//
+// Note that modifier keys are always printed in the following order:
+//   - ctrl
+//   - alt
+//   - shift
+//   - meta
+//   - hyper
+//   - super
+//
+// For example, you'll always see "ctrl+shift+alt+a" and never
+// "shift+ctrl+alt+a".
+func (k KeyPressEvent) Keystroke() string {
+	return Key(k).Keystroke()
+}
+
 // Key returns the underlying key event. This is a syntactic sugar for casting
 // the key event to a [Key].
 func (k KeyPressEvent) Key() Key {
@@ -161,6 +179,24 @@ func (k KeyReleaseEvent) MatchStrings(ss ...string) bool {
 // events. For details, on what this returns see [Key.String].
 func (k KeyReleaseEvent) String() string {
 	return Key(k).String()
+}
+
+// Keystroke returns the keystroke representation of the [Key]. While less type
+// safe than looking at the individual fields, it will usually be more
+// convenient and readable to use this method when matching against keys.
+//
+// Note that modifier keys are always printed in the following order:
+//   - ctrl
+//   - alt
+//   - shift
+//   - meta
+//   - hyper
+//   - super
+//
+// For example, you'll always see "ctrl+shift+alt+a" and never
+// "shift+ctrl+alt+a".
+func (k KeyReleaseEvent) Keystroke() string {
+	return Key(k).Keystroke()
 }
 
 // Key returns the underlying key event. This is a convenience method and

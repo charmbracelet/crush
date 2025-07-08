@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
-	initDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/init"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -64,23 +63,6 @@ func (a appModel) Init() tea.Cmd {
 
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
-
-	// Check if we should show the init dialog
-	cmds = append(cmds, func() tea.Msg {
-		shouldShow, err := config.ProjectNeedsInitialization()
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "Failed to check init status: " + err.Error(),
-			}
-		}
-		if shouldShow {
-			return dialogs.OpenDialogMsg{
-				Model: initDialog.NewInitDialogCmp(),
-			}
-		}
-		return nil
-	})
 
 	return tea.Batch(cmds...)
 }
@@ -156,7 +138,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		config.UpdatePreferredModel(msg.ModelType, msg.Model)
+		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {

@@ -220,6 +220,14 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			return p, cmd
 		}
+	case splash.OnboardingCompleteMsg:
+		p.state = ChatStateNewMessage
+		err := p.app.InitCoderAgent()
+		if err != nil {
+			return p, util.ReportError(err)
+		}
+		p.focusedPane = PanelTypeEditor
+		return p, p.SetSize(p.width, p.height)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
@@ -233,6 +241,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
+			if p.state == ChatStateOnboarding || p.state == ChatStateInitProject {
+				u, cmd := p.splash.Update(msg)
+				p.splash = u.(splash.Splash)
+				return p, cmd
+			}
 			p.changeFocus()
 			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
@@ -416,6 +429,7 @@ func (p *chatPage) newSession() tea.Cmd {
 		// Cannot start a new session if we are not in the session state
 		return nil
 	}
+
 	// blank session
 	p.session = session.Session{}
 	p.state = ChatStateNewMessage
@@ -456,8 +470,12 @@ func (p *chatPage) changeFocus() {
 	switch p.focusedPane {
 	case PanelTypeChat:
 		p.focusedPane = PanelTypeEditor
+		p.editor.Focus()
+		p.chat.Blur()
 	case PanelTypeEditor:
 		p.focusedPane = PanelTypeChat
+		p.chat.Focus()
+		p.editor.Blur()
 	}
 }
 

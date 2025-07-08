@@ -7,7 +7,11 @@ import (
 type KeyMap struct {
 	Select,
 	Next,
-	Previous key.Binding
+	Previous,
+	Yes,
+	No,
+	Tab,
+	LeftRight key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -23,6 +27,22 @@ func DefaultKeyMap() KeyMap {
 		Previous: key.NewBinding(
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
+		),
+		Yes: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
+		),
+		No: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
+		),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch"),
+		),
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←/→", "switch"),
 		),
 	}
 }

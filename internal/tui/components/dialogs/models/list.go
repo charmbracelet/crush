@@ -18,6 +18,7 @@ import (
 type ModelListComponent struct {
 	list      list.ListModel
 	modelType int
+	providers []provider.Provider
 }
 
 func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputPlaceholder string) *ModelListComponent {
@@ -36,7 +37,16 @@ func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputP
 }
 
 func (m *ModelListComponent) Init() tea.Cmd {
-	return tea.Batch(m.list.Init(), m.SetModelType(m.modelType))
+	var cmds []tea.Cmd
+	if len(m.providers) == 0 {
+		providers, err := config.Providers()
+		m.providers = providers
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		}
+	}
+	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType))
+	return tea.Batch(cmds...)
 }
 
 func (m *ModelListComponent) Update(msg tea.Msg) (*ModelListComponent, tea.Cmd) {
@@ -64,11 +74,6 @@ func (m *ModelListComponent) SelectedIndex() int {
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
-
-	providers, err := config.Providers()
-	if err != nil {
-		return util.ReportError(err)
-	}
 
 	modelItems := []util.Model{}
 	selectIndex := 0
@@ -144,7 +149,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	}
 
 	// Then add the known providers from the predefined list
-	for _, provider := range providers {
+	for _, provider := range m.providers {
 		// Skip if we already added this provider as an unknown provider
 		if addedProviders[string(provider.ID)] {
 			continue
@@ -186,4 +191,8 @@ func (m *ModelListComponent) GetModelType() int {
 
 func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
 	m.list.SetFilterPlaceholder(placeholder)
+}
+
+func (m *ModelListComponent) SetProviders(providers []provider.Provider) {
+	m.providers = providers
 }

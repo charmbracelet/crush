@@ -208,7 +208,8 @@ type Config struct {
 	// TODO: most likely remove this concept when I come back to it
 	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
-	resolver VariableResolver
+	resolver      VariableResolver
+	dataConfigDir string `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {
@@ -291,17 +292,17 @@ func (c *Config) Resolve(key string) (string, error) {
 	return c.resolver.ResolveValue(key)
 }
 
-// TODO: maybe handle this better
-func UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
-	cfg := Get()
-	cfg.Models[modelType] = model
+func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
+	c.Models[modelType] = model
+	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
+		return fmt.Errorf("failed to update preferred model: %w", err)
+	}
 	return nil
 }
 
 func (c *Config) SetConfigField(key string, value any) error {
-	configPath := GlobalConfigData()
 	// read the data
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(c.dataConfigDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			data = []byte("{}")
@@ -314,7 +315,7 @@ func (c *Config) SetConfigField(key string, value any) error {
 	if err != nil {
 		return fmt.Errorf("failed to set config field %s: %w", key, err)
 	}
-	if err := os.WriteFile(configPath, []byte(newValue), 0o644); err != nil {
+	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	return nil

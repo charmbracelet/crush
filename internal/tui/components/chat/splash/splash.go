@@ -1,9 +1,16 @@
 package splash
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/tui/components/chat"
+	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -43,6 +50,7 @@ type splashCmp struct {
 	state                SplashScreenState
 	modelList            *models.ModelListComponent
 	cursorRow, cursorCol int
+	selectedNo           bool // true if "No" button is selected in initialize state
 }
 
 func New() Splash {
@@ -67,6 +75,7 @@ func New() Splash {
 		state:        SplashScreenStateOnboarding,
 		logoRendered: "",
 		modelList:    modelList,
+		selectedNo:   false,
 	}
 }
 
@@ -83,8 +92,28 @@ func (s *splashCmp) Init() tea.Cmd {
 		} else {
 			s.state = SplashScreenStateReady
 		}
+	} else {
+		providers, err := config.Providers()
+		if err != nil {
+			return util.ReportError(err)
+		}
+		filteredProviders := []provider.Provider{}
+		simpleProviders := []string{
+			"anthropic",
+			"openai",
+			"gemini",
+			"xai",
+			"openrouter",
+		}
+		for _, p := range providers {
+			if slices.Contains(simpleProviders, string(p.ID)) {
+				filteredProviders = append(filteredProviders, p)
+			}
+		}
+		s.modelList.SetProviders(filteredProviders)
+		return s.modelList.Init()
 	}
-	return s.modelList.Init()
+	return nil
 }
 
 // SetSize implements SplashPage.
@@ -107,13 +136,155 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, s.SetSize(msg.Width, msg.Height)
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, s.keyMap.Select):
+			if s.state == SplashScreenStateOnboarding {
+				modelInx := s.modelList.SelectedIndex()
+				items := s.modelList.Items()
+				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
+				if s.isProviderConfigured(string(selectedItem.Provider.ID)) {
+					cmd := s.setPreferredModel(selectedItem)
+					s.state = SplashScreenStateReady
+					if b, err := config.ProjectNeedsInitialization(); err != nil {
+						return s, tea.Batch(cmd, util.ReportError(err))
+					} else if b {
+						s.state = SplashScreenStateInitialize
+						return s, cmd
+					} else {
+						s.state = SplashScreenStateReady
+						return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
+					}
+				}
+			} else if s.state == SplashScreenStateInitialize {
+				return s, s.initializeProject()
+			}
+		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
+			if s.state == SplashScreenStateInitialize {
+				s.selectedNo = !s.selectedNo
+				return s, nil
+			}
+		case key.Matches(msg, s.keyMap.Yes):
+			if s.state == SplashScreenStateInitialize {
+				return s, s.initializeProject()
+			}
+		case key.Matches(msg, s.keyMap.No):
+			if s.state == SplashScreenStateInitialize {
+				s.state = SplashScreenStateReady
+				return s, util.CmdHandler(OnboardingCompleteMsg{})
+			}
 		default:
-			u, cmd := s.modelList.Update(msg)
-			s.modelList = u
-			return s, cmd
+			if s.state == SplashScreenStateOnboarding {
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
+			}
 		}
 	}
 	return s, nil
+}
+
+func (s *splashCmp) initializeProject() tea.Cmd {
+	s.state = SplashScreenStateReady
+	prompt := `Please analyze this codebase and create a CRUSH.md file containing:
+1. Build/lint/test commands - especially for running a single test
+2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+
+The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
+If there's already a CRUSH.md, improve it.
+If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.
+Add the .crush directory to the .gitignore file if it's not already there.`
+
+	// Mark the project as initialized
+	if err := config.MarkProjectInitialized(); err != nil {
+		return util.ReportError(err)
+	}
+	var cmds []tea.Cmd
+
+	cmds = append(cmds, util.CmdHandler(OnboardingCompleteMsg{}))
+	if !s.selectedNo {
+		cmds = append(cmds,
+			util.CmdHandler(chat.SessionClearedMsg{}),
+			util.CmdHandler(chat.SendMsg{
+				Text: prompt,
+			}),
+		)
+	}
+	return tea.Sequence(cmds...)
+}
+
+func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
+	cfg := config.Get()
+	model := cfg.GetModel(string(selectedItem.Provider.ID), selectedItem.Model.ID)
+	if model == nil {
+		return util.ReportError(fmt.Errorf("model %s not found for provider %s", selectedItem.Model.ID, selectedItem.Provider.ID))
+	}
+
+	selectedModel := config.SelectedModel{
+		Model:           selectedItem.Model.ID,
+		Provider:        string(selectedItem.Provider.ID),
+		ReasoningEffort: model.DefaultReasoningEffort,
+		MaxTokens:       model.DefaultMaxTokens,
+	}
+
+	err := cfg.UpdatePreferredModel(config.SelectedModelTypeLarge, selectedModel)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	// Now lets automatically setup the small model
+	knownProvider, err := s.getProvider(selectedItem.Provider.ID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if knownProvider == nil {
+		// for local provider we just use the same model
+		err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
+		if err != nil {
+			return util.ReportError(err)
+		}
+	} else {
+		smallModel := knownProvider.DefaultSmallModelID
+		model := cfg.GetModel(string(selectedItem.Provider.ID), smallModel)
+		// should never happen
+		if model == nil {
+			err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
+			if err != nil {
+				return util.ReportError(err)
+			}
+			return nil
+		}
+		smallSelectedModel := config.SelectedModel{
+			Model:           smallModel,
+			Provider:        string(selectedItem.Provider.ID),
+			ReasoningEffort: model.DefaultReasoningEffort,
+			MaxTokens:       model.DefaultMaxTokens,
+		}
+		err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallSelectedModel)
+		if err != nil {
+			return util.ReportError(err)
+		}
+	}
+	return nil
+}
+
+func (s *splashCmp) getProvider(providerID provider.InferenceProvider) (*provider.Provider, error) {
+	providers, err := config.Providers()
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range providers {
+		if p.ID == providerID {
+			return &p, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *splashCmp) isProviderConfigured(providerID string) bool {
+	cfg := config.Get()
+	if _, ok := cfg.Providers[providerID]; ok {
+		return true
+	}
+	return false
 }
 
 // View implements SplashPage.
@@ -141,6 +312,56 @@ func (s *splashCmp) View() tea.View {
 			s.logoRendered,
 			modelSelector,
 		)
+	case SplashScreenStateInitialize:
+		t := styles.CurrentTheme()
+
+		titleStyle := t.S().Base.Foreground(t.FgBase)
+		bodyStyle := t.S().Base.Foreground(t.FgMuted)
+		shortcutStyle := t.S().Base.Foreground(t.Success)
+
+		initText := lipgloss.JoinVertical(
+			lipgloss.Left,
+			titleStyle.Render("Would you like to initialize this project?"),
+			"",
+			bodyStyle.Render("When I initialize your codebase I examine the project and put the"),
+			bodyStyle.Render("result into a CRUSH.md file which serves as general context."),
+			"",
+			bodyStyle.Render("You can also initialize anytime via ")+shortcutStyle.Render("ctrl+p")+bodyStyle.Render("."),
+			"",
+			bodyStyle.Render("Would you like to initialize now?"),
+		)
+
+		yesButton := core.SelectableButton(core.ButtonOpts{
+			Text:           "Yep!",
+			UnderlineIndex: 0,
+			Selected:       !s.selectedNo,
+		})
+
+		noButton := core.SelectableButton(core.ButtonOpts{
+			Text:           "Nope",
+			UnderlineIndex: 0,
+			Selected:       s.selectedNo,
+		})
+
+		buttons := lipgloss.JoinHorizontal(lipgloss.Left, yesButton, "  ", noButton)
+
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+
+		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				initText,
+				"",
+				buttons,
+			),
+		)
+
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			s.logoRendered,
+			initContent,
+		)
+
 	default:
 		// Show just the logo for other states
 		content = s.logoRendered
@@ -191,6 +412,14 @@ func (s *splashCmp) Bindings() []key.Binding {
 			s.keyMap.Select,
 			s.keyMap.Next,
 			s.keyMap.Previous,
+		}
+	} else if s.state == SplashScreenStateInitialize {
+		return []key.Binding{
+			s.keyMap.Select,
+			s.keyMap.Yes,
+			s.keyMap.No,
+			s.keyMap.Tab,
+			s.keyMap.LeftRight,
 		}
 	}
 	return []key.Binding{}

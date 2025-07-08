@@ -46,6 +46,8 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
+	cfg.dataConfigDir = GlobalConfigData()
+
 	cfg.setDefaults(workingDir)
 
 	if debug {
@@ -367,10 +369,11 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 }
 
 func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) error {
-	large, small, err := cfg.defaultModelSelection(knownProviders)
+	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
 	if err != nil {
 		return fmt.Errorf("failed to select default models: %w", err)
 	}
+	large, small := defaultLarge, defaultSmall
 
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -381,18 +384,26 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 			large.Provider = largeModelSelected.Provider
 		}
 		model := cfg.GetModel(large.Provider, large.Model)
+		slog.Info("Configuring selected large model", "provider", large.Provider, "model", large.Model)
+		slog.Info("MOdel configured", "model", model)
 		if model == nil {
-			return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-		}
-		if largeModelSelected.MaxTokens > 0 {
-			large.MaxTokens = largeModelSelected.MaxTokens
+			large = defaultLarge
+			// override the model type to large
+			err := cfg.UpdatePreferredModel(SelectedModelTypeLarge, large)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred large model: %w", err)
+			}
 		} else {
-			large.MaxTokens = model.DefaultMaxTokens
+			if largeModelSelected.MaxTokens > 0 {
+				large.MaxTokens = largeModelSelected.MaxTokens
+			} else {
+				large.MaxTokens = model.DefaultMaxTokens
+			}
+			if largeModelSelected.ReasoningEffort != "" {
+				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			}
+			large.Think = largeModelSelected.Think
 		}
-		if largeModelSelected.ReasoningEffort != "" {
-			large.ReasoningEffort = largeModelSelected.ReasoningEffort
-		}
-		large.Think = largeModelSelected.Think
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
 	if smallModelConfigured {
@@ -405,25 +416,21 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 
 		model := cfg.GetModel(small.Provider, small.Model)
 		if model == nil {
-			return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-		}
-		if smallModelSelected.MaxTokens > 0 {
-			small.MaxTokens = smallModelSelected.MaxTokens
+			small = defaultSmall
+			// override the model type to small
+			err := cfg.UpdatePreferredModel(SelectedModelTypeSmall, small)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred small model: %w", err)
+			}
 		} else {
-			small.MaxTokens = model.DefaultMaxTokens
+			if smallModelSelected.MaxTokens > 0 {
+				small.MaxTokens = smallModelSelected.MaxTokens
+			} else {
+				small.MaxTokens = model.DefaultMaxTokens
+			}
+			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			small.Think = smallModelSelected.Think
 		}
-		small.ReasoningEffort = smallModelSelected.ReasoningEffort
-		small.Think = smallModelSelected.Think
-	}
-
-	// validate the selected models
-	largeModel := cfg.GetModel(large.Provider, large.Model)
-	if largeModel == nil {
-		return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-	}
-	smallModel := cfg.GetModel(small.Provider, small.Model)
-	if smallModel == nil {
-		return fmt.Errorf("small model %s not found for provider %s", small.Model, small.Provider)
 	}
 	cfg.Models[SelectedModelTypeLarge] = large
 	cfg.Models[SelectedModelTypeSmall] = small

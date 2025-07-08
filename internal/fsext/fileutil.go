@@ -26,13 +26,13 @@ func init() {
 	var err error
 	rgPath, err = exec.LookPath("rg")
 	if err != nil {
-		if log.IsInitialized() {
+		if log.Initialized() {
 			slog.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
 		}
 	}
 	fzfPath, err = exec.LookPath("fzf")
 	if err != nil {
-		if log.IsInitialized() {
+		if log.Initialized() {
 			slog.Warn("FZF not found in $PATH. Some features might be limited or slower.")
 		}
 	}

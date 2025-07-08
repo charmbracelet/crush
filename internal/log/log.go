@@ -17,7 +17,7 @@ var (
 	initialized atomic.Bool
 )
 
-func Init(logFile string, debug bool) {
+func Setup(logFile string, debug bool) {
 	initOnce.Do(func() {
 		logRotator := &lumberjack.Logger{
 			Filename:   logFile,
@@ -42,7 +42,7 @@ func Init(logFile string, debug bool) {
 	})
 }
 
-func IsInitialized() bool {
+func Initialized() bool {
 	return initialized.Load()
 }
 

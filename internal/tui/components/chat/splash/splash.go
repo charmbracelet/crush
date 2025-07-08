@@ -25,19 +25,15 @@ type Splash interface {
 	util.Model
 	layout.Sizeable
 	layout.Help
+	// SetOnboarding controls whether the splash shows model selection UI
+	SetOnboarding(bool)
+	// SetProjectInit controls whether the splash shows project initialization prompt
+	SetProjectInit(bool)
 }
 
 const (
 	SplashScreenPaddingX = 2 // Padding X for the splash screen
 	SplashScreenPaddingY = 1 // Padding Y for the splash screen
-)
-
-type SplashScreenState string
-
-const (
-	SplashScreenStateOnboarding SplashScreenState = "onboarding"
-	SplashScreenStateInitialize SplashScreenState = "initialize"
-	SplashScreenStateReady      SplashScreenState = "ready"
 )
 
 // OnboardingCompleteMsg is sent when onboarding is complete
@@ -47,10 +43,14 @@ type splashCmp struct {
 	width, height        int
 	keyMap               KeyMap
 	logoRendered         string
-	state                SplashScreenState
+	
+	// State
+	isOnboarding     bool
+	needsProjectInit bool
+	selectedNo       bool
+	
 	modelList            *models.ModelListComponent
 	cursorRow, cursorCol int
-	selectedNo           bool // true if "No" button is selected in initialize state
 }
 
 func New() Splash {
@@ -69,33 +69,21 @@ func New() Splash {
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
 	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
 	return &splashCmp{
-		width:        0,
-		height:       0,
-		keyMap:       keyMap,
-		state:        SplashScreenStateOnboarding,
-		logoRendered: "",
-		modelList:    modelList,
-		selectedNo:   false,
+		width:            0,
+		height:           0,
+		keyMap:           keyMap,
+		logoRendered:     "",
+		modelList:        modelList,
+		selectedNo:       false,
 	}
 }
 
-// GetSize implements SplashPage.
-func (s *splashCmp) GetSize() (int, int) {
-	return s.width, s.height
-}
-
-// Init implements SplashPage.
-func (s *splashCmp) Init() tea.Cmd {
-	if config.HasInitialDataConfig() {
-		if b, _ := config.ProjectNeedsInitialization(); b {
-			s.state = SplashScreenStateInitialize
-		} else {
-			s.state = SplashScreenStateReady
-		}
-	} else {
+func (s *splashCmp) SetOnboarding(onboarding bool) {
+	s.isOnboarding = onboarding
+	if onboarding {
 		providers, err := config.Providers()
 		if err != nil {
-			return util.ReportError(err)
+			return
 		}
 		filteredProviders := []provider.Provider{}
 		simpleProviders := []string{
@@ -111,9 +99,21 @@ func (s *splashCmp) Init() tea.Cmd {
 			}
 		}
 		s.modelList.SetProviders(filteredProviders)
-		return s.modelList.Init()
 	}
-	return nil
+}
+
+func (s *splashCmp) SetProjectInit(needsInit bool) {
+	s.needsProjectInit = needsInit
+}
+
+// GetSize implements SplashPage.
+func (s *splashCmp) GetSize() (int, int) {
+	return s.width, s.height
+}
+
+// Init implements SplashPage.
+func (s *splashCmp) Init() tea.Cmd {
+	return s.modelList.Init()
 }
 
 // SetSize implements SplashPage.
@@ -137,42 +137,34 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Select):
-			if s.state == SplashScreenStateOnboarding {
+			if s.isOnboarding {
 				modelInx := s.modelList.SelectedIndex()
 				items := s.modelList.Items()
 				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
 				if s.isProviderConfigured(string(selectedItem.Provider.ID)) {
 					cmd := s.setPreferredModel(selectedItem)
-					s.state = SplashScreenStateReady
-					if b, err := config.ProjectNeedsInitialization(); err != nil {
-						return s, tea.Batch(cmd, util.ReportError(err))
-					} else if b {
-						s.state = SplashScreenStateInitialize
-						return s, cmd
-					} else {
-						s.state = SplashScreenStateReady
-						return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
-					}
+					s.isOnboarding = false
+					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 				}
-			} else if s.state == SplashScreenStateInitialize {
+			} else if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
-			if s.state == SplashScreenStateInitialize {
+			if s.needsProjectInit {
 				s.selectedNo = !s.selectedNo
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
-			if s.state == SplashScreenStateInitialize {
+			if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
-			if s.state == SplashScreenStateInitialize {
-				s.state = SplashScreenStateReady
+			if s.needsProjectInit {
+				s.needsProjectInit = false
 				return s, util.CmdHandler(OnboardingCompleteMsg{})
 			}
 		default:
-			if s.state == SplashScreenStateOnboarding {
+			if s.isOnboarding {
 				u, cmd := s.modelList.Update(msg)
 				s.modelList = u
 				return s, cmd
@@ -183,7 +175,7 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *splashCmp) initializeProject() tea.Cmd {
-	s.state = SplashScreenStateReady
+	s.needsProjectInit = false
 	prompt := `Please analyze this codebase and create a CRUSH.md file containing:
 1. Build/lint/test commands - especially for running a single test
 2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
@@ -193,7 +185,6 @@ If there's already a CRUSH.md, improve it.
 If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.
 Add the .crush directory to the .gitignore file if it's not already there.`
 
-	// Mark the project as initialized
 	if err := config.MarkProjectInitialized(); err != nil {
 		return util.ReportError(err)
 	}
@@ -293,9 +284,7 @@ func (s *splashCmp) View() tea.View {
 	var cursor *tea.Cursor
 
 	var content string
-	switch s.state {
-	case SplashScreenStateOnboarding:
-		// Show logo and model selector
+	if s.isOnboarding {
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 		modelListView := s.modelList.View()
 		cursor = s.moveCursor(modelListView.Cursor())
@@ -312,7 +301,7 @@ func (s *splashCmp) View() tea.View {
 			s.logoRendered,
 			modelSelector,
 		)
-	case SplashScreenStateInitialize:
+	} else if s.needsProjectInit {
 		t := styles.CurrentTheme()
 
 		titleStyle := t.S().Base.Foreground(t.FgBase)
@@ -361,9 +350,7 @@ func (s *splashCmp) View() tea.View {
 			s.logoRendered,
 			initContent,
 		)
-
-	default:
-		// Show just the logo for other states
+	} else {
 		content = s.logoRendered
 	}
 
@@ -407,13 +394,13 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 
 // Bindings implements SplashPage.
 func (s *splashCmp) Bindings() []key.Binding {
-	if s.state == SplashScreenStateOnboarding {
+	if s.isOnboarding {
 		return []key.Binding{
 			s.keyMap.Select,
 			s.keyMap.Next,
 			s.keyMap.Previous,
 		}
-	} else if s.state == SplashScreenStateInitialize {
+	} else if s.needsProjectInit {
 		return []key.Binding{
 			s.keyMap.Select,
 			s.keyMap.Yes,

@@ -511,7 +511,7 @@ func (p *chatPage) Bindings() []key.Binding {
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
 	}
-	if p.app.CoderAgent.IsBusy() {
+	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
 		if p.canceling {
 			cancelBinding = key.NewBinding(

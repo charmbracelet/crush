@@ -6,14 +6,18 @@ import (
 	"os"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var initOnce sync.Once
+var (
+	initOnce    sync.Once
+	initialized atomic.Bool
+)
 
-func Init(logFile string, debug bool) {
+func Setup(logFile string, debug bool) {
 	initOnce.Do(func() {
 		logRotator := &lumberjack.Logger{
 			Filename:   logFile,
@@ -34,7 +38,12 @@ func Init(logFile string, debug bool) {
 		})
 
 		slog.SetDefault(slog.New(logger))
+		initialized.Store(true)
 	})
+}
+
+func Initialized() bool {
+	return initialized.Load()
 }
 
 func RecoverPanic(name string, cleanup func()) {

@@ -52,15 +52,11 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug = true
 	}
 
-	// Init logs
-	log.Init(
+	// Setup logs
+	log.Setup(
 		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
 		cfg.Options.Debug,
 	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
 
 	// Load known providers, this loads the config from fur
 	providers, err := LoadProviders(client.New())

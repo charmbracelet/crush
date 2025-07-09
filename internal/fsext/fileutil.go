@@ -24,7 +24,7 @@ func init() {
 	rgPath, err = exec.LookPath("rg")
 	if err != nil {
 		if log.Initialized() {
-			slog.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
+			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
 		}
 	}
 }

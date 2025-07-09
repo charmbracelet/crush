@@ -7,3 +7,5 @@ jobs:
     with:
       go-version: ""
       go-version-file: ./go.mod
+    secrets:
+      gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"

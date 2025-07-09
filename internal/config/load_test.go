@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestConfig_setDefaults(t *testing.T) {
 	assert.NotNil(t, cfg.Models)
 	assert.NotNil(t, cfg.LSP)
 	assert.NotNil(t, cfg.MCP)
-	assert.Equal(t, "/tmp/.crush", cfg.Options.DataDirectory)
+	assert.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
 	for _, path := range defaultContextPaths {
 		assert.Contains(t, cfg.Options.ContextPaths, path)
 	}
@@ -97,8 +98,8 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 				BaseURL: "https://api.openai.com/v2",
 				Models: []provider.Model{
 					{
-						ID:   "test-model",
-						Name: "Updated",
+						ID:    "test-model",
+						Model: "Updated",
 					},
 					{
 						ID: "another-model",
@@ -121,7 +122,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	assert.Equal(t, "xyz", cfg.Providers["openai"].APIKey)
 	assert.Equal(t, "https://api.openai.com/v2", cfg.Providers["openai"].BaseURL)
 	assert.Len(t, cfg.Providers["openai"].Models, 2)
-	assert.Equal(t, "Updated", cfg.Providers["openai"].Models[0].Name)
+	assert.Equal(t, "Updated", cfg.Providers["openai"].Models[0].Model)
 }
 
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {

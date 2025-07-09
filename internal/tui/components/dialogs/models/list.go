@@ -55,8 +55,12 @@ func (m *ModelListComponent) Update(msg tea.Msg) (*ModelListComponent, tea.Cmd) 
 	return m, cmd
 }
 
-func (m *ModelListComponent) View() tea.View {
+func (m *ModelListComponent) View() string {
 	return m.list.View()
+}
+
+func (m *ModelListComponent) Cursor() *tea.Cursor {
+	return m.list.Cursor()
 }
 
 func (m *ModelListComponent) SetSize(width, height int) tea.Cmd {
@@ -113,7 +117,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			for i, model := range providerConfig.Models {
 				configProvider.Models[i] = provider.Model{
 					ID:                     model.ID,
-					Name:                   model.Name,
+					Model:                  model.Model,
 					CostPer1MIn:            model.CostPer1MIn,
 					CostPer1MOut:           model.CostPer1MOut,
 					CostPer1MInCached:      model.CostPer1MInCached,
@@ -136,7 +140,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			section.SetInfo(configured)
 			modelItems = append(modelItems, section)
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}))
@@ -171,7 +175,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 		modelItems = append(modelItems, section)
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))

@@ -104,17 +104,15 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the message list or an initial screen if empty.
-func (m *messageListCmp) View() tea.View {
+func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
-	return tea.NewView(
-		t.S().Base.
-			Padding(1).
-			Width(m.width).
-			Height(m.height).
-			Render(
-				m.listCmp.View().String(),
-			),
-	)
+	return t.S().Base.
+		Padding(1).
+		Width(m.width).
+		Height(m.height).
+		Render(
+			m.listCmp.View(),
+		)
 }
 
 // handleChildSession handles messages from child sessions (agent tools).

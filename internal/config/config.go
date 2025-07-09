@@ -90,11 +90,12 @@ const (
 )
 
 type MCPConfig struct {
-	Command string   `json:"command,omitempty" `
-	Env     []string `json:"env,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	Type    MCPType  `json:"type"`
-	URL     string   `json:"url,omitempty"`
+	Command  string   `json:"command,omitempty" `
+	Env      []string `json:"env,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	Type     MCPType  `json:"type"`
+	URL      string   `json:"url,omitempty"`
+	Disabled bool     `json:"disabled,omitempty"`
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty"`

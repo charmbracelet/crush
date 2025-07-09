@@ -53,9 +53,9 @@ func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, nil
 }
 
-func (p *header) View() tea.View {
+func (p *header) View() string {
 	if p.session.ID == "" {
-		return tea.NewView("")
+		return ""
 	}
 
 	t := styles.CurrentTheme()
@@ -82,7 +82,7 @@ func (p *header) View() tea.View {
 			parts...,
 		),
 	)
-	return tea.NewView(content)
+	return content
 }
 
 func (h *header) details() string {

@@ -97,7 +97,7 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *sidebarCmp) View() tea.View {
+func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 	if !m.compactMode {
@@ -129,19 +129,15 @@ func (m *sidebarCmp) View() tea.View {
 		m.mcpBlock(),
 	)
 
-	// TODO: CHECK out why we need to set the background here weird issue
 	style := t.S().Base.
-		Background(t.BgBase).
 		Width(m.width).
 		Height(m.height).
 		Padding(1)
 	if m.compactMode {
 		style = style.PaddingTop(0)
 	}
-	return tea.NewView(
-		style.Render(
-			lipgloss.JoinVertical(lipgloss.Left, parts...),
-		),
+	return style.Render(
+		lipgloss.JoinVertical(lipgloss.Left, parts...),
 	)
 }
 
@@ -335,7 +331,7 @@ func (m *sidebarCmp) lspBlock() string {
 
 	lspList := []string{section, ""}
 
-	lsp := config.Get().LSP
+	lsp := config.Get().LSP.Sorted()
 	if len(lsp) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -345,9 +341,9 @@ func (m *sidebarCmp) lspBlock() string {
 		)
 	}
 
-	for n, l := range lsp {
+	for _, l := range lsp {
 		iconColor := t.Success
-		if l.Disabled {
+		if l.LSP.Disabled {
 			iconColor = t.FgMuted
 		}
 		lspErrs := map[protocol.DiagnosticSeverity]int{
@@ -356,7 +352,7 @@ func (m *sidebarCmp) lspBlock() string {
 			protocol.SeverityHint:        0,
 			protocol.SeverityInformation: 0,
 		}
-		if client, ok := m.lspClients[n]; ok {
+		if client, ok := m.lspClients[l.Name]; ok {
 			for _, diagnostics := range client.GetDiagnostics() {
 				for _, diagnostic := range diagnostics {
 					if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -384,8 +380,8 @@ func (m *sidebarCmp) lspBlock() string {
 			core.Status(
 				core.StatusOpts{
 					IconColor:    iconColor,
-					Title:        n,
-					Description:  l.Command,
+					Title:        l.Name,
+					Description:  l.LSP.Command,
 					ExtraContent: strings.Join(errs, " "),
 				},
 				m.getMaxWidth(),
@@ -408,8 +404,8 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	mcpList := []string{section, ""}
 
-	mcp := config.Get().MCP
-	if len(mcp) == 0 {
+	mcps := config.Get().MCP.Sorted()
+	if len(mcps) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			section,
@@ -418,14 +414,17 @@ func (m *sidebarCmp) mcpBlock() string {
 		)
 	}
 
-	for n, l := range mcp {
+	for _, l := range mcps {
 		iconColor := t.Success
+		if l.MCP.Disabled {
+			iconColor = t.FgMuted
+		}
 		mcpList = append(mcpList,
 			core.Status(
 				core.StatusOpts{
 					IconColor:   iconColor,
-					Title:       n,
-					Description: l.Command,
+					Title:       l.Name,
+					Description: l.MCP.Command,
 				},
 				m.getMaxWidth(),
 			),
@@ -483,7 +482,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
+	modelName := t.S().Text.Render(model.Model)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,

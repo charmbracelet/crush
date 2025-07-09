@@ -50,7 +50,7 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-func (a *APIKeyInput) View() tea.View {
+func (a *APIKeyInput) View() string {
 	t := styles.CurrentTheme()
 
 	title := t.S().Base.
@@ -74,13 +74,15 @@ func (a *APIKeyInput) View() tea.View {
 		helpText,
 	)
 
-	view := tea.NewView(content)
+	return content
+}
+
+func (a *APIKeyInput) Cursor() *tea.Cursor {
 	cursor := a.input.Cursor()
 	if cursor != nil {
 		cursor.Y += 2 // Adjust for title and spacing
 	}
-	view.SetCursor(cursor)
-	return view
+	return cursor
 }
 
 func (a *APIKeyInput) Value() string {

@@ -12,16 +12,20 @@ Crush is a tool for building software with AI.
 
 ## Installation
 
-* [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
-* [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
+Nightly builds are available while Crush is in development.
 
-Or just install it with go:
+- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
+- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
+
+You can also just install it with go:
 
 ```
 git clone git@github.com:charmbracelet/crush.git
 cd crush
 go install
 ```
+
+Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 
@@ -45,13 +49,77 @@ providers.
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
 
+## Configuration
+
+For many use cases, Crush can be run with no config. That said, if you do need config, it can be added either local to the project itself, or globally. Configuration has the following priority:
+
+1. `.crush.json`
+2. `crush.json`
+3. `$HOME/.config/crush/crush.json`
+
+### LSPs
+
+Crush can use LSPs for additional context to help inform its decisions, just like you would. LSPs can be added manually like so:
+
+```json
+{
+  "lsp": {
+    "go": {
+      "command": "gopls"
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"]
+    },
+    "nix": {
+      "command": "alejandra"
+    }
+  }
+}
+```
+
+### OpenAI-Compatible APIs
+
+Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "provider_type": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "model": "Deepseek V3",
+          "cost_per_1m_in": 0.27,
+          "cost_per_1m_out": 1.1,
+          "cost_per_1m_in_cached": 0.07,
+          "cost_per_1m_out_cached": 1.1,
+          "context_window": 64000,
+          "default_max_tokens": 5000
+        }
+      ]
+    }
+  }
+}
+```
+
+## Whatcha think?
+
+We’d love to hear your thoughts on this project. Feel free to drop us a note!
+
+- [Twitter](https://twitter.com/charmcli)
+- [The Fediverse](https://mastodon.social/@charmcli)
+- [Discord](https://charm.sh/chat)
+
 ## License
 
 [MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)
 
 ---
 
-Part of [Charm](https://charm.sh).
+Part of [Charm](https://charm.land).
 
 <a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
 

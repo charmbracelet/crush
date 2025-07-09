@@ -36,7 +36,7 @@ func (m *itemSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *itemSectionModel) View() tea.View {
+func (m *itemSectionModel) View() string {
 	t := styles.CurrentTheme()
 	title := ansi.Truncate(m.title, m.width-2, "…")
 	style := t.S().Base.Padding(1, 1, 0, 1)
@@ -48,7 +48,7 @@ func (m *itemSectionModel) View() tea.View {
 		section = core.Section(title, m.width-2)
 	}
 
-	return tea.NewView(style.Render(section))
+	return style.Render(section)
 }
 
 func (m *itemSectionModel) GetSize() (int, int) {

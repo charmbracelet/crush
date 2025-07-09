@@ -35,6 +35,7 @@ type Editor interface {
 	layout.Positional
 
 	SetSession(session session.Session) tea.Cmd
+	Cursor() *tea.Cursor
 }
 
 type FileCompletionItem struct {
@@ -269,20 +270,22 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *editorCmp) View() tea.View {
-	t := styles.CurrentTheme()
+func (m *editorCmp) Cursor() *tea.Cursor {
 	cursor := m.textarea.Cursor()
 	if cursor != nil {
 		cursor.X = cursor.X + m.x + 1
 		cursor.Y = cursor.Y + m.y + 1 // adjust for padding
 	}
+	return cursor
+}
+
+func (m *editorCmp) View() string {
+	t := styles.CurrentTheme()
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),
 		)
-		view := tea.NewView(content)
-		view.SetCursor(cursor)
-		return view
+		return content
 	}
 	content := t.S().Base.Padding(0, 1, 1, 1).Render(
 		lipgloss.JoinVertical(lipgloss.Top,
@@ -290,9 +293,7 @@ func (m *editorCmp) View() tea.View {
 			m.textarea.View(),
 		),
 	)
-	view := tea.NewView(content)
-	view.SetCursor(cursor)
-	return view
+	return content
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {

@@ -25,6 +25,7 @@ type Splash interface {
 	util.Model
 	layout.Sizeable
 	layout.Help
+	Cursor() *tea.Cursor
 	// SetOnboarding controls whether the splash shows model selection UI
 	SetOnboarding(bool)
 	// SetProjectInit controls whether the splash shows project initialization prompt
@@ -40,15 +41,15 @@ const (
 type OnboardingCompleteMsg struct{}
 
 type splashCmp struct {
-	width, height        int
-	keyMap               KeyMap
-	logoRendered         string
-	
+	width, height int
+	keyMap        KeyMap
+	logoRendered  string
+
 	// State
 	isOnboarding     bool
 	needsProjectInit bool
 	selectedNo       bool
-	
+
 	modelList            *models.ModelListComponent
 	cursorRow, cursorCol int
 }
@@ -69,12 +70,12 @@ func New() Splash {
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
 	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
 	return &splashCmp{
-		width:            0,
-		height:           0,
-		keyMap:           keyMap,
-		logoRendered:     "",
-		modelList:        modelList,
-		selectedNo:       false,
+		width:        0,
+		height:       0,
+		keyMap:       keyMap,
+		logoRendered: "",
+		modelList:    modelList,
+		selectedNo:   false,
 	}
 }
 
@@ -278,22 +279,19 @@ func (s *splashCmp) isProviderConfigured(providerID string) bool {
 	return false
 }
 
-// View implements SplashPage.
-func (s *splashCmp) View() tea.View {
+func (s *splashCmp) View() string {
 	t := styles.CurrentTheme()
-	var cursor *tea.Cursor
 
 	var content string
 	if s.isOnboarding {
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 		modelListView := s.modelList.View()
-		cursor = s.moveCursor(modelListView.Cursor())
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Choose a Model"),
 				"",
-				modelListView.String(),
+				modelListView,
 			),
 		)
 		content = lipgloss.JoinVertical(
@@ -354,19 +352,26 @@ func (s *splashCmp) View() tea.View {
 		content = s.logoRendered
 	}
 
-	view := tea.NewView(
-		t.S().Base.
-			Width(s.width).
-			Height(s.height).
-			PaddingTop(SplashScreenPaddingY).
-			PaddingLeft(SplashScreenPaddingX).
-			PaddingRight(SplashScreenPaddingX).
-			PaddingBottom(SplashScreenPaddingY).
-			Render(content),
-	)
+	return t.S().Base.
+		Width(s.width).
+		Height(s.height).
+		PaddingTop(SplashScreenPaddingY).
+		PaddingLeft(SplashScreenPaddingX).
+		PaddingRight(SplashScreenPaddingX).
+		PaddingBottom(SplashScreenPaddingY).
+		Render(content)
+}
 
-	view.SetCursor(cursor)
-	return view
+func (s *splashCmp) Cursor() *tea.Cursor {
+	if s.isOnboarding {
+		cursor := s.modelList.Cursor()
+		if cursor != nil {
+			return s.moveCursor(cursor)
+		}
+	} else {
+		return nil
+	}
+	return nil
 }
 
 func (s *splashCmp) logoBlock() string {

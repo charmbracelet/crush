@@ -139,7 +139,7 @@ func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements CommandArgumentsDialog.
-func (c *commandArgumentsDialogCmp) View() tea.View {
+func (c *commandArgumentsDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
 
@@ -188,19 +188,19 @@ func (c *commandArgumentsDialogCmp) View() tea.View {
 		elements...,
 	)
 
-	view := tea.NewView(
-		baseStyle.Padding(1, 1, 0, 1).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(t.BorderFocus).
-			Width(c.width).
-			Render(content),
-	)
+	return baseStyle.Padding(1, 1, 0, 1).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.BorderFocus).
+		Width(c.width).
+		Render(content)
+}
+
+func (c *commandArgumentsDialogCmp) Cursor() *tea.Cursor {
 	cursor := c.inputs[c.focusIndex].Cursor()
 	if cursor != nil {
 		cursor = c.moveCursor(cursor)
 	}
-	view.SetCursor(cursor)
-	return view
+	return cursor
 }
 
 func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {

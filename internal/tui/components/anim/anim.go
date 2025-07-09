@@ -261,7 +261,7 @@ func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current state of the animation.
-func (a Anim) View() tea.View {
+func (a Anim) View() string {
 	var b strings.Builder
 	for i := range a.width {
 		switch {
@@ -284,7 +284,8 @@ func (a Anim) View() tea.View {
 	if a.initialized && a.labelWidth > 0 {
 		b.WriteString(a.ellipsisFrames[a.ellipsisStep/ellipsisAnimSpeed])
 	}
-	return tea.NewView(b.String())
+
+	return b.String()
 }
 
 // Step is a command that triggers the next step in the animation.

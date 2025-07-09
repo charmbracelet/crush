@@ -42,6 +42,7 @@ type ListModel interface {
 	SetSelected(int) tea.Cmd        // Set the selected item by index and scroll to it
 	Filter(string) tea.Cmd          // Filter items based on a search term
 	SetFilterPlaceholder(string)    // Set the placeholder text for the filter input
+	Cursor() *tea.Cursor            // Get the current cursor position in the filter input
 }
 
 // HasAnim interface identifies items that support animation.
@@ -281,12 +282,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Cursor returns the current cursor position in the input field.
+func (m *model) Cursor() *tea.Cursor {
+	if m.filterable && !m.hideFilterInput {
+		return m.input.Cursor()
+	}
+	return nil
+}
+
 // View renders the list to a string for display.
 // Returns empty string if the list has no dimensions.
 // Triggers re-rendering if needed before returning content.
-func (m *model) View() tea.View {
+func (m *model) View() string {
 	if m.viewState.height == 0 || m.viewState.width == 0 {
-		return tea.NewView("") // No content to display
+		return "" // No content to display
 	}
 	if m.renderState.needsRerender {
 		m.renderVisible()
@@ -304,11 +313,7 @@ func (m *model) View() tea.View {
 			content,
 		)
 	}
-	view := tea.NewView(content)
-	if m.filterable && !m.hideFilterInput {
-		view.SetCursor(m.input.Cursor())
-	}
-	return view
+	return content
 }
 
 // handleKeyPress processes keyboard input for list navigation.
@@ -834,7 +839,7 @@ func (m *model) rerenderItem(inx int) {
 func (m *model) getItemLines(item util.Model) []string {
 	var itemLines []string
 
-	itemLines = strings.Split(item.View().String(), "\n")
+	itemLines = strings.Split(item.View(), "\n")
 
 	if m.gapSize > 0 {
 		gap := make([]string, m.gapSize)
@@ -1262,7 +1267,7 @@ func (m *model) filterSection(sect section, search string) *section {
 
 	// Check if section header itself matches
 	if sect.header != nil {
-		headerText := strings.ToLower(sect.header.View().String())
+		headerText := strings.ToLower(sect.header.View())
 		if strings.Contains(headerText, search) {
 			hasHeaderMatch = true
 			// If header matches, include all items in the section

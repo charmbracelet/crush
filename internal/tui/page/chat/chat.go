@@ -54,13 +54,13 @@ const (
 	SideBarWidth          = 31  // Width of the sidebar
 	SideBarDetailsPadding = 1   // Padding for the sidebar details section
 	HeaderHeight          = 1   // Height of the header
-	
+
 	// Layout constants for borders and padding
 	BorderWidth        = 1 // Width of component borders
 	LeftRightBorders   = 2 // Left + right border width (1 + 1)
 	TopBottomBorders   = 2 // Top + bottom border width (1 + 1)
 	DetailsPositioning = 2 // Positioning adjustment for details panel
-	
+
 	// Timing constants
 	CancelTimerDuration = 2 * time.Second // Duration before cancel timer expires
 )
@@ -81,23 +81,23 @@ type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int
 	app                         *app.App
-	
+
 	// Layout state
 	compact      bool
 	forceCompact bool
 	focusedPane  PanelType
-	
+
 	// Session
 	session session.Session
 	keyMap  KeyMap
-	
+
 	// Components
 	header  header.Header
 	sidebar sidebar.Sidebar
 	chat    chat.MessageListCmp
 	editor  editor.Editor
 	splash  splash.Splash
-	
+
 	// Simple state flags
 	showingDetails   bool
 	isCanceling      bool
@@ -123,7 +123,7 @@ func (p *chatPage) Init() tea.Cmd {
 	p.compact = compact
 	p.forceCompact = compact
 	p.sidebar.SetCompactMode(p.compact)
-	
+
 	// Set splash state based on config
 	if !config.HasInitialDataConfig() {
 		// First-time setup: show model selection
@@ -138,7 +138,7 @@ func (p *chatPage) Init() tea.Cmd {
 		p.focusedPane = PanelTypeEditor
 		p.splashFullScreen = false
 	}
-	
+
 	return tea.Batch(
 		p.header.Init(),
 		p.sidebar.Init(),
@@ -244,7 +244,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if model.SupportsImages {
 				return p, util.CmdHandler(OpenFilePickerMsg{})
 			} else {
-				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
+				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Model)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {
@@ -279,10 +279,21 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, tea.Batch(cmds...)
 }
 
-func (p *chatPage) View() tea.View {
-	var chatView tea.View
+func (p *chatPage) Cursor() *tea.Cursor {
+	switch p.focusedPane {
+	case PanelTypeEditor:
+		return p.editor.Cursor()
+	case PanelTypeSplash:
+		return p.splash.Cursor()
+	default:
+		return nil
+	}
+}
+
+func (p *chatPage) View() string {
+	var chatView string
 	t := styles.CurrentTheme()
-	
+
 	if p.session.ID == "" {
 		splashView := p.splash.View()
 		// Full screen during onboarding or project initialization
@@ -291,49 +302,40 @@ func (p *chatPage) View() tea.View {
 		} else {
 			// Show splash + editor for new message state
 			editorView := p.editor.View()
-			chatView = tea.NewView(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					t.S().Base.Render(splashView.String()),
-					editorView.String(),
-				),
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				t.S().Base.Render(splashView),
+				editorView,
 			)
-			chatView.SetCursor(editorView.Cursor())
 		}
 	} else {
 		messagesView := p.chat.View()
 		editorView := p.editor.View()
 		if p.compact {
 			headerView := p.header.View()
-			chatView = tea.NewView(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					headerView.String(),
-					messagesView.String(),
-					editorView.String(),
-				),
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				headerView,
+				messagesView,
+				editorView,
 			)
-			chatView.SetCursor(editorView.Cursor())
 		} else {
 			sidebarView := p.sidebar.View()
 			messages := lipgloss.JoinHorizontal(
 				lipgloss.Left,
-				messagesView.String(),
-				sidebarView.String(),
+				messagesView,
+				sidebarView,
 			)
-			chatView = tea.NewView(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					messages,
-					p.editor.View().String(),
-				),
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				messages,
+				p.editor.View(),
 			)
-			chatView.SetCursor(editorView.Cursor())
 		}
 	}
 
 	layers := []*lipgloss.Layer{
-		lipgloss.NewLayer(chatView.String()).X(0).Y(0),
+		lipgloss.NewLayer(chatView).X(0).Y(0),
 	}
 
 	if p.showingDetails {
@@ -345,7 +347,7 @@ func (p *chatPage) View() tea.View {
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				p.sidebar.View().String(),
+				p.sidebar.View(),
 				version,
 			),
 		)
@@ -354,9 +356,7 @@ func (p *chatPage) View() tea.View {
 	canvas := lipgloss.NewCanvas(
 		layers...,
 	)
-	view := tea.NewView(canvas.Render())
-	view.SetCursor(chatView.Cursor())
-	return view
+	return canvas.Render()
 }
 
 func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
@@ -404,7 +404,7 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 	p.width = width
 	p.height = height
 	var cmds []tea.Cmd
-	
+
 	if p.session.ID == "" {
 		if p.splashFullScreen {
 			cmds = append(cmds, p.splash.SetSize(width, height))
@@ -451,7 +451,7 @@ func (p *chatPage) setSession(session session.Session) tea.Cmd {
 
 	var cmds []tea.Cmd
 	p.session = session
-	
+
 	cmds = append(cmds, p.SetSize(p.width, p.height))
 	cmds = append(cmds, p.chat.SetSession(session))
 	cmds = append(cmds, p.sidebar.SetSession(session))

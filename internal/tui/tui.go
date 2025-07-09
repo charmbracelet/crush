@@ -64,6 +64,8 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
+	cmds = append(cmds, tea.EnableMouseAllMotion)
+
 	return tea.Batch(cmds...)
 }
 
@@ -358,9 +360,9 @@ func (a *appModel) View() tea.View {
 	a.status.SetKeyMap(a.keyMap)
 	pageView := page.View()
 	components := []string{
-		pageView.String(),
+		pageView,
 	}
-	components = append(components, a.status.View().String())
+	components = append(components, a.status.View())
 
 	appView := lipgloss.JoinVertical(lipgloss.Top, components...)
 	layers := []*lipgloss.Layer{
@@ -373,14 +375,20 @@ func (a *appModel) View() tea.View {
 		)
 	}
 
-	cursor := pageView.Cursor()
-	activeView := a.dialog.ActiveView()
+	var cursor *tea.Cursor
+	if v, ok := page.(util.Cursor); ok {
+		cursor = v.Cursor()
+	}
+	activeView := a.dialog.ActiveModel()
 	if activeView != nil {
-		cursor = activeView.Cursor()
+		cursor = nil // Reset cursor if a dialog is active unless it implements util.Cursor
+		if v, ok := activeView.(util.Cursor); ok {
+			cursor = v.Cursor()
+		}
 	}
 
 	if a.completions.Open() && cursor != nil {
-		cmp := a.completions.View().String()
+		cmp := a.completions.View()
 		x, y := a.completions.Position()
 		layers = append(
 			layers,
@@ -392,10 +400,11 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
+	var view tea.View
 	t := styles.CurrentTheme()
-	view := tea.NewView(canvas.Render())
-	view.SetBackgroundColor(t.BgBase)
-	view.SetCursor(cursor)
+	view.Layer = canvas
+	view.BackgroundColor = t.BgBase
+	view.Cursor = cursor
 	return view
 }
 

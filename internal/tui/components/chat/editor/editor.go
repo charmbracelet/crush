@@ -145,6 +145,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		m.keyMap.keyboard = msg
+		return m, nil
 	case chat.SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			m.session = msg

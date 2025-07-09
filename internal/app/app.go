@@ -235,7 +235,7 @@ func (app *App) Subscribe(program *tea.Program) {
 		slog.Info("TUI subscription panic - attempting graceful shutdown")
 		program.Quit()
 	})
-	
+
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
 	app.cleanupFuncs = append(app.cleanupFuncs, func() {

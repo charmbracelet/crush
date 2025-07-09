@@ -68,6 +68,7 @@ const (
 type ChatPage interface {
 	util.Model
 	layout.Help
+	IsChatFocused() bool
 }
 
 // cancelTimerCmd creates a command that expires the cancel timer
@@ -556,4 +557,8 @@ func (p *chatPage) Bindings() []key.Binding {
 	}
 
 	return bindings
+}
+
+func (p *chatPage) IsChatFocused() bool {
+	return p.focusedPane == PanelTypeChat
 }

@@ -265,6 +265,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)

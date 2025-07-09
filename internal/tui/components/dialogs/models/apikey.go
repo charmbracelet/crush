@@ -12,9 +12,10 @@ import (
 )
 
 type APIKeyInput struct {
-	input  textinput.Model
-	width  int
-	height int
+	input        textinput.Model
+	width        int
+	height       int
+	providerName string
 }
 
 func NewAPIKeyInput() *APIKeyInput {
@@ -29,9 +30,14 @@ func NewAPIKeyInput() *APIKeyInput {
 	ti.Focus()
 
 	return &APIKeyInput{
-		input: ti,
-		width: 60,
+		input:        ti,
+		width:        60,
+		providerName: "Provider",
 	}
+}
+
+func (a *APIKeyInput) SetProviderName(name string) {
+	a.providerName = name
 }
 
 func (a *APIKeyInput) Init() tea.Cmd {
@@ -54,9 +60,9 @@ func (a *APIKeyInput) View() string {
 	t := styles.CurrentTheme()
 
 	title := t.S().Base.
-		Foreground(t.Secondary).
+		Foreground(t.Primary).
 		Bold(true).
-		Render("Enter your Anthropic API Key")
+		Render(fmt.Sprintf("Enter your %s API Key", a.providerName))
 
 	inputView := a.input.View()
 

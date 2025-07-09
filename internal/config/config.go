@@ -211,8 +211,9 @@ type Config struct {
 	// TODO: most likely remove this concept when I come back to it
 	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
-	resolver      VariableResolver
-	dataConfigDir string `json:"-"`
+	resolver       VariableResolver
+	dataConfigDir  string              `json:"-"`
+	knownProviders []provider.Provider `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {
@@ -321,5 +322,52 @@ func (c *Config) SetConfigField(key string, value any) error {
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+	return nil
+}
+
+func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
+	// First save to the config file
+	err := c.SetConfigField("providers."+providerID+".api_key", apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to save API key to config file: %w", err)
+	}
+
+	if c.Providers == nil {
+		c.Providers = make(map[string]ProviderConfig)
+	}
+
+	providerConfig, exists := c.Providers[providerID]
+	if exists {
+		providerConfig.APIKey = apiKey
+		c.Providers[providerID] = providerConfig
+		return nil
+	}
+
+	var foundProvider *provider.Provider
+	for _, p := range c.knownProviders {
+		if string(p.ID) == providerID {
+			foundProvider = &p
+			break
+		}
+	}
+
+	if foundProvider != nil {
+		// Create new provider config based on known provider
+		providerConfig = ProviderConfig{
+			ID:           providerID,
+			Name:         foundProvider.Name,
+			BaseURL:      foundProvider.APIEndpoint,
+			Type:         foundProvider.Type,
+			APIKey:       apiKey,
+			Disable:      false,
+			ExtraHeaders: make(map[string]string),
+			ExtraParams:  make(map[string]string),
+			Models:       foundProvider.Models,
+		}
+	} else {
+		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+	}
+	// Store the updated provider config
+	c.Providers[providerID] = providerConfig
 	return nil
 }

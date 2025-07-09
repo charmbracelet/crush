@@ -11,7 +11,8 @@ type KeyMap struct {
 	Yes,
 	No,
 	Tab,
-	LeftRight key.Binding
+	LeftRight,
+	Back key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -43,6 +44,10 @@ func DefaultKeyMap() KeyMap {
 		LeftRight: key.NewBinding(
 			key.WithKeys("left", "right"),
 			key.WithHelp("←/→", "switch"),
+		),
+		Back: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "back"),
 		),
 	}
 }

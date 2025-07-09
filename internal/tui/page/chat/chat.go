@@ -256,7 +256,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.changeFocus()
 			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
-			return p, p.cancel()
+			if p.session.ID != "" && p.app.CoderAgent.IsBusy() {
+				return p, p.cancel()
+			}
 		case key.Matches(msg, p.keyMap.Details):
 			p.showDetails()
 			return p, nil
@@ -275,6 +277,24 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
 			cmds = append(cmds, cmd)
+		}
+	case tea.PasteMsg:
+		switch p.focusedPane {
+		case PanelTypeEditor:
+			u, cmd := p.editor.Update(msg)
+			p.editor = u.(editor.Editor)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
+		case PanelTypeChat:
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
+		case PanelTypeSplash:
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
 		}
 	}
 	return p, tea.Batch(cmds...)
@@ -479,10 +499,6 @@ func (p *chatPage) changeFocus() {
 }
 
 func (p *chatPage) cancel() tea.Cmd {
-	if p.session.ID == "" || !p.app.CoderAgent.IsBusy() {
-		return nil
-	}
-
 	if p.isCanceling {
 		p.isCanceling = false
 		p.app.CoderAgent.Cancel(p.session.ID)

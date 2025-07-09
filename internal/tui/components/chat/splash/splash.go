@@ -2,6 +2,7 @@ package splash
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -48,10 +49,12 @@ type splashCmp struct {
 	// State
 	isOnboarding     bool
 	needsProjectInit bool
+	needsAPIKey      bool
 	selectedNo       bool
 
-	modelList            *models.ModelListComponent
-	cursorRow, cursorCol int
+	modelList     *models.ModelListComponent
+	apiKeyInput   *models.APIKeyInput
+	selectedModel *models.ModelOption
 }
 
 func New() Splash {
@@ -69,12 +72,15 @@ func New() Splash {
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
 	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
+	apiKeyInput := models.NewAPIKeyInput()
+
 	return &splashCmp{
 		width:        0,
 		height:       0,
 		keyMap:       keyMap,
 		logoRendered: "",
 		modelList:    modelList,
+		apiKeyInput:  apiKeyInput,
 		selectedNo:   false,
 	}
 }
@@ -114,7 +120,7 @@ func (s *splashCmp) GetSize() (int, int) {
 
 // Init implements SplashPage.
 func (s *splashCmp) Init() tea.Cmd {
-	return s.modelList.Init()
+	return tea.Batch(s.modelList.Init(), s.apiKeyInput.Init())
 }
 
 // SetSize implements SplashPage.
@@ -125,8 +131,6 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 	listHeigh := min(40, height-(SplashScreenPaddingY*2)-lipgloss.Height(s.logoRendered)-2) // -1 for the title
 	listWidth := min(60, width-(SplashScreenPaddingX*2))
 
-	// Calculate the cursor position based on the height and logo size
-	s.cursorRow = height - listHeigh
 	return s.modelList.SetSize(listWidth, listHeigh)
 }
 
@@ -137,8 +141,16 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, s.SetSize(msg.Width, msg.Height)
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, s.keyMap.Back):
+			slog.Info("Back key pressed in splash screen")
+			if s.needsAPIKey {
+				// Go back to model selection
+				s.needsAPIKey = false
+				s.selectedModel = nil
+				return s, nil
+			}
 		case key.Matches(msg, s.keyMap.Select):
-			if s.isOnboarding {
+			if s.isOnboarding && !s.needsAPIKey {
 				modelInx := s.modelList.SelectedIndex()
 				items := s.modelList.Items()
 				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
@@ -146,6 +158,18 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd := s.setPreferredModel(selectedItem)
 					s.isOnboarding = false
 					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
+				} else {
+					// Provider not configured, show API key input
+					s.needsAPIKey = true
+					s.selectedModel = &selectedItem
+					s.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+					return s, nil
+				}
+			} else if s.needsAPIKey {
+				// Handle API key submission
+				apiKey := s.apiKeyInput.Value()
+				if apiKey != "" {
+					return s, s.saveAPIKeyAndContinue(apiKey)
 				}
 			} else if s.needsProjectInit {
 				return s, s.initializeProject()
@@ -165,14 +189,48 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, util.CmdHandler(OnboardingCompleteMsg{})
 			}
 		default:
-			if s.isOnboarding {
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			} else if s.isOnboarding {
 				u, cmd := s.modelList.Update(msg)
 				s.modelList = u
 				return s, cmd
 			}
 		}
+	case tea.PasteMsg:
+		if s.needsAPIKey {
+			u, cmd := s.apiKeyInput.Update(msg)
+			s.apiKeyInput = u.(*models.APIKeyInput)
+			return s, cmd
+		} else if s.isOnboarding {
+			var cmd tea.Cmd
+			s.modelList, cmd = s.modelList.Update(msg)
+			return s, cmd
+		}
 	}
 	return s, nil
+}
+
+func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
+	if s.selectedModel == nil {
+		return util.ReportError(fmt.Errorf("no model selected"))
+	}
+
+	cfg := config.Get()
+	err := cfg.SetProviderAPIKey(string(s.selectedModel.Provider.ID), apiKey)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to save API key: %w", err))
+	}
+
+	// Reset API key state and continue with model selection
+	s.needsAPIKey = false
+	cmd := s.setPreferredModel(*s.selectedModel)
+	s.isOnboarding = false
+	s.selectedModel = nil
+
+	return tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 }
 
 func (s *splashCmp) initializeProject() tea.Cmd {
@@ -283,7 +341,21 @@ func (s *splashCmp) View() string {
 	t := styles.CurrentTheme()
 
 	var content string
-	if s.isOnboarding {
+	if s.needsAPIKey {
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		apiKeyView := s.apiKeyInput.View()
+		apiKeySelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				apiKeyView,
+			),
+		)
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			s.logoRendered,
+			apiKeySelector,
+		)
+	} else if s.isOnboarding {
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 		modelListView := s.modelList.View()
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
@@ -363,7 +435,12 @@ func (s *splashCmp) View() string {
 }
 
 func (s *splashCmp) Cursor() *tea.Cursor {
-	if s.isOnboarding {
+	if s.needsAPIKey {
+		cursor := s.apiKeyInput.Cursor()
+		if cursor != nil {
+			return s.moveCursor(cursor)
+		}
+	} else if s.isOnboarding {
 		cursor := s.modelList.Cursor()
 		if cursor != nil {
 			return s.moveCursor(cursor)
@@ -391,15 +468,38 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	if cursor == nil {
 		return nil
 	}
-	offset := m.cursorRow
-	cursor.Y += offset
-	cursor.X = cursor.X + 3 // 3 for padding
+
+	// Calculate the correct Y offset based on current state
+	logoHeight := lipgloss.Height(m.logoRendered)
+	baseOffset := logoHeight + SplashScreenPaddingY
+
+	if m.needsAPIKey {
+		// For API key input, position at the bottom of the remaining space
+		remainingHeight := m.height - logoHeight - (SplashScreenPaddingY * 2)
+		offset := baseOffset + remainingHeight - lipgloss.Height(m.apiKeyInput.View())
+		cursor.Y += offset
+		// API key input already includes prompt in its cursor positioning
+		cursor.X = cursor.X + SplashScreenPaddingX
+	} else if m.isOnboarding {
+		// For model list, use the original calculation
+		listHeight := min(40, m.height-(SplashScreenPaddingY*2)-logoHeight-2)
+		offset := m.height - listHeight
+		cursor.Y += offset
+		// Model list doesn't have a prompt, so add padding + space for list styling
+		cursor.X = cursor.X + SplashScreenPaddingX + 1
+	}
+
 	return cursor
 }
 
 // Bindings implements SplashPage.
 func (s *splashCmp) Bindings() []key.Binding {
-	if s.isOnboarding {
+	if s.needsAPIKey {
+		return []key.Binding{
+			s.keyMap.Select,
+			s.keyMap.Back,
+		}
+	} else if s.isOnboarding {
 		return []key.Binding{
 			s.keyMap.Select,
 			s.keyMap.Next,

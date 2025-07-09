@@ -65,6 +65,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err != nil || len(providers) == 0 {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}
+	cfg.knownProviders = providers
 
 	env := env.New()
 	// Configure providers

@@ -460,12 +460,15 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 }
 
 func (s *splashCmp) infoSection() string {
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		s.cwd(),
-		"",
-		lipgloss.JoinHorizontal(lipgloss.Left, s.lspBlock(), s.mcpBlock()),
-		"",
+	t := styles.CurrentTheme()
+	return t.S().Base.PaddingLeft(2).Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			s.cwd(),
+			"",
+			lipgloss.JoinHorizontal(lipgloss.Left, s.lspBlock(), s.mcpBlock()),
+			"",
+		),
 	)
 }
 
@@ -538,7 +541,7 @@ func (s *splashCmp) Bindings() []key.Binding {
 }
 
 func (s *splashCmp) getMaxInfoWidth() int {
-	return min(s.width, 40)
+	return min(s.width-2, 40) // 2 for left padding
 }
 
 func (s *splashCmp) cwd() string {

@@ -69,10 +69,6 @@ func FormatOutput(content string, formatStr string) (string, error) {
 	case Text:
 		fallthrough
 	default:
-		// ensure final new line
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
-		}
 		return content, nil
 	}
 }

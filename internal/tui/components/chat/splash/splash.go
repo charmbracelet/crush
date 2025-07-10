@@ -496,18 +496,14 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	infoSectionHeight := lipgloss.Height(m.infoSection())
 	baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
 	if m.needsAPIKey {
-		// For API key input, position at the bottom of the remaining space
-		remainingHeight := m.height - logoHeight - (SplashScreenPaddingY * 2)
-		offset := baseOffset + remainingHeight - lipgloss.Height(m.apiKeyInput.View())
+		remainingHeight := m.height - baseOffset - lipgloss.Height(m.apiKeyInput.View()) - SplashScreenPaddingY
+		offset := baseOffset + remainingHeight
 		cursor.Y += offset
-		// API key input already includes prompt in its cursor positioning
 		cursor.X = cursor.X + SplashScreenPaddingX
 	} else if m.isOnboarding {
-		// For model list, use the original calculation
-		listHeight := min(40, m.height-(SplashScreenPaddingY*2)-logoHeight-1-infoSectionHeight)
-		offset := m.height - listHeight
+		listHeight := min(40, m.height-(SplashScreenPaddingY)-baseOffset)
+		offset := m.height - listHeight + 1 // +1 for the title
 		cursor.Y += offset
-		// Model list doesn't have a prompt, so add padding + space for list styling
 		cursor.X = cursor.X + SplashScreenPaddingX + 1
 	}
 

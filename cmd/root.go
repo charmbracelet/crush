@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/tui"
@@ -52,13 +51,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		debug, _ := cmd.Flags().GetBool("debug")
 		cwd, _ := cmd.Flags().GetString("cwd")
 		prompt, _ := cmd.Flags().GetString("prompt")
-		outputFormat, _ := cmd.Flags().GetString("output-format")
 		quiet, _ := cmd.Flags().GetBool("quiet")
-
-		// Validate format option
-		if !format.IsValid(outputFormat) {
-			return fmt.Errorf("invalid format option: %s\n%s", outputFormat, format.GetHelpText())
-		}
 
 		if cwd != "" {
 			err := os.Chdir(cwd)
@@ -109,7 +102,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		// Non-interactive mode
 		if prompt != "" {
 			// Run non-interactive flow using the App method
-			return app.RunNonInteractive(ctx, prompt, outputFormat, quiet)
+			return app.RunNonInteractive(ctx, prompt, quiet)
 		}
 
 		// Set up the TUI
@@ -164,17 +157,8 @@ func init() {
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")
 
-	// Add format flag with validation logic
-	rootCmd.Flags().StringP("output-format", "f", format.Text.String(),
-		"Output format for non-interactive mode (text, json)")
-
 	// Add quiet flag to hide spinner in non-interactive mode
 	rootCmd.Flags().BoolP("quiet", "q", false, "Hide spinner in non-interactive mode")
-
-	// Register custom validation for the format flag
-	rootCmd.RegisterFlagCompletionFunc("output-format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return format.SupportedFormats, cobra.ShellCompDirectiveNoFileComp
-	})
 }
 
 func maybePrependStdin(prompt string) (string, error) {

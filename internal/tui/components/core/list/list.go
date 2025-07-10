@@ -332,6 +332,10 @@ func (m *model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.scrollDown(m.listHeight() / 2)
 	case key.Matches(msg, m.keyMap.HalfPageUp):
 		m.scrollUp(m.listHeight() / 2)
+	case key.Matches(msg, m.keyMap.PageDown):
+		m.scrollDown(m.listHeight())
+	case key.Matches(msg, m.keyMap.PageUp):
+		m.scrollUp(m.listHeight())
 	case key.Matches(msg, m.keyMap.Home):
 		return m, m.goToTop()
 	case key.Matches(msg, m.keyMap.End):

@@ -5,11 +5,39 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/bubbles/v2/help"
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+type KeyMapHelp interface {
+	Help() help.KeyMap
+}
+
+type simpleHelp struct {
+	shortList []key.Binding
+	fullList  [][]key.Binding
+}
+
+func NewSimpleHelp(shortList []key.Binding, fullList [][]key.Binding) help.KeyMap {
+	return &simpleHelp{
+		shortList: shortList,
+		fullList:  fullList,
+	}
+}
+
+// FullHelp implements help.KeyMap.
+func (s *simpleHelp) FullHelp() [][]key.Binding {
+	return s.fullList
+}
+
+// ShortHelp implements help.KeyMap.
+func (s *simpleHelp) ShortHelp() []key.Binding {
+	return s.shortList
+}
 
 func Section(text string, width int) string {
 	t := styles.CurrentTheme()

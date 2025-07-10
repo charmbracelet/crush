@@ -32,6 +32,9 @@ type Splash interface {
 	SetOnboarding(bool)
 	// SetProjectInit controls whether the splash shows project initialization prompt
 	SetProjectInit(bool)
+
+	// Showing API key input
+	IsShowingAPIKey() bool
 }
 
 const (
@@ -126,9 +129,11 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
-	s.width = width
 	s.height = height
-	s.logoRendered = s.logoBlock()
+	if width != s.width {
+		s.width = width
+		s.logoRendered = s.logoBlock()
+	}
 	listHeigh := min(40, height-(SplashScreenPaddingY*2)-lipgloss.Height(s.logoRendered)-2) // -1 for the title
 	listWidth := min(60, width-(SplashScreenPaddingX*2))
 
@@ -625,4 +630,8 @@ func (s *splashCmp) mcpBlock() string {
 			mcpList...,
 		),
 	)
+}
+
+func (s *splashCmp) IsShowingAPIKey() bool {
+	return s.needsAPIKey
 }

@@ -98,13 +98,12 @@ func (m *statusCmp) SetKeyMap(keyMap help.KeyMap) {
 	m.keyMap = keyMap
 }
 
-func NewStatusCmp(keyMap help.KeyMap) StatusCmp {
+func NewStatusCmp() StatusCmp {
 	t := styles.CurrentTheme()
 	help := help.New()
 	help.Styles = t.S().Help
 	return &statusCmp{
 		messageTTL: 5 * time.Second,
 		help:       help,
-		keyMap:     keyMap,
 	}
 }

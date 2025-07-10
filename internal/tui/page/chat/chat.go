@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"runtime"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -20,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/chat/sidebar"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
@@ -82,6 +85,7 @@ type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int
 	app                         *app.App
+	keyboardEnhancements        tea.KeyboardEnhancementsMsg
 
 	// Layout state
 	compact      bool
@@ -103,6 +107,8 @@ type chatPage struct {
 	showingDetails   bool
 	isCanceling      bool
 	splashFullScreen bool
+	isOnboarding     bool
+	isProjectInit    bool
 }
 
 func New(app *app.App) ChatPage {
@@ -129,10 +135,12 @@ func (p *chatPage) Init() tea.Cmd {
 	if !config.HasInitialDataConfig() {
 		// First-time setup: show model selection
 		p.splash.SetOnboarding(true)
+		p.isOnboarding = true
 		p.splashFullScreen = true
 	} else if b, _ := config.ProjectNeedsInitialization(); b {
 		// Project needs CRUSH.md initialization
 		p.splash.SetProjectInit(true)
+		p.isProjectInit = true
 		p.splashFullScreen = true
 	} else {
 		// Ready to chat: focus editor, splash in background
@@ -153,9 +161,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
-		m, cmd := p.editor.Update(msg)
-		p.editor = m.(editor.Editor)
-		return p, cmd
+		p.keyboardEnhancements = msg
+		return p, nil
 	case tea.WindowSizeMsg:
 		return p, p.SetSize(msg.Width, msg.Height)
 	case CancelTimerExpiredMsg:
@@ -237,6 +244,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return p, util.ReportError(err)
 		}
+		p.isOnboarding = false
+		p.isProjectInit = false
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
 	case tea.KeyPressMsg:
@@ -577,6 +586,231 @@ func (p *chatPage) Bindings() []key.Binding {
 	}
 
 	return bindings
+}
+
+func (a *chatPage) Help() help.KeyMap {
+	var shortList []key.Binding
+	var fullList [][]key.Binding
+	switch {
+	case a.isOnboarding && !a.splash.IsShowingAPIKey():
+		shortList = append(shortList,
+			// Choose model
+			key.NewBinding(
+				key.WithKeys("up", "down"),
+				key.WithHelp("↑/↓", "choose"),
+			),
+			// Accept selection
+			key.NewBinding(
+				key.WithKeys("enter", "ctrl+y"),
+				key.WithHelp("enter", "accept"),
+			),
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	case a.isOnboarding && a.splash.IsShowingAPIKey():
+		var pasteKey key.Binding
+		if runtime.GOOS != "darwin" {
+			pasteKey = key.NewBinding(
+				key.WithKeys("ctrl+v"),
+				key.WithHelp("ctrl+v", "paste API key"),
+			)
+		} else {
+			pasteKey = key.NewBinding(
+				key.WithKeys("cmd+v"),
+				key.WithHelp("cmd+v", "paste API key"),
+			)
+		}
+		shortList = append(shortList,
+			// Go back
+			key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "back"),
+			),
+			// Paste
+			pasteKey,
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	case a.isProjectInit:
+		shortList = append(shortList,
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	default:
+		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+			cancelBinding := key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "cancel"),
+			)
+			if a.isCanceling {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "press again to cancel"),
+				)
+			}
+			shortList = append(shortList, cancelBinding)
+			fullList = append(fullList,
+				[]key.Binding{
+					cancelBinding,
+				},
+			)
+		}
+		globalBindings := []key.Binding{}
+		// we are in a session
+		if a.session.ID != "" {
+			tabKey := key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "focus chat"),
+			)
+			if a.focusedPane == PanelTypeChat {
+				tabKey = key.NewBinding(
+					key.WithKeys("tab"),
+					key.WithHelp("tab", "focus editor"),
+				)
+			}
+			shortList = append(shortList, tabKey)
+			globalBindings = append(globalBindings, tabKey)
+		}
+		commandsBinding := key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "commands"),
+		)
+		helpBinding := key.NewBinding(
+			key.WithKeys("ctrl+g"),
+			key.WithHelp("ctrl+g", "more"),
+		)
+		globalBindings = append(globalBindings, commandsBinding)
+		globalBindings = append(globalBindings,
+			key.NewBinding(
+				key.WithKeys("ctrl+s"),
+				key.WithHelp("ctrl+s", "sessions"),
+			),
+		)
+		if a.session.ID != "" {
+			globalBindings = append(globalBindings,
+				key.NewBinding(
+					key.WithKeys("ctrl+n"),
+					key.WithHelp("ctrl+n", "new sessions"),
+				))
+		}
+		shortList = append(shortList,
+			// Commands
+			commandsBinding,
+		)
+		fullList = append(fullList, globalBindings)
+
+		if a.focusedPane == PanelTypeChat {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("up", "down"),
+					key.WithHelp("↑↓", "scroll"),
+				),
+			)
+			fullList = append(fullList,
+				[]key.Binding{
+					key.NewBinding(
+						key.WithKeys("up", "down"),
+						key.WithHelp("↑↓", "scroll"),
+					),
+					key.NewBinding(
+						key.WithKeys("shift+up", "shift+down"),
+						key.WithHelp("shift+↑↓", "next/prev item"),
+					),
+					key.NewBinding(
+						key.WithKeys("pgup", "b"),
+						key.WithHelp("b/pgup", "page up"),
+					),
+					key.NewBinding(
+						key.WithKeys("pgdown", " ", "f"),
+						key.WithHelp("f/pgdn", "page down"),
+					),
+				},
+				[]key.Binding{
+					key.NewBinding(
+						key.WithKeys("u"),
+						key.WithHelp("u", "half page up"),
+					),
+					key.NewBinding(
+						key.WithKeys("d"),
+						key.WithHelp("d", "half page down"),
+					),
+					key.NewBinding(
+						key.WithKeys("g", "home"),
+						key.WithHelp("g", "hone"),
+					),
+					key.NewBinding(
+						key.WithKeys("G", "end"),
+						key.WithHelp("G", "end"),
+					),
+				},
+			)
+		} else if a.focusedPane == PanelTypeEditor {
+			newLineBinding := key.NewBinding(
+				key.WithKeys("shift+enter", "ctrl+j"),
+				// "ctrl+j" is a common keybinding for newline in many editors. If
+				// the terminal supports "shift+enter", we substitute the help text
+				// to reflect that.
+				key.WithHelp("ctrl+j", "newline"),
+			)
+			if a.keyboardEnhancements.SupportsKeyDisambiguation() {
+				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
+			}
+			shortList = append(shortList, newLineBinding)
+			fullList = append(fullList,
+				[]key.Binding{
+					newLineBinding,
+					key.NewBinding(
+						key.WithKeys("ctrl+f"),
+						key.WithHelp("ctrl+f", "add image"),
+					),
+					key.NewBinding(
+						key.WithKeys("/"),
+						key.WithHelp("/", "add file"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+e"),
+						key.WithHelp("ctrl+e", "open editor"),
+					),
+				})
+		}
+		shortList = append(shortList,
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+			// Help
+			helpBinding,
+		)
+		fullList = append(fullList, []key.Binding{
+			key.NewBinding(
+				key.WithKeys("ctrl+g"),
+				key.WithHelp("ctrl+g", "less"),
+			),
+		})
+	}
+
+	return core.NewSimpleHelp(shortList, fullList)
 }
 
 func (p *chatPage) IsChatFocused() bool {

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -257,7 +258,7 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
 	a.wWidth, a.wHeight = width, height
 	if a.showingFullHelp {
-		height -= 4
+		height -= 5
 	} else {
 		height -= 2
 	}
@@ -384,10 +385,9 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	page := a.pages[a.currentPage]
-	if withHelp, ok := page.(layout.Help); ok {
-		a.keyMap.pageBindings = withHelp.Bindings()
+	if withHelp, ok := page.(core.KeyMapHelp); ok {
+		a.status.SetKeyMap(withHelp.Help())
 	}
-	a.status.SetKeyMap(a.keyMap)
 	pageView := page.View()
 	components := []string{
 		pageView,
@@ -447,7 +447,7 @@ func New(app *app.App) tea.Model {
 	model := &appModel{
 		currentPage: chat.ChatPageID,
 		app:         app,
-		status:      status.NewStatusCmp(keyMap),
+		status:      status.NewStatusCmp(),
 		loadedPages: make(map[page.PageID]bool),
 		keyMap:      keyMap,
 

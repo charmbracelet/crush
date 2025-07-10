@@ -2,7 +2,6 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
 type EditorKeyMap struct {
@@ -10,8 +9,6 @@ type EditorKeyMap struct {
 	SendMessage key.Binding
 	OpenEditor  key.Binding
 	Newline     key.Binding
-
-	keyboard tea.KeyboardEnhancementsMsg
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -40,15 +37,11 @@ func DefaultEditorKeyMap() EditorKeyMap {
 
 // KeyBindings implements layout.KeyMapProvider
 func (k EditorKeyMap) KeyBindings() []key.Binding {
-	newline := k.Newline
-	if k.keyboard.SupportsKeyDisambiguation() {
-		newline.SetHelp("shift+enter", newline.Help().Desc)
-	}
 	return []key.Binding{
 		k.AddFile,
 		k.SendMessage,
 		k.OpenEditor,
-		newline,
+		k.Newline,
 	}
 }
 

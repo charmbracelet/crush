@@ -808,8 +808,8 @@ func (a *chatPage) Help() help.KeyMap {
 						key.WithHelp("/", "add file"),
 					),
 					key.NewBinding(
-						key.WithKeys("ctrl+e"),
-						key.WithHelp("ctrl+e", "open editor"),
+						key.WithKeys("ctrl+v"),
+						key.WithHelp("ctrl+v", "open editor"),
 					),
 				})
 		}

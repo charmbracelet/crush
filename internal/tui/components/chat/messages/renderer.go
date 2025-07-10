@@ -645,6 +645,9 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 
 func joinHeaderBody(header, body string) string {
 	t := styles.CurrentTheme()
+	if body == "" {
+		return header
+	}
 	body = t.S().Base.PaddingLeft(2).Render(body)
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "")
 }

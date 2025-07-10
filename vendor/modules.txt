@@ -242,7 +242,7 @@ github.com/bmatcuk/doublestar/v4
 github.com/charlievieth/fastwalk
 github.com/charlievieth/fastwalk/internal/dirent
 github.com/charlievieth/fastwalk/internal/fmtdirent
-# github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250607113720-eb5e1cf3b09e
+# github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250710161907-a4c42b579198
 ## explicit; go 1.23.0
 github.com/charmbracelet/bubbles/v2/cursor
 github.com/charmbracelet/bubbles/v2/filepicker

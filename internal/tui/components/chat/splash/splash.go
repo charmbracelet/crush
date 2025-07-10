@@ -134,7 +134,8 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 		s.width = width
 		s.logoRendered = s.logoBlock()
 	}
-	listHeigh := min(40, height-(SplashScreenPaddingY*2)-lipgloss.Height(s.logoRendered)-2) // -1 for the title
+	infoSectionHeight := lipgloss.Height(s.infoSection())
+	listHeigh := min(40, height-(SplashScreenPaddingY*2)-lipgloss.Height(s.logoRendered)-2-infoSectionHeight)
 	listWidth := min(60, width-(SplashScreenPaddingX*2))
 
 	return s.modelList.SetSize(listWidth, listHeigh)
@@ -490,7 +491,6 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	if cursor == nil {
 		return nil
 	}
-
 	// Calculate the correct Y offset based on current state
 	logoHeight := lipgloss.Height(m.logoRendered)
 	infoSectionHeight := lipgloss.Height(m.infoSection())
@@ -502,7 +502,7 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 		cursor.X = cursor.X + SplashScreenPaddingX
 	} else if m.isOnboarding {
 		listHeight := min(40, m.height-(SplashScreenPaddingY)-baseOffset)
-		offset := m.height - listHeight + 1 // +1 for the title
+		offset := m.height - listHeight + 2
 		cursor.Y += offset
 		cursor.X = cursor.X + SplashScreenPaddingX + 1
 	}

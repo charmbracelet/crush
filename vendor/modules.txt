@@ -280,6 +280,7 @@ github.com/charmbracelet/log/v2
 # github.com/charmbracelet/ultraviolet v0.0.0-20250708152637-0fe0235c8db9
 ## explicit; go 1.24.0
 github.com/charmbracelet/ultraviolet
+github.com/charmbracelet/ultraviolet/screen
 # github.com/charmbracelet/x/ansi v0.9.3
 ## explicit; go 1.23.0
 github.com/charmbracelet/x/ansi

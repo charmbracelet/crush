@@ -382,19 +382,10 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
-		content := fmt.Sprintf("```bash\n%s\n```", pr.URL)
-
-		// Use the cache for markdown rendering
-		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
-			r := styles.GetMarkdownRenderer(p.width - 4)
-			s, err := r.Render(content)
-			return s, err
-		})
-
 		finalContent := baseStyle.
+			Padding(1, 1).
 			Width(p.contentViewPort.Width()).
-			Render(renderedContent)
-
+			Render(pr.URL)
 		return finalContent
 	}
 	return ""
@@ -452,8 +443,8 @@ func (p *permissionDialogCmp) render() string {
 	if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
 	}
-	// Calculate content height dynamically based on window size
 
+	// Calculate content height dynamically based on window size
 	strs := []string{
 		title,
 		"",

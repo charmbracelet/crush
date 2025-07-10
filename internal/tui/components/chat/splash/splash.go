@@ -38,8 +38,9 @@ type Splash interface {
 }
 
 const (
-	SplashScreenPaddingX = 2 // Padding X for the splash screen
 	SplashScreenPaddingY = 1 // Padding Y for the splash screen
+
+	LogoGap = 6
 )
 
 // OnboardingCompleteMsg is sent when onboarding is complete
@@ -56,6 +57,7 @@ type splashCmp struct {
 	needsAPIKey      bool
 	selectedNo       bool
 
+	listHeight    int
 	modelList     *models.ModelListComponent
 	apiKeyInput   *models.APIKeyInput
 	selectedModel *models.ModelOption
@@ -134,11 +136,10 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 		s.width = width
 		s.logoRendered = s.logoBlock()
 	}
-	infoSectionHeight := lipgloss.Height(s.infoSection())
-	listHeigh := min(40, height-(SplashScreenPaddingY*2)-lipgloss.Height(s.logoRendered)-2-infoSectionHeight)
-	listWidth := min(60, width-(SplashScreenPaddingX*2))
-
-	return s.modelList.SetSize(listWidth, listHeigh)
+	// remove padding, logo height, gap, title space
+	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
+	listWidth := min(60, width)
+	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
 // Update implements SplashPage.
@@ -347,9 +348,8 @@ func (s *splashCmp) View() string {
 	t := styles.CurrentTheme()
 	var content string
 	if s.needsAPIKey {
-		infoSection := s.infoSection()
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
-		apiKeyView := s.apiKeyInput.View()
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		apiKeyView := t.S().Base.PaddingLeft(1).Render(s.apiKeyInput.View())
 		apiKeySelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -359,13 +359,11 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
-			infoSection,
 			apiKeySelector,
 		)
 	} else if s.isOnboarding {
-		infoSection := s.infoSection()
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
 		modelListView := s.modelList.View()
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -377,7 +375,6 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
-			infoSection,
 			modelSelector,
 		)
 	} else if s.needsProjectInit {
@@ -441,8 +438,6 @@ func (s *splashCmp) View() string {
 		Width(s.width).
 		Height(s.height).
 		PaddingTop(SplashScreenPaddingY).
-		PaddingLeft(SplashScreenPaddingX).
-		PaddingRight(SplashScreenPaddingX).
 		PaddingBottom(SplashScreenPaddingY).
 		Render(content)
 }
@@ -476,38 +471,45 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	const padding = 2
-	return logo.Render(version.Version, false, logo.Opts{
-		FieldColor:   t.Primary,
-		TitleColorA:  t.Secondary,
-		TitleColorB:  t.Primary,
-		CharmColor:   t.Secondary,
-		VersionColor: t.Primary,
-		Width:        s.width - (SplashScreenPaddingX * 2),
-	})
+	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+		logo.Render(version.Version, false, logo.Opts{
+			FieldColor:   t.Primary,
+			TitleColorA:  t.Secondary,
+			TitleColorB:  t.Primary,
+			CharmColor:   t.Secondary,
+			VersionColor: t.Primary,
+			Width:        s.width - 4,
+		}),
+	)
 }
 
-func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	if cursor == nil {
 		return nil
 	}
 	// Calculate the correct Y offset based on current state
-	logoHeight := lipgloss.Height(m.logoRendered)
-	infoSectionHeight := lipgloss.Height(m.infoSection())
-	baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
-	if m.needsAPIKey {
-		remainingHeight := m.height - baseOffset - lipgloss.Height(m.apiKeyInput.View()) - SplashScreenPaddingY
+	logoHeight := lipgloss.Height(s.logoRendered)
+	if s.needsAPIKey {
+		infoSectionHeight := lipgloss.Height(s.infoSection())
+		baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
+		remainingHeight := s.height - baseOffset - lipgloss.Height(s.apiKeyInput.View()) - SplashScreenPaddingY
 		offset := baseOffset + remainingHeight
 		cursor.Y += offset
-		cursor.X = cursor.X + SplashScreenPaddingX
-	} else if m.isOnboarding {
-		listHeight := min(40, m.height-(SplashScreenPaddingY)-baseOffset)
-		offset := m.height - listHeight + 2
+		cursor.X = cursor.X + 1
+	} else if s.isOnboarding {
+		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 3
 		cursor.Y += offset
-		cursor.X = cursor.X + SplashScreenPaddingX + 1
+		cursor.X = cursor.X + 1
 	}
 
 	return cursor
+}
+
+func (s *splashCmp) logoGap() int {
+	if s.height > 35 {
+		return LogoGap
+	}
+	return 0
 }
 
 // Bindings implements SplashPage.
@@ -536,7 +538,7 @@ func (s *splashCmp) Bindings() []key.Binding {
 }
 
 func (s *splashCmp) getMaxInfoWidth() int {
-	return min(s.width-(SplashScreenPaddingX*2), 40)
+	return min(s.width, 40)
 }
 
 func (s *splashCmp) cwd() string {

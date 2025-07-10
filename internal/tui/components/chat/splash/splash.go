@@ -411,7 +411,7 @@ func (s *splashCmp) View() string {
 
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
 
-		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
+		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).PaddingLeft(1).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				initText,

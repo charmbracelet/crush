@@ -254,8 +254,8 @@ github.com/charmbracelet/bubbles/v2/spinner
 github.com/charmbracelet/bubbles/v2/textarea
 github.com/charmbracelet/bubbles/v2/textinput
 github.com/charmbracelet/bubbles/v2/viewport
-# github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250708152737-144080f3d891
-## explicit; go 1.24.3
+# github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250710185017-3c0ffd25e595
+## explicit; go 1.24.0
 github.com/charmbracelet/bubbletea/v2
 # github.com/charmbracelet/colorprofile v0.3.1
 ## explicit; go 1.23.0
@@ -269,7 +269,7 @@ github.com/charmbracelet/glamour/v2
 github.com/charmbracelet/glamour/v2/ansi
 github.com/charmbracelet/glamour/v2/internal/autolink
 github.com/charmbracelet/glamour/v2/styles
-# github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250708152830-0fa4ef151093
+# github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250710185058-03664cb9cecb
 ## explicit; go 1.24.2
 github.com/charmbracelet/lipgloss/v2
 github.com/charmbracelet/lipgloss/v2/table
@@ -280,7 +280,6 @@ github.com/charmbracelet/log/v2
 # github.com/charmbracelet/ultraviolet v0.0.0-20250708152637-0fe0235c8db9
 ## explicit; go 1.24.0
 github.com/charmbracelet/ultraviolet
-github.com/charmbracelet/ultraviolet/screen
 # github.com/charmbracelet/x/ansi v0.9.3
 ## explicit; go 1.23.0
 github.com/charmbracelet/x/ansi
@@ -839,5 +838,5 @@ mvdan.cc/sh/v3/fileutil
 mvdan.cc/sh/v3/interp
 mvdan.cc/sh/v3/pattern
 mvdan.cc/sh/v3/syntax
-# github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250708152737-144080f3d891
-# github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250708152830-0fa4ef151093
+# github.com/charmbracelet/bubbletea/v2 => github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250710185017-3c0ffd25e595
+# github.com/charmbracelet/lipgloss/v2 => github.com/charmbracelet/lipgloss-internal/v2 v2.0.0-20250710185058-03664cb9cecb

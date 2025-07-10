@@ -99,7 +99,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
-		return a, nil
+		for id, page := range a.pages {
+			m, pageCmd := page.Update(msg)
+			a.pages[id] = m.(util.Model)
+			if pageCmd != nil {
+				cmds = append(cmds, pageCmd)
+			}
+		}
+		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 

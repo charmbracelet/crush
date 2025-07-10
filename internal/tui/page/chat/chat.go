@@ -152,6 +152,10 @@ func (p *chatPage) Init() tea.Cmd {
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		m, cmd := p.editor.Update(msg)
+		p.editor = m.(editor.Editor)
+		return p, cmd
 	case tea.WindowSizeMsg:
 		return p, p.SetSize(msg.Width, msg.Height)
 	case CancelTimerExpiredMsg:

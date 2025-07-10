@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"time"
@@ -259,7 +260,7 @@ func NewBashTool(permission permission.Service, workingDir string) BaseTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
 	persistentShell.SetBlockFuncs(createCommandBlockFuncs())
-	
+
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
@@ -357,7 +358,20 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
 
+	slog.Info("Bash command executed",
+		"command", params.Command,
+		"stdout", stdout,
+		"stderr", stderr,
+		"exit_code", exitCode,
+		"interrupted", interrupted,
+		"err", err,
+	)
+
 	errorMessage := stderr
+	if errorMessage == "" && err != nil {
+		errorMessage = err.Error()
+	}
+
 	if interrupted {
 		if errorMessage != "" {
 			errorMessage += "\n"

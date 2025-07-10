@@ -43,7 +43,7 @@ type Completions interface {
 type completionsCmp struct {
 	width  int
 	height int  // Height of the completions component`
-	x      int  // X position for the completions popup\
+	x      int  // X position for the completions popup
 	y      int  // Y position for the completions popup
 	open   bool // Indicates if the completions are open
 	keyMap KeyMap

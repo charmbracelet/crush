@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	nbsp            = '\u00A0'
+	// NBSP is the non-breaking space rune.
+	NBSP            = '\u00A0'
 	tabWidthDefault = 4
 )
 
@@ -44,6 +45,7 @@ const (
 	paddingRightKey
 	paddingBottomKey
 	paddingLeftKey
+	paddingCharKey
 
 	// Margins.
 	marginTopKey
@@ -51,6 +53,7 @@ const (
 	marginBottomKey
 	marginLeftKey
 	marginBackgroundKey
+	marginCharKey
 
 	// Border runes.
 	borderStyleKey
@@ -128,12 +131,14 @@ type Style struct {
 	paddingRight  int
 	paddingBottom int
 	paddingLeft   int
+	paddingChar   rune
 
 	marginTop     int
 	marginRight   int
 	marginBottom  int
 	marginLeft    int
 	marginBgColor color.Color
+	marginChar    rune
 
 	borderStyle         Border
 	borderTopFgColor    color.Color
@@ -387,23 +392,24 @@ func (s Style) Render(strs ...string) string {
 
 	// Padding
 	if !inline { //nolint:nestif
+		padChar := s.paddingChar
+		if padChar == 0 {
+			padChar = ' '
+		}
 		if leftPadding > 0 {
 			var st *ansi.Style
 			if colorWhitespace || styleWhitespace {
 				st = &teWhitespace
 			}
-			str = padLeft(str, leftPadding, st, nbsp)
+			str = padLeft(str, leftPadding, st, padChar)
 		}
-
-		// XXX: We use a non-breaking space to pad so that the padding is
-		// preserved when the string is copied and pasted.
 
 		if rightPadding > 0 {
 			var st *ansi.Style
 			if colorWhitespace || styleWhitespace {
 				st = &teWhitespace
 			}
-			str = padRight(str, rightPadding, st, nbsp)
+			str = padRight(str, rightPadding, st, padChar)
 		}
 
 		if topPadding > 0 {
@@ -494,8 +500,12 @@ func (s Style) applyMargins(str string, inline bool) string {
 	}
 
 	// Add left and right margin
-	str = padLeft(str, leftMargin, &style, ' ')
-	str = padRight(str, rightMargin, &style, ' ')
+	marginChar := s.marginChar
+	if marginChar == 0 {
+		marginChar = ' '
+	}
+	str = padLeft(str, leftMargin, &style, marginChar)
+	str = padRight(str, rightMargin, &style, marginChar)
 
 	// Top/bottom margin
 	if !inline {

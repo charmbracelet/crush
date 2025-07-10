@@ -96,6 +96,13 @@ func (s Style) UnsetPadding() Style {
 	s.unset(paddingRightKey)
 	s.unset(paddingTopKey)
 	s.unset(paddingBottomKey)
+	s.unset(paddingCharKey)
+	return s
+}
+
+// UnsetPaddingChar removes the padding character style rule, if set.
+func (s Style) UnsetPaddingChar() Style {
+	s.unset(paddingCharKey)
 	return s
 }
 

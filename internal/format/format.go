@@ -70,6 +70,10 @@ func FormatOutput(content string, formatStr string) string {
 	case Text:
 		fallthrough
 	default:
+		// ensure final new line
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
 		return content
 	}
 }
@@ -86,6 +90,7 @@ func formatAsJSON(content string) string {
 	jsonBytes, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		// In case of an error, return a manually formatted JSON
+		// XXX: I don't see how it would ever get here
 		jsonEscaped := strings.ReplaceAll(content, "\\", "\\\\")
 		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\"", "\\\"")
 		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\n", "\\n")

@@ -261,8 +261,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {
 				// If the last character is a backslash, remove it and add a newline
-				m.textarea.SetValue(value[:len(value)-1] + "\n")
-				return m, nil
+				m.textarea.SetValue(value[:len(value)-1])
 			} else {
 				// Otherwise, send the message
 				return m, m.send()

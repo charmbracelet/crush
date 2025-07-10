@@ -378,6 +378,7 @@ func (c *editorCmp) IsFocused() bool {
 	return c.textarea.Focused()
 }
 
+// Bindings implements Container.
 func (c *editorCmp) Bindings() []key.Binding {
 	return c.keyMap.KeyBindings()
 }

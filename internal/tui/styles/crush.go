@@ -16,7 +16,7 @@ func NewCrushTheme() *Theme {
 
 		// Backgrounds
 		BgBase:        charmtone.Pepper,
-		BgBaseLighter: Lighten(charmtone.Pepper, 2),
+		BgBaseLighter: charmtone.BBQ,
 		BgSubtle:      charmtone.Charcoal,
 		BgOverlay:     charmtone.Iron,
 

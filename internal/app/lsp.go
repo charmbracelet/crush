@@ -71,7 +71,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	app.cancelFuncsMutex.Unlock()
 
 	// Add the watcher to a WaitGroup to track active goroutines
-	app.watcherWG.Add(1)
+	app.lspWatcherWG.Add(1)
 
 	// Add to map with mutex protection before starting goroutine
 	app.clientsMutex.Lock()
@@ -83,7 +83,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 
 // runWorkspaceWatcher executes the workspace watcher for an LSP client
 func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.WorkspaceWatcher) {
-	defer app.watcherWG.Done()
+	defer app.lspWatcherWG.Done()
 	defer log.RecoverPanic("LSP-"+name, func() {
 		// Try to restart the client
 		app.restartLSPClient(ctx, name)

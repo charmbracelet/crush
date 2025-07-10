@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -19,7 +18,8 @@ import (
 
 type Header interface {
 	util.Model
-	SetSession(session session.Session)
+	SetSession(session session.Session) tea.Cmd
+	SetWidth(width int) tea.Cmd
 	SetDetailsOpen(open bool)
 }
 
@@ -43,10 +43,6 @@ func (h *header) Init() tea.Cmd {
 
 func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		p.width = msg.Width - 2
-	case chat.SessionSelectedMsg:
-		p.session = msg
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
 			if p.session.ID == msg.Payload.ID {
@@ -131,6 +127,13 @@ func (h *header) SetDetailsOpen(open bool) {
 }
 
 // SetSession implements Header.
-func (h *header) SetSession(session session.Session) {
+func (h *header) SetSession(session session.Session) tea.Cmd {
 	h.session = session
+	return nil
+}
+
+// SetWidth implements Header.
+func (h *header) SetWidth(width int) tea.Cmd {
+	h.width = width
+	return nil
 }

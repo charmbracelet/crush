@@ -1,8 +1,6 @@
 package models
 
 import (
-	"slices"
-
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -12,7 +10,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -27,6 +24,9 @@ const (
 const (
 	LargeModelType int = iota
 	SmallModelType
+
+	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
 )
 
 // ModelSelectedMsg is sent when a model is selected
@@ -53,10 +53,9 @@ type modelDialogCmp struct {
 	wWidth  int
 	wHeight int
 
-	modelList list.ListModel
+	modelList *ModelListComponent
 	keyMap    KeyMap
 	help      help.Model
-	modelType int
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -75,12 +74,7 @@ func NewModelDialogCmp() ModelDialog {
 
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := list.New(
-		list.WithFilterable(true),
-		list.WithKeyMap(listKeyMap),
-		list.WithInputStyle(inputStyle),
-		list.WithWrapNavigation(true),
-	)
+	modelList := NewModelListComponent(listKeyMap, inputStyle, "Choose a model for large, complex tasks")
 	help := help.New()
 	help.Styles = t.S().Help
 
@@ -89,12 +83,10 @@ func NewModelDialogCmp() ModelDialog {
 		width:     defaultWidth,
 		keyMap:    DefaultKeyMap(),
 		help:      help,
-		modelType: LargeModelType,
 	}
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
-	m.SetModelType(m.modelType)
 	return m.modelList.Init()
 }
 
@@ -103,7 +95,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.wWidth = msg.Width
 		m.wHeight = msg.Height
-		m.SetModelType(m.modelType)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case tea.KeyPressMsg:
 		switch {
@@ -116,7 +107,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(ModelOption)
 
 			var modelType config.SelectedModelType
-			if m.modelType == LargeModelType {
+			if m.modelList.GetModelType() == LargeModelType {
 				modelType = config.SelectedModelTypeLarge
 			} else {
 				modelType = config.SelectedModelTypeSmall
@@ -133,16 +124,18 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}),
 			)
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.modelType == LargeModelType {
-				return m, m.SetModelType(SmallModelType)
+			if m.modelList.GetModelType() == LargeModelType {
+				m.modelList.SetInputPlaceholder(smallModelInputPlaceholder)
+				return m, m.modelList.SetModelType(SmallModelType)
 			} else {
-				return m, m.SetModelType(LargeModelType)
+				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
+				return m, m.modelList.SetModelType(LargeModelType)
 			}
 		case key.Matches(msg, m.keyMap.Close):
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := m.modelList.Update(msg)
-			m.modelList = u.(list.ListModel)
+			m.modelList = u
 			return m, cmd
 		}
 	}
@@ -164,12 +157,10 @@ func (m *modelDialogCmp) View() string {
 }
 
 func (m *modelDialogCmp) Cursor() *tea.Cursor {
-	if cursor, ok := m.modelList.(util.Cursor); ok {
-		cursor := cursor.Cursor()
-		if cursor != nil {
-			cursor = m.moveCursor(cursor)
-			return cursor
-		}
+	cursor := m.modelList.Cursor()
+	if cursor != nil {
+		cursor = m.moveCursor(cursor)
+		return cursor
 	}
 	return nil
 }
@@ -187,7 +178,8 @@ func (m *modelDialogCmp) listWidth() int {
 }
 
 func (m *modelDialogCmp) listHeight() int {
-	listHeigh := len(m.modelList.Items()) + 2 + 4 // height based on items + 2 for the input + 4 for the sections
+	items := m.modelList.Items()
+	listHeigh := len(items) + 2 + 4
 	return min(listHeigh, m.wHeight/2)
 }
 
@@ -215,115 +207,8 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 	choices := []string{"Large Task", "Small Task"}
 	iconSelected := "◉"
 	iconUnselected := "○"
-	if m.modelType == LargeModelType {
+	if m.modelList.GetModelType() == LargeModelType {
 		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + "  " + iconUnselected + " " + choices[1])
 	}
 	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + "  " + iconSelected + " " + choices[1])
-}
-
-func (m *modelDialogCmp) SetModelType(modelType int) tea.Cmd {
-	m.modelType = modelType
-
-	providers, err := config.Providers()
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	modelItems := []util.Model{}
-	selectIndex := 0
-
-	cfg := config.Get()
-	var currentModel config.SelectedModel
-	if m.modelType == LargeModelType {
-		currentModel = cfg.Models[config.SelectedModelTypeLarge]
-	} else {
-		currentModel = cfg.Models[config.SelectedModelTypeSmall]
-	}
-
-	// Create a map to track which providers we've already added
-	addedProviders := make(map[string]bool)
-
-	// First, add any configured providers that are not in the known providers list
-	// These should appear at the top of the list
-	knownProviders := provider.KnownProviders()
-	for providerID, providerConfig := range cfg.Providers {
-		if providerConfig.Disable {
-			continue
-		}
-
-		// Check if this provider is not in the known providers list
-		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
-			// Convert config provider to provider.Provider format
-			configProvider := provider.Provider{
-				Name:   string(providerID), // Use provider ID as name for unknown providers
-				ID:     provider.InferenceProvider(providerID),
-				Models: make([]provider.Model, len(providerConfig.Models)),
-			}
-
-			// Convert models
-			for i, model := range providerConfig.Models {
-				configProvider.Models[i] = provider.Model{
-					ID:                     model.ID,
-					Model:                  model.Model,
-					CostPer1MIn:            model.CostPer1MIn,
-					CostPer1MOut:           model.CostPer1MOut,
-					CostPer1MInCached:      model.CostPer1MInCached,
-					CostPer1MOutCached:     model.CostPer1MOutCached,
-					ContextWindow:          model.ContextWindow,
-					DefaultMaxTokens:       model.DefaultMaxTokens,
-					CanReason:              model.CanReason,
-					HasReasoningEffort:     model.HasReasoningEffort,
-					DefaultReasoningEffort: model.DefaultReasoningEffort,
-					SupportsImages:         model.SupportsImages,
-				}
-			}
-
-			// Add this unknown provider to the list
-			name := configProvider.Name
-			if name == "" {
-				name = string(configProvider.ID)
-			}
-			modelItems = append(modelItems, commands.NewItemSection(name))
-			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
-					Provider: configProvider,
-					Model:    model,
-				}))
-				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
-					selectIndex = len(modelItems) - 1 // Set the selected index to the current model
-				}
-			}
-			addedProviders[providerID] = true
-		}
-	}
-
-	// Then add the known providers from the predefined list
-	for _, provider := range providers {
-		// Skip if we already added this provider as an unknown provider
-		if addedProviders[string(provider.ID)] {
-			continue
-		}
-
-		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers[string(provider.ID)]; exists && providerConfig.Disable {
-			continue
-		}
-
-		name := provider.Name
-		if name == "" {
-			name = string(provider.ID)
-		}
-		modelItems = append(modelItems, commands.NewItemSection(name))
-		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
-				Provider: provider,
-				Model:    model,
-			}))
-			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
-				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
-			}
-		}
-	}
-
-	return tea.Sequence(m.modelList.SetItems(modelItems), m.modelList.SetSelected(selectIndex))
 }

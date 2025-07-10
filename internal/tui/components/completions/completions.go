@@ -70,8 +70,8 @@ func New() Completions {
 		list.WithHideFilterInput(true),
 	)
 	return &completionsCmp{
-		width:  30,
-		height: 10,
+		width:  0,
+		height: 0,
 		list:   l,
 		query:  "",
 		keyMap: completionsKeyMap,
@@ -89,6 +89,10 @@ func (c *completionsCmp) Init() tea.Cmd {
 // Update implements Completions.
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		c.width = min(msg.Width-c.x, 80)
+		c.height = min(msg.Height-c.y, 15)
+		return c, nil
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Up):
@@ -135,7 +139,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
 			items = append(items, item)
 		}
-		c.height = max(min(10, len(items)), 1) // Ensure at least 1 item height
+		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
 		cmds := []tea.Cmd{
 			c.list.SetSize(c.width, c.height),
 			c.list.SetItems(items),

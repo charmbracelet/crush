@@ -2,21 +2,30 @@ package chat
 
 import (
 	"context"
-	"strings"
+	"runtime"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/editor"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/header"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/sidebar"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
+	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -26,14 +35,37 @@ import (
 
 var ChatPageID page.PageID = "chat"
 
-const CompactModeBreakpoint = 120 // Width at which the chat page switches to compact mode
-
 type (
 	OpenFilePickerMsg struct{}
 	ChatFocusedMsg    struct {
-		Focused bool // True if the chat input is focused, false otherwise
+		Focused bool
 	}
 	CancelTimerExpiredMsg struct{}
+)
+
+type PanelType string
+
+const (
+	PanelTypeChat   PanelType = "chat"
+	PanelTypeEditor PanelType = "editor"
+	PanelTypeSplash PanelType = "splash"
+)
+
+const (
+	CompactModeBreakpoint = 120 // Width at which the chat page switches to compact mode
+	EditorHeight          = 5   // Height of the editor input area including padding
+	SideBarWidth          = 31  // Width of the sidebar
+	SideBarDetailsPadding = 1   // Padding for the sidebar details section
+	HeaderHeight          = 1   // Height of the header
+
+	// Layout constants for borders and padding
+	BorderWidth        = 1 // Width of component borders
+	LeftRightBorders   = 2 // Left + right border width (1 + 1)
+	TopBottomBorders   = 2 // Top + bottom border width (1 + 1)
+	DetailsPositioning = 2 // Positioning adjustment for details panel
+
+	// Timing constants
+	CancelTimerDuration = 2 * time.Second // Duration before cancel timer expires
 )
 
 type ChatPage interface {
@@ -42,138 +74,184 @@ type ChatPage interface {
 	IsChatFocused() bool
 }
 
+// cancelTimerCmd creates a command that expires the cancel timer
+func cancelTimerCmd() tea.Cmd {
+	return tea.Tick(CancelTimerDuration, func(time.Time) tea.Msg {
+		return CancelTimerExpiredMsg{}
+	})
+}
+
 type chatPage struct {
-	wWidth, wHeight int // Window dimensions
-	app             *app.App
+	width, height               int
+	detailsWidth, detailsHeight int
+	app                         *app.App
+	keyboardEnhancements        tea.KeyboardEnhancementsMsg
 
-	layout layout.SplitPaneLayout
+	// Layout state
+	compact      bool
+	forceCompact bool
+	focusedPane  PanelType
 
+	// Session
 	session session.Session
+	keyMap  KeyMap
 
-	keyMap KeyMap
+	// Components
+	header  header.Header
+	sidebar sidebar.Sidebar
+	chat    chat.MessageListCmp
+	editor  editor.Editor
+	splash  splash.Splash
 
-	chatFocused bool
+	// Simple state flags
+	showingDetails   bool
+	isCanceling      bool
+	splashFullScreen bool
+	isOnboarding     bool
+	isProjectInit    bool
+}
 
-	compactMode      bool
-	forceCompactMode bool // Force compact mode regardless of window size
-	showDetails      bool // Show details in the header
-	header           header.Header
-	compactSidebar   layout.Container
-
-	cancelPending bool // True if ESC was pressed once and waiting for second press
+func New(app *app.App) ChatPage {
+	return &chatPage{
+		app:         app,
+		keyMap:      DefaultKeyMap(),
+		header:      header.New(app.LSPClients),
+		sidebar:     sidebar.New(app.History, app.LSPClients, false),
+		chat:        chat.New(app),
+		editor:      editor.New(app),
+		splash:      splash.New(),
+		focusedPane: PanelTypeSplash,
+	}
 }
 
 func (p *chatPage) Init() tea.Cmd {
-	return tea.Batch(
-		p.layout.Init(),
-		p.compactSidebar.Init(),
-		p.layout.FocusPanel(layout.BottomPanel), // Focus on the bottom panel (editor),
-	)
-}
+	cfg := config.Get()
+	compact := cfg.Options.TUI.CompactMode
+	p.compact = compact
+	p.forceCompact = compact
+	p.sidebar.SetCompactMode(p.compact)
 
-// cancelTimerCmd creates a command that expires the cancel timer after 2 seconds
-func (p *chatPage) cancelTimerCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-		return CancelTimerExpiredMsg{}
-	})
+	// Set splash state based on config
+	if !config.HasInitialDataConfig() {
+		// First-time setup: show model selection
+		p.splash.SetOnboarding(true)
+		p.isOnboarding = true
+		p.splashFullScreen = true
+	} else if b, _ := config.ProjectNeedsInitialization(); b {
+		// Project needs CRUSH.md initialization
+		p.splash.SetProjectInit(true)
+		p.isProjectInit = true
+		p.splashFullScreen = true
+	} else {
+		// Ready to chat: focus editor, splash in background
+		p.focusedPane = PanelTypeEditor
+		p.splashFullScreen = false
+	}
+
+	return tea.Batch(
+		p.header.Init(),
+		p.sidebar.Init(),
+		p.chat.Init(),
+		p.editor.Init(),
+		p.splash.Init(),
+	)
 }
 
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
-		m, cmd := p.layout.Update(msg)
-		p.layout = m.(layout.SplitPaneLayout)
-		return p, cmd
-	case CancelTimerExpiredMsg:
-		p.cancelPending = false
+		p.keyboardEnhancements = msg
 		return p, nil
 	case tea.WindowSizeMsg:
-		h, cmd := p.header.Update(msg)
+		return p, p.SetSize(msg.Width, msg.Height)
+	case CancelTimerExpiredMsg:
+		p.isCanceling = false
+		return p, nil
+	case chat.SendMsg:
+		return p, p.sendMessage(msg.Text, msg.Attachments)
+	case chat.SessionSelectedMsg:
+		return p, p.setSession(msg)
+	case commands.ToggleCompactModeMsg:
+		p.forceCompact = !p.forceCompact
+		var cmd tea.Cmd
+		if p.forceCompact {
+			p.setCompactMode(true)
+			cmd = p.updateCompactConfig(true)
+		} else if p.width >= CompactModeBreakpoint {
+			p.setCompactMode(false)
+			cmd = p.updateCompactConfig(false)
+		}
+		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
+	case pubsub.Event[session.Session]:
+		u, cmd := p.header.Update(msg)
+		p.header = u.(header.Header)
 		cmds = append(cmds, cmd)
-		p.header = h.(header.Header)
-		cmds = append(cmds, p.compactSidebar.SetSize(msg.Width-4, 0))
-		// the mode is only relevant when there is a  session
-		if p.session.ID != "" {
-			// Only auto-switch to compact mode if not forced
-			if !p.forceCompactMode {
-				if msg.Width <= CompactModeBreakpoint && p.wWidth > CompactModeBreakpoint {
-					p.wWidth = msg.Width
-					p.wHeight = msg.Height
-					cmds = append(cmds, p.setCompactMode(true))
-					return p, tea.Batch(cmds...)
-				} else if msg.Width > CompactModeBreakpoint && p.wWidth <= CompactModeBreakpoint {
-					p.wWidth = msg.Width
-					p.wHeight = msg.Height
-					return p, p.setCompactMode(false)
-				}
-			}
-		}
-		p.wWidth = msg.Width
-		p.wHeight = msg.Height
-		layoutHeight := msg.Height
-		if p.compactMode {
-			// make space for the header
-			layoutHeight -= 1
-		}
-		cmd = p.layout.SetSize(msg.Width, layoutHeight)
+		u, cmd = p.sidebar.Update(msg)
+		p.sidebar = u.(sidebar.Sidebar)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+	case chat.SessionClearedMsg:
+		u, cmd := p.header.Update(msg)
+		p.header = u.(header.Header)
+		cmds = append(cmds, cmd)
+		u, cmd = p.sidebar.Update(msg)
+		p.sidebar = u.(sidebar.Sidebar)
+		cmds = append(cmds, cmd)
+		u, cmd = p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+	case filepicker.FilePickedMsg,
+		completions.CompletionsClosedMsg,
+		completions.SelectCompletionMsg:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
-	case chat.SendMsg:
-		cmd := p.sendMessage(msg.Text, msg.Attachments)
-		if cmd != nil {
-			return p, cmd
-		}
-	case commands.ToggleCompactModeMsg:
-		// Only allow toggling if window width is larger than compact breakpoint
-		if p.wWidth > CompactModeBreakpoint {
-			p.forceCompactMode = !p.forceCompactMode
-			// If force compact mode is enabled, switch to compact mode
-			// If force compact mode is disabled, switch based on window size
-			if p.forceCompactMode {
-				return p, p.setCompactMode(true)
-			} else {
-				// Return to auto mode based on window size
-				shouldBeCompact := p.wWidth <= CompactModeBreakpoint
-				return p, p.setCompactMode(shouldBeCompact)
-			}
-		}
+	case pubsub.Event[message.Message],
+		anim.StepMsg,
+		spinner.TickMsg:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+
+	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
+		u, cmd := p.sidebar.Update(msg)
+		p.sidebar = u.(sidebar.Sidebar)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+
 	case commands.CommandRunCustomMsg:
-		// Check if the agent is busy before executing custom commands
 		if p.app.CoderAgent.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 
-		// Handle custom command execution
 		cmd := p.sendMessage(msg.Content, nil)
 		if cmd != nil {
 			return p, cmd
 		}
-	case chat.SessionSelectedMsg:
-		if p.session.ID == "" {
-			cmd := p.setMessages()
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+	case splash.OnboardingCompleteMsg:
+		p.splashFullScreen = false
+		if b, _ := config.ProjectNeedsInitialization(); b {
+			p.splash.SetProjectInit(true)
+			p.splashFullScreen = true
+			return p, p.SetSize(p.width, p.height)
 		}
-		needsModeChange := p.session.ID == ""
-		p.session = msg
-		p.header.SetSession(msg)
-		if needsModeChange && (p.wWidth <= CompactModeBreakpoint || p.forceCompactMode) {
-			cmds = append(cmds, p.setCompactMode(true))
+		err := p.app.InitCoderAgent()
+		if err != nil {
+			return p, util.ReportError(err)
 		}
+		p.isOnboarding = false
+		p.isProjectInit = false
+		p.focusedPane = PanelTypeEditor
+		return p, p.SetSize(p.width, p.height)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
-			p.session = session.Session{}
-			return p, tea.Batch(
-				p.clearMessages(),
-				util.CmdHandler(chat.SessionClearedMsg{}),
-				p.setCompactMode(false),
-				p.layout.FocusPanel(layout.BottomPanel),
-				util.CmdHandler(ChatFocusedMsg{Focused: false}),
-			)
+			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
 			agentCfg := config.Get().Agents["coder"]
 			model := config.Get().GetModelByType(agentCfg.Model)
@@ -184,155 +262,126 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {
-				return p, nil
+				u, cmd := p.splash.Update(msg)
+				p.splash = u.(splash.Splash)
+				return p, cmd
 			}
-			p.chatFocused = !p.chatFocused
-			if p.chatFocused {
-				cmds = append(cmds, p.layout.FocusPanel(layout.LeftPanel))
-				cmds = append(cmds, util.CmdHandler(ChatFocusedMsg{Focused: true}))
-			} else {
-				cmds = append(cmds, p.layout.FocusPanel(layout.BottomPanel))
-				cmds = append(cmds, util.CmdHandler(ChatFocusedMsg{Focused: false}))
-			}
-			return p, tea.Batch(cmds...)
+			p.changeFocus()
+			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
-			if p.session.ID != "" {
-				if p.cancelPending {
-					// Second ESC press - actually cancel the session
-					p.cancelPending = false
-					p.app.CoderAgent.Cancel(p.session.ID)
-					return p, nil
-				} else {
-					// First ESC press - start the timer
-					p.cancelPending = true
-					return p, p.cancelTimerCmd()
-				}
+			if p.session.ID != "" && p.app.CoderAgent.IsBusy() {
+				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
-			if p.session.ID == "" || !p.compactMode {
-				return p, nil // No session to show details for
-			}
-			p.showDetails = !p.showDetails
-			p.header.SetDetailsOpen(p.showDetails)
-			if p.showDetails {
-				return p, tea.Batch()
-			}
-
+			p.showDetails()
 			return p, nil
 		}
+
+		switch p.focusedPane {
+		case PanelTypeChat:
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+		case PanelTypeEditor:
+			u, cmd := p.editor.Update(msg)
+			p.editor = u.(editor.Editor)
+			cmds = append(cmds, cmd)
+		case PanelTypeSplash:
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		}
+	case tea.PasteMsg:
+		switch p.focusedPane {
+		case PanelTypeEditor:
+			u, cmd := p.editor.Update(msg)
+			p.editor = u.(editor.Editor)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
+		case PanelTypeChat:
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
+		case PanelTypeSplash:
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+			return p, tea.Batch(cmds...)
+		}
 	}
-	u, cmd := p.layout.Update(msg)
-	cmds = append(cmds, cmd)
-	p.layout = u.(layout.SplitPaneLayout)
-	h, cmd := p.header.Update(msg)
-	p.header = h.(header.Header)
-	cmds = append(cmds, cmd)
-	s, cmd := p.compactSidebar.Update(msg)
-	p.compactSidebar = s.(layout.Container)
-	cmds = append(cmds, cmd)
 	return p, tea.Batch(cmds...)
 }
 
-func (p *chatPage) setMessages() tea.Cmd {
-	messagesContainer := layout.NewContainer(
-		chat.NewMessagesListCmp(p.app),
-		layout.WithPadding(1, 1, 0, 1),
-	)
-	return tea.Batch(p.layout.SetLeftPanel(messagesContainer), messagesContainer.Init())
-}
-
-func (p *chatPage) setSidebar() tea.Cmd {
-	sidebarContainer := sidebarCmp(p.app, false, p.session)
-	sidebarContainer.Init()
-	return p.layout.SetRightPanel(sidebarContainer)
-}
-
-func (p *chatPage) clearMessages() tea.Cmd {
-	return p.layout.ClearLeftPanel()
-}
-
-func (p *chatPage) setCompactMode(compact bool) tea.Cmd {
-	p.compactMode = compact
-	var cmds []tea.Cmd
-	if compact {
-		// add offset for the header
-		p.layout.SetOffset(0, 1)
-		// make space for the header
-		cmds = append(cmds, p.layout.SetSize(p.wWidth, p.wHeight-1))
-		// remove the sidebar
-		cmds = append(cmds, p.layout.ClearRightPanel())
-		return tea.Batch(cmds...)
-	} else {
-		// remove the offset for the header
-		p.layout.SetOffset(0, 0)
-		// restore the original size
-		cmds = append(cmds, p.layout.SetSize(p.wWidth, p.wHeight))
-		// set the sidebar
-		cmds = append(cmds, p.setSidebar())
-		l, cmd := p.layout.Update(chat.SessionSelectedMsg(p.session))
-		p.layout = l.(layout.SplitPaneLayout)
-		cmds = append(cmds, cmd)
-
-		return tea.Batch(cmds...)
+func (p *chatPage) Cursor() *tea.Cursor {
+	switch p.focusedPane {
+	case PanelTypeEditor:
+		return p.editor.Cursor()
+	case PanelTypeSplash:
+		return p.splash.Cursor()
+	default:
+		return nil
 	}
-}
-
-func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
-	var cmds []tea.Cmd
-	if p.session.ID == "" {
-		session, err := p.app.Sessions.Create(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
-		}
-
-		p.session = session
-		cmd := p.setMessages()
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
-	}
-
-	_, err := p.app.CoderAgent.Run(context.Background(), p.session.ID, text, attachments...)
-	if err != nil {
-		return util.ReportError(err)
-	}
-	return tea.Batch(cmds...)
-}
-
-func (p *chatPage) SetSize(width, height int) tea.Cmd {
-	return p.layout.SetSize(width, height)
-}
-
-func (p *chatPage) GetSize() (int, int) {
-	return p.layout.GetSize()
 }
 
 func (p *chatPage) View() string {
-	if !p.compactMode || p.session.ID == "" {
-		// If not in compact mode or there is no session, we don't show the header
-		return p.layout.View()
+	var chatView string
+	t := styles.CurrentTheme()
+
+	if p.session.ID == "" {
+		splashView := p.splash.View()
+		// Full screen during onboarding or project initialization
+		if p.splashFullScreen {
+			chatView = splashView
+		} else {
+			// Show splash + editor for new message state
+			editorView := p.editor.View()
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				t.S().Base.Render(splashView),
+				editorView,
+			)
+		}
+	} else {
+		messagesView := p.chat.View()
+		editorView := p.editor.View()
+		if p.compact {
+			headerView := p.header.View()
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				headerView,
+				messagesView,
+				editorView,
+			)
+		} else {
+			sidebarView := p.sidebar.View()
+			messages := lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				messagesView,
+				sidebarView,
+			)
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				messages,
+				p.editor.View(),
+			)
+		}
 	}
-	layoutView := p.layout.View()
-	chatView := strings.Join(
-		[]string{
-			p.header.View(),
-			layoutView,
-		}, "\n",
-	)
+
 	layers := []*lipgloss.Layer{
 		lipgloss.NewLayer(chatView).X(0).Y(0),
 	}
-	if p.showDetails {
-		t := styles.CurrentTheme()
+
+	if p.showingDetails {
 		style := t.S().Base.
+			Width(p.detailsWidth).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus)
-		version := t.S().Subtle.Padding(0, 1).AlignHorizontal(lipgloss.Right).Width(p.wWidth - 4).Render(version.Version)
+		version := t.S().Subtle.Width(p.detailsWidth - 2).AlignHorizontal(lipgloss.Right).Render(version.Version)
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				p.compactSidebar.View(),
+				p.sidebar.View(),
 				version,
 			),
 		)
@@ -344,11 +393,159 @@ func (p *chatPage) View() string {
 	return canvas.Render()
 }
 
-func (p *chatPage) Cursor() *tea.Cursor {
-	if v, ok := p.layout.(util.Cursor); ok {
-		return v.Cursor()
+func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
+	return func() tea.Msg {
+		err := config.Get().SetCompactMode(compact)
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update compact mode configuration: " + err.Error(),
+			}
+		}
+		return nil
 	}
-	return nil
+}
+
+func (p *chatPage) setCompactMode(compact bool) {
+	if p.compact == compact {
+		return
+	}
+	p.compact = compact
+	if compact {
+		p.compact = true
+		p.sidebar.SetCompactMode(true)
+	} else {
+		p.compact = false
+		p.showingDetails = false
+		p.sidebar.SetCompactMode(false)
+	}
+}
+
+func (p *chatPage) handleCompactMode(newWidth int) {
+	if p.forceCompact {
+		return
+	}
+	if newWidth < CompactModeBreakpoint && !p.compact {
+		p.setCompactMode(true)
+	}
+	if newWidth >= CompactModeBreakpoint && p.compact {
+		p.setCompactMode(false)
+	}
+}
+
+func (p *chatPage) SetSize(width, height int) tea.Cmd {
+	p.handleCompactMode(width)
+	p.width = width
+	p.height = height
+	var cmds []tea.Cmd
+
+	if p.session.ID == "" {
+		if p.splashFullScreen {
+			cmds = append(cmds, p.splash.SetSize(width, height))
+		} else {
+			cmds = append(cmds, p.splash.SetSize(width, height-EditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
+			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
+		}
+	} else {
+		if p.compact {
+			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight))
+			p.detailsWidth = width - DetailsPositioning
+			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
+			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
+			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
+		} else {
+			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
+			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-EditorHeight))
+		}
+		cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (p *chatPage) newSession() tea.Cmd {
+	if p.session.ID == "" {
+		return nil
+	}
+
+	p.session = session.Session{}
+	p.focusedPane = PanelTypeEditor
+	p.isCanceling = false
+	return tea.Batch(
+		util.CmdHandler(chat.SessionClearedMsg{}),
+		p.SetSize(p.width, p.height),
+	)
+}
+
+func (p *chatPage) setSession(session session.Session) tea.Cmd {
+	if p.session.ID == session.ID {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+	p.session = session
+
+	cmds = append(cmds, p.SetSize(p.width, p.height))
+	cmds = append(cmds, p.chat.SetSession(session))
+	cmds = append(cmds, p.sidebar.SetSession(session))
+	cmds = append(cmds, p.header.SetSession(session))
+	cmds = append(cmds, p.editor.SetSession(session))
+
+	return tea.Sequence(cmds...)
+}
+
+func (p *chatPage) changeFocus() {
+	if p.session.ID == "" {
+		return
+	}
+	switch p.focusedPane {
+	case PanelTypeChat:
+		p.focusedPane = PanelTypeEditor
+		p.editor.Focus()
+		p.chat.Blur()
+	case PanelTypeEditor:
+		p.focusedPane = PanelTypeChat
+		p.chat.Focus()
+		p.editor.Blur()
+	}
+}
+
+func (p *chatPage) cancel() tea.Cmd {
+	if p.isCanceling {
+		p.isCanceling = false
+		p.app.CoderAgent.Cancel(p.session.ID)
+		return nil
+	}
+
+	p.isCanceling = true
+	return cancelTimerCmd()
+}
+
+func (p *chatPage) showDetails() {
+	if p.session.ID == "" || !p.compact {
+		return
+	}
+	p.showingDetails = !p.showingDetails
+	p.header.SetDetailsOpen(p.showingDetails)
+}
+
+func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
+	session := p.session
+	var cmds []tea.Cmd
+	if p.session.ID == "" {
+		newSession, err := p.app.Sessions.Create(context.Background(), "New Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		session = newSession
+		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
+	}
+	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (p *chatPage) Bindings() []key.Binding {
@@ -356,9 +553,9 @@ func (p *chatPage) Bindings() []key.Binding {
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
 	}
-	if p.app.CoderAgent.IsBusy() {
+	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
-		if p.cancelPending {
+		if p.isCanceling {
 			cancelBinding = key.NewBinding(
 				key.WithKeys("esc"),
 				key.WithHelp("esc", "press again to cancel"),
@@ -367,61 +564,275 @@ func (p *chatPage) Bindings() []key.Binding {
 		bindings = append([]key.Binding{cancelBinding}, bindings...)
 	}
 
-	if p.chatFocused {
+	switch p.focusedPane {
+	case PanelTypeChat:
 		bindings = append([]key.Binding{
 			key.NewBinding(
 				key.WithKeys("tab"),
 				key.WithHelp("tab", "focus editor"),
 			),
 		}, bindings...)
-	} else {
+		bindings = append(bindings, p.chat.Bindings()...)
+	case PanelTypeEditor:
 		bindings = append([]key.Binding{
 			key.NewBinding(
 				key.WithKeys("tab"),
 				key.WithHelp("tab", "focus chat"),
 			),
 		}, bindings...)
+		bindings = append(bindings, p.editor.Bindings()...)
+	case PanelTypeSplash:
+		bindings = append(bindings, p.splash.Bindings()...)
 	}
 
-	bindings = append(bindings, p.layout.Bindings()...)
 	return bindings
 }
 
-func sidebarCmp(app *app.App, compact bool, session session.Session) layout.Container {
-	padding := layout.WithPadding(1, 1, 1, 1)
-	if compact {
-		padding = layout.WithPadding(0, 1, 1, 1)
-	}
-	sidebar := sidebar.NewSidebarCmp(app.History, app.LSPClients, compact)
-	if session.ID != "" {
-		sidebar.SetSession(session)
+func (a *chatPage) Help() help.KeyMap {
+	var shortList []key.Binding
+	var fullList [][]key.Binding
+	switch {
+	case a.isOnboarding && !a.splash.IsShowingAPIKey():
+		shortList = append(shortList,
+			// Choose model
+			key.NewBinding(
+				key.WithKeys("up", "down"),
+				key.WithHelp("↑/↓", "choose"),
+			),
+			// Accept selection
+			key.NewBinding(
+				key.WithKeys("enter", "ctrl+y"),
+				key.WithHelp("enter", "accept"),
+			),
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	case a.isOnboarding && a.splash.IsShowingAPIKey():
+		var pasteKey key.Binding
+		if runtime.GOOS != "darwin" {
+			pasteKey = key.NewBinding(
+				key.WithKeys("ctrl+v"),
+				key.WithHelp("ctrl+v", "paste API key"),
+			)
+		} else {
+			pasteKey = key.NewBinding(
+				key.WithKeys("cmd+v"),
+				key.WithHelp("cmd+v", "paste API key"),
+			)
+		}
+		shortList = append(shortList,
+			// Go back
+			key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "back"),
+			),
+			// Paste
+			pasteKey,
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	case a.isProjectInit:
+		shortList = append(shortList,
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	default:
+		if a.editor.IsCompletionsOpen() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("tab", "enter"),
+					key.WithHelp("tab/enter", "complete"),
+				),
+				key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "cancel"),
+				),
+				key.NewBinding(
+					key.WithKeys("up", "down"),
+					key.WithHelp("↑/↓", "choose"),
+				),
+			)
+			for _, v := range shortList {
+				fullList = append(fullList, []key.Binding{v})
+			}
+			return core.NewSimpleHelp(shortList, fullList)
+		}
+		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+			cancelBinding := key.NewBinding(
+				key.WithKeys("esc"),
+				key.WithHelp("esc", "cancel"),
+			)
+			if a.isCanceling {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "press again to cancel"),
+				)
+			}
+			shortList = append(shortList, cancelBinding)
+			fullList = append(fullList,
+				[]key.Binding{
+					cancelBinding,
+				},
+			)
+		}
+		globalBindings := []key.Binding{}
+		// we are in a session
+		if a.session.ID != "" {
+			tabKey := key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "focus chat"),
+			)
+			if a.focusedPane == PanelTypeChat {
+				tabKey = key.NewBinding(
+					key.WithKeys("tab"),
+					key.WithHelp("tab", "focus editor"),
+				)
+			}
+			shortList = append(shortList, tabKey)
+			globalBindings = append(globalBindings, tabKey)
+		}
+		commandsBinding := key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "commands"),
+		)
+		helpBinding := key.NewBinding(
+			key.WithKeys("ctrl+g"),
+			key.WithHelp("ctrl+g", "more"),
+		)
+		globalBindings = append(globalBindings, commandsBinding)
+		globalBindings = append(globalBindings,
+			key.NewBinding(
+				key.WithKeys("ctrl+s"),
+				key.WithHelp("ctrl+s", "sessions"),
+			),
+		)
+		if a.session.ID != "" {
+			globalBindings = append(globalBindings,
+				key.NewBinding(
+					key.WithKeys("ctrl+n"),
+					key.WithHelp("ctrl+n", "new sessions"),
+				))
+		}
+		shortList = append(shortList,
+			// Commands
+			commandsBinding,
+		)
+		fullList = append(fullList, globalBindings)
+
+		if a.focusedPane == PanelTypeChat {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("up", "down"),
+					key.WithHelp("↑↓", "scroll"),
+				),
+			)
+			fullList = append(fullList,
+				[]key.Binding{
+					key.NewBinding(
+						key.WithKeys("up", "down"),
+						key.WithHelp("↑↓", "scroll"),
+					),
+					key.NewBinding(
+						key.WithKeys("shift+up", "shift+down"),
+						key.WithHelp("shift+↑↓", "next/prev item"),
+					),
+					key.NewBinding(
+						key.WithKeys("pgup", "b"),
+						key.WithHelp("b/pgup", "page up"),
+					),
+					key.NewBinding(
+						key.WithKeys("pgdown", " ", "f"),
+						key.WithHelp("f/pgdn", "page down"),
+					),
+				},
+				[]key.Binding{
+					key.NewBinding(
+						key.WithKeys("u"),
+						key.WithHelp("u", "half page up"),
+					),
+					key.NewBinding(
+						key.WithKeys("d"),
+						key.WithHelp("d", "half page down"),
+					),
+					key.NewBinding(
+						key.WithKeys("g", "home"),
+						key.WithHelp("g", "hone"),
+					),
+					key.NewBinding(
+						key.WithKeys("G", "end"),
+						key.WithHelp("G", "end"),
+					),
+				},
+			)
+		} else if a.focusedPane == PanelTypeEditor {
+			newLineBinding := key.NewBinding(
+				key.WithKeys("shift+enter", "ctrl+j"),
+				// "ctrl+j" is a common keybinding for newline in many editors. If
+				// the terminal supports "shift+enter", we substitute the help text
+				// to reflect that.
+				key.WithHelp("ctrl+j", "newline"),
+			)
+			if a.keyboardEnhancements.SupportsKeyDisambiguation() {
+				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
+			}
+			shortList = append(shortList, newLineBinding)
+			fullList = append(fullList,
+				[]key.Binding{
+					newLineBinding,
+					key.NewBinding(
+						key.WithKeys("ctrl+f"),
+						key.WithHelp("ctrl+f", "add image"),
+					),
+					key.NewBinding(
+						key.WithKeys("/"),
+						key.WithHelp("/", "add file"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+v"),
+						key.WithHelp("ctrl+v", "open editor"),
+					),
+				})
+		}
+		shortList = append(shortList,
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+			// Help
+			helpBinding,
+		)
+		fullList = append(fullList, []key.Binding{
+			key.NewBinding(
+				key.WithKeys("ctrl+g"),
+				key.WithHelp("ctrl+g", "less"),
+			),
+		})
 	}
 
-	return layout.NewContainer(
-		sidebar,
-		padding,
-	)
+	return core.NewSimpleHelp(shortList, fullList)
 }
 
-func NewChatPage(app *app.App) ChatPage {
-	editorContainer := layout.NewContainer(
-		editor.NewEditorCmp(app),
-	)
-	return &chatPage{
-		app: app,
-		layout: layout.NewSplitPane(
-			layout.WithRightPanel(sidebarCmp(app, false, session.Session{})),
-			layout.WithBottomPanel(editorContainer),
-			layout.WithFixedBottomHeight(5),
-			layout.WithFixedRightWidth(31),
-		),
-		compactSidebar: sidebarCmp(app, true, session.Session{}),
-		keyMap:         DefaultKeyMap(),
-		header:         header.New(app.LSPClients),
-	}
-}
-
-// IsChatFocused returns whether the chat messages are focused (true) or editor is focused (false)
 func (p *chatPage) IsChatFocused() bool {
-	return p.chatFocused
+	return p.focusedPane == PanelTypeChat
 }

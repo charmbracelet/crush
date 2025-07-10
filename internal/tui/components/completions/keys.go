@@ -22,7 +22,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("up", "move up"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter"),
+			key.WithKeys("enter", "tab", "ctrl+y"),
 			key.WithHelp("enter", "select"),
 		),
 		Cancel: key.NewBinding(

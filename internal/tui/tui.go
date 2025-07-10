@@ -13,13 +13,13 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
-	initDialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/init"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -88,22 +88,7 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
-	// Check if we should show the init dialog
-	cmds = append(cmds, func() tea.Msg {
-		shouldShow, err := config.ProjectNeedsInitialization()
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "Failed to check init status: " + err.Error(),
-			}
-		}
-		if shouldShow {
-			return dialogs.OpenDialogMsg{
-				Model: initDialog.NewInitDialogCmp(),
-			}
-		}
-		return nil
-	})
+	cmds = append(cmds, tea.EnableMouseAllMotion)
 
 	return tea.Batch(cmds...)
 }
@@ -124,6 +109,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
 	// Completions messages
@@ -134,9 +120,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Dialog messages
 	case dialogs.OpenDialogMsg, dialogs.CloseDialogMsg:
+		u, completionCmd := a.completions.Update(completions.CloseCompletionsMsg{})
+		a.completions = u.(completions.Completions)
 		u, dialogCmd := a.dialog.Update(msg)
 		a.dialog = u.(dialogs.DialogCmp)
-		return a, dialogCmd
+		return a, tea.Batch(completionCmd, dialogCmd)
 	case commands.ShowArgumentsDialogMsg:
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
@@ -186,7 +174,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		config.UpdatePreferredModel(msg.ModelType, msg.Model)
+		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
@@ -273,7 +261,7 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
 	a.wWidth, a.wHeight = width, height
 	if a.showingFullHelp {
-		height -= 4
+		height -= 5
 	} else {
 		height -= 2
 	}
@@ -400,10 +388,9 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	page := a.pages[a.currentPage]
-	if withHelp, ok := page.(layout.Help); ok {
-		a.keyMap.pageBindings = withHelp.Bindings()
+	if withHelp, ok := page.(core.KeyMapHelp); ok {
+		a.status.SetKeyMap(withHelp.Help())
 	}
-	a.status.SetKeyMap(a.keyMap)
 	pageView := page.View()
 	components := []string{
 		pageView,
@@ -456,14 +443,14 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
-	chatPage := chat.NewChatPage(app)
+	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()
 
 	model := &appModel{
 		currentPage: chat.ChatPageID,
 		app:         app,
-		status:      status.NewStatusCmp(keyMap),
+		status:      status.NewStatusCmp(),
 		loadedPages: make(map[page.PageID]bool),
 		keyMap:      keyMap,
 

@@ -85,7 +85,7 @@ func Render(version string, compact bool, o Opts) string {
 	}
 
 	// Right field.
-	rightWidth := max(15, o.Width-crushWidth-leftWidth) // 2 for the gap.
+	rightWidth := max(15, o.Width-crushWidth-leftWidth-2) // 2 for the gap.
 	const stepDownAt = 0
 	rightField := new(strings.Builder)
 	for i := range fieldHeight {
@@ -98,7 +98,16 @@ func Render(version string, compact bool, o Opts) string {
 
 	// Return the wide version.
 	const hGap = " "
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftField.String(), hGap, crush, hGap, rightField.String())
+	logo := lipgloss.JoinHorizontal(lipgloss.Top, leftField.String(), hGap, crush, hGap, rightField.String())
+	if o.Width > 0 {
+		// Truncate the logo to the specified width.
+		lines := strings.Split(logo, "\n")
+		for i, line := range lines {
+			lines[i] = ansi.Truncate(line, o.Width, "")
+		}
+		logo = strings.Join(lines, "\n")
+	}
+	return logo
 }
 
 // renderWord renders letterforms to fork a word.

@@ -5,6 +5,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
+// TODO: move this to core
+
 type Focusable interface {
 	Focus() tea.Cmd
 	Blur() tea.Cmd
@@ -22,9 +24,4 @@ type Help interface {
 
 type Positional interface {
 	SetPosition(x, y int) tea.Cmd
-}
-
-// KeyMapProvider defines an interface for types that can provide their key bindings as a slice
-type KeyMapProvider interface {
-	KeyBindings() []key.Binding
 }

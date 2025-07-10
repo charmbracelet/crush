@@ -103,3 +103,11 @@ func MarkProjectInitialized() error {
 
 	return nil
 }
+
+func HasInitialDataConfig() bool {
+	cfgPath := GlobalConfigData()
+	if _, err := os.Stat(cfgPath); err != nil {
+		return false
+	}
+	return true
+}

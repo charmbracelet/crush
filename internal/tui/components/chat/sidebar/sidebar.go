@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -27,10 +26,6 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-)
-
-const (
-	logoBreakpoint = 65
 )
 
 type FileHistory struct {
@@ -52,6 +47,7 @@ type Sidebar interface {
 	util.Model
 	layout.Sizeable
 	SetSession(session session.Session) tea.Cmd
+	SetCompactMode(bool)
 }
 
 type sidebarCmp struct {
@@ -66,7 +62,7 @@ type sidebarCmp struct {
 	files sync.Map
 }
 
-func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
+func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
 	return &sidebarCmp{
 		lspClients:  lspClients,
 		history:     history,
@@ -75,15 +71,11 @@ func NewSidebarCmp(history history.Service, lspClients map[string]*lsp.Client, c
 }
 
 func (m *sidebarCmp) Init() tea.Cmd {
-	m.logo = m.logoBlock(false)
-	m.cwd = cwd()
 	return nil
 }
 
 func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case chat.SessionSelectedMsg:
-		return m, m.SetSession(msg)
 	case SessionFilesMsg:
 		m.files = sync.Map{}
 		for _, file := range msg.Files {
@@ -137,7 +129,16 @@ func (m *sidebarCmp) View() string {
 		m.mcpBlock(),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	style := t.S().Base.
+		Width(m.width).
+		Height(m.height).
+		Padding(1)
+	if m.compactMode {
+		style = style.PaddingTop(0)
+	}
+	return style.Render(
+		lipgloss.JoinVertical(lipgloss.Left, parts...),
+	)
 }
 
 func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
@@ -230,12 +231,8 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 }
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
-	if width < logoBreakpoint && (m.width == 0 || m.width >= logoBreakpoint) {
-		m.logo = m.logoBlock(true)
-	} else if width >= logoBreakpoint && (m.width == 0 || m.width < logoBreakpoint) {
-		m.logo = m.logoBlock(false)
-	}
-
+	m.logo = m.logoBlock()
+	m.cwd = cwd()
 	m.width = width
 	m.height = height
 	return nil
@@ -245,23 +242,27 @@ func (m *sidebarCmp) GetSize() (int, int) {
 	return m.width, m.height
 }
 
-func (m *sidebarCmp) logoBlock(compact bool) string {
+func (m *sidebarCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return logo.Render(version.Version, compact, logo.Opts{
+	return logo.Render(version.Version, true, logo.Opts{
 		FieldColor:   t.Primary,
 		TitleColorA:  t.Secondary,
 		TitleColorB:  t.Primary,
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
+		Width:        m.width - 2,
 	})
 }
 
+func (m *sidebarCmp) getMaxWidth() int {
+	return min(m.width-2, 58) // -2 for padding
+}
+
 func (m *sidebarCmp) filesBlock() string {
-	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
 	section := t.S().Subtle.Render(
-		core.Section("Modified Files", maxWidth),
+		core.Section("Modified Files", m.getMaxWidth()),
 	)
 
 	files := make([]SessionFile, 0)
@@ -302,7 +303,7 @@ func (m *sidebarCmp) filesBlock() string {
 		filePath := file.FilePath
 		filePath = strings.TrimPrefix(filePath, cwd)
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
-		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
+		filePath = ansi.Truncate(filePath, m.getMaxWidth()-lipgloss.Width(extraContent)-2, "…")
 		fileList = append(fileList,
 			core.Status(
 				core.StatusOpts{
@@ -311,7 +312,7 @@ func (m *sidebarCmp) filesBlock() string {
 					Title:        filePath,
 					ExtraContent: extraContent,
 				},
-				m.width,
+				m.getMaxWidth(),
 			),
 		)
 	}
@@ -323,11 +324,10 @@ func (m *sidebarCmp) filesBlock() string {
 }
 
 func (m *sidebarCmp) lspBlock() string {
-	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
 	section := t.S().Subtle.Render(
-		core.Section("LSPs", maxWidth),
+		core.Section("LSPs", m.getMaxWidth()),
 	)
 
 	lspList := []string{section, ""}
@@ -385,7 +385,7 @@ func (m *sidebarCmp) lspBlock() string {
 					Description:  l.LSP.Command,
 					ExtraContent: strings.Join(errs, " "),
 				},
-				m.width,
+				m.getMaxWidth(),
 			),
 		)
 	}
@@ -397,11 +397,10 @@ func (m *sidebarCmp) lspBlock() string {
 }
 
 func (m *sidebarCmp) mcpBlock() string {
-	maxWidth := min(m.width, 58)
 	t := styles.CurrentTheme()
 
 	section := t.S().Subtle.Render(
-		core.Section("MCPs", maxWidth),
+		core.Section("MCPs", m.getMaxWidth()),
 	)
 
 	mcpList := []string{section, ""}
@@ -428,7 +427,7 @@ func (m *sidebarCmp) mcpBlock() string {
 					Title:       l.Name,
 					Description: l.MCP.Command,
 				},
-				m.width,
+				m.getMaxWidth(),
 			),
 		)
 	}
@@ -509,6 +508,11 @@ func (s *sidebarCmp) currentModelBlock() string {
 func (m *sidebarCmp) SetSession(session session.Session) tea.Cmd {
 	m.session = session
 	return m.loadSessionFiles
+}
+
+// SetCompactMode sets the compact mode for the sidebar.
+func (m *sidebarCmp) SetCompactMode(compact bool) {
+	m.compactMode = compact
 }
 
 func cwd() string {

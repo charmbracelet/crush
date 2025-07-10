@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -58,6 +60,8 @@ type SelectedModel struct {
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty"`
+	// The provider's name, used for display purposes.
+	Name string `json:"name,omitempty"`
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
@@ -207,7 +211,9 @@ type Config struct {
 	// TODO: most likely remove this concept when I come back to it
 	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
-	resolver VariableResolver
+	resolver       VariableResolver
+	dataConfigDir  string              `json:"-"`
+	knownProviders []provider.Provider `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {
@@ -275,6 +281,14 @@ func (c *Config) SmallModel() *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+func (c *Config) SetCompactMode(enabled bool) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	c.Options.TUI.CompactMode = enabled
+	return c.SetConfigField("options.tui.compact_mode", enabled)
+}
+
 func (c *Config) Resolve(key string) (string, error) {
 	if c.resolver == nil {
 		return "", fmt.Errorf("no variable resolver configured")
@@ -282,9 +296,78 @@ func (c *Config) Resolve(key string) (string, error) {
 	return c.resolver.ResolveValue(key)
 }
 
-// TODO: maybe handle this better
-func UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
-	cfg := Get()
-	cfg.Models[modelType] = model
+func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
+	c.Models[modelType] = model
+	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
+		return fmt.Errorf("failed to update preferred model: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) SetConfigField(key string, value any) error {
+	// read the data
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			data = []byte("{}")
+		} else {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+	}
+
+	newValue, err := sjson.Set(string(data), key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set config field %s: %w", key, err)
+	}
+	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
+	// First save to the config file
+	err := c.SetConfigField("providers."+providerID+".api_key", apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to save API key to config file: %w", err)
+	}
+
+	if c.Providers == nil {
+		c.Providers = make(map[string]ProviderConfig)
+	}
+
+	providerConfig, exists := c.Providers[providerID]
+	if exists {
+		providerConfig.APIKey = apiKey
+		c.Providers[providerID] = providerConfig
+		return nil
+	}
+
+	var foundProvider *provider.Provider
+	for _, p := range c.knownProviders {
+		if string(p.ID) == providerID {
+			foundProvider = &p
+			break
+		}
+	}
+
+	if foundProvider != nil {
+		// Create new provider config based on known provider
+		providerConfig = ProviderConfig{
+			ID:           providerID,
+			Name:         foundProvider.Name,
+			BaseURL:      foundProvider.APIEndpoint,
+			Type:         foundProvider.Type,
+			APIKey:       apiKey,
+			Disable:      false,
+			ExtraHeaders: make(map[string]string),
+			ExtraParams:  make(map[string]string),
+			Models:       foundProvider.Models,
+		}
+	} else {
+		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+	}
+	// Store the updated provider config
+	c.Providers[providerID] = providerConfig
 	return nil
 }

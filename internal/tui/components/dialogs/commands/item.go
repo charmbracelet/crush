@@ -14,11 +14,12 @@ type ItemSection interface {
 	util.Model
 	layout.Sizeable
 	list.SectionHeader
+	SetInfo(info string)
 }
 type itemSectionModel struct {
-	width     int
-	title     string
-	noPadding bool // No padding for the section header
+	width int
+	title string
+	info  string
 }
 
 func NewItemSection(title string) ItemSection {
@@ -40,7 +41,14 @@ func (m *itemSectionModel) View() string {
 	title := ansi.Truncate(m.title, m.width-2, "…")
 	style := t.S().Base.Padding(1, 1, 0, 1)
 	title = t.S().Muted.Render(title)
-	return style.Render(core.Section(title, m.width-2))
+	section := ""
+	if m.info != "" {
+		section = core.SectionWithInfo(title, m.width-2, m.info)
+	} else {
+		section = core.Section(title, m.width-2)
+	}
+
+	return style.Render(section)
 }
 
 func (m *itemSectionModel) GetSize() (int, int) {
@@ -54,4 +62,8 @@ func (m *itemSectionModel) SetSize(width int, height int) tea.Cmd {
 
 func (m *itemSectionModel) IsSectionHeader() bool {
 	return true
+}
+
+func (m *itemSectionModel) SetInfo(info string) {
+	m.info = info
 }

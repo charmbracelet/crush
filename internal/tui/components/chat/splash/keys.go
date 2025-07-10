@@ -5,14 +5,49 @@ import (
 )
 
 type KeyMap struct {
-	Cancel key.Binding
+	Select,
+	Next,
+	Previous,
+	Yes,
+	No,
+	Tab,
+	LeftRight,
+	Back key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Cancel: key.NewBinding(
+		Select: key.NewBinding(
+			key.WithKeys("enter", "ctrl+y"),
+			key.WithHelp("enter", "confirm"),
+		),
+		Next: key.NewBinding(
+			key.WithKeys("down", "ctrl+n"),
+			key.WithHelp("↓", "next item"),
+		),
+		Previous: key.NewBinding(
+			key.WithKeys("up", "ctrl+p"),
+			key.WithHelp("↑", "previous item"),
+		),
+		Yes: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
+		),
+		No: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
+		),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch"),
+		),
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←/→", "switch"),
+		),
+		Back: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "back"),
 		),
 	}
 }

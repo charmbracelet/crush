@@ -37,7 +37,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
-		globalConfigData(),
+		GlobalConfigData(),
 		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
 		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
 	}
@@ -45,6 +45,8 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
+
+	cfg.dataConfigDir = GlobalConfigData()
 
 	cfg.setDefaults(workingDir)
 
@@ -63,6 +65,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err != nil || len(providers) == 0 {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}
+	cfg.knownProviders = providers
 
 	env := env.New()
 	// Configure providers
@@ -162,6 +165,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 		}
 		prepared := ProviderConfig{
 			ID:           string(p.ID),
+			Name:         p.Name,
 			BaseURL:      p.APIEndpoint,
 			APIKey:       p.APIKey,
 			Type:         p.Type,
@@ -218,6 +222,9 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 
 		// Make sure the provider ID is set
 		providerConfig.ID = id
+		if providerConfig.Name == "" {
+			providerConfig.Name = id // Use ID as name if not set
+		}
 		// default to OpenAI if not set
 		if providerConfig.Type == "" {
 			providerConfig.Type = provider.TypeOpenAI
@@ -229,9 +236,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			continue
 		}
 		if providerConfig.APIKey == "" {
-			slog.Warn("Skipping custom provider due to missing API key", "provider", id)
-			delete(cfg.Providers, id)
-			continue
+			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		if providerConfig.BaseURL == "" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
@@ -251,9 +256,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
-			slog.Warn("Skipping custom provider due to missing API key", "provider", id, "error", err)
-			delete(cfg.Providers, id)
-			continue
+			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
@@ -369,10 +372,11 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 }
 
 func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) error {
-	large, small, err := cfg.defaultModelSelection(knownProviders)
+	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
 	if err != nil {
 		return fmt.Errorf("failed to select default models: %w", err)
 	}
+	large, small := defaultLarge, defaultSmall
 
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -383,18 +387,26 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 			large.Provider = largeModelSelected.Provider
 		}
 		model := cfg.GetModel(large.Provider, large.Model)
+		slog.Info("Configuring selected large model", "provider", large.Provider, "model", large.Model)
+		slog.Info("MOdel configured", "model", model)
 		if model == nil {
-			return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-		}
-		if largeModelSelected.MaxTokens > 0 {
-			large.MaxTokens = largeModelSelected.MaxTokens
+			large = defaultLarge
+			// override the model type to large
+			err := cfg.UpdatePreferredModel(SelectedModelTypeLarge, large)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred large model: %w", err)
+			}
 		} else {
-			large.MaxTokens = model.DefaultMaxTokens
+			if largeModelSelected.MaxTokens > 0 {
+				large.MaxTokens = largeModelSelected.MaxTokens
+			} else {
+				large.MaxTokens = model.DefaultMaxTokens
+			}
+			if largeModelSelected.ReasoningEffort != "" {
+				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			}
+			large.Think = largeModelSelected.Think
 		}
-		if largeModelSelected.ReasoningEffort != "" {
-			large.ReasoningEffort = largeModelSelected.ReasoningEffort
-		}
-		large.Think = largeModelSelected.Think
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
 	if smallModelConfigured {
@@ -407,25 +419,21 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 
 		model := cfg.GetModel(small.Provider, small.Model)
 		if model == nil {
-			return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-		}
-		if smallModelSelected.MaxTokens > 0 {
-			small.MaxTokens = smallModelSelected.MaxTokens
+			small = defaultSmall
+			// override the model type to small
+			err := cfg.UpdatePreferredModel(SelectedModelTypeSmall, small)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred small model: %w", err)
+			}
 		} else {
-			small.MaxTokens = model.DefaultMaxTokens
+			if smallModelSelected.MaxTokens > 0 {
+				small.MaxTokens = smallModelSelected.MaxTokens
+			} else {
+				small.MaxTokens = model.DefaultMaxTokens
+			}
+			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			small.Think = smallModelSelected.Think
 		}
-		small.ReasoningEffort = smallModelSelected.ReasoningEffort
-		small.Think = smallModelSelected.Think
-	}
-
-	// validate the selected models
-	largeModel := cfg.GetModel(large.Provider, large.Model)
-	if largeModel == nil {
-		return fmt.Errorf("large model %s not found for provider %s", large.Model, large.Provider)
-	}
-	smallModel := cfg.GetModel(small.Provider, small.Model)
-	if smallModel == nil {
-		return fmt.Errorf("small model %s not found for provider %s", small.Model, small.Provider)
 	}
 	cfg.Models[SelectedModelTypeLarge] = large
 	cfg.Models[SelectedModelTypeSmall] = small
@@ -512,9 +520,9 @@ func globalConfig() string {
 	return filepath.Join(os.Getenv("HOME"), ".config", appName, fmt.Sprintf("%s.json", appName))
 }
 
-// globalConfigData returns the path to the main data directory for the application.
+// GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
-func globalConfigData() string {
+func GlobalConfigData() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
 		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
@@ -532,4 +540,15 @@ func globalConfigData() string {
 	}
 
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+}
+
+func HomeDir() string {
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = os.Getenv("USERPROFILE") // For Windows compatibility
+	}
+	if homeDir == "" {
+		homeDir = os.Getenv("HOMEPATH") // Fallback for some environments
+	}
+	return homeDir
 }

@@ -17,23 +17,14 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-var (
-	rgPath  string
-	fzfPath string
-)
+var rgPath string
 
 func init() {
 	var err error
 	rgPath, err = exec.LookPath("rg")
 	if err != nil {
 		if log.Initialized() {
-			slog.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
-		}
-	}
-	fzfPath, err = exec.LookPath("fzf")
-	if err != nil {
-		if log.Initialized() {
-			slog.Warn("FZF not found in $PATH. Some features might be limited or slower.")
+			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
 		}
 	}
 }

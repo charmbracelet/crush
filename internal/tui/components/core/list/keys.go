@@ -9,6 +9,8 @@ type KeyMap struct {
 	Up,
 	DownOneItem,
 	UpOneItem,
+	PageDown,
+	PageUp,
 	HalfPageDown,
 	HalfPageUp,
 	Home,
@@ -37,7 +39,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("d"),
 			key.WithHelp("d", "half page down"),
 		),
-		HalfPageUp: key.NewBinding(
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown", " ", "f"),
+			key.WithHelp("f/pgdn", "page down"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup", "b"),
+			key.WithHelp("b/pgup", "page up"),
+		), HalfPageUp: key.NewBinding(
 			key.WithKeys("u"),
 			key.WithHelp("u", "half page up"),
 		),

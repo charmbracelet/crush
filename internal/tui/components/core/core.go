@@ -5,11 +5,39 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/bubbles/v2/help"
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+type KeyMapHelp interface {
+	Help() help.KeyMap
+}
+
+type simpleHelp struct {
+	shortList []key.Binding
+	fullList  [][]key.Binding
+}
+
+func NewSimpleHelp(shortList []key.Binding, fullList [][]key.Binding) help.KeyMap {
+	return &simpleHelp{
+		shortList: shortList,
+		fullList:  fullList,
+	}
+}
+
+// FullHelp implements help.KeyMap.
+func (s *simpleHelp) FullHelp() [][]key.Binding {
+	return s.fullList
+}
+
+// ShortHelp implements help.KeyMap.
+func (s *simpleHelp) ShortHelp() []key.Binding {
+	return s.shortList
+}
 
 func Section(text string, width int) string {
 	t := styles.CurrentTheme()
@@ -19,6 +47,22 @@ func Section(text string, width int) string {
 	lineStyle := t.S().Base.Foreground(t.Border)
 	if remainingWidth > 0 {
 		text = text + " " + lineStyle.Render(strings.Repeat(char, remainingWidth))
+	}
+	return text
+}
+
+func SectionWithInfo(text string, width int, info string) string {
+	t := styles.CurrentTheme()
+	char := "─"
+	length := lipgloss.Width(text) + 1
+	remainingWidth := width - length
+
+	if info != "" {
+		remainingWidth -= lipgloss.Width(info) + 1 // 1 for the space before info
+	}
+	lineStyle := t.S().Base.Foreground(t.Border)
+	if remainingWidth > 0 {
+		text = text + " " + lineStyle.Render(strings.Repeat(char, remainingWidth)) + " " + info
 	}
 	return text
 }
@@ -145,6 +189,21 @@ func SelectableButtons(buttons []ButtonOpts, spacing string) string {
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+}
+
+// SelectableButtonsVertical creates a vertical row of selectable buttons
+func SelectableButtonsVertical(buttons []ButtonOpts, spacing int) string {
+	var parts []string
+	for i, button := range buttons {
+		parts = append(parts, SelectableButton(button))
+		if i < len(buttons)-1 {
+			for j := 0; j < spacing; j++ {
+				parts = append(parts, "")
+			}
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }
 
 func DiffFormatter() *diffview.DiffView {

@@ -20,8 +20,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl+c", "quit"),
 		),
 		Help: key.NewBinding(
-			key.WithKeys("ctrl+?", "ctrl+_", "ctrl+/"),
-			key.WithHelp("ctrl+?", "more"),
+			key.WithKeys("ctrl+g"),
+			key.WithHelp("ctrl+g", "help"),
 		),
 		Commands: key.NewBinding(
 			key.WithKeys("ctrl+p"),

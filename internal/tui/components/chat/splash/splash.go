@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -242,14 +243,6 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 
 func (s *splashCmp) initializeProject() tea.Cmd {
 	s.needsProjectInit = false
-	prompt := `Please analyze this codebase and create a CRUSH.md file containing:
-1. Build/lint/test commands - especially for running a single test
-2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
-
-The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-If there's already a CRUSH.md, improve it.
-If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.
-Add the .crush directory to the .gitignore file if it's not already there.`
 
 	if err := config.MarkProjectInitialized(); err != nil {
 		return util.ReportError(err)
@@ -261,7 +254,7 @@ Add the .crush directory to the .gitignore file if it's not already there.`
 		cmds = append(cmds,
 			util.CmdHandler(chat.SessionClearedMsg{}),
 			util.CmdHandler(chat.SendMsg{
-				Text: prompt,
+				Text: prompt.Initialize(),
 			}),
 		)
 	}

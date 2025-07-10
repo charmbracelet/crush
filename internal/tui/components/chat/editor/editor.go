@@ -67,6 +67,10 @@ const (
 	maxAttachments = 5
 )
 
+type openEditorMsg struct {
+	Text string
+}
+
 func (m *editorCmp) openEditor(value string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -102,11 +106,8 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
-		attachments := m.attachments
-		m.attachments = nil
-		return chat.SendMsg{
-			Text:        string(content),
-			Attachments: attachments,
+		return openEditorMsg{
+			Text: strings.TrimSpace(string(content)),
 		}
 	})
 }
@@ -184,6 +185,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.completionsStartIndex = 0
 			return m, nil
 		}
+	case openEditorMsg:
+		m.textarea.SetValue(msg.Text)
+		m.textarea.MoveToEnd()
 	case tea.KeyPressMsg:
 		switch {
 		// Completions
@@ -387,11 +391,11 @@ func NewEditorCmp(app *app.App) util.Model {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(lineIndex int, focused bool) string {
-		if lineIndex == 0 {
+	ta.SetPromptFunc(4, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
 			return "  > "
 		}
-		if focused {
+		if info.Focused {
 			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
 		} else {
 			return t.S().Muted.Render("::: ")

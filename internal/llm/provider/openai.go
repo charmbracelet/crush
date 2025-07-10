@@ -38,7 +38,10 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
 	}
 	if opts.baseURL != "" {
-		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(opts.baseURL))
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil {
+			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
+		}
 	}
 
 	if opts.extraHeaders != nil {

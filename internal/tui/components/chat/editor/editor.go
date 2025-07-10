@@ -187,7 +187,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case openEditorMsg:
 		m.textarea.SetValue(msg.Text)
-		return m, nil
 	case tea.KeyPressMsg:
 		switch {
 		// Completions

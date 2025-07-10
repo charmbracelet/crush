@@ -191,6 +191,21 @@ func SelectableButtons(buttons []ButtonOpts, spacing string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 }
 
+// SelectableButtonsVertical creates a vertical row of selectable buttons
+func SelectableButtonsVertical(buttons []ButtonOpts, spacing int) string {
+	var parts []string
+	for i, button := range buttons {
+		parts = append(parts, SelectableButton(button))
+		if i < len(buttons)-1 {
+			for j := 0; j < spacing; j++ {
+				parts = append(parts, "")
+			}
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+}
+
 func DiffFormatter() *diffview.DiffView {
 	t := styles.CurrentTheme()
 	formatDiff := diffview.New()

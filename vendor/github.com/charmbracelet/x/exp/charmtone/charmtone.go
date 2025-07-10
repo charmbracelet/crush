@@ -65,7 +65,7 @@ const (
 	Citron
 	Zest
 	Pepper
-	Barbeque
+	BBQ
 	Charcoal
 	Iron
 	Oyster
@@ -74,6 +74,22 @@ const (
 	Ash
 	Salt
 	Butter
+
+	// Diffs: additions. The brightest color in this set is Julep, defined
+	// above.
+	Pickle
+	Gator
+	Spinach
+
+	// Diffs: deletions. The brightest color in this set is Cherry, defined
+	// above.
+	Pom
+	Steak
+	Toast
+
+	// Provisional.
+	NeueGuac
+	NeueZinc
 )
 
 // RGBA returns the red, green, blue, and alpha values of the color. It
@@ -139,7 +155,7 @@ func (k Key) String() string {
 		Citron:   "Citron",
 		Zest:     "Zest",
 		Pepper:   "Pepper",
-		Barbeque: "Barbeque",
+		BBQ:      "BBQ",
 		Charcoal: "Charcoal",
 		Iron:     "Iron",
 		Oyster:   "Oyster",
@@ -148,6 +164,20 @@ func (k Key) String() string {
 		Salt:     "Salt",
 		Ash:      "Ash",
 		Butter:   "Butter",
+
+		// Diffs: additions.
+		Pickle:  "Pickle",
+		Gator:   "Gator",
+		Spinach: "Spinach",
+
+		// Diffs: deletions.
+		Pom:   "Pom",
+		Steak: "Steak",
+		Toast: "Toast",
+
+		// Provisional.
+		NeueGuac: "Neue Guac",
+		NeueZinc: "Neue Zinc",
 	}[k]
 }
 
@@ -193,17 +223,17 @@ func (k Key) Hex() string {
 		Damson:   "#007AB8",
 		Malibu:   "#00A4FF",
 		Sardine:  "#4FBEFE",
-		Zinc:     "#0e9996",
+		Zinc:     "#10B1AE",
 		Turtle:   "#0ADCD9",
 		Lichen:   "#5CDFEA",
-		Guac:     "#00b875",
+		Guac:     "#12C78F",
 		Julep:    "#00FFB2",
 		Bok:      "#68FFD6",
 		Mustard:  "#F5EF34",
 		Citron:   "#E8FF27",
 		Zest:     "#E8FE96",
 		Pepper:   "#201F26",
-		Barbeque: "#2d2c35",
+		BBQ:      "#2d2c35",
 		Charcoal: "#3A3943",
 		Iron:     "#4D4C57",
 		Oyster:   "#605F6B",
@@ -212,6 +242,20 @@ func (k Key) Hex() string {
 		Ash:      "#DFDBDD",
 		Salt:     "#F1EFEF",
 		Butter:   "#FFFAF1",
+
+		// Diffs: additions.
+		Pickle:  "#00A475",
+		Gator:   "#18463D",
+		Spinach: "#1C3634",
+
+		// Diffs: deletions.
+		Pom:   "#AB2454",
+		Steak: "#582238",
+		Toast: "#412130",
+
+		// Provisional.
+		NeueGuac: "#00b875",
+		NeueZinc: "#0e9996",
 	}[k]
 }
 
@@ -267,7 +311,7 @@ func Keys() []Key {
 		Citron,
 		Zest,
 		Pepper,
-		Barbeque,
+		BBQ,
 		Charcoal,
 		Iron,
 		Oyster,
@@ -276,6 +320,8 @@ func Keys() []Key {
 		Ash,
 		Salt,
 		Butter,
+
+		// XXX: additions and deletions are not included, yet.
 	}
 }
 

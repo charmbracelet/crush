@@ -80,7 +80,7 @@ const (
 	maxAttachments = 5
 )
 
-func (m *editorCmp) openEditor() tea.Cmd {
+func (m *editorCmp) openEditor(value string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		// Use platform-appropriate default editor
@@ -95,7 +95,10 @@ func (m *editorCmp) openEditor() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	tmpfile.Close()
+	defer tmpfile.Close() //nolint:errcheck
+	if _, err := tmpfile.WriteString(value); err != nil {
+		return util.ReportError(err)
+	}
 	c := exec.Command(editor, tmpfile.Name())
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -247,7 +250,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
-			return m, m.openEditor()
+			return m, m.openEditor(m.textarea.Value())
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {
 			m.deleteMode = false
@@ -379,6 +382,7 @@ func (c *editorCmp) IsFocused() bool {
 	return c.textarea.Focused()
 }
 
+// Bindings implements Container.
 func (c *editorCmp) Bindings() []key.Binding {
 	return c.keyMap.KeyBindings()
 }

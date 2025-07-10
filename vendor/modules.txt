@@ -289,7 +289,7 @@ github.com/charmbracelet/x/ansi/parser
 # github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa
 ## explicit; go 1.23.0
 github.com/charmbracelet/x/cellbuf
-# github.com/charmbracelet/x/exp/charmtone v0.0.0-20250627134340-c144409e381c
+# github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 ## explicit; go 1.23.0
 github.com/charmbracelet/x/exp/charmtone
 # github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a

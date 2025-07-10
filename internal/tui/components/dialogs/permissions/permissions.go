@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -395,7 +396,22 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 			Width(p.contentViewPort.Width()).
 			Render(renderedContent)
 
-		return finalContent
+		// We render the content into a buffer with the size of the viewport
+		// width and height of the content. Then we make sure each cell has the
+		// appropriate background color.
+		ss := uv.NewStyledString(finalContent)
+		scr := uv.NewScreenBuffer(p.contentViewPort.Width(), lipgloss.Height(finalContent))
+		ss.Draw(scr, scr.Bounds())
+		for y := 0; y < scr.Height(); y++ {
+			for x := 0; x < scr.Width(); x++ {
+				cell := scr.CellAt(x, y)
+				if cell != nil {
+					cell.Style.Bg = t.BgSubtle
+				}
+			}
+		}
+
+		return scr.Render()
 	}
 	return ""
 }
@@ -452,8 +468,8 @@ func (p *permissionDialogCmp) render() string {
 	if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
 	}
-	// Calculate content height dynamically based on window size
 
+	// Calculate content height dynamically based on window size
 	strs := []string{
 		title,
 		"",

@@ -118,7 +118,7 @@ func (m *messageListCmp) View() string {
 // handleChildSession handles messages from child sessions (agent tools).
 func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
-	if len(event.Payload.ToolCalls()) == 0 {
+	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
 	}
 	items := m.listCmp.Items()
@@ -158,6 +158,15 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 			)
 		}
 	}
+	for _, tr := range event.Payload.ToolResults() {
+		for nestedInx, nestedTC := range nestedToolCalls {
+			if nestedTC.GetToolCall().ID == tr.ToolCallID {
+				nestedToolCalls[nestedInx].SetToolResult(tr)
+				break
+			}
+		}
+	}
+
 	toolCall.SetNestedToolCalls(nestedToolCalls)
 	m.listCmp.UpdateItem(
 		toolCallInx,

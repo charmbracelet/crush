@@ -112,10 +112,21 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 }
 
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
-func (br baseRenderer) makeNestedHeader(_ *toolCallCmp, tool string, width int, params ...string) string {
+func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
+	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	if v.result.ToolCallID != "" {
+		if v.result.IsError {
+			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
+		} else {
+			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
+		}
+	} else if v.cancelled {
+		icon = t.S().Muted.Render(styles.ToolPending)
+	}
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
-	return tool + renderParamList(true, width-lipgloss.Width(tool), params...)
+	prefix := fmt.Sprintf("%s %s ", icon, tool)
+	return prefix + renderParamList(true, width-lipgloss.Width(tool), params...)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
@@ -542,7 +553,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 	if v.result.ToolCallID == "" {
 		v.spinning = true
-		parts = append(parts, v.anim.View())
+		parts = append(parts, "", v.anim.View())
 	} else {
 		v.spinning = false
 	}

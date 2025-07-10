@@ -237,11 +237,11 @@ func setupSubscriber[T any](
 				case <-time.After(2 * time.Second):
 					slog.Warn("message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
-					slog.Info("subscription cancelled", "name", name)
+					slog.Info("subscription canceled", "name", name)
 					return
 				}
 			case <-ctx.Done():
-				slog.Info("subscription cancelled", "name", name)
+				slog.Info("subscription canceled", "name", name)
 				return
 			}
 		}

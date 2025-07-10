@@ -199,6 +199,13 @@ func (p *permissionDialogCmp) renderButtons() string {
 	}
 
 	content := core.SelectableButtons(buttons, "  ")
+	if lipgloss.Width(content) > p.width-4 {
+		content = core.SelectableButtonsVertical(buttons, 1)
+		return baseStyle.AlignVertical(lipgloss.Center).
+			AlignHorizontal(lipgloss.Center).
+			Width(p.width - 4).
+			Render(content)
+	}
 
 	return baseStyle.AlignHorizontal(lipgloss.Right).Width(p.width - 4).Render(content)
 }
@@ -452,8 +459,8 @@ func (p *permissionDialogCmp) render() string {
 	if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
 	}
-	// Calculate content height dynamically based on window size
 
+	// Calculate content height dynamically based on window size
 	strs := []string{
 		title,
 		"",
@@ -491,7 +498,7 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 
 	switch p.permission.ToolName {
 	case tools.BashToolName:
-		p.width = int(float64(p.wWidth) * 0.4)
+		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
 	case tools.EditToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
@@ -500,7 +507,7 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.8)
 	case tools.FetchToolName:
-		p.width = int(float64(p.wWidth) * 0.4)
+		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
 	default:
 		p.width = int(float64(p.wWidth) * 0.7)

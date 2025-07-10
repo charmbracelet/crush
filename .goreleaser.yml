@@ -36,8 +36,8 @@ before:
     - sh -c 'go run . completion fish >./completions/crush.fish'
     - sh -c 'go run . man | gzip -c >./manpages/crush.1.gz'
 
-gomod:
-  proxy: true
+# gomod:
+#   proxy: true
 
 builds:
   - env:

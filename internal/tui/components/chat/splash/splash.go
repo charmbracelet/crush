@@ -2,8 +2,9 @@ package splash
 
 import (
 	"fmt"
-	"log/slog"
+	"os"
 	"slices"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -142,7 +143,6 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Back):
-			slog.Info("Back key pressed in splash screen")
 			if s.needsAPIKey {
 				// Go back to model selection
 				s.needsAPIKey = false
@@ -339,10 +339,10 @@ func (s *splashCmp) isProviderConfigured(providerID string) bool {
 
 func (s *splashCmp) View() string {
 	t := styles.CurrentTheme()
-
 	var content string
 	if s.needsAPIKey {
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		infoSection := s.infoSection()
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
 		apiKeyView := s.apiKeyInput.View()
 		apiKeySelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -353,10 +353,12 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
+			infoSection,
 			apiKeySelector,
 		)
 	} else if s.isOnboarding {
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		infoSection := s.infoSection()
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
 		modelListView := s.modelList.View()
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -369,11 +371,10 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
+			infoSection,
 			modelSelector,
 		)
 	} else if s.needsProjectInit {
-		t := styles.CurrentTheme()
-
 		titleStyle := t.S().Base.Foreground(t.FgBase)
 		bodyStyle := t.S().Base.Foreground(t.FgMuted)
 		shortcutStyle := t.S().Base.Foreground(t.Success)
@@ -403,8 +404,9 @@ func (s *splashCmp) View() string {
 		})
 
 		buttons := lipgloss.JoinHorizontal(lipgloss.Left, yesButton, "  ", noButton)
+		infoSection := s.infoSection()
 
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
 
 		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -418,10 +420,15 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
+			infoSection,
 			initContent,
 		)
 	} else {
-		content = s.logoRendered
+		parts := []string{
+			s.logoRendered,
+			s.infoSection(),
+		}
+		content = lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
 	return t.S().Base.
@@ -451,6 +458,16 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) infoSection() string {
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		s.cwd(),
+		"",
+		lipgloss.JoinHorizontal(lipgloss.Left, s.lspBlock(), s.mcpBlock()),
+		"",
+	)
+}
+
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
 	const padding = 2
@@ -471,8 +488,8 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 
 	// Calculate the correct Y offset based on current state
 	logoHeight := lipgloss.Height(m.logoRendered)
-	baseOffset := logoHeight + SplashScreenPaddingY
-
+	infoSectionHeight := lipgloss.Height(m.infoSection())
+	baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
 	if m.needsAPIKey {
 		// For API key input, position at the bottom of the remaining space
 		remainingHeight := m.height - logoHeight - (SplashScreenPaddingY * 2)
@@ -482,7 +499,7 @@ func (m *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 		cursor.X = cursor.X + SplashScreenPaddingX
 	} else if m.isOnboarding {
 		// For model list, use the original calculation
-		listHeight := min(40, m.height-(SplashScreenPaddingY*2)-logoHeight-2)
+		listHeight := min(40, m.height-(SplashScreenPaddingY*2)-logoHeight-1-infoSectionHeight)
 		offset := m.height - listHeight
 		cursor.Y += offset
 		// Model list doesn't have a prompt, so add padding + space for list styling
@@ -515,4 +532,97 @@ func (s *splashCmp) Bindings() []key.Binding {
 		}
 	}
 	return []key.Binding{}
+}
+
+func (s *splashCmp) getMaxInfoWidth() int {
+	return min(s.width-(SplashScreenPaddingX*2), 40)
+}
+
+func (s *splashCmp) cwd() string {
+	cwd := config.Get().WorkingDir()
+	t := styles.CurrentTheme()
+	homeDir, err := os.UserHomeDir()
+	if err == nil && cwd != homeDir {
+		cwd = strings.ReplaceAll(cwd, homeDir, "~")
+	}
+	maxWidth := s.getMaxInfoWidth()
+	return t.S().Muted.Width(maxWidth).Render(cwd)
+}
+
+func LSPList(maxWidth int) []string {
+	t := styles.CurrentTheme()
+	lspList := []string{}
+	lsp := config.Get().LSP.Sorted()
+	if len(lsp) == 0 {
+		return []string{t.S().Base.Foreground(t.Border).Render("None")}
+	}
+	for _, l := range lsp {
+		iconColor := t.Success
+		if l.LSP.Disabled {
+			iconColor = t.FgMuted
+		}
+		lspList = append(lspList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:   iconColor,
+					Title:       l.Name,
+					Description: l.LSP.Command,
+				},
+				maxWidth,
+			),
+		)
+	}
+	return lspList
+}
+
+func (s *splashCmp) lspBlock() string {
+	t := styles.CurrentTheme()
+	maxWidth := s.getMaxInfoWidth() / 2
+	section := t.S().Subtle.Render("LSPs")
+	lspList := append([]string{section, ""}, LSPList(maxWidth-1)...)
+	return t.S().Base.Width(maxWidth).PaddingRight(1).Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			lspList...,
+		),
+	)
+}
+
+func MCPList(maxWidth int) []string {
+	t := styles.CurrentTheme()
+	mcpList := []string{}
+	mcps := config.Get().MCP.Sorted()
+	if len(mcps) == 0 {
+		return []string{t.S().Base.Foreground(t.Border).Render("None")}
+	}
+	for _, l := range mcps {
+		iconColor := t.Success
+		if l.MCP.Disabled {
+			iconColor = t.FgMuted
+		}
+		mcpList = append(mcpList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:   iconColor,
+					Title:       l.Name,
+					Description: l.MCP.Command,
+				},
+				maxWidth,
+			),
+		)
+	}
+	return mcpList
+}
+
+func (s *splashCmp) mcpBlock() string {
+	t := styles.CurrentTheme()
+	maxWidth := s.getMaxInfoWidth() / 2
+	section := t.S().Subtle.Render("MCPs")
+	mcpList := append([]string{section, ""}, MCPList(maxWidth-1)...)
+	return t.S().Base.Width(maxWidth).PaddingRight(1).Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			mcpList...,
+		),
+	)
 }

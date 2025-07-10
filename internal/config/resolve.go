@@ -54,8 +54,8 @@ func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 		return strings.TrimSpace(stdout), nil
 	}
 
-	if strings.HasPrefix(value, "$") {
-		varName := strings.TrimPrefix(value, "$")
+	if after, ok := strings.CutPrefix(value, "$"); ok {
+		varName := after
 		value = r.env.Get(varName)
 		if value == "" {
 			return "", fmt.Errorf("environment variable %q not set", varName)

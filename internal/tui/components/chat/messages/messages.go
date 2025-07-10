@@ -66,10 +66,7 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 // Returns a command to start the animation for spinning messages.
 func (m *messageCmp) Init() tea.Cmd {
 	m.spinning = m.shouldSpin()
-	if m.spinning {
-		return m.anim.Init()
-	}
-	return nil
+	return m.anim.Init()
 }
 
 // Update handles incoming messages and updates the component state.

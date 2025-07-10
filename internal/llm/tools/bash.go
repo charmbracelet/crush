@@ -43,7 +43,7 @@ const (
 var bannedCommands = []string{
 	"alias", "curl", "curlie", "wget", "axel", "aria2c",
 	"nc", "telnet", "lynx", "w3m", "links", "httpie", "xh",
-	"http-prompt", "chrome", "firefox", "safari",
+	"http-prompt", "chrome", "firefox", "safari", "sudo",
 }
 
 // getSafeReadOnlyCommands returns platform-appropriate safe commands
@@ -244,7 +244,22 @@ Important:
 - Never update git config`, bannedCommandsStr, MaxOutputLength)
 }
 
+func createCommandBlockFuncs() []shell.CommandBlockFunc {
+	return []shell.CommandBlockFunc{
+		shell.CreateSimpleCommandBlocker(bannedCommands),
+		shell.CreateSubCommandBlocker([][]string{
+			{"brew", "install"},
+			{"npm", "install", "-g"},
+			{"npm", "install", "--global"},
+		}),
+	}
+}
+
 func NewBashTool(permission permission.Service, workingDir string) BaseTool {
+	// Set up command blocking on the persistent shell
+	persistentShell := shell.GetPersistentShell(workingDir)
+	persistentShell.SetBlockFuncs(createCommandBlockFuncs())
+	
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
@@ -287,13 +302,6 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	if params.Command == "" {
 		return NewTextErrorResponse("missing command"), nil
-	}
-
-	baseCmd := strings.Fields(params.Command)[0]
-	for _, banned := range bannedCommands {
-		if strings.EqualFold(baseCmd, banned) {
-			return NewTextErrorResponse(fmt.Sprintf("command '%s' is not allowed", baseCmd)), nil
-		}
 	}
 
 	isSafeReadOnly := false

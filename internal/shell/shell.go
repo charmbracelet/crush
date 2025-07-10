@@ -44,12 +44,16 @@ type noopLogger struct{}
 
 func (noopLogger) InfoPersist(msg string, keysAndValues ...interface{}) {}
 
+// CommandBlockFunc is a function that determines if a command should be blocked
+type CommandBlockFunc func(args []string) bool
+
 // Shell provides cross-platform shell execution with optional state persistence
 type Shell struct {
-	env    []string
-	cwd    string
-	mu     sync.Mutex
-	logger Logger
+	env        []string
+	cwd        string
+	mu         sync.Mutex
+	logger     Logger
+	blockFuncs []CommandBlockFunc
 }
 
 // Options for creating a new shell
@@ -57,6 +61,7 @@ type Options struct {
 	WorkingDir string
 	Env        []string
 	Logger     Logger
+	BlockFuncs []CommandBlockFunc
 }
 
 // NewShell creates a new shell instance with the given options
@@ -81,9 +86,10 @@ func NewShell(opts *Options) *Shell {
 	}
 
 	return &Shell{
-		cwd:    cwd,
-		env:    env,
-		logger: logger,
+		cwd:        cwd,
+		env:        env,
+		logger:     logger,
+		blockFuncs: opts.BlockFuncs,
 	}
 }
 
@@ -152,6 +158,13 @@ func (s *Shell) SetEnv(key, value string) {
 	s.env = append(s.env, keyPrefix+value)
 }
 
+// SetBlockFuncs sets the command block functions for the shell
+func (s *Shell) SetBlockFuncs(blockFuncs []CommandBlockFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockFuncs = blockFuncs
+}
+
 // Windows-specific commands that should use native shell
 var windowsNativeCommands = map[string]bool{
 	"dir":      true,
@@ -201,6 +214,59 @@ func (s *Shell) determineShellType(command string) ShellType {
 
 	// Default to POSIX emulation for cross-platform compatibility
 	return ShellTypePOSIX
+}
+
+// CreateSimpleCommandBlocker creates a CommandBlockFunc that blocks exact command matches
+func CreateSimpleCommandBlocker(bannedCommands []string) CommandBlockFunc {
+	bannedSet := make(map[string]bool)
+	for _, cmd := range bannedCommands {
+		bannedSet[cmd] = true
+	}
+	
+	return func(args []string) bool {
+		if len(args) == 0 {
+			return false
+		}
+		return bannedSet[args[0]]
+	}
+}
+
+// CreateSubCommandBlocker creates a CommandBlockFunc that blocks specific subcommands
+func CreateSubCommandBlocker(blockedSubCommands [][]string) CommandBlockFunc {
+	return func(args []string) bool {
+		for _, blocked := range blockedSubCommands {
+			if len(args) >= len(blocked) {
+				match := true
+				for i, part := range blocked {
+					if args[i] != part {
+						match = false
+						break
+					}
+				}
+				if match {
+					return true
+				}
+			}
+		}
+		return false
+	}
+}
+func (s *Shell) createCommandBlockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+		return func(ctx context.Context, args []string) error {
+			if len(args) == 0 {
+				return next(ctx, args)
+			}
+
+			for _, blockFunc := range s.blockFuncs {
+				if blockFunc(args) {
+					return fmt.Errorf("command '%s' is not allowed for security reasons", strings.Join(args, " "))
+				}
+			}
+
+			return next(ctx, args)
+		}
+	}
 }
 
 // execWindows executes commands using native Windows shells (cmd.exe or PowerShell)
@@ -291,6 +357,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
+		interp.ExecHandlers(s.createCommandBlockHandler()),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)

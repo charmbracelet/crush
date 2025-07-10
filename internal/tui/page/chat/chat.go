@@ -81,6 +81,10 @@ func (p *chatPage) cancelTimerCmd() tea.Cmd {
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		m, cmd := p.layout.Update(msg)
+		p.layout = m.(layout.SplitPaneLayout)
+		return p, cmd
 	case CancelTimerExpiredMsg:
 		p.cancelPending = false
 		return p, nil

@@ -2,12 +2,16 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
 type EditorKeyMap struct {
 	AddFile     key.Binding
 	SendMessage key.Binding
 	OpenEditor  key.Binding
+	Newline     key.Binding
+
+	keyboard tea.KeyboardEnhancementsMsg
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -24,15 +28,27 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			key.WithKeys("ctrl+e"),
 			key.WithHelp("ctrl+e", "open editor"),
 		),
+		Newline: key.NewBinding(
+			key.WithKeys("shift+enter", "ctrl+j"),
+			// "ctrl+j" is a common keybinding for newline in many editors. If
+			// the terminal supports "shift+enter", we substitute the help text
+			// to reflect that.
+			key.WithHelp("ctrl+j", "newline"),
+		),
 	}
 }
 
 // KeyBindings implements layout.KeyMapProvider
 func (k EditorKeyMap) KeyBindings() []key.Binding {
+	newline := k.Newline
+	if k.keyboard.SupportsKeyDisambiguation() {
+		newline.SetHelp("shift+enter", newline.Help().Desc)
+	}
 	return []key.Binding{
 		k.AddFile,
 		k.SendMessage,
 		k.OpenEditor,
+		newline,
 	}
 }
 

@@ -145,6 +145,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		m.keyMap.keyboard = msg
+		return m, nil
 	case chat.SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			m.session = msg
@@ -245,7 +248,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleteMode = false
 			return m, nil
 		}
-		// Hanlde Enter key
+		if key.Matches(msg, m.keyMap.Newline) {
+			m.textarea.InsertRune('\n')
+			return m, nil
+		}
+		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {

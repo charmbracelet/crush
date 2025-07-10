@@ -187,6 +187,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case openEditorMsg:
 		m.textarea.SetValue(msg.Text)
+		m.textarea.MoveToEnd()
 	case tea.KeyPressMsg:
 		switch {
 		// Completions
@@ -389,11 +390,11 @@ func NewEditorCmp(app *app.App) util.Model {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(lineIndex int, focused bool) string {
-		if lineIndex == 0 {
+	ta.SetPromptFunc(4, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
 			return "  > "
 		}
-		if focused {
+		if info.Focused {
 			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
 		} else {
 			return t.S().Muted.Render("::: ")

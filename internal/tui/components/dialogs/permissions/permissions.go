@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -383,35 +382,11 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
-		content := fmt.Sprintf("```bash\n%s\n```", pr.URL)
-
-		// Use the cache for markdown rendering
-		renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
-			r := styles.GetMarkdownRenderer(p.width - 4)
-			s, err := r.Render(content)
-			return s, err
-		})
-
 		finalContent := baseStyle.
+			Padding(1, 1).
 			Width(p.contentViewPort.Width()).
-			Render(renderedContent)
-
-		// We render the content into a buffer with the size of the viewport
-		// width and height of the content. Then we make sure each cell has the
-		// appropriate background color.
-		ss := uv.NewStyledString(finalContent)
-		scr := uv.NewScreenBuffer(p.contentViewPort.Width(), lipgloss.Height(finalContent))
-		ss.Draw(scr, scr.Bounds())
-		for y := 0; y < scr.Height(); y++ {
-			for x := 0; x < scr.Width(); x++ {
-				cell := scr.CellAt(x, y)
-				if cell != nil {
-					cell.Style.Bg = t.BgSubtle
-				}
-			}
-		}
-
-		return scr.Render()
+			Render(pr.URL)
+		return finalContent
 	}
 	return ""
 }

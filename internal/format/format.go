@@ -57,11 +57,10 @@ func GetHelpText() string {
 }
 
 // FormatOutput formats the AI response according to the specified format
-func FormatOutput(content string, formatStr string) string {
+func FormatOutput(content string, formatStr string) (string, error) {
 	format, err := Parse(formatStr)
 	if err != nil {
-		// Default to text format on error
-		return content
+		format = Text
 	}
 
 	switch format {
@@ -74,12 +73,12 @@ func FormatOutput(content string, formatStr string) string {
 		if !strings.HasSuffix(content, "\n") {
 			content += "\n"
 		}
-		return content
+		return content, nil
 	}
 }
 
 // formatAsJSON wraps the content in a simple JSON object
-func formatAsJSON(content string) string {
+func formatAsJSON(content string) (string, error) {
 	// Use the JSON package to properly escape the content
 	response := struct {
 		Response string `json:"response"`
@@ -89,16 +88,8 @@ func formatAsJSON(content string) string {
 
 	jsonBytes, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
-		// In case of an error, return a manually formatted JSON
-		// XXX: I don't see how it would ever get here
-		jsonEscaped := strings.ReplaceAll(content, "\\", "\\\\")
-		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\"", "\\\"")
-		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\n", "\\n")
-		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\r", "\\r")
-		jsonEscaped = strings.ReplaceAll(jsonEscaped, "\t", "\\t")
-
-		return fmt.Sprintf("{\n  \"response\": \"%s\"\n}", jsonEscaped)
+		return "", fmt.Errorf("failed to marshal output into JSON: %w", err)
 	}
 
-	return string(jsonBytes)
+	return string(jsonBytes), nil
 }

@@ -139,10 +139,13 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 		content = result.Message.Content().String()
 	}
 
-	fmt.Println(format.FormatOutput(content, outputFormat))
+	out, err := format.FormatOutput(content, outputFormat)
+	if err != nil {
+		return err
+	}
 
+	fmt.Println(out)
 	slog.Info("Non-interactive run completed", "session_id", sess.ID)
-
 	return nil
 }
 

@@ -657,6 +657,26 @@ func (a *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	default:
+		if a.editor.IsCompletionsOpen() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("tab", "enter"),
+					key.WithHelp("tab/enter", "complete"),
+				),
+				key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "cancel"),
+				),
+				key.NewBinding(
+					key.WithKeys("up", "down"),
+					key.WithHelp("↑/↓", "choose"),
+				),
+			)
+			for _, v := range shortList {
+				fullList = append(fullList, []key.Binding{v})
+			}
+			return core.NewSimpleHelp(shortList, fullList)
+		}
 		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 			cancelBinding := key.NewBinding(
 				key.WithKeys("esc"),

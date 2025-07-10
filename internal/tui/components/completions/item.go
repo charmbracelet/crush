@@ -90,6 +90,7 @@ func (c *completionItemCmp) View() string {
 	if c.bgColor != nil {
 		titleStyle = titleStyle.Background(c.bgColor)
 		titleMatchStyle = titleMatchStyle.Background(c.bgColor)
+		itemStyle = itemStyle.Background(c.bgColor)
 	}
 
 	if c.focus {

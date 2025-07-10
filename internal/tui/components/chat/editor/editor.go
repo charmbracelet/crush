@@ -35,6 +35,7 @@ type Editor interface {
 	layout.Positional
 
 	SetSession(session session.Session) tea.Cmd
+	IsCompletionsOpen() bool
 	Cursor() *tea.Cursor
 }
 
@@ -389,6 +390,10 @@ func (c *editorCmp) Bindings() []key.Binding {
 func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 	c.session = session
 	return nil
+}
+
+func (c *editorCmp) IsCompletionsOpen() bool {
+	return c.isCompletionsOpen
 }
 
 func New(app *app.App) Editor {

@@ -109,6 +109,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
 	// Completions messages
@@ -119,9 +120,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Dialog messages
 	case dialogs.OpenDialogMsg, dialogs.CloseDialogMsg:
+		u, completionCmd := a.completions.Update(completions.CloseCompletionsMsg{})
+		a.completions = u.(completions.Completions)
 		u, dialogCmd := a.dialog.Update(msg)
 		a.dialog = u.(dialogs.DialogCmp)
-		return a, dialogCmd
+		return a, tea.Batch(completionCmd, dialogCmd)
 	case commands.ShowArgumentsDialogMsg:
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{

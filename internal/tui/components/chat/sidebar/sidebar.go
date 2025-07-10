@@ -250,6 +250,7 @@ func (m *sidebarCmp) logoBlock() string {
 		TitleColorB:  t.Primary,
 		CharmColor:   t.Secondary,
 		VersionColor: t.Primary,
+		Width:        m.width - 2,
 	})
 }
 

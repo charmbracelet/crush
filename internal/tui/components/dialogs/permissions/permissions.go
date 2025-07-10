@@ -390,7 +390,7 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
 		finalContent := baseStyle.
-			Padding(1, 1).
+			Padding(1, 2).
 			Width(p.contentViewPort.Width()).
 			Render(pr.URL)
 		return finalContent

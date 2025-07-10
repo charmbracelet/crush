@@ -82,8 +82,10 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	_, _ = tmpfile.WriteString(value)
-	tmpfile.Close()
+	defer tmpfile.Close() //nolint:errcheck
+	if _, err := tmpfile.WriteString(value); err != nil {
+		return util.ReportError(err)
+	}
 	c := exec.Command(editor, tmpfile.Name())
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout

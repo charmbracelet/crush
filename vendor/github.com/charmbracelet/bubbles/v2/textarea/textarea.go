@@ -133,6 +133,13 @@ type LineInfo struct {
 	CharOffset int
 }
 
+// PromptInfo is a struct that can be used to store information about the
+// prompt.
+type PromptInfo struct {
+	LineNumber int
+	Focused    bool
+}
+
 // CursorStyle is the style for real and virtual cursors.
 type CursorStyle struct {
 	// Style styles the cursor block.
@@ -287,7 +294,7 @@ type Model struct {
 
 	// If promptFunc is set, it replaces Prompt as a generator for
 	// prompt strings at the beginning of each line.
-	promptFunc func(line int, focused bool) string
+	promptFunc func(PromptInfo) string
 
 	// promptWidth is the width of the prompt.
 	promptWidth int
@@ -983,14 +990,14 @@ func (m Model) Width() int {
 	return m.width
 }
 
-// moveToBegin moves the cursor to the beginning of the input.
-func (m *Model) moveToBegin() {
+// MoveToBegin moves the cursor to the beginning of the input.
+func (m *Model) MoveToBegin() {
 	m.row = 0
 	m.SetCursorColumn(0)
 }
 
-// moveToEnd moves the cursor to the end of the input.
-func (m *Model) moveToEnd() {
+// MoveToEnd moves the cursor to the end of the input.
+func (m *Model) MoveToEnd() {
 	m.row = len(m.value) - 1
 	m.SetCursorColumn(len(m.value[m.row]))
 }
@@ -1052,7 +1059,7 @@ func (m *Model) SetWidth(w int) {
 // promptWidth, it will be padded to the left. If it returns a prompt that is
 // longer, display artifacts may occur; the caller is responsible for computing
 // an adequate promptWidth.
-func (m *Model) SetPromptFunc(promptWidth int, fn func(lineIndex int, focused bool) string) {
+func (m *Model) SetPromptFunc(promptWidth int, fn func(PromptInfo) string) {
 	m.promptFunc = fn
 	m.promptWidth = promptWidth
 }
@@ -1170,9 +1177,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.WordBackward):
 			m.wordLeft()
 		case key.Matches(msg, m.KeyMap.InputBegin):
-			m.moveToBegin()
+			m.MoveToBegin()
 		case key.Matches(msg, m.KeyMap.InputEnd):
-			m.moveToEnd()
+			m.MoveToEnd()
 		case key.Matches(msg, m.KeyMap.LowercaseWordForward):
 			m.lowercaseRight()
 		case key.Matches(msg, m.KeyMap.UppercaseWordForward):
@@ -1320,7 +1327,10 @@ func (m Model) promptView(displayLine int) (prompt string) {
 	if m.promptFunc == nil {
 		return prompt
 	}
-	prompt = m.promptFunc(displayLine, m.focus)
+	prompt = m.promptFunc(PromptInfo{
+		LineNumber: displayLine,
+		Focused:    m.focus,
+	})
 	width := lipgloss.Width(prompt)
 	if width < m.promptWidth {
 		prompt = fmt.Sprintf("%*s%s", m.promptWidth-width, "", prompt)

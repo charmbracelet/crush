@@ -98,7 +98,7 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 	// Start spinner if not in quiet mode
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner("Thinking...")
+		spinner = format.NewSpinner(ctx, "Generating")
 		spinner.Start()
 		defer spinner.Stop()
 	}
@@ -129,17 +129,18 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 	}
 
 	result := <-done
+
+	// Stop spinner before printing output
+	if !quiet && spinner != nil {
+		spinner.Stop()
+	}
+
 	if result.Error != nil {
 		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
 			slog.Info("Agent processing cancelled", "session_id", sess.ID)
 			return nil
 		}
 		return fmt.Errorf("agent processing failed: %w", result.Error)
-	}
-
-	// Stop spinner before printing output
-	if !quiet && spinner != nil {
-		spinner.Stop()
 	}
 
 	// Get the text content from the response

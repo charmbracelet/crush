@@ -89,7 +89,7 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 	// Start spinner if not in quiet mode
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner("Thinking...")
+		spinner = format.NewSpinner(ctx, "Generating")
 		spinner.Start()
 		defer spinner.Stop()
 	}

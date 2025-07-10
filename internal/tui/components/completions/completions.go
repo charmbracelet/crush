@@ -150,18 +150,25 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !c.open {
 			return c, nil // If completions are not open, do nothing
 		}
-		cmd := c.list.Filter(msg.Query)
-		c.height = max(min(10, len(c.list.Items())), 1)
-		return c, tea.Batch(
-			cmd,
-			c.list.SetSize(c.width, c.height),
-		)
+		var cmds []tea.Cmd
+		cmds = append(cmds, c.list.Filter(msg.Query))
+		itemsLen := len(c.list.Items())
+		c.height = max(min(10, itemsLen), 1)
+		cmds = append(cmds, c.list.SetSize(c.width, c.height))
+		if itemsLen == 0 {
+			// Close completions if no items match the query
+			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
+		}
+		return c, tea.Batch(cmds...)
 	}
 	return c, nil
 }
 
 // View implements Completions.
 func (c *completionsCmp) View() string {
+	if !c.open {
+		return ""
+	}
 	if len(c.list.Items()) == 0 {
 		return c.style().Render("No completions found")
 	}

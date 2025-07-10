@@ -94,3 +94,168 @@ func TestPlatformSpecificSafeCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCommand(t *testing.T) {
+	tests := []struct {
+		name        string
+		command     string
+		shouldError bool
+	}{
+		// Commands that should be blocked
+		{
+			name:        "direct sudo",
+			command:     "sudo ls",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in script",
+			command:     "bash -c 'sudo ls'",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in command substitution",
+			command:     "$(sudo whoami)",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in echo command substitution",
+			command:     "echo $(sudo id)",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in command chain",
+			command:     "ls && sudo rm file",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in if statement",
+			command:     "if true; then sudo ls; fi",
+			shouldError: true,
+		},
+		{
+			name:        "sudo in for loop",
+			command:     "for i in 1; do sudo echo $i; done",
+			shouldError: true,
+		},
+		{
+			name:        "direct curl",
+			command:     "curl http://example.com",
+			shouldError: true,
+		},
+		{
+			name:        "curl in script",
+			command:     "bash -c 'curl malicious.com'",
+			shouldError: true,
+		},
+		{
+			name:        "wget command",
+			command:     "wget http://example.com",
+			shouldError: true,
+		},
+		{
+			name:        "nc command",
+			command:     "nc -l 8080",
+			shouldError: true,
+		},
+		// Commands that should be allowed
+		{
+			name:        "simple ls",
+			command:     "ls -la",
+			shouldError: false,
+		},
+		{
+			name:        "echo command",
+			command:     "echo hello",
+			shouldError: false,
+		},
+		{
+			name:        "git status",
+			command:     "git status",
+			shouldError: false,
+		},
+		{
+			name:        "go build",
+			command:     "go build",
+			shouldError: false,
+		},
+		{
+			name:        "sudo as literal text",
+			command:     "echo 'sudo is just text here'",
+			shouldError: false,
+		},
+		{
+			name:        "complex allowed command",
+			command:     "find . -name '*.go' | head -10",
+			shouldError: false,
+		},
+		{
+			name:        "command with environment variables",
+			command:     "FOO=bar go test",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCommand(tt.command)
+			if tt.shouldError && err == nil {
+				t.Errorf("Expected error for command %q, but got none", tt.command)
+			}
+			if !tt.shouldError && err != nil {
+				t.Errorf("Expected no error for command %q, but got: %v", tt.command, err)
+			}
+		})
+	}
+}
+
+func TestContainsBannedCommand(t *testing.T) {
+	// Test the helper functions directly with some edge cases
+	tests := []struct {
+		name        string
+		command     string
+		shouldError bool
+	}{
+		{
+			name:        "nested command substitution",
+			command:     "echo $(echo $(sudo id))",
+			shouldError: true,
+		},
+		{
+			name:        "subshell with banned command",
+			command:     "(sudo ls)",
+			shouldError: true,
+		},
+		{
+			name:        "case statement with banned command",
+			command:     "case $1 in start) sudo systemctl start service ;; esac",
+			shouldError: true,
+		},
+		{
+			name:        "while loop with banned command",
+			command:     "while true; do sudo echo test; done",
+			shouldError: true,
+		},
+		{
+			name:        "function with banned command",
+			command:     "function test() { sudo ls; }",
+			shouldError: true,
+		},
+		{
+			name:        "complex valid command",
+			command:     "if [ -f file ]; then echo exists; else echo missing; fi",
+			shouldError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCommand(tt.command)
+			if tt.shouldError && err == nil {
+				t.Errorf("Expected error for command %q, but got none", tt.command)
+			}
+			if !tt.shouldError && err != nil {
+				t.Errorf("Expected no error for command %q, but got: %v", tt.command, err)
+			}
+		})
+	}
+}

@@ -5,8 +5,9 @@
 // - PersistentShell: A singleton shell that maintains state across the application
 //
 // WINDOWS COMPATIBILITY:
-// This implementation provides both POSIX shell emulation (mvdan.cc/sh/v3) and
-// native Windows shell support (cmd.exe/PowerShell) for optimal compatibility.
+// This implementation provides both POSIX shell emulation (mvdan.cc/sh/v3),
+// even on Windows. Some caution has to be taken: commands should have forward
+// slashes (/) as path separators to work, even on Windows.
 package shell
 
 import (
@@ -15,8 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -98,17 +97,7 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Determine which shell to use based on platform and command
-	shellType := s.determineShellType(command)
-
-	switch shellType {
-	case ShellTypeCmd:
-		return s.execWindows(ctx, command, "cmd")
-	case ShellTypePowerShell:
-		return s.execWindows(ctx, command, "powershell")
-	default:
-		return s.execPOSIX(ctx, command)
-	}
+	return s.execPOSIX(ctx, command)
 }
 
 // GetWorkingDir returns the current working directory
@@ -165,57 +154,6 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.blockFuncs = blockFuncs
 }
 
-// Windows-specific commands that should use native shell
-var windowsNativeCommands = map[string]bool{
-	"dir":      true,
-	"type":     true,
-	"copy":     true,
-	"move":     true,
-	"del":      true,
-	"md":       true,
-	"mkdir":    true,
-	"rd":       true,
-	"rmdir":    true,
-	"cls":      true,
-	"where":    true,
-	"tasklist": true,
-	"taskkill": true,
-	"net":      true,
-	"sc":       true,
-	"reg":      true,
-	"wmic":     true,
-}
-
-// determineShellType decides which shell to use based on platform and command
-func (s *Shell) determineShellType(command string) ShellType {
-	if runtime.GOOS != "windows" {
-		return ShellTypePOSIX
-	}
-
-	// Extract the first command from the command line
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return ShellTypePOSIX
-	}
-
-	firstCmd := strings.ToLower(parts[0])
-
-	// Check if it's a Windows-specific command
-	if windowsNativeCommands[firstCmd] {
-		return ShellTypeCmd
-	}
-
-	// Check for PowerShell-specific syntax
-	if strings.Contains(command, "Get-") || strings.Contains(command, "Set-") ||
-		strings.Contains(command, "New-") || strings.Contains(command, "$_") ||
-		strings.Contains(command, "| Where-Object") || strings.Contains(command, "| ForEach-Object") {
-		return ShellTypePowerShell
-	}
-
-	// Default to POSIX emulation for cross-platform compatibility
-	return ShellTypePOSIX
-}
-
 // CommandsBlocker creates a BlockFunc that blocks exact command matches
 func CommandsBlocker(bannedCommands []string) BlockFunc {
 	bannedSet := make(map[string]bool)
@@ -268,81 +206,6 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 			return next(ctx, args)
 		}
 	}
-}
-
-// execWindows executes commands using native Windows shells (cmd.exe or PowerShell)
-func (s *Shell) execWindows(ctx context.Context, command string, shell string) (string, string, error) {
-	var cmd *exec.Cmd
-
-	// Handle directory changes specially to maintain persistent shell behavior
-	if strings.HasPrefix(strings.TrimSpace(command), "cd ") {
-		return s.handleWindowsCD(command)
-	}
-
-	switch shell {
-	case "cmd":
-		// Use cmd.exe for Windows commands
-		// Add current directory context to maintain state
-		fullCommand := fmt.Sprintf("cd /d \"%s\" && %s", s.cwd, command)
-		cmd = exec.CommandContext(ctx, "cmd", "/C", fullCommand)
-	case "powershell":
-		// Use PowerShell for PowerShell commands
-		// Add current directory context to maintain state
-		fullCommand := fmt.Sprintf("Set-Location '%s'; %s", s.cwd, command)
-		cmd = exec.CommandContext(ctx, "powershell", "-Command", fullCommand)
-	default:
-		return "", "", fmt.Errorf("unsupported Windows shell: %s", shell)
-	}
-
-	// Set environment variables
-	cmd.Env = s.env
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-
-	s.logger.InfoPersist("Windows command finished", "shell", shell, "command", command, "err", err)
-	return stdout.String(), stderr.String(), err
-}
-
-// handleWindowsCD handles directory changes for Windows shells
-func (s *Shell) handleWindowsCD(command string) (string, string, error) {
-	// Extract the target directory from the cd command
-	parts := strings.Fields(command)
-	if len(parts) < 2 {
-		return "", "cd: missing directory argument", fmt.Errorf("missing directory argument")
-	}
-
-	targetDir := parts[1]
-
-	// Handle relative paths
-	if !strings.Contains(targetDir, ":") && !strings.HasPrefix(targetDir, "\\") {
-		// Relative path - resolve against current directory
-		if targetDir == ".." {
-			// Go up one directory
-			if len(s.cwd) > 3 { // Don't go above drive root (C:\)
-				lastSlash := strings.LastIndex(s.cwd, "\\")
-				if lastSlash > 2 { // Keep drive letter
-					s.cwd = s.cwd[:lastSlash]
-				}
-			}
-		} else if targetDir != "." {
-			// Go to subdirectory
-			s.cwd = s.cwd + "\\" + targetDir
-		}
-	} else {
-		// Absolute path
-		s.cwd = targetDir
-	}
-
-	// Verify the directory exists
-	if _, err := os.Stat(s.cwd); err != nil {
-		return "", fmt.Sprintf("cd: %s: No such file or directory", targetDir), err
-	}
-
-	return "", "", nil
 }
 
 // execPOSIX executes commands using POSIX shell emulation (cross-platform)

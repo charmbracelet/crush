@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"strings"
 	"time"
 
@@ -112,58 +111,17 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-// getSafeReadOnlyCommands returns platform-appropriate safe commands
-func getSafeReadOnlyCommands() []string {
-	// Base commands that work on all platforms
-	baseCommands := []string{
-		// Cross-platform commands
-		"echo", "hostname", "whoami",
-
-		// Git commands (cross-platform)
-		"git status", "git log", "git diff", "git show", "git branch", "git tag", "git remote", "git ls-files", "git ls-remote",
-		"git rev-parse", "git config --get", "git config --list", "git describe", "git blame", "git grep", "git shortlog",
-
-		// Go commands (cross-platform)
-		"go version", "go help", "go list", "go env", "go doc", "go vet", "go fmt", "go mod", "go test", "go build", "go run", "go install", "go clean",
-	}
-
-	if runtime.GOOS == "windows" {
-		// Windows-specific commands
-		windowsCommands := []string{
-			"dir", "type", "where", "ver", "systeminfo", "tasklist", "ipconfig", "ping", "nslookup",
-			"Get-Process", "Get-Location", "Get-ChildItem", "Get-Content", "Get-Date", "Get-Host", "Get-ComputerInfo",
-		}
-		return append(baseCommands, windowsCommands...)
-	} else {
-		// Unix/Linux commands (including WSL, since WSL reports as Linux)
-		unixCommands := []string{
-			"ls", "pwd", "date", "cal", "uptime", "id", "groups", "env", "printenv", "set", "unset", "which", "type", "whereis",
-			"whatis", "uname", "df", "du", "free", "top", "ps", "kill", "killall", "nice", "nohup", "time", "timeout",
-		}
-		return append(baseCommands, unixCommands...)
-	}
-}
-
 func bashDescription() string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	return fmt.Sprintf(`Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
 CROSS-PLATFORM SHELL SUPPORT:
-- Unix/Linux/macOS: Uses native bash/sh shell
-- Windows: Intelligent shell selection:
-  * Windows commands (dir, type, copy, etc.) use cmd.exe
-  * PowerShell commands (Get-, Set-, etc.) use PowerShell
-  * Unix-style commands (ls, cat, etc.) use POSIX emulation
-- WSL: Automatically treated as Linux (which is correct)
-- Automatic detection: Chooses the best shell based on command and platform
-- Persistent state: Working directory and environment variables persist between commands
-
-WINDOWS-SPECIFIC FEATURES:
-- Native Windows commands: dir, type, copy, move, del, md, rd, cls, where, tasklist, etc.
-- PowerShell support: Get-Process, Set-Location, and other PowerShell cmdlets
-- Windows path handling: Supports both forward slashes (/) and backslashes (\)
-- Drive letters: Properly handles C:\, D:\, etc.
-- Environment variables: Supports both Unix ($VAR) and Windows (%%VAR%%) syntax
+* This tool uses a shell interpreter (mvdan/sh) that mimics the Bash language,
+  so you should use Bash syntax even on all platforms, even on Windows.
+  The most common shell builtins and core utils are available even on Windows as
+  well.
+* Make sure to use forward slashes (/) as path separators in commands, even on
+  Windows. Example: "ls C:/foo/bar" instead of "ls C:\foo\bar".
 
 Before executing the command, please follow these steps:
 
@@ -393,10 +351,8 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	isSafeReadOnly := false
 	cmdLower := strings.ToLower(params.Command)
 
-	// Get platform-appropriate safe commands
-	safeReadOnlyCommands := getSafeReadOnlyCommands()
-	for _, safe := range safeReadOnlyCommands {
-		if strings.HasPrefix(cmdLower, strings.ToLower(safe)) {
+	for _, safe := range safeCommands {
+		if strings.HasPrefix(cmdLower, safe) {
 			if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
 				isSafeReadOnly = true
 				break

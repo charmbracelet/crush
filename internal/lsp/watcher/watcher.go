@@ -36,26 +36,11 @@ type WorkspaceWatcher struct {
 // NewWorkspaceWatcher creates a new workspace watcher
 func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
-		name:          normalizeName(name),
+		name:          name,
 		client:        client,
 		debounceTime:  300 * time.Millisecond,
 		debounceMap:   make(map[string]*time.Timer),
 		registrations: []protocol.FileSystemWatcher{},
-	}
-}
-
-func normalizeName(name string) string {
-	switch name {
-	case "typescript-language-server",
-		"tsserver",
-		"vtsls":
-		return "typescript"
-	case "pyright", "pylsp":
-		return "python"
-	case "jdtls":
-		return "java"
-	default:
-		return name
 	}
 }
 
@@ -875,42 +860,43 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 	}
 
 	// For non-high-priority files, we'll use different strategies based on server type
-	if shouldPreloadFiles(w.name) {
-		// For servers that benefit from preloading, open files but with limits
+	if !shouldPreloadFiles(w.name) {
+		return
+	}
+	// For servers that benefit from preloading, open files but with limits
 
-		// Check file size - for preloading we're more conservative
-		if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
-			if cfg.Options.DebugLSP {
-				slog.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
-			}
-			return
+	// Check file size - for preloading we're more conservative
+	if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
+		if cfg.Options.DebugLSP {
+			slog.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
 		}
+		return
+	}
 
-		// Check file extension for common source files
-		ext := strings.ToLower(filepath.Ext(path))
+	// Check file extension for common source files
+	ext := strings.ToLower(filepath.Ext(path))
 
-		// Only preload source files for the specific language
-		var shouldOpen bool
-		switch w.name {
-		case "typescript":
-			shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
-		case "gopls":
-			shouldOpen = ext == ".go"
-		case "rust-analyzer":
-			shouldOpen = ext == ".rs"
-		case "python":
-			shouldOpen = ext == ".py"
-		case "clangd":
-			shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
-		case "java":
-			shouldOpen = ext == ".java"
-		}
+	// Only preload source files for the specific language
+	var shouldOpen bool
+	switch w.name {
+	case "typescript", "typescript-language-server", "tsserver", "vtsls":
+		shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
+	case "gopls":
+		shouldOpen = ext == ".go"
+	case "rust-analyzer":
+		shouldOpen = ext == ".rs"
+	case "python", "pyright", "pylsp":
+		shouldOpen = ext == ".py"
+	case "clangd":
+		shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
+	case "java", "jdtls":
+		shouldOpen = ext == ".java"
+	}
 
-		if shouldOpen {
-			// Don't need to check if it's already open - the client.OpenFile handles that
-			if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
-				slog.Error("Error opening file", "path", path, "error", err)
-			}
+	if shouldOpen {
+		// Don't need to check if it's already open - the client.OpenFile handles that
+		if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
+			slog.Error("Error opening file", "path", path, "error", err)
 		}
 	}
 }

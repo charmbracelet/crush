@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -64,13 +66,19 @@ var logsCmd = &cobra.Command{
 			}
 			defer file.Close()
 
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				printLogLine(scanner.Text())
-			}
-
-			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("failed to read log file: %v", err)
+			reader := bufio.NewReader(file)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					if err == io.EOF && line != "" {
+						// Handle last line without newline
+						printLogLine(line)
+					}
+					break
+				}
+				// Remove trailing newline
+				line = strings.TrimSuffix(line, "\n")
+				printLogLine(line)
 			}
 		}
 

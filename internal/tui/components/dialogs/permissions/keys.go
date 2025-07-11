@@ -109,9 +109,5 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithKeys("shift+left", "shift+down", "shift+up", "shift+right"),
 			key.WithHelp("shift+←↓↑→", "scroll"),
 		),
-		key.NewBinding(
-			key.WithKeys("shift+h", "shift+j", "shift+k", "shift+l"),
-			key.WithHelp("shift+hjkl", "scroll"),
-		),
 	}
 }

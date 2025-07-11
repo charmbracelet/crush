@@ -35,6 +35,14 @@ type FileHistory struct {
 
 const LogoHeightBreakpoint = 40
 
+// Default maximum number of items to show in each section
+const (
+	DefaultMaxFilesShown = 10
+	DefaultMaxLSPsShown  = 8
+	DefaultMaxMCPsShown  = 8
+	MinItemsPerSection   = 2 // Minimum items to show per section
+)
+
 type SessionFile struct {
 	History   FileHistory
 	FilePath  string
@@ -266,6 +274,79 @@ func (m *sidebarCmp) getMaxWidth() int {
 	return min(m.width-2, 58) // -2 for padding
 }
 
+// calculateAvailableHeight estimates how much height is available for dynamic content
+func (m *sidebarCmp) calculateAvailableHeight() int {
+	usedHeight := 0
+
+	if !m.compactMode {
+		if m.height > LogoHeightBreakpoint {
+			usedHeight += 7 // Approximate logo height
+		} else {
+			usedHeight += 2 // Smaller logo height
+		}
+		usedHeight += 1 // Empty line after logo
+	}
+
+	if m.session.ID != "" {
+		usedHeight += 1 // Title line
+		usedHeight += 1 // Empty line after title
+	}
+
+	if !m.compactMode {
+		usedHeight += 1 // CWD line
+		usedHeight += 1 // Empty line after CWD
+	}
+
+	usedHeight += 2 // Model info
+
+	usedHeight += 6 // 3 sections × 2 lines each (header + empty line)
+
+	// Base padding
+	usedHeight += 2 // Top and bottom padding
+
+	return max(0, m.height-usedHeight)
+}
+
+// getDynamicLimits calculates how many items to show in each section based on available height
+func (m *sidebarCmp) getDynamicLimits() (maxFiles, maxLSPs, maxMCPs int) {
+	availableHeight := m.calculateAvailableHeight()
+
+	// If we have very little space, use minimum values
+	if availableHeight < 10 {
+		return MinItemsPerSection, MinItemsPerSection, MinItemsPerSection
+	}
+
+	// Distribute available height among the three sections
+	// Give priority to files, then LSPs, then MCPs
+	totalSections := 3
+	heightPerSection := availableHeight / totalSections
+
+	// Calculate limits for each section, ensuring minimums
+	maxFiles = max(MinItemsPerSection, min(DefaultMaxFilesShown, heightPerSection))
+	maxLSPs = max(MinItemsPerSection, min(DefaultMaxLSPsShown, heightPerSection))
+	maxMCPs = max(MinItemsPerSection, min(DefaultMaxMCPsShown, heightPerSection))
+
+	// If we have extra space, give it to files first
+	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs)
+	if remainingHeight > 0 {
+		extraForFiles := min(remainingHeight, DefaultMaxFilesShown-maxFiles)
+		maxFiles += extraForFiles
+		remainingHeight -= extraForFiles
+
+		if remainingHeight > 0 {
+			extraForLSPs := min(remainingHeight, DefaultMaxLSPsShown-maxLSPs)
+			maxLSPs += extraForLSPs
+			remainingHeight -= extraForLSPs
+
+			if remainingHeight > 0 {
+				maxMCPs += min(remainingHeight, DefaultMaxMCPsShown-maxMCPs)
+			}
+		}
+	}
+
+	return maxFiles, maxLSPs, maxMCPs
+}
+
 func (m *sidebarCmp) filesBlock() string {
 	t := styles.CurrentTheme()
 
@@ -294,10 +375,19 @@ func (m *sidebarCmp) filesBlock() string {
 		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
 	})
 
+	// Limit the number of files shown
+	maxFiles, _, _ := m.getDynamicLimits()
+	maxFiles = min(len(files), maxFiles)
+	filesShown := 0
+
 	for _, file := range files {
 		if file.Additions == 0 && file.Deletions == 0 {
 			continue // skip files with no changes
 		}
+		if filesShown >= maxFiles {
+			break
+		}
+
 		var statusParts []string
 		if file.Additions > 0 {
 			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
@@ -322,6 +412,21 @@ func (m *sidebarCmp) filesBlock() string {
 				},
 				m.getMaxWidth(),
 			),
+		)
+		filesShown++
+	}
+
+	// Add indicator if there are more files
+	totalFilesWithChanges := 0
+	for _, file := range files {
+		if file.Additions > 0 || file.Deletions > 0 {
+			totalFilesWithChanges++
+		}
+	}
+	if totalFilesWithChanges > maxFiles {
+		remaining := totalFilesWithChanges - maxFiles
+		fileList = append(fileList,
+			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
 		)
 	}
 
@@ -350,7 +455,14 @@ func (m *sidebarCmp) lspBlock() string {
 		)
 	}
 
-	for _, l := range lsp {
+	// Limit the number of LSPs shown
+	_, maxLSPs, _ := m.getDynamicLimits()
+	maxLSPs = min(len(lsp), maxLSPs)
+	for i, l := range lsp {
+		if i >= maxLSPs {
+			break
+		}
+
 		iconColor := t.Success
 		if l.LSP.Disabled {
 			iconColor = t.FgMuted
@@ -398,6 +510,14 @@ func (m *sidebarCmp) lspBlock() string {
 		)
 	}
 
+	// Add indicator if there are more LSPs
+	if len(lsp) > maxLSPs {
+		remaining := len(lsp) - maxLSPs
+		lspList = append(lspList,
+			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
+		)
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		lspList...,
@@ -423,7 +543,14 @@ func (m *sidebarCmp) mcpBlock() string {
 		)
 	}
 
-	for _, l := range mcps {
+	// Limit the number of MCPs shown
+	_, _, maxMCPs := m.getDynamicLimits()
+	maxMCPs = min(len(mcps), maxMCPs)
+	for i, l := range mcps {
+		if i >= maxMCPs {
+			break
+		}
+
 		iconColor := t.Success
 		if l.MCP.Disabled {
 			iconColor = t.FgMuted
@@ -437,6 +564,14 @@ func (m *sidebarCmp) mcpBlock() string {
 				},
 				m.getMaxWidth(),
 			),
+		)
+	}
+
+	// Add indicator if there are more MCPs
+	if len(mcps) > maxMCPs {
+		remaining := len(mcps) - maxMCPs
+		mcpList = append(mcpList,
+			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
 		)
 	}
 

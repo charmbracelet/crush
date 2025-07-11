@@ -29,6 +29,22 @@ type Interface interface {
 
 	// Close the connection.
 	Close() error
+
+	// GetSessionId returns the session ID of the transport.
+	GetSessionId() string
+}
+
+// RequestHandler defines a function that handles incoming requests from the server.
+type RequestHandler func(ctx context.Context, request JSONRPCRequest) (*JSONRPCResponse, error)
+
+// BidirectionalInterface extends Interface to support incoming requests from the server.
+// This is used for features like sampling where the server can send requests to the client.
+type BidirectionalInterface interface {
+	Interface
+
+	// SetRequestHandler sets the handler for incoming requests from the server.
+	// The handler should process the request and return a response.
+	SetRequestHandler(handler RequestHandler)
 }
 
 type JSONRPCRequest struct {
@@ -41,10 +57,10 @@ type JSONRPCRequest struct {
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      mcp.RequestId   `json:"id"`
-	Result  json.RawMessage `json:"result"`
+	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *struct {
 		Code    int             `json:"code"`
 		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
-	} `json:"error"`
+	} `json:"error,omitempty"`
 }

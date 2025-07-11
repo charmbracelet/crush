@@ -428,6 +428,12 @@ func (c *SSE) Close() error {
 	return nil
 }
 
+// GetSessionId returns the session ID of the transport.
+// Since SSE does not maintain a session ID, it returns an empty string.
+func (c *SSE) GetSessionId() string {
+	return ""
+}
+
 // SendNotification sends a JSON-RPC notification to the server without expecting a response.
 func (c *SSE) SendNotification(ctx context.Context, notification mcp.JSONRPCNotification) error {
 	if c.endpoint == nil {

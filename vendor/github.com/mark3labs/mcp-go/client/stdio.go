@@ -19,10 +19,26 @@ func NewStdioMCPClient(
 	env []string,
 	args ...string,
 ) (*Client, error) {
+	return NewStdioMCPClientWithOptions(command, env, args)
+}
 
-	stdioTransport := transport.NewStdio(command, env, args...)
-	err := stdioTransport.Start(context.Background())
-	if err != nil {
+// NewStdioMCPClientWithOptions creates a new stdio-based MCP client that communicates with a subprocess.
+// It launches the specified command with given arguments and sets up stdin/stdout pipes for communication.
+// Optional configuration functions can be provided to customize the transport before it starts,
+// such as setting a custom command function.
+//
+// NOTICE: NewStdioMCPClientWithOptions automatically starts the underlying transport.
+// Don't call the Start method manually.
+// This is for backward compatibility.
+func NewStdioMCPClientWithOptions(
+	command string,
+	env []string,
+	args []string,
+	opts ...transport.StdioOption,
+) (*Client, error) {
+	stdioTransport := transport.NewStdioWithOptions(command, env, args, opts...)
+
+	if err := stdioTransport.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start stdio transport: %w", err)
 	}
 

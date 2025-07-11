@@ -50,7 +50,7 @@ func (s *Spinner) Start() {
 		_, err := s.prog.Run()
 		// ensures line is cleared
 		fmt.Fprint(os.Stderr, ansi.EraseEntireLine)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrInterrupted) {
 			fmt.Fprintf(os.Stderr, "Error running spinner: %v\n", err)
 		}
 		close(s.done)

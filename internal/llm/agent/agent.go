@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -405,11 +406,37 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			if errors.Is(err, context.Canceled) {
 				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request was canceled by user.")
 				a.messages.Update(context.Background(), agentMessage)
+				
+				// Log detailed error metadata for debugging
+				errorDetails := map[string]interface{}{
+					"error_type": "context.Canceled",
+					"session_id": sessionID,
+					"error_message": err.Error(),
+					"timestamp": time.Now().Unix(),
+					"finish_reason": message.FinishReasonCanceled,
+				}
+				if errorJSON, jsonErr := json.MarshalIndent(errorDetails, "", "  "); jsonErr == nil {
+					fmt.Printf("CANCELLATION ERROR DETAILS:\n%s\n", string(errorJSON))
+				}
+				
 				return a.err(ErrRequestCancelled)
 			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request timed out")
 				a.messages.Update(context.Background(), agentMessage)
+				
+				// Log detailed error metadata for debugging
+				errorDetails := map[string]interface{}{
+					"error_type": "context.DeadlineExceeded",
+					"session_id": sessionID,
+					"error_message": err.Error(),
+					"timestamp": time.Now().Unix(),
+					"finish_reason": message.FinishReasonCanceled,
+				}
+				if errorJSON, jsonErr := json.MarshalIndent(errorDetails, "", "  "); jsonErr == nil {
+					fmt.Printf("TIMEOUT ERROR DETAILS:\n%s\n", string(errorJSON))
+				}
+				
 				return a.err(fmt.Errorf("request timed out: %w", err))
 			}
 			return a.err(fmt.Errorf("failed to process events: %w", err))
@@ -592,10 +619,36 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 	case provider.EventError:
 		if errors.Is(event.Error, context.Canceled) {
 			slog.Info(fmt.Sprintf("Event processing canceled for session: %s", sessionID))
+			
+			// Log detailed error metadata for debugging
+			errorDetails := map[string]interface{}{
+				"error_type": "event.context.Canceled",
+				"session_id": sessionID,
+				"error_message": event.Error.Error(),
+				"timestamp": time.Now().Unix(),
+				"event_type": "EventError",
+			}
+			if errorJSON, jsonErr := json.MarshalIndent(errorDetails, "", "  "); jsonErr == nil {
+				fmt.Printf("EVENT CANCELLATION ERROR DETAILS:\n%s\n", string(errorJSON))
+			}
+			
 			return context.Canceled
 		}
 		if errors.Is(event.Error, context.DeadlineExceeded) {
 			slog.Info(fmt.Sprintf("Event processing deadline exceeded for session: %s", sessionID))
+			
+			// Log detailed error metadata for debugging
+			errorDetails := map[string]interface{}{
+				"error_type": "event.context.DeadlineExceeded",
+				"session_id": sessionID,
+				"error_message": event.Error.Error(),
+				"timestamp": time.Now().Unix(),
+				"event_type": "EventError",
+			}
+			if errorJSON, jsonErr := json.MarshalIndent(errorDetails, "", "  "); jsonErr == nil {
+				fmt.Printf("EVENT TIMEOUT ERROR DETAILS:\n%s\n", string(errorJSON))
+			}
+			
 			return context.DeadlineExceeded
 		}
 		slog.Error(event.Error.Error())

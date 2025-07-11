@@ -650,7 +650,7 @@ func joinHeaderBody(header, body string) string {
 		return header
 	}
 	body = t.S().Base.PaddingLeft(2).Render(body)
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "")
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {

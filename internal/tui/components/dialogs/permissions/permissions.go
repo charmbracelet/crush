@@ -60,6 +60,9 @@ type permissionDialogCmp struct {
 	cachedContent string
 	contentDirty  bool
 
+	positionRow int // Row position for dialog
+	positionCol int // Column position for dialog
+
 	keyMap KeyMap
 }
 
@@ -446,6 +449,9 @@ func (p *permissionDialogCmp) render() string {
 	p.contentViewPort.SetHeight(contentHeight)
 	p.contentViewPort.SetContent(contentFinal)
 
+	p.positionRow = p.wHeight / 2
+	p.positionRow -= (contentHeight + 9) / 2
+
 	var contentHelp string
 	if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
@@ -509,7 +515,10 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	if oldWidth != p.width || oldHeight != p.height {
 		p.contentDirty = true
 	}
-
+	p.positionRow = p.wHeight / 2
+	p.positionRow -= p.height / 2
+	p.positionCol = p.wWidth / 2
+	p.positionCol -= p.width / 2
 	return nil
 }
 
@@ -529,9 +538,5 @@ func (p *permissionDialogCmp) ID() dialogs.DialogID {
 
 // Position implements PermissionDialogCmp.
 func (p *permissionDialogCmp) Position() (int, int) {
-	row := (p.wHeight / 2) - 2 // Just a bit above the center
-	row -= p.height / 2
-	col := p.wWidth / 2
-	col -= p.width / 2
-	return row, col
+	return p.positionRow, p.positionCol
 }

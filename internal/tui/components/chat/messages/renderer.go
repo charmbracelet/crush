@@ -207,6 +207,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	}
 
 	cmd := strings.ReplaceAll(params.Command, "\n", " ")
+	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	args := newParamBuilder().addMain(cmd).build()
 
 	return br.renderWithParams(v, "Bash", args, func() string {
@@ -578,8 +579,8 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 		return ""
 	}
 	mainParam := params[0]
-	if paramsWidth-3 >= 0 && len(mainParam) > paramsWidth {
-		mainParam = mainParam[:paramsWidth-3] + "…"
+	if paramsWidth >= 0 && lipgloss.Width(mainParam) > paramsWidth {
+		mainParam = ansi.Truncate(mainParam, paramsWidth, "…")
 	}
 
 	if len(params) == 1 {

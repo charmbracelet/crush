@@ -59,9 +59,6 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	// Create a child context that can be canceled when the app is shutting down
 	watchCtx, cancelFunc := context.WithCancel(ctx)
 
-	// Create a context with the server name for better identification
-	watchCtx = context.WithValue(watchCtx, "serverName", name)
-
 	// Create the workspace watcher
 	workspaceWatcher := watcher.NewWorkspaceWatcher(lspClient)
 

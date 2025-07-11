@@ -10,13 +10,13 @@ import (
 func TestCommandBlocking(t *testing.T) {
 	tests := []struct {
 		name        string
-		blockFuncs  []CommandBlockFunc
+		blockFuncs  []BlockFunc
 		command     string
 		shouldBlock bool
 	}{
 		{
 			name: "block simple command",
-			blockFuncs: []CommandBlockFunc{
+			blockFuncs: []BlockFunc{
 				func(args []string) bool {
 					return len(args) > 0 && args[0] == "curl"
 				},
@@ -26,7 +26,7 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "allow non-blocked command",
-			blockFuncs: []CommandBlockFunc{
+			blockFuncs: []BlockFunc{
 				func(args []string) bool {
 					return len(args) > 0 && args[0] == "curl"
 				},
@@ -36,7 +36,7 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "block subcommand",
-			blockFuncs: []CommandBlockFunc{
+			blockFuncs: []BlockFunc{
 				func(args []string) bool {
 					return len(args) >= 2 && args[0] == "brew" && args[1] == "install"
 				},
@@ -46,7 +46,7 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "allow different subcommand",
-			blockFuncs: []CommandBlockFunc{
+			blockFuncs: []BlockFunc{
 				func(args []string) bool {
 					return len(args) >= 2 && args[0] == "brew" && args[1] == "install"
 				},
@@ -56,8 +56,8 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "block npm global install with -g",
-			blockFuncs: []CommandBlockFunc{
-				CreateSubCommandBlocker([][]string{
+			blockFuncs: []BlockFunc{
+				ArgumentsBlocker([][]string{
 					{"npm", "install", "-g"},
 					{"npm", "install", "--global"},
 				}),
@@ -67,8 +67,8 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "block npm global install with --global",
-			blockFuncs: []CommandBlockFunc{
-				CreateSubCommandBlocker([][]string{
+			blockFuncs: []BlockFunc{
+				ArgumentsBlocker([][]string{
 					{"npm", "install", "-g"},
 					{"npm", "install", "--global"},
 				}),
@@ -78,8 +78,8 @@ func TestCommandBlocking(t *testing.T) {
 		},
 		{
 			name: "allow npm local install",
-			blockFuncs: []CommandBlockFunc{
-				CreateSubCommandBlocker([][]string{
+			blockFuncs: []BlockFunc{
+				ArgumentsBlocker([][]string{
 					{"npm", "install", "-g"},
 					{"npm", "install", "--global"},
 				}),

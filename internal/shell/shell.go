@@ -44,8 +44,8 @@ type noopLogger struct{}
 
 func (noopLogger) InfoPersist(msg string, keysAndValues ...interface{}) {}
 
-// CommandBlockFunc is a function that determines if a command should be blocked
-type CommandBlockFunc func(args []string) bool
+// BlockFunc is a function that determines if a command should be blocked
+type BlockFunc func(args []string) bool
 
 // Shell provides cross-platform shell execution with optional state persistence
 type Shell struct {
@@ -53,7 +53,7 @@ type Shell struct {
 	cwd        string
 	mu         sync.Mutex
 	logger     Logger
-	blockFuncs []CommandBlockFunc
+	blockFuncs []BlockFunc
 }
 
 // Options for creating a new shell
@@ -61,7 +61,7 @@ type Options struct {
 	WorkingDir string
 	Env        []string
 	Logger     Logger
-	BlockFuncs []CommandBlockFunc
+	BlockFuncs []BlockFunc
 }
 
 // NewShell creates a new shell instance with the given options
@@ -159,7 +159,7 @@ func (s *Shell) SetEnv(key, value string) {
 }
 
 // SetBlockFuncs sets the command block functions for the shell
-func (s *Shell) SetBlockFuncs(blockFuncs []CommandBlockFunc) {
+func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.blockFuncs = blockFuncs
@@ -216,13 +216,13 @@ func (s *Shell) determineShellType(command string) ShellType {
 	return ShellTypePOSIX
 }
 
-// CreateSimpleCommandBlocker creates a CommandBlockFunc that blocks exact command matches
-func CreateSimpleCommandBlocker(bannedCommands []string) CommandBlockFunc {
+// CommandsBlocker creates a BlockFunc that blocks exact command matches
+func CommandsBlocker(bannedCommands []string) BlockFunc {
 	bannedSet := make(map[string]bool)
 	for _, cmd := range bannedCommands {
 		bannedSet[cmd] = true
 	}
-	
+
 	return func(args []string) bool {
 		if len(args) == 0 {
 			return false
@@ -231,8 +231,8 @@ func CreateSimpleCommandBlocker(bannedCommands []string) CommandBlockFunc {
 	}
 }
 
-// CreateSubCommandBlocker creates a CommandBlockFunc that blocks specific subcommands
-func CreateSubCommandBlocker(blockedSubCommands [][]string) CommandBlockFunc {
+// ArgumentsBlocker creates a BlockFunc that blocks specific subcommands
+func ArgumentsBlocker(blockedSubCommands [][]string) BlockFunc {
 	return func(args []string) bool {
 		for _, blocked := range blockedSubCommands {
 			if len(args) >= len(blocked) {
@@ -251,7 +251,8 @@ func CreateSubCommandBlocker(blockedSubCommands [][]string) CommandBlockFunc {
 		return false
 	}
 }
-func (s *Shell) createCommandBlockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+
+func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 {
@@ -357,7 +358,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.createCommandBlockHandler()),
+		interp.ExecHandlers(s.blockHandler()),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)

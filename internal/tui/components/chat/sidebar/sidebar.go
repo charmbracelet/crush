@@ -33,6 +33,8 @@ type FileHistory struct {
 	latestVersion  history.File
 }
 
+const LogoHeightBreakpoint = 40
+
 type SessionFile struct {
 	History   FileHistory
 	FilePath  string
@@ -100,8 +102,14 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
+
 	if !m.compactMode {
-		parts = append(parts, m.logo)
+		if m.height > LogoHeightBreakpoint {
+			parts = append(parts, m.logo)
+		} else {
+			// Use a smaller logo for smaller screens
+			parts = append(parts, m.smallerScreenLogo(), "")
+		}
 	}
 
 	if !m.compactMode && m.session.ID != "" {
@@ -502,6 +510,19 @@ func (s *sidebarCmp) currentModelBlock() string {
 		lipgloss.Left,
 		parts...,
 	)
+}
+
+func (m *sidebarCmp) smallerScreenLogo() string {
+	t := styles.CurrentTheme()
+	title := t.S().Base.Foreground(t.Secondary).Render("Charm™")
+	title += " " + styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary)
+	remainingWidth := m.width - lipgloss.Width(title) - 3
+	if remainingWidth > 0 {
+		char := "╱"
+		lines := strings.Repeat(char, remainingWidth)
+		title += " " + t.S().Base.Foreground(t.Primary).Render(lines)
+	}
+	return title
 }
 
 // SetSession implements Sidebar.

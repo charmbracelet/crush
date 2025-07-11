@@ -52,11 +52,12 @@ const (
 )
 
 const (
-	CompactModeBreakpoint = 120 // Width at which the chat page switches to compact mode
-	EditorHeight          = 5   // Height of the editor input area including padding
-	SideBarWidth          = 31  // Width of the sidebar
-	SideBarDetailsPadding = 1   // Padding for the sidebar details section
-	HeaderHeight          = 1   // Height of the header
+	CompactModeWidthBreakpoint  = 120 // Width at which the chat page switches to compact mode
+	CompactModeHeightBreakpoint = 30  // Height at which the chat page switches to compact mode
+	EditorHeight                = 5   // Height of the editor input area including padding
+	SideBarWidth                = 31  // Width of the sidebar
+	SideBarDetailsPadding       = 1   // Padding for the sidebar details section
+	HeaderHeight                = 1   // Height of the header
 
 	// Layout constants for borders and padding
 	BorderWidth        = 1 // Width of component borders
@@ -178,7 +179,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.forceCompact {
 			p.setCompactMode(true)
 			cmd = p.updateCompactConfig(true)
-		} else if p.width >= CompactModeBreakpoint {
+		} else if p.width >= CompactModeWidthBreakpoint && p.height >= CompactModeHeightBreakpoint {
 			p.setCompactMode(false)
 			cmd = p.updateCompactConfig(false)
 		}
@@ -421,20 +422,20 @@ func (p *chatPage) setCompactMode(compact bool) {
 	}
 }
 
-func (p *chatPage) handleCompactMode(newWidth int) {
+func (p *chatPage) handleCompactMode(newWidth int, newHeight int) {
 	if p.forceCompact {
 		return
 	}
-	if newWidth < CompactModeBreakpoint && !p.compact {
+	if (newWidth < CompactModeWidthBreakpoint || newHeight < CompactModeHeightBreakpoint) && !p.compact {
 		p.setCompactMode(true)
 	}
-	if newWidth >= CompactModeBreakpoint && p.compact {
+	if (newWidth >= CompactModeWidthBreakpoint && newHeight >= CompactModeHeightBreakpoint) && p.compact {
 		p.setCompactMode(false)
 	}
 }
 
 func (p *chatPage) SetSize(width, height int) tea.Cmd {
-	p.handleCompactMode(width)
+	p.handleCompactMode(width, height)
 	p.width = width
 	p.height = height
 	var cmds []tea.Cmd

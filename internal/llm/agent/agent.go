@@ -403,7 +403,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request was cancelled by user")
+				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request was canceled by user.")
 				a.messages.Update(context.Background(), agentMessage)
 				return a.err(ErrRequestCancelled)
 			}

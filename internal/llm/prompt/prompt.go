@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/env"
 )
 
 type PromptID string
@@ -21,7 +24,7 @@ func GetPrompt(promptID PromptID, provider string, contextPaths ...string) strin
 	basePrompt := ""
 	switch promptID {
 	case PromptCoder:
-		basePrompt = CoderPrompt(provider)
+		basePrompt = CoderPrompt(provider, contextPaths...)
 	case PromptTitle:
 		basePrompt = TitlePrompt()
 	case PromptTask:
@@ -36,6 +39,32 @@ func GetPrompt(promptID PromptID, provider string, contextPaths ...string) strin
 
 func getContextFromPaths(workingDir string, contextPaths []string) string {
 	return processContextPaths(workingDir, contextPaths)
+}
+
+// expandPath expands ~ and environment variables in file paths
+func expandPath(path string) string {
+	// Handle tilde expansion
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			path = filepath.Join(homeDir, path[2:])
+		}
+	} else if path == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			path = homeDir
+		}
+	}
+
+	// Handle environment variable expansion using the same pattern as config
+	if strings.HasPrefix(path, "$") {
+		resolver := config.NewEnvironmentVariableResolver(env.New())
+		if expanded, err := resolver.ResolveValue(path); err == nil {
+			path = expanded
+		}
+	}
+
+	return path
 }
 
 func processContextPaths(workDir string, paths []string) string {
@@ -53,8 +82,16 @@ func processContextPaths(workDir string, paths []string) string {
 		go func(p string) {
 			defer wg.Done()
 
+			// Expand ~ and environment variables before processing
+			p = expandPath(p)
+
 			if strings.HasSuffix(p, "/") {
-				filepath.WalkDir(filepath.Join(workDir, p), func(path string, d os.DirEntry, err error) error {
+				// Use absolute path if provided, otherwise join with workDir
+				dirPath := p
+				if !filepath.IsAbs(p) {
+					dirPath = filepath.Join(workDir, p)
+				}
+				filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 					if err != nil {
 						return err
 					}
@@ -78,7 +115,12 @@ func processContextPaths(workDir string, paths []string) string {
 					return nil
 				})
 			} else {
-				fullPath := filepath.Join(workDir, p)
+				// Expand ~ and environment variables before processing
+				// Use absolute path if provided, otherwise join with workDir
+				fullPath := p
+				if !filepath.IsAbs(p) {
+					fullPath = filepath.Join(workDir, p)
+				}
 
 				// Check if we've already processed this file (case-insensitive)
 				lowerPath := strings.ToLower(fullPath)

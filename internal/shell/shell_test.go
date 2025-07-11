@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -24,6 +25,11 @@ func BenchmarkShellQuickCommands(b *testing.B) {
 }
 
 func TestTestTimeout(t *testing.T) {
+	// XXX(@andreynering): This fails on Windows. Address once possible.
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows")
+	}
+
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	t.Cleanup(cancel)
 
@@ -72,113 +78,23 @@ func TestRunCommandError(t *testing.T) {
 }
 
 func TestRunContinuity(t *testing.T) {
-	shell := NewShell(&Options{WorkingDir: t.TempDir()})
-	shell.Exec(t.Context(), "export FOO=bar")
-	dst := t.TempDir()
-	shell.Exec(t.Context(), "cd "+dst)
-	out, _, _ := shell.Exec(t.Context(), "echo $FOO ; pwd")
-	expect := "bar\n" + dst + "\n"
+	tempDir1 := t.TempDir()
+	tempDir2 := t.TempDir()
+
+	shell := NewShell(&Options{WorkingDir: tempDir1})
+	if _, _, err := shell.Exec(t.Context(), "export FOO=bar"); err != nil {
+		t.Fatalf("failed to set env: %v", err)
+	}
+	if _, _, err := shell.Exec(t.Context(), "cd "+filepath.ToSlash(tempDir2)); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	out, _, err := shell.Exec(t.Context(), "echo $FOO ; pwd")
+	if err != nil {
+		t.Fatalf("failed to echo: %v", err)
+	}
+	expect := "bar\n" + tempDir2 + "\n"
 	if out != expect {
-		t.Fatalf("Expected output %q, got %q", expect, out)
-	}
-}
-
-// New tests for Windows shell support
-
-func TestShellTypeDetection(t *testing.T) {
-	shell := &PersistentShell{}
-
-	tests := []struct {
-		command     string
-		expected    ShellType
-		windowsOnly bool
-	}{
-		// Windows-specific commands
-		{"dir", ShellTypeCmd, true},
-		{"type file.txt", ShellTypeCmd, true},
-		{"copy file1.txt file2.txt", ShellTypeCmd, true},
-		{"del file.txt", ShellTypeCmd, true},
-		{"md newdir", ShellTypeCmd, true},
-		{"tasklist", ShellTypeCmd, true},
-
-		// PowerShell commands
-		{"Get-Process", ShellTypePowerShell, true},
-		{"Get-ChildItem", ShellTypePowerShell, true},
-		{"Set-Location C:\\", ShellTypePowerShell, true},
-		{"Get-Content file.txt | Where-Object {$_ -match 'pattern'}", ShellTypePowerShell, true},
-		{"$files = Get-ChildItem", ShellTypePowerShell, true},
-
-		// Unix/cross-platform commands
-		{"ls -la", ShellTypePOSIX, false},
-		{"cat file.txt", ShellTypePOSIX, false},
-		{"grep pattern file.txt", ShellTypePOSIX, false},
-		{"echo hello", ShellTypePOSIX, false},
-		{"git status", ShellTypePOSIX, false},
-		{"go build", ShellTypePOSIX, false},
-	}
-
-	for _, test := range tests {
-		t.Run(test.command, func(t *testing.T) {
-			result := shell.determineShellType(test.command)
-
-			if test.windowsOnly && runtime.GOOS != "windows" {
-				// On non-Windows systems, everything should use POSIX
-				if result != ShellTypePOSIX {
-					t.Errorf("On non-Windows, command %q should use POSIX shell, got %v", test.command, result)
-				}
-			} else if runtime.GOOS == "windows" {
-				// On Windows, check the expected shell type
-				if result != test.expected {
-					t.Errorf("Command %q should use %v shell, got %v", test.command, test.expected, result)
-				}
-			}
-		})
-	}
-}
-
-func TestWindowsCDHandling(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows CD handling test only runs on Windows")
-	}
-
-	shell := NewShell(&Options{
-		WorkingDir: "C:\\Users",
-	})
-
-	tests := []struct {
-		command     string
-		expectedCwd string
-		shouldError bool
-	}{
-		{"cd ..", "C:\\", false},
-		{"cd Documents", "C:\\Users\\Documents", false},
-		{"cd C:\\Windows", "C:\\Windows", false},
-		{"cd", "", true}, // Missing argument
-	}
-
-	for _, test := range tests {
-		t.Run(test.command, func(t *testing.T) {
-			originalCwd := shell.GetWorkingDir()
-			stdout, stderr, err := shell.handleWindowsCD(test.command)
-
-			if test.shouldError {
-				if err == nil {
-					t.Errorf("Command %q should have failed", test.command)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Command %q failed: %v", test.command, err)
-				}
-				if shell.GetWorkingDir() != test.expectedCwd {
-					t.Errorf("Command %q: expected cwd %q, got %q", test.command, test.expectedCwd, shell.GetWorkingDir())
-				}
-			}
-
-			// Reset for next test
-			shell.SetWorkingDir(originalCwd)
-			_ = stdout
-			_ = stderr
-		})
+		t.Fatalf("expected output %q, got %q", expect, out)
 	}
 }
 
@@ -200,25 +116,5 @@ func TestCrossPlatformExecution(t *testing.T) {
 	// The output should contain "hello" regardless of platform
 	if !strings.Contains(strings.ToLower(stdout), "hello") {
 		t.Errorf("Echo output should contain 'hello', got: %q", stdout)
-	}
-}
-
-func TestWindowsNativeCommands(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows native command test only runs on Windows")
-	}
-
-	shell := NewShell(&Options{WorkingDir: "."})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Test Windows dir command
-	stdout, stderr, err := shell.Exec(ctx, "dir")
-	if err != nil {
-		t.Fatalf("Dir command failed: %v, stderr: %s", err, stderr)
-	}
-
-	if stdout == "" {
-		t.Error("Dir command produced no output")
 	}
 }

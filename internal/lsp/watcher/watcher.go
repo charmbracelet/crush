@@ -34,9 +34,9 @@ type WorkspaceWatcher struct {
 }
 
 // NewWorkspaceWatcher creates a new workspace watcher
-func NewWorkspaceWatcher(client *lsp.Client) *WorkspaceWatcher {
+func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
-		name:          normalizeName(client.Cmd.Path),
+		name:          normalizeName(name),
 		client:        client,
 		debounceTime:  300 * time.Millisecond,
 		debounceMap:   make(map[string]*time.Timer),
@@ -44,9 +44,8 @@ func NewWorkspaceWatcher(client *lsp.Client) *WorkspaceWatcher {
 	}
 }
 
-func normalizeName(path string) string {
-	base := filepath.Base(path)
-	switch base {
+func normalizeName(name string) string {
+	switch name {
 	case "typescript-language-server",
 		"tsserver",
 		"vtsls":
@@ -56,7 +55,7 @@ func normalizeName(path string) string {
 	case "jdtls":
 		return "java"
 	default:
-		return base
+		return name
 	}
 }
 

@@ -60,7 +60,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	watchCtx, cancelFunc := context.WithCancel(ctx)
 
 	// Create the workspace watcher
-	workspaceWatcher := watcher.NewWorkspaceWatcher(lspClient)
+	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient)
 
 	// Store the cancel function to be called during cleanup
 	app.cancelFuncsMutex.Lock()

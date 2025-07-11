@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
+const maxCompletionsHeight = 10
+
 type Completion struct {
 	Title string // The title of the completion item
 	Value any    // The value of the completion item
@@ -153,7 +155,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.list.Filter(msg.Query))
 		itemsLen := len(c.list.Items())
-		c.height = max(min(10, itemsLen), 1)
+		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {
 			// Close completions if no items match the query

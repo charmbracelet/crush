@@ -34,6 +34,7 @@ func NewSpinner(ctx context.Context, message string) *Spinner {
 		model,
 		tea.WithInput(nil),
 		tea.WithOutput(os.Stderr),
+		tea.WithoutSignals(), // sigs are handled by caller
 		tea.WithContext(ctx),
 		tea.WithoutCatchPanics(),
 	)
@@ -47,13 +48,13 @@ func NewSpinner(ctx context.Context, message string) *Spinner {
 // Start begins the spinner animation
 func (s *Spinner) Start() {
 	go func() {
+		defer close(s.done)
 		_, err := s.prog.Run()
 		// ensures line is cleared
 		fmt.Fprint(os.Stderr, ansi.EraseEntireLine)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrInterrupted) {
 			fmt.Fprintf(os.Stderr, "Error running spinner: %v\n", err)
 		}
-		close(s.done)
 	}()
 }
 

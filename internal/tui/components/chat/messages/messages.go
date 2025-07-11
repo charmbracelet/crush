@@ -198,7 +198,11 @@ func (m *messageCmp) markdownContent() string {
 			//  provides the requested question
 			content = ""
 		} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
-			content = "*Canceled*"
+			if finishedData.Error != "" {
+				content = fmt.Sprintf("*Canceled: %s*", finishedData.Error)
+			} else {
+				content = "*Canceled*"
+			}
 		}
 	}
 	return m.toMarkdown(content)

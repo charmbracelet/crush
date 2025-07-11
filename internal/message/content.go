@@ -104,6 +104,7 @@ func (ToolResult) isPart() {}
 type Finish struct {
 	Reason FinishReason `json:"reason"`
 	Time   int64        `json:"time"`
+	Error  string       `json:"error,omitempty"` // Optional error message for cancellations
 }
 
 func (Finish) isPart() {}
@@ -309,6 +310,10 @@ func (m *Message) SetToolResults(tr []ToolResult) {
 }
 
 func (m *Message) AddFinish(reason FinishReason) {
+	m.AddFinishWithError(reason, "")
+}
+
+func (m *Message) AddFinishWithError(reason FinishReason, errorMsg string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -316,7 +321,7 @@ func (m *Message) AddFinish(reason FinishReason) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix()})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Error: errorMsg})
 }
 
 func (m *Message) AddImageURL(url, detail string) {

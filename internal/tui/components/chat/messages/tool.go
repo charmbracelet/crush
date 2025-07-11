@@ -43,6 +43,7 @@ type toolCallCmp struct {
 	call            message.ToolCall   // The tool call being executed
 	result          message.ToolResult // The result of the tool execution
 	cancelled       bool               // Whether the tool call was cancelled
+	cancelError     string             // Error message if cancelled
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -58,6 +59,14 @@ type ToolCallOption func(*toolCallCmp)
 func WithToolCallCancelled() ToolCallOption {
 	return func(m *toolCallCmp) {
 		m.cancelled = true
+	}
+}
+
+// WithToolCallCancelledWithError marks the tool call as cancelled with an error message
+func WithToolCallCancelledWithError(errorMsg string) ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.cancelled = true
+		m.cancelError = errorMsg
 	}
 }
 

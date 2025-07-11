@@ -489,7 +489,11 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 
 	// Add cancelled status if applicable
 	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-		options = append(options, messages.WithToolCallCancelled())
+		if msg.FinishPart().Error != "" {
+			options = append(options, messages.WithToolCallCancelledWithError(msg.FinishPart().Error))
+		} else {
+			options = append(options, messages.WithToolCallCancelled())
+		}
 	}
 
 	return options

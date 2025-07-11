@@ -633,7 +633,11 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.result.IsError:
 		message = v.renderToolError()
 	case v.cancelled:
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
+		if v.cancelError != "" {
+			message = t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("Canceled: %s", v.cancelError))
+		} else {
+			message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
+		}
 	case v.result.ToolCallID == "":
 		message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool to start...")
 	default:

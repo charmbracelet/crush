@@ -403,9 +403,14 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				agentMessage.AddFinish(message.FinishReasonCanceled)
+				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request was cancelled by user")
 				a.messages.Update(context.Background(), agentMessage)
 				return a.err(ErrRequestCancelled)
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				agentMessage.AddFinishWithError(message.FinishReasonCanceled, "Request timed out")
+				a.messages.Update(context.Background(), agentMessage)
+				return a.err(fmt.Errorf("request timed out: %w", err))
 			}
 			return a.err(fmt.Errorf("failed to process events: %w", err))
 		}
@@ -553,6 +558,11 @@ func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishR
 	_ = a.messages.Update(ctx, *msg)
 }
 
+func (a *agent) finishMessageWithError(ctx context.Context, msg *message.Message, finishReson message.FinishReason, errorMsg string) {
+	msg.AddFinishWithError(finishReson, errorMsg)
+	_ = a.messages.Update(ctx, *msg)
+}
+
 func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg *message.Message, event provider.ProviderEvent) error {
 	select {
 	case <-ctx.Done():
@@ -583,6 +593,10 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		if errors.Is(event.Error, context.Canceled) {
 			slog.Info(fmt.Sprintf("Event processing canceled for session: %s", sessionID))
 			return context.Canceled
+		}
+		if errors.Is(event.Error, context.DeadlineExceeded) {
+			slog.Info(fmt.Sprintf("Event processing deadline exceeded for session: %s", sessionID))
+			return context.DeadlineExceeded
 		}
 		slog.Error(event.Error.Error())
 		return event.Error

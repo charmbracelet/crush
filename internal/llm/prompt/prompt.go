@@ -85,13 +85,20 @@ func processContextPaths(workDir string, paths []string) string {
 			// Expand ~ and environment variables before processing
 			p = expandPath(p)
 
-			if strings.HasSuffix(p, "/") {
-				// Use absolute path if provided, otherwise join with workDir
-				dirPath := p
-				if !filepath.IsAbs(p) {
-					dirPath = filepath.Join(workDir, p)
-				}
-				filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+			// Use absolute path if provided, otherwise join with workDir
+			fullPath := p
+			if !filepath.IsAbs(p) {
+				fullPath = filepath.Join(workDir, p)
+			}
+
+			// Check if the path is a directory using os.Stat
+			info, err := os.Stat(fullPath)
+			if err != nil {
+				return // Skip if path doesn't exist or can't be accessed
+			}
+
+			if info.IsDir() {
+				filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
 					if err != nil {
 						return err
 					}
@@ -115,13 +122,7 @@ func processContextPaths(workDir string, paths []string) string {
 					return nil
 				})
 			} else {
-				// Expand ~ and environment variables before processing
-				// Use absolute path if provided, otherwise join with workDir
-				fullPath := p
-				if !filepath.IsAbs(p) {
-					fullPath = filepath.Join(workDir, p)
-				}
-
+				// It's a file, process it directly
 				// Check if we've already processed this file (case-insensitive)
 				lowerPath := strings.ToLower(fullPath)
 

@@ -80,12 +80,18 @@ func TestProcessContextPaths(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Test with absolute path
+	// Test with absolute path to file
 	result := processContextPaths("", []string{testFile})
 	expected := "# From:" + testFile + "\n" + testContent
 
 	if result != expected {
 		t.Errorf("processContextPaths with absolute path failed.\nGot: %q\nWant: %q", result, expected)
+	}
+
+	// Test with directory path (should process all files in directory)
+	result = processContextPaths("", []string{tmpDir})
+	if !strings.Contains(result, testContent) {
+		t.Errorf("processContextPaths with directory path failed to include file content")
 	}
 
 	// Test with tilde expansion (if we can create a file in home directory)

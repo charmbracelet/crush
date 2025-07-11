@@ -95,10 +95,10 @@ func TestProcessContextPaths(t *testing.T) {
 	}
 
 	// Test with tilde expansion (if we can create a file in home directory)
-	tmpDir := t.TempDir()
+	tmpDir = t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	homeTestFile := filepath.Join(tmpDir, "crush_test_file.txt")
-	err := os.WriteFile(homeTestFile, []byte(testContent), 0o644)
+	err = os.WriteFile(homeTestFile, []byte(testContent), 0o644)
 	if err == nil {
 		defer os.Remove(homeTestFile) // Clean up
 

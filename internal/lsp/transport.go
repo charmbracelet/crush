@@ -222,29 +222,32 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	}
 
 	// Wait for response
-	resp := <-ch
-
-	if cfg.Options.DebugLSP {
-		slog.Debug("Received response", "id", id)
-	}
-
-	if resp.Error != nil {
-		return fmt.Errorf("request failed: %s (code: %d)", resp.Error.Message, resp.Error.Code)
-	}
-
-	if result != nil {
-		// If result is a json.RawMessage, just copy the raw bytes
-		if rawMsg, ok := result.(*json.RawMessage); ok {
-			*rawMsg = resp.Result
-			return nil
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case resp := <-ch:
+		if cfg.Options.DebugLSP {
+			slog.Debug("Received response", "id", id)
 		}
-		// Otherwise unmarshal into the provided type
-		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return fmt.Errorf("failed to unmarshal result: %w", err)
-		}
-	}
 
-	return nil
+		if resp.Error != nil {
+			return fmt.Errorf("request failed: %s (code: %d)", resp.Error.Message, resp.Error.Code)
+		}
+
+		if result != nil {
+			// If result is a json.RawMessage, just copy the raw bytes
+			if rawMsg, ok := result.(*json.RawMessage); ok {
+				*rawMsg = resp.Result
+				return nil
+			}
+			// Otherwise unmarshal into the provided type
+			if err := json.Unmarshal(resp.Result, result); err != nil {
+				return fmt.Errorf("failed to unmarshal result: %w", err)
+			}
+		}
+
+		return nil
+	}
 }
 
 // Notify sends a notification (a request without an ID that doesn't expect a response)

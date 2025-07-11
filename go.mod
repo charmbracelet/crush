@@ -18,9 +18,9 @@ require (
 	github.com/charlievieth/fastwalk v1.0.11
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250710161907-a4c42b579198
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.1
-	github.com/charmbracelet/fang v0.1.0
+	github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.2.0.20250703152125-8e1c474f8a71
+	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
 	github.com/charmbracelet/x/ansi v0.9.3
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3

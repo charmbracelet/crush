@@ -222,6 +222,17 @@ func NewAudioContent(data, mimeType string) AudioContent {
 	}
 }
 
+// Helper function to create a new ResourceLink
+func NewResourceLink(uri, name, description, mimeType string) ResourceLink {
+	return ResourceLink{
+		Type:        "resource_link",
+		URI:         uri,
+		Name:        name,
+		Description: description,
+		MIMEType:    mimeType,
+	}
+}
+
 // Helper function to create a new EmbeddedResource
 func NewEmbeddedResource(resource ResourceContents) EmbeddedResource {
 	return EmbeddedResource{
@@ -475,6 +486,16 @@ func ParseContent(contentMap map[string]any) (Content, error) {
 			return nil, fmt.Errorf("audio data or mimeType is missing")
 		}
 		return NewAudioContent(data, mimeType), nil
+
+	case "resource_link":
+		uri := ExtractString(contentMap, "uri")
+		name := ExtractString(contentMap, "name")
+		description := ExtractString(contentMap, "description")
+		mimeType := ExtractString(contentMap, "mimeType")
+		if uri == "" || name == "" {
+			return nil, fmt.Errorf("resource_link uri or name is missing")
+		}
+		return NewResourceLink(uri, name, description, mimeType), nil
 
 	case "resource":
 		resourceMap := ExtractMap(contentMap, "resource")

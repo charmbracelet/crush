@@ -763,6 +763,11 @@ const (
 
 /* Sampling */
 
+const (
+	// MethodSamplingCreateMessage allows servers to request LLM completions from clients
+	MethodSamplingCreateMessage MCPMethod = "sampling/createMessage"
+)
+
 // CreateMessageRequest is a request from the server to sample an LLM via the
 // client. The client has full discretion over which model to select. The client
 // should also inform the user before beginning sampling, to allow them to inspect
@@ -864,6 +869,22 @@ type AudioContent struct {
 }
 
 func (AudioContent) isContent() {}
+
+// ResourceLink represents a link to a resource that the client can access.
+type ResourceLink struct {
+	Annotated
+	Type string `json:"type"` // Must be "resource_link"
+	// The URI of the resource.
+	URI string `json:"uri"`
+	// The name of the resource.
+	Name string `json:"name"`
+	// The description of the resource.
+	Description string `json:"description"`
+	// The MIME type of the resource.
+	MIMEType string `json:"mimeType"`
+}
+
+func (ResourceLink) isContent() {}
 
 // EmbeddedResource represents the contents of a resource, embedded into a prompt or tool call result.
 //

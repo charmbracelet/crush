@@ -89,20 +89,19 @@ func TestProcessContextPaths(t *testing.T) {
 	}
 
 	// Test with tilde expansion (if we can create a file in home directory)
-	home, err := os.UserHomeDir()
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	homeTestFile := filepath.Join(tmpDir, "crush_test_file.txt")
+	err := os.WriteFile(homeTestFile, []byte(testContent), 0o644)
 	if err == nil {
-		homeTestFile := filepath.Join(home, "crush_test_file.txt")
-		err = os.WriteFile(homeTestFile, []byte(testContent), 0o644)
-		if err == nil {
-			defer os.Remove(homeTestFile) // Clean up
+		defer os.Remove(homeTestFile) // Clean up
 
-			tildeFile := "~/crush_test_file.txt"
-			result = processContextPaths("", []string{tildeFile})
-			expected = "# From:" + homeTestFile + "\n" + testContent
+		tildeFile := "~/crush_test_file.txt"
+		result = processContextPaths("", []string{tildeFile})
+		expected = "# From:" + homeTestFile + "\n" + testContent
 
-			if result != expected {
-				t.Errorf("processContextPaths with tilde expansion failed.\nGot: %q\nWant: %q", result, expected)
-			}
+		if result != expected {
+			t.Errorf("processContextPaths with tilde expansion failed.\nGot: %q\nWant: %q", result, expected)
 		}
 	}
 }

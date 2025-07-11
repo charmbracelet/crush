@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,10 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(logsCmd)
-}
-
 var logsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "View crush logs",
@@ -27,7 +24,16 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get current working directory: %v", err)
 		}
+
+		follow, err := cmd.Flags().GetBool("follow")
+		if err != nil {
+			return fmt.Errorf("failed to get follow flag: %v", err)
+		}
+
 		log.SetLevel(log.DebugLevel)
+		// Configure log to output to stdout instead of stderr
+		log.SetOutput(os.Stdout)
+
 		cfg, err := config.Load(cwd, false)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
@@ -38,62 +44,92 @@ var logsCmd = &cobra.Command{
 			log.Warn("Looks like you are not in a crush project. No logs found.")
 			return nil
 		}
-		t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
-		if err != nil {
-			return fmt.Errorf("failed to tail log file: %v", err)
+
+		if follow {
+			// Follow mode - tail the file continuously
+			t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
+			if err != nil {
+				return fmt.Errorf("failed to tail log file: %v", err)
+			}
+
+			// Print the text of each received line
+			for line := range t.Lines {
+				printLogLine(line.Text)
+			}
+		} else {
+			// Oneshot mode - read the entire file once
+			file, err := os.Open(logsFile)
+			if err != nil {
+				return fmt.Errorf("failed to open log file: %v", err)
+			}
+			defer file.Close()
+
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				printLogLine(scanner.Text())
+			}
+
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("failed to read log file: %v", err)
+			}
 		}
 
-		// Print the text of each received line
-		for line := range t.Lines {
-			var data map[string]any
-			if err := json.Unmarshal([]byte(line.Text), &data); err != nil {
-				continue
-			}
-			msg := data["msg"]
-			level := data["level"]
-			otherData := []any{}
-			keys := []string{}
-			for k := range data {
-				keys = append(keys, k)
-			}
-			slices.Sort(keys)
-			for _, k := range keys {
-				switch k {
-				case "msg", "level", "time":
-					continue
-				case "source":
-					source, ok := data[k].(map[string]any)
-					if !ok {
-						continue
-					}
-					sourceFile := fmt.Sprintf("%s:%d", source["file"], int(source["line"].(float64)))
-					otherData = append(otherData, "source", sourceFile)
-
-				default:
-					otherData = append(otherData, k, data[k])
-				}
-			}
-			log.SetTimeFunction(func(_ time.Time) time.Time {
-				// parse the timestamp from the log line if available
-				t, err := time.Parse(time.RFC3339, data["time"].(string))
-				if err != nil {
-					return time.Now() // fallback to current time if parsing fails
-				}
-				return t
-			})
-			switch level {
-			case "INFO":
-				log.Info(msg, otherData...)
-			case "DEBUG":
-				log.Debug(msg, otherData...)
-			case "ERROR":
-				log.Error(msg, otherData...)
-			case "WARN":
-				log.Warn(msg, otherData...)
-			default:
-				log.Info(msg, otherData...)
-			}
-		}
 		return nil
 	},
+}
+
+func init() {
+	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	rootCmd.AddCommand(logsCmd)
+}
+
+func printLogLine(lineText string) {
+	var data map[string]any
+	if err := json.Unmarshal([]byte(lineText), &data); err != nil {
+		return
+	}
+	msg := data["msg"]
+	level := data["level"]
+	otherData := []any{}
+	keys := []string{}
+	for k := range data {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		switch k {
+		case "msg", "level", "time":
+			continue
+		case "source":
+			source, ok := data[k].(map[string]any)
+			if !ok {
+				continue
+			}
+			sourceFile := fmt.Sprintf("%s:%d", source["file"], int(source["line"].(float64)))
+			otherData = append(otherData, "source", sourceFile)
+
+		default:
+			otherData = append(otherData, k, data[k])
+		}
+	}
+	log.SetTimeFunction(func(_ time.Time) time.Time {
+		// parse the timestamp from the log line if available
+		t, err := time.Parse(time.RFC3339, data["time"].(string))
+		if err != nil {
+			return time.Now() // fallback to current time if parsing fails
+		}
+		return t
+	})
+	switch level {
+	case "INFO":
+		log.Info(msg, otherData...)
+	case "DEBUG":
+		log.Debug(msg, otherData...)
+	case "ERROR":
+		log.Error(msg, otherData...)
+	case "WARN":
+		log.Warn(msg, otherData...)
+	default:
+		log.Info(msg, otherData...)
+	}
 }

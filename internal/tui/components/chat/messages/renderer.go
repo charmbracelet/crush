@@ -578,7 +578,7 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 		return ""
 	}
 	mainParam := params[0]
-	if len(mainParam) > paramsWidth {
+	if paramsWidth-3 >= 0 && len(mainParam) > paramsWidth {
 		mainParam = mainParam[:paramsWidth-3] + "…"
 	}
 

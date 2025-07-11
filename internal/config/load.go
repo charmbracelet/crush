@@ -388,7 +388,7 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 		}
 		model := cfg.GetModel(large.Provider, large.Model)
 		slog.Info("Configuring selected large model", "provider", large.Provider, "model", large.Model)
-		slog.Info("MOdel configured", "model", model)
+		slog.Info("Model configured", "model", model)
 		if model == nil {
 			large = defaultLarge
 			// override the model type to large

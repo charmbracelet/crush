@@ -72,7 +72,7 @@ type ProviderConfig struct {
 	Disable bool `json:"disable,omitempty"`
 
 	// Extra headers to send with each request to the provider.
-	ExtraHeaders map[string]string
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`

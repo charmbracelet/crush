@@ -32,6 +32,11 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("failed to get follow flag: %v", err)
 		}
 
+		tailLines, err := cmd.Flags().GetInt("tail")
+		if err != nil {
+			return fmt.Errorf("failed to get tail flag: %v", err)
+		}
+
 		log.SetLevel(log.DebugLevel)
 		// Configure log to output to stdout instead of stderr
 		log.SetOutput(os.Stdout)
@@ -57,6 +62,15 @@ var logsCmd = &cobra.Command{
 			// Print the text of each received line
 			for line := range t.Lines {
 				printLogLine(line.Text)
+			}
+		} else if tailLines > 0 {
+			// Tail mode - show last N lines
+			lines, err := readLastNLines(logsFile, tailLines)
+			if err != nil {
+				return fmt.Errorf("failed to read last %d lines: %v", tailLines, err)
+			}
+			for _, line := range lines {
+				printLogLine(line)
 			}
 		} else {
 			// Oneshot mode - read the entire file once
@@ -88,7 +102,55 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+	logsCmd.Flags().IntP("tail", "t", 0, "Show only the last N lines")
 	rootCmd.AddCommand(logsCmd)
+}
+
+// readLastNLines reads the last N lines from a file using a simple circular buffer approach
+func readLastNLines(filename string, n int) ([]string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Use a circular buffer to keep only the last N lines
+	lines := make([]string, n)
+	count := 0
+	index := 0
+
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF && line != "" {
+				// Handle last line without newline
+				line = strings.TrimSuffix(line, "\n")
+				lines[index] = line
+				count++
+				index = (index + 1) % n
+			}
+			break
+		}
+		// Remove trailing newline
+		line = strings.TrimSuffix(line, "\n")
+		lines[index] = line
+		count++
+		index = (index + 1) % n
+	}
+
+	// Extract the last N lines in correct order
+	if count <= n {
+		// We have fewer lines than requested, return them all
+		return lines[:count], nil
+	}
+
+	// We have more lines than requested, extract from circular buffer
+	result := make([]string, n)
+	for i := range n {
+		result[i] = lines[(index+i)%n]
+	}
+	return result, nil
 }
 
 func printLogLine(lineText string) {

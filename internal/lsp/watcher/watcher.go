@@ -846,12 +846,14 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 		return
 	}
 
+	serverName := w.name
+
 	// Get server name for specialized handling
 	// Check if the file is a high-priority file that should be opened immediately
 	// This helps with project initialization for certain language servers
-	if isHighPriorityFile(path, w.name) {
+	if isHighPriorityFile(path, serverName) {
 		if cfg.Options.DebugLSP {
-			slog.Debug("Opening high-priority file", "path", path, "serverName", w.name)
+			slog.Debug("Opening high-priority file", "path", path, "serverName", serverName)
 		}
 		if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
 			slog.Error("Error opening high-priority file", "path", path, "error", err)
@@ -860,7 +862,7 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 	}
 
 	// For non-high-priority files, we'll use different strategies based on server type
-	if !shouldPreloadFiles(w.name) {
+	if !shouldPreloadFiles(serverName) {
 		return
 	}
 	// For servers that benefit from preloading, open files but with limits
@@ -878,7 +880,7 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 
 	// Only preload source files for the specific language
 	var shouldOpen bool
-	switch w.name {
+	switch serverName {
 	case "typescript", "typescript-language-server", "tsserver", "vtsls":
 		shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
 	case "gopls":

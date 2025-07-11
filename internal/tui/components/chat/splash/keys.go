@@ -30,11 +30,11 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("↑", "previous item"),
 		),
 		Yes: key.NewBinding(
-			key.WithKeys("y"),
+			key.WithKeys("y", "Y"),
 			key.WithHelp("y", "yes"),
 		),
 		No: key.NewBinding(
-			key.WithKeys("n"),
+			key.WithKeys("n", "N"),
 			key.WithHelp("n", "no"),
 		),
 		Tab: key.NewBinding(

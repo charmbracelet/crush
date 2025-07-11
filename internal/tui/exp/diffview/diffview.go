@@ -365,7 +365,8 @@ func (dv *DiffView) renderUnified() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.TrimSuffix(in, "\n")
+		content = strings.ReplaceAll(in, "\r\n", "\n")
+		content = strings.TrimSuffix(content, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
@@ -488,7 +489,8 @@ func (dv *DiffView) renderSplit() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.TrimSuffix(in, "\n")
+		content = strings.ReplaceAll(in, "\r\n", "\n")
+		content = strings.TrimSuffix(content, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")

@@ -17,9 +17,23 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/util"
 )
 
 type StreamableHTTPCOption func(*StreamableHTTP)
+
+// WithContinuousListening enables receiving server-to-client notifications when no request is in flight.
+// In particular, if you want to receive global notifications from the server (like ToolListChangedNotification),
+// you should enable this option.
+//
+// It will establish a standalone long-live GET HTTP connection to the server.
+// https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#listening-for-messages-from-the-server
+// NOTICE: Even enabled, the server may not support this feature.
+func WithContinuousListening() StreamableHTTPCOption {
+	return func(sc *StreamableHTTP) {
+		sc.getListeningEnabled = true
+	}
+}
 
 // WithHTTPClient sets a custom HTTP client on the StreamableHTTP transport.
 func WithHTTPBasicClient(client *http.Client) StreamableHTTPCOption {
@@ -54,6 +68,19 @@ func WithHTTPOAuth(config OAuthConfig) StreamableHTTPCOption {
 	}
 }
 
+func WithLogger(logger util.Logger) StreamableHTTPCOption {
+	return func(sc *StreamableHTTP) {
+		sc.logger = logger
+	}
+}
+
+// WithSession creates a client with a pre-configured session
+func WithSession(sessionID string) StreamableHTTPCOption {
+	return func(sc *StreamableHTTP) {
+		sc.sessionID.Store(sessionID)
+	}
+}
+
 // StreamableHTTP implements Streamable HTTP transport.
 //
 // It transmits JSON-RPC messages over individual HTTP requests. One message per request.
@@ -64,18 +91,21 @@ func WithHTTPOAuth(config OAuthConfig) StreamableHTTPCOption {
 //
 // The current implementation does not support the following features:
 //   - batching
-//   - continuously listening for server notifications when no request is in flight
-//     (https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#listening-for-messages-from-the-server)
 //   - resuming stream
 //     (https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#resumability-and-redelivery)
 //   - server -> client request
 type StreamableHTTP struct {
-	serverURL  *url.URL
-	httpClient *http.Client
-	headers    map[string]string
-	headerFunc HTTPHeaderFunc
+	serverURL           *url.URL
+	httpClient          *http.Client
+	headers             map[string]string
+	headerFunc          HTTPHeaderFunc
+	logger              util.Logger
+	getListeningEnabled bool
 
 	sessionID atomic.Value // string
+
+	initialized     chan struct{}
+	initializedOnce sync.Once
 
 	notificationHandler func(mcp.JSONRPCNotification)
 	notifyMu            sync.RWMutex
@@ -95,15 +125,19 @@ func NewStreamableHTTP(serverURL string, options ...StreamableHTTPCOption) (*Str
 	}
 
 	smc := &StreamableHTTP{
-		serverURL:  parsedURL,
-		httpClient: &http.Client{},
-		headers:    make(map[string]string),
-		closed:     make(chan struct{}),
+		serverURL:   parsedURL,
+		httpClient:  &http.Client{},
+		headers:     make(map[string]string),
+		closed:      make(chan struct{}),
+		logger:      util.DefaultLogger(),
+		initialized: make(chan struct{}),
 	}
 	smc.sessionID.Store("") // set initial value to simplify later usage
 
 	for _, opt := range options {
-		opt(smc)
+		if opt != nil {
+			opt(smc)
+		}
 	}
 
 	// If OAuth is configured, set the base URL for metadata discovery
@@ -118,7 +152,20 @@ func NewStreamableHTTP(serverURL string, options ...StreamableHTTPCOption) (*Str
 
 // Start initiates the HTTP connection to the server.
 func (c *StreamableHTTP) Start(ctx context.Context) error {
-	// For Streamable HTTP, we don't need to establish a persistent connection
+	// For Streamable HTTP, we don't need to establish a persistent connection by default
+	if c.getListeningEnabled {
+		go func() {
+			select {
+			case <-c.initialized:
+				ctx, cancel := c.contextAwareOfClientClose(ctx)
+				defer cancel()
+				c.listenForever(ctx)
+			case <-c.closed:
+				return
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -142,13 +189,13 @@ func (c *StreamableHTTP) Close() error {
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.serverURL.String(), nil)
 			if err != nil {
-				fmt.Printf("failed to create close request\n: %v", err)
+				c.logger.Errorf("failed to create close request: %v", err)
 				return
 			}
 			req.Header.Set(headerKeySessionID, sessionId)
 			res, err := c.httpClient.Do(req)
 			if err != nil {
-				fmt.Printf("failed to send close request\n: %v", err)
+				c.logger.Errorf("failed to send close request: %v", err)
 				return
 			}
 			res.Body.Close()
@@ -185,37 +232,103 @@ func (c *StreamableHTTP) SendRequest(
 	request JSONRPCRequest,
 ) (*JSONRPCResponse, error) {
 
-	// Create a combined context that could be canceled when the client is closed
-	newCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go func() {
-		select {
-		case <-c.closed:
-			cancel()
-		case <-newCtx.Done():
-			// The original context was canceled, no need to do anything
-		}
-	}()
-	ctx = newCtx
-
 	// Marshal request
 	requestBody, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	ctx, cancel := c.contextAwareOfClientClose(ctx)
+	defer cancel()
+
+	resp, err := c.sendHTTP(ctx, http.MethodPost, bytes.NewReader(requestBody), "application/json, text/event-stream")
+	if err != nil {
+		if errors.Is(err, ErrSessionTerminated) && request.Method == string(mcp.MethodInitialize) {
+			// If the request is initialize, should not return a SessionTerminated error
+			// It should be a genuine endpoint-routing issue.
+			// ( Fall through to return StatusCode checking. )
+		} else {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
+	}
+	defer resp.Body.Close()
+
+	// Check if we got an error response
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+
+		// Handle OAuth unauthorized error
+		if resp.StatusCode == http.StatusUnauthorized && c.oauthHandler != nil {
+			return nil, &OAuthAuthorizationRequiredError{
+				Handler: c.oauthHandler,
+			}
+		}
+
+		// handle error response
+		var errResponse JSONRPCResponse
+		body, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(body, &errResponse); err == nil {
+			return &errResponse, nil
+		}
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	if request.Method == string(mcp.MethodInitialize) {
+		// saved the received session ID in the response
+		// empty session ID is allowed
+		if sessionID := resp.Header.Get(headerKeySessionID); sessionID != "" {
+			c.sessionID.Store(sessionID)
+		}
+
+		c.initializedOnce.Do(func() {
+			close(c.initialized)
+		})
+	}
+
+	// Handle different response types
+	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	switch mediaType {
+	case "application/json":
+		// Single response
+		var response JSONRPCResponse
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		// should not be a notification
+		if response.ID.IsNil() {
+			return nil, fmt.Errorf("response should contain RPC id: %v", response)
+		}
+
+		return &response, nil
+
+	case "text/event-stream":
+		// Server is using SSE for streaming responses
+		return c.handleSSEResponse(ctx, resp.Body, false)
+
+	default:
+		return nil, fmt.Errorf("unexpected content type: %s", resp.Header.Get("Content-Type"))
+	}
+}
+
+func (c *StreamableHTTP) sendHTTP(
+	ctx context.Context,
+	method string,
+	body io.Reader,
+	acceptType string,
+) (resp *http.Response, err error) {
+
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.serverURL.String(), bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(ctx, method, c.serverURL.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	sessionID := c.sessionID.Load()
+	req.Header.Set("Accept", acceptType)
+	sessionID := c.sessionID.Load().(string)
 	if sessionID != "" {
-		req.Header.Set(headerKeySessionID, sessionID.(string))
+		req.Header.Set(headerKeySessionID, sessionID)
 	}
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
@@ -243,73 +356,24 @@ func (c *StreamableHTTP) SendRequest(
 	}
 
 	// Send request
-	resp, err := c.httpClient.Do(req)
+	resp, err = c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// Check if we got an error response
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		// handle session closed
-		if resp.StatusCode == http.StatusNotFound {
-			c.sessionID.CompareAndSwap(sessionID, "")
-			return nil, fmt.Errorf("session terminated (404). need to re-initialize")
-		}
-
-		// Handle OAuth unauthorized error
-		if resp.StatusCode == http.StatusUnauthorized && c.oauthHandler != nil {
-			return nil, &OAuthAuthorizationRequiredError{
-				Handler: c.oauthHandler,
-			}
-		}
-
-		// handle error response
-		var errResponse JSONRPCResponse
-		body, _ := io.ReadAll(resp.Body)
-		if err := json.Unmarshal(body, &errResponse); err == nil {
-			return &errResponse, nil
-		}
-		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, body)
+	// universal handling for session terminated
+	if resp.StatusCode == http.StatusNotFound {
+		c.sessionID.CompareAndSwap(sessionID, "")
+		return nil, ErrSessionTerminated
 	}
 
-	if request.Method == string(mcp.MethodInitialize) {
-		// saved the received session ID in the response
-		// empty session ID is allowed
-		if sessionID := resp.Header.Get(headerKeySessionID); sessionID != "" {
-			c.sessionID.Store(sessionID)
-		}
-	}
-
-	// Handle different response types
-	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	switch mediaType {
-	case "application/json":
-		// Single response
-		var response JSONRPCResponse
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-			return nil, fmt.Errorf("failed to decode response: %w", err)
-		}
-
-		// should not be a notification
-		if response.ID.IsNil() {
-			return nil, fmt.Errorf("response should contain RPC id: %v", response)
-		}
-
-		return &response, nil
-
-	case "text/event-stream":
-		// Server is using SSE for streaming responses
-		return c.handleSSEResponse(ctx, resp.Body)
-
-	default:
-		return nil, fmt.Errorf("unexpected content type: %s", resp.Header.Get("Content-Type"))
-	}
+	return resp, nil
 }
 
 // handleSSEResponse processes an SSE stream for a specific request.
 // It returns the final result for the request once received, or an error.
-func (c *StreamableHTTP) handleSSEResponse(ctx context.Context, reader io.ReadCloser) (*JSONRPCResponse, error) {
+// If ignoreResponse is true, it won't return when a response messge is received. This is for continuous listening.
+func (c *StreamableHTTP) handleSSEResponse(ctx context.Context, reader io.ReadCloser, ignoreResponse bool) (*JSONRPCResponse, error) {
 
 	// Create a channel for this specific request
 	responseChan := make(chan *JSONRPCResponse, 1)
@@ -328,7 +392,7 @@ func (c *StreamableHTTP) handleSSEResponse(ctx context.Context, reader io.ReadCl
 
 			var message JSONRPCResponse
 			if err := json.Unmarshal([]byte(data), &message); err != nil {
-				fmt.Printf("failed to unmarshal message: %v\n", err)
+				c.logger.Errorf("failed to unmarshal message: %v", err)
 				return
 			}
 
@@ -336,7 +400,7 @@ func (c *StreamableHTTP) handleSSEResponse(ctx context.Context, reader io.ReadCl
 			if message.ID.IsNil() {
 				var notification mcp.JSONRPCNotification
 				if err := json.Unmarshal([]byte(data), &notification); err != nil {
-					fmt.Printf("failed to unmarshal notification: %v\n", err)
+					c.logger.Errorf("failed to unmarshal notification: %v", err)
 					return
 				}
 				c.notifyMu.RLock()
@@ -347,7 +411,9 @@ func (c *StreamableHTTP) handleSSEResponse(ctx context.Context, reader io.ReadCl
 				return
 			}
 
-			responseChan <- &message
+			if !ignoreResponse {
+				responseChan <- &message
+			}
 		})
 	}()
 
@@ -393,7 +459,7 @@ func (c *StreamableHTTP) readSSE(ctx context.Context, reader io.ReadCloser, hand
 				case <-ctx.Done():
 					return
 				default:
-					fmt.Printf("SSE stream error: %v\n", err)
+					c.logger.Errorf("SSE stream error: %v", err)
 					return
 				}
 			}
@@ -432,44 +498,10 @@ func (c *StreamableHTTP) SendNotification(ctx context.Context, notification mcp.
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.serverURL.String(), bytes.NewReader(requestBody))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
+	ctx, cancel := c.contextAwareOfClientClose(ctx)
+	defer cancel()
 
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	if sessionID := c.sessionID.Load(); sessionID != "" {
-		req.Header.Set(headerKeySessionID, sessionID.(string))
-	}
-	for k, v := range c.headers {
-		req.Header.Set(k, v)
-	}
-
-	// Add OAuth authorization if configured
-	if c.oauthHandler != nil {
-		authHeader, err := c.oauthHandler.GetAuthorizationHeader(ctx)
-		if err != nil {
-			// If we get an authorization error, return a specific error that can be handled by the client
-			if errors.Is(err, ErrOAuthAuthorizationRequired) {
-				return &OAuthAuthorizationRequiredError{
-					Handler: c.oauthHandler,
-				}
-			}
-			return fmt.Errorf("failed to get authorization header: %w", err)
-		}
-		req.Header.Set("Authorization", authHeader)
-	}
-
-	if c.headerFunc != nil {
-		for k, v := range c.headerFunc(ctx) {
-			req.Header.Set(k, v)
-		}
-	}
-
-	// Send request
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.sendHTTP(ctx, http.MethodPost, bytes.NewReader(requestBody), "application/json, text/event-stream")
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
@@ -512,4 +544,85 @@ func (c *StreamableHTTP) GetOAuthHandler() *OAuthHandler {
 // IsOAuthEnabled returns true if OAuth is enabled
 func (c *StreamableHTTP) IsOAuthEnabled() bool {
 	return c.oauthHandler != nil
+}
+
+func (c *StreamableHTTP) listenForever(ctx context.Context) {
+	c.logger.Infof("listening to server forever")
+	for {
+		err := c.createGETConnectionToServer(ctx)
+		if errors.Is(err, ErrGetMethodNotAllowed) {
+			// server does not support listening
+			c.logger.Errorf("server does not support listening")
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err != nil {
+			c.logger.Errorf("failed to listen to server. retry in 1 second: %v", err)
+		}
+		time.Sleep(retryInterval)
+	}
+}
+
+var (
+	ErrSessionTerminated   = fmt.Errorf("session terminated (404). need to re-initialize")
+	ErrGetMethodNotAllowed = fmt.Errorf("GET method not allowed")
+
+	retryInterval = 1 * time.Second // a variable is convenient for testing
+)
+
+func (c *StreamableHTTP) createGETConnectionToServer(ctx context.Context) error {
+
+	resp, err := c.sendHTTP(ctx, http.MethodGet, nil, "text/event-stream")
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check if we got an error response
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		return ErrGetMethodNotAllowed
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	// handle SSE response
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "text/event-stream" {
+		return fmt.Errorf("unexpected content type: %s", contentType)
+	}
+
+	// When ignoreResponse is true, the function will never return expect context is done.
+	// NOTICE: Due to the ambiguity of the specification, other SDKs may use the GET connection to transfer the response
+	// messages. To be more compatible, we should handle this response, however, as the transport layer is message-based,
+	// currently, there is no convenient way to handle this response.
+	// So we ignore the response here. It's not a bug, but may be not compatible with other SDKs.
+	_, err = c.handleSSEResponse(ctx, resp.Body, true)
+	if err != nil {
+		return fmt.Errorf("failed to handle SSE response: %w", err)
+	}
+
+	return nil
+}
+
+func (c *StreamableHTTP) contextAwareOfClientClose(ctx context.Context) (context.Context, context.CancelFunc) {
+	newCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		select {
+		case <-c.closed:
+			cancel()
+		case <-newCtx.Done():
+			// The original context was canceled
+			cancel()
+		}
+	}()
+	return newCtx, cancel
 }

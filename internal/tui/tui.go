@@ -327,6 +327,9 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			// If the commands dialog is already open, close it
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
+		if a.dialog.HasDialogs() {
+			return nil // Don't open commands dialog if another dialog is active
+		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})

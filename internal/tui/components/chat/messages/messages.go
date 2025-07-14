@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
@@ -184,6 +185,7 @@ func (m *messageCmp) toMarkdown(content string) string {
 // markdownContent processes the message content and handles special states.
 // Returns appropriate content for thinking, finished, and error states.
 func (m *messageCmp) markdownContent() string {
+	t := styles.CurrentTheme()
 	content := m.message.Content().String()
 	if m.message.Role == message.Assistant {
 		thinking := m.message.IsThinking()
@@ -199,6 +201,13 @@ func (m *messageCmp) markdownContent() string {
 			content = ""
 		} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
 			content = "*Canceled*"
+		} else if finished && content == "" && finishedData.Reason == message.FinishReasonError {
+			errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
+			truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
+			title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
+			details := t.S().Base.Foreground(t.FgSubtle).Width(m.textWidth() - 2).Render(finishedData.Details)
+			return fmt.Sprintf("%s\n\n%s", title, details)
+
 		}
 	}
 	return m.toMarkdown(content)

@@ -403,7 +403,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				agentMessage.AddFinish(message.FinishReasonCanceled)
+				agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
 				a.messages.Update(context.Background(), agentMessage)
 				return a.err(ErrRequestCancelled)
 			}
@@ -454,11 +454,15 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	// Process each event in the stream.
 	for event := range eventChan {
 		if processErr := a.processEvent(ctx, sessionID, &assistantMsg, event); processErr != nil {
-			a.finishMessage(ctx, &assistantMsg, message.FinishReasonCanceled)
+			if errors.Is(processErr, context.Canceled) {
+				a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
+			} else {
+				a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "API Error", processErr.Error())
+			}
 			return assistantMsg, nil, processErr
 		}
 		if ctx.Err() != nil {
-			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled)
+			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
 			return assistantMsg, nil, ctx.Err()
 		}
 	}
@@ -468,7 +472,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	for i, toolCall := range toolCalls {
 		select {
 		case <-ctx.Done():
-			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled)
+			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
 			// Make all future tool calls cancelled
 			for j := i; j < len(toolCalls); j++ {
 				toolResults[j] = message.ToolResult{
@@ -516,7 +520,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 							IsError:    true,
 						}
 					}
-					a.finishMessage(ctx, &assistantMsg, message.FinishReasonPermissionDenied)
+					a.finishMessage(ctx, &assistantMsg, message.FinishReasonPermissionDenied, "Permission denied", "")
 					break
 				}
 			}
@@ -548,8 +552,8 @@ out:
 	return assistantMsg, &msg, err
 }
 
-func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishReson message.FinishReason) {
-	msg.AddFinish(finishReson)
+func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishReson message.FinishReason, message, details string) {
+	msg.AddFinish(finishReson, message, details)
 	_ = a.messages.Update(ctx, *msg)
 }
 
@@ -580,15 +584,10 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventError:
-		if errors.Is(event.Error, context.Canceled) {
-			slog.Info(fmt.Sprintf("Event processing canceled for session: %s", sessionID))
-			return context.Canceled
-		}
-		slog.Error(event.Error.Error())
 		return event.Error
 	case provider.EventComplete:
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)
-		assistantMsg.AddFinish(event.Response.FinishReason)
+		assistantMsg.AddFinish(event.Response.FinishReason, "", "")
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)
 		}

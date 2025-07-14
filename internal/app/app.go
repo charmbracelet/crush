@@ -279,6 +279,9 @@ func (app *App) Subscribe(program *tea.Program) {
 
 // Shutdown performs a clean shutdown of the application
 func (app *App) Shutdown() {
+	if app.CoderAgent != nil {
+		app.CoderAgent.CancelAll()
+	}
 	app.cancelFuncsMutex.Lock()
 	for _, cancel := range app.watcherCancelFuncs {
 		cancel()
@@ -297,9 +300,6 @@ func (app *App) Shutdown() {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()
-	}
-	if app.CoderAgent != nil {
-		app.CoderAgent.CancelAll()
 	}
 
 	for _, cleanup := range app.cleanupFuncs {

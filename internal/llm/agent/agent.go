@@ -801,6 +801,13 @@ func (a *agent) CancelAll() {
 		a.Cancel(key.(string)) // key is sessionID
 		return true
 	})
+	for {
+		if a.IsBusy() {
+			time.Sleep(200 * time.Millisecond)
+		} else {
+			break
+		}
+	}
 }
 
 func (a *agent) UpdateModel() error {

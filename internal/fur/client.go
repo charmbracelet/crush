@@ -1,13 +1,11 @@
-// Package client provides a client for interacting with the fur service.
-package client
+// Package fur provides a client for interacting with the fur service.
+package fur
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-
-	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
 const defaultURL = "https://fur.charm.sh"
@@ -41,7 +39,7 @@ func NewWithURL(url string) *Client {
 }
 
 // GetProviders retrieves all available providers from the service.
-func (c *Client) GetProviders() ([]provider.Provider, error) {
+func (c *Client) GetProviders() ([]Provider, error) {
 	url := fmt.Sprintf("%s/providers", c.baseURL)
 
 	resp, err := c.httpClient.Get(url) //nolint:noctx
@@ -54,7 +52,7 @@ func (c *Client) GetProviders() ([]provider.Provider, error) {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	var providers []provider.Provider
+	var providers []Provider
 	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}

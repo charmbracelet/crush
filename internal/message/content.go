@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 )
 
 type MessageRole string
@@ -71,9 +71,9 @@ type BinaryContent struct {
 	Data     []byte
 }
 
-func (bc BinaryContent) String(p provider.InferenceProvider) string {
+func (bc BinaryContent) String(p fur.InferenceProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	if p == provider.InferenceProviderOpenAI {
+	if p == fur.InferenceProviderOpenAI {
 		return "data:" + bc.MIMEType + ";base64," + base64Encoded
 	}
 	return base64Encoded

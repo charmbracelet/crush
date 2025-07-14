@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/tidwall/sjson"
 )
 
@@ -65,7 +65,7 @@ type ProviderConfig struct {
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type provider.Type `json:"type,omitempty"`
+	Type fur.Type `json:"type,omitempty"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty"`
 	// Marks the provider as disabled.
@@ -78,7 +78,7 @@ type ProviderConfig struct {
 	ExtraParams map[string]string `json:"-"`
 
 	// The provider models
-	Models []provider.Model `json:"models,omitempty"`
+	Models []fur.Model `json:"models,omitempty"`
 }
 
 type MCPType string
@@ -212,8 +212,8 @@ type Config struct {
 	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
-	dataConfigDir  string              `json:"-"`
-	knownProviders []provider.Provider `json:"-"`
+	dataConfigDir  string         `json:"-"`
+	knownProviders []fur.Provider `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {
@@ -235,7 +235,7 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
-func (c *Config) GetModel(provider, model string) *provider.Model {
+func (c *Config) GetModel(provider, model string) *fur.Model {
 	if providerConfig, ok := c.Providers[provider]; ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
@@ -257,7 +257,7 @@ func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfi
 	return nil
 }
 
-func (c *Config) GetModelByType(modelType SelectedModelType) *provider.Model {
+func (c *Config) GetModelByType(modelType SelectedModelType) *fur.Model {
 	model, ok := c.Models[modelType]
 	if !ok {
 		return nil
@@ -265,7 +265,7 @@ func (c *Config) GetModelByType(modelType SelectedModelType) *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) LargeModel() *provider.Model {
+func (c *Config) LargeModel() *fur.Model {
 	model, ok := c.Models[SelectedModelTypeLarge]
 	if !ok {
 		return nil
@@ -273,7 +273,7 @@ func (c *Config) LargeModel() *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) SmallModel() *provider.Model {
+func (c *Config) SmallModel() *fur.Model {
 	model, ok := c.Models[SelectedModelTypeSmall]
 	if !ok {
 		return nil
@@ -343,7 +343,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 		return nil
 	}
 
-	var foundProvider *provider.Provider
+	var foundProvider *fur.Provider
 	for _, p := range c.knownProviders {
 		if string(p.ID) == providerID {
 			foundProvider = &p

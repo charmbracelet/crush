@@ -10,16 +10,16 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
 
 func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 	switch p {
-	case string(provider.InferenceProviderOpenAI):
+	case string(fur.InferenceProviderOpenAI):
 		basePrompt = baseOpenAICoderPrompt
-	case string(provider.InferenceProviderGemini), string(provider.InferenceProviderVertexAI):
+	case string(fur.InferenceProviderGemini), string(fur.InferenceProviderVertexAI):
 		basePrompt = baseGeminiCoderPrompt
 	default:
 		basePrompt = baseAnthropicCoderPrompt

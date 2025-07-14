@@ -1,18 +1,18 @@
-// Package provider provides types and constants for AI providers.
-package provider
+package fur
 
 // Type represents the type of AI provider.
 type Type string
 
 // All the supported AI provider types.
 const (
-	TypeOpenAI    Type = "openai"
-	TypeAnthropic Type = "anthropic"
-	TypeGemini    Type = "gemini"
-	TypeAzure     Type = "azure"
-	TypeBedrock   Type = "bedrock"
-	TypeVertexAI  Type = "vertexai"
-	TypeXAI       Type = "xai"
+	TypeOpenAI     Type = "openai"
+	TypeAnthropic  Type = "anthropic"
+	TypeGemini     Type = "gemini"
+	TypeAzure      Type = "azure"
+	TypeBedrock    Type = "bedrock"
+	TypeVertexAI   Type = "vertexai"
+	TypeXAI        Type = "xai"
+	TypeOpenRouter Type = "openrouter"
 )
 
 // InferenceProvider represents the inference provider identifier.
@@ -45,7 +45,7 @@ type Provider struct {
 // Model represents an AI model configuration.
 type Model struct {
 	ID                     string  `json:"id"`
-	Model                  string  `json:"model"`
+	Name                   string  `json:"name"`
 	CostPer1MIn            float64 `json:"cost_per_1m_in"`
 	CostPer1MOut           float64 `json:"cost_per_1m_out"`
 	CostPer1MInCached      float64 `json:"cost_per_1m_in_cached"`

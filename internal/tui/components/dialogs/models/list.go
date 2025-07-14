@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -18,7 +18,7 @@ import (
 type ModelListComponent struct {
 	list      list.ListModel
 	modelType int
-	providers []provider.Provider
+	providers []fur.Provider
 }
 
 func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputPlaceholder string) *ModelListComponent {
@@ -98,26 +98,26 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 
 	// First, add any configured providers that are not in the known providers list
 	// These should appear at the top of the list
-	knownProviders := provider.KnownProviders()
+	knownProviders := fur.KnownProviders()
 	for providerID, providerConfig := range cfg.Providers {
 		if providerConfig.Disable {
 			continue
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
+		if !slices.Contains(knownProviders, fur.InferenceProvider(providerID)) {
 			// Convert config provider to provider.Provider format
-			configProvider := provider.Provider{
+			configProvider := fur.Provider{
 				Name:   providerConfig.Name,
-				ID:     provider.InferenceProvider(providerID),
-				Models: make([]provider.Model, len(providerConfig.Models)),
+				ID:     fur.InferenceProvider(providerID),
+				Models: make([]fur.Model, len(providerConfig.Models)),
 			}
 
 			// Convert models
 			for i, model := range providerConfig.Models {
-				configProvider.Models[i] = provider.Model{
+				configProvider.Models[i] = fur.Model{
 					ID:                     model.ID,
-					Model:                  model.Model,
+					Name:                   model.Name,
 					CostPer1MIn:            model.CostPer1MIn,
 					CostPer1MOut:           model.CostPer1MOut,
 					CostPer1MInCached:      model.CostPer1MInCached,
@@ -140,7 +140,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			section.SetInfo(configured)
 			modelItems = append(modelItems, section)
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}))
@@ -175,7 +175,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 		modelItems = append(modelItems, section)
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))
@@ -197,6 +197,6 @@ func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
 	m.list.SetFilterPlaceholder(placeholder)
 }
 
-func (m *ModelListComponent) SetProviders(providers []provider.Provider) {
+func (m *ModelListComponent) SetProviders(providers []fur.Provider) {
 	m.providers = providers
 }

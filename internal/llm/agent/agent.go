@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	fur "github.com/charmbracelet/crush/internal/fur/provider"
+	fur "github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"

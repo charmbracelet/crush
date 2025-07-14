@@ -5,7 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
@@ -44,8 +44,8 @@ type ModelDialog interface {
 }
 
 type ModelOption struct {
-	Provider provider.Provider
-	Model    provider.Model
+	Provider fur.Provider
+	Model    fur.Model
 }
 
 type modelDialogCmp struct {

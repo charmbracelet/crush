@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -55,7 +55,7 @@ type Provider interface {
 
 	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() provider.Model
+	Model() fur.Model
 }
 
 type providerClientOptions struct {
@@ -63,7 +63,7 @@ type providerClientOptions struct {
 	config        config.ProviderConfig
 	apiKey        string
 	modelType     config.SelectedModelType
-	model         func(config.SelectedModelType) provider.Model
+	model         func(config.SelectedModelType) fur.Model
 	disableCache  bool
 	systemMessage string
 	maxTokens     int64
@@ -77,7 +77,7 @@ type ProviderClient interface {
 	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() provider.Model
+	Model() fur.Model
 }
 
 type baseProvider[C ProviderClient] struct {
@@ -106,7 +106,7 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 	return p.client.stream(ctx, messages, tools)
 }
 
-func (p *baseProvider[C]) Model() provider.Model {
+func (p *baseProvider[C]) Model() fur.Model {
 	return p.client.Model()
 }
 
@@ -145,7 +145,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		config:       cfg,
 		apiKey:       resolvedAPIKey,
 		extraHeaders: cfg.ExtraHeaders,
-		model: func(tp config.SelectedModelType) provider.Model {
+		model: func(tp config.SelectedModelType) fur.Model {
 			return *config.Get().GetModelByType(tp)
 		},
 	}
@@ -153,37 +153,37 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		o(&clientOptions)
 	}
 	switch cfg.Type {
-	case provider.TypeAnthropic:
+	case fur.TypeAnthropic:
 		return &baseProvider[AnthropicClient]{
 			options: clientOptions,
 			client:  newAnthropicClient(clientOptions, false),
 		}, nil
-	case provider.TypeOpenAI:
+	case fur.TypeOpenAI:
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
 		}, nil
-	case provider.TypeGemini:
+	case fur.TypeGemini:
 		return &baseProvider[GeminiClient]{
 			options: clientOptions,
 			client:  newGeminiClient(clientOptions),
 		}, nil
-	case provider.TypeBedrock:
+	case fur.TypeBedrock:
 		return &baseProvider[BedrockClient]{
 			options: clientOptions,
 			client:  newBedrockClient(clientOptions),
 		}, nil
-	case provider.TypeAzure:
+	case fur.TypeAzure:
 		return &baseProvider[AzureClient]{
 			options: clientOptions,
 			client:  newAzureClient(clientOptions),
 		}, nil
-	case provider.TypeVertexAI:
+	case fur.TypeVertexAI:
 		return &baseProvider[VertexAIClient]{
 			options: clientOptions,
 			client:  newVertexAIClient(clientOptions),
 		}, nil
-	case provider.TypeXAI:
+	case fur.TypeXAI:
 		clientOptions.baseURL = "https://api.x.ai/v1"
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,

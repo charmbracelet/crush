@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -32,7 +32,7 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		}
 	}
 
-	opts.model = func(modelType config.SelectedModelType) provider.Model {
+	opts.model = func(modelType config.SelectedModelType) fur.Model {
 		model := config.Get().GetModelByType(modelType)
 
 		// Prefix the model name with region
@@ -88,6 +88,6 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 	return b.childProvider.stream(ctx, messages, tools)
 }
 
-func (b *bedrockClient) Model() provider.Model {
+func (b *bedrockClient) Model() fur.Model {
 	return b.providerOptions.model(b.providerOptions.modelType)
 }

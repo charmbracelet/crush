@@ -11,8 +11,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fur/client"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/fur"
 	"github.com/charmbracelet/crush/internal/log"
 	"golang.org/x/exp/slog"
 )
@@ -61,7 +60,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	)
 
 	// Load known providers, this loads the config from fur
-	providers, err := LoadProviders(client.New())
+	providers, err := LoadProviders(fur.New())
 	if err != nil || len(providers) == 0 {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}
@@ -117,7 +116,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	return cfg, nil
 }
 
-func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []provider.Provider) error {
+func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []fur.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
@@ -136,7 +135,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 				p.APIKey = config.APIKey
 			}
 			if len(config.Models) > 0 {
-				models := []provider.Model{}
+				models := []fur.Model{}
 				seen := make(map[string]bool)
 
 				for _, model := range config.Models {
@@ -144,8 +143,8 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 						continue
 					}
 					seen[model.ID] = true
-					if model.Model == "" {
-						model.Model = model.ID
+					if model.Name == "" {
+						model.Name = model.ID
 					}
 					models = append(models, model)
 				}
@@ -154,8 +153,8 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 						continue
 					}
 					seen[model.ID] = true
-					if model.Model == "" {
-						model.Model = model.ID
+					if model.Name == "" {
+						model.Name = model.ID
 					}
 					models = append(models, model)
 				}
@@ -177,7 +176,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
-		case provider.InferenceProviderVertexAI:
+		case fur.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
@@ -187,7 +186,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			}
 			prepared.ExtraParams["project"] = env.Get("GOOGLE_CLOUD_PROJECT")
 			prepared.ExtraParams["location"] = env.Get("GOOGLE_CLOUD_LOCATION")
-		case provider.InferenceProviderBedrock:
+		case fur.InferenceProviderBedrock:
 			if !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
@@ -227,7 +226,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 		}
 		// default to OpenAI if not set
 		if providerConfig.Type == "" {
-			providerConfig.Type = provider.TypeOpenAI
+			providerConfig.Type = fur.TypeOpenAI
 		}
 
 		if providerConfig.Disable {
@@ -248,7 +247,7 @@ func (cfg *Config) configureProviders(env env.Env, resolver VariableResolver, kn
 			delete(cfg.Providers, id)
 			continue
 		}
-		if providerConfig.Type != provider.TypeOpenAI {
+		if providerConfig.Type != fur.TypeOpenAI {
 			slog.Warn("Skipping custom provider because the provider type is not supported", "provider", id, "type", providerConfig.Type)
 			delete(cfg.Providers, id)
 			continue
@@ -303,7 +302,7 @@ func (cfg *Config) setDefaults(workingDir string) {
 	cfg.Options.ContextPaths = slices.Compact(cfg.Options.ContextPaths)
 }
 
-func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (cfg *Config) defaultModelSelection(knownProviders []fur.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
 	if len(knownProviders) == 0 && len(cfg.Providers) == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return
@@ -371,7 +370,7 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 	return
 }
 
-func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) error {
+func (cfg *Config) configureSelectedModels(knownProviders []fur.Provider) error {
 	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
 	if err != nil {
 		return fmt.Errorf("failed to select default models: %w", err)

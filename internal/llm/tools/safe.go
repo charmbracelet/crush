@@ -74,14 +74,11 @@ func init() {
 		safeCommands = append(
 			safeCommands,
 			// Windows-specific commands
-			"dir",
 			"ipconfig",
 			"nslookup",
 			"ping",
 			"systeminfo",
 			"tasklist",
-			"type",
-			"ver",
 			"where",
 		)
 	}

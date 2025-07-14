@@ -793,7 +793,10 @@ func escapeLine(t *styles.Theme, text string) string {
 		n     int
 		w     int
 	)
-	faint := t.S().Muted.Faint(true)
+	var faint lipgloss.Style
+	if t != nil {
+		faint = t.S().Muted.Faint(true)
+	}
 	for len(text) > 0 {
 		seq, w, n, state = ansi.DecodeSequence(text, state, nil)
 		if w > 0 {

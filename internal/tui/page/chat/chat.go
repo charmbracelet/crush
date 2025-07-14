@@ -315,6 +315,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (p *chatPage) Cursor() *tea.Cursor {
+	if p.header.ShowingDetails() {
+		return nil
+	}
 	switch p.focusedPane {
 	case PanelTypeEditor:
 		return p.editor.Cursor()

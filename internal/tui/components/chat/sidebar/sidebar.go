@@ -135,15 +135,26 @@ func (m *sidebarCmp) View() string {
 	parts = append(parts,
 		m.currentModelBlock(),
 	)
-	if m.session.ID != "" {
-		parts = append(parts, "", m.filesBlock())
+
+	// Check if we should use horizontal layout for sections
+	if m.compactMode && m.width > m.height {
+		// Horizontal layout for compact mode when width > height
+		sectionsContent := m.renderSectionsHorizontal()
+		if sectionsContent != "" {
+			parts = append(parts, "", sectionsContent)
+		}
+	} else {
+		// Vertical layout (default)
+		if m.session.ID != "" {
+			parts = append(parts, "", m.filesBlock())
+		}
+		parts = append(parts,
+			"",
+			m.lspBlock(),
+			"",
+			m.mcpBlock(),
+		)
 	}
-	parts = append(parts,
-		"",
-		m.lspBlock(),
-		"",
-		m.mcpBlock(),
-	)
 
 	style := t.S().Base.
 		Width(m.width).
@@ -345,6 +356,255 @@ func (m *sidebarCmp) getDynamicLimits() (maxFiles, maxLSPs, maxMCPs int) {
 	}
 
 	return maxFiles, maxLSPs, maxMCPs
+}
+
+// renderSectionsHorizontal renders the files, LSPs, and MCPs sections horizontally
+func (m *sidebarCmp) renderSectionsHorizontal() string {
+	// Calculate available width for each section
+	totalWidth := m.width - 4 // Account for padding and spacing
+	sectionWidth := min(50, totalWidth/3)
+
+	// Get the sections content with limited height
+	var filesContent, lspContent, mcpContent string
+
+	filesContent = m.filesBlockCompact(sectionWidth)
+	lspContent = m.lspBlockCompact(sectionWidth)
+	mcpContent = m.mcpBlockCompact(sectionWidth)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
+}
+
+// filesBlockCompact renders the files block with limited width and height for horizontal layout
+func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
+	t := styles.CurrentTheme()
+
+	section := t.S().Subtle.Render("Modified Files")
+
+	files := make([]SessionFile, 0)
+	m.files.Range(func(key, value any) bool {
+		file := value.(SessionFile)
+		files = append(files, file)
+		return true
+	})
+
+	if len(files) == 0 {
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			section,
+			"",
+			t.S().Base.Foreground(t.Border).Render("None"),
+		)
+		return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	}
+
+	fileList := []string{section, ""}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
+	})
+
+	// Limit items for horizontal layout - use less space
+	maxItems := min(5, len(files))
+	availableHeight := m.height - 8 // Reserve space for header and other content
+	if availableHeight > 0 {
+		maxItems = min(maxItems, availableHeight)
+	}
+
+	filesShown := 0
+	for _, file := range files {
+		if file.Additions == 0 && file.Deletions == 0 {
+			continue
+		}
+		if filesShown >= maxItems {
+			break
+		}
+
+		var statusParts []string
+		if file.Additions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
+		}
+		if file.Deletions > 0 {
+			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
+		}
+
+		extraContent := strings.Join(statusParts, " ")
+		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
+		filePath := file.FilePath
+		filePath = strings.TrimPrefix(filePath, cwd)
+		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
+		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
+
+		fileList = append(fileList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:    t.FgMuted,
+					NoIcon:       true,
+					Title:        filePath,
+					ExtraContent: extraContent,
+				},
+				maxWidth,
+			),
+		)
+		filesShown++
+	}
+
+	// Add "..." indicator if there are more files
+	totalFilesWithChanges := 0
+	for _, file := range files {
+		if file.Additions > 0 || file.Deletions > 0 {
+			totalFilesWithChanges++
+		}
+	}
+	if totalFilesWithChanges > maxItems {
+		fileList = append(fileList, t.S().Base.Foreground(t.FgMuted).Render("…"))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, fileList...)
+	return lipgloss.NewStyle().Width(maxWidth).Render(content)
+}
+
+// lspBlockCompact renders the LSP block with limited width and height for horizontal layout
+func (m *sidebarCmp) lspBlockCompact(maxWidth int) string {
+	t := styles.CurrentTheme()
+
+	section := t.S().Subtle.Render("LSPs")
+
+	lspList := []string{section, ""}
+
+	lsp := config.Get().LSP.Sorted()
+	if len(lsp) == 0 {
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			section,
+			"",
+			t.S().Base.Foreground(t.Border).Render("None"),
+		)
+		return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	}
+
+	// Limit items for horizontal layout
+	maxItems := min(5, len(lsp))
+	availableHeight := m.height - 8
+	if availableHeight > 0 {
+		maxItems = min(maxItems, availableHeight)
+	}
+
+	for i, l := range lsp {
+		if i >= maxItems {
+			break
+		}
+
+		iconColor := t.Success
+		if l.LSP.Disabled {
+			iconColor = t.FgMuted
+		}
+
+		lspErrs := map[protocol.DiagnosticSeverity]int{
+			protocol.SeverityError:       0,
+			protocol.SeverityWarning:     0,
+			protocol.SeverityHint:        0,
+			protocol.SeverityInformation: 0,
+		}
+		if client, ok := m.lspClients[l.Name]; ok {
+			for _, diagnostics := range client.GetDiagnostics() {
+				for _, diagnostic := range diagnostics {
+					if severity, ok := lspErrs[diagnostic.Severity]; ok {
+						lspErrs[diagnostic.Severity] = severity + 1
+					}
+				}
+			}
+		}
+
+		errs := []string{}
+		if lspErrs[protocol.SeverityError] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
+		}
+		if lspErrs[protocol.SeverityWarning] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
+		}
+		if lspErrs[protocol.SeverityHint] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
+		}
+		if lspErrs[protocol.SeverityInformation] > 0 {
+			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
+		}
+
+		lspList = append(lspList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:    iconColor,
+					Title:        l.Name,
+					Description:  l.LSP.Command,
+					ExtraContent: strings.Join(errs, " "),
+				},
+				maxWidth,
+			),
+		)
+	}
+
+	// Add "..." indicator if there are more LSPs
+	if len(lsp) > maxItems {
+		lspList = append(lspList, t.S().Base.Foreground(t.FgMuted).Render("…"))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lspList...)
+	return lipgloss.NewStyle().Width(maxWidth).Render(content)
+}
+
+// mcpBlockCompact renders the MCP block with limited width and height for horizontal layout
+func (m *sidebarCmp) mcpBlockCompact(maxWidth int) string {
+	t := styles.CurrentTheme()
+
+	section := t.S().Subtle.Render("MCPs")
+
+	mcpList := []string{section, ""}
+
+	mcps := config.Get().MCP.Sorted()
+	if len(mcps) == 0 {
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			section,
+			"",
+			t.S().Base.Foreground(t.Border).Render("None"),
+		)
+		return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	}
+
+	// Limit items for horizontal layout
+	maxItems := min(5, len(mcps))
+	availableHeight := m.height - 8
+	if availableHeight > 0 {
+		maxItems = min(maxItems, availableHeight)
+	}
+
+	for i, l := range mcps {
+		if i >= maxItems {
+			break
+		}
+
+		iconColor := t.Success
+		if l.MCP.Disabled {
+			iconColor = t.FgMuted
+		}
+
+		mcpList = append(mcpList,
+			core.Status(
+				core.StatusOpts{
+					IconColor:   iconColor,
+					Title:       l.Name,
+					Description: l.MCP.Command,
+				},
+				maxWidth,
+			),
+		)
+	}
+
+	// Add "..." indicator if there are more MCPs
+	if len(mcps) > maxItems {
+		mcpList = append(mcpList, t.S().Base.Foreground(t.FgMuted).Render("…"))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, mcpList...)
+	return lipgloss.NewStyle().Width(maxWidth).Render(content)
 }
 
 func (m *sidebarCmp) filesBlock() string {

@@ -21,6 +21,7 @@ type Header interface {
 	SetSession(session session.Session) tea.Cmd
 	SetWidth(width int) tea.Cmd
 	SetDetailsOpen(open bool)
+	ShowingDetails() bool
 }
 
 type header struct {
@@ -136,4 +137,9 @@ func (h *header) SetSession(session session.Session) tea.Cmd {
 func (h *header) SetWidth(width int) tea.Cmd {
 	h.width = width
 	return nil
+}
+
+// ShowingDetails implements Header.
+func (h *header) ShowingDetails() bool {
+	return h.detailsOpen
 }

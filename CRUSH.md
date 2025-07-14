@@ -4,7 +4,7 @@
 
 - **Build**: `go build .` or `go run .`
 - **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
-- **Lint**: `task lint` (golangci-lint run) or `task lint-fix` (with --fix)
+- **Lint**: `task lint-fix`
 - **Format**: `task fmt` (gofumpt -w .)
 - **Dev**: `task dev` (runs with profiling enabled)
 

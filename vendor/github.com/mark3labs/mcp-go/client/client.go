@@ -22,6 +22,7 @@ type Client struct {
 	requestID          atomic.Int64
 	clientCapabilities mcp.ClientCapabilities
 	serverCapabilities mcp.ServerCapabilities
+	samplingHandler    SamplingHandler
 }
 
 type ClientOption func(*Client)
@@ -30,6 +31,21 @@ type ClientOption func(*Client)
 func WithClientCapabilities(capabilities mcp.ClientCapabilities) ClientOption {
 	return func(c *Client) {
 		c.clientCapabilities = capabilities
+	}
+}
+
+// WithSamplingHandler sets the sampling handler for the client.
+// When set, the client will declare sampling capability during initialization.
+func WithSamplingHandler(handler SamplingHandler) ClientOption {
+	return func(c *Client) {
+		c.samplingHandler = handler
+  }
+}
+
+// WithSession assumes a MCP Session has already been initialized
+func WithSession() ClientOption {
+	return func(c *Client) {
+		c.initialized = true
 	}
 }
 
@@ -71,6 +87,12 @@ func (c *Client) Start(ctx context.Context) error {
 			handler(notification)
 		}
 	})
+
+	// Set up request handler for bidirectional communication (e.g., sampling)
+	if bidirectional, ok := c.transport.(transport.BidirectionalInterface); ok {
+		bidirectional.SetRequestHandler(c.handleIncomingRequest)
+	}
+
 	return nil
 }
 
@@ -127,6 +149,12 @@ func (c *Client) Initialize(
 	ctx context.Context,
 	request mcp.InitializeRequest,
 ) (*mcp.InitializeResult, error) {
+	// Merge client capabilities with sampling capability if handler is configured
+	capabilities := request.Params.Capabilities
+	if c.samplingHandler != nil {
+		capabilities.Sampling = &struct{}{}
+	}
+
 	// Ensure we send a params object with all required fields
 	params := struct {
 		ProtocolVersion string                 `json:"protocolVersion"`
@@ -135,7 +163,7 @@ func (c *Client) Initialize(
 	}{
 		ProtocolVersion: request.Params.ProtocolVersion,
 		ClientInfo:      request.Params.ClientInfo,
-		Capabilities:    request.Params.Capabilities, // Will be empty struct if not set
+		Capabilities:    capabilities,
 	}
 
 	response, err := c.sendRequest(ctx, "initialize", params)
@@ -398,6 +426,64 @@ func (c *Client) Complete(
 	return &result, nil
 }
 
+// handleIncomingRequest processes incoming requests from the server.
+// This is the main entry point for server-to-client requests like sampling.
+func (c *Client) handleIncomingRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	switch request.Method {
+	case string(mcp.MethodSamplingCreateMessage):
+		return c.handleSamplingRequestTransport(ctx, request)
+	default:
+		return nil, fmt.Errorf("unsupported request method: %s", request.Method)
+	}
+}
+
+// handleSamplingRequestTransport handles sampling requests at the transport level.
+func (c *Client) handleSamplingRequestTransport(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	if c.samplingHandler == nil {
+		return nil, fmt.Errorf("no sampling handler configured")
+	}
+
+	// Parse the request parameters
+	var params mcp.CreateMessageParams
+	if request.Params != nil {
+		paramsBytes, err := json.Marshal(request.Params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal params: %w", err)
+		}
+		if err := json.Unmarshal(paramsBytes, &params); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+		}
+	}
+
+	// Create the MCP request
+	mcpRequest := mcp.CreateMessageRequest{
+		Request: mcp.Request{
+			Method: string(mcp.MethodSamplingCreateMessage),
+		},
+		CreateMessageParams: params,
+	}
+
+	// Call the sampling handler
+	result, err := c.samplingHandler.CreateMessage(ctx, mcpRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	// Marshal the result
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	// Create the transport response
+	response := &transport.JSONRPCResponse{
+		JSONRPC: mcp.JSONRPC_VERSION,
+		ID:      request.ID,
+		Result:  json.RawMessage(resultBytes),
+	}
+
+	return response, nil
+}
 func listByPage[T any](
 	ctx context.Context,
 	client *Client,
@@ -431,4 +517,18 @@ func (c *Client) GetServerCapabilities() mcp.ServerCapabilities {
 // GetClientCapabilities returns the client capabilities.
 func (c *Client) GetClientCapabilities() mcp.ClientCapabilities {
 	return c.clientCapabilities
+}
+
+// GetSessionId returns the session ID of the transport.
+// If the transport does not support sessions, it returns an empty string.
+func (c *Client) GetSessionId() string {
+	if c.transport == nil {
+		return ""
+	}
+	return c.transport.GetSessionId()
+}
+
+// IsInitialized returns true if the client has been initialized.
+func (c *Client) IsInitialized() bool {
+	return c.initialized
 }

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"log/slog"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -22,6 +23,7 @@ func CmdHandler(msg tea.Msg) tea.Cmd {
 }
 
 func ReportError(err error) tea.Cmd {
+	slog.Error("Error reported", "error", err)
 	return CmdHandler(InfoMsg{
 		Type: InfoTypeError,
 		Msg:  err.Error(),

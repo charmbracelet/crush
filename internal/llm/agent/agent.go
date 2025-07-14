@@ -149,7 +149,7 @@ func NewAgent(
 	}
 	opts := []provider.ProviderClientOption{
 		provider.WithModel(agentCfg.Model),
-		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID)),
+		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID, config.Get().Options.ContextPaths...)),
 	}
 	agentProvider, err := provider.NewProvider(*providerCfg, opts...)
 	if err != nil {
@@ -827,7 +827,7 @@ func (a *agent) UpdateModel() error {
 
 		opts := []provider.ProviderClientOption{
 			provider.WithModel(a.agentCfg.Model),
-			provider.WithSystemMessage(prompt.GetPrompt(promptID, currentProviderCfg.ID)),
+			provider.WithSystemMessage(prompt.GetPrompt(promptID, currentProviderCfg.ID, cfg.Options.ContextPaths...)),
 		}
 
 		newProvider, err := provider.NewProvider(*currentProviderCfg, opts...)

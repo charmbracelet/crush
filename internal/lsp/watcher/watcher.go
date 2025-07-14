@@ -21,6 +21,7 @@ import (
 // WorkspaceWatcher manages LSP file watching
 type WorkspaceWatcher struct {
 	client        *lsp.Client
+	name          string
 	workspacePath string
 
 	debounceTime time.Duration
@@ -33,8 +34,9 @@ type WorkspaceWatcher struct {
 }
 
 // NewWorkspaceWatcher creates a new workspace watcher
-func NewWorkspaceWatcher(client *lsp.Client) *WorkspaceWatcher {
+func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
+		name:          name,
 		client:        client,
 		debounceTime:  300 * time.Millisecond,
 		debounceMap:   make(map[string]*time.Timer),
@@ -95,7 +97,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 	}
 
 	// Determine server type for specialized handling
-	serverName := getServerNameFromContext(ctx)
+	serverName := w.name
 	slog.Debug("Server type detected", "serverName", serverName)
 
 	// Check if this server has sent file watchers
@@ -325,17 +327,7 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 	cfg := config.Get()
 	w.workspacePath = workspacePath
 
-	// Store the watcher in the context for later use
-	ctx = context.WithValue(ctx, "workspaceWatcher", w)
-
-	// If the server name isn't already in the context, try to detect it
-	if _, ok := ctx.Value("serverName").(string); !ok {
-		serverName := getServerNameFromContext(ctx)
-		ctx = context.WithValue(ctx, "serverName", serverName)
-	}
-
-	serverName := getServerNameFromContext(ctx)
-	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", serverName)
+	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", w.name)
 
 	// Register handler for file watcher registrations from the server
 	lsp.RegisterFileWatchHandler(func(id string, watchers []protocol.FileSystemWatcher) {
@@ -697,40 +689,6 @@ func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, chan
 	return w.client.DidChangeWatchedFiles(ctx, params)
 }
 
-// getServerNameFromContext extracts the server name from the context
-// This is a best-effort function that tries to identify which LSP server we're dealing with
-func getServerNameFromContext(ctx context.Context) string {
-	// First check if the server name is directly stored in the context
-	if serverName, ok := ctx.Value("serverName").(string); ok && serverName != "" {
-		return strings.ToLower(serverName)
-	}
-
-	// Otherwise, try to extract server name from the client command path
-	if w, ok := ctx.Value("workspaceWatcher").(*WorkspaceWatcher); ok && w != nil && w.client != nil && w.client.Cmd != nil {
-		path := strings.ToLower(w.client.Cmd.Path)
-
-		// Extract server name from path
-		if strings.Contains(path, "typescript") || strings.Contains(path, "tsserver") || strings.Contains(path, "vtsls") {
-			return "typescript"
-		} else if strings.Contains(path, "gopls") {
-			return "gopls"
-		} else if strings.Contains(path, "rust-analyzer") {
-			return "rust-analyzer"
-		} else if strings.Contains(path, "pyright") || strings.Contains(path, "pylsp") || strings.Contains(path, "python") {
-			return "python"
-		} else if strings.Contains(path, "clangd") {
-			return "clangd"
-		} else if strings.Contains(path, "jdtls") || strings.Contains(path, "java") {
-			return "java"
-		}
-
-		// Return the base name as fallback
-		return filepath.Base(path)
-	}
-
-	return "unknown"
-}
-
 // shouldPreloadFiles determines if we should preload files for a specific language server
 // Some servers work better with preloaded files, others don't need it
 func shouldPreloadFiles(serverName string) bool {
@@ -884,64 +842,63 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 	}
 
 	// Check if this path should be watched according to server registrations
-	if watched, _ := w.isPathWatched(path); watched {
-		// Get server name for specialized handling
-		serverName := getServerNameFromContext(ctx)
+	if watched, _ := w.isPathWatched(path); !watched {
+		return
+	}
 
-		// Check if the file is a high-priority file that should be opened immediately
-		// This helps with project initialization for certain language servers
-		if isHighPriorityFile(path, serverName) {
-			if cfg.Options.DebugLSP {
-				slog.Debug("Opening high-priority file", "path", path, "serverName", serverName)
-			}
-			if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
-				slog.Error("Error opening high-priority file", "path", path, "error", err)
-			}
-			return
+	serverName := w.name
+
+	// Get server name for specialized handling
+	// Check if the file is a high-priority file that should be opened immediately
+	// This helps with project initialization for certain language servers
+	if isHighPriorityFile(path, serverName) {
+		if cfg.Options.DebugLSP {
+			slog.Debug("Opening high-priority file", "path", path, "serverName", serverName)
 		}
+		if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
+			slog.Error("Error opening high-priority file", "path", path, "error", err)
+		}
+		return
+	}
 
-		// For non-high-priority files, we'll use different strategies based on server type
-		if shouldPreloadFiles(serverName) {
-			// For servers that benefit from preloading, open files but with limits
+	// For non-high-priority files, we'll use different strategies based on server type
+	if !shouldPreloadFiles(serverName) {
+		return
+	}
+	// For servers that benefit from preloading, open files but with limits
 
-			// Check file size - for preloading we're more conservative
-			if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
-				if cfg.Options.DebugLSP {
-					slog.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
-				}
-				return
-			}
+	// Check file size - for preloading we're more conservative
+	if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
+		if cfg.Options.DebugLSP {
+			slog.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
+		}
+		return
+	}
 
-			// Check file extension for common source files
-			ext := strings.ToLower(filepath.Ext(path))
+	// Check file extension for common source files
+	ext := strings.ToLower(filepath.Ext(path))
 
-			// Only preload source files for the specific language
-			shouldOpen := false
+	// Only preload source files for the specific language
+	var shouldOpen bool
+	switch serverName {
+	case "typescript", "typescript-language-server", "tsserver", "vtsls":
+		shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
+	case "gopls":
+		shouldOpen = ext == ".go"
+	case "rust-analyzer":
+		shouldOpen = ext == ".rs"
+	case "python", "pyright", "pylsp":
+		shouldOpen = ext == ".py"
+	case "clangd":
+		shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
+	case "java", "jdtls":
+		shouldOpen = ext == ".java"
+	}
 
-			switch serverName {
-			case "typescript", "typescript-language-server", "tsserver", "vtsls":
-				shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
-			case "gopls":
-				shouldOpen = ext == ".go"
-			case "rust-analyzer":
-				shouldOpen = ext == ".rs"
-			case "python", "pyright", "pylsp":
-				shouldOpen = ext == ".py"
-			case "clangd":
-				shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
-			case "java", "jdtls":
-				shouldOpen = ext == ".java"
-			default:
-				// For unknown servers, be conservative
-				shouldOpen = false
-			}
-
-			if shouldOpen {
-				// Don't need to check if it's already open - the client.OpenFile handles that
-				if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
-					slog.Error("Error opening file", "path", path, "error", err)
-				}
-			}
+	if shouldOpen {
+		// Don't need to check if it's already open - the client.OpenFile handles that
+		if err := w.client.OpenFile(ctx, path); err != nil && cfg.Options.DebugLSP {
+			slog.Error("Error opening file", "path", path, "error", err)
 		}
 	}
 }

@@ -92,16 +92,26 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 }
 
 // RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.
-func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat string, quiet bool) error {
+func (a *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// Start spinner if not in quiet mode
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner(ctx, "Generating")
+		spinner = format.NewSpinner(ctx, cancel, "Generating")
 		spinner.Start()
-		defer spinner.Stop()
 	}
+	// Helper function to stop spinner once
+	stopSpinner := func() {
+		if !quiet && spinner != nil {
+			spinner.Stop()
+			spinner = nil
+		}
+	}
+	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
 	titlePrefix := "Non-interactive: "
@@ -128,35 +138,42 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, outputFormat
 		return fmt.Errorf("failed to start agent processing stream: %w", err)
 	}
 
-	result := <-done
+	messageEvents := a.Messages.Subscribe(ctx)
+	readBts := 0
 
-	// Stop spinner before printing output
-	if !quiet && spinner != nil {
-		spinner.Stop()
-	}
+	for {
+		select {
+		case result := <-done:
+			stopSpinner()
 
-	if result.Error != nil {
-		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-			slog.Info("Agent processing cancelled", "session_id", sess.ID)
+			if result.Error != nil {
+				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
+					slog.Info("Agent processing cancelled", "session_id", sess.ID)
+					return nil
+				}
+				return fmt.Errorf("agent processing failed: %w", result.Error)
+			}
+
+			part := result.Message.Content().String()[readBts:]
+			fmt.Println(part)
+
+			slog.Info("Non-interactive run completed", "session_id", sess.ID)
 			return nil
+
+		case event := <-messageEvents:
+			msg := event.Payload
+			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+				stopSpinner()
+				part := msg.Content().String()[readBts:]
+				fmt.Print(part)
+				readBts += len(part)
+			}
+
+		case <-ctx.Done():
+			stopSpinner()
+			return ctx.Err()
 		}
-		return fmt.Errorf("agent processing failed: %w", result.Error)
 	}
-
-	// Get the text content from the response
-	content := "No content available"
-	if result.Message.Content().String() != "" {
-		content = result.Message.Content().String()
-	}
-
-	out, err := format.FormatOutput(content, outputFormat)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(out)
-	slog.Info("Non-interactive run completed", "session_id", sess.ID)
-	return nil
 }
 
 func (app *App) UpdateAgentModel() error {

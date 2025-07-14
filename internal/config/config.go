@@ -72,7 +72,7 @@ type ProviderConfig struct {
 	Disable bool `json:"disable,omitempty"`
 
 	// Extra headers to send with each request to the provider.
-	ExtraHeaders map[string]string
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
@@ -370,4 +370,35 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	// Store the updated provider config
 	c.Providers[providerID] = providerConfig
 	return nil
+}
+
+func (c *Config) SetupAgents() {
+	agents := map[string]Agent{
+		"coder": {
+			ID:           "coder",
+			Name:         "Coder",
+			Description:  "An agent that helps with executing coding tasks.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			// All tools allowed
+		},
+		"task": {
+			ID:           "task",
+			Name:         "Task",
+			Description:  "An agent that helps with searching for context and finding implementation details.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: []string{
+				"glob",
+				"grep",
+				"ls",
+				"sourcegraph",
+				"view",
+			},
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+			AllowedLSP: []string{},
+		},
+	}
+	c.Agents = agents
 }

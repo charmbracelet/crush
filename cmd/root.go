@@ -118,8 +118,8 @@ to assist developers in writing, debugging, and understanding code directly from
 			tea.WithAltScreen(),
 			tea.WithKeyReleases(),
 			tea.WithUniformKeyLayout(),
-			tea.WithMouseCellMotion(), // Use cell motion instead of all motion to reduce event flooding
 			tea.WithContext(ctx),
+			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
 			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 

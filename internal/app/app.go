@@ -92,7 +92,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 }
 
 // RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.
-func (a *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -124,21 +124,21 @@ func (a *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) 
 	}
 	title := titlePrefix + titleSuffix
 
-	sess, err := a.Sessions.Create(ctx, title)
+	sess, err := app.Sessions.Create(ctx, title)
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
 	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive session
-	a.Permissions.AutoApproveSession(sess.ID)
+	app.Permissions.AutoApproveSession(sess.ID)
 
-	done, err := a.CoderAgent.Run(ctx, sess.ID, prompt)
+	done, err := app.CoderAgent.Run(ctx, sess.ID, prompt)
 	if err != nil {
 		return fmt.Errorf("failed to start agent processing stream: %w", err)
 	}
 
-	messageEvents := a.Messages.Subscribe(ctx)
+	messageEvents := app.Messages.Subscribe(ctx)
 	readBts := 0
 
 	for {

@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 )
 
-// Write writes an LSP message to the given writer
+// WriteMessage writes an LSP message to the given writer
 func WriteMessage(w io.Writer, msg *Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {

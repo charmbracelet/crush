@@ -77,7 +77,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 				switch u := v.BaseURI.Value.(type) {
 				case string:
 					slog.Debug("BaseURI", "baseURI", u)
-				case protocol.DocumentUri:
+				case protocol.DocumentURI:
 					slog.Debug("BaseURI", "baseURI", u)
 				default:
 					slog.Debug("BaseURI", "baseURI", u)
@@ -514,8 +514,8 @@ func matchesGlob(pattern, path string) bool {
 // matchesSimpleGlob handles glob patterns with ** wildcards
 func matchesSimpleGlob(pattern, path string) bool {
 	// Handle special case for **/*.ext pattern (common in LSP)
-	if strings.HasPrefix(pattern, "**/") {
-		rest := strings.TrimPrefix(pattern, "**/")
+	if after, ok := strings.CutPrefix(pattern, "**/"); ok {
+		rest := after
 
 		// If the rest is a simple file extension pattern like *.go
 		if strings.HasPrefix(rest, "*.") {
@@ -607,7 +607,7 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 	}
 
 	// For relative patterns
-	basePath = protocol.DocumentUri(basePath).Path()
+	basePath = protocol.DocumentURI(basePath).Path()
 	basePath = filepath.ToSlash(basePath)
 
 	// Make path relative to basePath for matching
@@ -650,9 +650,9 @@ func (w *WorkspaceWatcher) debounceHandleFileEvent(ctx context.Context, uri stri
 // handleFileEvent sends file change notifications
 func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) {
 	// If the file is open and it's a change event, use didChange notification
-	filePath := protocol.DocumentUri(uri).Path()
+	filePath := protocol.DocumentURI(uri).Path()
 	if changeType == protocol.FileChangeType(protocol.Deleted) {
-		w.client.ClearDiagnosticsForURI(protocol.DocumentUri(uri))
+		w.client.ClearDiagnosticsForURI(protocol.DocumentURI(uri))
 	} else if changeType == protocol.FileChangeType(protocol.Changed) && w.client.IsFileOpen(filePath) {
 		err := w.client.NotifyChange(ctx, filePath)
 		if err != nil {
@@ -680,7 +680,7 @@ func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, chan
 	params := protocol.DidChangeWatchedFilesParams{
 		Changes: []protocol.FileEvent{
 			{
-				URI:  protocol.DocumentUri(uri),
+				URI:  protocol.DocumentURI(uri),
 				Type: changeType,
 			},
 		},

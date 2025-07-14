@@ -591,11 +591,11 @@ func (p *chatPage) Bindings() []key.Binding {
 	return bindings
 }
 
-func (a *chatPage) Help() help.KeyMap {
+func (p *chatPage) Help() help.KeyMap {
 	var shortList []key.Binding
 	var fullList [][]key.Binding
 	switch {
-	case a.isOnboarding && !a.splash.IsShowingAPIKey():
+	case p.isOnboarding && !p.splash.IsShowingAPIKey():
 		shortList = append(shortList,
 			// Choose model
 			key.NewBinding(
@@ -617,7 +617,7 @@ func (a *chatPage) Help() help.KeyMap {
 		for _, v := range shortList {
 			fullList = append(fullList, []key.Binding{v})
 		}
-	case a.isOnboarding && a.splash.IsShowingAPIKey():
+	case p.isOnboarding && p.splash.IsShowingAPIKey():
 		shortList = append(shortList,
 			// Go back
 			key.NewBinding(
@@ -634,7 +634,7 @@ func (a *chatPage) Help() help.KeyMap {
 		for _, v := range shortList {
 			fullList = append(fullList, []key.Binding{v})
 		}
-	case a.isProjectInit:
+	case p.isProjectInit:
 		shortList = append(shortList,
 			key.NewBinding(
 				key.WithKeys("ctrl+c"),
@@ -646,7 +646,7 @@ func (a *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	default:
-		if a.editor.IsCompletionsOpen() {
+		if p.editor.IsCompletionsOpen() {
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("tab", "enter"),
@@ -666,12 +666,12 @@ func (a *chatPage) Help() help.KeyMap {
 			}
 			return core.NewSimpleHelp(shortList, fullList)
 		}
-		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 			cancelBinding := key.NewBinding(
 				key.WithKeys("esc"),
 				key.WithHelp("esc", "cancel"),
 			)
-			if a.isCanceling {
+			if p.isCanceling {
 				cancelBinding = key.NewBinding(
 					key.WithKeys("esc"),
 					key.WithHelp("esc", "press again to cancel"),
@@ -686,12 +686,12 @@ func (a *chatPage) Help() help.KeyMap {
 		}
 		globalBindings := []key.Binding{}
 		// we are in a session
-		if a.session.ID != "" {
+		if p.session.ID != "" {
 			tabKey := key.NewBinding(
 				key.WithKeys("tab"),
 				key.WithHelp("tab", "focus chat"),
 			)
-			if a.focusedPane == PanelTypeChat {
+			if p.focusedPane == PanelTypeChat {
 				tabKey = key.NewBinding(
 					key.WithKeys("tab"),
 					key.WithHelp("tab", "focus editor"),
@@ -715,7 +715,7 @@ func (a *chatPage) Help() help.KeyMap {
 				key.WithHelp("ctrl+s", "sessions"),
 			),
 		)
-		if a.session.ID != "" {
+		if p.session.ID != "" {
 			globalBindings = append(globalBindings,
 				key.NewBinding(
 					key.WithKeys("ctrl+n"),
@@ -728,7 +728,8 @@ func (a *chatPage) Help() help.KeyMap {
 		)
 		fullList = append(fullList, globalBindings)
 
-		if a.focusedPane == PanelTypeChat {
+		switch p.focusedPane {
+		case PanelTypeChat:
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("up", "down"),
@@ -773,7 +774,7 @@ func (a *chatPage) Help() help.KeyMap {
 					),
 				},
 			)
-		} else if a.focusedPane == PanelTypeEditor {
+		case PanelTypeEditor:
 			newLineBinding := key.NewBinding(
 				key.WithKeys("shift+enter", "ctrl+j"),
 				// "ctrl+j" is a common keybinding for newline in many editors. If
@@ -781,7 +782,7 @@ func (a *chatPage) Help() help.KeyMap {
 				// to reflect that.
 				key.WithHelp("ctrl+j", "newline"),
 			)
-			if a.keyboardEnhancements.SupportsKeyDisambiguation() {
+			if p.keyboardEnhancements.SupportsKeyDisambiguation() {
 				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
 			}
 			shortList = append(shortList, newLineBinding)

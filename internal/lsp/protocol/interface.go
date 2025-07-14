@@ -2,7 +2,7 @@ package protocol
 
 import "fmt"
 
-// TextEditResult is an interface for types that represent workspace symbols
+// WorkspaceSymbolResult is an interface for types that represent workspace symbols
 type WorkspaceSymbolResult interface {
 	GetName() string
 	GetLocation() Location
@@ -48,7 +48,7 @@ func (r Or_Result_workspace_symbol) Results() ([]WorkspaceSymbolResult, error) {
 	}
 }
 
-// TextEditResult is an interface for types that represent document symbols
+// DocumentSymbolResult is an interface for types that represent document symbols
 type DocumentSymbolResult interface {
 	GetRange() Range
 	GetName() string
@@ -98,7 +98,7 @@ func (te *TextEdit) GetRange() Range    { return te.Range }
 func (te *TextEdit) GetNewText() string { return te.NewText }
 func (te *TextEdit) isTextEdit()        {}
 
-// Convert Or_TextDocumentEdit_edits_Elem to TextEdit
+// AsTextEdit converts Or_TextDocumentEdit_edits_Elem to TextEdit
 func (e Or_TextDocumentEdit_edits_Elem) AsTextEdit() (TextEdit, error) {
 	if e.Value == nil {
 		return TextEdit{}, fmt.Errorf("nil text edit")

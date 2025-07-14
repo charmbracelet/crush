@@ -192,10 +192,8 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
-			if s.needsProjectInit {
-				s.needsProjectInit = false
-				return s, util.CmdHandler(OnboardingCompleteMsg{})
-			}
+			s.selectedNo = true
+			return s, s.initializeProject()
 		default:
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)

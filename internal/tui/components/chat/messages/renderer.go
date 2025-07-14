@@ -792,7 +792,7 @@ func escapeLine(t *styles.Theme, text string) string {
 		n     int
 		w     int
 	)
-	faint := ansi.NewStyle().Faint().ForegroundColor(t.FgMuted)
+	faint := t.S().Muted.Faint(true)
 	for len(text) > 0 {
 		seq, w, n, state = ansi.DecodeSequence(text, state, nil)
 		if w > 0 {
@@ -801,7 +801,7 @@ func escapeLine(t *styles.Theme, text string) string {
 			quote := strconv.Quote(seq)
 			quote = strings.TrimPrefix(quote, "\"")
 			quote = strings.TrimSuffix(quote, "\"")
-			sb.WriteString(faint.Styled(quote))
+			sb.WriteString(faint.Render(quote))
 		}
 		text = text[n:]
 	}

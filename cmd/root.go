@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -72,9 +73,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		// Create main context for the application
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := cmd.Context()
 
 		// Connect DB, this will also run migrations
 		conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
@@ -145,6 +144,7 @@ func Execute() {
 		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
+		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
 	); err != nil {
 		os.Exit(1)
 	}

@@ -2,10 +2,12 @@ package fang
 
 import (
 	"image/color"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -31,8 +33,14 @@ type ColorScheme struct {
 }
 
 // DefaultTheme is the default colorscheme.
+//
+// Deprecated: use [DefaultColorScheme] instead.
 func DefaultTheme(isDark bool) ColorScheme {
-	c := lipgloss.LightDark(isDark)
+	return DefaultColorScheme(lipgloss.LightDark(isDark))
+}
+
+// DefaultColorScheme is the default colorscheme.
+func DefaultColorScheme(c lipgloss.LightDarkFunc) ColorScheme {
 	return ColorScheme{
 		Base:           c(charmtone.Charcoal, charmtone.Ash),
 		Title:          charmtone.Charple,
@@ -45,11 +53,31 @@ func DefaultTheme(isDark bool) ColorScheme {
 		Argument:       c(charmtone.Charcoal, charmtone.Ash),
 		Description:    c(charmtone.Charcoal, charmtone.Ash), // flag and command descriptions
 		FlagDefault:    c(charmtone.Smoke, charmtone.Squid),  // flag default values in descriptions
-		QuotedString:   c(charmtone.Charcoal, charmtone.Ash),
+		QuotedString:   c(charmtone.Coral, charmtone.Salmon),
 		ErrorHeader: [2]color.Color{
 			charmtone.Butter,
 			charmtone.Cherry,
 		},
+	}
+}
+
+// AnsiColorScheme is a ANSI colorscheme.
+func AnsiColorScheme(c lipgloss.LightDarkFunc) ColorScheme {
+	base := c(lipgloss.Black, lipgloss.White)
+	return ColorScheme{
+		Base:         base,
+		Title:        lipgloss.Blue,
+		Description:  base,
+		Comment:      c(lipgloss.BrightWhite, lipgloss.BrightBlack),
+		Flag:         lipgloss.Magenta,
+		FlagDefault:  lipgloss.BrightMagenta,
+		Command:      lipgloss.Cyan,
+		QuotedString: lipgloss.Green,
+		Argument:     base,
+		Help:         base,
+		Dash:         base,
+		ErrorHeader:  [2]color.Color{lipgloss.Black, lipgloss.Red},
+		ErrorDetails: lipgloss.Red,
 	}
 }
 
@@ -84,6 +112,14 @@ type Program struct {
 	QuotedString   lipgloss.Style
 }
 
+func mustColorscheme(cs func(lipgloss.LightDarkFunc) ColorScheme) ColorScheme {
+	var isDark bool
+	if term.IsTerminal(os.Stdout.Fd()) {
+		isDark = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	}
+	return cs(lipgloss.LightDark(isDark))
+}
+
 func makeStyles(cs ColorScheme) Styles {
 	//nolint:mnd
 	return Styles{
@@ -98,8 +134,7 @@ func makeStyles(cs ColorScheme) Styles {
 			Foreground(cs.Description).
 			Transform(titleFirstWord),
 		FlagDefault: lipgloss.NewStyle().
-			Foreground(cs.FlagDefault).
-			PaddingLeft(1),
+			Foreground(cs.FlagDefault),
 		Codeblock: Codeblock{
 			Base: lipgloss.NewStyle().
 				Background(cs.Codeblock).
@@ -116,23 +151,18 @@ func makeStyles(cs ColorScheme) Styles {
 					Background(cs.Codeblock).
 					Foreground(cs.Program),
 				Flag: lipgloss.NewStyle().
-					PaddingLeft(1).
 					Background(cs.Codeblock).
 					Foreground(cs.Flag),
 				Argument: lipgloss.NewStyle().
-					PaddingLeft(1).
 					Background(cs.Codeblock).
 					Foreground(cs.Argument),
 				DimmedArgument: lipgloss.NewStyle().
-					PaddingLeft(1).
 					Background(cs.Codeblock).
 					Foreground(cs.DimmedArgument),
 				Command: lipgloss.NewStyle().
-					PaddingLeft(1).
 					Background(cs.Codeblock).
 					Foreground(cs.Command),
 				QuotedString: lipgloss.NewStyle().
-					PaddingLeft(1).
 					Background(cs.Codeblock).
 					Foreground(cs.QuotedString),
 			},
@@ -141,18 +171,14 @@ func makeStyles(cs ColorScheme) Styles {
 			Name: lipgloss.NewStyle().
 				Foreground(cs.Program),
 			Argument: lipgloss.NewStyle().
-				PaddingLeft(1).
 				Foreground(cs.Argument),
 			DimmedArgument: lipgloss.NewStyle().
-				PaddingLeft(1).
 				Foreground(cs.DimmedArgument),
 			Flag: lipgloss.NewStyle().
-				PaddingLeft(1).
 				Foreground(cs.Flag),
 			Command: lipgloss.NewStyle().
 				Foreground(cs.Command),
 			QuotedString: lipgloss.NewStyle().
-				PaddingLeft(1).
 				Foreground(cs.QuotedString),
 		},
 		Span: lipgloss.NewStyle().

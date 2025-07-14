@@ -1,7 +1,7 @@
 # Fang
 
 <p>
-    <img width="485" alt="Charm Fang" src="https://github.com/user-attachments/assets/3f34ea01-3750-4760-beb2-a1b700e110f5">   
+    <img width="485" alt="Charm Fang" src="https://github.com/user-attachments/assets/3f34ea01-3750-4760-beb2-a1b700e110f5">
 </p>
 <p>
     <a href="https://github.com/charmbracelet/fang/releases"><img src="https://img.shields.io/github/release/charmbracelet/fang.svg" alt="Latest Release"></a>
@@ -12,7 +12,7 @@
 The CLI starter kit. A small, experimental library for batteries-included [Cobra][cobra] applications.
 
 <p>
-    <img width="865" alt="fang-02" src="https://github.com/user-attachments/assets/7f68ec3f-2b42-4188-a750-7e2808696132" />
+    <img width="859" alt="The Charm Fang mascot and title treatment" src="https://github.com/user-attachments/assets/5c35e1fa-9577-4f81-a879-3ddb4d4a43f0" />
 </p>
 
 ## Features
@@ -45,6 +45,7 @@ To use it, invoke `fang.Execute` passing your root `*cobra.Command`:
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/charmbracelet/fang"
@@ -56,7 +57,7 @@ func main() {
 		Use:   "example",
 		Short: "A simple example program!",
 	}
-	if err := fang.Execute(context.TODO(), cmd); err != nil {
+	if err := fang.Execute(context.Background(), cmd); err != nil {
 		os.Exit(1)
 	}
 }

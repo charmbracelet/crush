@@ -773,6 +773,7 @@ func prettifyToolName(name string) string {
 // escapeContent escapes ANSI escape sequences and control characters in the
 // content and styles it for display in the terminal.
 func escapeContent(t *styles.Theme, content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		lines[i] = escapeLine(t, line)

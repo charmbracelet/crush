@@ -364,8 +364,9 @@ func (m *editorCmp) startCompletions() tea.Msg {
 		})
 	}
 
-	x := m.textarea.Cursor().X + m.x + 1
-	y := m.textarea.Cursor().Y + m.y + 1
+	cur := m.textarea.Cursor()
+	x := cur.X + m.x // adjust for padding
+	y := cur.Y + m.y + 1
 	return completions.OpenCompletionsMsg{
 		Completions: completionItems,
 		X:           x,

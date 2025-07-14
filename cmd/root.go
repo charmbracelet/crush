@@ -73,7 +73,6 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		// Use the context from the command which includes signal handling
 		ctx := cmd.Context()
 
 		// Connect DB, this will also run migrations
@@ -154,11 +153,12 @@ func initMCPTools(ctx context.Context, app *app.App, cfg *config.Config) {
 	}()
 }
 
-func Execute(ctx context.Context) {
+func Execute() {
 	if err := fang.Execute(
-		ctx,
+		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
+		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {
 		os.Exit(1)
 	}

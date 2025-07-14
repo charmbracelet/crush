@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"time"
@@ -41,9 +42,74 @@ const (
 )
 
 var bannedCommands = []string{
-	"alias", "curl", "curlie", "wget", "axel", "aria2c",
-	"nc", "telnet", "lynx", "w3m", "links", "httpie", "xh",
-	"http-prompt", "chrome", "firefox", "safari",
+	// Network/Download tools
+	"alias",
+	"aria2c",
+	"axel",
+	"chrome",
+	"curl",
+	"curlie",
+	"firefox",
+	"http-prompt",
+	"httpie",
+	"links",
+	"lynx",
+	"nc",
+	"safari",
+	"telnet",
+	"w3m",
+	"wget",
+	"xh",
+
+	// System administration
+	"doas",
+	"su",
+	"sudo",
+
+	// Package managers
+	"apk",
+	"apt",
+	"apt-cache",
+	"apt-get",
+	"dnf",
+	"dpkg",
+	"emerge",
+	"home-manager",
+	"makepkg",
+	"opkg",
+	"pacman",
+	"paru",
+	"pkg",
+	"pkg_add",
+	"pkg_delete",
+	"portage",
+	"rpm",
+	"yay",
+	"yum",
+	"zypper",
+
+	// System modification
+	"at",
+	"batch",
+	"chkconfig",
+	"crontab",
+	"fdisk",
+	"mkfs",
+	"mount",
+	"parted",
+	"service",
+	"systemctl",
+	"umount",
+
+	// Network configuration
+	"firewall-cmd",
+	"ifconfig",
+	"ip",
+	"iptables",
+	"netstat",
+	"pfctl",
+	"route",
+	"ufw",
 }
 
 // getSafeReadOnlyCommands returns platform-appropriate safe commands
@@ -244,7 +310,42 @@ Important:
 - Never update git config`, bannedCommandsStr, MaxOutputLength)
 }
 
+func blockFuncs() []shell.BlockFunc {
+	return []shell.BlockFunc{
+		shell.CommandsBlocker(bannedCommands),
+		shell.ArgumentsBlocker([][]string{
+			// System package managers
+			{"apk", "add"},
+			{"apt", "install"},
+			{"apt-get", "install"},
+			{"dnf", "install"},
+			{"emerge"},
+			{"pacman", "-S"},
+			{"pkg", "install"},
+			{"yum", "install"},
+			{"zypper", "install"},
+
+			// Language-specific package managers
+			{"brew", "install"},
+			{"cargo", "install"},
+			{"gem", "install"},
+			{"go", "install"},
+			{"npm", "install", "-g"},
+			{"npm", "install", "--global"},
+			{"pip", "install", "--user"},
+			{"pip3", "install", "--user"},
+			{"pnpm", "add", "-g"},
+			{"pnpm", "add", "--global"},
+			{"yarn", "global", "add"},
+		}),
+	}
+}
+
 func NewBashTool(permission permission.Service, workingDir string) BaseTool {
+	// Set up command blocking on the persistent shell
+	persistentShell := shell.GetPersistentShell(workingDir)
+	persistentShell.SetBlockFuncs(blockFuncs())
+
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
@@ -287,13 +388,6 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	if params.Command == "" {
 		return NewTextErrorResponse("missing command"), nil
-	}
-
-	baseCmd := strings.Fields(params.Command)[0]
-	for _, banned := range bannedCommands {
-		if strings.EqualFold(baseCmd, banned) {
-			return NewTextErrorResponse(fmt.Sprintf("command '%s' is not allowed", baseCmd)), nil
-		}
 	}
 
 	isSafeReadOnly := false
@@ -349,7 +443,20 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
 
+	slog.Info("Bash command executed",
+		"command", params.Command,
+		"stdout", stdout,
+		"stderr", stderr,
+		"exit_code", exitCode,
+		"interrupted", interrupted,
+		"err", err,
+	)
+
 	errorMessage := stderr
+	if errorMessage == "" && err != nil {
+		errorMessage = err.Error()
+	}
+
 	if interrupted {
 		if errorMessage != "" {
 			errorMessage += "\n"

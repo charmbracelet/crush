@@ -95,10 +95,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 func (a *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Start spinner if not in quiet mode
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner(ctx, "Generating")
+		spinner = format.NewSpinner(ctx, cancel, "Generating")
 		spinner.Start()
 	}
 	// Helper function to stop spinner once

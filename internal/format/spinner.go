@@ -18,24 +18,48 @@ type Spinner struct {
 	prog *tea.Program
 }
 
+type model struct {
+	cancel context.CancelFunc
+	anim   anim.Anim
+}
+
+func (m model) Init() tea.Cmd { return m.anim.Init() }
+func (m model) View() string  { return m.anim.View() }
+
+// Update implements tea.Model.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			m.cancel()
+			return m, tea.Quit
+		}
+	}
+	mm, cmd := m.anim.Update(msg)
+	m.anim = mm.(anim.Anim)
+	return m, cmd
+}
+
 // NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, message string) *Spinner {
+func NewSpinner(ctx context.Context, cancel context.CancelFunc, message string) *Spinner {
 	t := styles.CurrentTheme()
-	model := anim.New(anim.Settings{
-		Size:        10,
-		Label:       message,
-		LabelColor:  t.FgBase,
-		GradColorA:  t.Primary,
-		GradColorB:  t.Secondary,
-		CycleColors: true,
-	})
+	model := model{
+		anim: anim.New(anim.Settings{
+			Size:        10,
+			Label:       message,
+			LabelColor:  t.FgBase,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		}),
+		cancel: cancel,
+	}
 
 	prog := tea.NewProgram(
 		model,
-		tea.WithInput(nil),
 		tea.WithOutput(os.Stderr),
 		tea.WithContext(ctx),
-		tea.WithoutCatchPanics(),
 	)
 
 	return &Spinner{
@@ -47,13 +71,13 @@ func NewSpinner(ctx context.Context, message string) *Spinner {
 // Start begins the spinner animation
 func (s *Spinner) Start() {
 	go func() {
+		defer close(s.done)
 		_, err := s.prog.Run()
 		// ensures line is cleared
 		fmt.Fprint(os.Stderr, ansi.EraseEntireLine)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrInterrupted) {
 			fmt.Fprintf(os.Stderr, "Error running spinner: %v\n", err)
 		}
-		close(s.done)
 	}()
 }
 

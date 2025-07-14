@@ -83,37 +83,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err := cfg.configureSelectedModels(providers); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-
-	// TODO: remove the agents concept from the config
-	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
-			Name:         "Coder",
-			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: cfg.Options.ContextPaths,
-			// All tools allowed
-		},
-		"task": {
-			ID:           "task",
-			Name:         "Task",
-			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: cfg.Options.ContextPaths,
-			AllowedTools: []string{
-				"glob",
-				"grep",
-				"ls",
-				"sourcegraph",
-				"view",
-			},
-			// NO MCPs or LSPs by default
-			AllowedMCP: map[string][]string{},
-			AllowedLSP: []string{},
-		},
-	}
-	cfg.Agents = agents
-
+	cfg.SetupAgents()
 	return cfg, nil
 }
 
@@ -387,8 +357,6 @@ func (cfg *Config) configureSelectedModels(knownProviders []provider.Provider) e
 			large.Provider = largeModelSelected.Provider
 		}
 		model := cfg.GetModel(large.Provider, large.Model)
-		slog.Info("Configuring selected large model", "provider", large.Provider, "model", large.Model)
-		slog.Info("Model configured", "model", model)
 		if model == nil {
 			large = defaultLarge
 			// override the model type to large

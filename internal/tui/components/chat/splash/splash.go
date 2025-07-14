@@ -313,6 +313,7 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 			return util.ReportError(err)
 		}
 	}
+	cfg.SetupAgents()
 	return nil
 }
 

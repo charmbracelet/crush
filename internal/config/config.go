@@ -371,3 +371,34 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	c.Providers[providerID] = providerConfig
 	return nil
 }
+
+func (c *Config) SetupAgents() {
+	agents := map[string]Agent{
+		"coder": {
+			ID:           "coder",
+			Name:         "Coder",
+			Description:  "An agent that helps with executing coding tasks.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			// All tools allowed
+		},
+		"task": {
+			ID:           "task",
+			Name:         "Task",
+			Description:  "An agent that helps with searching for context and finding implementation details.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: []string{
+				"glob",
+				"grep",
+				"ls",
+				"sourcegraph",
+				"view",
+			},
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+			AllowedLSP: []string{},
+		},
+	}
+	c.Agents = agents
+}

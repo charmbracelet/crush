@@ -117,8 +117,8 @@ func bashDescription() string {
 
 CROSS-PLATFORM SHELL SUPPORT:
 * This tool uses a shell interpreter (mvdan/sh) that mimics the Bash language,
-  so you should use Bash syntax even on all platforms, even on Windows.
-  The most common shell builtins and core utils are available even on Windows as
+  so you should use Bash syntax in all platforms, including Windows.
+  The most common shell builtins and core utils are available in Windows as
   well.
 * Make sure to use forward slashes (/) as path separators in commands, even on
   Windows. Example: "ls C:/foo/bar" instead of "ls C:\foo\bar".

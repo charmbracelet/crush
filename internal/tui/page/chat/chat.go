@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"runtime"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -615,26 +614,12 @@ func (a *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	case a.isOnboarding && a.splash.IsShowingAPIKey():
-		var pasteKey key.Binding
-		if runtime.GOOS != "darwin" {
-			pasteKey = key.NewBinding(
-				key.WithKeys("ctrl+v"),
-				key.WithHelp("ctrl+v", "paste API key"),
-			)
-		} else {
-			pasteKey = key.NewBinding(
-				key.WithKeys("cmd+v"),
-				key.WithHelp("cmd+v", "paste API key"),
-			)
-		}
 		shortList = append(shortList,
 			// Go back
 			key.NewBinding(
 				key.WithKeys("esc"),
 				key.WithHelp("esc", "back"),
 			),
-			// Paste
-			pasteKey,
 			// Quit
 			key.NewBinding(
 				key.WithKeys("ctrl+c"),

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -72,9 +73,8 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		// Create main context for the application
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		// Use the context from the command which includes signal handling
+		ctx := cmd.Context()
 
 		// Connect DB, this will also run migrations
 		conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
@@ -87,8 +87,23 @@ to assist developers in writing, debugging, and understanding code directly from
 			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err
 		}
-		// Defer shutdown here so it runs for both interactive and non-interactive modes
-		defer app.Shutdown()
+
+		// Set up shutdown handling that works for both normal exit and signal interruption
+		var shutdownOnce sync.Once
+		shutdown := func() {
+			shutdownOnce.Do(func() {
+				slog.Info("Shutting down application")
+				app.Shutdown()
+			})
+		}
+		defer shutdown()
+
+		// Handle context cancellation (from signals) in a goroutine
+		go func() {
+			<-ctx.Done()
+			slog.Info("Context cancelled, initiating shutdown")
+			shutdown()
+		}()
 
 		// Initialize MCP tools early for both modes
 		initMCPTools(ctx, app, cfg)
@@ -121,7 +136,6 @@ to assist developers in writing, debugging, and understanding code directly from
 			slog.Error(fmt.Sprintf("TUI run error: %v", err))
 			return fmt.Errorf("TUI error: %v", err)
 		}
-		app.Shutdown()
 		return nil
 	},
 }
@@ -140,9 +154,9 @@ func initMCPTools(ctx context.Context, app *app.App, cfg *config.Config) {
 	}()
 }
 
-func Execute() {
+func Execute(ctx context.Context) {
 	if err := fang.Execute(
-		context.Background(),
+		ctx,
 		rootCmd,
 		fang.WithVersion(version.Version),
 	); err != nil {

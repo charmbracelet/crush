@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	_ "net/http/pprof" // profiling
 
@@ -19,6 +22,19 @@ func main() {
 		slog.Error("Application terminated due to unhandled panic")
 	})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+
+	// Start signal handler in a goroutine
+	go func() {
+		sig := <-sigChan
+		slog.Info("Received signal, initiating graceful shutdown", "signal", sig)
+		cancel()
+	}()
+
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
@@ -28,5 +44,5 @@ func main() {
 		}()
 	}
 
-	cmd.Execute()
+	cmd.Execute(ctx)
 }

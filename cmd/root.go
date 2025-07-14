@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -86,16 +85,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err
 		}
-
-		// Set up shutdown handling that works for both normal exit and signal interruption
-		var shutdownOnce sync.Once
-		shutdown := func() {
-			shutdownOnce.Do(func() {
-				slog.Info("Shutting down application")
-				app.Shutdown()
-			})
-		}
-		defer shutdown()
+		defer app.Shutdown()
 
 		// Initialize MCP tools early for both modes
 		initMCPTools(ctx, app, cfg)

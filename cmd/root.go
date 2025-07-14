@@ -97,13 +97,6 @@ to assist developers in writing, debugging, and understanding code directly from
 		}
 		defer shutdown()
 
-		// Handle context cancellation (from signals) in a goroutine
-		go func() {
-			<-ctx.Done()
-			slog.Info("Context cancelled, initiating shutdown")
-			shutdown()
-		}()
-
 		// Initialize MCP tools early for both modes
 		initMCPTools(ctx, app, cfg)
 
@@ -125,7 +118,8 @@ to assist developers in writing, debugging, and understanding code directly from
 			tea.WithAltScreen(),
 			tea.WithKeyReleases(),
 			tea.WithUniformKeyLayout(),
-			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
+			tea.WithMouseCellMotion(), // Use cell motion instead of all motion to reduce event flooding
+			tea.WithContext(ctx),
 			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 

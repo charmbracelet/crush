@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fur/provider"
 )
 
-const defaultURL = "https://fur.charmcli.dev"
+const defaultURL = "https://fur.charm.sh"
 
 // Client represents a client for the fur service.
 type Client struct {

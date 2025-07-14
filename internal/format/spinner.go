@@ -18,25 +18,48 @@ type Spinner struct {
 	prog *tea.Program
 }
 
+type model struct {
+	cancel context.CancelFunc
+	anim   anim.Anim
+}
+
+func (m model) Init() tea.Cmd { return m.anim.Init() }
+func (m model) View() string  { return m.anim.View() }
+
+// Update implements tea.Model.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c", "esc":
+			m.cancel()
+			return m, tea.Quit
+		}
+	}
+	mm, cmd := m.anim.Update(msg)
+	m.anim = mm.(anim.Anim)
+	return m, cmd
+}
+
 // NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, message string) *Spinner {
+func NewSpinner(ctx context.Context, cancel context.CancelFunc, message string) *Spinner {
 	t := styles.CurrentTheme()
-	model := anim.New(anim.Settings{
-		Size:        10,
-		Label:       message,
-		LabelColor:  t.FgBase,
-		GradColorA:  t.Primary,
-		GradColorB:  t.Secondary,
-		CycleColors: true,
-	})
+	model := model{
+		anim: anim.New(anim.Settings{
+			Size:        10,
+			Label:       message,
+			LabelColor:  t.FgBase,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		}),
+		cancel: cancel,
+	}
 
 	prog := tea.NewProgram(
 		model,
-		tea.WithInput(nil),
 		tea.WithOutput(os.Stderr),
-		tea.WithoutSignals(), // sigs are handled by caller
 		tea.WithContext(ctx),
-		tea.WithoutCatchPanics(),
 	)
 
 	return &Spinner{

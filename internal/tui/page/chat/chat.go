@@ -53,7 +53,7 @@ const (
 
 const (
 	CompactModeBreakpoint = 120 // Width at which the chat page switches to compact mode
-	EditorHeight          = 5   // Height of the editor input area including padding
+	MaxEditorHeight       = 12  // The maximum editor height, this includes 2 for padding
 	SideBarWidth          = 31  // Width of the sidebar
 	SideBarDetailsPadding = 1   // Padding for the sidebar details section
 	HeaderHeight          = 1   // Height of the header
@@ -66,6 +66,7 @@ const (
 
 	// Timing constants
 	CancelTimerDuration = 2 * time.Second // Duration before cancel timer expires
+
 )
 
 type ChatPage interface {
@@ -84,6 +85,7 @@ func cancelTimerCmd() tea.Cmd {
 type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int
+	currentEditorHeight         int
 	app                         *app.App
 	keyboardEnhancements        tea.KeyboardEnhancementsMsg
 
@@ -113,14 +115,15 @@ type chatPage struct {
 
 func New(app *app.App) ChatPage {
 	return &chatPage{
-		app:         app,
-		keyMap:      DefaultKeyMap(),
-		header:      header.New(app.LSPClients),
-		sidebar:     sidebar.New(app.History, app.LSPClients, false),
-		chat:        chat.New(app),
-		editor:      editor.New(app),
-		splash:      splash.New(),
-		focusedPane: PanelTypeSplash,
+		app:                 app,
+		keyMap:              DefaultKeyMap(),
+		header:              header.New(app.LSPClients),
+		sidebar:             sidebar.New(app.History, app.LSPClients, false),
+		chat:                chat.New(app),
+		editor:              editor.New(app),
+		splash:              splash.New(),
+		currentEditorHeight: 4,
+		focusedPane:         PanelTypeSplash,
 	}
 }
 
@@ -286,6 +289,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := p.editor.Update(msg)
 			p.editor = u.(editor.Editor)
 			cmds = append(cmds, cmd)
+			editorHeight := min(MaxEditorHeight, p.getEditorHeight())
+			if editorHeight != p.currentEditorHeight {
+				p.currentEditorHeight = editorHeight
+				cmds = append(cmds, p.SetSize(p.width, p.height))
+			}
 		case PanelTypeSplash:
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
@@ -297,12 +305,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := p.editor.Update(msg)
 			p.editor = u.(editor.Editor)
 			cmds = append(cmds, cmd)
-			return p, tea.Batch(cmds...)
-		case PanelTypeChat:
-			u, cmd := p.chat.Update(msg)
-			p.chat = u.(chat.MessageListCmp)
-			cmds = append(cmds, cmd)
-			return p, tea.Batch(cmds...)
+			editorHeight := min(MaxEditorHeight, p.getEditorHeight())
+			if editorHeight != p.currentEditorHeight {
+				p.currentEditorHeight = editorHeight
+				cmds = append(cmds, p.SetSize(p.width, p.height))
+			}
 		case PanelTypeSplash:
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
@@ -406,6 +413,12 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 	}
 }
 
+func (p *chatPage) getEditorHeight() int {
+	height := lipgloss.Height(p.editor.Value())
+
+	return util.Clamp(height, 2, MaxEditorHeight) + 2
+}
+
 func (p *chatPage) setCompactMode(compact bool) {
 	if p.compact == compact {
 		return
@@ -443,23 +456,23 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 		if p.splashFullScreen {
 			cmds = append(cmds, p.splash.SetSize(width, height))
 		} else {
-			cmds = append(cmds, p.splash.SetSize(width, height-EditorHeight))
-			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
-			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
+			cmds = append(cmds, p.splash.SetSize(width, height-p.currentEditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, p.currentEditorHeight))
+			cmds = append(cmds, p.editor.SetPosition(0, height-p.currentEditorHeight))
 		}
 	} else {
 		if p.compact {
-			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight))
+			cmds = append(cmds, p.chat.SetSize(width, height-p.currentEditorHeight-HeaderHeight))
 			p.detailsWidth = width - DetailsPositioning
 			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
-			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, p.currentEditorHeight))
 			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
 		} else {
-			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight))
-			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
-			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-EditorHeight))
+			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-p.currentEditorHeight))
+			cmds = append(cmds, p.editor.SetSize(width, p.currentEditorHeight))
+			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-p.currentEditorHeight))
 		}
-		cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
+		cmds = append(cmds, p.editor.SetPosition(0, height-p.currentEditorHeight))
 	}
 	return tea.Batch(cmds...)
 }

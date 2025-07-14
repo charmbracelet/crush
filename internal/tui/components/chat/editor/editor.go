@@ -37,6 +37,7 @@ type Editor interface {
 	SetSession(session session.Session) tea.Cmd
 	IsCompletionsOpen() bool
 	Cursor() *tea.Cursor
+	Value() string
 }
 
 type FileCompletionItem struct {
@@ -260,10 +261,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleteMode = false
 			return m, nil
 		}
-		if key.Matches(msg, m.keyMap.Newline) {
-			m.textarea.InsertRune('\n')
-		}
 		// Handle Enter key
+		// TODO: need to fix cases where the user is not at the end but tries to create a new line in a line before
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
 			if len(value) > 0 && value[len(value)-1] == '\\' {
@@ -312,6 +311,8 @@ func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.height = height
 	m.textarea.SetWidth(width - 2)   // adjust for padding
 	m.textarea.SetHeight(height - 2) // adjust for padding
+	// without doing this it won't update correctly for some reason
+	m.textarea.SetValue(m.textarea.Value())
 	return nil
 }
 
@@ -402,6 +403,10 @@ func (c *editorCmp) IsCompletionsOpen() bool {
 	return c.isCompletionsOpen
 }
 
+func (m *editorCmp) Value() string {
+	return m.textarea.Value()
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
@@ -420,6 +425,7 @@ func New(app *app.App) Editor {
 	ta.CharLimit = -1
 	ta.Placeholder = "Tell me more about this project..."
 	ta.SetVirtualCursor(false)
+	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("enter", "ctrl+j"), key.WithHelp("enter", "insert newline"))
 	ta.Focus()
 
 	return &editorCmp{

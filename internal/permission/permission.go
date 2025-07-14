@@ -49,6 +49,7 @@ type permissionService struct {
 	pendingRequests       sync.Map
 	autoApproveSessions   []string
 	autoApproveSessionsMu sync.RWMutex
+	skip                  bool
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -77,6 +78,10 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(opts CreatePermissionRequest) bool {
+	if s.skip {
+		return true
+	}
+
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := slices.Contains(s.autoApproveSessions, opts.SessionID)
 	s.autoApproveSessionsMu.RUnlock()
@@ -125,10 +130,11 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func NewPermissionService(workingDir string) Service {
+func NewPermissionService(workingDir string, skip bool) Service {
 	return &permissionService{
 		Broker:             pubsub.NewBroker[PermissionRequest](),
 		workingDir:         workingDir,
 		sessionPermissions: make([]PermissionRequest, 0),
+		skip:               skip,
 	}
 }

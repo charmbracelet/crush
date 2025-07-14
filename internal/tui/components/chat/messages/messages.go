@@ -207,7 +207,6 @@ func (m *messageCmp) markdownContent() string {
 			title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
 			details := t.S().Base.Foreground(t.FgSubtle).Width(m.textWidth() - 2).Render(finishedData.Details)
 			return fmt.Sprintf("%s\n\n%s", title, details)
-
 		}
 	}
 	return m.toMarkdown(content)

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -144,7 +143,7 @@ func Execute() {
 		context.Background(),
 		rootCmd,
 		fang.WithVersion(version.Version),
-		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
+		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {
 		os.Exit(1)
 	}

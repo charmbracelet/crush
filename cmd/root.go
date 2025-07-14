@@ -45,6 +45,9 @@ to assist developers in writing, debugging, and understanding code directly from
 
   # Run a single non-interactive prompt with JSON output format
   crush -p "Explain the use of context in Go" -f json
+
+  # Run in dangerous mode (auto-accept all permissions)
+  crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load the config
@@ -52,6 +55,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		cwd, _ := cmd.Flags().GetString("cwd")
 		prompt, _ := cmd.Flags().GetString("prompt")
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		yolo, _ := cmd.Flags().GetBool("yolo")
 
 		if cwd != "" {
 			err := os.Chdir(cwd)
@@ -71,6 +75,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		if err != nil {
 			return err
 		}
+		cfg.Options.SkipPermissionsRequests = yolo
 
 		ctx := cmd.Context()
 
@@ -152,6 +157,7 @@ func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")
+	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
 	// Add quiet flag to hide spinner in non-interactive mode
 	rootCmd.Flags().BoolP("quiet", "q", false, "Hide spinner in non-interactive mode")

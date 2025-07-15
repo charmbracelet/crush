@@ -78,6 +78,22 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 }
 ```
 
+### MCPs
+
+Crush can also use MCPs for additional context. Add LSPs to the config like so:
+
+```
+{
+  "mcp": {
+    "context7": {
+      "command": "",
+      "url": "https://mcp.context7.com/mcp",
+      "type": "http"
+    }
+  },
+}
+```
+
 ### OpenAI-Compatible APIs
 
 Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.

@@ -323,7 +323,7 @@ func (p *permissionDialogCmp) generateBashContent() string {
 		for _, ln := range lines {
 			out = append(out, t.S().Muted.
 				Width(width).
-				Padding(0, 2).
+				Padding(0, 3).
 				Foreground(t.FgBase).
 				Background(t.BgSubtle).
 				Render(ln))

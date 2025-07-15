@@ -606,6 +606,9 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 		return fullPathMatch || baseNameMatch
 	}
 
+	if basePath == "" {
+		return false
+	}
 	// For relative patterns
 	basePath = protocol.DocumentURI(basePath).Path()
 	basePath = filepath.ToSlash(basePath)

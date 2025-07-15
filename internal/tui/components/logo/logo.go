@@ -233,42 +233,6 @@ func letterR(stretch bool) string {
 	)
 }
 
-// letterS renders the letter S in a stylized way. It takes an integer that
-// determines how many cells to stretch the letter. If the stretch is less than
-// 1, it defaults to no stretching.
-func letterS(stretch bool) string {
-	// Here's what we're making:
-	//
-	// ▄▀▀▀▀
-	//	▀▀▀▄
-	// ▀▀▀▀
-
-	left := heredoc.Doc(`
-		▄
-
-		▀
-	`)
-	center := heredoc.Doc(`
-		▀
-		▀
-		▀
-	`)
-	right := heredoc.Doc(`
-		▀
-		▄
-	`)
-	return joinLetterform(
-		left,
-		stretchLetterformPart(center, letterformProps{
-			stretch:    stretch,
-			width:      3,
-			minStretch: 7,
-			maxStretch: 12,
-		}),
-		right,
-	)
-}
-
 // letterSStylized renders the letter S in a stylized way, more so than
 // [letterS]. It takes an integer that determines how many cells to stretch the
 // letter. If the stretch is less than 1, it defaults to no stretching.

@@ -21,8 +21,6 @@ type list struct {
 
 	items []Item
 
-	renderedView string
-
 	// Filter options
 	filterable        bool
 	filterPlaceholder string

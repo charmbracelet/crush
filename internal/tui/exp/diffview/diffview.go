@@ -9,7 +9,6 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -210,7 +209,7 @@ func (dv *DiffView) computeDiff() error {
 		return dv.err
 	}
 	dv.isComputed = true
-	dv.edits = myers.ComputeEdits( //nolint:staticcheck
+	dv.edits = udiff.Strings(
 		dv.before.content,
 		dv.after.content,
 	)

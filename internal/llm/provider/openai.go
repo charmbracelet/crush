@@ -463,6 +463,6 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 	}
 }
 
-func (a *openaiClient) Model() provider.Model {
-	return a.providerOptions.model(a.providerOptions.modelType)
+func (o *openaiClient) Model() provider.Model {
+	return o.providerOptions.model(o.providerOptions.modelType)
 }

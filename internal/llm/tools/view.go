@@ -238,7 +238,7 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 
 	lineCount := 0
 
-	scanner := bufio.NewScanner(file)
+	scanner := NewLineScanner(file)
 	if offset > 0 {
 		for lineCount < offset && scanner.Scan() {
 			lineCount++
@@ -297,4 +297,26 @@ func isImageFile(filePath string) (bool, string) {
 	default:
 		return false, ""
 	}
+}
+
+type LineScanner struct {
+	scanner *bufio.Scanner
+}
+
+func NewLineScanner(r io.Reader) *LineScanner {
+	return &LineScanner{
+		scanner: bufio.NewScanner(r),
+	}
+}
+
+func (s *LineScanner) Scan() bool {
+	return s.scanner.Scan()
+}
+
+func (s *LineScanner) Text() string {
+	return s.scanner.Text()
+}
+
+func (s *LineScanner) Err() error {
+	return s.scanner.Err()
 }

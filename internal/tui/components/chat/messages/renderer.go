@@ -3,7 +3,6 @@ package messages
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -657,7 +656,6 @@ func joinHeaderBody(header, body string) string {
 func renderPlainContent(v *toolCallCmp, content string) string {
 	t := styles.CurrentTheme()
 	content = strings.TrimSpace(content)
-	content = escapeContent(t, content)
 	lines := strings.Split(content, "\n")
 
 	width := v.textWidth() - 2 // -2 for left padding
@@ -696,7 +694,6 @@ func pad(v any, width int) string {
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
 	t := styles.CurrentTheme()
-	content = escapeContent(t, content)
 	truncated := truncateHeight(content, responseContextHeight)
 
 	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgBase)
@@ -768,46 +765,4 @@ func prettifyToolName(name string) string {
 	default:
 		return name
 	}
-}
-
-// escapeContent escapes ANSI escape sequences and control characters in the
-// content and styles it for display in the terminal.
-func escapeContent(t *styles.Theme, content string) string {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		lines[i] = escapeLine(t, line)
-	}
-
-	content = strings.Join(lines, "\n")
-	return content
-}
-
-// escapeLine escapes ANSI escape sequences and control characters and styles
-// them for display in the terminal.
-func escapeLine(t *styles.Theme, text string) string {
-	var (
-		sb    strings.Builder
-		state byte
-		seq   string
-		n     int
-		w     int
-	)
-	var faint lipgloss.Style
-	if t != nil {
-		faint = t.S().Muted.Faint(true)
-	}
-	for len(text) > 0 {
-		seq, w, n, state = ansi.DecodeSequence(text, state, nil)
-		if w > 0 {
-			sb.WriteString(seq)
-		} else {
-			quote := strconv.Quote(seq)
-			quote = strings.TrimPrefix(quote, "\"")
-			quote = strings.TrimSuffix(quote, "\"")
-			sb.WriteString(faint.Render(quote))
-		}
-		text = text[n:]
-	}
-	return sb.String()
 }

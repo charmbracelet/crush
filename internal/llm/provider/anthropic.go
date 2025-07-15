@@ -72,6 +72,13 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 
 		case message.Assistant:
 			blocks := []anthropic.ContentBlockParamUnion{}
+
+			// Add thinking blocks first if present (required when thinking is enabled with tool use)
+			if reasoningContent := msg.ReasoningContent(); reasoningContent.Thinking != "" {
+				thinkingBlock := anthropic.NewThinkingBlock(reasoningContent.Signature, reasoningContent.Thinking)
+				blocks = append(blocks, thinkingBlock)
+			}
+
 			if msg.Content().String() != "" {
 				content := anthropic.NewTextBlock(msg.Content().String())
 				if cache && !a.providerOptions.disableCache {
@@ -159,16 +166,14 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	}
 	temperature := anthropic.Float(0)
 
-	if a.Model().CanReason && modelConfig.Think {
-		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
-		temperature = anthropic.Float(1)
-	}
-
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
-
+	if a.Model().CanReason && modelConfig.Think {
+		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(maxTokens) * 0.8))
+		temperature = anthropic.Float(1)
+	}
 	// Override max tokens if set in provider options
 	if a.providerOptions.maxTokens > 0 {
 		maxTokens = a.providerOptions.maxTokens
@@ -299,6 +304,11 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 						eventChan <- ProviderEvent{
 							Type:     EventThinkingDelta,
 							Thinking: event.Delta.Thinking,
+						}
+					} else if event.Delta.Type == "signature_delta" && event.Delta.Signature != "" {
+						eventChan <- ProviderEvent{
+							Type:      EventSignatureDelta,
+							Signature: event.Delta.Signature,
 						}
 					} else if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 						eventChan <- ProviderEvent{

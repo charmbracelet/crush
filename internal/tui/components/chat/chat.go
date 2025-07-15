@@ -329,7 +329,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 
 // shouldShowAssistantMessage determines if an assistant message should be displayed.
 func (m *messageListCmp) shouldShowAssistantMessage(msg message.Message) bool {
-	return len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.IsThinking()
+	return len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.ReasoningContent().Thinking != "" || msg.IsThinking()
 }
 
 // updateToolCalls handles updates to tool calls, updating existing ones and adding new ones.

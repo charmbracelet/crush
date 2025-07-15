@@ -451,6 +451,7 @@ func (p *permissionDialogCmp) render() string {
 
 	p.positionRow = p.wHeight / 2
 	p.positionRow -= (contentHeight + 9) / 2
+	p.positionRow -= 3 // Move dialog slightly higher than middle
 
 	var contentHelp string
 	if p.supportsDiffView() {
@@ -517,6 +518,7 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	}
 	p.positionRow = p.wHeight / 2
 	p.positionRow -= p.height / 2
+	p.positionRow -= 3 // Move dialog slightly higher than middle
 	p.positionCol = p.wWidth / 2
 	p.positionCol -= p.width / 2
 	return nil

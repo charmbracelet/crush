@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -16,6 +18,8 @@ import (
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
 )
+
+const defaultTailLines = 1000
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
@@ -53,16 +57,55 @@ var logsCmd = &cobra.Command{
 		}
 
 		if follow {
-			// Follow mode - tail the file continuously
-			t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
+			lines, err := readLastNLines(logsFile, defaultTailLines)
+			if err != nil {
+				return fmt.Errorf("failed to read last %d lines: %v", defaultTailLines, err)
+			}
+
+			// Check if we truncated the initial output
+			totalLines, err := countTotalLines(logsFile)
+			if err != nil {
+				return fmt.Errorf("failed to count total lines: %v", err)
+			}
+
+			// Print initial lines
+			for _, line := range lines {
+				printLogLine(line)
+			}
+
+			// Print truncation message to stderr if we truncated
+			if totalLines > defaultTailLines {
+				fmt.Fprintf(os.Stderr, "\nShowing last %d lines (of %d total). Full logs available at: %s\n",
+					defaultTailLines, totalLines, logsFile)
+				fmt.Fprintf(os.Stderr, "Following new log entries...\n\n")
+			}
+
+			// Now start following new lines from the end of the file
+			t, err := tail.TailFile(logsFile, tail.Config{
+				Follow:   true,
+				ReOpen:   true,
+				Logger:   tail.DiscardingLogger,
+				Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
+			})
 			if err != nil {
 				return fmt.Errorf("failed to tail log file: %v", err)
 			}
 
+			// Set up signal handling for graceful shutdown
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
 			// Print the text of each received line
-			for line := range t.Lines {
-				printLogLine(line.Text)
-			}
+			go func() {
+				for line := range t.Lines {
+					printLogLine(line.Text)
+				}
+			}()
+
+			// Wait for interrupt signal
+			<-sigChan
+			t.Stop()
+			return nil
 		} else if tailLines > 0 {
 			// Tail mode - show last N lines
 			lines, err := readLastNLines(logsFile, tailLines)
@@ -73,26 +116,25 @@ var logsCmd = &cobra.Command{
 				printLogLine(line)
 			}
 		} else {
-			// Oneshot mode - read the entire file once
-			file, err := os.Open(logsFile)
+			lines, err := readLastNLines(logsFile, defaultTailLines)
 			if err != nil {
-				return fmt.Errorf("failed to open log file: %v", err)
+				return fmt.Errorf("failed to read last %d lines: %v", defaultTailLines, err)
 			}
-			defer file.Close()
 
-			reader := bufio.NewReader(file)
-			for {
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					if err == io.EOF && line != "" {
-						// Handle last line without newline
-						printLogLine(line)
-					}
-					break
-				}
-				// Remove trailing newline
-				line = strings.TrimSuffix(line, "\n")
+			// Check if we truncated the output
+			totalLines, err := countTotalLines(logsFile)
+			if err != nil {
+				return fmt.Errorf("failed to count total lines: %v", err)
+			}
+
+			for _, line := range lines {
 				printLogLine(line)
+			}
+
+			// Print truncation message to stderr if we truncated
+			if totalLines > defaultTailLines {
+				fmt.Fprintf(os.Stderr, "\nShowing last %d lines (of %d total). Full logs available at: %s\n",
+					defaultTailLines, totalLines, logsFile)
 			}
 		}
 
@@ -102,7 +144,7 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
-	logsCmd.Flags().IntP("tail", "t", 0, "Show only the last N lines")
+	logsCmd.Flags().IntP("tail", "t", 1000, "Show only the last N lines")
 	rootCmd.AddCommand(logsCmd)
 }
 
@@ -151,6 +193,29 @@ func readLastNLines(filename string, n int) ([]string, error) {
 		result[i] = lines[(index+i)%n]
 	}
 	return result, nil
+}
+
+// countTotalLines counts the total number of lines in a file
+func countTotalLines(filename string) (int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	count := 0
+	reader := bufio.NewReader(file)
+	for {
+		_, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, err
+		}
+		count++
+	}
+	return count, nil
 }
 
 func printLogLine(lineText string) {

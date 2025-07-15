@@ -382,7 +382,7 @@ func (p *chatPage) View() string {
 			Width(p.detailsWidth).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus)
-		version := t.S().Subtle.Width(p.detailsWidth - 4).AlignHorizontal(lipgloss.Right).Render(version.Version)
+		version := t.S().Base.Foreground(t.Border).Width(p.detailsWidth - 4).AlignHorizontal(lipgloss.Right).Render(version.Version)
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,

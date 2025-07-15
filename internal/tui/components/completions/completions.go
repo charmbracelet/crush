@@ -157,6 +157,10 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		itemsLen := len(c.list.Items())
 		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
+		if itemsLen == 0 {
+			// Close completions if no items match the query
+			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
+		}
 		return c, tea.Batch(cmds...)
 	}
 	return c, nil

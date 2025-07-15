@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -93,7 +92,7 @@ var logsCmd = &cobra.Command{
 
 			// Set up signal handling for graceful shutdown
 			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+			signal.Notify(sigChan, os.Interrupt)
 
 			// Print the text of each received line
 			go func() {

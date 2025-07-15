@@ -19,10 +19,11 @@ import (
 
 // Constants for special index values and defaults
 const (
-	NoSelection    = -1 // Indicates no item is currently selected
-	NotRendered    = -1 // Indicates an item hasn't been rendered yet
-	NoFinalHeight  = -1 // Indicates final height hasn't been calculated
-	DefaultGapSize = 0  // Default spacing between list items
+	NoSelection     = -1 // Indicates no item is currently selected
+	NotRendered     = -1 // Indicates an item hasn't been rendered yet
+	NoFinalHeight   = -1 // Indicates final height hasn't been calculated
+	DefaultGapSize  = 0  // Default spacing between list items
+	MouseWheelDelta = 3  // Default mouse wheel delta from github.com/charmbracelet/bubbles/viewport
 )
 
 // ListModel defines the interface for a scrollable, selectable list component.
@@ -270,6 +271,8 @@ func (m *model) Init() tea.Cmd {
 // to the currently selected item.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg)
 	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
 	case anim.StepMsg:
@@ -314,6 +317,33 @@ func (m *model) View() string {
 		)
 	}
 	return content
+}
+
+func (m *model) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	// TODO implement horizontal scroll
+	case tea.MouseWheelDown:
+		// NOTE: some terminal emulators don't send the shift event for
+		// mouse actions.
+		//	if msg.Mod.Contains(tea.ModShift) {
+		//		m.ScrollRight(m.horizontalStep)
+		//		break
+		//	}
+		m.scrollDown(MouseWheelDelta)
+	case tea.MouseWheelUp:
+		// NOTE: some terminal emulators don't send the shift event for
+		// mouse actions.
+		//		if msg.Mod.Contains(tea.ModShift) {
+		//			m.ScrollLeft(m.horizontalStep)
+		//			break
+		//		}
+		m.scrollUp(MouseWheelDelta)
+		//	case tea.MouseWheelLeft:
+		//		m.ScrollLeft(m.horizontalStep)
+		//	case tea.MouseWheelRight:
+		//		m.ScrollRight(m.horizontalStep)
+	}
+	return m, nil
 }
 
 // handleKeyPress processes keyboard input for list navigation.

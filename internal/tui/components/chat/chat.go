@@ -94,13 +94,12 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[message.Message]:
 		cmd := m.handleMessageEvent(msg)
 		return m, cmd
-	default:
-		var cmds []tea.Cmd
-		u, cmd := m.listCmp.Update(msg)
-		m.listCmp = u.(list.ListModel)
-		cmds = append(cmds, cmd)
-		return m, tea.Batch(cmds...)
 	}
+	var cmds []tea.Cmd
+	u, cmd := m.listCmp.Update(msg)
+	m.listCmp = u.(list.ListModel)
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
 // View renders the message list or an initial screen if empty.

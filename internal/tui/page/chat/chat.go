@@ -160,6 +160,8 @@ func (p *chatPage) Init() tea.Cmd {
 func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		p.chat.Update(msg)
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
 		return p, nil

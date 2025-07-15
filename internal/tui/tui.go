@@ -88,7 +88,9 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
-	cmds = append(cmds, tea.EnableMouseAllMotion)
+	// Enable mouse.
+	cmds = append(cmds, tea.EnableMouseCellMotion)
+	// 	cmds = append(cmds, tea.EnableMouseAllMotion)
 
 	return tea.Batch(cmds...)
 }

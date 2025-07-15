@@ -40,6 +40,8 @@ type Completions interface {
 	Query() string // Returns the current filter query
 	KeyMap() KeyMap
 	Position() (int, int) // Returns the X and Y position of the completions popup
+	Width() int
+	Height() int
 }
 
 type completionsCmp struct {
@@ -53,6 +55,8 @@ type completionsCmp struct {
 	list  list.ListModel
 	query string // The current filter query
 }
+
+const MaxCompletionsWidth = 80 // Maximum width for the completions popup
 
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
@@ -92,7 +96,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		c.width = min(msg.Width-c.x, 80)
+		c.width = min(msg.Width-c.x, MaxCompletionsWidth)
 		c.height = min(msg.Height-c.y, 15)
 		return c, nil
 	case tea.KeyPressMsg:
@@ -200,4 +204,12 @@ func (c *completionsCmp) KeyMap() KeyMap {
 
 func (c *completionsCmp) Position() (int, int) {
 	return c.x, c.y - c.height
+}
+
+func (c *completionsCmp) Width() int {
+	return c.width
+}
+
+func (c *completionsCmp) Height() int {
+	return c.height
 }

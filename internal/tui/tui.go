@@ -116,6 +116,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg, completions.CloseCompletionsMsg:
 		u, completionCmd := a.completions.Update(msg)
 		a.completions = u.(completions.Completions)
+		switch msg := msg.(type) {
+		case completions.OpenCompletionsMsg:
+			x, _ := a.completions.Position()
+			if a.completions.Width()+x >= a.wWidth {
+				// Adjust X position to fit in the window.
+				msg.X = a.wWidth - a.completions.Width() - 1
+				u, completionCmd = a.completions.Update(msg)
+				a.completions = u.(completions.Completions)
+			}
+		}
 		return a, completionCmd
 
 	// Dialog messages

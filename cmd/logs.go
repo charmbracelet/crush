@@ -54,14 +54,23 @@ var logsCmd = &cobra.Command{
 
 		if follow {
 			// Follow mode - tail the file continuously
-			t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
+			t, err := tail.TailFile(logsFile, tail.Config{
+				Follow: true,
+				ReOpen: true,
+				Logger: tail.DiscardingLogger,
+			})
 			if err != nil {
 				return fmt.Errorf("failed to tail log file: %v", err)
 			}
 
 			// Print the text of each received line
-			for line := range t.Lines {
-				printLogLine(line.Text)
+			for {
+				select {
+				case line := <-t.Lines:
+					printLogLine(line.Text)
+				case <-cmd.Context().Done():
+					return cmd.Context().Err()
+				}
 			}
 		} else if tailLines > 0 {
 			// Tail mode - show last N lines

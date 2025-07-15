@@ -118,10 +118,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Value: selectedItem,
 			})
 		case key.Matches(msg, c.keyMap.Cancel):
-			if c.open {
-				c.open = false
-				return c, util.CmdHandler(CompletionsClosedMsg{})
-			}
+			return c, util.CmdHandler(CloseCompletionsMsg{})
 		}
 	case CloseCompletionsMsg:
 		c.open = false

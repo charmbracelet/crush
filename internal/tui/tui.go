@@ -315,7 +315,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// dialogs
 	case key.Matches(msg, a.keyMap.Quit):
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
-			// if the quit dialog is already open, close the app
 			return tea.Quit
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
@@ -324,19 +323,20 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	case key.Matches(msg, a.keyMap.Commands):
 		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
-			// If the commands dialog is already open, close it
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		if a.dialog.HasDialogs() {
-			return nil // Don't open commands dialog if another dialog is active
+			return nil
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
 		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
-			// If the sessions dialog is already open, close it
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() != commands.CommandsDialogID {
+			return nil
 		}
 		var cmds []tea.Cmd
 		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {

@@ -337,7 +337,7 @@ func (m *messageListCmp) updateToolCalls(msg message.Message, existingToolCalls 
 	var cmds []tea.Cmd
 
 	for _, tc := range msg.ToolCalls() {
-		if cmd := m.updateOrAddToolCall(tc, existingToolCalls, msg.ID); cmd != nil {
+		if cmd := m.updateOrAddToolCall(msg, tc, existingToolCalls); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -346,18 +346,21 @@ func (m *messageListCmp) updateToolCalls(msg message.Message, existingToolCalls 
 }
 
 // updateOrAddToolCall updates an existing tool call or adds a new one.
-func (m *messageListCmp) updateOrAddToolCall(tc message.ToolCall, existingToolCalls map[int]messages.ToolCallCmp, messageID string) tea.Cmd {
+func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.ToolCall, existingToolCalls map[int]messages.ToolCallCmp) tea.Cmd {
 	// Try to find existing tool call
 	for index, existingTC := range existingToolCalls {
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
+			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
+				existingTC.SetCancelled()
+			}
 			m.listCmp.UpdateItem(index, existingTC)
 			return nil
 		}
 	}
 
 	// Add new tool call if not found
-	return m.listCmp.AppendItem(messages.NewToolCallCmp(messageID, tc))
+	return m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
 }
 
 // handleNewAssistantMessage processes new assistant messages and their tool calls.

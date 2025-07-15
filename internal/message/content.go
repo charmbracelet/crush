@@ -102,8 +102,10 @@ type ToolResult struct {
 func (ToolResult) isPart() {}
 
 type Finish struct {
-	Reason FinishReason `json:"reason"`
-	Time   int64        `json:"time"`
+	Reason  FinishReason `json:"reason"`
+	Time    int64        `json:"time"`
+	Message string       `json:"message,omitempty"`
+	Details string       `json:"details,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -308,7 +310,7 @@ func (m *Message) SetToolResults(tr []ToolResult) {
 	}
 }
 
-func (m *Message) AddFinish(reason FinishReason) {
+func (m *Message) AddFinish(reason FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -316,7 +318,7 @@ func (m *Message) AddFinish(reason FinishReason) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix()})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
 }
 
 func (m *Message) AddImageURL(url, detail string) {

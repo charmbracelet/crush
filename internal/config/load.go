@@ -301,6 +301,7 @@ func (cfg *Config) defaultModelSelection(knownProviders []provider.Provider) (la
 		defaultSmallModel := cfg.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
 			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
+			return
 		}
 		smallModel = SelectedModel{
 			Provider:        string(p.ID),

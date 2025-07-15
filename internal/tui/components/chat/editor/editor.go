@@ -130,6 +130,9 @@ func (m *editorCmp) Init() tea.Cmd {
 }
 
 func (m *editorCmp) send() tea.Cmd {
+	if m.app.CoderAgent == nil {
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+	}
 	if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 		return util.ReportWarn("Agent is working, please wait...")
 	}

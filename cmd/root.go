@@ -85,7 +85,6 @@ to assist developers in writing, debugging, and understanding code directly from
 			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err
 		}
-		// Defer shutdown here so it runs for both interactive and non-interactive modes
 		defer app.Shutdown()
 
 		// Initialize MCP tools early for both modes
@@ -107,6 +106,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
+			tea.WithContext(ctx),
 			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
 			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
@@ -117,7 +117,6 @@ to assist developers in writing, debugging, and understanding code directly from
 			slog.Error(fmt.Sprintf("TUI run error: %v", err))
 			return fmt.Errorf("TUI error: %v", err)
 		}
-		app.Shutdown()
 		return nil
 	},
 }

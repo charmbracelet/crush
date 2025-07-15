@@ -789,7 +789,6 @@ func escapeContent(content string) string {
 		case r == ansi.DEL:
 			sb.WriteRune('\u2421')
 		default:
-			// Do we need to handle C1 control characters (0x80-0x9f) as well?
 			sb.WriteRune(r)
 		}
 	}

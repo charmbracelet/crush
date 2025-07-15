@@ -3,7 +3,6 @@ package fsext
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charlievieth/fastwalk"
 	ignore "github.com/sabhiram/go-gitignore"
@@ -109,10 +108,6 @@ func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 	}
 
 	base := filepath.Base(path)
-
-	if base != "." && strings.HasPrefix(base, ".") {
-		return true
-	}
 
 	for _, pattern := range ignorePatterns {
 		matched, err := filepath.Match(pattern, base)

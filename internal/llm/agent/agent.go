@@ -585,8 +585,8 @@ out:
 	return assistantMsg, &msg, err
 }
 
-func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishReson message.FinishReason, message, details string) {
-	msg.AddFinish(finishReson, message, details)
+func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishReason message.FinishReason, message, details string) {
+	msg.AddFinish(finishReason, message, details)
 	_ = a.messages.Update(ctx, *msg)
 }
 

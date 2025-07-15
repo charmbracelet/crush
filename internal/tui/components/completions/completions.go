@@ -164,11 +164,8 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements Completions.
 func (c *completionsCmp) View() string {
-	if !c.open {
+	if !c.open || len(c.list.Items()) == 0 {
 		return ""
-	}
-	if len(c.list.Items()) == 0 {
-		return c.style().Render("No completions found")
 	}
 
 	return c.style().Render(c.list.View())

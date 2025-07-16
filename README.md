@@ -86,7 +86,6 @@ Crush can also use MCPs for additional context. Add LSPs to the config like so:
 {
   "mcp": {
     "context7": {
-      "command": "",
       "url": "https://mcp.context7.com/mcp",
       "type": "http"
     },

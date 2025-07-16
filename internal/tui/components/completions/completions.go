@@ -1,6 +1,8 @@
 package completions
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
@@ -126,7 +128,6 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case CloseCompletionsMsg:
 		c.open = false
-		c.query = ""
 		return c, util.CmdHandler(CompletionsClosedMsg{})
 	case OpenCompletionsMsg:
 		c.open = true
@@ -146,10 +147,24 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return c, tea.Batch(cmds...)
 	case FilterCompletionsMsg:
-		c.query = msg.Query
 		if !c.open && !msg.Reopen {
 			return c, nil
 		}
+		if msg.Query == c.query {
+			// PERF: if same query, don't need to filter again
+			return c, nil
+		}
+		if len(c.list.Items()) == 0 &&
+			len(msg.Query) > len(c.query) &&
+			strings.HasPrefix(msg.Query, c.query) {
+			// PERF: if c.query didn't match anything,
+			// AND msg.Query is longer than c.query,
+			// AND msg.Query is prefixed with c.query - which means
+			//		that the user typed more chars after a 0 match,
+			// it won't match anything, so return earlier.
+			return c, nil
+		}
+		c.query = msg.Query
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.list.Filter(msg.Query))
 		itemsLen := len(c.list.Items())

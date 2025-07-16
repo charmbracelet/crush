@@ -203,11 +203,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentQuery = ""
 			cmds = append(cmds, m.startCompletions)
 			m.completionsStartIndex = len(m.textarea.Value())
-		case msg.String() == "space" && m.isCompletionsOpen:
-			m.isCompletionsOpen = false
-			m.currentQuery = ""
-			m.completionsStartIndex = 0
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
@@ -263,16 +258,28 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	if m.textarea.Focused() {
-		_, ok := msg.(tea.KeyPressMsg)
+		kp, ok := msg.(tea.KeyPressMsg)
 		if ok {
-			word := m.textarea.Word()
-			if strings.HasPrefix(word, "/") {
-				m.completionsStartIndex = strings.Index(m.textarea.Value(), word)
-				m.currentQuery = word[1:]
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query:  m.currentQuery,
-					Reopen: !m.isCompletionsOpen,
-				}))
+			if kp.String() == "space" || m.textarea.Value() == "" {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+			} else {
+				word := m.textarea.Word()
+				if strings.HasPrefix(word, "/") {
+					m.completionsStartIndex = strings.Index(m.textarea.Value(), word)
+					m.currentQuery = word[1:]
+					cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+						Query:  m.currentQuery,
+						Reopen: !m.isCompletionsOpen,
+					}))
+				} else {
+					m.isCompletionsOpen = false
+					m.currentQuery = ""
+					m.completionsStartIndex = 0
+					cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+				}
 			}
 		}
 	}

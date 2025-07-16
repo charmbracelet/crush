@@ -342,7 +342,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					slog.Debug("Response", "messages", string(jsonData))
 				}
 
-				if len(acc.ChatCompletion.Choices) == 0 {
+				if len(acc.Choices) == 0 {
 					eventChan <- ProviderEvent{
 						Type:  EventError,
 						Error: fmt.Errorf("received empty streaming response from OpenAI API - check endpoint configuration"),
@@ -350,7 +350,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					return
 				}
 
-				resultFinishReason := acc.ChatCompletion.Choices[0].FinishReason
+				resultFinishReason := acc.Choices[0].FinishReason
 				if resultFinishReason == "" {
 					// If the finish reason is empty, we assume it was a successful completion
 					// INFO: this is happening for openrouter for some reason

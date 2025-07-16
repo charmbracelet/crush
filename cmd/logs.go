@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -16,6 +15,8 @@ import (
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
 )
+
+const defaultTailLines = 1000
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
@@ -38,7 +39,6 @@ var logsCmd = &cobra.Command{
 		}
 
 		log.SetLevel(log.DebugLevel)
-		// Configure log to output to stdout instead of stderr
 		log.SetOutput(os.Stdout)
 
 		cfg, err := config.Load(cwd, false)
@@ -53,104 +53,114 @@ var logsCmd = &cobra.Command{
 		}
 
 		if follow {
-			// Follow mode - tail the file continuously
-			t, err := tail.TailFile(logsFile, tail.Config{Follow: true, ReOpen: true, Logger: tail.DiscardingLogger})
-			if err != nil {
-				return fmt.Errorf("failed to tail log file: %v", err)
-			}
-
-			// Print the text of each received line
-			for line := range t.Lines {
-				printLogLine(line.Text)
-			}
-		} else if tailLines > 0 {
-			// Tail mode - show last N lines
-			lines, err := readLastNLines(logsFile, tailLines)
-			if err != nil {
-				return fmt.Errorf("failed to read last %d lines: %v", tailLines, err)
-			}
-			for _, line := range lines {
-				printLogLine(line)
-			}
-		} else {
-			// Oneshot mode - read the entire file once
-			file, err := os.Open(logsFile)
-			if err != nil {
-				return fmt.Errorf("failed to open log file: %v", err)
-			}
-			defer file.Close()
-
-			reader := bufio.NewReader(file)
-			for {
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					if err == io.EOF && line != "" {
-						// Handle last line without newline
-						printLogLine(line)
-					}
-					break
-				}
-				// Remove trailing newline
-				line = strings.TrimSuffix(line, "\n")
-				printLogLine(line)
-			}
+			return followLogs(cmd.Context(), logsFile, tailLines)
 		}
 
-		return nil
+		return showLogs(logsFile, tailLines)
 	},
 }
 
 func init() {
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
-	logsCmd.Flags().IntP("tail", "t", 0, "Show only the last N lines")
+	logsCmd.Flags().IntP("tail", "t", defaultTailLines, "Show only the last N lines default: 1000 for performance")
 	rootCmd.AddCommand(logsCmd)
 }
 
-// readLastNLines reads the last N lines from a file using a simple circular buffer approach
-func readLastNLines(filename string, n int) ([]string, error) {
-	file, err := os.Open(filename)
+func followLogs(ctx context.Context, logsFile string, tailLines int) error {
+	t, err := tail.TailFile(logsFile, tail.Config{
+		Follow: false,
+		ReOpen: false,
+		Logger: tail.DiscardingLogger,
+	})
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to tail log file: %v", err)
 	}
-	defer file.Close()
 
-	// Use a circular buffer to keep only the last N lines
-	lines := make([]string, n)
-	count := 0
-	index := 0
-
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && line != "" {
-				// Handle last line without newline
-				line = strings.TrimSuffix(line, "\n")
-				lines[index] = line
-				count++
-				index = (index + 1) % n
-			}
-			break
+	var lines []string
+	lineCount := 0
+	for line := range t.Lines {
+		if line.Err != nil {
+			continue
 		}
-		// Remove trailing newline
-		line = strings.TrimSuffix(line, "\n")
-		lines[index] = line
-		count++
-		index = (index + 1) % n
+		lines = append(lines, line.Text)
+		lineCount++
+		if lineCount >= tailLines {
+			if len(lines) > tailLines {
+				lines = lines[len(lines)-tailLines:]
+			}
+		}
+	}
+	t.Stop()
+
+	for _, line := range lines {
+		printLogLine(line)
 	}
 
-	// Extract the last N lines in correct order
-	if count <= n {
-		// We have fewer lines than requested, return them all
-		return lines[:count], nil
+	if len(lines) == tailLines {
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
+		fmt.Fprintf(os.Stderr, "Following new log entries...\n\n")
 	}
 
-	// We have more lines than requested, extract from circular buffer
-	result := make([]string, n)
-	for i := range n {
-		result[i] = lines[(index+i)%n]
+	t, err = tail.TailFile(logsFile, tail.Config{
+		Follow:   true,
+		ReOpen:   true,
+		Logger:   tail.DiscardingLogger,
+		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to tail log file: %v", err)
 	}
-	return result, nil
+	defer t.Stop()
+
+	for {
+		select {
+		case line := <-t.Lines:
+			if line.Err != nil {
+				continue
+			}
+			printLogLine(line.Text)
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func showLogs(logsFile string, tailLines int) error {
+	t, err := tail.TailFile(logsFile, tail.Config{
+		Follow:      false,
+		ReOpen:      false,
+		Logger:      tail.DiscardingLogger,
+		MaxLineSize: 0,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to tail log file: %v", err)
+	}
+	defer t.Stop()
+
+	var lines []string
+	lineCount := 0
+	for line := range t.Lines {
+		if line.Err != nil {
+			continue
+		}
+		lines = append(lines, line.Text)
+		lineCount++
+		if lineCount >= tailLines {
+			if len(lines) > tailLines {
+				lines = lines[len(lines)-tailLines:]
+			}
+		}
+	}
+
+	for _, line := range lines {
+		printLogLine(line)
+	}
+
+	if len(lines) == tailLines {
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
+	}
+
+	return nil
 }
 
 func printLogLine(lineText string) {

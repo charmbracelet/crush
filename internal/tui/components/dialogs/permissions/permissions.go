@@ -459,7 +459,11 @@ func (p *permissionDialogCmp) render() string {
 	contentFinal := p.getOrGenerateContent()
 
 	// Always set viewport content (the caching is handled in getOrGenerateContent)
-	contentHeight := min(p.height-9, lipgloss.Height(contentFinal))
+	const minContentHeight = 9
+	contentHeight := min(
+		max(minContentHeight, p.height-minContentHeight),
+		lipgloss.Height(contentFinal),
+	)
 	p.contentViewPort.SetHeight(contentHeight)
 	p.contentViewPort.SetContent(contentFinal)
 

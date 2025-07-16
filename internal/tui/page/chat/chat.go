@@ -183,6 +183,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = p.updateCompactConfig(false)
 		}
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
+	case commands.ToggleThinkingMsg:
+		return p, p.toggleThinking()
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -409,6 +411,35 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 	}
 }
 
+func (p *chatPage) toggleThinking() tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		currentModel := cfg.Models[agentCfg.Model]
+
+		// Toggle the thinking mode
+		currentModel.Think = !currentModel.Think
+		cfg.Models[agentCfg.Model] = currentModel
+
+		// Update the agent with the new configuration
+		if err := p.app.UpdateAgentModel(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update thinking mode: " + err.Error(),
+			}
+		}
+
+		status := "disabled"
+		if currentModel.Think {
+			status = "enabled"
+		}
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Thinking mode " + status,
+		}
+	}
+}
+
 func (p *chatPage) setCompactMode(compact bool) {
 	if p.compact == compact {
 		return
@@ -474,6 +505,8 @@ func (p *chatPage) newSession() tea.Cmd {
 
 	p.session = session.Session{}
 	p.focusedPane = PanelTypeEditor
+	p.editor.Focus()
+	p.chat.Blur()
 	p.isCanceling = false
 	return tea.Batch(
 		util.CmdHandler(chat.SessionClearedMsg{}),

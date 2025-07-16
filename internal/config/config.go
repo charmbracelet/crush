@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/tidwall/sjson"
+	"golang.org/x/exp/slog"
 )
 
 const (
@@ -90,12 +92,12 @@ const (
 )
 
 type MCPConfig struct {
-	Command  string   `json:"command,omitempty" `
-	Env      []string `json:"env,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	Type     MCPType  `json:"type"`
-	URL      string   `json:"url,omitempty"`
-	Disabled bool     `json:"disabled,omitempty"`
+	Command  string            `json:"command,omitempty" `
+	Env      map[string]string `json:"env,omitempty"`
+	Args     []string          `json:"args,omitempty"`
+	Type     MCPType           `json:"type"`
+	URL      string            `json:"url,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty"`
@@ -163,6 +165,37 @@ func (l LSPs) Sorted() []LSP {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return sorted
+}
+
+func (m MCPConfig) ResolvedEnv() []string {
+	resolver := NewShellVariableResolver(env.New())
+	for e, v := range m.Env {
+		var err error
+		m.Env[e], err = resolver.ResolveValue(v)
+		if err != nil {
+			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
+			continue
+		}
+	}
+
+	env := make([]string, 0, len(m.Env))
+	for k, v := range m.Env {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return env
+}
+
+func (m MCPConfig) ResolvedHeaders() map[string]string {
+	resolver := NewShellVariableResolver(env.New())
+	for e, v := range m.Headers {
+		var err error
+		m.Headers[e], err = resolver.ResolveValue(v)
+		if err != nil {
+			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
+			continue
+		}
+	}
+	return m.Headers
 }
 
 type Agent struct {

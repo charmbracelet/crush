@@ -409,13 +409,26 @@ func (p *permissionDialogCmp) generateDefaultContent() string {
 
 	content := p.permission.Description
 
-	// Use the cache for markdown rendering
-	renderedContent := p.GetOrSetMarkdown(p.permission.ID, func() (string, error) {
-		r := styles.GetMarkdownRenderer(p.width - 4)
-		s, err := r.Render(content)
-		return s, err
-	})
+	content = strings.TrimSpace(content)
+	content = "\n" + content + "\n"
+	lines := strings.Split(content, "\n")
 
+	width := p.width - 4
+	var out []string
+	for _, ln := range lines {
+		ln = " " + ln // left padding
+		if len(ln) > width {
+			ln = ansi.Truncate(ln, width, "…")
+		}
+		out = append(out, t.S().Muted.
+			Width(width).
+			Foreground(t.FgBase).
+			Background(t.BgSubtle).
+			Render(ln))
+	}
+
+	// Use the cache for markdown rendering
+	renderedContent := strings.Join(out, "\n")
 	finalContent := baseStyle.
 		Width(p.contentViewPort.Width()).
 		Render(renderedContent)

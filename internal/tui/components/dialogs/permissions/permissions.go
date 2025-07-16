@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type PermissionAction string
@@ -323,18 +322,14 @@ func (p *permissionDialogCmp) generateBashContent() string {
 		content := pr.Command
 		t := styles.CurrentTheme()
 		content = strings.TrimSpace(content)
-		content = "\n" + content + "\n"
 		lines := strings.Split(content, "\n")
 
 		width := p.width - 4
 		var out []string
 		for _, ln := range lines {
-			ln = " " + ln // left padding
-			if len(ln) > width {
-				ln = ansi.Truncate(ln, width, "…")
-			}
 			out = append(out, t.S().Muted.
 				Width(width).
+				Padding(0, 3).
 				Foreground(t.FgBase).
 				Background(t.BgSubtle).
 				Render(ln))
@@ -344,6 +339,7 @@ func (p *permissionDialogCmp) generateBashContent() string {
 		renderedContent := strings.Join(out, "\n")
 		finalContent := baseStyle.
 			Width(p.contentViewPort.Width()).
+			Padding(1, 0).
 			Render(renderedContent)
 
 		return finalContent

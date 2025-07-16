@@ -183,9 +183,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If the selected item is a file, insert its path into the textarea
 			value := m.textarea.Value()
 			value = value[:m.completionsStartIndex]
-			if len(value) > 0 && value[len(value)-1] != ' ' {
-				value += " "
-			}
 			value += item.Path
 			m.textarea.SetValue(value)
 			m.isCompletionsOpen = false
@@ -270,7 +267,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			word := m.textarea.Word()
 			if strings.HasPrefix(word, "/") {
-				m.completionsStartIndex = strings.Index(m.textarea.Value(), word) + 1 // ignore the slash itself
+				m.completionsStartIndex = strings.Index(m.textarea.Value(), word)
 				m.currentQuery = word[1:]
 				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
 					Query:  m.currentQuery,

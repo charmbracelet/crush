@@ -196,13 +196,13 @@ func New(opts Settings) (a Anim) {
 // SetLabel updates the label text and re-renders it.
 func (a *Anim) SetLabel(newLabel string) {
 	a.labelWidth = lipgloss.Width(newLabel)
-	
+
 	// Update total width
 	a.width = a.cyclingCharWidth
 	if newLabel != "" {
 		a.width += labelGapWidth + a.labelWidth
 	}
-	
+
 	// Re-render the label
 	a.renderLabel(newLabel)
 }

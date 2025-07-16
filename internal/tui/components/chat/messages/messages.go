@@ -266,7 +266,6 @@ func (m *messageCmp) renderThinkingContent() string {
 		} else {
 			footer = m.anim.View()
 		}
-
 	}
 	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }

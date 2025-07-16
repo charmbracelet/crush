@@ -77,13 +77,16 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				Role: "assistant",
 			}
 
+			hasContent := false
 			if msg.Content().String() != "" {
+				hasContent = true
 				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
 					OfString: openai.String(msg.Content().String()),
 				}
 			}
 
 			if len(msg.ToolCalls()) > 0 {
+				hasContent = true
 				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
 				for i, call := range msg.ToolCalls() {
 					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
@@ -95,6 +98,10 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 						},
 					}
 				}
+			}
+			if !hasContent {
+				slog.Warn("There is a message without content, investigate, this should not happen")
+				continue
 			}
 
 			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{

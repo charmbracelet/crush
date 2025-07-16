@@ -42,6 +42,9 @@ func (k EditorKeyMap) KeyBindings() []key.Binding {
 		k.SendMessage,
 		k.OpenEditor,
 		k.Newline,
+		AttachmentsKeyMaps.AttachmentDeleteMode,
+		AttachmentsKeyMaps.DeleteAllAttachments,
+		AttachmentsKeyMaps.Escape,
 	}
 }
 

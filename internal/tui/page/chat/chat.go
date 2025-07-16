@@ -838,6 +838,18 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithKeys("ctrl+v"),
 						key.WithHelp("ctrl+v", "open editor"),
 					),
+					key.NewBinding(
+						key.WithKeys("ctrl+r"),
+						key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+r", "r"),
+						key.WithHelp("ctrl+r+r", "delete all attachments"),
+					),
+					key.NewBinding(
+						key.WithKeys("esc"),
+						key.WithHelp("esc", "cancel delete mode"),
+					),
 				})
 		}
 		shortList = append(shortList,

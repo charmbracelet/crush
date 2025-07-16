@@ -713,6 +713,15 @@ func (m *Model) Blur() {
 	m.virtualCursor.Blur()
 }
 
+// Reset sets the input to its default state with no input.
+func (m *Model) Reset() {
+	m.value = make([][]rune, minHeight, maxLines)
+	m.col = 0
+	m.row = 0
+	m.viewport.GotoTop()
+	m.SetCursorColumn(0)
+}
+
 // Word returns the word at the cursor position.
 // A word is delimited by spaces or line-breaks.
 func (m *Model) Word() string {
@@ -746,15 +755,6 @@ func (m *Model) Word() string {
 	}
 
 	return string(line[start:end])
-}
-
-// Reset sets the input to its default state with no input.
-func (m *Model) Reset() {
-	m.value = make([][]rune, minHeight, maxLines)
-	m.col = 0
-	m.row = 0
-	m.viewport.GotoTop()
-	m.SetCursorColumn(0)
 }
 
 // san initializes or retrieves the rune sanitizer.

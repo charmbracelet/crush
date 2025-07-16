@@ -31,6 +31,8 @@ type FilterCompletionsMsg struct {
 
 type CompletionsClosedMsg struct{}
 
+type CompletionsOpenedMsg struct{}
+
 type CloseCompletionsMsg struct{}
 
 type SelectCompletionMsg struct {
@@ -141,11 +143,11 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items = append(items, item)
 		}
 		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
-		cmds := []tea.Cmd{
+		return c, tea.Batch(
 			c.list.SetSize(c.width, c.height),
 			c.list.SetItems(items),
-		}
-		return c, tea.Batch(cmds...)
+			util.CmdHandler(CompletionsOpenedMsg{}),
+		)
 	case FilterCompletionsMsg:
 		if !c.open && !msg.Reopen {
 			return c, nil
@@ -174,6 +176,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
 		} else if msg.Reopen {
 			c.open = true
+			cmds = append(cmds, util.CmdHandler(CompletionsOpenedMsg{}))
 		}
 		return c, tea.Batch(cmds...)
 	}

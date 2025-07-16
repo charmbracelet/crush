@@ -171,6 +171,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
+	case completions.CompletionsOpenedMsg:
+		m.isCompletionsOpen = true
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
@@ -270,9 +272,10 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.HasPrefix(word, "/") {
 					m.completionsStartIndex = strings.Index(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
+					m.isCompletionsOpen = true
 					cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
 						Query:  m.currentQuery,
-						Reopen: !m.isCompletionsOpen,
+						Reopen: m.isCompletionsOpen,
 					}))
 				} else {
 					m.isCompletionsOpen = false

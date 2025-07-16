@@ -6,6 +6,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -58,6 +60,7 @@ type (
 	SwitchSessionsMsg    struct{}
 	SwitchModelMsg       struct{}
 	ToggleCompactModeMsg struct{}
+	ToggleThinkingMsg    struct{}
 	CompactMsg           struct {
 		SessionID string
 	}
@@ -260,6 +263,30 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			},
 		})
 	}
+
+	// Only show thinking toggle for Anthropic models that can reason
+	cfg := config.Get()
+	if agentCfg, ok := cfg.Agents["coder"]; ok {
+		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+		model := cfg.GetModelByType(agentCfg.Model)
+		if providerCfg != nil && model != nil &&
+			providerCfg.Type == provider.TypeAnthropic && model.CanReason {
+			selectedModel := cfg.Models[agentCfg.Model]
+			status := "Enable"
+			if selectedModel.Think {
+				status = "Disable"
+			}
+			commands = append(commands, Command{
+				ID:          "toggle_thinking",
+				Title:       status + " Thinking Mode",
+				Description: "Toggle model thinking for reasoning-capable models",
+				Handler: func(cmd Command) tea.Cmd {
+					return util.CmdHandler(ToggleThinkingMsg{})
+				},
+			})
+		}
+	}
+
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
 	if c.wWidth > 120 && c.sessionID != "" {
 		commands = append(commands, Command{

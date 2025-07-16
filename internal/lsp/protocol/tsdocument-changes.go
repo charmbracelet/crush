@@ -23,18 +23,18 @@ type DocumentChange struct {
 
 // Valid reports whether the DocumentChange sum-type value is valid,
 // that is, exactly one of create, delete, edit, or rename.
-func (ch DocumentChange) Valid() bool {
+func (d DocumentChange) Valid() bool {
 	n := 0
-	if ch.TextDocumentEdit != nil {
+	if d.TextDocumentEdit != nil {
 		n++
 	}
-	if ch.CreateFile != nil {
+	if d.CreateFile != nil {
 		n++
 	}
-	if ch.RenameFile != nil {
+	if d.RenameFile != nil {
 		n++
 	}
-	if ch.DeleteFile != nil {
+	if d.DeleteFile != nil {
 		n++
 	}
 	return n == 1

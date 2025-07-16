@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -24,11 +25,12 @@ import (
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
 type MessageCmp interface {
-	util.Model                   // Basic Bubble Tea model interface
-	layout.Sizeable              // Width/height management
-	layout.Focusable             // Focus state management
-	GetMessage() message.Message // Access to underlying message data
-	Spinning() bool              // Animation state for loading messages
+	util.Model                      // Basic Bubble Tea model interface
+	layout.Sizeable                 // Width/height management
+	layout.Focusable                // Focus state management
+	GetMessage() message.Message    // Access to underlying message data
+	SetMessage(msg message.Message) // Update the message content
+	Spinning() bool                 // Animation state for loading messages
 }
 
 // messageCmp implements the MessageCmp interface for displaying chat messages.
@@ -41,7 +43,10 @@ type messageCmp struct {
 	// Core message data and state
 	message  message.Message // The underlying message content
 	spinning bool            // Whether to show loading animation
-	anim     util.Model      // Animation component for loading states
+	anim     anim.Anim       // Animation component for loading states
+
+	// Thinking viewport for displaying reasoning content
+	thinkingViewport viewport.Model
 }
 
 var focusedMessageBorder = lipgloss.Border{
@@ -51,6 +56,11 @@ var focusedMessageBorder = lipgloss.Border{
 // NewMessageCmp creates a new message component with the given message and options
 func NewMessageCmp(msg message.Message) MessageCmp {
 	t := styles.CurrentTheme()
+
+	thinkingViewport := viewport.New()
+	thinkingViewport.SetHeight(1)
+	thinkingViewport.KeyMap = viewport.KeyMap{}
+
 	m := &messageCmp{
 		message: msg,
 		anim: anim.New(anim.Settings{
@@ -59,6 +69,7 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 			GradColorB:  t.Secondary,
 			CycleColors: true,
 		}),
+		thinkingViewport: thinkingViewport,
 	}
 	return m
 }
@@ -78,7 +89,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
-			m.anim = u.(util.Model)
+			m.anim = u.(anim.Anim)
 			return m, cmd
 		}
 	}
@@ -88,7 +99,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
-	if m.spinning {
+	if m.spinning && m.message.ReasoningContent().Thinking == "" {
 		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {
@@ -106,6 +117,10 @@ func (m *messageCmp) View() string {
 // GetMessage returns the underlying message data
 func (m *messageCmp) GetMessage() message.Message {
 	return m.message
+}
+
+func (m *messageCmp) SetMessage(msg message.Message) {
+	m.message = msg
 }
 
 // textWidth calculates the available width for text content,
@@ -139,8 +154,39 @@ func (msg *messageCmp) style() lipgloss.Style {
 // renderAssistantMessage renders assistant messages with optional footer information.
 // Shows model name, response time, and finish reason when the message is complete.
 func (m *messageCmp) renderAssistantMessage() string {
-	parts := []string{
-		m.markdownContent(),
+	t := styles.CurrentTheme()
+	parts := []string{}
+	content := m.message.Content().String()
+	thinking := m.message.IsThinking()
+	finished := m.message.IsFinished()
+	finishedData := m.message.FinishPart()
+	thinkingContent := ""
+
+	if thinking || m.message.ReasoningContent().Thinking != "" {
+		m.anim.SetLabel("Thinking")
+		thinkingContent = m.renderThinkingContent()
+	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
+		content = ""
+	} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
+		content = "*Canceled*"
+	} else if finished && content == "" && finishedData.Reason == message.FinishReasonError {
+		errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
+		truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
+		title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
+		details := t.S().Base.Foreground(t.FgSubtle).Width(m.textWidth() - 2).Render(finishedData.Details)
+		// Handle error messages differently
+		return fmt.Sprintf("%s\n\n%s", title, details)
+	}
+
+	if thinkingContent != "" {
+		parts = append(parts, thinkingContent)
+	}
+
+	if content != "" {
+		if thinkingContent != "" {
+			parts = append(parts, "")
+		}
+		parts = append(parts, m.toMarkdown(content))
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -152,7 +198,7 @@ func (m *messageCmp) renderAssistantMessage() string {
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
 	parts := []string{
-		m.markdownContent(),
+		m.toMarkdown(m.message.Content().String()),
 	}
 	attachmentStyles := t.S().Text.
 		MarginLeft(1).
@@ -182,34 +228,46 @@ func (m *messageCmp) toMarkdown(content string) string {
 	return strings.TrimSuffix(rendered, "\n")
 }
 
-// markdownContent processes the message content and handles special states.
-// Returns appropriate content for thinking, finished, and error states.
-func (m *messageCmp) markdownContent() string {
+func (m *messageCmp) renderThinkingContent() string {
 	t := styles.CurrentTheme()
-	content := m.message.Content().String()
-	if m.message.Role == message.Assistant {
-		thinking := m.message.IsThinking()
-		finished := m.message.IsFinished()
-		finishedData := m.message.FinishPart()
-		if thinking {
-			// Handle the thinking state
-			// TODO: maybe add the thinking content if available later.
-			content = fmt.Sprintf("**%s %s**", styles.LoadingIcon, "Thinking...")
-		} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
-			// Sometimes the LLMs respond with no content when they think the previous tool result
-			//  provides the requested question
-			content = ""
-		} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
-			content = "*Canceled*"
-		} else if finished && content == "" && finishedData.Reason == message.FinishReasonError {
-			errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
-			truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
-			title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
-			details := t.S().Base.Foreground(t.FgSubtle).Width(m.textWidth() - 2).Render(finishedData.Details)
-			return fmt.Sprintf("%s\n\n%s", title, details)
+	reasoningContent := m.message.ReasoningContent()
+	if reasoningContent.Thinking == "" {
+		return ""
+	}
+	lines := strings.Split(reasoningContent.Thinking, "\n")
+	var content strings.Builder
+	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		content.WriteString(lineStyle.Width(m.textWidth() - 2).Render(line))
+		if i < len(lines)-1 {
+			content.WriteString("\n")
 		}
 	}
-	return m.toMarkdown(content)
+	fullContent := content.String()
+	height := util.Clamp(lipgloss.Height(fullContent), 1, 10)
+	m.thinkingViewport.SetHeight(height)
+	m.thinkingViewport.SetWidth(m.textWidth())
+	m.thinkingViewport.SetContent(fullContent)
+	m.thinkingViewport.GotoBottom()
+	var footer string
+	if reasoningContent.StartedAt > 0 {
+		duration := m.message.ThinkingDuration()
+		if reasoningContent.FinishedAt > 0 {
+			m.anim.SetLabel("")
+			opts := core.StatusOpts{
+				Title:       "Thought for",
+				Description: duration.String(),
+				NoIcon:      true,
+			}
+			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+		} else {
+			footer = m.anim.View()
+		}
+	}
+	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }
 
 // shouldSpin determines whether the message should show a loading animation.
@@ -226,10 +284,11 @@ func (m *messageCmp) shouldSpin() bool {
 	if m.message.Content().Text != "" {
 		return false
 	}
+	if len(m.message.ToolCalls()) > 0 {
+		return false
+	}
 	return true
 }
-
-// Focus management methods
 
 // Blur removes focus from the message component
 func (m *messageCmp) Blur() tea.Cmd {
@@ -257,8 +316,8 @@ func (m *messageCmp) GetSize() (int, int) {
 
 // SetSize updates the width of the message component for text wrapping
 func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
-	// For better readability, we limit the width to a maximum of 120 characters
-	m.width = min(width, 120)
+	m.width = util.Clamp(width, 1, 120)
+	m.thinkingViewport.SetWidth(m.width - 4)
 	return nil
 }
 

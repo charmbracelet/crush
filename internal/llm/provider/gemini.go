@@ -73,7 +73,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 
 			if len(msg.ToolCalls()) > 0 {
 				for _, call := range msg.ToolCalls() {
-					args, _ := parseJsonToMap(call.Input)
+					args, _ := parseJSONToMap(call.Input)
 					assistantParts = append(assistantParts, &genai.Part{
 						FunctionCall: &genai.FunctionCall{
 							Name: call.Name,
@@ -93,7 +93,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 		case message.Tool:
 			for _, result := range msg.ToolResults() {
 				response := map[string]any{"result": result.Content}
-				parsed, err := parseJsonToMap(result.Content)
+				parsed, err := parseJSONToMap(result.Content)
 				if err == nil {
 					response = parsed
 				}
@@ -468,7 +468,7 @@ func (g *geminiClient) Model() provider.Model {
 }
 
 // Helper functions
-func parseJsonToMap(jsonStr string) (map[string]any, error) {
+func parseJSONToMap(jsonStr string) (map[string]any, error) {
 	var result map[string]any
 	err := json.Unmarshal([]byte(jsonStr), &result)
 	return result, err

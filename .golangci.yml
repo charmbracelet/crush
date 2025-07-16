@@ -19,6 +19,7 @@ linters:
     # - revive
     - rowserrcheck
     - sqlclosecheck
+    - staticcheck
     - tparallel
     # - unconvert
     # - unparam
@@ -27,7 +28,6 @@ linters:
   disable:
     - errcheck
     - ineffassign
-    - staticcheck
     - unused
   exclusions:
     generated: lax

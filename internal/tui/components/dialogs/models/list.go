@@ -98,14 +98,17 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 
 	// First, add any configured providers that are not in the known providers list
 	// These should appear at the top of the list
-	knownProviders := provider.KnownProviders()
+	knownProviders, err := config.Providers()
+	if err != nil {
+		return util.ReportError(err)
+	}
 	for providerID, providerConfig := range cfg.Providers {
 		if providerConfig.Disable {
 			continue
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.Contains(knownProviders, provider.InferenceProvider(providerID)) {
+		if !slices.ContainsFunc(knownProviders, func(p provider.Provider) bool { return p.ID == provider.InferenceProvider(providerID) }) {
 			// Convert config provider to provider.Provider format
 			configProvider := provider.Provider{
 				Name:   providerConfig.Name,

@@ -52,9 +52,10 @@ type permissionDialogCmp struct {
 	selectedOption  int // 0: Allow, 1: Allow for session, 2: Deny
 
 	// Diff view state
-	diffSplitMode bool // true for split, false for unified
-	diffXOffset   int  // horizontal scroll offset
-	diffYOffset   int  // vertical scroll offset
+	defaultDiffSplitMode bool  // true for split, false for unified
+	diffSplitMode        *bool // nil means use defaultDiffSplitMode
+	diffXOffset          int   // horizontal scroll offset
+	diffYOffset          int   // vertical scroll offset
 
 	// Caching
 	cachedContent string
@@ -122,7 +123,12 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.supportsDiffView() {
-				p.diffSplitMode = !p.diffSplitMode
+				if p.diffSplitMode == nil {
+					diffSplitMode := !p.defaultDiffSplitMode
+					p.diffSplitMode = &diffSplitMode
+				} else {
+					*p.diffSplitMode = !*p.diffSplitMode
+				}
 				p.contentDirty = true // Mark content as dirty when diff mode changes
 				return p, nil
 			}
@@ -354,7 +360,7 @@ func (p *permissionDialogCmp) generateEditContent() string {
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
 			YOffset(p.diffYOffset)
-		if p.diffSplitMode {
+		if p.useDiffSplitMode() {
 			formatter = formatter.Split()
 		} else {
 			formatter = formatter.Unified()
@@ -376,7 +382,7 @@ func (p *permissionDialogCmp) generateWriteContent() string {
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
 			YOffset(p.diffYOffset)
-		if p.diffSplitMode {
+		if p.useDiffSplitMode() {
 			formatter = formatter.Split()
 		} else {
 			formatter = formatter.Unified()
@@ -423,6 +429,14 @@ func (p *permissionDialogCmp) generateDefaultContent() string {
 	}
 
 	return finalContent
+}
+
+func (p *permissionDialogCmp) useDiffSplitMode() bool {
+	if p.diffSplitMode != nil {
+		return *p.diffSplitMode
+	} else {
+		return p.defaultDiffSplitMode
+	}
 }
 
 func (p *permissionDialogCmp) styleViewport() string {
@@ -511,6 +525,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 		p.width = int(float64(p.wWidth) * 0.7)
 		p.height = int(float64(p.wHeight) * 0.5)
 	}
+
+	// Default to diff split mode when dialog is wide enough.
+	p.defaultDiffSplitMode = p.width >= 140
 
 	// Mark content as dirty if size changed
 	if oldWidth != p.width || oldHeight != p.height {

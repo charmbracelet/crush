@@ -36,7 +36,10 @@ type ContentPart interface {
 }
 
 type ReasoningContent struct {
-	Thinking string `json:"thinking"`
+	Thinking   string `json:"thinking"`
+	Signature  string `json:"signature"`
+	StartedAt  int64  `json:"started_at,omitempty"`
+	FinishedAt int64  `json:"finished_at,omitempty"`
 }
 
 func (tc ReasoningContent) String() string {
@@ -230,13 +233,66 @@ func (m *Message) AppendReasoningContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{Thinking: c.Thinking + delta}
+			m.Parts[i] = ReasoningContent{
+				Thinking:   c.Thinking + delta,
+				Signature:  c.Signature,
+				StartedAt:  c.StartedAt,
+				FinishedAt: c.FinishedAt,
+			}
 			found = true
 		}
 	}
 	if !found {
-		m.Parts = append(m.Parts, ReasoningContent{Thinking: delta})
+		m.Parts = append(m.Parts, ReasoningContent{
+			Thinking:  delta,
+			StartedAt: time.Now().Unix(),
+		})
 	}
+}
+
+func (m *Message) AppendReasoningSignature(signature string) {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			m.Parts[i] = ReasoningContent{
+				Thinking:   c.Thinking,
+				Signature:  c.Signature + signature,
+				StartedAt:  c.StartedAt,
+				FinishedAt: c.FinishedAt,
+			}
+			return
+		}
+	}
+	m.Parts = append(m.Parts, ReasoningContent{Signature: signature})
+}
+
+func (m *Message) FinishThinking() {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			if c.FinishedAt == 0 {
+				m.Parts[i] = ReasoningContent{
+					Thinking:   c.Thinking,
+					Signature:  c.Signature,
+					StartedAt:  c.StartedAt,
+					FinishedAt: time.Now().Unix(),
+				}
+			}
+			return
+		}
+	}
+}
+
+func (m *Message) ThinkingDuration() time.Duration {
+	reasoning := m.ReasoningContent()
+	if reasoning.StartedAt == 0 {
+		return 0
+	}
+
+	endTime := reasoning.FinishedAt
+	if endTime == 0 {
+		endTime = time.Now().Unix()
+	}
+
+	return time.Duration(endTime-reasoning.StartedAt) * time.Second
 }
 
 func (m *Message) FinishToolCall(toolCallID string) {

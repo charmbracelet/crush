@@ -1,10 +1,13 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/provider"
@@ -434,4 +437,48 @@ func (c *Config) SetupAgents() {
 		},
 	}
 	c.Agents = agents
+}
+
+func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
+	if c.APIKey == "" {
+		return fmt.Errorf("API key for provider %s is not set", c.ID)
+	}
+	if c.BaseURL == "" {
+		return fmt.Errorf("base URL for provider %s is not set", c.ID)
+	}
+	testURL := ""
+	switch c.Type {
+	case provider.TypeOpenAI:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		testURL = baseURL + "/models"
+	case provider.TypeAnthropic:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com/v1"
+		}
+		testURL = baseURL + "/models"
+	}
+	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if c.ExtraHeaders != nil {
+		for k, v := range c.ExtraHeaders {
+			req.Header.Set(k, v)
+		}
+	}
+	b, err := client.Do(req)
+	_ = b.Body.Close()
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	return nil
 }

@@ -529,6 +529,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	// Default to diff split mode when dialog is wide enough.
 	p.defaultDiffSplitMode = p.width >= 140
 
+	// Set a maximum width for the dialog
+	p.width = min(p.width, 180)
+
 	// Mark content as dirty if size changed
 	if oldWidth != p.width || oldHeight != p.height {
 		p.contentDirty = true

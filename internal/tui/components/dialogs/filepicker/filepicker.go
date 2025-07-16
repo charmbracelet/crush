@@ -49,7 +49,7 @@ func NewFilePickerCmp(workingDir string) FilePicker {
 	t := styles.CurrentTheme()
 	fp := filepicker.New()
 	fp.AllowedTypes = []string{".jpg", ".jpeg", ".png"}
-	
+
 	if workingDir != "" {
 		fp.CurrentDirectory = workingDir
 	} else {
@@ -60,7 +60,7 @@ func NewFilePickerCmp(workingDir string) FilePicker {
 			fp.CurrentDirectory, _ = os.UserHomeDir()
 		}
 	}
-	
+
 	fp.ShowPermissions = false
 	fp.ShowSize = false
 	fp.AutoHeight = false

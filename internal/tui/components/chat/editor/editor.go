@@ -203,8 +203,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			(len(m.textarea.Value()) == 0 || m.textarea.Value()[len(m.textarea.Value())-1] == ' '):
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
-			cmds = append(cmds, m.startCompletions)
 			m.completionsStartIndex = len(m.textarea.Value())
+			cmds = append(cmds, m.startCompletions)
 		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
@@ -270,7 +270,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				word := m.textarea.Word()
 				if strings.HasPrefix(word, "/") {
-					m.completionsStartIndex = strings.Index(m.textarea.Value(), word)
+					// XXX: wont' work if editing in the middle of the field.
+					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
 					m.isCompletionsOpen = true
 					cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{

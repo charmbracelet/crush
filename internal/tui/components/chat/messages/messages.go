@@ -237,11 +237,14 @@ func (m *messageCmp) renderThinkingContent() string {
 	lines := strings.Split(reasoningContent.Thinking, "\n")
 	var content strings.Builder
 	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
-	for _, line := range lines {
+	for i, line := range lines {
 		if line == "" {
 			continue
 		}
-		content.WriteString(lineStyle.Width(m.textWidth()-2).Render(line) + "\n")
+		content.WriteString(lineStyle.Width(m.textWidth() - 2).Render(line))
+		if i < len(lines)-1 {
+			content.WriteString("\n")
+		}
 	}
 	fullContent := content.String()
 	height := util.Clamp(lipgloss.Height(fullContent), 1, 10)

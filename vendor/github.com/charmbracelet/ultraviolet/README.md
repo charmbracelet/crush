@@ -1,5 +1,7 @@
 # Ultraviolet
 
+<img width="400" alt="Charm Ultraviolet" src="https://github.com/user-attachments/assets/3484e4b0-3741-4e8c-bebf-9ea51f5bb49c" />
+
 <p>
     <a href="https://github.com/charmbracelet/ultraviolet/releases"><img src="https://img.shields.io/github/release/charmbracelet/ultraviolet.svg" alt="Latest Release"></a>
     <a href="https://pkg.go.dev/github.com/charmbracelet/ultraviolet?tab=doc"><img src="https://godoc.org/github.com/charmbracelet/ultraviolet?status.svg" alt="GoDoc"></a>

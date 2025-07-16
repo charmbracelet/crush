@@ -204,7 +204,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: filepicker.NewFilePickerCmp(),
+			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
 	case pubsub.Event[permission.PermissionRequest]:

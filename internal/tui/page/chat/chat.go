@@ -505,6 +505,8 @@ func (p *chatPage) newSession() tea.Cmd {
 
 	p.session = session.Session{}
 	p.focusedPane = PanelTypeEditor
+	p.editor.Focus()
+	p.chat.Blur()
 	p.isCanceling = false
 	return tea.Batch(
 		util.CmdHandler(chat.SessionClearedMsg{}),

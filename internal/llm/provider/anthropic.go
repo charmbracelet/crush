@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -270,6 +271,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
+				option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"),
 			)
 			accumulatedMessage := anthropic.Message{}
 
@@ -426,7 +428,8 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 	}
 
-	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
+	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 

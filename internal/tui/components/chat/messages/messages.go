@@ -252,6 +252,7 @@ func (m *messageCmp) renderThinkingContent() string {
 	m.thinkingViewport.SetWidth(m.textWidth())
 	m.thinkingViewport.SetContent(fullContent)
 	m.thinkingViewport.GotoBottom()
+	finishReason := m.message.FinishPart()
 	var footer string
 	if reasoningContent.StartedAt > 0 {
 		duration := m.message.ThinkingDuration()
@@ -263,6 +264,8 @@ func (m *messageCmp) renderThinkingContent() string {
 				NoIcon:      true,
 			}
 			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
+			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {
 			footer = m.anim.View()
 		}

@@ -27,6 +27,8 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type FileHistory struct {
@@ -905,7 +907,8 @@ func (s *sidebarCmp) currentModelBlock() string {
 			if selectedModel.ReasoningEffort != "" {
 				reasoningEffort = selectedModel.ReasoningEffort
 			}
-			parts = append(parts, reasoningInfoStyle.Render(fmt.Sprintf("Reasoning %s", reasoningEffort)))
+			formatter := cases.Title(language.English)
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		case provider.TypeAnthropic:
 			if selectedModel.Think {
 				parts = append(parts, reasoningInfoStyle.Render("Thinking on"))

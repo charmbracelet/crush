@@ -80,7 +80,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	m.modelType = modelType
 
 	modelItems := []util.Model{}
-	selectIndex := 0
+	// first none section
+	selectIndex := 1
 
 	cfg := config.Get()
 	var currentModel config.SelectedModel

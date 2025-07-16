@@ -907,13 +907,14 @@ func (s *sidebarCmp) currentModelBlock() string {
 			if selectedModel.ReasoningEffort != "" {
 				reasoningEffort = selectedModel.ReasoningEffort
 			}
-			formatter := cases.Title(language.English)
+			formatter := cases.Title(language.English, cases.NoLower)
 			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		case provider.TypeAnthropic:
+			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
-				parts = append(parts, reasoningInfoStyle.Render("Thinking on"))
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
 			} else {
-				parts = append(parts, reasoningInfoStyle.Render("Thinking off"))
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
 			}
 		}
 	}

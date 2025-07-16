@@ -82,15 +82,22 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 Crush can also use MCPs for additional context. Add LSPs to the config like so:
 
-```
+```json
 {
   "mcp": {
     "context7": {
       "command": "",
       "url": "https://mcp.context7.com/mcp",
       "type": "http"
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "$(echo Bearer $GH_MCP_TOKEN)"
+      }
     }
-  },
+  }
 }
 ```
 

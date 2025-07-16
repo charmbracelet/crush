@@ -56,7 +56,7 @@ type completionsCmp struct {
 	query string // The current filter query
 }
 
-const MaxCompletionsWidth = 80 // Maximum width for the completions popup
+const maxCompletionsWidth = 80 // Maximum width for the completions popup
 
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
@@ -96,7 +96,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		c.width = min(msg.Width-c.x, MaxCompletionsWidth)
+		c.width = min(msg.Width-c.x, maxCompletionsWidth)
 		c.height = min(msg.Height-c.y, 15)
 		return c, nil
 	case tea.KeyPressMsg:

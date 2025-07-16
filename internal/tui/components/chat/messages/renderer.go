@@ -655,6 +655,7 @@ func joinHeaderBody(header, body string) string {
 
 func renderPlainContent(v *toolCallCmp, content string) string {
 	t := styles.CurrentTheme()
+	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
@@ -664,6 +665,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		if i >= responseContextHeight {
 			break
 		}
+		ln = escapeContent(ln)
 		ln = " " + ln // left padding
 		if len(ln) > width {
 			ln = v.fit(ln, width)
@@ -680,6 +682,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 			Width(width).
 			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
 	}
+
 	return strings.Join(out, "\n")
 }
 
@@ -694,10 +697,17 @@ func pad(v any, width int) string {
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
 	t := styles.CurrentTheme()
+	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
+	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	truncated := truncateHeight(content, responseContextHeight)
 
-	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgBase)
-	lines := strings.Split(highlighted, "\n")
+	lines := strings.Split(truncated, "\n")
+	for i, ln := range lines {
+		lines[i] = escapeContent(ln)
+	}
+
+	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, t.BgBase)
+	lines = strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
@@ -721,6 +731,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 				PaddingLeft(1).
 				Render(v.fit(ln, w-1)))
 	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
@@ -765,4 +776,21 @@ func prettifyToolName(name string) string {
 	default:
 		return name
 	}
+}
+
+// escapeContent replaces control characters with their Unicode Control Picture
+// representations to ensure they are displayed correctly in the UI.
+func escapeContent(content string) string {
+	var sb strings.Builder
+	for _, r := range content {
+		switch {
+		case r >= 0 && r <= 0x1f: // Control characters 0x00-0x1F
+			sb.WriteRune('\u2400' + r)
+		case r == ansi.DEL:
+			sb.WriteRune('\u2421')
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
 }

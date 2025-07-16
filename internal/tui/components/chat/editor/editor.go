@@ -199,7 +199,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		// Completions
-		case msg.String() == "/" && !m.isCompletionsOpen:
+		case msg.String() == "/" && !m.isCompletionsOpen &&
+			// only show if beginning of prompt, or if previous char is a space:
+			(len(m.textarea.Value()) == 0 || m.textarea.Value()[len(m.textarea.Value())-1] == ' '):
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
 			cmds = append(cmds, m.startCompletions)
@@ -211,25 +213,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		case msg.String() == "backspace" && m.isCompletionsOpen:
-			if len(m.currentQuery) > 0 {
-				m.currentQuery = m.currentQuery[:len(m.currentQuery)-1]
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
-			} else {
-				m.isCompletionsOpen = false
-				m.currentQuery = ""
-				m.completionsStartIndex = 0
-				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-			}
-		default:
-			if m.isCompletionsOpen {
-				m.currentQuery += msg.String()
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
-			}
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
@@ -281,6 +264,22 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
+
+	if m.textarea.Focused() {
+		_, ok := msg.(tea.KeyPressMsg)
+		if ok {
+			word := m.textarea.Word()
+			if strings.HasPrefix(word, "/") {
+				m.completionsStartIndex = strings.Index(m.textarea.Value(), word) + 1 // ignore the slash itself
+				m.currentQuery = word[1:]
+				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+					Query:  m.currentQuery,
+					Reopen: !m.isCompletionsOpen,
+				}))
+			}
+		}
+	}
+
 	return m, tea.Batch(cmds...)
 }
 

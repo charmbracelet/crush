@@ -23,7 +23,8 @@ type OpenCompletionsMsg struct {
 }
 
 type FilterCompletionsMsg struct {
-	Query string // The query to filter completions
+	Query  string // The query to filter completions
+	Reopen bool
 }
 
 type CompletionsClosedMsg struct{}
@@ -126,10 +127,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CloseCompletionsMsg:
 		c.open = false
 		c.query = ""
-		return c, tea.Batch(
-			c.list.SetItems([]util.Model{}),
-			util.CmdHandler(CompletionsClosedMsg{}),
-		)
+		return c, util.CmdHandler(CompletionsClosedMsg{})
 	case OpenCompletionsMsg:
 		c.open = true
 		c.query = ""
@@ -149,8 +147,8 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, tea.Batch(cmds...)
 	case FilterCompletionsMsg:
 		c.query = msg.Query
-		if !c.open {
-			return c, nil // If completions are not open, do nothing
+		if !c.open && !msg.Reopen {
+			return c, nil
 		}
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.list.Filter(msg.Query))
@@ -158,8 +156,9 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {
-			// Close completions if no items match the query
 			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
+		} else if msg.Reopen {
+			c.open = true
 		}
 		return c, tea.Batch(cmds...)
 	}

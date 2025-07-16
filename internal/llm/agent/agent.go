@@ -94,7 +94,7 @@ func NewAgent(
 ) (Service, error) {
 	ctx := context.Background()
 	cfg := config.Get()
-	otherTools := GetMcpTools(ctx, permissions, cfg)
+	otherTools := GetMCPTools(ctx, permissions, cfg)
 	if len(lspClients) > 0 {
 		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
 	}
@@ -600,12 +600,17 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 
 	switch event.Type {
 	case provider.EventThinkingDelta:
-		assistantMsg.AppendReasoningContent(event.Content)
+		assistantMsg.AppendReasoningContent(event.Thinking)
+		return a.messages.Update(ctx, *assistantMsg)
+	case provider.EventSignatureDelta:
+		assistantMsg.AppendReasoningSignature(event.Signature)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventContentDelta:
+		assistantMsg.FinishThinking()
 		assistantMsg.AppendContent(event.Content)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStart:
+		assistantMsg.FinishThinking()
 		slog.Info("Tool call started", "toolCall", event.ToolCall)
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
@@ -619,6 +624,7 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 	case provider.EventError:
 		return event.Error
 	case provider.EventComplete:
+		assistantMsg.FinishThinking()
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)
 		assistantMsg.AddFinish(event.Response.FinishReason, "", "")
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {

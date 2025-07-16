@@ -275,7 +275,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
-			p.showDetails()
+			p.toggleDetails()
 			return p, nil
 		}
 
@@ -382,7 +382,7 @@ func (p *chatPage) View() string {
 			Width(p.detailsWidth).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus)
-		version := t.S().Subtle.Width(p.detailsWidth - 2).AlignHorizontal(lipgloss.Right).Render(version.Version)
+		version := t.S().Base.Foreground(t.Border).Width(p.detailsWidth - 4).AlignHorizontal(lipgloss.Right).Render(version.Version)
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -446,12 +446,9 @@ func (p *chatPage) setCompactMode(compact bool) {
 	}
 	p.compact = compact
 	if compact {
-		p.compact = true
 		p.sidebar.SetCompactMode(true)
 	} else {
-		p.compact = false
-		p.showingDetails = false
-		p.sidebar.SetCompactMode(false)
+		p.setShowDetails(false)
 	}
 }
 
@@ -558,12 +555,19 @@ func (p *chatPage) cancel() tea.Cmd {
 	return cancelTimerCmd()
 }
 
-func (p *chatPage) showDetails() {
+func (p *chatPage) setShowDetails(show bool) {
+	p.showingDetails = show
+	p.header.SetDetailsOpen(p.showingDetails)
+	if !p.compact {
+		p.sidebar.SetCompactMode(false)
+	}
+}
+
+func (p *chatPage) toggleDetails() {
 	if p.session.ID == "" || !p.compact {
 		return
 	}
-	p.showingDetails = !p.showingDetails
-	p.header.SetDetailsOpen(p.showingDetails)
+	p.setShowDetails(!p.showingDetails)
 }
 
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {

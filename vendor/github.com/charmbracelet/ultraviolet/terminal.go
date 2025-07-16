@@ -20,6 +20,8 @@ import (
 	"github.com/muesli/cancelreader"
 )
 
+const isWindows = "windows"
+
 var (
 	// ErrNotTerminal is returned when one of the I/O streams is not a terminal.
 	ErrNotTerminal = fmt.Errorf("not a terminal")
@@ -42,8 +44,7 @@ type Terminal struct {
 	inTtyState  *term.State
 	outTty      term.File
 	outTtyState *term.State
-	winchTty    term.File // The terminal to receive window size changes from.
-	started     bool      // Indicates if the terminal has been started.
+	started     bool // Indicates if the terminal has been started.
 
 	// Terminal type, screen and buffer.
 	termtype            string            // The $TERM type.
@@ -123,7 +124,7 @@ func NewTerminal(in io.Reader, out io.Writer, env []string) *Terminal {
 	// Handle debugging I/O.
 	debug, ok := os.LookupEnv("UV_DEBUG")
 	if ok && len(debug) > 0 {
-		f, err := os.OpenFile(debug, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o666)
+		f, err := os.OpenFile(debug, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 		if err != nil {
 			panic("failed to open debug file: " + err.Error())
 		}
@@ -346,7 +347,7 @@ func (t *Terminal) EnableMode(modes ...ansi.Mode) {
 	for _, m := range modes {
 		t.modes[m] = ansi.ModeSet
 	}
-	t.scr.WriteString(ansi.SetMode(modes...)) //nolint:errcheck
+	t.scr.WriteString(ansi.SetMode(modes...)) //nolint:errcheck,gosec
 }
 
 // DisableMode disables the given modes on the terminal. This is typically
@@ -362,7 +363,7 @@ func (t *Terminal) DisableMode(modes ...ansi.Mode) {
 	for _, m := range modes {
 		t.modes[m] = ansi.ModeReset
 	}
-	t.scr.WriteString(ansi.ResetMode(modes...)) //nolint:errcheck
+	t.scr.WriteString(ansi.ResetMode(modes...)) //nolint:errcheck,gosec
 }
 
 // RequestMode requests the current state of the given modes from the terminal.
@@ -372,7 +373,7 @@ func (t *Terminal) DisableMode(modes ...ansi.Mode) {
 // Note that this won't take any effect until the next [Terminal.Display] or
 // [Terminal.Flush] call.
 func (t *Terminal) RequestMode(mode ansi.Mode) {
-	t.scr.WriteString(ansi.RequestMode(mode)) //nolint:errcheck
+	t.scr.WriteString(ansi.RequestMode(mode)) //nolint:errcheck,gosec
 }
 
 // MouseMode represents the mouse mode for the terminal. It is used to enable
@@ -399,7 +400,7 @@ func (t *Terminal) SetForegroundColor(c color.Color) {
 	t.setFg = c
 	col, ok := colorful.MakeColor(c)
 	if ok {
-		t.scr.WriteString(ansi.SetForegroundColor(col.Hex())) //nolint:errcheck
+		t.scr.WriteString(ansi.SetForegroundColor(col.Hex())) //nolint:errcheck,gosec
 	}
 }
 
@@ -408,7 +409,7 @@ func (t *Terminal) SetForegroundColor(c color.Color) {
 // Note that this won't take any effect until the next [Terminal.Display] or
 // [Terminal.Flush] call.
 func (t *Terminal) RequestForegroundColor() {
-	t.scr.WriteString(ansi.RequestForegroundColor) //nolint:errcheck
+	t.scr.WriteString(ansi.RequestForegroundColor) //nolint:errcheck,gosec
 }
 
 // ResetForegroundColor resets the terminal foreground color to the
@@ -418,7 +419,7 @@ func (t *Terminal) RequestForegroundColor() {
 // [Terminal.Flush] call.
 func (t *Terminal) ResetForegroundColor() {
 	t.setFg = nil
-	t.scr.WriteString(ansi.ResetForegroundColor) //nolint:errcheck
+	t.scr.WriteString(ansi.ResetForegroundColor) //nolint:errcheck,gosec
 }
 
 // SetBackgroundColor sets the terminal default background color.
@@ -429,7 +430,7 @@ func (t *Terminal) SetBackgroundColor(c color.Color) {
 	t.setBg = c
 	col, ok := colorful.MakeColor(c)
 	if ok {
-		t.scr.WriteString(ansi.SetBackgroundColor(col.Hex())) //nolint:errcheck
+		t.scr.WriteString(ansi.SetBackgroundColor(col.Hex())) //nolint:errcheck,gosec
 	}
 }
 
@@ -438,7 +439,7 @@ func (t *Terminal) SetBackgroundColor(c color.Color) {
 // Note that this won't take any effect until the next [Terminal.Display] or
 // [Terminal.Flush] call.
 func (t *Terminal) RequestBackgroundColor() {
-	t.scr.WriteString(ansi.RequestBackgroundColor) //nolint:errcheck
+	t.scr.WriteString(ansi.RequestBackgroundColor) //nolint:errcheck,gosec
 }
 
 // ResetBackgroundColor resets the terminal background color to the
@@ -448,7 +449,7 @@ func (t *Terminal) RequestBackgroundColor() {
 // [Terminal.Flush] call.
 func (t *Terminal) ResetBackgroundColor() {
 	t.setBg = nil
-	t.scr.WriteString(ansi.ResetBackgroundColor) //nolint:errcheck
+	t.scr.WriteString(ansi.ResetBackgroundColor) //nolint:errcheck,gosec
 }
 
 // SetCursorColor sets the terminal cursor color.
@@ -459,7 +460,7 @@ func (t *Terminal) SetCursorColor(c color.Color) {
 	t.setCc = c
 	col, ok := colorful.MakeColor(c)
 	if ok {
-		t.scr.WriteString(ansi.SetCursorColor(col.Hex())) //nolint:errcheck
+		t.scr.WriteString(ansi.SetCursorColor(col.Hex())) //nolint:errcheck,gosec
 	}
 }
 
@@ -468,7 +469,7 @@ func (t *Terminal) SetCursorColor(c color.Color) {
 // Note that this won't take any effect until the next [Terminal.Display] or
 // [Terminal.Flush] call.
 func (t *Terminal) RequestCursorColor() {
-	t.scr.WriteString(ansi.RequestCursorColor) //nolint:errcheck
+	t.scr.WriteString(ansi.RequestCursorColor) //nolint:errcheck,gosec
 }
 
 // ResetCursorColor resets the terminal cursor color to the
@@ -478,7 +479,7 @@ func (t *Terminal) RequestCursorColor() {
 // [Terminal.Flush] call.
 func (t *Terminal) ResetCursorColor() {
 	t.setCc = nil
-	t.scr.WriteString(ansi.ResetCursorColor) //nolint:errcheck
+	t.scr.WriteString(ansi.ResetCursorColor) //nolint:errcheck,gosec
 }
 
 // SetCursorShape sets the terminal cursor shape and blinking style.
@@ -488,7 +489,7 @@ func (t *Terminal) ResetCursorColor() {
 func (t *Terminal) SetCursorShape(shape CursorShape, blink bool) {
 	style := shape.Encode(blink)
 	t.curStyle = style
-	t.scr.WriteString(ansi.SetCursorStyle(style)) //nolint:errcheck
+	t.scr.WriteString(ansi.SetCursorStyle(style)) //nolint:errcheck,gosec
 }
 
 // EnableMouse enables mouse support on the terminal.
@@ -520,7 +521,7 @@ func (t *Terminal) EnableMouse(modes ...MouseMode) {
 		mode = ButtonMouseMode | DragMouseMode | AllMouseMode
 	}
 	t.mouseMode = mode
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != isWindows {
 		modes := []ansi.Mode{}
 		if t.mouseMode&AllMouseMode != 0 {
 			modes = append(modes, ansi.AnyEventMouseMode)
@@ -532,7 +533,7 @@ func (t *Terminal) EnableMouse(modes ...MouseMode) {
 		modes = append(modes, ansi.SgrExtMouseMode)
 		t.EnableMode(modes...)
 	}
-	t.enableWindowsMouse() //nolint:errcheck
+	t.enableWindowsMouse() //nolint:errcheck,gosec
 }
 
 // DisableMouse disables mouse support on the terminal. This will disable mouse
@@ -542,7 +543,7 @@ func (t *Terminal) EnableMouse(modes ...MouseMode) {
 // [Terminal.Display] or [Terminal.Flush] call.
 func (t *Terminal) DisableMouse() {
 	t.mouseMode = 0
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != isWindows {
 		var modes []ansi.Mode
 		if t.modes.Get(ansi.AnyEventMouseMode).IsSet() {
 			modes = append(modes, ansi.AnyEventMouseMode)
@@ -558,7 +559,7 @@ func (t *Terminal) DisableMouse() {
 		}
 		t.DisableMode(modes...)
 	}
-	t.disableWindowsMouse() //nolint:errcheck
+	t.disableWindowsMouse() //nolint:errcheck,gosec
 }
 
 // EnableBracketedPaste enables bracketed paste mode on the terminal. This is
@@ -608,9 +609,9 @@ func (t *Terminal) enterAltScreen(cursor bool) {
 	t.scr.EnterAltScreen()
 	if cursor && !altscreen {
 		if t.scr.CursorHidden() {
-			t.scr.WriteString(ansi.HideCursor) //nolint:errcheck
+			t.scr.WriteString(ansi.HideCursor) //nolint:errcheck,gosec
 		} else {
-			t.scr.WriteString(ansi.ShowCursor) //nolint:errcheck
+			t.scr.WriteString(ansi.ShowCursor) //nolint:errcheck,gosec
 		}
 	}
 	t.scr.SetRelativeCursor(false)
@@ -639,9 +640,9 @@ func (t *Terminal) exitAltScreen(cursor bool) {
 	t.scr.ExitAltScreen()
 	if cursor && altscreen {
 		if t.scr.CursorHidden() {
-			t.scr.WriteString(ansi.HideCursor) //nolint:errcheck
+			t.scr.WriteString(ansi.HideCursor) //nolint:errcheck,gosec
 		} else {
-			t.scr.WriteString(ansi.ShowCursor) //nolint:errcheck
+			t.scr.WriteString(ansi.ShowCursor) //nolint:errcheck,gosec
 		}
 	}
 	t.scr.SetRelativeCursor(true)
@@ -725,11 +726,6 @@ func (t *Terminal) Start() error {
 		return ErrNotTerminal
 	}
 
-	t.winchTty = t.inTty
-	if t.winchTty == nil {
-		t.winchTty = t.outTty
-	}
-
 	// Get the initial terminal size.
 	var err error
 	t.size.Width, t.size.Height, err = t.GetSize()
@@ -749,11 +745,11 @@ func (t *Terminal) Start() error {
 	t.configureRenderer()
 
 	if t.modes.Get(ansi.AltScreenSaveCursorMode).IsSet() {
-		t.enterAltScreen(false) //nolint:errcheck
+		t.enterAltScreen(false)
 	}
 	if t.cursorHidden == t.modes.Get(ansi.TextCursorEnableMode).IsReset() {
 		// We always hide the cursor when we start.
-		t.hideCursor() //nolint:errcheck
+		t.hideCursor()
 	}
 	// Restore terminal modes.
 	for m, s := range t.modes {
@@ -763,7 +759,7 @@ func (t *Terminal) Start() error {
 			continue
 		default:
 			if s.IsSet() {
-				t.scr.WriteString(ansi.SetMode(m)) //nolint:errcheck
+				t.scr.WriteString(ansi.SetMode(m)) //nolint:errcheck,gosec
 			}
 		}
 	}
@@ -779,21 +775,32 @@ func (t *Terminal) Start() error {
 		if c.colorp != nil && *c.colorp != nil {
 			col, ok := colorful.MakeColor(*c.colorp)
 			if ok {
-				t.scr.WriteString(c.setter(col.Hex())) //nolint:errcheck
+				t.scr.WriteString(c.setter(col.Hex())) //nolint:errcheck,gosec
 			}
 		}
 	}
 	if t.curStyle > 1 {
-		t.scr.WriteString(ansi.SetCursorStyle(t.curStyle)) //nolint:errcheck
+		t.scr.WriteString(ansi.SetCursorStyle(t.curStyle)) //nolint:errcheck,gosec
 	}
 
 	if err := t.rd.Start(); err != nil {
 		return fmt.Errorf("error starting terminal: %w", err)
 	}
 
-	recvs := []InputReceiver{t.rd}
-	if runtime.GOOS != "windows" {
-		t.wrdr = &WinChReceiver{t.winchTty}
+	var winchTty term.File
+	if runtime.GOOS == isWindows {
+		// On Windows, we need to use the console output buffer to get the
+		// window size.
+		winchTty = t.outTty
+	} else {
+		winchTty = t.inTty
+		if winchTty == nil {
+			winchTty = t.outTty
+		}
+	}
+	recvs := []InputReceiver{t.rd, &InitialSizeReceiver{winchTty}}
+	if runtime.GOOS != isWindows {
+		t.wrdr = &WinChReceiver{winchTty}
 		if err := t.wrdr.Start(); err != nil {
 			return fmt.Errorf("error starting window size receiver: %w", err)
 		}
@@ -818,13 +825,13 @@ func (t *Terminal) Start() error {
 func (t *Terminal) Restore() error {
 	if t.inTtyState != nil {
 		if err := term.Restore(t.inTty.Fd(), t.inTtyState); err != nil {
-			return err
+			return fmt.Errorf("error restoring input terminal state: %w", err)
 		}
 		t.inTtyState = nil
 	}
 	if t.outTtyState != nil {
 		if err := term.Restore(t.outTty.Fd(), t.outTtyState); err != nil {
-			return err
+			return fmt.Errorf("error restoring output terminal state: %w", err)
 		}
 		t.outTtyState = nil
 	}
@@ -835,10 +842,10 @@ func (t *Terminal) Restore() error {
 		t.scr.MoveTo(0, t.buf.Height()-1)
 	}
 	if altscreen {
-		t.exitAltScreen(false) //nolint:errcheck
+		t.exitAltScreen(false)
 	}
 	if cursorHidden {
-		t.showCursor() //nolint:errcheck
+		t.showCursor()
 		// Override the cursor hidden state so that we can auto hide it again
 		// when the terminal resumes using [Terminal.Start].
 		t.cursorHidden = false

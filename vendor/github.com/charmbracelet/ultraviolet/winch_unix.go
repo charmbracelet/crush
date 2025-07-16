@@ -18,6 +18,8 @@ func (l *WinChReceiver) receiveEvents(ctx context.Context, f term.File, evch cha
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGWINCH)
 
+	defer signal.Stop(sig)
+
 	sendWinSize := func(w, h int) {
 		select {
 		case <-ctx.Done():
@@ -32,31 +34,8 @@ func (l *WinChReceiver) receiveEvents(ctx context.Context, f term.File, evch cha
 		}
 	}
 
-	defer signal.Stop(sig)
-
-	// Send the initial window size.
-	winsize, err := termios.GetWinsize(int(f.Fd()))
-	if err != nil {
-		return err
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendWinSize(int(winsize.Col), int(winsize.Row))
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendPixelSize(int(winsize.Xpixel), int(winsize.Ypixel))
-	}()
-
-	// Wait for all goroutines to finish before continuing.
-	wg.Wait()
-
 	// Listen for window size changes.
+	var wg sync.WaitGroup
 	for {
 		select {
 		case <-ctx.Done():

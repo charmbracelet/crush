@@ -3,6 +3,7 @@ package uv
 import (
 	"context"
 
+	"github.com/charmbracelet/x/term"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -58,4 +59,31 @@ func (im *InputManager) ReceiveEvents(ctx context.Context, events chan<- Event) 
 
 	// Wait for all receivers to finish
 	return errg.Wait()
+}
+
+// InitialSizeReceiver query the initial size of the terminal window and sends
+// it to the given event channel.
+type InitialSizeReceiver struct {
+	File term.File
+}
+
+// ReceiveEvents queries the initial size of the terminal window and sends it
+// to the given event channel. It stops when event is sent, the context is done
+// or an error occurs.
+func (r *InitialSizeReceiver) ReceiveEvents(ctx context.Context, events chan<- Event) error {
+	if r.File == nil {
+		return nil // No file set, nothing to do.
+	}
+
+	w, h, err := term.GetSize(r.File.Fd())
+	if err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case events <- WindowSizeEvent{Width: w, Height: h}:
+		return nil
+	}
 }

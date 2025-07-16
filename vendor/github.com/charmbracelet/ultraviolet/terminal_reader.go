@@ -259,17 +259,22 @@ func (d *TerminalReader) run() {
 		// - "\x1b^" (alt+^ key press)
 		esc := n > 0 && n <= 2 && readBuf[0] == ansi.ESC
 		if esc {
-			d.esc.Store(true)
-			d.timeout.Reset(d.EscTimeout)
+			d.resetEsc()
 		}
 
 		d.notify <- readBuf[:n]
 	}
 }
 
+func (d *TerminalReader) resetEsc() {
+	// Reset the escape sequence state and timer.
+	d.esc.Store(true)
+	d.timeout.Reset(d.EscTimeout)
+}
+
 func (d *TerminalReader) sendEvents(events chan<- Event) {
 	// Lookup table first
-	if d.lookup && d.timedout.Load() && len(d.buf) > 0 && d.buf[0] == ansi.ESC {
+	if d.lookup && d.timedout.Load() && len(d.buf) > 2 && d.buf[0] == ansi.ESC {
 		if k, ok := d.table[string(d.buf)]; ok {
 			events <- KeyPressEvent(k)
 			d.buf = d.buf[:0]
@@ -309,8 +314,7 @@ LOOP:
 					if slices.Contains([]byte{
 						ansi.ESC, ansi.CSI, ansi.OSC, ansi.DCS, ansi.APC, ansi.SOS, ansi.PM,
 					}, d.buf[0]) {
-						d.esc.Store(true)
-						d.timeout.Reset(d.EscTimeout)
+						d.resetEsc()
 					}
 				}
 				// If this is the entire buffer, we can break and assume this

@@ -6,14 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
@@ -92,9 +89,6 @@ to assist developers in writing, debugging, and understanding code directly from
 		}
 		defer app.Shutdown()
 
-		// Initialize MCP tools early for both modes
-		initMCPTools(ctx, app, cfg)
-
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to read from stdin: %v", err))
@@ -124,20 +118,6 @@ to assist developers in writing, debugging, and understanding code directly from
 		}
 		return nil
 	},
-}
-
-func initMCPTools(ctx context.Context, app *app.App, cfg *config.Config) {
-	go func() {
-		defer log.RecoverPanic("MCP-goroutine", nil)
-
-		// Create a context with timeout for the initial MCP tools fetch
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		// Set this up once with proper error handling
-		agent.GetMcpTools(ctxWithTimeout, app.Permissions, cfg)
-		slog.Info("MCP message handling goroutine exiting")
-	}()
 }
 
 func Execute() {

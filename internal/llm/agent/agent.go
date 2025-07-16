@@ -94,7 +94,7 @@ func NewAgent(
 ) (Service, error) {
 	ctx := context.Background()
 	cfg := config.Get()
-	otherTools := GetMcpTools(ctx, permissions, cfg)
+	otherTools := GetMCPTools(ctx, permissions, cfg)
 	if len(lspClients) > 0 {
 		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
 	}
@@ -859,7 +859,7 @@ func (a *agent) UpdateModel() error {
 
 	// Get current provider configuration
 	currentProviderCfg := cfg.GetProviderForModel(a.agentCfg.Model)
-	if currentProviderCfg.ID == "" {
+	if currentProviderCfg == nil || currentProviderCfg.ID == "" {
 		return fmt.Errorf("provider for agent %s not found in config", a.agentCfg.Name)
 	}
 

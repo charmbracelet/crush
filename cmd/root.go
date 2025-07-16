@@ -6,14 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
@@ -45,6 +42,9 @@ to assist developers in writing, debugging, and understanding code directly from
 
   # Run a single non-interactive prompt with JSON output format
   crush -p "Explain the use of context in Go" -f json
+
+  # Run in dangerous mode (auto-accept all permissions)
+  crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load the config
@@ -52,6 +52,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		cwd, _ := cmd.Flags().GetString("cwd")
 		prompt, _ := cmd.Flags().GetString("prompt")
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		yolo, _ := cmd.Flags().GetBool("yolo")
 
 		if cwd != "" {
 			err := os.Chdir(cwd)
@@ -71,6 +72,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		if err != nil {
 			return err
 		}
+		cfg.Options.SkipPermissionsRequests = yolo
 
 		ctx := cmd.Context()
 
@@ -86,9 +88,6 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 		defer app.Shutdown()
-
-		// Initialize MCP tools early for both modes
-		initMCPTools(ctx, app, cfg)
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
@@ -121,20 +120,6 @@ to assist developers in writing, debugging, and understanding code directly from
 	},
 }
 
-func initMCPTools(ctx context.Context, app *app.App, cfg *config.Config) {
-	go func() {
-		defer log.RecoverPanic("MCP-goroutine", nil)
-
-		// Create a context with timeout for the initial MCP tools fetch
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		// Set this up once with proper error handling
-		agent.GetMcpTools(ctxWithTimeout, app.Permissions, cfg)
-		slog.Info("MCP message handling goroutine exiting")
-	}()
-}
-
 func Execute() {
 	if err := fang.Execute(
 		context.Background(),
@@ -152,6 +137,7 @@ func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().StringP("prompt", "p", "", "Prompt to run in non-interactive mode")
+	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
 	// Add quiet flag to hide spinner in non-interactive mode
 	rootCmd.Flags().BoolP("quiet", "q", false, "Hide spinner in non-interactive mode")

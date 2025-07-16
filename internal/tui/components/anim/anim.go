@@ -80,6 +80,7 @@ type Anim struct {
 	cyclingCharWidth int
 	label            []string
 	labelWidth       int
+	labelColor       color.Color
 	startTime        time.Time
 	birthOffsets     []time.Duration
 	initialFrames    [][]string // frames for the initial characters
@@ -112,6 +113,7 @@ func New(opts Settings) (a Anim) {
 	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
 	a.labelWidth = lipgloss.Width(opts.Label)
+	a.labelColor = opts.LabelColor
 
 	// Total width of anim, in cells.
 	a.width = opts.Size
@@ -119,25 +121,8 @@ func New(opts Settings) (a Anim) {
 		a.width += labelGapWidth + lipgloss.Width(opts.Label)
 	}
 
-	if a.labelWidth > 0 {
-		// Pre-render the label.
-		// XXX: We should really get the graphemes for the label, not the runes.
-		labelRunes := []rune(opts.Label)
-		a.label = make([]string, len(labelRunes))
-		for i := range a.label {
-			a.label[i] = lipgloss.NewStyle().
-				Foreground(opts.LabelColor).
-				Render(string(labelRunes[i]))
-		}
-
-		// Pre-render the ellipsis frames which come after the label.
-		a.ellipsisFrames = make([]string, len(ellipsisFrames))
-		for i, frame := range ellipsisFrames {
-			a.ellipsisFrames[i] = lipgloss.NewStyle().
-				Foreground(opts.LabelColor).
-				Render(frame)
-		}
-	}
+	// Render the label
+	a.renderLabel(opts.Label)
 
 	// Pre-generate gradient.
 	var ramp []color.Color
@@ -206,6 +191,45 @@ func New(opts Settings) (a Anim) {
 	}
 
 	return a
+}
+
+// SetLabel updates the label text and re-renders it.
+func (a *Anim) SetLabel(newLabel string) {
+	a.labelWidth = lipgloss.Width(newLabel)
+
+	// Update total width
+	a.width = a.cyclingCharWidth
+	if newLabel != "" {
+		a.width += labelGapWidth + a.labelWidth
+	}
+
+	// Re-render the label
+	a.renderLabel(newLabel)
+}
+
+// renderLabel renders the label with the current label color.
+func (a *Anim) renderLabel(label string) {
+	if a.labelWidth > 0 {
+		// Pre-render the label.
+		labelRunes := []rune(label)
+		a.label = make([]string, len(labelRunes))
+		for i := range a.label {
+			a.label[i] = lipgloss.NewStyle().
+				Foreground(a.labelColor).
+				Render(string(labelRunes[i]))
+		}
+
+		// Pre-render the ellipsis frames which come after the label.
+		a.ellipsisFrames = make([]string, len(ellipsisFrames))
+		for i, frame := range ellipsisFrames {
+			a.ellipsisFrames[i] = lipgloss.NewStyle().
+				Foreground(a.labelColor).
+				Render(frame)
+		}
+	} else {
+		a.label = nil
+		a.ellipsisFrames = nil
+	}
 }
 
 // Width returns the total width of the animation.

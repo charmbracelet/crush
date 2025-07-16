@@ -42,7 +42,7 @@ type Client struct {
 	notificationMu       sync.RWMutex
 
 	// Diagnostic cache
-	diagnostics   map[protocol.DocumentUri][]protocol.Diagnostic
+	diagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	diagnosticsMu sync.RWMutex
 
 	// Files are currently opened by the LSP
@@ -81,7 +81,7 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 		handlers:              make(map[int32]chan *Message),
 		notificationHandlers:  make(map[string]NotificationHandler),
 		serverRequestHandlers: make(map[string]ServerRequestHandler),
-		diagnostics:           make(map[protocol.DocumentUri][]protocol.Diagnostic),
+		diagnostics:           make(map[protocol.DocumentURI][]protocol.Diagnostic),
 		openFiles:             make(map[string]*OpenFileInfo),
 	}
 
@@ -449,13 +449,13 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 
 	// If we have any open files, try to get document symbols for one
 	for uri := range c.openFiles {
-		filePath := protocol.DocumentUri(uri).Path()
+		filePath := protocol.DocumentURI(uri).Path()
 		if strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".js") ||
 			strings.HasSuffix(filePath, ".tsx") || strings.HasSuffix(filePath, ".jsx") {
 			var symbols []protocol.DocumentSymbol
 			err := c.Call(ctx, "textDocument/documentSymbol", protocol.DocumentSymbolParams{
 				TextDocument: protocol.TextDocumentIdentifier{
-					URI: protocol.DocumentUri(uri),
+					URI: protocol.DocumentURI(uri),
 				},
 			}, &symbols)
 			if err == nil {
@@ -583,7 +583,7 @@ func (c *Client) pingWithServerCapabilities(ctx context.Context) error {
 
 type OpenFileInfo struct {
 	Version int32
-	URI     protocol.DocumentUri
+	URI     protocol.DocumentURI
 }
 
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
@@ -604,7 +604,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 
 	params := protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
-			URI:        protocol.DocumentUri(uri),
+			URI:        protocol.DocumentURI(uri),
 			LanguageID: DetectLanguageID(uri),
 			Version:    1,
 			Text:       string(content),
@@ -618,7 +618,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	c.openFilesMu.Lock()
 	c.openFiles[uri] = &OpenFileInfo{
 		Version: 1,
-		URI:     protocol.DocumentUri(uri),
+		URI:     protocol.DocumentURI(uri),
 	}
 	c.openFilesMu.Unlock()
 
@@ -648,7 +648,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 	params := protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{
-				URI: protocol.DocumentUri(uri),
+				URI: protocol.DocumentURI(uri),
 			},
 			Version: version,
 		},
@@ -677,7 +677,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 
 	params := protocol.DidCloseTextDocumentParams{
 		TextDocument: protocol.TextDocumentIdentifier{
-			URI: protocol.DocumentUri(uri),
+			URI: protocol.DocumentURI(uri),
 		},
 	}
 
@@ -712,7 +712,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// First collect all URIs that need to be closed
 	for uri := range c.openFiles {
 		// Convert URI back to file path using proper URI handling
-		filePath := protocol.DocumentUri(uri).Path()
+		filePath := protocol.DocumentURI(uri).Path()
 		filesToClose = append(filesToClose, filePath)
 	}
 	c.openFilesMu.Unlock()
@@ -730,7 +730,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	}
 }
 
-func (c *Client) GetFileDiagnostics(uri protocol.DocumentUri) []protocol.Diagnostic {
+func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
 	c.diagnosticsMu.RLock()
 	defer c.diagnosticsMu.RUnlock()
 
@@ -738,7 +738,7 @@ func (c *Client) GetFileDiagnostics(uri protocol.DocumentUri) []protocol.Diagnos
 }
 
 // GetDiagnostics returns all diagnostics for all files
-func (c *Client) GetDiagnostics() map[protocol.DocumentUri][]protocol.Diagnostic {
+func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
 	return c.diagnostics
 }
 
@@ -757,7 +757,7 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 // GetDiagnosticsForFile ensures a file is open and returns its diagnostics
 // This is useful for on-demand diagnostics when using lazy loading
 func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]protocol.Diagnostic, error) {
-	documentUri := protocol.URIFromPath(filepath)
+	documentURI := protocol.URIFromPath(filepath)
 
 	// Make sure the file is open
 	if !c.IsFileOpen(filepath) {
@@ -771,14 +771,14 @@ func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]
 
 	// Get diagnostics
 	c.diagnosticsMu.RLock()
-	diagnostics := c.diagnostics[documentUri]
+	diagnostics := c.diagnostics[documentURI]
 	c.diagnosticsMu.RUnlock()
 
 	return diagnostics, nil
 }
 
 // ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache
-func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentUri) {
+func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
 	c.diagnosticsMu.Lock()
 	defer c.diagnosticsMu.Unlock()
 	delete(c.diagnostics, uri)

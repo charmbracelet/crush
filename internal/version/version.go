@@ -3,6 +3,7 @@ package version
 import "runtime/debug"
 
 // Build-time parameters set via -ldflags
+
 var Version = "unknown"
 
 // A user may install crush using `go install github.com/charmbracelet/crush@latest`.

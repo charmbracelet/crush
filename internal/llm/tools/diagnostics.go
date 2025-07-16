@@ -108,7 +108,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	diagChan := make(chan struct{}, 1)
 
 	for _, client := range lsps {
-		originalDiags := make(map[protocol.DocumentUri][]protocol.Diagnostic)
+		originalDiags := make(map[protocol.DocumentURI][]protocol.Diagnostic)
 		maps.Copy(originalDiags, client.GetDiagnostics())
 
 		handler := func(params json.RawMessage) {
@@ -148,7 +148,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	}
 }
 
-func hasDiagnosticsChanged(current, original map[protocol.DocumentUri][]protocol.Diagnostic) bool {
+func hasDiagnosticsChanged(current, original map[protocol.DocumentURI][]protocol.Diagnostic) bool {
 	for uri, diags := range current {
 		origDiags, exists := original[uri]
 		if !exists || len(diags) != len(origDiags) {

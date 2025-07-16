@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/aymanbagabas/go-udiff/myers"
 	"github.com/charmbracelet/x/exp/golden"
 )
 
@@ -39,7 +38,7 @@ func TestUdiff(t *testing.T) {
 
 	t.Run("ToUnifiedDiff", func(t *testing.T) {
 		toUnifiedDiff := func(t *testing.T, before, after string, contextLines int) udiff.UnifiedDiff {
-			edits := myers.ComputeEdits(before, after) //nolint:staticcheck
+			edits := udiff.Strings(before, after)
 			unifiedDiff, err := udiff.ToUnifiedDiff("main.go", "main.go", before, edits, contextLines)
 			if err != nil {
 				t.Fatalf("ToUnifiedDiff failed: %v", err)

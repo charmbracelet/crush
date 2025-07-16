@@ -17,7 +17,7 @@ import (
 	"unicode"
 )
 
-// A DocumentUri is the URI of a client editor document.
+// A DocumentURI is the URI of a client editor document.
 //
 // According to the LSP specification:
 //
@@ -38,8 +38,8 @@ import (
 //	file:///C%3A/project/readme.md
 //
 // This is done during JSON unmarshalling;
-// see [DocumentUri.UnmarshalText] for details.
-type DocumentUri string
+// see [DocumentURI.UnmarshalText] for details.
+type DocumentURI string
 
 // A URI is an arbitrary URL (e.g. https), not necessarily a file.
 type URI = string
@@ -60,8 +60,8 @@ type URI = string
 //
 // Non-empty DocumentUris are valid "file"-scheme URIs.
 // The empty DocumentUri is valid.
-func (uri *DocumentUri) UnmarshalText(data []byte) (err error) {
-	*uri, err = ParseDocumentUri(string(data))
+func (uri *DocumentURI) UnmarshalText(data []byte) (err error) {
+	*uri, err = ParseDocumentURI(string(data))
 	return
 }
 
@@ -70,7 +70,7 @@ func (uri *DocumentUri) UnmarshalText(data []byte) (err error) {
 // DocumentUri("").Path() returns the empty string.
 //
 // Path panics if called on a URI that is not a valid filename.
-func (uri DocumentUri) Path() string {
+func (uri DocumentURI) Path() string {
 	filename, err := filename(uri)
 	if err != nil {
 		// e.g. ParseRequestURI failed.
@@ -85,7 +85,7 @@ func (uri DocumentUri) Path() string {
 }
 
 // Dir returns the URI for the directory containing the receiver.
-func (uri DocumentUri) Dir() DocumentUri {
+func (uri DocumentURI) Dir() DocumentURI {
 	// This function could be more efficiently implemented by avoiding any call
 	// to Path(), but at least consolidates URI manipulation.
 	return URIFromPath(uri.DirPath())
@@ -93,11 +93,11 @@ func (uri DocumentUri) Dir() DocumentUri {
 
 // DirPath returns the file path to the directory containing this URI, which
 // must be a file URI.
-func (uri DocumentUri) DirPath() string {
+func (uri DocumentURI) DirPath() string {
 	return filepath.Dir(uri.Path())
 }
 
-func filename(uri DocumentUri) (string, error) {
+func filename(uri DocumentURI) (string, error) {
 	if uri == "" {
 		return "", nil
 	}
@@ -137,9 +137,9 @@ slow:
 	return u.Path, nil
 }
 
-// ParseDocumentUri interprets a string as a DocumentUri, applying VS
-// Code workarounds; see [DocumentUri.UnmarshalText] for details.
-func ParseDocumentUri(s string) (DocumentUri, error) {
+// ParseDocumentURI interprets a string as a DocumentUri, applying VS
+// Code workarounds; see [DocumentURI.UnmarshalText] for details.
+func ParseDocumentURI(s string) (DocumentURI, error) {
 	if s == "" {
 		return "", nil
 	}
@@ -169,12 +169,12 @@ func ParseDocumentUri(s string) (DocumentUri, error) {
 		path = path[:1] + strings.ToUpper(string(path[1])) + path[2:]
 	}
 	u := url.URL{Scheme: fileScheme, Path: path}
-	return DocumentUri(u.String()), nil
+	return DocumentURI(u.String()), nil
 }
 
 // URIFromPath returns DocumentUri for the supplied file path.
 // Given "", it returns "".
-func URIFromPath(path string) DocumentUri {
+func URIFromPath(path string) DocumentURI {
 	if path == "" {
 		return ""
 	}
@@ -192,7 +192,7 @@ func URIFromPath(path string) DocumentUri {
 		Scheme: fileScheme,
 		Path:   path,
 	}
-	return DocumentUri(u.String())
+	return DocumentURI(u.String())
 }
 
 const fileScheme = "file"

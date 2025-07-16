@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 )
 
-func applyTextEdits(uri protocol.DocumentUri, edits []protocol.TextEdit) error {
+func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit) error {
 	path := uri.Path()
 
 	// Read the file content

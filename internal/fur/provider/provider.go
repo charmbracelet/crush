@@ -27,6 +27,7 @@ const (
 	InferenceProviderBedrock    InferenceProvider = "bedrock"
 	InferenceProviderVertexAI   InferenceProvider = "vertexai"
 	InferenceProviderXAI        InferenceProvider = "xai"
+	InferenceProviderGROQ       InferenceProvider = "groq"
 	InferenceProviderOpenRouter InferenceProvider = "openrouter"
 )
 
@@ -68,6 +69,7 @@ func KnownProviders() []InferenceProvider {
 		InferenceProviderBedrock,
 		InferenceProviderVertexAI,
 		InferenceProviderXAI,
+		InferenceProviderGROQ,
 		InferenceProviderOpenRouter,
 	}
 }

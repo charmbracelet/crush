@@ -105,6 +105,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 			"openai",
 			"gemini",
 			"xai",
+			"groq",
 			"openrouter",
 		}
 		for _, p := range providers {

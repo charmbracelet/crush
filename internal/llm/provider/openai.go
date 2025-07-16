@@ -77,13 +77,16 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				Role: "assistant",
 			}
 
+			hasContent := false
 			if msg.Content().String() != "" {
+				hasContent = true
 				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
 					OfString: openai.String(msg.Content().String()),
 				}
 			}
 
 			if len(msg.ToolCalls()) > 0 {
+				hasContent = true
 				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
 				for i, call := range msg.ToolCalls() {
 					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
@@ -95,6 +98,10 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 						},
 					}
 				}
+			}
+			if !hasContent {
+				slog.Warn("There is a message without content, investigate, this should not happen")
+				continue
 			}
 
 			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
@@ -224,6 +231,10 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 			return nil, retryErr
 		}
 
+		if len(openaiResponse.Choices) == 0 {
+			return nil, fmt.Errorf("received empty response from OpenAI API - check endpoint configuration")
+		}
+
 		content := ""
 		if openaiResponse.Choices[0].Message.Content != "" {
 			content = openaiResponse.Choices[0].Message.Content
@@ -324,7 +335,9 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					}
 					if choice.FinishReason == "tool_calls" {
 						msgToolCalls = append(msgToolCalls, currentToolCall)
-						acc.Choices[0].Message.ToolCalls = msgToolCalls
+						if len(acc.Choices) > 0 {
+							acc.Choices[0].Message.ToolCalls = msgToolCalls
+						}
 					}
 				}
 			}
@@ -336,7 +349,15 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					slog.Debug("Response", "messages", string(jsonData))
 				}
 
-				resultFinishReason := acc.ChatCompletion.Choices[0].FinishReason
+				if len(acc.Choices) == 0 {
+					eventChan <- ProviderEvent{
+						Type:  EventError,
+						Error: fmt.Errorf("received empty streaming response from OpenAI API - check endpoint configuration"),
+					}
+					return
+				}
+
+				resultFinishReason := acc.Choices[0].FinishReason
 				if resultFinishReason == "" {
 					// If the finish reason is empty, we assume it was a successful completion
 					// INFO: this is happening for openrouter for some reason

@@ -1,6 +1,7 @@
 package lipgloss
 
 import (
+	"fmt"
 	"image"
 	"sort"
 
@@ -94,17 +95,14 @@ type Layer struct {
 	zIndex   int
 	children []*Layer
 	id       string
-	content  string
+	content  uv.Drawable
 }
 
 // NewLayer creates a new Layer with the given content. It calculates the size
 // based on the widest line and the number of lines in the content.
-func NewLayer(content string) (l *Layer) {
+func NewLayer(content any) (l *Layer) {
 	l = new(Layer)
-	l.content = content
-	height := Height(content)
-	width := Width(content)
-	l.rect = image.Rect(0, 0, width, height)
+	l.SetContent(content)
 	return l
 }
 
@@ -216,23 +214,56 @@ func (l *Layer) AddLayers(layers ...*Layer) *Layer {
 }
 
 // SetContent sets the content of the Layer.
-func (l *Layer) SetContent(content string) *Layer {
-	l.content = content
+func (l *Layer) SetContent(content any) *Layer {
+	var drawable uv.Drawable
+	var rect image.Rectangle
+	switch c := content.(type) {
+	case uv.Drawable:
+		drawable = c
+		switch c := c.(type) {
+		case interface{ Bounds() image.Rectangle }:
+			rect.Max.X = c.Bounds().Dx()
+			rect.Max.Y = c.Bounds().Dy()
+		case interface {
+			Width() int
+			Height() int
+		}:
+			rect.Max.X = c.Width()
+			rect.Max.Y = c.Height()
+		}
+	case fmt.Stringer:
+		s := c.String()
+		drawable = uv.NewStyledString(s)
+		rect = image.Rect(0, 0, Width(s), Height(s))
+	case string:
+		drawable = uv.NewStyledString(c)
+		rect = image.Rect(0, 0, Width(c), Height(c))
+	default:
+		s := fmt.Sprint(content)
+		drawable = uv.NewStyledString(s)
+		rect = image.Rect(0, 0, Width(s), Height(s))
+	}
+	l.content = drawable
+	l.rect = rect
 	return l
 }
 
 // Content returns the content of the Layer.
-func (l *Layer) Content() string {
+func (l *Layer) Content() any {
 	return l.content
 }
 
 // Draw draws the Layer onto the given screen buffer.
-func (l *Layer) Draw(scr uv.Screen, _ image.Rectangle) {
-	ss := uv.NewStyledString(l.content)
-	ss.Draw(scr, l.Bounds())
+func (l *Layer) Draw(scr uv.Screen, area image.Rectangle) {
+	if l.content == nil {
+		return
+	}
+	l.content.Draw(scr, area.Intersect(l.Bounds()))
 	for _, child := range l.children {
-		ss := uv.NewStyledString(child.content)
-		ss.Draw(scr, child.Bounds())
+		if child.content == nil {
+			continue
+		}
+		child.content.Draw(scr, area.Intersect(child.Bounds()))
 	}
 }
 

@@ -25,11 +25,12 @@ import (
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
 type MessageCmp interface {
-	util.Model                   // Basic Bubble Tea model interface
-	layout.Sizeable              // Width/height management
-	layout.Focusable             // Focus state management
-	GetMessage() message.Message // Access to underlying message data
-	Spinning() bool              // Animation state for loading messages
+	util.Model                      // Basic Bubble Tea model interface
+	layout.Sizeable                 // Width/height management
+	layout.Focusable                // Focus state management
+	GetMessage() message.Message    // Access to underlying message data
+	SetMessage(msg message.Message) // Update the message content
+	Spinning() bool                 // Animation state for loading messages
 }
 
 // messageCmp implements the MessageCmp interface for displaying chat messages.
@@ -42,7 +43,7 @@ type messageCmp struct {
 	// Core message data and state
 	message  message.Message // The underlying message content
 	spinning bool            // Whether to show loading animation
-	anim     util.Model      // Animation component for loading states
+	anim     anim.Anim       // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -88,7 +89,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
-			m.anim = u.(util.Model)
+			m.anim = u.(anim.Anim)
 			return m, cmd
 		}
 	}
@@ -98,7 +99,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
-	if m.spinning {
+	if m.spinning && m.message.ReasoningContent().Thinking == "" {
 		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {
@@ -116,6 +117,10 @@ func (m *messageCmp) View() string {
 // GetMessage returns the underlying message data
 func (m *messageCmp) GetMessage() message.Message {
 	return m.message
+}
+
+func (m *messageCmp) SetMessage(msg message.Message) {
+	m.message = msg
 }
 
 // textWidth calculates the available width for text content,
@@ -158,6 +163,7 @@ func (m *messageCmp) renderAssistantMessage() string {
 	thinkingContent := ""
 
 	if thinking || m.message.ReasoningContent().Thinking != "" {
+		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
 	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
 		content = ""
@@ -230,7 +236,7 @@ func (m *messageCmp) renderThinkingContent() string {
 	}
 	lines := strings.Split(reasoningContent.Thinking, "\n")
 	var content strings.Builder
-	lineStyle := t.S().Muted.Background(t.BgBaseLighter)
+	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -246,15 +252,18 @@ func (m *messageCmp) renderThinkingContent() string {
 	var footer string
 	if reasoningContent.StartedAt > 0 {
 		duration := m.message.ThinkingDuration()
-		opts := core.StatusOpts{
-			Title:       "Thinking...",
-			Description: duration.String(),
-		}
 		if reasoningContent.FinishedAt > 0 {
-			opts.NoIcon = true
-			opts.Title = "Thought for"
+			m.anim.SetLabel("")
+			opts := core.StatusOpts{
+				Title:       "Thought for",
+				Description: duration.String(),
+				NoIcon:      true,
+			}
+			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+		} else {
+			footer = m.anim.View()
 		}
-		footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+
 	}
 	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }
@@ -273,10 +282,11 @@ func (m *messageCmp) shouldSpin() bool {
 	if m.message.Content().Text != "" {
 		return false
 	}
+	if len(m.message.ToolCalls()) > 0 {
+		return false
+	}
 	return true
 }
-
-// Focus management methods
 
 // Blur removes focus from the message component
 func (m *messageCmp) Blur() tea.Cmd {

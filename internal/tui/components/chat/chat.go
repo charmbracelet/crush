@@ -304,14 +304,15 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 	shouldShowMessage := m.shouldShowAssistantMessage(msg)
 	hasToolCallsOnly := len(msg.ToolCalls()) > 0 && msg.Content().Text == ""
 
+	var cmd tea.Cmd
 	if shouldShowMessage {
+		items := m.listCmp.Items()
+		uiMsg := items[assistantIndex].(messages.MessageCmp)
+		uiMsg.SetMessage(msg)
 		m.listCmp.UpdateItem(
 			assistantIndex,
-			messages.NewMessageCmp(
-				msg,
-			),
+			uiMsg,
 		)
-
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			m.listCmp.AppendItem(
 				messages.NewAssistantSection(
@@ -324,7 +325,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 		m.listCmp.DeleteItem(assistantIndex)
 	}
 
-	return nil
+	return cmd
 }
 
 // shouldShowAssistantMessage determines if an assistant message should be displayed.

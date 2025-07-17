@@ -439,14 +439,14 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
+func (c *Config) Resolver() VariableResolver {
+	return c.resolver
+}
+
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	if c.APIKey == "" {
-		return fmt.Errorf("API key for provider %s is not set", c.ID)
-	}
-	if c.BaseURL == "" {
-		return fmt.Errorf("base URL for provider %s is not set", c.ID)
-	}
 	testURL := ""
+	headers := make(map[string]string)
+	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	switch c.Type {
 	case provider.TypeOpenAI:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
@@ -454,14 +454,16 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://api.openai.com/v1"
 		}
 		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + c.APIKey
 	case provider.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://api.anthropic.com/v1"
 		}
 		testURL = baseURL + "/models"
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
 	}
-	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	client := &http.Client{}
@@ -469,16 +471,19 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	if c.ExtraHeaders != nil {
-		for k, v := range c.ExtraHeaders {
-			req.Header.Set(k, v)
-		}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	for k, v := range c.ExtraHeaders {
+		req.Header.Set(k, v)
 	}
 	b, err := client.Do(req)
-	_ = b.Body.Close()
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
+	if b.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	}
+	_ = b.Body.Close()
 	return nil
 }

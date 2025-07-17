@@ -72,6 +72,7 @@ type Theme struct {
 	Red      color.Color
 	RedDark  color.Color
 	RedLight color.Color
+	Cherry   color.Color
 
 	styles *Styles
 }

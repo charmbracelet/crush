@@ -2,11 +2,13 @@ package splash
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
@@ -36,6 +38,9 @@ type Splash interface {
 
 	// Showing API key input
 	IsShowingAPIKey() bool
+
+	// IsAPIKeyValid returns whether the API key is valid
+	IsAPIKeyValid() bool
 }
 
 const (
@@ -62,6 +67,8 @@ type splashCmp struct {
 	modelList     *models.ModelListComponent
 	apiKeyInput   *models.APIKeyInput
 	selectedModel *models.ModelOption
+	isAPIKeyValid bool
+	apiKeyValue   string
 }
 
 func New() Splash {
@@ -141,6 +148,7 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 	// remove padding, logo height, gap, title space
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
+	s.apiKeyInput.SetWidth(width - 2)
 	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
@@ -149,9 +157,16 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)
+	case models.APIKeyStateChangeMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		return s, cmd
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Back):
+			if s.isAPIKeyValid {
+				return s, nil
+			}
 			if s.needsAPIKey {
 				// Go back to model selection
 				s.needsAPIKey = false
@@ -159,6 +174,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Select):
+			if s.isAPIKeyValid {
+				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+			}
 			if s.isOnboarding && !s.needsAPIKey {
 				modelInx := s.modelList.SelectedIndex()
 				items := s.modelList.Items()
@@ -176,23 +194,66 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if s.needsAPIKey {
 				// Handle API key submission
-				apiKey := s.apiKeyInput.Value()
-				if apiKey != "" {
-					return s, s.saveAPIKeyAndContinue(apiKey)
+				s.apiKeyValue = s.apiKeyInput.Value()
+				provider, err := s.getProvider(s.selectedModel.Provider.ID)
+				if err != nil || provider == nil {
+					return s, util.ReportError(fmt.Errorf("provider %s not found", s.selectedModel.Provider.ID))
 				}
+				providerConfig := config.ProviderConfig{
+					ID:      string(s.selectedModel.Provider.ID),
+					Name:    s.selectedModel.Provider.Name,
+					APIKey:  s.apiKeyValue,
+					Type:    provider.Type,
+					BaseURL: provider.APIEndpoint,
+				}
+				return s, tea.Sequence(
+					util.CmdHandler(models.APIKeyStateChangeMsg{
+						State: models.APIKeyInputStateVerifying,
+					}),
+					func() tea.Msg {
+						err := providerConfig.TestConnection(config.Get().Resolver())
+						slog.Info("Testing API key connection", "provider", providerConfig.ID, "err", err)
+						if err == nil {
+							s.isAPIKeyValid = true
+							return models.APIKeyStateChangeMsg{
+								State: models.APIKeyInputStateVerified,
+							}
+						}
+						return models.APIKeyStateChangeMsg{
+							State: models.APIKeyInputStateError,
+						}
+					},
+				)
 			} else if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
 			if s.needsProjectInit {
 				s.selectedNo = !s.selectedNo
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+
 			if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+
 			s.selectedNo = true
 			return s, s.initializeProject()
 		default:
@@ -216,6 +277,10 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.modelList, cmd = s.modelList.Update(msg)
 			return s, cmd
 		}
+	case spinner.TickMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		return s, cmd
 	}
 	return s, nil
 }
@@ -628,4 +693,8 @@ func (s *splashCmp) mcpBlock() string {
 
 func (s *splashCmp) IsShowingAPIKey() bool {
 	return s.needsAPIKey
+}
+
+func (s *splashCmp) IsAPIKeyValid() bool {
+	return s.isAPIKeyValid
 }

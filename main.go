@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 
 	_ "net/http/pprof" // profiling
 
@@ -12,9 +13,14 @@ import (
 
 	"github.com/charmbracelet/crush/internal/cmd"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 func main() {
+	if runtime.GOOS == "windows" {
+		showWindowsWarning()
+	}
+
 	defer log.RecoverPanic("main", func() {
 		slog.Error("Application terminated due to unhandled panic")
 	})
@@ -29,4 +35,24 @@ func main() {
 	}
 
 	cmd.Execute()
+}
+
+func showWindowsWarning() {
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Render("WARNING:")+" Crush is experimental on Windows!",
+		"",
+		"While we work on it, we recommend WSL2 for a better experience.",
+		"",
+		lipgloss.NewStyle().Italic(true).Render("Press Enter to continue..."),
+	)
+	content = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(1).
+		Render(content)
+	content += "\n"
+
+	fmt.Print(content)
+
+	var input string
+	fmt.Scanln(&input)
 }

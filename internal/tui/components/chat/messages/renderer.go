@@ -656,6 +656,7 @@ func joinHeaderBody(header, body string) string {
 func renderPlainContent(v *toolCallCmp, content string) string {
 	t := styles.CurrentTheme()
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
+	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 

@@ -171,6 +171,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Go back to model selection
 				s.needsAPIKey = false
 				s.selectedModel = nil
+				s.isAPIKeyValid = false
+				s.apiKeyValue = ""
+				s.apiKeyInput.Reset()
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Select):

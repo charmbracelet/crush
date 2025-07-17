@@ -44,13 +44,19 @@ func Render(version string, compact bool, o Opts) string {
 
 	// Title.
 	const spacing = 1
-	crush := renderWord(spacing, !compact,
+	letterforms := []letterform{
 		letterC,
 		letterR,
 		letterU,
 		letterSStylized,
 		letterH,
-	)
+	}
+	stretchIndex := -1 // -1 means no stretching.
+	if !compact {
+		stretchIndex = rand.IntN(len(letterforms))
+	}
+
+	crush := renderWord(spacing, stretchIndex, letterforms...)
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
@@ -124,8 +130,9 @@ func SmallRender(width int) string {
 	return title
 }
 
-// renderWord renders letterforms to fork a word.
-func renderWord(spacing int, stretchRandomLetter bool, letterforms ...letterform) string {
+// renderWord renders letterforms to fork a word. stretchIndex is the index of
+// the letter to stretch, or -1 if no letter should be stretched.
+func renderWord(spacing int, stretchIndex int, letterforms ...letterform) string {
 	if spacing < 0 {
 		spacing = 0
 	}
@@ -133,11 +140,6 @@ func renderWord(spacing int, stretchRandomLetter bool, letterforms ...letterform
 	renderedLetterforms := make([]string, len(letterforms))
 
 	// pick one letter randomly to stretch
-	stretchIndex := -1
-	if stretchRandomLetter {
-		stretchIndex = rand.IntN(len(letterforms)) //nolint:gosec
-	}
-
 	for i, letter := range letterforms {
 		renderedLetterforms[i] = letter(i == stretchIndex)
 	}

@@ -38,6 +38,8 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(opts CreatePermissionRequest) bool
 	AutoApproveSession(sessionID string)
+	GetNextPendingRequest() *PermissionRequest
+	HasPendingRequests() bool
 }
 
 type permissionService struct {
@@ -51,6 +53,11 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
 	allowedTools          []string
+
+	// Permission queue
+	requestQueue   []PermissionRequest
+	requestQueueMu sync.Mutex
+	activeRequest  *PermissionRequest
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -62,6 +69,9 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.sessionPermissionsMu.Lock()
 	s.sessionPermissions = append(s.sessionPermissions, permission)
 	s.sessionPermissionsMu.Unlock()
+
+	// Process next in queue
+	s.processNextInQueue()
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
@@ -69,6 +79,9 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 	if ok {
 		respCh.(chan bool) <- true
 	}
+
+	// Process next in queue
+	s.processNextInQueue()
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
@@ -76,6 +89,50 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 	if ok {
 		respCh.(chan bool) <- false
 	}
+
+	// Process next in queue
+	s.processNextInQueue()
+}
+
+func (s *permissionService) processNextInQueue() {
+	s.requestQueueMu.Lock()
+	defer s.requestQueueMu.Unlock()
+
+	// Remove the current active request from queue
+	if s.activeRequest != nil && len(s.requestQueue) > 0 {
+		// Find and remove the active request
+		for i, req := range s.requestQueue {
+			if req.ID == s.activeRequest.ID {
+				s.requestQueue = slices.Delete(s.requestQueue, i, i+1)
+				break
+			}
+		}
+	}
+
+	// Get next request if available
+	if len(s.requestQueue) > 0 {
+		s.activeRequest = &s.requestQueue[0]
+		s.Publish(pubsub.CreatedEvent, *s.activeRequest)
+	} else {
+		s.activeRequest = nil
+	}
+}
+
+func (s *permissionService) GetNextPendingRequest() *PermissionRequest {
+	s.requestQueueMu.Lock()
+	defer s.requestQueueMu.Unlock()
+
+	if len(s.requestQueue) > 0 {
+		return &s.requestQueue[0]
+	}
+	return nil
+}
+
+func (s *permissionService) HasPendingRequests() bool {
+	s.requestQueueMu.Lock()
+	defer s.requestQueueMu.Unlock()
+
+	return len(s.requestQueue) > 0
 }
 
 func (s *permissionService) Request(opts CreatePermissionRequest) bool {
@@ -125,7 +182,17 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	s.pendingRequests.Store(permission.ID, respCh)
 	defer s.pendingRequests.Delete(permission.ID)
 
-	s.Publish(pubsub.CreatedEvent, permission)
+	// Add to queue
+	s.requestQueueMu.Lock()
+	s.requestQueue = append(s.requestQueue, permission)
+	// If this is the first request or no active request, publish it
+	if s.activeRequest == nil {
+		s.activeRequest = &permission
+		s.requestQueueMu.Unlock()
+		s.Publish(pubsub.CreatedEvent, permission)
+	} else {
+		s.requestQueueMu.Unlock()
+	}
 
 	// Wait for the response indefinitely
 	return <-respCh
@@ -144,5 +211,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions: make([]PermissionRequest, 0),
 		skip:               skip,
 		allowedTools:       allowedTools,
+		requestQueue:       make([]PermissionRequest, 0),
 	}
 }

@@ -68,8 +68,8 @@ github.com/bmatcuk/doublestar/v4 v4.8.1 h1:54Bopc5c2cAvhLRAzqOGCYHYyhcDHsFF4wWIR
 github.com/bmatcuk/doublestar/v4 v4.8.1/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
 github.com/charlievieth/fastwalk v1.0.11 h1:5sLT/q9+d9xMdpKExawLppqvXFZCVKf6JHnr2u/ufj8=
 github.com/charlievieth/fastwalk v1.0.11/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
-github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250710161907-a4c42b579198 h1:CkMS9Ah9ac1Ego5JDC5NJyZyAAqu23Z+O0yDwsa3IxM=
-github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250710161907-a4c42b579198/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5 h1:GTcMIfDQJKyNKS+xVt7GkNIwz+tBuQtIuiP50WpzNgs=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250716142813-5d1379f56ba2 h1:Gj/vSk7h96TxUU/GSuwbYkr9H0ze+ElAQjcl25wB0+U=
 github.com/charmbracelet/bubbletea-internal/v2 v2.0.0-20250716142813-5d1379f56ba2/go.mod h1:m240IQxo1/eDQ7klblSzOCAUyc3LddHcV3Rc/YEGAgw=
 github.com/charmbracelet/colorprofile v0.3.1 h1:k8dTHMd7fgw4bnFd7jXTLZrSU/CQrKnL3m+AxCzDz40=

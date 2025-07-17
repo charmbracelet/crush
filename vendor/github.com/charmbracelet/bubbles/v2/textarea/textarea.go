@@ -722,6 +722,41 @@ func (m *Model) Reset() {
 	m.SetCursorColumn(0)
 }
 
+// Word returns the word at the cursor position.
+// A word is delimited by spaces or line-breaks.
+func (m *Model) Word() string {
+	line := m.value[m.row]
+	col := m.col - 1
+
+	if col < 0 {
+		return ""
+	}
+
+	// If cursor is beyond the line, return empty string
+	if col >= len(line) {
+		return ""
+	}
+
+	// If cursor is on a space, return empty string
+	if unicode.IsSpace(line[col]) {
+		return ""
+	}
+
+	// Find the start of the word by moving left
+	start := col
+	for start > 0 && !unicode.IsSpace(line[start-1]) {
+		start--
+	}
+
+	// Find the end of the word by moving right
+	end := col
+	for end < len(line) && !unicode.IsSpace(line[end]) {
+		end++
+	}
+
+	return string(line[start:end])
+}
+
 // san initializes or retrieves the rune sanitizer.
 func (m *Model) san() runeutil.Sanitizer {
 	if m.rsan == nil {

@@ -252,6 +252,30 @@ func (p *permissionDialogCmp) renderHeader() string {
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		headerParts = append(headerParts, t.S().Muted.Width(p.width).Render("Command"))
+	case tools.DownloadToolName:
+		params := p.permission.Params.(tools.DownloadPermissionsParams)
+		urlKey := t.S().Muted.Render("URL")
+		urlValue := t.S().Text.
+			Width(p.width - lipgloss.Width(urlKey)).
+			Render(fmt.Sprintf(" %s", params.URL))
+		fileKey := t.S().Muted.Render("File")
+		filePath := t.S().Text.
+			Width(p.width - lipgloss.Width(fileKey)).
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.FilePath)))
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				urlKey,
+				urlValue,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				fileKey,
+				filePath,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+		)
 	case tools.EditToolName:
 		params := p.permission.Params.(tools.EditPermissionsParams)
 		fileKey := t.S().Muted.Render("File")
@@ -299,6 +323,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		content = p.generateBashContent()
+	case tools.DownloadToolName:
+		content = p.generateDownloadContent()
 	case tools.EditToolName:
 		content = p.generateEditContent()
 	case tools.WriteToolName:
@@ -387,6 +413,24 @@ func (p *permissionDialogCmp) generateWriteContent() string {
 
 		diff := formatter.String()
 		return diff
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateDownloadContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
+		content := fmt.Sprintf("URL: %s\nFile: %s", pr.URL, fsext.PrettyPath(pr.FilePath))
+		if pr.Timeout > 0 {
+			content += fmt.Sprintf("\nTimeout: %ds", pr.Timeout)
+		}
+
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
+		return finalContent
 	}
 	return ""
 }
@@ -526,6 +570,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	case tools.BashToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
+	case tools.DownloadToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.4)
 	case tools.EditToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.8)

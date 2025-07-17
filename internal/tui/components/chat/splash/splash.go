@@ -453,9 +453,19 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) isSmallScreen() bool {
+	// Consider a screen small if either the width is less than 40 or if the
+	// height is less than 20
+	return s.width < 40 || s.height < 20
+}
+
 func (s *splashCmp) infoSection() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.PaddingLeft(2).Render(
+	infoStyle := t.S().Base.PaddingLeft(2)
+	if s.isSmallScreen() {
+		infoStyle = infoStyle.MarginTop(1)
+	}
+	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.cwd(),
@@ -469,7 +479,7 @@ func (s *splashCmp) infoSection() string {
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
 	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
-	if s.width < 40 || s.height < 20 {
+	if s.isSmallScreen() {
 		// If the width is too small, render a smaller version of the logo
 		// NOTE: 20 is not correct because [splashCmp.height] is not the
 		// *actual* window height, instead, it is the height of the splash

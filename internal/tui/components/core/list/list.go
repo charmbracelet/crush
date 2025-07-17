@@ -1,6 +1,7 @@
 package list
 
 import (
+	"log"
 	"slices"
 	"sort"
 	"strings"
@@ -682,13 +683,43 @@ func (m *model) findLastSelectableItem() int {
 	return NoSelection
 }
 
+// NOT CACHED
+func (m *model) forceRenderItem(index int) {
+	if len(m.filteredItems) > 0 && index < 0 || index >= len(m.filteredItems) {
+		return
+	}
+
+	item := m.filteredItems[index]
+	itemLines := m.getItemLines(item)
+	start := 0
+	for i := 0; i < index; i++ {
+		item := m.filteredItems[i]
+		// start should be sum of all items heights up until the provided index
+		start += len(m.getItemLines(item))
+	}
+	m.renderState.items[index] = renderedItem{
+		lines:  itemLines,
+		start:  start,
+		height: len(itemLines),
+	}
+}
+
+// TODO if we track current selected item, why not track the start? then we can have helper for forceRenderItem and getOrRender
+
 // ensureSelectedItemVisible scrolls the list to make the selected item visible.
 // Uses different strategies for forward and reverse rendering modes.
 func (m *model) ensureSelectedItemVisible() {
+	log.Printf("length of rendered items: %d", len(m.renderState.items))
 	cachedItem, ok := m.renderState.items[m.selectionState.selectedIndex]
 	if !ok {
-		m.renderState.needsRerender = true
-		return
+		m.forceRenderItem(m.selectionState.selectedIndex)
+		if cachedItem, ok = m.renderState.items[m.selectionState.selectedIndex]; !ok {
+			// item is still not being added to rendered items list
+			// uh oh, pls do something TODO
+			log.Println("item is still not in m.renderState.items")
+		}
+		// m.renderVisible()
+		log.Printf("length of rendered items: %d", len(m.renderState.items))
 	}
 
 	if m.viewState.reverse {
@@ -702,24 +733,38 @@ func (m *model) ensureSelectedItemVisible() {
 // ensureVisibleForward ensures the selected item is visible in forward rendering mode.
 // Handles both large items (taller than viewport) and normal items.
 func (m *model) ensureVisibleForward(cachedItem renderedItem) {
+	log.Printf("%d vs listHeight = %d", cachedItem.height, m.listHeight())
 	if cachedItem.height >= m.listHeight() {
-		if m.selectionState.selectedIndex > 0 {
-			changeNeeded := m.viewState.offset - cachedItem.start
-			m.decreaseOffset(changeNeeded)
-		} else {
-			changeNeeded := cachedItem.start - m.viewState.offset
-			m.increaseOffset(changeNeeded)
+		currentViewStart := m.viewState.offset
+		currentViewEnd := m.viewState.offset + m.listHeight()
+		itemStart := cachedItem.start
+		itemEnd := cachedItem.start + cachedItem.height
+
+		// item ends before current offset OR item starts after current offset + list height
+		if itemEnd <= currentViewStart || itemStart >= currentViewEnd {
+			changeNeeded := itemStart - currentViewStart
+			log.Println(changeNeeded)
+			if changeNeeded > 0 {
+				m.increaseOffset(changeNeeded)
+			} else {
+				// changeNeeded is negative, invert it to decrease
+				m.decreaseOffset(-(changeNeeded))
+			}
 		}
 		return
 	}
 
 	if cachedItem.start < m.viewState.offset {
+		log.Printf("item start (%d) is less than current offset (%d)", cachedItem.start, m.viewState.offset)
 		changeNeeded := m.viewState.offset - cachedItem.start
 		m.decreaseOffset(changeNeeded)
 	} else {
-		end := cachedItem.start + cachedItem.height
-		if end > m.viewState.offset+m.listHeight() {
-			changeNeeded := end - (m.viewState.offset + m.listHeight())
+		itemEnd := cachedItem.start + cachedItem.height
+		log.Printf("item end is %d, CO (%d)", itemEnd, m.viewState.offset+m.listHeight())
+		// this is the visible area
+		if itemEnd > m.viewState.offset+m.listHeight() {
+			changeNeeded := itemEnd - (m.viewState.offset + m.listHeight())
+			log.Printf("changeNeeded: %d", changeNeeded)
 			m.increaseOffset(changeNeeded)
 		}
 	}
@@ -824,6 +869,7 @@ func (m *model) rerenderItem(inx int) {
 
 	cachedItem, ok := m.renderState.items[inx]
 	if !ok {
+		m.renderState.needsRerender = true
 		return
 	}
 

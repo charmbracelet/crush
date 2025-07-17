@@ -111,6 +111,12 @@ to assist developers in writing, debugging, and understanding code directly from
 		)
 
 		go app.Subscribe(program)
+		f, err := tea.LogToFile("debug.log", "debug")
+		if err != nil {
+			fmt.Println("fatal:", err)
+			os.Exit(1)
+		}
+		defer f.Close()
 
 		if _, err := program.Run(); err != nil {
 			slog.Error(fmt.Sprintf("TUI run error: %v", err))

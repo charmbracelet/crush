@@ -133,10 +133,11 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	wasSmallScreen := s.isSmallScreen()
 	rerenderLogo := width != s.width
 	s.height = height
 	s.width = width
-	if rerenderLogo {
+	if rerenderLogo || wasSmallScreen != s.isSmallScreen() {
 		s.logoRendered = s.logoBlock()
 	}
 	// remove padding, logo height, gap, title space

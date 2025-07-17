@@ -133,9 +133,12 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	rerenderLogo := width != s.width
 	s.height = height
 	s.width = width
-	s.logoRendered = s.logoBlock()
+	if rerenderLogo {
+		s.logoRendered = s.logoBlock()
+	}
 	// remove padding, logo height, gap, title space
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)

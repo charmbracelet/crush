@@ -18,9 +18,10 @@ import (
 )
 
 type EditParams struct {
-	FilePath  string `json:"file_path"`
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	FilePath   string `json:"file_path"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
 type EditPermissionsParams struct {
@@ -58,31 +59,33 @@ To make a file edit, provide the following:
 1. file_path: The absolute path to the file to modify (must be absolute, not relative)
 2. old_string: The text to replace (must be unique within the file, and must match the file contents exactly, including all whitespace and indentation)
 3. new_string: The edited text to replace the old_string
+4. replace_all: Replace all occurrences of old_string (default false)
 
 Special cases:
 - To create a new file: provide file_path and new_string, leave old_string empty
 - To delete content: provide file_path and old_string, leave new_string empty
 
-The tool will replace ONE occurrence of old_string with new_string in the specified file.
+The tool will replace ONE occurrence of old_string with new_string in the specified file by default. Set replace_all to true to replace all occurrences.
 
 CRITICAL REQUIREMENTS FOR USING THIS TOOL:
 
-1. UNIQUENESS: The old_string MUST uniquely identify the specific instance you want to change. This means:
+1. UNIQUENESS: When replace_all is false (default), the old_string MUST uniquely identify the specific instance you want to change. This means:
    - Include AT LEAST 3-5 lines of context BEFORE the change point
    - Include AT LEAST 3-5 lines of context AFTER the change point
    - Include all whitespace, indentation, and surrounding code exactly as it appears in the file
 
-2. SINGLE INSTANCE: This tool can only change ONE instance at a time. If you need to change multiple instances:
-   - Make separate calls to this tool for each instance
+2. SINGLE INSTANCE: When replace_all is false, this tool can only change ONE instance at a time. If you need to change multiple instances:
+   - Set replace_all to true to replace all occurrences at once
+   - Or make separate calls to this tool for each instance
    - Each call must uniquely identify its specific instance using extensive context
 
 3. VERIFICATION: Before using this tool:
    - Check how many instances of the target text exist in the file
-   - If multiple instances exist, gather enough context to uniquely identify each one
-   - Plan separate tool calls for each instance
+   - If multiple instances exist and replace_all is false, gather enough context to uniquely identify each one
+   - Plan separate tool calls for each instance or use replace_all
 
 WARNING: If you do not follow these requirements:
-   - The tool will fail if old_string matches multiple locations
+   - The tool will fail if old_string matches multiple locations and replace_all is false
    - The tool will fail if old_string doesn't match exactly (including whitespace)
    - You may change the wrong instance if you don't include enough context
 
@@ -129,6 +132,10 @@ func (e *editTool) Info() ToolInfo {
 				"type":        "string",
 				"description": "The text to replace it with",
 			},
+			"replace_all": map[string]any{
+				"type":        "boolean",
+				"description": "Replace all occurrences of old_string (default false)",
+			},
 		},
 		Required: []string{"file_path", "old_string", "new_string"},
 	}
@@ -152,20 +159,20 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	var err error
 
 	if params.OldString == "" {
-		response, err = e.createNewFile(ctx, params.FilePath, params.NewString)
+		response, err = e.createNewFile(ctx, params.FilePath, params.NewString, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
 	if params.NewString == "" {
-		response, err = e.deleteContent(ctx, params.FilePath, params.OldString)
+		response, err = e.deleteContent(ctx, params.FilePath, params.OldString, params.ReplaceAll, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
-	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString)
+	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 	if err != nil {
 		return response, err
 	}
@@ -182,7 +189,7 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	return response, nil
 }
 
-func (e *editTool) createNewFile(ctx context.Context, filePath, content string) (ToolResponse, error) {
+func (e *editTool) createNewFile(ctx context.Context, filePath, content string, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err == nil {
 		if fileInfo.IsDir() {
@@ -217,6 +224,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
@@ -264,7 +272,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	), nil
 }
 
-func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string) (ToolResponse, error) {
+func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string, replaceAll bool, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -297,17 +305,29 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 
 	oldContent := string(content)
 
-	index := strings.Index(oldContent, oldString)
-	if index == -1 {
-		return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
-	}
+	var newContent string
+	var deletionCount int
 
-	lastIndex := strings.LastIndex(oldContent, oldString)
-	if index != lastIndex {
-		return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match"), nil
-	}
+	if replaceAll {
+		newContent = strings.ReplaceAll(oldContent, oldString, "")
+		deletionCount = strings.Count(oldContent, oldString)
+		if deletionCount == 0 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+	} else {
+		index := strings.Index(oldContent, oldString)
+		if index == -1 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
 
-	newContent := oldContent[:index] + oldContent[index+len(oldString):]
+		lastIndex := strings.LastIndex(oldContent, oldString)
+		if index != lastIndex {
+			return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+		}
+
+		newContent = oldContent[:index] + oldContent[index+len(oldString):]
+		deletionCount = 1
+	}
 
 	sessionID, messageID := GetContextValues(ctx)
 
@@ -330,6 +350,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
@@ -385,7 +406,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	), nil
 }
 
-func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string) (ToolResponse, error) {
+func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string, replaceAll bool, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -418,17 +439,29 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 
 	oldContent := string(content)
 
-	index := strings.Index(oldContent, oldString)
-	if index == -1 {
-		return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
-	}
+	var newContent string
+	var replacementCount int
 
-	lastIndex := strings.LastIndex(oldContent, oldString)
-	if index != lastIndex {
-		return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match"), nil
-	}
+	if replaceAll {
+		newContent = strings.ReplaceAll(oldContent, oldString, newString)
+		replacementCount = strings.Count(oldContent, oldString)
+		if replacementCount == 0 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+	} else {
+		index := strings.Index(oldContent, oldString)
+		if index == -1 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
 
-	newContent := oldContent[:index] + newString + oldContent[index+len(oldString):]
+		lastIndex := strings.LastIndex(oldContent, oldString)
+		if index != lastIndex {
+			return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+		}
+
+		newContent = oldContent[:index] + newString + oldContent[index+len(oldString):]
+		replacementCount = 1
+	}
 
 	if oldContent == newContent {
 		return NewTextErrorResponse("new content is the same as old content. No changes made."), nil
@@ -452,6 +485,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),

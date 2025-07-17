@@ -107,7 +107,7 @@ NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTAN
 
 # Tool usage policy
 - When doing file search, prefer to use the Agent tool in order to reduce context usage.
-- If you intend to call multiple tools and there are no dependencies between the calls, make all of the independent calls in parallel.
+- IMPORTANT: All tools are executed in parallel when multiple tool calls are sent in a single message. Only send multiple tool calls when they are safe to run in parallel (no dependencies between them).
 - IMPORTANT: The user does not see the full output of the tool responses, so if you need the output of the tool for the response make sure to summarize it for the user.
 
 # Proactiveness
@@ -217,7 +217,7 @@ NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTAN
 
 # Tool usage policy
 - When doing file search, prefer to use the Agent tool in order to reduce context usage.
-- If you intend to call multiple tools and there are no dependencies between the calls, make all of the independent calls in parallel.
+- IMPORTANT: All tools are executed in parallel when multiple tool calls are sent in a single message. Only send multiple tool calls when they are safe to run in parallel (no dependencies between them).
 - IMPORTANT: The user does not see the full output of the tool responses, so if you need the output of the tool for the response make sure to summarize it for the user.
 
 VERY IMPORTANT NEVER use emojis in your responses.
@@ -281,7 +281,7 @@ NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTAN
 
 ## Tool Usage
 - **File Paths:** Always use absolute paths when referring to files with tools like ` + "`view`" + ` or ` + "`write`" + `. Relative paths are not supported. You must provide an absolute path.
-- **Parallelism:** Execute multiple independent tool calls in parallel when feasible (i.e. searching the codebase).
+- **Parallelism:** IMPORTANT: All tools are executed in parallel when multiple tool calls are sent in a single message. Only send multiple tool calls when they are safe to run in parallel (no dependencies between them).
 - **Command Execution:** Use the ` + "`bash`" + ` tool for running shell commands, remembering the safety rule to explain modifying commands first.
 - **Background Processes:** Use background processes (via ` + "`&`" + `) for commands that are unlikely to stop on their own, e.g. ` + "`node server.js &`" + `. If unsure, ask the user.
 - **Interactive Commands:** Try to avoid shell commands that are likely to require user interaction (e.g. ` + "`git rebase -i`" + `). Use non-interactive versions of commands (e.g. ` + "`npm init -y`" + ` instead of ` + "`npm init`" + `) when available, and otherwise remind the user that interactive shell commands are not supported and may cause hangs until canceled by the user.

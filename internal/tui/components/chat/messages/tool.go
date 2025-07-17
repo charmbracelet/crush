@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -30,6 +31,8 @@ type ToolCallCmp interface {
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
 	ID() string
+	SetPermissionRequested() // Mark permission request
+	SetPermissionGranted()   // Mark permission granted
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -40,10 +43,12 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID string             // ID of the message that initiated this tool call
-	call            message.ToolCall   // The tool call being executed
-	result          message.ToolResult // The result of the tool execution
-	cancelled       bool               // Whether the tool call was cancelled
+	parentMessageID     string             // ID of the message that initiated this tool call
+	call                message.ToolCall   // The tool call being executed
+	result              message.ToolResult // The result of the tool execution
+	cancelled           bool               // Whether the tool call was cancelled
+	permissionRequested bool
+	permissionGranted   bool
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -81,9 +86,21 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	}
 }
 
+func WithToolPermissionRequested() ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.permissionRequested = true
+	}
+}
+
+func WithToolPermissionGranted() ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.permissionGranted = true
+	}
+}
+
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
-func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
+func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions permission.Service, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
 		parentMessageID: parentMessageID,
@@ -315,4 +332,14 @@ func (m *toolCallCmp) Spinning() bool {
 
 func (m *toolCallCmp) ID() string {
 	return m.call.ID
+}
+
+// SetPermissionRequested marks that a permission request was made for this tool call
+func (m *toolCallCmp) SetPermissionRequested() {
+	m.permissionRequested = true
+}
+
+// SetPermissionGranted marks that permission was granted for this tool call
+func (m *toolCallCmp) SetPermissionGranted() {
+	m.permissionGranted = true
 }

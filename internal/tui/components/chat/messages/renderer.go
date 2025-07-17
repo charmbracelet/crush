@@ -166,6 +166,7 @@ func init() {
 	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
+	registry.register(tools.MultiEditToolName, func() renderer { return multiEditRenderer{} })
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
 	registry.register(tools.FetchToolName, func() renderer { return fetchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
@@ -291,6 +292,57 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 	return er.renderWithParams(v, "Edit", args, func() string {
 		var meta tools.EditResponseMetadata
 		if err := er.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(params.FilePath), meta.OldContent).
+			After(fsext.PrettyPath(params.FilePath), meta.NewContent).
+			Width(v.textWidth() - 2) // -2 for padding
+		if v.textWidth() > 120 {
+			formatter = formatter.Split()
+		}
+		// add a message to the bottom if the content was truncated
+		formatted := formatter.String()
+		if lipgloss.Height(formatted) > responseContextHeight {
+			contentLines := strings.Split(formatted, "\n")
+			truncateMessage := t.S().Muted.
+				Background(t.BgBaseLighter).
+				PaddingLeft(2).
+				Width(v.textWidth() - 4).
+				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
+			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
+		}
+		return formatted
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Multi-Edit renderer
+// -----------------------------------------------------------------------------
+
+// multiEditRenderer handles multiple file edits with diff visualization
+type multiEditRenderer struct {
+	baseRenderer
+}
+
+// Render displays the multi-edited file with a formatted diff of changes
+func (mer multiEditRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.MultiEditParams
+	var args []string
+	if err := mer.unmarshalParams(v.call.Input, &params); err == nil {
+		file := fsext.PrettyPath(params.FilePath)
+		editsCount := len(params.Edits)
+		args = newParamBuilder().
+			addMain(file).
+			addKeyValue("edits", fmt.Sprintf("%d", editsCount)).
+			build()
+	}
+
+	return mer.renderWithParams(v, "Multi-Edit", args, func() string {
+		var meta tools.MultiEditResponseMetadata
+		if err := mer.unmarshalParams(v.result.Metadata, &meta); err != nil {
 			return renderPlainContent(v, v.result.Content)
 		}
 
@@ -672,7 +724,11 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.cancelled:
 		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
 	case v.result.ToolCallID == "":
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool to start...")
+		if v.permissionRequested && !v.permissionGranted {
+			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting for permission...")
+		} else {
+			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
+		}
 	default:
 		return "", false
 	}
@@ -799,6 +855,8 @@ func prettifyToolName(name string) string {
 		return "Download"
 	case tools.EditToolName:
 		return "Edit"
+	case tools.MultiEditToolName:
+		return "Multi-Edit"
 	case tools.FetchToolName:
 		return "Fetch"
 	case tools.GlobToolName:

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 )
@@ -173,11 +174,15 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	isImage, imageType := isImageFile(filePath)
 	// TODO: handle images
 	if isImage {
-		return NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\nUse a different tool to process images", imageType)), nil
+		return NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
 	}
 
 	// Read the file content
 	content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
+	isValidUt8 := utf8.ValidString(content)
+	if !isValidUt8 {
+		return NewTextErrorResponse("File content is not valid UTF-8"), nil
+	}
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 	}

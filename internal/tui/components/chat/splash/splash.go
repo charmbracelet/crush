@@ -134,10 +134,8 @@ func (s *splashCmp) Init() tea.Cmd {
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 	s.height = height
-	if width != s.width {
-		s.width = width
-		s.logoRendered = s.logoBlock()
-	}
+	s.width = width
+	s.logoRendered = s.logoBlock()
 	// remove padding, logo height, gap, title space
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
@@ -467,14 +465,25 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
+	if s.width < 40 || s.height < 20 {
+		// If the width is too small, render a smaller version of the logo
+		// NOTE: 20 is not correct because [splashCmp.height] is not the
+		// *actual* window height, instead, it is the height of the splash
+		// component and that depends on other variables like compact mode and
+		// the height of the editor.
+		return logoStyle.Render(
+			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
+		)
+	}
+	return logoStyle.Render(
 		logo.Render(version.Version, false, logo.Opts{
 			FieldColor:   t.Primary,
 			TitleColorA:  t.Secondary,
 			TitleColorB:  t.Primary,
 			CharmColor:   t.Secondary,
 			VersionColor: t.Primary,
-			Width:        s.width - 4,
+			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
 		}),
 	)
 }

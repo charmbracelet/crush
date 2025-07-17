@@ -110,6 +110,20 @@ func Render(version string, compact bool, o Opts) string {
 	return logo
 }
 
+// SmallRender renders a smaller version of the Crush logo, suitable for
+// smaller windows or sidebar usage.
+func SmallRender(width int) string {
+	t := styles.CurrentTheme()
+	title := t.S().Base.Foreground(t.Secondary).Render("Charm™")
+	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad("Crush", t.Secondary, t.Primary))
+	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after "Crush"
+	if remainingWidth > 0 {
+		lines := strings.Repeat("╱", remainingWidth)
+		title = fmt.Sprintf("%s %s", title, t.S().Base.Foreground(t.Primary).Render(lines))
+	}
+	return title
+}
+
 // renderWord renders letterforms to fork a word.
 func renderWord(spacing int, stretchRandomLetter bool, letterforms ...letterform) string {
 	if spacing < 0 {

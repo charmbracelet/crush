@@ -141,6 +141,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Type:         p.Type,
 			Disable:      config.Disable,
 			ExtraHeaders: config.ExtraHeaders,
+			ExtraBody:    config.ExtraBody,
 			ExtraParams:  make(map[string]string),
 			Models:       p.Models,
 		}

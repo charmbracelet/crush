@@ -70,6 +70,7 @@ type providerClientOptions struct {
 	systemMessage string
 	maxTokens     int64
 	extraHeaders  map[string]string
+	extraBody     map[string]any
 	extraParams   map[string]string
 }
 
@@ -147,6 +148,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		config:       cfg,
 		apiKey:       resolvedAPIKey,
 		extraHeaders: cfg.ExtraHeaders,
+		extraBody:    cfg.ExtraBody,
 		model: func(tp config.SelectedModelType) provider.Model {
 			return *config.Get().GetModelByType(tp)
 		},

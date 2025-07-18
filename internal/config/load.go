@@ -157,6 +157,17 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			}
 			prepared.ExtraParams["project"] = env.Get("GOOGLE_CLOUD_PROJECT")
 			prepared.ExtraParams["location"] = env.Get("GOOGLE_CLOUD_LOCATION")
+		case provider.InferenceProviderAzure:
+			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
+			if err != nil || endpoint == "" {
+				if configExists {
+					slog.Warn("Skipping Azure provider due to missing API endpoint", "provider", p.ID, "error", err)
+					delete(c.Providers, string(p.ID))
+				}
+				continue
+			}
+			prepared.BaseURL = endpoint
+			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 		case provider.InferenceProviderBedrock:
 			if !hasAWSCredentials(env) {
 				if configExists {

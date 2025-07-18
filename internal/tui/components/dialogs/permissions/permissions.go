@@ -84,7 +84,7 @@ func (p *permissionDialogCmp) Init() tea.Cmd {
 }
 
 func (p *permissionDialogCmp) supportsDiffView() bool {
-	return p.permission.ToolName == tools.EditToolName || p.permission.ToolName == tools.WriteToolName
+	return p.permission.ToolName == tools.EditToolName || p.permission.ToolName == tools.WriteToolName || p.permission.ToolName == tools.MultiEditToolName
 }
 
 func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -305,6 +305,20 @@ func (p *permissionDialogCmp) renderHeader() string {
 			),
 			baseStyle.Render(strings.Repeat(" ", p.width)),
 		)
+	case tools.MultiEditToolName:
+		params := p.permission.Params.(tools.MultiEditPermissionsParams)
+		fileKey := t.S().Muted.Render("File")
+		filePath := t.S().Text.
+			Width(p.width - lipgloss.Width(fileKey)).
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.FilePath)))
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				fileKey,
+				filePath,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+		)
 	case tools.FetchToolName:
 		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
 	}
@@ -329,6 +343,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateEditContent()
 	case tools.WriteToolName:
 		content = p.generateWriteContent()
+	case tools.MultiEditToolName:
+		content = p.generateMultiEditContent()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
 	default:
@@ -431,6 +447,28 @@ func (p *permissionDialogCmp) generateDownloadContent() string {
 			Width(p.contentViewPort.Width()).
 			Render(content)
 		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateMultiEditContent() string {
+	if pr, ok := p.permission.Params.(tools.MultiEditPermissionsParams); ok {
+		// Use the cache for diff rendering
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
+			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			Height(p.contentViewPort.Height()).
+			Width(p.contentViewPort.Width()).
+			XOffset(p.diffXOffset).
+			YOffset(p.diffYOffset)
+		if p.useDiffSplitMode() {
+			formatter = formatter.Split()
+		} else {
+			formatter = formatter.Unified()
+		}
+
+		diff := formatter.String()
+		return diff
 	}
 	return ""
 }
@@ -577,6 +615,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.8)
 	case tools.WriteToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.8)
+	case tools.MultiEditToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.8)
 	case tools.FetchToolName:

@@ -98,7 +98,6 @@ func NewAgent(
 ) (Service, error) {
 	ctx := context.Background()
 	cfg := config.Get()
-
 	var agentTool tools.BaseTool
 	if agentCfg.ID == "coder" {
 		taskAgentCfg := config.Get().Agents["task"]
@@ -180,6 +179,7 @@ func NewAgent(
 			tools.NewBashTool(permissions, cwd),
 			tools.NewDownloadTool(permissions, cwd),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
+			tools.NewMultiEditTool(lspClients, permissions, history, cwd),
 			tools.NewFetchTool(permissions, cwd),
 			tools.NewGlobTool(cwd),
 			tools.NewGrepTool(cwd),

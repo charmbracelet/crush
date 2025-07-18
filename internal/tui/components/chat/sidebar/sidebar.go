@@ -36,7 +36,7 @@ type FileHistory struct {
 	latestVersion  history.File
 }
 
-const LogoHeightBreakpoint = 40
+const LogoHeightBreakpoint = 30
 
 // Default maximum number of items to show in each section
 const (

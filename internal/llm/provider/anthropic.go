@@ -42,8 +42,31 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	if opts.apiKey != "" {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
 	}
+
+	// Check if API key starts with "Bearer " (indicating it's a bearer token)
+	isBearerToken := strings.HasPrefix(opts.apiKey, "Bearer ")
+
+	if opts.apiKey != "" && !hasBearerAuth {
+		if isBearerToken {
+			// Use the API key as an Authorization header instead of X-Api-Key
+			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
+			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader("Authorization", opts.apiKey))
+		} else {
+			// Use standard X-Api-Key header
+			anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
+		}
+	} else if hasBearerAuth {
+		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
+	}
+
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
+	}
+	if opts.extraHeaders != nil {
+		for key, value := range opts.extraHeaders {
+			slog.Debug("Adding extra header to Anthropic client", "key", key, "value", value)
+			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader(key, value))
+		}
 	}
 	return anthropic.NewClient(anthropicClientOptions...)
 }

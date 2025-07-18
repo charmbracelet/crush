@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"path/filepath"
@@ -15,6 +16,7 @@ var ErrorPermissionDenied = errors.New("permission denied")
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
+	ToolCallID  string `json:"tool_call_id"`
 	ToolName    string `json:"tool_name"`
 	Description string `json:"description"`
 	Action      string `json:"action"`
@@ -22,9 +24,16 @@ type CreatePermissionRequest struct {
 	Path        string `json:"path"`
 }
 
+type PermissionNotification struct {
+	ToolCallID string `json:"tool_call_id"`
+	Granted    bool   `json:"granted"`
+	Denied     bool   `json:"denied"`
+}
+
 type PermissionRequest struct {
 	ID          string `json:"id"`
 	SessionID   string `json:"session_id"`
+	ToolCallID  string `json:"tool_call_id"`
 	ToolName    string `json:"tool_name"`
 	Description string `json:"description"`
 	Action      string `json:"action"`
@@ -39,11 +48,13 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(opts CreatePermissionRequest) bool
 	AutoApproveSession(sessionID string)
+	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
+	notificationBroker    *pubsub.Broker[PermissionNotification]
 	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
@@ -59,6 +70,10 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+		Granted:    true,
+	})
 	respCh, ok := s.pendingRequests.Load(permission.ID)
 	if ok {
 		respCh.(chan bool) <- true
@@ -74,6 +89,10 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+		Granted:    true,
+	})
 	respCh, ok := s.pendingRequests.Load(permission.ID)
 	if ok {
 		respCh.(chan bool) <- true
@@ -85,6 +104,11 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+		Granted:    false,
+		Denied:     true,
+	})
 	respCh, ok := s.pendingRequests.Load(permission.ID)
 	if ok {
 		respCh.(chan bool) <- false
@@ -99,6 +123,11 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if s.skip {
 		return true
 	}
+
+	// tell the UI that a permission was requested
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: opts.ToolCallID,
+	})
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
 
@@ -125,6 +154,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		ID:          uuid.New().String(),
 		Path:        dir,
 		SessionID:   opts.SessionID,
+		ToolCallID:  opts.ToolCallID,
 		ToolName:    opts.ToolName,
 		Description: opts.Description,
 		Action:      opts.Action,
@@ -167,13 +197,18 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
+func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
+	return s.notificationBroker.Subscribe(ctx)
+}
+
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
-		Broker:             pubsub.NewBroker[PermissionRequest](),
-		workingDir:         workingDir,
-		sessionPermissions: make([]PermissionRequest, 0),
-		skip:               skip,
-		allowedTools:       allowedTools,
-		requestQueue:       make([]PermissionRequest, 0),
+		Broker:              pubsub.NewBroker[PermissionRequest](),
+		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		workingDir:          workingDir,
+		sessionPermissions:  make([]PermissionRequest, 0),
+		autoApproveSessions: make(map[string]bool),
+		skip:                skip,
+		allowedTools:        allowedTools,
 	}
 }

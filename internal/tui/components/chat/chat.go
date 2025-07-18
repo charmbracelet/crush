@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
@@ -81,6 +83,8 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case pubsub.Event[permission.PermissionNotification]:
+		return m, m.handlePermissionRequest(msg.Payload)
 	case SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			cmd := m.SetSession(msg)
@@ -113,6 +117,20 @@ func (m *messageListCmp) View() string {
 		Render(
 			m.listCmp.View(),
 		)
+}
+
+func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
+	items := m.listCmp.Items()
+	slog.Info("Handling permission request", "tool_call_id", permission.ToolCallID, "granted", permission.Granted)
+	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
+		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
+		toolCall.SetPermissionRequested()
+		if permission.Granted {
+			toolCall.SetPermissionGranted()
+		}
+		m.listCmp.UpdateItem(toolCallIndex, toolCall)
+	}
+	return nil
 }
 
 // handleChildSession handles messages from child sessions (agent tools).
@@ -149,6 +167,7 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 			nestedCall := messages.NewToolCallCmp(
 				event.Payload.ID,
 				tc,
+				m.app.Permissions,
 				messages.WithToolCallNested(true),
 			)
 			cmds = append(cmds, nestedCall.Init())
@@ -366,7 +385,7 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 	}
 
 	// Add new tool call if not found
-	return m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
+	return m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions))
 }
 
 // handleNewAssistantMessage processes new assistant messages and their tool calls.
@@ -385,7 +404,7 @@ func (m *messageListCmp) handleNewAssistantMessage(msg message.Message) tea.Cmd 
 
 	// Add tool calls
 	for _, tc := range msg.ToolCalls() {
-		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc))
+		cmd := m.listCmp.AppendItem(messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions))
 		cmds = append(cmds, cmd)
 	}
 
@@ -468,7 +487,7 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 	// Add tool calls with their results and status
 	for _, tc := range msg.ToolCalls() {
 		options := m.buildToolCallOptions(tc, msg, toolResultMap)
-		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, options...))
+		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions, options...))
 		// If this tool call is the agent tool, fetch nested tool calls
 		if tc.Name == agent.AgentToolName {
 			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)

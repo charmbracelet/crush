@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -242,6 +243,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
 		u, cmd := p.sidebar.Update(msg)
 		p.sidebar = u.(sidebar.Sidebar)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+	case pubsub.Event[permission.PermissionNotification]:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 

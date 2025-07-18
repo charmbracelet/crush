@@ -181,6 +181,7 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    WriteToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),

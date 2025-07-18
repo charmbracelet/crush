@@ -373,6 +373,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 			permission.CreatePermissionRequest{
 				SessionID:   sessionID,
 				Path:        b.workingDir,
+				ToolCallID:  call.ID,
 				ToolName:    BashToolName,
 				Action:      "execute",
 				Description: fmt.Sprintf("Execute command: %s", params.Command),

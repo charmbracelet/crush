@@ -152,20 +152,20 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	var err error
 
 	if params.OldString == "" {
-		response, err = e.createNewFile(ctx, params.FilePath, params.NewString)
+		response, err = e.createNewFile(ctx, params.FilePath, params.NewString, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
 	if params.NewString == "" {
-		response, err = e.deleteContent(ctx, params.FilePath, params.OldString)
+		response, err = e.deleteContent(ctx, params.FilePath, params.OldString, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
-	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString)
+	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString, call)
 	if err != nil {
 		return response, err
 	}
@@ -182,7 +182,7 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	return response, nil
 }
 
-func (e *editTool) createNewFile(ctx context.Context, filePath, content string) (ToolResponse, error) {
+func (e *editTool) createNewFile(ctx context.Context, filePath, content string, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err == nil {
 		if fileInfo.IsDir() {
@@ -217,6 +217,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
@@ -264,7 +265,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	), nil
 }
 
-func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string) (ToolResponse, error) {
+func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -330,6 +331,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
@@ -385,7 +387,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	), nil
 }
 
-func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string) (ToolResponse, error) {
+func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -452,6 +454,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        permissionPath,
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),

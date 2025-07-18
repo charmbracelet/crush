@@ -100,6 +100,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	p := b.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
+			ToolCallID:  params.ID,
 			Path:        b.workingDir,
 			ToolName:    b.Info().Name,
 			Action:      "execute",

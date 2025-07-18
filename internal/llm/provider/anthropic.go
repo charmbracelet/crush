@@ -39,8 +39,16 @@ func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicCl
 
 func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropic.Client {
 	anthropicClientOptions := []option.RequestOption{}
-	if opts.apiKey != "" {
-		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
+
+	// Check if Authorization header is provided in extra headers
+	hasBearerAuth := false
+	if opts.extraHeaders != nil {
+		for key := range opts.extraHeaders {
+			if strings.ToLower(key) == "authorization" {
+				hasBearerAuth = true
+				break
+			}
+		}
 	}
 
 	// Check if API key starts with "Bearer " (indicating it's a bearer token)
@@ -58,7 +66,6 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	} else if hasBearerAuth {
 		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
 	}
-
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
@@ -391,6 +398,8 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				close(eventChan)
 				return
 			}
+			slog.Warn(err.Error())
+
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {

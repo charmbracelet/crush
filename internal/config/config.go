@@ -73,6 +73,9 @@ type ProviderConfig struct {
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty"`
 
+	// Custom system prompt prefix.
+	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty"`
+
 	// Extra headers to send with each request to the provider.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 

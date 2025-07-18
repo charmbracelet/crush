@@ -61,16 +61,17 @@ type Provider interface {
 }
 
 type providerClientOptions struct {
-	baseURL       string
-	config        config.ProviderConfig
-	apiKey        string
-	modelType     config.SelectedModelType
-	model         func(config.SelectedModelType) provider.Model
-	disableCache  bool
-	systemMessage string
-	maxTokens     int64
-	extraHeaders  map[string]string
-	extraParams   map[string]string
+	baseURL            string
+	config             config.ProviderConfig
+	apiKey             string
+	modelType          config.SelectedModelType
+	model              func(config.SelectedModelType) provider.Model
+	disableCache       bool
+	systemMessage      string
+	systemPromptPrefix string
+	maxTokens          int64
+	extraHeaders       map[string]string
+	extraParams        map[string]string
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -153,10 +154,11 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 	}
 
 	clientOptions := providerClientOptions{
-		baseURL:      cfg.BaseURL,
-		config:       cfg,
-		apiKey:       resolvedAPIKey,
-		extraHeaders: resolvedExtraHeaders,
+		baseURL:            cfg.BaseURL,
+		config:             cfg,
+		apiKey:             resolvedAPIKey,
+		extraHeaders:       resolvedExtraHeaders,
+		systemPromptPrefix: cfg.SystemPromptPrefix,
 		model: func(tp config.SelectedModelType) provider.Model {
 			return *config.Get().GetModelByType(tp)
 		},

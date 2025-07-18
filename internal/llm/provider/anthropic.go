@@ -51,12 +51,10 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 		}
 	}
 
-	// Check if API key starts with "Bearer " (indicating it's a bearer token)
 	isBearerToken := strings.HasPrefix(opts.apiKey, "Bearer ")
 
 	if opts.apiKey != "" && !hasBearerAuth {
 		if isBearerToken {
-			// Use the API key as an Authorization header instead of X-Api-Key
 			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
 			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader("Authorization", opts.apiKey))
 		} else {
@@ -215,6 +213,25 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		maxTokens = int64(a.adjustedMaxTokens)
 	}
 
+	systemBlocks := []anthropic.TextBlockParam{}
+
+	// Add custom system prompt prefix if configured
+	if a.providerOptions.systemPromptPrefix != "" {
+		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+			Text: a.providerOptions.systemPromptPrefix,
+			CacheControl: anthropic.CacheControlEphemeralParam{
+				Type: "ephemeral",
+			},
+		})
+	}
+
+	systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+		Text: a.providerOptions.systemMessage,
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	})
+
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(model.ID),
 		MaxTokens:   maxTokens,
@@ -222,14 +239,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		Messages:    messages,
 		Tools:       tools,
 		Thinking:    thinkingParam,
-		System: []anthropic.TextBlockParam{
-			{
-				Text: a.providerOptions.systemMessage,
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			},
-		},
+		System:      systemBlocks,
 	}
 }
 
@@ -398,7 +408,6 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				close(eventChan)
 				return
 			}
-			slog.Warn(err.Error())
 
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := a.shouldRetry(attempts, err)

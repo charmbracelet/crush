@@ -55,7 +55,11 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 
 func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
 	// Add system message first
-	openaiMessages = append(openaiMessages, openai.SystemMessage(o.providerOptions.systemMessage))
+	systemMessage := o.providerOptions.systemMessage
+	if o.providerOptions.systemPromptPrefix != "" {
+		systemMessage = o.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	}
+	openaiMessages = append(openaiMessages, openai.SystemMessage(systemMessage))
 
 	for _, msg := range messages {
 		switch msg.Role {

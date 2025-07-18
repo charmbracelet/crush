@@ -151,15 +151,15 @@ func (t *Theme) buildStyles() *Styles {
 		TextInput: textinput.Styles{
 			Focused: textinput.StyleState{
 				Text:        base,
-				Placeholder: base.Foreground(t.FgMuted),
+				Placeholder: base.Foreground(t.FgSubtle),
 				Prompt:      base.Foreground(t.Tertiary),
-				Suggestion:  base.Foreground(t.FgMuted),
+				Suggestion:  base.Foreground(t.FgSubtle),
 			},
 			Blurred: textinput.StyleState{
 				Text:        base.Foreground(t.FgMuted),
-				Placeholder: base.Foreground(t.FgMuted),
+				Placeholder: base.Foreground(t.FgSubtle),
 				Prompt:      base.Foreground(t.FgMuted),
-				Suggestion:  base.Foreground(t.FgMuted),
+				Suggestion:  base.Foreground(t.FgSubtle),
 			},
 			Cursor: textinput.CursorStyle{
 				Color: t.Secondary,
@@ -174,7 +174,7 @@ func (t *Theme) buildStyles() *Styles {
 				LineNumber:       base.Foreground(t.FgSubtle),
 				CursorLine:       base,
 				CursorLineNumber: base.Foreground(t.FgSubtle),
-				Placeholder:      base.Foreground(t.FgMuted),
+				Placeholder:      base.Foreground(t.FgSubtle),
 				Prompt:           base.Foreground(t.Tertiary),
 			},
 			Blurred: textarea.StyleState{
@@ -183,7 +183,7 @@ func (t *Theme) buildStyles() *Styles {
 				LineNumber:       base.Foreground(t.FgMuted),
 				CursorLine:       base,
 				CursorLineNumber: base.Foreground(t.FgMuted),
-				Placeholder:      base.Foreground(t.FgMuted),
+				Placeholder:      base.Foreground(t.FgSubtle),
 				Prompt:           base.Foreground(t.FgMuted),
 			},
 			Cursor: textarea.CursorStyle{

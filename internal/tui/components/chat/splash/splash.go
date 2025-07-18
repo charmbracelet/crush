@@ -2,10 +2,10 @@ package splash
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
@@ -50,7 +50,10 @@ const (
 )
 
 // OnboardingCompleteMsg is sent when onboarding is complete
-type OnboardingCompleteMsg struct{}
+type (
+	OnboardingCompleteMsg struct{}
+	SubmitAPIKeyMsg       struct{}
+)
 
 type splashCmp struct {
 	width, height int
@@ -160,7 +163,16 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case models.APIKeyStateChangeMsg:
 		u, cmd := s.apiKeyInput.Update(msg)
 		s.apiKeyInput = u.(*models.APIKeyInput)
+		if msg.State == models.APIKeyInputStateVerified {
+			return s, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+				return SubmitAPIKeyMsg{}
+			})
+		}
 		return s, cmd
+	case SubmitAPIKeyMsg:
+		if s.isAPIKeyValid {
+			return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Back):
@@ -197,7 +209,11 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if s.needsAPIKey {
 				// Handle API key submission
-				s.apiKeyValue = s.apiKeyInput.Value()
+				s.apiKeyValue = strings.TrimSpace(s.apiKeyInput.Value())
+				if s.apiKeyValue == "" {
+					return s, nil
+				}
+
 				provider, err := s.getProvider(s.selectedModel.Provider.ID)
 				if err != nil || provider == nil {
 					return s, util.ReportError(fmt.Errorf("provider %s not found", s.selectedModel.Provider.ID))
@@ -214,8 +230,13 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						State: models.APIKeyInputStateVerifying,
 					}),
 					func() tea.Msg {
+						start := time.Now()
 						err := providerConfig.TestConnection(config.Get().Resolver())
-						slog.Info("Testing API key connection", "provider", providerConfig.ID, "err", err)
+						// intentionally wait for at least 750ms to make sure the user sees the spinner
+						elapsed := time.Since(start)
+						if elapsed < 750*time.Millisecond {
+							time.Sleep(750*time.Millisecond - elapsed)
+						}
 						if err == nil {
 							s.isAPIKeyValid = true
 							return models.APIKeyStateChangeMsg{

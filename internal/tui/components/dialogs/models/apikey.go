@@ -59,6 +59,7 @@ func NewAPIKeyInput() *APIKeyInput {
 
 func (a *APIKeyInput) SetProviderName(name string) {
 	a.providerName = name
+	a.updateStatePresentation()
 }
 
 func (a *APIKeyInput) SetShowTitle(show bool) {
@@ -103,10 +104,9 @@ func (a *APIKeyInput) updateStatePresentation() {
 	t := styles.CurrentTheme()
 
 	prefixStyle := t.S().Base.
-		Foreground(t.Primary).
-		Bold(true)
+		Foreground(t.Primary)
 	accentStyle := t.S().Base.Foreground(t.Green).Bold(true)
-	errorStyle := t.S().Base.Foreground(t.Cherry).Bold(true)
+	errorStyle := t.S().Base.Foreground(t.Cherry)
 
 	switch a.state {
 	case APIKeyInputStateInitial:
@@ -120,11 +120,14 @@ func (a *APIKeyInput) updateStatePresentation() {
 		ts := t.S().TextInput
 		// make the blurred state be the same
 		ts.Blurred.Prompt = ts.Focused.Prompt
-		a.input.Prompt = a.spinner.View() + " "
+		a.input.Prompt = a.spinner.View()
 		a.input.Blur()
 	case APIKeyInputStateVerified:
 		a.title = accentStyle.Render(a.providerName+" API Key") + prefixStyle.Render(" validated.")
-		a.input.SetStyles(t.S().TextInput)
+		ts := t.S().TextInput
+		// make the blurred state be the same
+		ts.Blurred.Prompt = ts.Focused.Prompt
+		a.input.SetStyles(ts)
 		a.input.Prompt = styles.CheckIcon + " "
 		a.input.Blur()
 	case APIKeyInputStateError:

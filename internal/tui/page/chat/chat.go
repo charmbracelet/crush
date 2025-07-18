@@ -173,6 +173,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
+	case splash.SubmitAPIKeyMsg:
+		u, cmd := p.splash.Update(msg)
+		p.splash = u.(splash.Splash)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
 	case commands.ToggleCompactModeMsg:
 		p.forceCompact = !p.forceCompact
 		var cmd tea.Cmd

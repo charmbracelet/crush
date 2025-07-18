@@ -2,7 +2,7 @@ package models
 
 import (
 	"fmt"
-	"log/slog"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -142,8 +142,13 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						State: APIKeyInputStateVerifying,
 					}),
 					func() tea.Msg {
+						start := time.Now()
 						err := providerConfig.TestConnection(config.Get().Resolver())
-						slog.Info("Testing API key connection", "provider", providerConfig.ID, "err", err)
+						// intentionally wait for at least 750ms to make sure the user sees the spinner
+						elapsed := time.Since(start)
+						if elapsed < 750*time.Millisecond {
+							time.Sleep(750*time.Millisecond - elapsed)
+						}
 						if err == nil {
 							m.isAPIKeyValid = true
 							return APIKeyStateChangeMsg{

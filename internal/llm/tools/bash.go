@@ -188,7 +188,7 @@ When the user asks you to create a new git commit, follow these steps carefully:
 
 4. Create the commit with a message ending with:
 💘 Generated with Crush
-Co-Authored-By: Crush <noreply@crush.charm.land>
+Co-Authored-By: Crush <crush@charm.land>
 
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
 <example>
@@ -196,7 +196,7 @@ git commit -m "$(cat <<'EOF'
  Commit message here.
 
  💘 Generated with Crush
- Co-Authored-By: 💘 Crush <noreply@crush.charm.land>
+ Co-Authored-By: 💘 Crush <crush@charm.land>
  EOF
  )"
 </example>

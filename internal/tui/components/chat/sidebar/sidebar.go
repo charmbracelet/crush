@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -26,6 +27,8 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type FileHistory struct {
@@ -880,8 +883,13 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	agentCfg := config.Get().Agents["coder"]
+	cfg := config.Get()
+	agentCfg := cfg.Agents["coder"]
+
+	selectedModel := cfg.Models[agentCfg.Model]
+
 	model := config.Get().GetModelByType(agentCfg.Model)
+	modelProvider := config.Get().GetProviderForModel(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
@@ -890,6 +898,25 @@ func (s *sidebarCmp) currentModelBlock() string {
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,
+	}
+	if model.CanReason {
+		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+		switch modelProvider.Type {
+		case provider.TypeOpenAI:
+			reasoningEffort := model.DefaultReasoningEffort
+			if selectedModel.ReasoningEffort != "" {
+				reasoningEffort = selectedModel.ReasoningEffort
+			}
+			formatter := cases.Title(language.English, cases.NoLower)
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+		case provider.TypeAnthropic:
+			formatter := cases.Title(language.English, cases.NoLower)
+			if selectedModel.Think {
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+			} else {
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+			}
+		}
 	}
 	if s.session.ID != "" {
 		parts = append(

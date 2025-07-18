@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -403,13 +404,6 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 	msgHistory := append(msgs, userMsg)
 
 	for {
-		// Check for cancellation before each iteration
-		select {
-		case <-ctx.Done():
-			return a.err(ctx.Err())
-		default:
-			// Continue processing
-		}
 		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -461,135 +455,155 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
 
+	toolResults := sync.Map{}
+	processedTool := make(map[string]bool)
+	msg, err := a.messages.Create(context.Background(), assistantMsg.SessionID, message.CreateMessageParams{
+		Role:     message.Tool,
+		Parts:    []message.ContentPart{},
+		Provider: a.providerID,
+	})
+	hasPermissionDenied := atomic.Bool{}
+	wg := sync.WaitGroup{}
+
+	// Helper function to handle cancellation
+	handleCancellation := func(ctx context.Context, reason string) error {
+		slog.Info("Request cancelled by user", "sessionID", sessionID, "reason", reason)
+		for toolCallID, processed := range processedTool {
+			_, ok := toolResults.Load(toolCallID)
+			if !ok || !processed {
+				toolResults.Store(toolCallID, message.ToolResult{
+					ToolCallID: toolCallID,
+					Content:    "Tool execution cancelled by user",
+					IsError:    true,
+				})
+			}
+		}
+		parts := make([]message.ContentPart, 0)
+		toolResults.Range(func(key, value any) bool {
+			if tr, ok := value.(message.ToolResult); ok {
+				parts = append(parts, tr)
+			}
+			return true
+		})
+		msg.Parts = parts
+		if updateErr := a.messages.Update(context.Background(), msg); updateErr != nil {
+			slog.Error("Failed to update tool message", "error", updateErr)
+			a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "Failed to update tool message", updateErr.Error())
+			return updateErr
+		}
+		a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
+		return ctx.Err()
+	}
+
 	// Process each event in the stream.
 	for event := range eventChan {
 		if processErr := a.processEvent(ctx, sessionID, &assistantMsg, event); processErr != nil {
 			if errors.Is(processErr, context.Canceled) {
-				a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
+				return assistantMsg, nil, handleCancellation(ctx, "process event")
 			} else {
 				a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "API Error", processErr.Error())
 			}
 			return assistantMsg, nil, processErr
 		}
 		if ctx.Err() != nil {
-			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
-			return assistantMsg, nil, ctx.Err()
+			return assistantMsg, nil, handleCancellation(ctx, "context cancelled during event processing")
 		}
-	}
 
-	toolResults := make([]message.ToolResult, len(assistantMsg.ToolCalls()))
-	toolCalls := assistantMsg.ToolCalls()
-	for i, toolCall := range toolCalls {
-		select {
-		case <-ctx.Done():
-			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
-			// Make all future tool calls cancelled
-			for j := i; j < len(toolCalls); j++ {
-				toolResults[j] = message.ToolResult{
-					ToolCallID: toolCalls[j].ID,
-					Content:    "Tool execution canceled by user",
-					IsError:    true,
-				}
-			}
-			goto out
-		default:
-			// Continue processing
-			var tool tools.BaseTool
-			for availableTool := range a.tools.Seq() {
-				if availableTool.Info().Name == toolCall.Name {
-					tool = availableTool
-					break
-				}
-			}
-
-			// Tool not found
-			if tool == nil {
-				toolResults[i] = message.ToolResult{
-					ToolCallID: toolCall.ID,
-					Content:    fmt.Sprintf("Tool not found: %s", toolCall.Name),
-					IsError:    true,
-				}
+		for _, toolCall := range assistantMsg.ToolCalls() {
+			if !toolCall.Finished {
 				continue
 			}
-
-			// Run tool in goroutine to allow cancellation
-			type toolExecResult struct {
-				response tools.ToolResponse
-				err      error
+			if _, exists := processedTool[toolCall.ID]; exists {
+				continue
 			}
-			resultChan := make(chan toolExecResult, 1)
-
-			go func() {
+			processedTool[toolCall.ID] = false
+			wg.Add(1)
+			go func(toolCall message.ToolCall) {
+				defer wg.Done()
+				var tool tools.BaseTool
+				defer func() { processedTool[toolCall.ID] = true }()
+				for _, availableTool := range a.tools {
+					if availableTool.Info().Name == toolCall.Name {
+						tool = availableTool
+						break
+					}
+				}
+				// Tool not found
+				if tool == nil {
+					toolResults.Store(toolCall.ID, message.ToolResult{
+						ToolCallID: toolCall.ID,
+						Content:    fmt.Sprintf("Tool not found: %s", toolCall.Name),
+						IsError:    true,
+					})
+					return
+				}
 				response, err := tool.Run(ctx, tools.ToolCall{
 					ID:    toolCall.ID,
 					Name:  toolCall.Name,
 					Input: toolCall.Input,
 				})
-				resultChan <- toolExecResult{response: response, err: err}
-			}()
-
-			var toolResponse tools.ToolResponse
-			var toolErr error
-
-			select {
-			case <-ctx.Done():
-				a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
-				// Mark remaining tool calls as cancelled
-				for j := i; j < len(toolCalls); j++ {
-					toolResults[j] = message.ToolResult{
-						ToolCallID: toolCalls[j].ID,
+				if ctx.Err() != nil {
+					toolResults.Store(toolCall.ID, message.ToolResult{
+						ToolCallID: toolCall.ID,
 						Content:    "Tool execution canceled by user",
 						IsError:    true,
-					}
+					})
+					return
 				}
-				goto out
-			case result := <-resultChan:
-				toolResponse = result.response
-				toolErr = result.err
-			}
-
-			if toolErr != nil {
-				slog.Error("Tool execution error", "toolCall", toolCall.ID, "error", toolErr)
-				if errors.Is(toolErr, permission.ErrorPermissionDenied) {
-					toolResults[i] = message.ToolResult{
-						ToolCallID: toolCall.ID,
-						Content:    "Permission denied",
-						IsError:    true,
-					}
-					for j := i + 1; j < len(toolCalls); j++ {
-						toolResults[j] = message.ToolResult{
-							ToolCallID: toolCalls[j].ID,
-							Content:    "Tool execution canceled by user",
+				if err != nil {
+					slog.Error("Tool execution error", "toolCall", toolCall.ID, "error", err)
+					if errors.Is(err, permission.ErrorPermissionDenied) {
+						toolResults.Store(toolCall.ID, message.ToolResult{
+							ToolCallID: toolCall.ID,
+							Content:    "Permission denied",
 							IsError:    true,
-						}
+						})
+						hasPermissionDenied.Store(true)
 					}
-					a.finishMessage(ctx, &assistantMsg, message.FinishReasonPermissionDenied, "Permission denied", "")
-					break
+				} else {
+					toolResults.Store(toolCall.ID, message.ToolResult{
+						ToolCallID: toolCall.ID,
+						Content:    response.Content,
+						Metadata:   response.Metadata,
+						IsError:    response.IsError,
+					})
 				}
-			}
-			toolResults[i] = message.ToolResult{
-				ToolCallID: toolCall.ID,
-				Content:    toolResponse.Content,
-				Metadata:   toolResponse.Metadata,
-				IsError:    toolResponse.IsError,
-			}
+				parts := make([]message.ContentPart, 0)
+				toolResults.Range(func(key, value any) bool {
+					if tr, ok := value.(message.ToolResult); ok {
+						parts = append(parts, tr)
+					}
+					return true
+				})
+				msg.Parts = parts
+				if updateErr := a.messages.Update(ctx, msg); updateErr != nil {
+					slog.Error("Failed to update tool message", "error", updateErr)
+					a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "Failed to update tool message", updateErr.Error())
+				}
+			}(toolCall)
+			break
 		}
 	}
-out:
-	if len(toolResults) == 0 {
-		return assistantMsg, nil, nil
+
+	// We need this to be a go routine to avoid blocking so that if the context is cancelled we can
+	// cancel the tool calls.
+	doneChan := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneChan)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return assistantMsg, nil, handleCancellation(ctx, "context cancelled during tool execution")
+	case <-doneChan:
+		slog.Debug("All tool calls processed", "sessionID", sessionID, "finished", assistantMsg.FinishReason())
+		// Intentionally did not add a timeout here, users can forget that they started a request and it will sit
+		// while permissions are requested.
 	}
-	parts := make([]message.ContentPart, 0)
-	for _, tr := range toolResults {
-		parts = append(parts, tr)
-	}
-	msg, err := a.messages.Create(context.Background(), assistantMsg.SessionID, message.CreateMessageParams{
-		Role:     message.Tool,
-		Parts:    parts,
-		Provider: a.providerID,
-	})
-	if err != nil {
-		return assistantMsg, nil, fmt.Errorf("failed to create cancelled tool message: %w", err)
+
+	if hasPermissionDenied.Load() {
+		a.finishMessage(ctx, &assistantMsg, message.FinishReasonPermissionDenied, "Permission denied", "")
 	}
 
 	return assistantMsg, &msg, err

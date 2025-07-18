@@ -190,7 +190,12 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 		if event.Payload.SessionID != m.session.ID {
 			return m.handleChildSession(event)
 		}
-		return m.handleUpdateAssistantMessage(event.Payload)
+		switch event.Payload.Role {
+		case message.Assistant:
+			return m.handleUpdateAssistantMessage(event.Payload)
+		case message.Tool:
+			return m.handleToolMessage(event.Payload)
+		}
 	}
 	return nil
 }

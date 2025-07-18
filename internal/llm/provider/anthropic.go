@@ -157,6 +157,15 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 	}
 }
 
+func (a *anthropicClient) isThinkingEnabled() bool {
+	cfg := config.Get()
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if a.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	}
+	return a.Model().CanReason && modelConfig.Think
+}
+
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
 	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
@@ -171,7 +180,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
-	if a.Model().CanReason && modelConfig.Think {
+	if a.isThinkingEnabled() {
 		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(maxTokens) * 0.8))
 		temperature = anthropic.Float(1)
 	}
@@ -216,9 +225,14 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 			slog.Debug("Prepared messages", "messages", string(jsonData))
 		}
 
+		var opts []option.RequestOption
+		if a.isThinkingEnabled() {
+			opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+		}
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
+			opts...,
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
@@ -268,10 +282,15 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				slog.Debug("Prepared messages", "messages", string(jsonData))
 			}
 
+			var opts []option.RequestOption
+			if a.isThinkingEnabled() {
+				opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+			}
+
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
-				option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"),
+				opts...,
 			)
 			accumulatedMessage := anthropic.Message{}
 

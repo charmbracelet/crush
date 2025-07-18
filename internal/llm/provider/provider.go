@@ -142,11 +142,21 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
 
+	// Resolve extra headers
+	resolvedExtraHeaders := make(map[string]string)
+	for key, value := range cfg.ExtraHeaders {
+		resolvedValue, err := config.Get().Resolve(value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
+		}
+		resolvedExtraHeaders[key] = resolvedValue
+	}
+
 	clientOptions := providerClientOptions{
 		baseURL:      cfg.BaseURL,
 		config:       cfg,
 		apiKey:       resolvedAPIKey,
-		extraHeaders: cfg.ExtraHeaders,
+		extraHeaders: resolvedExtraHeaders,
 		model: func(tp config.SelectedModelType) provider.Model {
 			return *config.Get().GetModelByType(tp)
 		},

@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -172,6 +173,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
+	case splash.SubmitAPIKeyMsg:
+		u, cmd := p.splash.Update(msg)
+		p.splash = u.(splash.Splash)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
 	case commands.ToggleCompactModeMsg:
 		p.forceCompact = !p.forceCompact
 		var cmd tea.Cmd
@@ -212,12 +218,25 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
+	case models.APIKeyStateChangeMsg:
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		}
+		return p, tea.Batch(cmds...)
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
-		u, cmd := p.chat.Update(msg)
-		p.chat = u.(chat.MessageListCmp)
-		cmds = append(cmds, cmd)
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		} else {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+		}
 		return p, tea.Batch(cmds...)
 
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
@@ -655,12 +674,23 @@ func (p *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	case p.isOnboarding && p.splash.IsShowingAPIKey():
+		if p.splash.IsAPIKeyValid() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "continue"),
+				),
+			)
+		} else {
+			shortList = append(shortList,
+				// Go back
+				key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "back"),
+				),
+			)
+		}
 		shortList = append(shortList,
-			// Go back
-			key.NewBinding(
-				key.WithKeys("esc"),
-				key.WithHelp("esc", "back"),
-			),
 			// Quit
 			key.NewBinding(
 				key.WithKeys("ctrl+c"),

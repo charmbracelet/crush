@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -48,8 +49,9 @@ type appModel struct {
 
 	app *app.App
 
-	dialog      dialogs.DialogCmp
-	completions completions.Completions
+	dialog       dialogs.DialogCmp
+	completions  completions.Completions
+	isConfigured bool
 
 	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
@@ -72,6 +74,7 @@ func (a appModel) Init() tea.Cmd {
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
+	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
@@ -224,9 +227,27 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return a, tea.Batch(cmds...)
+	case splash.OnboardingCompleteMsg:
+		a.isConfigured = config.HasInitialDataConfig()
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
+		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
+
+	case tea.PasteMsg:
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		} else {
+			updated, cmd := a.pages[a.currentPage].Update(msg)
+			a.pages[a.currentPage] = updated.(util.Model)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
 	}
 	s, _ := a.status.Update(msg)
 	a.status = s.(status.StatusCmp)
@@ -307,6 +328,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		})
 
 	case key.Matches(msg, a.keyMap.Commands):
+		// if the app is not configured show no commands
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -317,6 +342,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
+		// if the app is not configured show no sessions
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}

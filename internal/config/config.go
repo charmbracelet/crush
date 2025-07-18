@@ -454,7 +454,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://api.openai.com/v1"
 		}
 		testURL = baseURL + "/models"
-		headers["Authorization"] = "Bearer " + c.APIKey
+		headers["Authorization"] = "Bearer " + apiKey
 	case provider.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {

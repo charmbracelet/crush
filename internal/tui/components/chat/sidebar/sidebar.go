@@ -689,7 +689,7 @@ func (m *sidebarCmp) filesBlock() string {
 	if totalFilesWithChanges > maxFiles {
 		remaining := totalFilesWithChanges - maxFiles
 		fileList = append(fileList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
+			t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("…and %d more", remaining)),
 		)
 	}
 
@@ -777,7 +777,7 @@ func (m *sidebarCmp) lspBlock() string {
 	if len(lsp) > maxLSPs {
 		remaining := len(lsp) - maxLSPs
 		lspList = append(lspList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
+			t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("…and %d more", remaining)),
 		)
 	}
 
@@ -834,7 +834,7 @@ func (m *sidebarCmp) mcpBlock() string {
 	if len(mcps) > maxMCPs {
 		remaining := len(mcps) - maxMCPs
 		mcpList = append(mcpList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
+			t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("…and %d more", remaining)),
 		)
 	}
 

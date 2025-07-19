@@ -206,7 +206,7 @@ func (m *messageCmp) renderUserMessage() string {
 		Background(t.BgSubtle)
 
 	attachments := make([]string, len(m.message.BinaryContent()))
-	for _, attachment := range m.message.BinaryContent() {
+	for i, attachment := range m.message.BinaryContent() {
 		file := filepath.Base(attachment.Path)
 		var filename string
 		runes := []rune(file)
@@ -218,7 +218,7 @@ func (m *messageCmp) renderUserMessage() string {
 			filename = fmt.Sprintf(" %s %s ", styles.DocumentIcon, file)
 		}
 
-		attachments = append(attachments, attachmentStyles.Render(filename))
+		attachments[i] = attachmentStyles.Render(filename)
 	}
 
 	if len(attachments) > 0 {

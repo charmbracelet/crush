@@ -44,10 +44,12 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 		}
 	}
 
-	if opts.extraHeaders != nil {
-		for key, value := range opts.extraHeaders {
-			openaiClientOptions = append(openaiClientOptions, option.WithHeader(key, value))
-		}
+	for key, value := range opts.extraHeaders {
+		openaiClientOptions = append(openaiClientOptions, option.WithHeader(key, value))
+	}
+
+	for extraKey, extraValue := range opts.extraBody {
+		openaiClientOptions = append(openaiClientOptions, option.WithJSONSet(extraKey, extraValue))
 	}
 
 	return openai.NewClient(openaiClientOptions...)

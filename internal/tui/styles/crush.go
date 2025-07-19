@@ -52,5 +52,6 @@ func NewCrushTheme() *Theme {
 		Red:      charmtone.Coral,
 		RedDark:  charmtone.Sriracha,
 		RedLight: charmtone.Salmon,
+		Cherry:   charmtone.Cherry,
 	}
 }

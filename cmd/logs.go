@@ -77,17 +77,13 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 	}
 
 	var lines []string
-	lineCount := 0
 	for line := range t.Lines {
 		if line.Err != nil {
 			continue
 		}
 		lines = append(lines, line.Text)
-		lineCount++
-		if lineCount >= tailLines {
-			if len(lines) > tailLines {
-				lines = lines[len(lines)-tailLines:]
-			}
+		if len(lines) > tailLines {
+			lines = lines[len(lines)-tailLines:]
 		}
 	}
 	t.Stop()
@@ -138,17 +134,13 @@ func showLogs(logsFile string, tailLines int) error {
 	defer t.Stop()
 
 	var lines []string
-	lineCount := 0
 	for line := range t.Lines {
 		if line.Err != nil {
 			continue
 		}
 		lines = append(lines, line.Text)
-		lineCount++
-		if lineCount >= tailLines {
-			if len(lines) > tailLines {
-				lines = lines[len(lines)-tailLines:]
-			}
+		if len(lines) > tailLines {
+			lines = lines[len(lines)-tailLines:]
 		}
 	}
 

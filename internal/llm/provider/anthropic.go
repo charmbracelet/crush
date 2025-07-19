@@ -67,11 +67,11 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
-	if opts.extraHeaders != nil {
-		for key, value := range opts.extraHeaders {
-			slog.Debug("Adding extra header to Anthropic client", "key", key, "value", value)
-			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader(key, value))
-		}
+	for _, header := range opts.extraHeaders {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(header, opts.extraHeaders[header]))
+	}
+	for key, value := range opts.extraBody {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithJSONSet(key, value))
 	}
 	return anthropic.NewClient(anthropicClientOptions...)
 }

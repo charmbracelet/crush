@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
@@ -182,6 +183,11 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	}
 
 	content := string(body)
+
+	isValidUt8 := utf8.ValidString(content)
+	if !isValidUt8 {
+		return NewTextErrorResponse("Response content is not valid UTF-8"), nil
+	}
 	contentType := resp.Header.Get("Content-Type")
 
 	switch format {
@@ -191,9 +197,8 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			if err != nil {
 				return NewTextErrorResponse("Failed to extract text from HTML: " + err.Error()), nil
 			}
-			return NewTextResponse(text), nil
+			content = text
 		}
-		return NewTextResponse(content), nil
 
 	case "markdown":
 		if strings.Contains(contentType, "text/html") {
@@ -201,17 +206,36 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			if err != nil {
 				return NewTextErrorResponse("Failed to convert HTML to Markdown: " + err.Error()), nil
 			}
-			return NewTextResponse(markdown), nil
+			content = markdown
 		}
 
-		return NewTextResponse("```\n" + content + "\n```"), nil
+		content = "```\n" + content + "\n```"
 
 	case "html":
-		return NewTextResponse(content), nil
-
-	default:
-		return NewTextResponse(content), nil
+		// return only the body of the HTML document
+		if strings.Contains(contentType, "text/html") {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
+			if err != nil {
+				return NewTextErrorResponse("Failed to parse HTML: " + err.Error()), nil
+			}
+			body, err := doc.Find("body").Html()
+			if err != nil {
+				return NewTextErrorResponse("Failed to extract body from HTML: " + err.Error()), nil
+			}
+			if body == "" {
+				return NewTextErrorResponse("No body content found in HTML"), nil
+			}
+			content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
+		}
 	}
+	// calculate byte size of content
+	contentSize := int64(len(content))
+	if contentSize > MaxReadSize {
+		content = content[:MaxReadSize]
+		content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
+	}
+
+	return NewTextResponse(content), nil
 }
 
 func extractTextFromHTML(html string) (string, error) {
@@ -220,7 +244,7 @@ func extractTextFromHTML(html string) (string, error) {
 		return "", err
 	}
 
-	text := doc.Text()
+	text := doc.Find("body").Text()
 	text = strings.Join(strings.Fields(text), " ")
 
 	return text, nil

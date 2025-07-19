@@ -193,17 +193,19 @@ func (m *messageCmp) renderAssistantMessage() string {
 	return m.style().Render(joined)
 }
 
-// renderUserMessage renders user messages with file attachments.
-// Displays message content and any attached files with appropriate icons.
+// renderUserMessage renders user messages with file attachments. It displays
+// message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
 	parts := []string{
 		m.toMarkdown(m.message.Content().String()),
 	}
+
 	attachmentStyles := t.S().Text.
 		MarginLeft(1).
 		Background(t.BgSubtle)
-	attachments := []string{}
+
+	attachments := make([]string, len(m.message.BinaryContent()))
 	for _, attachment := range m.message.BinaryContent() {
 		file := filepath.Base(attachment.Path)
 		var filename string
@@ -214,9 +216,11 @@ func (m *messageCmp) renderUserMessage() string {
 		}
 		attachments = append(attachments, attachmentStyles.Render(filename))
 	}
+
 	if len(attachments) > 0 {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
+
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.style().Render(joined)
 }

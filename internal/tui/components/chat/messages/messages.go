@@ -209,11 +209,15 @@ func (m *messageCmp) renderUserMessage() string {
 	for _, attachment := range m.message.BinaryContent() {
 		file := filepath.Base(attachment.Path)
 		var filename string
-		if len(file) > 10 {
-			filename = fmt.Sprintf(" %s %s... ", styles.DocumentIcon, file[0:7])
+		runes := []rune(file)
+
+		const truncatePathAt = 7
+		if len(runes) > truncatePathAt {
+			filename = fmt.Sprintf(" %s %s... ", styles.DocumentIcon, string(runes[0:truncatePathAt]))
 		} else {
 			filename = fmt.Sprintf(" %s %s ", styles.DocumentIcon, file)
 		}
+
 		attachments = append(attachments, attachmentStyles.Render(filename))
 	}
 

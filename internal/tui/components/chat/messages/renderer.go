@@ -162,6 +162,7 @@ func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 // Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
+	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
@@ -374,6 +375,32 @@ func formatTimeout(timeout int) string {
 		return ""
 	}
 	return (time.Duration(timeout) * time.Second).String()
+}
+
+// -----------------------------------------------------------------------------
+//  Download renderer
+// -----------------------------------------------------------------------------
+
+// downloadRenderer handles file downloading with URL and file path display
+type downloadRenderer struct {
+	baseRenderer
+}
+
+// Render displays the download URL and destination file path with timeout parameter
+func (dr downloadRenderer) Render(v *toolCallCmp) string {
+	var params tools.DownloadParams
+	var args []string
+	if err := dr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			addKeyValue("file_path", fsext.PrettyPath(params.FilePath)).
+			addKeyValue("timeout", formatTimeout(params.Timeout)).
+			build()
+	}
+
+	return dr.renderWithParams(v, "Download", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -758,6 +785,8 @@ func prettifyToolName(name string) string {
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
+	case tools.DownloadToolName:
+		return "Download"
 	case tools.EditToolName:
 		return "Edit"
 	case tools.FetchToolName:

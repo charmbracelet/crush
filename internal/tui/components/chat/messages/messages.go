@@ -263,7 +263,7 @@ func (m *messageCmp) renderThinkingContent() string {
 				Description: duration.String(),
 				NoIcon:      true,
 			}
-			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+			return t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
 			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {

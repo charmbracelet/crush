@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -31,29 +32,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-// MouseEventFilter filters mouse events based on the current focus state
-// This is used with tea.WithFilter to prevent mouse scroll events from
-// interfering with typing performance in the editor
-func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
-	// Only filter mouse events
-	switch msg.(type) {
-	case tea.MouseWheelMsg, tea.MouseMotionMsg:
-		// Check if we have an appModel and if editor is focused
-		if appModel, ok := m.(*appModel); ok {
-			if appModel.currentPage == chat.ChatPageID {
-				if chatPage, ok := appModel.pages[appModel.currentPage].(chat.ChatPage); ok {
-					// If editor is focused (not chatFocused), filter out mouse wheel/motion events
-					if !chatPage.IsChatFocused() {
-						return nil // Filter out the event
-					}
-				}
-			}
-		}
-	}
-	// Allow all other events to pass through
-	return msg
-}
-
 // appModel represents the main application model that manages pages, dialogs, and UI state.
 type appModel struct {
 	wWidth, wHeight int // Window dimensions
@@ -71,8 +49,9 @@ type appModel struct {
 
 	app *app.App
 
-	dialog      dialogs.DialogCmp
-	completions completions.Completions
+	dialog       dialogs.DialogCmp
+	completions  completions.Completions
+	isConfigured bool
 
 	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
@@ -88,8 +67,6 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
-	cmds = append(cmds, tea.EnableMouseAllMotion)
-
 	return tea.Batch(cmds...)
 }
 
@@ -97,6 +74,7 @@ func (a appModel) Init() tea.Cmd {
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
+	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
@@ -204,7 +182,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: filepicker.NewFilePickerCmp(),
+			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
 	case pubsub.Event[permission.PermissionRequest]:
@@ -249,9 +227,27 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return a, tea.Batch(cmds...)
+	case splash.OnboardingCompleteMsg:
+		a.isConfigured = config.HasInitialDataConfig()
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
+		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
+
+	case tea.PasteMsg:
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		} else {
+			updated, cmd := a.pages[a.currentPage].Update(msg)
+			a.pages[a.currentPage] = updated.(util.Model)
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
 	}
 	s, _ := a.status.Update(msg)
 	a.status = s.(status.StatusCmp)
@@ -332,6 +328,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		})
 
 	case key.Matches(msg, a.keyMap.Commands):
+		// if the app is not configured show no commands
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -342,6 +342,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
+		// if the app is not configured show no sessions
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}

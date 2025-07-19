@@ -92,6 +92,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	return app, nil
 }
 
+// Config returns the application configuration.
+func (app *App) Config() *config.Config {
+	return app.config
+}
+
 // RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.
 func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")

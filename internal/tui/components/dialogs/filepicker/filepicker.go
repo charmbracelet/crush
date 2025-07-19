@@ -45,11 +45,22 @@ type model struct {
 	help            help.Model
 }
 
-func NewFilePickerCmp() FilePicker {
+func NewFilePickerCmp(workingDir string) FilePicker {
 	t := styles.CurrentTheme()
 	fp := filepicker.New()
 	fp.AllowedTypes = []string{".jpg", ".jpeg", ".png"}
-	fp.CurrentDirectory, _ = os.UserHomeDir()
+
+	if workingDir != "" {
+		fp.CurrentDirectory = workingDir
+	} else {
+		// Fallback to current working directory, then home directory
+		if cwd, err := os.Getwd(); err == nil {
+			fp.CurrentDirectory = cwd
+		} else {
+			fp.CurrentDirectory, _ = os.UserHomeDir()
+		}
+	}
+
 	fp.ShowPermissions = false
 	fp.ShowSize = false
 	fp.AutoHeight = false

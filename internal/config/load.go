@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/client"
@@ -74,6 +75,35 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err := cfg.configureProviders(env, valueResolver, providers); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
+
+	// Test provider connections in parallel
+	var testResults sync.Map
+	var wg sync.WaitGroup
+
+	for _, p := range cfg.Providers {
+		if p.Type == provider.TypeOpenAI || p.Type == provider.TypeAnthropic {
+			wg.Add(1)
+			go func(provider ProviderConfig) {
+				defer wg.Done()
+				err := provider.TestConnection(cfg.resolver)
+				testResults.Store(provider.ID, err == nil)
+				if err != nil {
+					slog.Error("Provider connection test failed", "provider", provider.ID, "error", err)
+				}
+			}(p)
+		}
+	}
+	wg.Wait()
+
+	// Remove failed providers
+	testResults.Range(func(key, value any) bool {
+		providerID := key.(string)
+		passed := value.(bool)
+		if !passed {
+			delete(cfg.Providers, providerID)
+		}
+		return true
+	})
 
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
@@ -141,6 +171,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Type:         p.Type,
 			Disable:      config.Disable,
 			ExtraHeaders: config.ExtraHeaders,
+			ExtraBody:    config.ExtraBody,
 			ExtraParams:  make(map[string]string),
 			Models:       p.Models,
 		}

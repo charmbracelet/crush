@@ -10,6 +10,9 @@ type KeyMap struct {
 	Previous,
 	Tab,
 	Close key.Binding
+
+	isAPIKeyHelp  bool
+	isAPIKeyValid bool
 }
 
 func DefaultKeyMap() KeyMap {
@@ -61,6 +64,15 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
+	if k.isAPIKeyHelp && !k.isAPIKeyValid {
+		return []key.Binding{
+			k.Close,
+		}
+	} else if k.isAPIKeyValid {
+		return []key.Binding{
+			k.Select,
+		}
+	}
 	return []key.Binding{
 		key.NewBinding(
 			key.WithKeys("down", "up"),

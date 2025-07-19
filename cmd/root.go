@@ -106,6 +106,8 @@ to assist developers in writing, debugging, and understanding code directly from
 			tui.New(app),
 			tea.WithAltScreen(),
 			tea.WithContext(ctx),
+			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
+			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 
 		go app.Subscribe(program)

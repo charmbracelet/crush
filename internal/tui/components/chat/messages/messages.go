@@ -207,27 +207,13 @@ func (m *messageCmp) renderUserMessage() string {
 
 	attachments := make([]string, len(m.message.BinaryContent()))
 	for i, attachment := range m.message.BinaryContent() {
+		const maxFilenameWidth = 10
 		filename := filepath.Base(attachment.Path)
-		var displayFilename string
-		runes := []rune(filename)
-
-		const truncateAtChars = 7
-		const truncateSuffix = "..."
-
-		// If the filename is too long, truncate it to fit within the maximum
-		// width we’ve chosen.
-		if lipgloss.Width(filename) > truncateAtChars+lipgloss.Width(truncateSuffix) {
-			displayFilename = fmt.Sprintf(
-				" %s %s%s ",
-				styles.DocumentIcon,
-				string(runes[0:truncateAtChars]),
-				truncateSuffix,
-			)
-		} else {
-			displayFilename = fmt.Sprintf(" %s %s ", styles.DocumentIcon, filename)
-		}
-
-		attachments[i] = attachmentStyles.Render(displayFilename)
+		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
+			" %s %s ",
+			styles.DocumentIcon,
+			ansi.Truncate(filename, maxFilenameWidth, "..."),
+		))
 	}
 
 	if len(attachments) > 0 {

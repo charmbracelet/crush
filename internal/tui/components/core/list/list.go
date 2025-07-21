@@ -248,7 +248,6 @@ func New(opts ...listOptions) ListModel {
 	}
 
 	if m.filterable && !m.hideFilterInput {
-		t := styles.CurrentTheme()
 		ti := textinput.New()
 		ti.Placeholder = m.filterPlaceholder
 		ti.SetVirtualCursor(false)

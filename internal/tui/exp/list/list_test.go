@@ -2,6 +2,7 @@ package list
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -74,14 +75,14 @@ func TestListPosition(t *testing.T) {
 	}
 	for _, c := range tests {
 		t.Run(c.test, func(t *testing.T) {
-			l := New(WithDirection(c.dir)).(*list)
-			l.SetSize(c.width, c.height)
 			items := []Item{}
 			for i := range c.numItems {
-				item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+				item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 				items = append(items, item)
 			}
-			cmd := l.SetItems(items)
+			l := New(items, WithDirection(c.dir)).(*list[Item])
+			l.SetSize(c.width, c.height)
+			cmd := l.Init()
 			if cmd != nil {
 				cmd()
 			}
@@ -102,33 +103,32 @@ func TestListPosition(t *testing.T) {
 func TestBackwardList(t *testing.T) {
 	t.Run("within height", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward), WithGap(1)).(*list)
-		l.SetSize(10, 20)
 		items := []Item{}
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward), WithGap(1)).(*list[Item])
+		l.SetSize(10, 20)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
 
 		// should select the last item
 		assert.Equal(t, l.selectedItem, items[len(items)-1].ID())
-
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should not change selected item", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		l := New(WithDirection(Backward), WithGap(1), WithSelectedItem(items[2].ID())).(*list)
+		l := New(items, WithDirection(Backward), WithGap(1), WithSelectedItem(items[2].ID())).(*list[Item])
 		l.SetSize(10, 20)
-		cmd := l.SetItems(items)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -137,14 +137,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("more than height", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward))
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward))
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -153,14 +153,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("more than height multi line", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward))
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d\nLine2", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d\nLine2", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward))
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -169,14 +169,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("should move up", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward))
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -186,14 +186,14 @@ func TestBackwardList(t *testing.T) {
 	})
 
 	t.Run("should move at max to the top", func(t *testing.T) {
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -204,14 +204,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("should do nothing with wrong move number", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward))
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -221,14 +221,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("should move to the top", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -239,14 +239,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("should select the item above", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -268,14 +268,14 @@ func TestBackwardList(t *testing.T) {
 	})
 	t.Run("should move the view to be able to see the selected item", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Backward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -293,14 +293,14 @@ func TestBackwardList(t *testing.T) {
 func TestForwardList(t *testing.T) {
 	t.Run("within height", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward), WithGap(1)).(*list)
-		l.SetSize(10, 20)
 		items := []Item{}
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward), WithGap(1)).(*list[Item])
+		l.SetSize(10, 20)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -314,12 +314,12 @@ func TestForwardList(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		l := New(WithDirection(Forward), WithGap(1), WithSelectedItem(items[2].ID())).(*list)
+		l := New(items, WithDirection(Forward), WithGap(1), WithSelectedItem(items[2].ID())).(*list[Item])
 		l.SetSize(10, 20)
-		cmd := l.SetItems(items)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -328,14 +328,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("more than height", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward))
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -344,14 +344,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("more than height multi line", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward))
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d\nLine2", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d\nLine2", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -360,14 +360,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should move down", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -377,14 +377,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should move at max to the bottom", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -395,14 +395,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should do nothing with wrong move number", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -412,14 +412,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should move to the bottom", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -430,14 +430,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should select the item below", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -459,14 +459,14 @@ func TestForwardList(t *testing.T) {
 	})
 	t.Run("should move the view to be able to see the selected item", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Backward)).(*list)
-		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(10, 5)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -484,15 +484,15 @@ func TestForwardList(t *testing.T) {
 func TestListSelection(t *testing.T) {
 	t.Run("should skip none selectable items initially", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(100, 10)
 		items := []Item{}
 		items = append(items, NewSimpleItem("None Selectable"))
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(100, 10)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
@@ -500,24 +500,79 @@ func TestListSelection(t *testing.T) {
 		assert.Equal(t, items[1].ID(), l.selectedItem)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+	t.Run("should select the correct item on startup", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 5 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		cmd := l.Init()
+		otherCmd := l.SetSelected(items[3].ID())
+		var wg sync.WaitGroup
+		if cmd != nil {
+			wg.Add(1)
+			go func() {
+				cmd()
+				wg.Done()
+			}()
+		}
+		if otherCmd != nil {
+			wg.Add(1)
+			go func() {
+				otherCmd()
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+		l.SetSize(100, 10)
+		assert.Equal(t, items[3].ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
 	t.Run("should skip none selectable items in the middle", func(t *testing.T) {
 		t.Parallel()
-		l := New(WithDirection(Forward)).(*list)
-		l.SetSize(100, 10)
 		items := []Item{}
-		item := NewSelectsableItem("Item initial")
+		item := NewSelectableItem("Item initial")
 		items = append(items, item)
 		items = append(items, NewSimpleItem("None Selectable"))
 		for i := range 5 {
-			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
-		cmd := l.SetItems(items)
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(100, 10)
+		cmd := l.Init()
 		if cmd != nil {
 			cmd()
 		}
 		l.SelectItemBelow()
 		assert.Equal(t, items[2].ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+}
+
+func TestListSetSelection(t *testing.T) {
+	t.Run("should move to the selected item", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 100 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirection(Forward)).(*list[Item])
+		l.SetSize(100, 10)
+		cmd := l.Init()
+		if cmd != nil {
+			cmd()
+		}
+
+		cmd = l.SetSelected(items[52].ID())
+		if cmd != nil {
+			cmd()
+		}
+
+		assert.Equal(t, items[52].ID(), l.selectedItem)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 }
@@ -545,7 +600,7 @@ func NewSimpleItem(content string) *simpleItem {
 	}
 }
 
-func NewSelectsableItem(content string) SelectableItem {
+func NewSelectableItem(content string) SelectableItem {
 	return &selectableItem{
 		simpleItem: NewSimpleItem(content),
 		focused:    false,

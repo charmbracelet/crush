@@ -457,7 +457,7 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 func (s *splashCmp) isSmallScreen() bool {
 	// Consider a screen small if either the width is less than 40 or if the
 	// height is less than 20
-	return s.width < 40 || s.height < 20
+	return s.width < 55 || s.height < 20
 }
 
 func (s *splashCmp) infoSection() string {

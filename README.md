@@ -26,17 +26,22 @@ go install
 ```
 
 <details>
-<summary>Not a developer? Quick how-to.</summary>
-Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. Here’s the [macOS one for Silicon chips](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz), which is likely what you want.
+<summary>Not a developer? Here’s a quick how-to</summary>
+
+Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
 
 Next, open a terminal and run the following commands:
 
 ```bash
 cd ~/Downloads
 tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
-sudo mv crush /usr/local/bin/crush
+sudo mv ./crush/crush /usr/local/bin/crush
 rm -rf crush
 ```
+
+Then, run Crush by typing `crush`.
+
+***
 
 </details>
 

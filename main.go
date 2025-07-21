@@ -40,17 +40,9 @@ func main() {
 func showWindowsWarning() {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Render("WARNING:")+" Crush is experimental on Windows!",
-		"",
 		"While we work on it, we recommend WSL2 for a better experience.",
-		"",
 		lipgloss.NewStyle().Italic(true).Render("Press Enter to continue..."),
 	)
-	content = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(1).
-		Render(content)
-	content += "\n"
-
 	fmt.Print(content)
 
 	var input string

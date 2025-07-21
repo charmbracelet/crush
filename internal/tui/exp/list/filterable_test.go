@@ -10,6 +10,7 @@ import (
 )
 
 func TestFilterableList(t *testing.T) {
+	t.Parallel()
 	t.Run("should create simple filterable list", func(t *testing.T) {
 		t.Parallel()
 		items := []FilterableItem{}

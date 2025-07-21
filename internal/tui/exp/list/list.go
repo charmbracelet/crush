@@ -1,6 +1,7 @@
 package list
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -29,6 +30,11 @@ type List[T Item] interface {
 	SetItems([]T) tea.Cmd
 	SetSelected(string) tea.Cmd
 	SelectedItem() *T
+	Items() []T
+	UpdateItem(string, T)
+	DeleteItem(string)
+	PrependItem(T) tea.Cmd
+	AppendItem(T) tea.Cmd
 }
 
 type direction int
@@ -63,7 +69,7 @@ type confOptions struct {
 	selectedItem string
 }
 type list[T Item] struct {
-	confOptions
+	*confOptions
 
 	focused       bool
 	offset        int
@@ -118,14 +124,14 @@ func WithWrapNavigation() listOption {
 
 func New[T Item](items []T, opts ...listOption) List[T] {
 	list := &list[T]{
-		confOptions: confOptions{
+		confOptions: &confOptions{
 			direction: Forward,
 			keyMap:    DefaultKeyMap(),
 		},
 		items: items,
 	}
 	for _, opt := range opts {
-		opt(&list.confOptions)
+		opt(list.confOptions)
 	}
 	return list
 }
@@ -343,6 +349,7 @@ func (l *list[T]) firstSelectableItemAfter(inx int) int {
 	return NotFound
 }
 
+// moveToSelected needs to be called after the view is rendered
 func (l *list[T]) moveToSelected(center bool) tea.Cmd {
 	var cmds []tea.Cmd
 	if l.selectedItem == "" || !l.isReady {
@@ -421,8 +428,8 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 			break
 		}
 	}
-	l.moveToSelected(false)
 	l.renderView()
+	l.moveToSelected(false)
 	return tea.Batch(cmds...)
 }
 
@@ -457,8 +464,8 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 		}
 	}
 
-	l.moveToSelected(false)
 	l.renderView()
+	l.moveToSelected(false)
 	return tea.Batch(cmds...)
 }
 
@@ -605,10 +612,10 @@ func (l *list[T]) SetItems(items []T) tea.Cmd {
 		cmds = append(cmds, item.SetSize(l.width, 0))
 	}
 
+	cmds = append(cmds, l.renderItems())
 	if l.selectedItem != "" {
 		cmds = append(cmds, l.moveToSelected(true))
 	}
-	cmds = append(cmds, l.renderItems())
 	return tea.Batch(cmds...)
 }
 
@@ -691,8 +698,8 @@ func (l *list[T]) SetSelected(id string) tea.Cmd {
 		}
 	}
 	l.selectedItem = id
-	cmds = append(cmds, l.moveToSelected(true))
 	l.renderView()
+	cmds = append(cmds, l.moveToSelected(true))
 	return tea.Batch(cmds...)
 }
 
@@ -708,4 +715,67 @@ func (l *list[T]) SelectedItem() *T {
 // IsFocused implements List.
 func (l *list[T]) IsFocused() bool {
 	return l.focused
+}
+
+func (l *list[T]) Items() []T {
+	return l.items
+}
+
+func (l *list[T]) UpdateItem(id string, item T) {
+	// TODO: preserve offset
+	for inx, item := range l.items {
+		if item.ID() == id {
+			l.items[inx] = item
+			l.renderedItems[inx] = l.renderItem(item)
+			l.renderView()
+			return
+		}
+	}
+}
+
+func (l *list[T]) DeleteItem(id string) {
+	// TODO: preserve offset
+	inx := NotFound
+	for i, item := range l.items {
+		if item.ID() == id {
+			inx = i
+			break
+		}
+	}
+
+	l.items = slices.Delete(l.items, inx, inx+1)
+	l.renderedItems = slices.Delete(l.renderedItems, inx, inx+1)
+	l.renderView()
+}
+
+func (l *list[T]) PrependItem(item T) tea.Cmd {
+	// TODO: preserve offset
+	var cmd tea.Cmd
+	l.items = append([]T{item}, l.items...)
+	l.renderedItems = append([]renderedItem{l.renderItem(item)}, l.renderedItems...)
+	if len(l.items) == 1 {
+		cmd = l.SetSelected(item.ID())
+	}
+	// the viewport did not move and the last item was focused
+	if l.direction == Backward && l.offset == 0 && l.selectedItem == l.items[0].ID() {
+		cmd = l.SetSelected(item.ID())
+	}
+	l.renderView()
+	return cmd
+}
+
+func (l *list[T]) AppendItem(item T) tea.Cmd {
+	// TODO: preserve offset
+	var cmd tea.Cmd
+	l.items = append(l.items, item)
+	l.renderedItems = append(l.renderedItems, l.renderItem(item))
+	if len(l.items) == 1 {
+		cmd = l.SetSelected(item.ID())
+	} else if l.direction == Backward && l.offset == 0 && l.selectedItem == l.items[len(l.items)-2].ID() {
+		// the viewport did not move and the last item was focused
+		cmd = l.SetSelected(item.ID())
+	} else {
+		l.renderView()
+	}
+	return cmd
 }

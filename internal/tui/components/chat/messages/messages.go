@@ -11,13 +11,14 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/google/uuid"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -31,6 +32,7 @@ type MessageCmp interface {
 	GetMessage() message.Message    // Access to underlying message data
 	SetMessage(msg message.Message) // Update the message content
 	Spinning() bool                 // Animation state for loading messages
+	ID() string
 }
 
 // messageCmp implements the MessageCmp interface for displaying chat messages.
@@ -333,19 +335,25 @@ func (m *messageCmp) Spinning() bool {
 }
 
 type AssistantSection interface {
-	util.Model
+	list.Item
 	layout.Sizeable
-	list.SectionHeader
 }
 type assistantSectionModel struct {
 	width               int
+	id                  string
 	message             message.Message
 	lastUserMessageTime time.Time
+}
+
+// ID implements AssistantSection.
+func (m *assistantSectionModel) ID() string {
+	return m.id
 }
 
 func NewAssistantSection(message message.Message, lastUserMessageTime time.Time) AssistantSection {
 	return &assistantSectionModel{
 		width:               0,
+		id:                  uuid.NewString(),
 		message:             message,
 		lastUserMessageTime: lastUserMessageTime,
 	}
@@ -391,4 +399,8 @@ func (m *assistantSectionModel) SetSize(width int, height int) tea.Cmd {
 
 func (m *assistantSectionModel) IsSectionHeader() bool {
 	return true
+}
+
+func (m *messageCmp) ID() string {
+	return m.message.ID
 }

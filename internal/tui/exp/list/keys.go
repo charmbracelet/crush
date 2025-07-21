@@ -61,3 +61,16 @@ func DefaultKeyMap() KeyMap {
 		),
 	}
 }
+
+func (k KeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Down,
+		k.Up,
+		k.DownOneItem,
+		k.UpOneItem,
+		k.HalfPageDown,
+		k.HalfPageUp,
+		k.Home,
+		k.End,
+	}
+}

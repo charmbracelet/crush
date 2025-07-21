@@ -29,6 +29,7 @@ type ToolCallCmp interface {
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
+	ID() string
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -310,4 +311,8 @@ func (m *toolCallCmp) Spinning() bool {
 		}
 	}
 	return m.spinning
+}
+
+func (m *toolCallCmp) ID() string {
+	return m.call.ID
 }

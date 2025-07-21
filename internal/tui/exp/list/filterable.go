@@ -38,7 +38,7 @@ type filterableOptions struct {
 }
 type filterableList[T FilterableItem] struct {
 	*list[T]
-	filterableOptions
+	*filterableOptions
 	width, height int
 	// stores all available items
 	items      []T
@@ -83,13 +83,13 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	t := styles.CurrentTheme()
 
 	f := &filterableList[T]{
-		filterableOptions: filterableOptions{
+		filterableOptions: &filterableOptions{
 			inputStyle:  t.S().Base,
 			placeholder: "Type to filter",
 		},
 	}
 	for _, opt := range opts {
-		opt(&f.filterableOptions)
+		opt(f.filterableOptions)
 	}
 	f.list = New[T](items, f.listOptions...).(*list[T])
 

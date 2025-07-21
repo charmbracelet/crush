@@ -14,6 +14,7 @@ import (
 )
 
 func TestListPosition(t *testing.T) {
+	t.Parallel()
 	type positionOffsetTest struct {
 		dir      direction
 		test     string
@@ -75,6 +76,7 @@ func TestListPosition(t *testing.T) {
 	}
 	for _, c := range tests {
 		t.Run(c.test, func(t *testing.T) {
+			t.Parallel()
 			items := []Item{}
 			for i := range c.numItems {
 				item := NewSelectableItem(fmt.Sprintf("Item %d", i))
@@ -101,6 +103,7 @@ func TestListPosition(t *testing.T) {
 }
 
 func TestBackwardList(t *testing.T) {
+	t.Parallel()
 	t.Run("within height", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
@@ -291,6 +294,7 @@ func TestBackwardList(t *testing.T) {
 }
 
 func TestForwardList(t *testing.T) {
+	t.Parallel()
 	t.Run("within height", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
@@ -482,6 +486,7 @@ func TestForwardList(t *testing.T) {
 }
 
 func TestListSelection(t *testing.T) {
+	t.Parallel()
 	t.Run("should skip none selectable items initially", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
@@ -553,6 +558,7 @@ func TestListSelection(t *testing.T) {
 }
 
 func TestListSetSelection(t *testing.T) {
+	t.Parallel()
 	t.Run("should move to the selected item", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
@@ -573,6 +579,55 @@ func TestListSetSelection(t *testing.T) {
 		}
 
 		assert.Equal(t, items[52].ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+}
+
+func TestListChanges(t *testing.T) {
+	t.Parallel()
+	t.Run("should append an item to the end", func(t *testing.T) {
+		t.Parallel()
+		items := []SelectableItem{}
+		for i := range 20 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirection(Backward)).(*list[SelectableItem])
+		l.SetSize(100, 10)
+		cmd := l.Init()
+		if cmd != nil {
+			cmd()
+		}
+
+		newItem := NewSelectableItem("New Item")
+		l.AppendItem(newItem)
+
+		assert.Equal(t, 21, len(l.items))
+		assert.Equal(t, 21, len(l.renderedItems))
+		assert.Equal(t, newItem.ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should should not change the selected if we moved the offset", func(t *testing.T) {
+		t.Parallel()
+		items := []SelectableItem{}
+		for i := range 20 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d\nLine2", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirection(Backward)).(*list[SelectableItem])
+		l.SetSize(100, 10)
+		cmd := l.Init()
+		if cmd != nil {
+			cmd()
+		}
+		l.MoveUp(1)
+
+		newItem := NewSelectableItem("New Item")
+		l.AppendItem(newItem)
+
+		assert.Equal(t, 21, len(l.items))
+		assert.Equal(t, 21, len(l.renderedItems))
+		assert.Equal(t, l.items[19].ID(), l.selectedItem)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 }

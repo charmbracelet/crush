@@ -25,14 +25,30 @@ cd crush
 go install
 ```
 
+<details>
+<summary>Not a developer? Quick how-to.</summary>
+Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. Here’s the [macOS one for Silicon chips](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz), which is likely what you want.
+
+Next, open a terminal and run the following commands:
+
+```bash
+cd ~/Downloads
+tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
+sudo mv crush /usr/local/bin/crush
+rm -rf crush
+```
+
+</details>
+
 Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 
-For now, the quickest way to get started is to set an environment variable for
-your preferred provider. Note that you can switch between providers mid-
-sessions, so you're welcome to set environment variables for multiple
-providers.
+The quickest way to get started to grab an API key for your preferred
+provider such as Anthropic, OpenAI, or Groq, and just start Crush. You'll be
+prompted to enter your API key.
+
+That said, you can also set environment variables for preferred providers:
 
 | Environment Variable       | Provider                                           |
 | -------------------------- | -------------------------------------------------- |

@@ -160,8 +160,12 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 				return fmt.Errorf("agent processing failed: %w", result.Error)
 			}
 
-			part := result.Message.Content().String()[readBts:]
-			fmt.Println(part)
+			msgContent := result.Message.Content().String()
+			if len(msgContent) < readBts {
+				// XXX: Log accordingly?
+				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
+			}
+			fmt.Println(msgContent[readBts:])
 
 			slog.Info("Non-interactive run completed", "session_id", sess.ID)
 			return nil

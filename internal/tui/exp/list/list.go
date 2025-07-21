@@ -1,6 +1,7 @@
 package list
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -132,19 +133,20 @@ func (l *list) View() string {
 	view := l.rendered
 	lines := strings.Split(view, "\n")
 
-	start, end := l.viewPosition(len(lines))
-	lines = lines[start:end]
+	start, end := l.viewPosition()
+	lines = lines[start : end+1]
 	return strings.Join(lines, "\n")
 }
 
-func (l *list) viewPosition(total int) (int, int) {
+func (l *list) viewPosition() (int, int) {
 	start, end := 0, 0
+	renderedLines := lipgloss.Height(l.rendered) - 1
 	if l.direction == Forward {
 		start = max(0, l.offset)
-		end = min(l.offset+l.listHeight(), total)
+		end = min(l.offset+l.listHeight()-1, renderedLines)
 	} else {
-		start = max(0, total-l.offset-l.listHeight())
-		end = max(0, total-l.offset)
+		start = max(0, renderedLines-l.offset-l.listHeight()+1)
+		end = max(0, renderedLines-l.offset)
 	}
 	return start, end
 }
@@ -200,20 +202,71 @@ func (l *list) decrementOffset(n int) {
 	}
 }
 
-func (l *list) MoveUp(n int) {
-	if l.direction == Forward {
-		l.decrementOffset(n)
-	} else {
-		l.incrementOffset(n)
+// changeSelectedWhenNotVisible is called so we make sure we move to the next available selected that is visible
+func (l *list) changeSelectedWhenNotVisible() tea.Cmd {
+	var cmds []tea.Cmd
+	start, end := l.viewPosition()
+	currentPosition := 0
+	itemWithinView := NotFound
+	needsMove := false
+
+	for i, item := range l.items {
+		rendered := l.renderedItems[i]
+		itemStart := currentPosition
+		// we remove 1 so that we actually have the row, e.x 1 row => height 1 => start 0, end 0
+		itemEnd := itemStart + rendered.height - 1
+		if itemStart >= start && itemEnd <= end {
+			itemWithinView = i
+		}
+		if item.ID() == l.selectedItem {
+			// item is completely above the viewport
+			if itemStart < start && itemEnd < start {
+				needsMove = true
+			}
+			// item is completely below the viewport
+			if itemStart > end && itemEnd > end {
+				needsMove = true
+			}
+			if needsMove {
+				if focusable, ok := item.(layout.Focusable); ok {
+					cmds = append(cmds, focusable.Blur())
+				}
+				l.renderedItems[i] = l.renderItem(item)
+			} else {
+				return nil
+			}
+		}
+		if itemWithinView != NotFound && needsMove {
+			newSelection := l.items[itemWithinView]
+			l.selectedItem = newSelection.ID()
+			if focusable, ok := newSelection.(layout.Focusable); ok {
+				cmds = append(cmds, focusable.Focus())
+			}
+			l.renderedItems[itemWithinView] = l.renderItem(newSelection)
+			break
+		}
+		currentPosition += rendered.height + l.gap
 	}
+	l.renderView()
+	return tea.Batch(cmds...)
 }
 
-func (l *list) MoveDown(n int) {
+func (l *list) MoveUp(n int) tea.Cmd {
+	if l.direction == Forward {
+		l.decrementOffset(n)
+	} else {
+		l.incrementOffset(n)
+	}
+	return l.changeSelectedWhenNotVisible()
+}
+
+func (l *list) MoveDown(n int) tea.Cmd {
 	if l.direction == Forward {
 		l.incrementOffset(n)
 	} else {
 		l.decrementOffset(n)
 	}
+	return l.changeSelectedWhenNotVisible()
 }
 
 func (l *list) firstSelectableItemBefore(inx int) int {
@@ -239,10 +292,10 @@ func (l *list) moveToSelected() {
 		return
 	}
 	currentPosition := 0
-	start, end := l.viewPosition(lipgloss.Height(l.rendered))
+	start, end := l.viewPosition()
 	for _, item := range l.renderedItems {
 		if item.id == l.selectedItem {
-			if start <= currentPosition && currentPosition <= end {
+			if start <= currentPosition && (currentPosition+item.height) <= end {
 				return
 			}
 			// we need to go up
@@ -354,7 +407,7 @@ func (l *list) renderForward() tea.Cmd {
 	currentIndex := 0
 	for i, item := range l.items {
 		currentIndex = i
-		if currentHeight > l.listHeight() {
+		if currentHeight-1 > l.listHeight() {
 			break
 		}
 		rendered := l.renderItem(item)
@@ -387,6 +440,7 @@ func (l *list) renderBackward() tea.Cmd {
 	currentHeight := 0
 	currentIndex := 0
 	for i := len(l.items) - 1; i >= 0; i-- {
+		fmt.Printf("rendering item %d\n", i)
 		currentIndex = i
 		if currentHeight > l.listHeight() {
 			break
@@ -397,12 +451,13 @@ func (l *list) renderBackward() tea.Cmd {
 	}
 	// initial render
 	l.renderView()
-	if currentIndex == len(l.items)-1 {
+	if currentIndex == 0 {
 		l.isReady = true
 		return nil
 	}
 	return func() tea.Msg {
 		for i := currentIndex; i >= 0; i-- {
+			fmt.Printf("rendering item after %d\n", i)
 			rendered := l.renderItem(l.items[i])
 			l.renderedItems = append([]renderedItem{rendered}, l.renderedItems...)
 		}
@@ -450,6 +505,9 @@ func (l *list) renderItems() tea.Cmd {
 		} else {
 			l.selectLastItem()
 		}
+	}
+	if l.direction == Forward {
+		return l.renderForward()
 	}
 	return l.renderBackward()
 }

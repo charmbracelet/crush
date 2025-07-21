@@ -12,6 +12,93 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestListPosition(t *testing.T) {
+	type positionOffsetTest struct {
+		dir      direction
+		test     string
+		width    int
+		height   int
+		numItems int
+
+		moveUp   int
+		moveDown int
+
+		expectedStart int
+		expectedEnd   int
+	}
+	tests := []positionOffsetTest{
+		{
+			dir:           Forward,
+			test:          "should have correct position initially when forward",
+			moveUp:        0,
+			moveDown:      0,
+			width:         10,
+			height:        20,
+			numItems:      100,
+			expectedStart: 0,
+			expectedEnd:   19,
+		},
+		{
+			dir:           Forward,
+			test:          "should offset start and end by one when moving down by one",
+			moveUp:        0,
+			moveDown:      1,
+			width:         10,
+			height:        20,
+			numItems:      100,
+			expectedStart: 1,
+			expectedEnd:   20,
+		},
+		{
+			dir:           Backward,
+			test:          "should have correct position initially when backward",
+			moveUp:        0,
+			moveDown:      0,
+			width:         10,
+			height:        20,
+			numItems:      100,
+			expectedStart: 80,
+			expectedEnd:   99,
+		},
+		{
+			dir:           Backward,
+			test:          "should offset the start and end by one when moving up by one",
+			moveUp:        1,
+			moveDown:      0,
+			width:         10,
+			height:        20,
+			numItems:      100,
+			expectedStart: 79,
+			expectedEnd:   98,
+		},
+	}
+	for _, c := range tests {
+		t.Run(c.test, func(t *testing.T) {
+			l := New(WithDirection(c.dir)).(*list)
+			l.SetSize(c.width, c.height)
+			items := []Item{}
+			for i := range c.numItems {
+				item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+				items = append(items, item)
+			}
+			cmd := l.SetItems(items)
+			if cmd != nil {
+				cmd()
+			}
+
+			if c.moveUp > 0 {
+				l.MoveUp(c.moveUp)
+			}
+			if c.moveDown > 0 {
+				l.MoveDown(c.moveDown)
+			}
+			start, end := l.viewPosition()
+			assert.Equal(t, c.expectedStart, start)
+			assert.Equal(t, c.expectedEnd, end)
+		})
+	}
+}
+
 func TestBackwardList(t *testing.T) {
 	t.Run("within height", func(t *testing.T) {
 		t.Parallel()
@@ -19,7 +106,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 20)
 		items := []Item{}
 		for i := range 5 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -36,7 +123,7 @@ func TestBackwardList(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
 		for i := range 5 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		l := New(WithDirection(Backward), WithGap(1), WithSelectedItem(items[2].ID())).(*list)
@@ -54,7 +141,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -70,7 +157,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d\nLine2", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d\nLine2", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -86,7 +173,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -97,13 +184,13 @@ func TestBackwardList(t *testing.T) {
 		l.MoveUp(1)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+
 	t.Run("should move at max to the top", func(t *testing.T) {
-		t.Parallel()
 		l := New(WithDirection(Backward)).(*list)
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -121,7 +208,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -138,7 +225,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -156,7 +243,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -167,15 +254,15 @@ func TestBackwardList(t *testing.T) {
 		selectedInx := len(l.items) - 2
 		currentItem := items[len(l.items)-1]
 		nextItem := items[selectedInx]
-		assert.False(t, nextItem.(SimpleItem).IsFocused())
-		assert.True(t, currentItem.(SimpleItem).IsFocused())
+		assert.False(t, nextItem.(SelectableItem).IsFocused())
+		assert.True(t, currentItem.(SelectableItem).IsFocused())
 		cmd = l.SelectItemAbove()
 		if cmd != nil {
 			cmd()
 		}
 
 		assert.Equal(t, l.selectedItem, l.items[selectedInx].ID())
-		assert.True(t, l.items[selectedInx].(SimpleItem).IsFocused())
+		assert.True(t, l.items[selectedInx].(SelectableItem).IsFocused())
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})
@@ -185,7 +272,7 @@ func TestBackwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -210,7 +297,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 20)
 		items := []Item{}
 		for i := range 5 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -227,7 +314,7 @@ func TestForwardList(t *testing.T) {
 		t.Parallel()
 		items := []Item{}
 		for i := range 5 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		l := New(WithDirection(Forward), WithGap(1), WithSelectedItem(items[2].ID())).(*list)
@@ -245,7 +332,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -261,7 +348,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d\nLine2", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d\nLine2", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -277,7 +364,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -288,13 +375,13 @@ func TestForwardList(t *testing.T) {
 		l.MoveDown(1)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
-	t.Run("should move at max to the top", func(t *testing.T) {
+	t.Run("should move at max to the bottom", func(t *testing.T) {
 		t.Parallel()
 		l := New(WithDirection(Forward)).(*list)
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -312,7 +399,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -329,7 +416,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -347,7 +434,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -358,15 +445,15 @@ func TestForwardList(t *testing.T) {
 		selectedInx := 1
 		currentItem := items[0]
 		nextItem := items[selectedInx]
-		assert.False(t, nextItem.(SimpleItem).IsFocused())
-		assert.True(t, currentItem.(SimpleItem).IsFocused())
+		assert.False(t, nextItem.(SelectableItem).IsFocused())
+		assert.True(t, currentItem.(SelectableItem).IsFocused())
 		cmd = l.SelectItemBelow()
 		if cmd != nil {
 			cmd()
 		}
 
 		assert.Equal(t, l.selectedItem, l.items[selectedInx].ID())
-		assert.True(t, l.items[selectedInx].(SimpleItem).IsFocused())
+		assert.True(t, l.items[selectedInx].(SelectableItem).IsFocused())
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})
@@ -376,7 +463,7 @@ func TestForwardList(t *testing.T) {
 		l.SetSize(10, 5)
 		items := []Item{}
 		for i := range 10 {
-			item := NewSimpleItem(fmt.Sprintf("Item %d", i))
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
 			items = append(items, item)
 		}
 		cmd := l.SetItems(items)
@@ -394,7 +481,28 @@ func TestForwardList(t *testing.T) {
 	})
 }
 
-type SimpleItem interface {
+func TestListSelection(t *testing.T) {
+	t.Run("should skip none selectable items initially", func(t *testing.T) {
+		t.Parallel()
+		l := New(WithDirection(Forward)).(*list)
+		l.SetSize(100, 10)
+		items := []Item{}
+		items = append(items, NewSimpleItem("None Selectable"))
+		for i := range 5 {
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		cmd := l.SetItems(items)
+		if cmd != nil {
+			cmd()
+		}
+
+		assert.Equal(t, items[1].ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+}
+
+type SelectableItem interface {
 	Item
 	layout.Focusable
 }
@@ -403,15 +511,24 @@ type simpleItem struct {
 	width   int
 	content string
 	id      string
+}
+type selectableItem struct {
+	*simpleItem
 	focused bool
 }
 
-func NewSimpleItem(content string) SimpleItem {
+func NewSimpleItem(content string) *simpleItem {
 	return &simpleItem{
+		id:      uuid.NewString(),
 		width:   0,
 		content: content,
-		focused: false,
-		id:      uuid.NewString(),
+	}
+}
+
+func NewSelectsableItem(content string) SelectableItem {
+	return &selectableItem{
+		simpleItem: NewSimpleItem(content),
+		focused:    false,
 	}
 }
 
@@ -428,9 +545,6 @@ func (s *simpleItem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *simpleItem) View() string {
-	if s.focused {
-		return lipgloss.NewStyle().BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).Width(s.width).Render(s.content)
-	}
 	return lipgloss.NewStyle().Width(s.width).Render(s.content)
 }
 
@@ -444,19 +558,26 @@ func (s *simpleItem) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
+func (s *selectableItem) View() string {
+	if s.focused {
+		return lipgloss.NewStyle().BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).Width(s.width).Render(s.content)
+	}
+	return lipgloss.NewStyle().Width(s.width).Render(s.content)
+}
+
 // Blur implements SimpleItem.
-func (s *simpleItem) Blur() tea.Cmd {
+func (s *selectableItem) Blur() tea.Cmd {
 	s.focused = false
 	return nil
 }
 
 // Focus implements SimpleItem.
-func (s *simpleItem) Focus() tea.Cmd {
+func (s *selectableItem) Focus() tea.Cmd {
 	s.focused = true
 	return nil
 }
 
 // IsFocused implements SimpleItem.
-func (s *simpleItem) IsFocused() bool {
+func (s *selectableItem) IsFocused() bool {
 	return s.focused
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOsEnv_Get(t *testing.T) {
@@ -81,7 +82,7 @@ func TestMapEnv_Env(t *testing.T) {
 		envMap := make(map[string]string)
 		for _, envVar := range envVars {
 			parts := strings.SplitN(envVar, "=", 2)
-			assert.Len(t, parts, 2)
+			require.Len(t, parts, 2)
 			envMap[parts[0]] = parts[1]
 		}
 

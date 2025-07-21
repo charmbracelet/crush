@@ -55,6 +55,9 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 			parts = append(parts, &genai.Part{Text: msg.Content().String()})
 			for _, binaryContent := range msg.BinaryContent() {
 				imageFormat := strings.Split(binaryContent.MIMEType, "/")
+				if len(imageFormat) == 0 {
+					continue
+				}
 				parts = append(parts, &genai.Part{InlineData: &genai.Blob{
 					MIMEType: imageFormat[1],
 					Data:     binaryContent.Data,

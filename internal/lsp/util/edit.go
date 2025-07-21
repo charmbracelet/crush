@@ -129,7 +129,7 @@ func applyTextEdit(lines []string, edit protocol.TextEdit) ([]string, error) {
 		if len(newLines) == 1 {
 			// Single line change
 			result = append(result, prefix+newLines[0]+suffix)
-		} else {
+		} else if len(newLines) > 0 {
 			// Multi-line change
 			result = append(result, prefix+newLines[0])
 			result = append(result, newLines[1:len(newLines)-1]...)

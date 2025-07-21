@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -121,7 +122,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	// We want to make sure that we keep the configured API key as a placeholder
 	assert.Equal(t, "xyz", cfg.Providers["openai"].APIKey)
 	assert.Equal(t, "https://api.openai.com/v2", cfg.Providers["openai"].BaseURL)
-	assert.Len(t, cfg.Providers["openai"].Models, 2)
+	require.Len(t, cfg.Providers["openai"].Models, 2)
 	assert.Equal(t, "Updated", cfg.Providers["openai"].Models[0].Model)
 }
 
@@ -196,7 +197,7 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 
 	bedrockProvider, ok := cfg.Providers["bedrock"]
 	assert.True(t, ok, "Bedrock provider should be present")
-	assert.Len(t, bedrockProvider.Models, 1)
+	require.Len(t, bedrockProvider.Models, 1)
 	assert.Equal(t, "anthropic.claude-sonnet-4-20250514-v1:0", bedrockProvider.Models[0].ID)
 }
 
@@ -271,7 +272,7 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 
 	vertexProvider, ok := cfg.Providers["vertexai"]
 	assert.True(t, ok, "VertexAI provider should be present")
-	assert.Len(t, vertexProvider.Models, 1)
+	require.Len(t, vertexProvider.Models, 1)
 	assert.Equal(t, "gemini-pro", vertexProvider.Models[0].ID)
 	assert.Equal(t, "test-project", vertexProvider.ExtraParams["project"])
 	assert.Equal(t, "us-central1", vertexProvider.ExtraParams["location"])
@@ -392,7 +393,7 @@ func TestConfig_EnabledProviders(t *testing.T) {
 		}
 
 		enabled := cfg.EnabledProviders()
-		assert.Len(t, enabled, 1)
+		require.Len(t, enabled, 1)
 		assert.Equal(t, "openai", enabled[0].ID)
 	})
 

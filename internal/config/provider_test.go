@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockProviderClient struct {
@@ -60,7 +61,7 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 	providers, err := loadProviders(tmpPath, client)
 	assert.NoError(t, err)
 	assert.NotNil(t, providers)
-	assert.Len(t, providers, 1)
+	require.Len(t, providers, 1)
 	assert.Equal(t, "OldProvider", providers[0].Name, "Expected to keep old provider when loading fails")
 }
 

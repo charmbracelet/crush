@@ -500,6 +500,26 @@ func TestListSelection(t *testing.T) {
 		assert.Equal(t, items[1].ID(), l.selectedItem)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+	t.Run("should skip none selectable items in the middle", func(t *testing.T) {
+		t.Parallel()
+		l := New(WithDirection(Forward)).(*list)
+		l.SetSize(100, 10)
+		items := []Item{}
+		item := NewSelectsableItem("Item initial")
+		items = append(items, item)
+		items = append(items, NewSimpleItem("None Selectable"))
+		for i := range 5 {
+			item := NewSelectsableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		cmd := l.SetItems(items)
+		if cmd != nil {
+			cmd()
+		}
+		l.SelectItemBelow()
+		assert.Equal(t, items[2].ID(), l.selectedItem)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
 }
 
 type SelectableItem interface {

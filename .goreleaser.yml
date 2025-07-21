@@ -111,6 +111,17 @@ homebrew_casks:
       owner: charmbracelet
       name: homebrew-tap
 
+npms:
+  - name: "@charmland/crush"
+    repository: "git+https://github.com/charmbracelet/crush.git"
+    bugs: https://github.com/charmbracelet/crush/issues
+    access: public
+    keywords:
+      - ai
+      - claude
+      - gpt
+      - ollama
+
 nfpms:
   - formats:
       - deb

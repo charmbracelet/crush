@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"runtime"
@@ -331,8 +332,27 @@ func (m *editorCmp) Cursor() *tea.Cursor {
 	return cursor
 }
 
+var readyPlaceholders = [...]string{
+	"Ready!",
+	"Ready...",
+	"Ready?",
+}
+
+var workingPlaceholders = [...]string{
+	"Working!",
+	"Working...",
+	"Working?",
+}
+
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
+	if ca := m.app.CoderAgent; ca != nil {
+		if ca.IsBusy() {
+			m.textarea.Placeholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+		} else {
+			m.textarea.Placeholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+		}
+	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),

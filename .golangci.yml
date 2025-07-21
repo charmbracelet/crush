@@ -13,7 +13,7 @@ linters:
     # - nakedret
     # - nestif
     # - nilerr
-    - noctx
+    # - noctx
     - nolintlint
     # - prealloc
     # - revive

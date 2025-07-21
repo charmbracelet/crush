@@ -194,7 +194,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	}
 
 	dir := filepath.Dir(filePath)
-	if err = os.MkdirAll(dir, 0o755); err != nil {
+	if err = os.MkdirAll(dir, 0o750); err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(content), 0o644)
+	err = os.WriteFile(filePath, []byte(content), 0o600)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -344,7 +344,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
+	err = os.WriteFile(filePath, []byte(newContent), 0o600)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -466,8 +466,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
-	if err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), 0o600); err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 

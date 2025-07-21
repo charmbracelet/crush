@@ -186,7 +186,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(maxTokens),
+		MaxOutputTokens: int32(maxTokens), //nolint:gosec
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
@@ -288,7 +288,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(maxTokens),
+		MaxOutputTokens: int32(maxTokens), //nolint:gosec
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},

@@ -547,7 +547,7 @@ func RoundedEnumerator(children tree.Children, index int) string {
 func (tr agentRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params agent.AgentParams
-	tr.unmarshalParams(v.call.Input, &params)
+	_ = tr.unmarshalParams(v.call.Input, &params)
 
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")

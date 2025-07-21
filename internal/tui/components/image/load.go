@@ -70,7 +70,7 @@ func imageToString(width, height uint, img image.Image) (string, error) {
 	p := termenv.ColorProfile()
 	str := strings.Builder{}
 	for y := 0; y < h; y += 2 {
-		for x := w; x < int(width); x = x + 2 {
+		for x := w; x < int(width); x = x + 2 { //nolint:gosec
 			str.WriteString(" ")
 		}
 		for x := range w {
@@ -127,10 +127,10 @@ func svgToImage(width uint, height uint, r io.Reader) (string, error) {
 	// Write rasterized image as PNG:
 	err = png.Encode(tmpPngFile, rgba)
 	if err != nil {
-		tmpPngFile.Close()
+		_ = tmpPngFile.Close()
 		return "", err
 	}
-	tmpPngFile.Close()
+	_ = tmpPngFile.Close()
 
 	rPng, err := os.Open(tmpPngPath)
 	if err != nil {

@@ -101,7 +101,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 		})
 		if txErr != nil {
 			// Rollback the transaction
-			tx.Rollback()
+			_ = tx.Rollback()
 
 			// Check if this is a uniqueness constraint violation
 			if strings.Contains(txErr.Error(), "UNIQUE constraint failed") {

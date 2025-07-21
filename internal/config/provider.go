@@ -43,7 +43,7 @@ func providerCacheFileData() string {
 
 func saveProvidersInCache(path string, providers []provider.Provider) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 
@@ -52,7 +52,7 @@ func saveProvidersInCache(path string, providers []provider.Provider) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func loadProvidersFromCache(path string) ([]provider.Provider, error) {

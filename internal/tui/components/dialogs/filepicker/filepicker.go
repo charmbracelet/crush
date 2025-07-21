@@ -116,7 +116,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	if m.highlightedFile != m.currentImage() && m.currentImage() != "" {
 		w, h := m.imagePreviewSize()
-		cmd = m.image.Redraw(uint(w-2), uint(h-2), m.currentImage())
+		cmd = m.image.Redraw(uint(w-2), uint(h-2), m.currentImage()) //nolint:gosec
 		cmds = append(cmds, cmd)
 	}
 	m.highlightedFile = m.currentImage()

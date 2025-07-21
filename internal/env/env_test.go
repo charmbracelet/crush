@@ -1,7 +1,6 @@
 package env
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -13,8 +12,7 @@ func TestOsEnv_Get(t *testing.T) {
 	env := New()
 
 	// Test getting an existing environment variable
-	os.Setenv("TEST_VAR", "test_value")
-	defer os.Unsetenv("TEST_VAR")
+	t.Setenv("TEST_VAR", "test_value")
 
 	value := env.Get("TEST_VAR")
 	assert.Equal(t, "test_value", value)

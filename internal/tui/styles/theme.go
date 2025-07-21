@@ -536,13 +536,14 @@ func (m *Manager) List() []string {
 // ParseHex converts hex string to color
 func ParseHex(hex string) color.Color {
 	var r, g, b uint8
-	fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+	_, _ = fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
 	return color.RGBA{R: r, G: g, B: b, A: 255}
 }
 
 // Alpha returns a color with transparency
 func Alpha(c color.Color, alpha uint8) color.Color {
 	r, g, b, _ := c.RGBA()
+	//nolint:gosec
 	return color.RGBA{
 		R: uint8(r >> 8),
 		G: uint8(g >> 8),
@@ -555,6 +556,7 @@ func Alpha(c color.Color, alpha uint8) color.Color {
 func Darken(c color.Color, percent float64) color.Color {
 	r, g, b, a := c.RGBA()
 	factor := 1.0 - percent/100.0
+	//nolint:gosec
 	return color.RGBA{
 		R: uint8(float64(r>>8) * factor),
 		G: uint8(float64(g>>8) * factor),
@@ -567,6 +569,7 @@ func Darken(c color.Color, percent float64) color.Color {
 func Lighten(c color.Color, percent float64) color.Color {
 	r, g, b, a := c.RGBA()
 	factor := percent / 100.0
+	//nolint:gosec
 	return color.RGBA{
 		R: uint8(min(255, float64(r>>8)+255*factor)),
 		G: uint8(min(255, float64(g>>8)+255*factor)),

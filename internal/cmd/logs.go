@@ -86,7 +86,7 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 			lines = lines[len(lines)-tailLines:]
 		}
 	}
-	t.Stop()
+	_ = t.Stop()
 
 	for _, line := range lines {
 		printLogLine(line)

@@ -3,7 +3,6 @@ package prompt
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,8 +75,7 @@ func TestProcessContextPaths(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "test.txt")
 	testContent := "test content"
 
-	err := os.WriteFile(testFile, []byte(testContent), 0o644)
-	if err != nil {
+	if err := os.WriteFile(testFile, []byte(testContent), 0o600); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -97,11 +95,10 @@ func TestProcessContextPaths(t *testing.T) {
 
 	// Test with tilde expansion (if we can create a file in home directory)
 	tmpDir = t.TempDir()
-	rollback := setHomeEnv(tmpDir)
-	defer rollback()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	homeTestFile := filepath.Join(tmpDir, "crush_test_file.txt")
-	err = os.WriteFile(homeTestFile, []byte(testContent), 0o644)
-	if err == nil {
+	if err := os.WriteFile(homeTestFile, []byte(testContent), 0o600); err == nil {
 		defer os.Remove(homeTestFile) // Clean up
 
 		tildeFile := "~/crush_test_file.txt"
@@ -112,14 +109,4 @@ func TestProcessContextPaths(t *testing.T) {
 			t.Errorf("processContextPaths with tilde expansion failed.\nGot: %q\nWant: %q", result, expected)
 		}
 	}
-}
-
-func setHomeEnv(path string) (rollback func()) {
-	key := "HOME"
-	if runtime.GOOS == "windows" {
-		key = "USERPROFILE"
-	}
-	original := os.Getenv(key)
-	os.Setenv(key, path)
-	return func() { os.Setenv(key, original) }
 }

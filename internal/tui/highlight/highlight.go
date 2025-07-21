@@ -34,7 +34,7 @@ func SyntaxHighlight(source, fileName string, bg color.Color) (string, error) {
 	s, err := style.Builder().Transform(
 		func(t chroma.StyleEntry) chroma.StyleEntry {
 			r, g, b, _ := bg.RGBA()
-			t.Background = chroma.NewColour(uint8(r>>8), uint8(g>>8), uint8(b>>8))
+			t.Background = chroma.NewColour(uint8(r>>8), uint8(g>>8), uint8(b>>8)) //nolint:gosec
 			return t
 		},
 	).Build()

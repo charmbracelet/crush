@@ -188,7 +188,7 @@ func extractArgNames(content string) []string {
 
 func ensureDir(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return os.MkdirAll(path, 0o755)
+		return os.MkdirAll(path, 0o750)
 	}
 	return nil
 }

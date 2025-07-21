@@ -44,8 +44,8 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 		}
 
 		jsonData, _ := json.Marshal(emptyChoicesChunk)
-		w.Write([]byte("data: " + string(jsonData) + "\n\n"))
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: " + string(jsonData) + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 

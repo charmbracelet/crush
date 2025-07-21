@@ -98,7 +98,7 @@ func processContextPaths(workDir string, paths []string) string {
 			}
 
 			if info.IsDir() {
-				filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+				_ = filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
 					if err != nil {
 						return err
 					}

@@ -54,7 +54,7 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 		t.Fatalf("Failed to marshal old providers: %v", err)
 	}
 
-	err = os.WriteFile(tmpPath, data, 0o644)
+	err = os.WriteFile(tmpPath, data, 0o600)
 	if err != nil {
 		t.Fatalf("Failed to write old providers to file: %v", err)
 	}

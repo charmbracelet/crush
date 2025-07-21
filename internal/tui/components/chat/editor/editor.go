@@ -118,7 +118,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 		if len(content) == 0 {
 			return util.ReportWarn("Message is empty")
 		}
-		os.Remove(tmpfile.Name())
+		_ = os.Remove(tmpfile.Name())
 		return openEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}

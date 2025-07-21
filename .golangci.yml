@@ -8,7 +8,7 @@ linters:
     # - godox
     # - gomoddirectives
     - goprintffuncname
-    # - gosec
+    - gosec
     - misspell
     # - nakedret
     # - nestif

@@ -188,7 +188,7 @@ func (t *downloadTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	}
 
 	// Create parent directories if they don't exist
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
@@ -209,7 +209,7 @@ func (t *downloadTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	// Check if we hit the size limit
 	if bytesWritten == maxSize {
 		// Clean up the file since it might be incomplete
-		os.Remove(filePath)
+		_ = os.Remove(filePath)
 		return NewTextErrorResponse(fmt.Sprintf("File too large: exceeded %d bytes limit", maxSize)), nil
 	}
 

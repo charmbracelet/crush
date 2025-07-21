@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime"
 
-	_ "net/http/pprof" // profiling
+	_ "net/http/pprof" //nolint:gosec
 
 	_ "github.com/joho/godotenv/autoload" // automatically load .env files
 
@@ -28,7 +28,7 @@ func main() {
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
-			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {
+			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil { //nolint:gosec
 				slog.Error(fmt.Sprintf("Failed to pprof listen: %v", httpErr))
 			}
 		}()
@@ -46,5 +46,5 @@ func showWindowsWarning() {
 	fmt.Print(content)
 
 	var input string
-	fmt.Scanln(&input)
+	_, _ = fmt.Scanln(&input)
 }

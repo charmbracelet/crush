@@ -174,7 +174,7 @@ func New(opts Settings) (a Anim) {
 
 			// Also prerender the color with Lip Gloss here to avoid processing
 			// in the render loop.
-			r := availableRunes[rand.IntN(len(availableRunes))]
+			r := availableRunes[rand.IntN(len(availableRunes))] //nolint:gosec
 			a.cyclingFrames[i][j] = lipgloss.NewStyle().
 				Foreground(ramp[j+offset]).
 				Render(string(r))
@@ -187,7 +187,7 @@ func New(opts Settings) (a Anim) {
 	// Random assign a birth to each character for a stagged entrance effect.
 	a.birthOffsets = make([]time.Duration, a.width)
 	for i := range a.birthOffsets {
-		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond
+		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond //nolint:gosec
 	}
 
 	return a

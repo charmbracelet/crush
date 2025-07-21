@@ -30,7 +30,7 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 
 	// Verify connection
 	if err = db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 

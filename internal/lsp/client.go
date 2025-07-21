@@ -139,7 +139,7 @@ func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (
 		},
 
 		XInitializeParams: protocol.XInitializeParams{
-			ProcessID: int32(os.Getpid()),
+			ProcessID: int32(os.Getpid()), //nolint:gosec
 			ClientInfo: &protocol.ClientInfo{
 				Name:    "mcp-language-server",
 				Version: "0.1.0",

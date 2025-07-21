@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -45,14 +46,16 @@ type FileCompletionItem struct {
 }
 
 type editorCmp struct {
-	width       int
-	height      int
-	x, y        int
-	app         *app.App
-	session     session.Session
-	textarea    textarea.Model
-	attachments []message.Attachment
-	deleteMode  bool
+	width              int
+	height             int
+	x, y               int
+	app                *app.App
+	session            session.Session
+	textarea           textarea.Model
+	attachments        []message.Attachment
+	deleteMode         bool
+	readyPlaceholder   string
+	workingPlaceholder string
 
 	keyMap EditorKeyMap
 
@@ -270,6 +273,10 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.send()
 			}
 		}
+	case pubsub.Event[message.Message]:
+		if msg.Type == pubsub.CreatedEvent {
+			m.randomizePlaceholders()
+		}
 	}
 
 	m.textarea, cmd = m.textarea.Update(msg)
@@ -344,14 +351,18 @@ var workingPlaceholders = [...]string{
 	"Working?",
 }
 
+func (m *editorCmp) randomizePlaceholders() {
+	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
-	if ca := m.app.CoderAgent; ca != nil {
-		if ca.IsBusy() {
-			m.textarea.Placeholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
-		} else {
-			m.textarea.Placeholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
-		}
+	// Update placeholder
+	if m.app.CoderAgent.IsBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+	} else {
+		m.textarea.Placeholder = m.readyPlaceholder
 	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
@@ -478,14 +489,18 @@ func New(app *app.App) Editor {
 	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
-	ta.Placeholder = "Tell me more about this project..."
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	return &editorCmp{
+	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
 	}
+
+	e.randomizePlaceholders()
+	e.textarea.Placeholder = e.readyPlaceholder
+
+	return e
 }

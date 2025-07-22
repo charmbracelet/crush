@@ -109,11 +109,7 @@ func NewAgent(
 			return nil, fmt.Errorf("failed to create task agent: %w", err)
 		}
 
-		agentTool = NewAgentTool(
-			taskAgent,
-			sessions,
-			messages,
-		)
+		agentTool = NewAgentTool(taskAgent, sessions, messages)
 	}
 
 	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)

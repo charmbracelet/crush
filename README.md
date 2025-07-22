@@ -101,14 +101,18 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ### MCPs
 
-Crush can also use MCPs for additional context. Add LSPs to the config like so:
+Crush supports Model Context Protocol (MCP) servers through three transport types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse` for Server-Sent Events. Environment variable expansion is supported using `$(echo $VAR)` syntax.
 
 ```json
 {
   "mcp": {
-    "context7": {
-      "url": "https://mcp.context7.com/mcp",
-      "type": "http"
+    "filesystem": {
+      "type": "stdio",
+      "command": "node", 
+      "args": ["/path/to/mcp-server.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
     },
     "github": {
       "type": "http",
@@ -116,7 +120,43 @@ Crush can also use MCPs for additional context. Add LSPs to the config like so:
       "headers": {
         "Authorization": "$(echo Bearer $GH_MCP_TOKEN)"
       }
+    },
+    "streaming-service": {
+      "type": "sse",
+      "url": "https://example.com/mcp/sse",
+      "headers": {
+        "API-Key": "$(echo $API_KEY)"
+      }
     }
+  }
+}
+```
+
+### Logging
+
+Enable debug logging with the `-d` flag or in config. View logs with `crush logs`. Logs are stored in `.crush/logs/crush.log`.
+
+```bash
+# Run with debug logging
+crush -d
+
+# View last 1000 lines
+crush logs
+
+# Follow logs in real-time  
+crush logs -f
+
+# Show last 500 lines
+crush logs -t 500
+```
+
+Add to your `crush.json` config file:
+
+```json
+{
+  "options": {
+    "debug": true,
+    "debug_lsp": true
   }
 }
 ```

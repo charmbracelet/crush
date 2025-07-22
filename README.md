@@ -80,20 +80,31 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ### MCPs
 
-Crush can also use MCPs for additional context. Add LSPs to the config like so:
+Crush supports Model Context Protocol (MCP) servers through three transport types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse` for Server-Sent Events. Environment variable expansion is supported using `$(echo $VAR)` syntax.
 
 ```json
 {
   "mcp": {
-    "context7": {
-      "url": "https://mcp.context7.com/mcp",
-      "type": "http"
+    "filesystem": {
+      "type": "stdio",
+      "command": "node", 
+      "args": ["/path/to/mcp-server.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
     },
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
         "Authorization": "$(echo Bearer $GH_MCP_TOKEN)"
+      }
+    },
+    "streaming-service": {
+      "type": "sse",
+      "url": "https://example.com/mcp/sse",
+      "headers": {
+        "API-Key": "$(echo $API_KEY)"
       }
     }
   }

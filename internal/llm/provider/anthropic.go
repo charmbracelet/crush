@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -44,6 +45,12 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
+	for _, header := range opts.extraHeaders {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(header, opts.extraHeaders[header]))
+	}
+	for key, value := range opts.extraBody {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithJSONSet(key, value))
+	}
 	return anthropic.NewClient(anthropicClientOptions...)
 }
 
@@ -72,6 +79,13 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 
 		case message.Assistant:
 			blocks := []anthropic.ContentBlockParamUnion{}
+
+			// Add thinking blocks first if present (required when thinking is enabled with tool use)
+			if reasoningContent := msg.ReasoningContent(); reasoningContent.Thinking != "" {
+				thinkingBlock := anthropic.NewThinkingBlock(reasoningContent.Signature, reasoningContent.Thinking)
+				blocks = append(blocks, thinkingBlock)
+			}
+
 			if msg.Content().String() != "" {
 				content := anthropic.NewTextBlock(msg.Content().String())
 				if cache && !a.providerOptions.disableCache {
@@ -149,6 +163,15 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 	}
 }
 
+func (a *anthropicClient) isThinkingEnabled() bool {
+	cfg := config.Get()
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if a.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	}
+	return a.Model().CanReason && modelConfig.Think
+}
+
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
 	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
@@ -159,16 +182,14 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	}
 	temperature := anthropic.Float(0)
 
-	if a.Model().CanReason && modelConfig.Think {
-		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(a.providerOptions.maxTokens) * 0.8))
-		temperature = anthropic.Float(1)
-	}
-
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
-
+	if a.isThinkingEnabled() {
+		thinkingParam = anthropic.ThinkingConfigParamOfEnabled(int64(float64(maxTokens) * 0.8))
+		temperature = anthropic.Float(1)
+	}
 	// Override max tokens if set in provider options
 	if a.providerOptions.maxTokens > 0 {
 		maxTokens = a.providerOptions.maxTokens
@@ -210,9 +231,14 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 			slog.Debug("Prepared messages", "messages", string(jsonData))
 		}
 
+		var opts []option.RequestOption
+		if a.isThinkingEnabled() {
+			opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+		}
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
+			opts...,
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
@@ -262,9 +288,15 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				slog.Debug("Prepared messages", "messages", string(jsonData))
 			}
 
+			var opts []option.RequestOption
+			if a.isThinkingEnabled() {
+				opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
+			}
+
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
+				opts...,
 			)
 			accumulatedMessage := anthropic.Message{}
 
@@ -299,6 +331,11 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 						eventChan <- ProviderEvent{
 							Type:     EventThinkingDelta,
 							Thinking: event.Delta.Thinking,
+						}
+					} else if event.Delta.Type == "signature_delta" && event.Delta.Signature != "" {
+						eventChan <- ProviderEvent{
+							Type:      EventSignatureDelta,
+							Signature: event.Delta.Signature,
 						}
 					} else if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 						eventChan <- ProviderEvent{
@@ -416,7 +453,8 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 	}
 
-	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 {
+	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
+	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 

@@ -35,13 +35,13 @@ const (
 
 // Logger interface for optional logging
 type Logger interface {
-	InfoPersist(msg string, keysAndValues ...interface{})
+	InfoPersist(msg string, keysAndValues ...any)
 }
 
 // noopLogger is a logger that does nothing
 type noopLogger struct{}
 
-func (noopLogger) InfoPersist(msg string, keysAndValues ...interface{}) {}
+func (noopLogger) InfoPersist(msg string, keysAndValues ...any) {}
 
 // BlockFunc is a function that determines if a command should be blocked
 type BlockFunc func(args []string) bool

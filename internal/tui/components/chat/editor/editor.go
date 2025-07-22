@@ -72,7 +72,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 	),
 	DeleteAllAttachments: key.NewBinding(
 		key.WithKeys("r"),
-		key.WithHelp("ctrl+r+r", "delete all attchments"),
+		key.WithHelp("ctrl+r+r", "delete all attachments"),
 	),
 }
 
@@ -171,6 +171,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
+	case completions.CompletionsOpenedMsg:
+		m.isCompletionsOpen = true
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
@@ -183,9 +185,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If the selected item is a file, insert its path into the textarea
 			value := m.textarea.Value()
 			value = value[:m.completionsStartIndex]
-			if len(value) > 0 && value[len(value)-1] != ' ' {
-				value += " "
-			}
 			value += item.Path
 			m.textarea.SetValue(value)
 			m.isCompletionsOpen = false
@@ -199,37 +198,15 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		// Completions
-		case msg.String() == "/" && !m.isCompletionsOpen:
+		case msg.String() == "/" && !m.isCompletionsOpen &&
+			// only show if beginning of prompt, or if previous char is a space:
+			(len(m.textarea.Value()) == 0 || m.textarea.Value()[len(m.textarea.Value())-1] == ' '):
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
-			cmds = append(cmds, m.startCompletions)
 			m.completionsStartIndex = len(m.textarea.Value())
-		case msg.String() == "space" && m.isCompletionsOpen:
-			m.isCompletionsOpen = false
-			m.currentQuery = ""
-			m.completionsStartIndex = 0
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+			cmds = append(cmds, m.startCompletions)
 		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		case msg.String() == "backspace" && m.isCompletionsOpen:
-			if len(m.currentQuery) > 0 {
-				m.currentQuery = m.currentQuery[:len(m.currentQuery)-1]
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
-			} else {
-				m.isCompletionsOpen = false
-				m.currentQuery = ""
-				m.completionsStartIndex = 0
-				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-			}
-		default:
-			if m.isCompletionsOpen {
-				m.currentQuery += msg.String()
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
-			}
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
@@ -281,6 +258,36 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
+
+	if m.textarea.Focused() {
+		kp, ok := msg.(tea.KeyPressMsg)
+		if ok {
+			if kp.String() == "space" || m.textarea.Value() == "" {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+			} else {
+				word := m.textarea.Word()
+				if strings.HasPrefix(word, "/") {
+					// XXX: wont' work if editing in the middle of the field.
+					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
+					m.currentQuery = word[1:]
+					m.isCompletionsOpen = true
+					cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
+						Query:  m.currentQuery,
+						Reopen: m.isCompletionsOpen,
+					}))
+				} else {
+					m.isCompletionsOpen = false
+					m.currentQuery = ""
+					m.completionsStartIndex = 0
+					cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+				}
+			}
+		}
+	}
+
 	return m, tea.Batch(cmds...)
 }
 

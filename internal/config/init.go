@@ -109,5 +109,5 @@ func HasInitialDataConfig() bool {
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}
-	return true
+	return Get().IsConfigured()
 }

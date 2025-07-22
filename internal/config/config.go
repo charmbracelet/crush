@@ -1,13 +1,18 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/tidwall/sjson"
+	"golang.org/x/exp/slog"
 )
 
 const (
@@ -73,6 +78,8 @@ type ProviderConfig struct {
 
 	// Extra headers to send with each request to the provider.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// Extra body
+	ExtraBody map[string]any `json:"extra_body,omitempty"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
@@ -90,12 +97,12 @@ const (
 )
 
 type MCPConfig struct {
-	Command  string   `json:"command,omitempty" `
-	Env      []string `json:"env,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	Type     MCPType  `json:"type"`
-	URL      string   `json:"url,omitempty"`
-	Disabled bool     `json:"disabled,omitempty"`
+	Command  string            `json:"command,omitempty" `
+	Env      map[string]string `json:"env,omitempty"`
+	Args     []string          `json:"args,omitempty"`
+	Type     MCPType           `json:"type"`
+	URL      string            `json:"url,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty"`
@@ -163,6 +170,37 @@ func (l LSPs) Sorted() []LSP {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return sorted
+}
+
+func (m MCPConfig) ResolvedEnv() []string {
+	resolver := NewShellVariableResolver(env.New())
+	for e, v := range m.Env {
+		var err error
+		m.Env[e], err = resolver.ResolveValue(v)
+		if err != nil {
+			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
+			continue
+		}
+	}
+
+	env := make([]string, 0, len(m.Env))
+	for k, v := range m.Env {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return env
+}
+
+func (m MCPConfig) ResolvedHeaders() map[string]string {
+	resolver := NewShellVariableResolver(env.New())
+	for e, v := range m.Headers {
+		var err error
+		m.Headers[e], err = resolver.ResolveValue(v)
+		if err != nil {
+			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
+			continue
+		}
+	}
+	return m.Headers
 }
 
 type Agent struct {
@@ -401,4 +439,53 @@ func (c *Config) SetupAgents() {
 		},
 	}
 	c.Agents = agents
+}
+
+func (c *Config) Resolver() VariableResolver {
+	return c.resolver
+}
+
+func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
+	testURL := ""
+	headers := make(map[string]string)
+	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	switch c.Type {
+	case provider.TypeOpenAI:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + apiKey
+	case provider.TypeAnthropic:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	for k, v := range c.ExtraHeaders {
+		req.Header.Set(k, v)
+	}
+	b, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	if b.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	}
+	_ = b.Body.Close()
+	return nil
 }

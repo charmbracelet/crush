@@ -15,16 +15,17 @@ type EventType string
 const maxRetries = 8
 
 const (
-	EventContentStart  EventType = "content_start"
-	EventToolUseStart  EventType = "tool_use_start"
-	EventToolUseDelta  EventType = "tool_use_delta"
-	EventToolUseStop   EventType = "tool_use_stop"
-	EventContentDelta  EventType = "content_delta"
-	EventThinkingDelta EventType = "thinking_delta"
-	EventContentStop   EventType = "content_stop"
-	EventComplete      EventType = "complete"
-	EventError         EventType = "error"
-	EventWarning       EventType = "warning"
+	EventContentStart   EventType = "content_start"
+	EventToolUseStart   EventType = "tool_use_start"
+	EventToolUseDelta   EventType = "tool_use_delta"
+	EventToolUseStop    EventType = "tool_use_stop"
+	EventContentDelta   EventType = "content_delta"
+	EventThinkingDelta  EventType = "thinking_delta"
+	EventSignatureDelta EventType = "signature_delta"
+	EventContentStop    EventType = "content_stop"
+	EventComplete       EventType = "complete"
+	EventError          EventType = "error"
+	EventWarning        EventType = "warning"
 )
 
 type TokenUsage struct {
@@ -44,11 +45,12 @@ type ProviderResponse struct {
 type ProviderEvent struct {
 	Type EventType
 
-	Content  string
-	Thinking string
-	Response *ProviderResponse
-	ToolCall *message.ToolCall
-	Error    error
+	Content   string
+	Thinking  string
+	Signature string
+	Response  *ProviderResponse
+	ToolCall  *message.ToolCall
+	Error     error
 }
 type Provider interface {
 	SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
@@ -68,6 +70,7 @@ type providerClientOptions struct {
 	systemMessage string
 	maxTokens     int64
 	extraHeaders  map[string]string
+	extraBody     map[string]any
 	extraParams   map[string]string
 }
 
@@ -145,6 +148,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		config:       cfg,
 		apiKey:       resolvedAPIKey,
 		extraHeaders: cfg.ExtraHeaders,
+		extraBody:    cfg.ExtraBody,
 		model: func(tp config.SelectedModelType) provider.Model {
 			return *config.Get().GetModelByType(tp)
 		},

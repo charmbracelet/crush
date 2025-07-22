@@ -106,7 +106,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
 	return t.S().Base.
-		Padding(1).
+		Padding(1, 1, 0, 1).
 		Width(m.width).
 		Height(m.height).
 		Render(
@@ -303,14 +303,15 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 	shouldShowMessage := m.shouldShowAssistantMessage(msg)
 	hasToolCallsOnly := len(msg.ToolCalls()) > 0 && msg.Content().Text == ""
 
+	var cmd tea.Cmd
 	if shouldShowMessage {
+		items := m.listCmp.Items()
+		uiMsg := items[assistantIndex].(messages.MessageCmp)
+		uiMsg.SetMessage(msg)
 		m.listCmp.UpdateItem(
 			assistantIndex,
-			messages.NewMessageCmp(
-				msg,
-			),
+			uiMsg,
 		)
-
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			m.listCmp.AppendItem(
 				messages.NewAssistantSection(
@@ -323,12 +324,12 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 		m.listCmp.DeleteItem(assistantIndex)
 	}
 
-	return nil
+	return cmd
 }
 
 // shouldShowAssistantMessage determines if an assistant message should be displayed.
 func (m *messageListCmp) shouldShowAssistantMessage(msg message.Message) bool {
-	return len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.IsThinking()
+	return len(msg.ToolCalls()) == 0 || msg.Content().Text != "" || msg.ReasoningContent().Thinking != "" || msg.IsThinking()
 }
 
 // updateToolCalls handles updates to tool calls, updating existing ones and adding new ones.
@@ -506,7 +507,7 @@ func (m *messageListCmp) GetSize() (int, int) {
 func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	return m.listCmp.SetSize(width-2, height-2) // for padding
+	return m.listCmp.SetSize(width-2, height-1) // for padding
 }
 
 // Blur implements MessageListCmp.

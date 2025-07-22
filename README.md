@@ -25,14 +25,35 @@ cd crush
 go install
 ```
 
+<details>
+<summary>Not a developer? Here’s a quick how-to.</summary>
+
+Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
+
+Next, open a terminal and run the following commands:
+
+```bash
+cd ~/Downloads
+tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
+sudo mv ./crush/crush /usr/local/bin/crush
+rm -rf crush
+```
+
+Then, run Crush by typing `crush`.
+
+***
+
+</details>
+
 Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 
-For now, the quickest way to get started is to set an environment variable for
-your preferred provider. Note that you can switch between providers mid-
-sessions, so you're welcome to set environment variables for multiple
-providers.
+The quickest way to get started to grab an API key for your preferred
+provider such as Anthropic, OpenAI, or Groq, and just start Crush. You'll be
+prompted to enter your API key.
+
+That said, you can also set environment variables for preferred providers:
 
 | Environment Variable       | Provider                                           |
 | -------------------------- | -------------------------------------------------- |
@@ -73,6 +94,28 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
     },
     "nix": {
       "command": "alejandra"
+    }
+  }
+}
+```
+
+### MCPs
+
+Crush can also use MCPs for additional context. Add LSPs to the config like so:
+
+```json
+{
+  "mcp": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "type": "http"
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "$(echo Bearer $GH_MCP_TOKEN)"
+      }
     }
   }
 }

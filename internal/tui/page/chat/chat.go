@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -174,6 +175,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
+	case splash.SubmitAPIKeyMsg:
+		u, cmd := p.splash.Update(msg)
+		p.splash = u.(splash.Splash)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
 	case commands.ToggleCompactModeMsg:
 		p.forceCompact = !p.forceCompact
 		var cmd tea.Cmd
@@ -185,6 +191,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = p.updateCompactConfig(false)
 		}
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
+	case commands.ToggleThinkingMsg:
+		return p, p.toggleThinking()
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -212,12 +220,25 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
+	case models.APIKeyStateChangeMsg:
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		}
+		return p, tea.Batch(cmds...)
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
-		u, cmd := p.chat.Update(msg)
-		p.chat = u.(chat.MessageListCmp)
-		cmds = append(cmds, cmd)
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		} else {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+		}
 		return p, tea.Batch(cmds...)
 
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
@@ -275,7 +296,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
-			p.showDetails()
+			p.toggleDetails()
 			return p, nil
 		}
 
@@ -382,7 +403,7 @@ func (p *chatPage) View() string {
 			Width(p.detailsWidth).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus)
-		version := t.S().Subtle.Width(p.detailsWidth - 2).AlignHorizontal(lipgloss.Right).Render(version.Version)
+		version := t.S().Base.Foreground(t.Border).Width(p.detailsWidth - 4).AlignHorizontal(lipgloss.Right).Render(version.Version)
 		details := style.Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -411,18 +432,44 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 	}
 }
 
+func (p *chatPage) toggleThinking() tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		currentModel := cfg.Models[agentCfg.Model]
+
+		// Toggle the thinking mode
+		currentModel.Think = !currentModel.Think
+		cfg.Models[agentCfg.Model] = currentModel
+
+		// Update the agent with the new configuration
+		if err := p.app.UpdateAgentModel(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update thinking mode: " + err.Error(),
+			}
+		}
+
+		status := "disabled"
+		if currentModel.Think {
+			status = "enabled"
+		}
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Thinking mode " + status,
+		}
+	}
+}
+
 func (p *chatPage) setCompactMode(compact bool) {
 	if p.compact == compact {
 		return
 	}
 	p.compact = compact
 	if compact {
-		p.compact = true
 		p.sidebar.SetCompactMode(true)
 	} else {
-		p.compact = false
-		p.showingDetails = false
-		p.sidebar.SetCompactMode(false)
+		p.setShowDetails(false)
 	}
 }
 
@@ -476,6 +523,8 @@ func (p *chatPage) newSession() tea.Cmd {
 
 	p.session = session.Session{}
 	p.focusedPane = PanelTypeEditor
+	p.editor.Focus()
+	p.chat.Blur()
 	p.isCanceling = false
 	return tea.Batch(
 		util.CmdHandler(chat.SessionClearedMsg{}),
@@ -527,12 +576,19 @@ func (p *chatPage) cancel() tea.Cmd {
 	return cancelTimerCmd()
 }
 
-func (p *chatPage) showDetails() {
+func (p *chatPage) setShowDetails(show bool) {
+	p.showingDetails = show
+	p.header.SetDetailsOpen(p.showingDetails)
+	if !p.compact {
+		p.sidebar.SetCompactMode(false)
+	}
+}
+
+func (p *chatPage) toggleDetails() {
 	if p.session.ID == "" || !p.compact {
 		return
 	}
-	p.showingDetails = !p.showingDetails
-	p.header.SetDetailsOpen(p.showingDetails)
+	p.setShowDetails(!p.showingDetails)
 }
 
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
@@ -620,12 +676,23 @@ func (p *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	case p.isOnboarding && p.splash.IsShowingAPIKey():
+		if p.splash.IsAPIKeyValid() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "continue"),
+				),
+			)
+		} else {
+			shortList = append(shortList,
+				// Go back
+				key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "back"),
+				),
+			)
+		}
 		shortList = append(shortList,
-			// Go back
-			key.NewBinding(
-				key.WithKeys("esc"),
-				key.WithHelp("esc", "back"),
-			),
 			// Quit
 			key.NewBinding(
 				key.WithKeys("ctrl+c"),
@@ -802,6 +869,18 @@ func (p *chatPage) Help() help.KeyMap {
 					key.NewBinding(
 						key.WithKeys("ctrl+v"),
 						key.WithHelp("ctrl+v", "open editor"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+r"),
+						key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+r", "r"),
+						key.WithHelp("ctrl+r+r", "delete all attachments"),
+					),
+					key.NewBinding(
+						key.WithKeys("esc"),
+						key.WithHelp("esc", "cancel delete mode"),
 					),
 				})
 		}

@@ -5,8 +5,10 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fur/provider"
@@ -36,6 +38,9 @@ type Splash interface {
 
 	// Showing API key input
 	IsShowingAPIKey() bool
+
+	// IsAPIKeyValid returns whether the API key is valid
+	IsAPIKeyValid() bool
 }
 
 const (
@@ -45,7 +50,10 @@ const (
 )
 
 // OnboardingCompleteMsg is sent when onboarding is complete
-type OnboardingCompleteMsg struct{}
+type (
+	OnboardingCompleteMsg struct{}
+	SubmitAPIKeyMsg       struct{}
+)
 
 type splashCmp struct {
 	width, height int
@@ -62,6 +70,8 @@ type splashCmp struct {
 	modelList     *models.ModelListComponent
 	apiKeyInput   *models.APIKeyInput
 	selectedModel *models.ModelOption
+	isAPIKeyValid bool
+	apiKeyValue   string
 }
 
 func New() Splash {
@@ -105,6 +115,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 			"openai",
 			"gemini",
 			"xai",
+			"groq",
 			"openrouter",
 		}
 		for _, p := range providers {
@@ -132,14 +143,17 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	wasSmallScreen := s.isSmallScreen()
+	rerenderLogo := width != s.width
 	s.height = height
-	if width != s.width {
-		s.width = width
+	s.width = width
+	if rerenderLogo || wasSmallScreen != s.isSmallScreen() {
 		s.logoRendered = s.logoBlock()
 	}
 	// remove padding, logo height, gap, title space
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
+	s.apiKeyInput.SetWidth(width - 2)
 	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
@@ -148,16 +162,38 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)
+	case models.APIKeyStateChangeMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		if msg.State == models.APIKeyInputStateVerified {
+			return s, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+				return SubmitAPIKeyMsg{}
+			})
+		}
+		return s, cmd
+	case SubmitAPIKeyMsg:
+		if s.isAPIKeyValid {
+			return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Back):
+			if s.isAPIKeyValid {
+				return s, nil
+			}
 			if s.needsAPIKey {
 				// Go back to model selection
 				s.needsAPIKey = false
 				s.selectedModel = nil
+				s.isAPIKeyValid = false
+				s.apiKeyValue = ""
+				s.apiKeyInput.Reset()
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Select):
+			if s.isAPIKeyValid {
+				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+			}
 			if s.isOnboarding && !s.needsAPIKey {
 				modelInx := s.modelList.SelectedIndex()
 				items := s.modelList.Items()
@@ -175,23 +211,75 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if s.needsAPIKey {
 				// Handle API key submission
-				apiKey := s.apiKeyInput.Value()
-				if apiKey != "" {
-					return s, s.saveAPIKeyAndContinue(apiKey)
+				s.apiKeyValue = strings.TrimSpace(s.apiKeyInput.Value())
+				if s.apiKeyValue == "" {
+					return s, nil
 				}
+
+				provider, err := s.getProvider(s.selectedModel.Provider.ID)
+				if err != nil || provider == nil {
+					return s, util.ReportError(fmt.Errorf("provider %s not found", s.selectedModel.Provider.ID))
+				}
+				providerConfig := config.ProviderConfig{
+					ID:      string(s.selectedModel.Provider.ID),
+					Name:    s.selectedModel.Provider.Name,
+					APIKey:  s.apiKeyValue,
+					Type:    provider.Type,
+					BaseURL: provider.APIEndpoint,
+				}
+				return s, tea.Sequence(
+					util.CmdHandler(models.APIKeyStateChangeMsg{
+						State: models.APIKeyInputStateVerifying,
+					}),
+					func() tea.Msg {
+						start := time.Now()
+						err := providerConfig.TestConnection(config.Get().Resolver())
+						// intentionally wait for at least 750ms to make sure the user sees the spinner
+						elapsed := time.Since(start)
+						if elapsed < 750*time.Millisecond {
+							time.Sleep(750*time.Millisecond - elapsed)
+						}
+						if err == nil {
+							s.isAPIKeyValid = true
+							return models.APIKeyStateChangeMsg{
+								State: models.APIKeyInputStateVerified,
+							}
+						}
+						return models.APIKeyStateChangeMsg{
+							State: models.APIKeyInputStateError,
+						}
+					},
+				)
 			} else if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
 			if s.needsProjectInit {
 				s.selectedNo = !s.selectedNo
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+
 			if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+
 			s.selectedNo = true
 			return s, s.initializeProject()
 		default:
@@ -215,6 +303,10 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.modelList, cmd = s.modelList.Update(msg)
 			return s, cmd
 		}
+	case spinner.TickMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		return s, cmd
 	}
 	return s, nil
 }
@@ -451,9 +543,19 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) isSmallScreen() bool {
+	// Consider a screen small if either the width is less than 40 or if the
+	// height is less than 20
+	return s.width < 55 || s.height < 20
+}
+
 func (s *splashCmp) infoSection() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.PaddingLeft(2).Render(
+	infoStyle := t.S().Base.PaddingLeft(2)
+	if s.isSmallScreen() {
+		infoStyle = infoStyle.MarginTop(1)
+	}
+	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.cwd(),
@@ -466,14 +568,25 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
+	if s.isSmallScreen() {
+		// If the width is too small, render a smaller version of the logo
+		// NOTE: 20 is not correct because [splashCmp.height] is not the
+		// *actual* window height, instead, it is the height of the splash
+		// component and that depends on other variables like compact mode and
+		// the height of the editor.
+		return logoStyle.Render(
+			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
+		)
+	}
+	return logoStyle.Render(
 		logo.Render(version.Version, false, logo.Opts{
 			FieldColor:   t.Primary,
 			TitleColorA:  t.Secondary,
 			TitleColorB:  t.Primary,
 			CharmColor:   t.Secondary,
 			VersionColor: t.Primary,
-			Width:        s.width - 4,
+			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
 		}),
 	)
 }
@@ -627,4 +740,8 @@ func (s *splashCmp) mcpBlock() string {
 
 func (s *splashCmp) IsShowingAPIKey() bool {
 	return s.needsAPIKey
+}
+
+func (s *splashCmp) IsAPIKeyValid() bool {
+	return s.isAPIKeyValid
 }

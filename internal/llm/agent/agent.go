@@ -98,6 +98,24 @@ func NewAgent(
 	ctx := context.Background()
 	cfg := config.Get()
 
+	var agentTool tools.BaseTool
+	if agentCfg.ID == "coder" {
+		taskAgentCfg := config.Get().Agents["task"]
+		if taskAgentCfg.ID == "" {
+			return nil, fmt.Errorf("task agent not found in config")
+		}
+		taskAgent, err := NewAgent(taskAgentCfg, permissions, sessions, messages, history, lspClients)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create task agent: %w", err)
+		}
+
+		agentTool = NewAgentTool(
+			taskAgent,
+			sessions,
+			messages,
+		)
+	}
+
 	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)
 	if providerCfg == nil {
 		return nil, fmt.Errorf("provider for agent %s not found in config", agentCfg.Name)
@@ -152,24 +170,6 @@ func NewAgent(
 	summarizeProvider, err := provider.NewProvider(*smallModelProviderCfg, summarizeOpts...)
 	if err != nil {
 		return nil, err
-	}
-
-	var agentTool tools.BaseTool
-	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
-			return nil, fmt.Errorf("task agent not found in config")
-		}
-		taskAgent, err := NewAgent(taskAgentCfg, permissions, sessions, messages, history, lspClients)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create task agent: %w", err)
-		}
-
-		agentTool = NewAgentTool(
-			taskAgent,
-			sessions,
-			messages,
-		)
 	}
 
 	agent := &agent{

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/csync"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	fur "github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"

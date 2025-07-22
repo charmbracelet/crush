@@ -124,9 +124,9 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 	} else if v.cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
-	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
+	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(true, width-lipgloss.Width(tool), params...)
+	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.

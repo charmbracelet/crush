@@ -23,8 +23,8 @@ func NewLazySlice[K any](load func() []K) *LazySlice[K] {
 	return s
 }
 
-// Iter returns an iterator that yields elements from the slice.
-func (s *LazySlice[K]) Iter() iter.Seq[K] {
+// Seq returns an iterator that yields elements from the slice.
+func (s *LazySlice[K]) Seq() iter.Seq[K] {
 	s.mu.Lock()
 	inner := s.inner
 	s.mu.Unlock()

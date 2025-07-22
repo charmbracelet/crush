@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLazySlice_Iter(t *testing.T) {
+func TestLazySlice_Seq(t *testing.T) {
 	t.Parallel()
 
 	data := []string{"a", "b", "c"}
@@ -19,14 +19,14 @@ func TestLazySlice_Iter(t *testing.T) {
 	})
 
 	var result []string
-	for v := range s.Iter() {
+	for v := range s.Seq() {
 		result = append(result, v)
 	}
 
 	assert.Equal(t, data, result)
 }
 
-func TestLazySlice_IterWaitsForLoading(t *testing.T) {
+func TestLazySlice_SeqWaitsForLoading(t *testing.T) {
 	t.Parallel()
 
 	var loaded atomic.Bool
@@ -42,11 +42,11 @@ func TestLazySlice_IterWaitsForLoading(t *testing.T) {
 	assert.False(t, loaded.Load(), "should not be loaded immediately")
 
 	var result []string
-	for v := range s.Iter() {
+	for v := range s.Seq() {
 		result = append(result, v)
 	}
 
-	assert.True(t, loaded.Load(), "should be loaded after Iter")
+	assert.True(t, loaded.Load(), "should be loaded after Seq")
 	assert.Equal(t, data, result)
 }
 
@@ -58,7 +58,7 @@ func TestLazySlice_EmptySlice(t *testing.T) {
 	})
 
 	var result []string
-	for v := range s.Iter() {
+	for v := range s.Seq() {
 		result = append(result, v)
 	}
 
@@ -76,7 +76,7 @@ func TestLazySlice_EarlyBreak(t *testing.T) {
 	})
 
 	var result []string
-	for v := range s.Iter() {
+	for v := range s.Seq() {
 		result = append(result, v)
 		if len(result) == 2 {
 			break

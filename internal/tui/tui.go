@@ -410,9 +410,10 @@ func (a *appModel) View() tea.View {
 					Align(lipgloss.Center, lipgloss.Center).
 					Render(
 						t.S().Base.
-							Padding(1, 2).
-							Background(t.BgSubtle).
+							Padding(1, 4).
 							Foreground(t.White).
+							BorderStyle(lipgloss.RoundedBorder()).
+							BorderForeground(t.Primary).
 							Render("Too small!"),
 					),
 			),

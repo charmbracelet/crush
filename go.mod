@@ -21,7 +21,7 @@ require (
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
-	github.com/fsnotify/fsnotify v1.8.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mark3labs/mcp-go v0.33.0
@@ -125,7 +125,7 @@ require (
 	golang.org/x/image v0.26.0 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/sys v0.34.0
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.24.0
 	google.golang.org/genai v1.3.0

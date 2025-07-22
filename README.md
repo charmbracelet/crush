@@ -111,6 +111,35 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
 }
 ```
 
+### Logging
+
+Enable debug logging with the `-d` flag or in config. View logs with `crush logs`. Logs are stored in `.crush/logs/crush.log`.
+
+```bash
+# Run with debug logging
+crush -d
+
+# View last 1000 lines
+crush logs
+
+# Follow logs in real-time  
+crush logs -f
+
+# Show last 500 lines
+crush logs -t 500
+```
+
+Add to your `crush.json` config file:
+
+```json
+{
+  "options": {
+    "debug": true,
+    "debug_lsp": true
+  }
+}
+```
+
 ### OpenAI-Compatible APIs
 
 Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.

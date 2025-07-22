@@ -168,12 +168,14 @@ func TestMap_MarshalJSON(t *testing.T) {
 	data, err := json.Marshal(m)
 	assert.NoError(t, err)
 
-	var result map[string]int
-	err = json.Unmarshal(data, &result)
+	result := &Map[string, int]{}
+	err = json.Unmarshal(data, result)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(result))
-	assert.Equal(t, 1, result["key1"])
-	assert.Equal(t, 2, result["key2"])
+	assert.Equal(t, 2, result.Len())
+	v1, _ := result.Get("key1")
+	v2, _ := result.Get("key2")
+	assert.Equal(t, 1, v1)
+	assert.Equal(t, 2, v2)
 }
 
 func TestMap_MarshalJSON_EmptyMap(t *testing.T) {

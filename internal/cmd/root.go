@@ -48,6 +48,7 @@ to assist developers in writing, debugging, and understanding code directly from
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load the config
+		// XXX: Handle errors.
 		debug, _ := cmd.Flags().GetBool("debug")
 		cwd, _ := cmd.Flags().GetString("cwd")
 		prompt, _ := cmd.Flags().GetString("prompt")
@@ -76,7 +77,7 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		ctx := cmd.Context()
 
-		// Connect DB, this will also run migrations
+		// Connect to DB; this will also run migrations.
 		conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
 		if err != nil {
 			return err
@@ -95,13 +96,13 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		// Non-interactive mode
+		// Non-interactive mode.
 		if prompt != "" {
 			// Run non-interactive flow using the App method
 			return app.RunNonInteractive(ctx, prompt, quiet)
 		}
 
-		// Set up the TUI
+		// Set up the TUI.
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),

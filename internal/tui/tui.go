@@ -254,9 +254,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 	case splash.OnboardingCompleteMsg:
 		a.isConfigured = config.HasInitialDataConfig()
-		updated, cmd := a.pages[a.currentPage].Update(msg)
+		updated, pageCmd := a.pages[a.currentPage].Update(msg)
 		a.pages[a.currentPage] = updated.(util.Model)
-		cmds = append(cmds, cmd)
+		cmds = append(cmds, pageCmd)
 		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
@@ -268,9 +268,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dialog = u.(dialogs.DialogCmp)
 			cmds = append(cmds, dialogCmd)
 		} else {
-			updated, cmd := a.pages[a.currentPage].Update(msg)
+			updated, pageCmd := a.pages[a.currentPage].Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
-			cmds = append(cmds, cmd)
+			cmds = append(cmds, pageCmd)
 		}
 		return a, tea.Batch(cmds...)
 	}

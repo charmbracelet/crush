@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 
 	_ "net/http/pprof" //nolint:gosec
 
@@ -38,11 +39,11 @@ func main() {
 }
 
 func showWindowsWarning() {
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Render("WARNING:")+" Crush is experimental on Windows!",
+	content := strings.Join([]string{
+		lipgloss.NewStyle().Bold(true).Render("WARNING:") + " Crush is experimental on Windows!",
 		"While we work on it, we recommend WSL2 for a better experience.",
 		lipgloss.NewStyle().Italic(true).Render("Press Enter to continue..."),
-	)
+	}, "\n")
 	fmt.Print(content)
 
 	var input string

@@ -322,7 +322,7 @@ func (c *Config) setDefaults(workingDir string) {
 }
 
 func (c *Config) defaultModelSelection(knownProviders []provider.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
-	if len(knownProviders) == 0 { // TODO:}&& len(c.Providers) == 0 {
+	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return
 	}

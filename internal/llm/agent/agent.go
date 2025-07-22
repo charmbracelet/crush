@@ -187,6 +187,10 @@ func NewAgent(
 
 	go func() {
 		slog.Info("Initializing agent tools", "agent", agentCfg.ID)
+		defer func() {
+			slog.Info("Initialized agent tools", "agent", agentCfg.ID)
+			agent.toolsDone.Store(true)
+		}()
 
 		cwd := cfg.WorkingDir()
 		allTools := []tools.BaseTool{
@@ -203,29 +207,28 @@ func NewAgent(
 		}
 
 		mcpTools := GetMCPTools(ctx, permissions, cfg)
-		if len(lspClients) > 0 {
-			mcpTools = append(mcpTools, tools.NewDiagnosticsTool(lspClients))
-		}
 		allTools = append(allTools, mcpTools...)
+
+		if len(lspClients) > 0 {
+			allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
+		}
 
 		if agentTool != nil {
 			allTools = append(allTools, agentTool)
 		}
 
-		agentTools := []tools.BaseTool{}
 		if agentCfg.AllowedTools == nil {
-			agentTools = allTools
-		} else {
-			for _, tool := range allTools {
-				if slices.Contains(agentCfg.AllowedTools, tool.Name()) {
-					agentTools = append(agentTools, tool)
-				}
-			}
+			agent.tools = allTools
+			return
 		}
 
-		slog.Info("Initialized agent tools", "agent", agentCfg.ID)
-		agent.tools = agentTools
-		agent.toolsDone.Store(true)
+		var filteredTools []tools.BaseTool
+		for _, tool := range allTools {
+			if slices.Contains(agentCfg.AllowedTools, tool.Name()) {
+				filteredTools = append(filteredTools, tool)
+			}
+		}
+		agent.tools = filteredTools
 	}()
 
 	return agent, nil

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -84,15 +83,12 @@ to assist developers in writing, debugging, and understanding code directly from
 			return err
 		}
 
-		slog.Info("Initing...")
-		now := time.Now()
 		app, err := app.New(ctx, conn, cfg)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
 			return err
 		}
 		defer app.Shutdown()
-		slog.Info("Init done", "took", time.Since(now).String())
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {

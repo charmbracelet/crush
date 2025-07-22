@@ -414,7 +414,7 @@ func (a *appModel) View() tea.View {
 							Foreground(t.White).
 							BorderStyle(lipgloss.RoundedBorder()).
 							BorderForeground(t.Primary).
-							Render("Too small!"),
+							Render("Window too small!"),
 					),
 			),
 		)

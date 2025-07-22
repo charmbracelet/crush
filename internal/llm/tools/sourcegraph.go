@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/crush/internal/network"
 )
 
 type SourcegraphParams struct {
@@ -233,6 +235,9 @@ func (t *sourcegraphTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 
 	resp, err := t.client.Do(req)
 	if err != nil {
+		if network.IsOfflineError(err) {
+			return NewTextErrorResponse(network.GetFriendlyOfflineMessage()), nil
+		}
 		return ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()

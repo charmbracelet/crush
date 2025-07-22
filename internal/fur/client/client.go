@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/network"
 )
 
 const defaultURL = "https://fur.charm.sh"
@@ -46,6 +47,9 @@ func (c *Client) GetProviders() ([]provider.Provider, error) {
 
 	resp, err := c.httpClient.Get(url) //nolint:noctx
 	if err != nil {
+		if network.IsOfflineError(err) {
+			return nil, fmt.Errorf(network.GetFriendlyOfflineMessage())
+		}
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck

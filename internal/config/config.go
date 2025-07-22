@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/tidwall/sjson"
@@ -236,7 +237,7 @@ type Config struct {
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty"`
 
 	// The providers that are configured
-	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty"`
 
 	MCP MCPs `json:"mcp,omitempty"`
 
@@ -259,8 +260,8 @@ func (c *Config) WorkingDir() string {
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
-	enabled := make([]ProviderConfig, 0, len(c.Providers))
-	for _, p := range c.Providers {
+	var enabled []ProviderConfig
+	for _, p := range c.Providers.Seq2() {
 		if !p.Disable {
 			enabled = append(enabled, p)
 		}
@@ -274,7 +275,7 @@ func (c *Config) IsConfigured() bool {
 }
 
 func (c *Config) GetModel(provider, model string) *provider.Model {
-	if providerConfig, ok := c.Providers[provider]; ok {
+	if providerConfig, ok := c.Providers.Get(provider); ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
 				return &m
@@ -289,7 +290,7 @@ func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfi
 	if !ok {
 		return nil
 	}
-	if providerConfig, ok := c.Providers[model.Provider]; ok {
+	if providerConfig, ok := c.Providers.Get(model.Provider); ok {
 		return &providerConfig
 	}
 	return nil
@@ -370,14 +371,10 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 		return fmt.Errorf("failed to save API key to config file: %w", err)
 	}
 
-	if c.Providers == nil {
-		c.Providers = make(map[string]ProviderConfig)
-	}
-
-	providerConfig, exists := c.Providers[providerID]
+	providerConfig, exists := c.Providers.Get(providerID)
 	if exists {
 		providerConfig.APIKey = apiKey
-		c.Providers[providerID] = providerConfig
+		c.Providers.Set(providerID, providerConfig)
 		return nil
 	}
 
@@ -406,7 +403,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
 	// Store the updated provider config
-	c.Providers[providerID] = providerConfig
+	c.Providers.Set(providerID, providerConfig)
 	return nil
 }
 

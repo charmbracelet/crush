@@ -1,7 +1,6 @@
 package diffview
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"image/color"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/zeebo/xxh3"
 )
 
 const (
@@ -769,7 +769,7 @@ func (dv *DiffView) createSyntaxCacheKey(source string, bgColor color.Color) str
 	colorStr := fmt.Sprintf("%d,%d,%d,%d", r, g, b, a)
 
 	// Create a hash of the content + color to use as cache key
-	h := sha256.New()
+	h := xxh3.New()
 	h.Write([]byte(source))
 	h.Write([]byte(colorStr))
 	return fmt.Sprintf("%x", h.Sum(nil))

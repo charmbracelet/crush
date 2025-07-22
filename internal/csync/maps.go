@@ -7,35 +7,41 @@ import (
 	"sync"
 )
 
+// Map is a concurrent map implementation that provides thread-safe access.
 type Map[K comparable, V any] struct {
 	inner map[K]V
 	mu    sync.RWMutex
 }
 
+// NewMap creates a new thread-safe map with the specified key and value types.
 func NewMap[K comparable, V any]() *Map[K, V] {
 	return &Map[K, V]{
 		inner: make(map[K]V),
 	}
 }
 
+// NewMapFrom creates a new thread-safe map from an existing map.
 func NewMapFrom[K comparable, V any](m map[K]V) *Map[K, V] {
 	return &Map[K, V]{
 		inner: m,
 	}
 }
 
+// Set sets the value for the specified key in the map.
 func (m *Map[K, V]) Set(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inner[key] = value
 }
 
+// Del deletes the specified key from the map.
 func (m *Map[K, V]) Del(key K) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.inner, key)
 }
 
+// Get gets the value for the specified key from the map.
 func (m *Map[K, V]) Get(key K) (V, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -43,12 +49,14 @@ func (m *Map[K, V]) Get(key K) (V, bool) {
 	return v, ok
 }
 
+// Len returns the number of items in the map.
 func (m *Map[K, V]) Len() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.inner)
 }
 
+// Seq2 returns an iter.Seq2 that yields key-value pairs from the map.
 func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 	dst := make(map[K]V)
 	m.mu.RLock()

@@ -5,11 +5,14 @@ import (
 	"sync"
 )
 
+// LazySlice is a thread-safe lazy-loaded slice.
 type LazySlice[K any] struct {
 	inner []K
 	mu    sync.Mutex
 }
 
+// NewLazySlice creates a new slice and runs the [load] function in a goroutine
+// to populate it.
 func NewLazySlice[K any](load func() []K) *LazySlice[K] {
 	s := &LazySlice[K]{}
 	s.mu.Lock()
@@ -20,6 +23,7 @@ func NewLazySlice[K any](load func() []K) *LazySlice[K] {
 	return s
 }
 
+// Iter returns an iterator that yields elements from the slice.
 func (s *LazySlice[K]) Iter() iter.Seq[K] {
 	s.mu.Lock()
 	inner := s.inner

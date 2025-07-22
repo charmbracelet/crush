@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sort"
 	"strings"
@@ -120,7 +121,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 
 			path, err := diagParams.URI.Path()
 			if err != nil {
-				// XXX: Log or handle the error appropriately.
+				slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
 				return
 			}
 
@@ -224,7 +225,7 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 			for location, diags := range diagnostics {
 				path, err := location.Path()
 				if err != nil {
-					// XXX: Log or handle the error appropriately.
+					slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
 					continue
 				}
 				isCurrentFile := path == filePath

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+	"log/slog"
 )
 
 // PatternInfo is an interface for types that represent glob patterns
@@ -49,14 +50,14 @@ func (g *GlobPattern) AsPattern() (PatternInfo, error) {
 		case string:
 			basePath, err = DocumentURI(baseURI).Path()
 			if err != nil {
-				// XXX: log or handle error accordingly
+				slog.Error("Failed to convert URI to path", "uri", baseURI, "error", err)
 				return nil, fmt.Errorf("invalid URI: %s", baseURI)
 			}
 
 		case DocumentURI:
 			basePath, err = baseURI.Path()
 			if err != nil {
-				// XXX: log or handle error accordingly
+				slog.Error("Failed to convert DocumentURI to path", "uri", baseURI, "error", err)
 				return nil, fmt.Errorf("invalid DocumentURI: %s", baseURI)
 			}
 

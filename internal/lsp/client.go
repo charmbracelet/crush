@@ -451,7 +451,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 	for uri := range c.openFiles {
 		filePath, err := protocol.DocumentURI(uri).Path()
 		if err != nil {
-			// XXX: Log or handle the error appropriately
+			slog.Error("Failed to convert URI to path for TypeScript symbol collection", "uri", uri, "error", err)
 			continue
 		}
 
@@ -719,7 +719,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		// Convert URI back to file path using proper URI handling
 		filePath, err := protocol.DocumentURI(uri).Path()
 		if err != nil {
-			// XXX: Log or handle the error appropriately
+			slog.Error("Failed to convert URI to path for file closing", "uri", uri, "error", err)
 			continue
 		}
 		filesToClose = append(filesToClose, filePath)

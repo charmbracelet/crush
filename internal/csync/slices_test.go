@@ -70,6 +70,7 @@ func TestLazySlice_EarlyBreak(t *testing.T) {
 
 	data := []string{"a", "b", "c", "d", "e"}
 	s := NewLazySlice(func() []string {
+		// TODO: use synctest when new Go is out.
 		time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
 		return data
 	})

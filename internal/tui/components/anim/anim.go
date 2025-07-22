@@ -289,7 +289,7 @@ func (a Anim) View() string {
 	var b strings.Builder
 	for i := range a.width {
 		switch {
-		case !a.initialized && time.Since(a.startTime) < a.birthOffsets[i]:
+		case !a.initialized && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
 			// Birth offset not reached: render initial character.
 			b.WriteString(a.initialFrames[a.step][i])
 		case i < a.cyclingCharWidth:

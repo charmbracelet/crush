@@ -107,7 +107,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
 	return t.S().Base.
-		Padding(1).
+		Padding(1, 1, 0, 1).
 		Width(m.width).
 		Height(m.height).
 		Render(
@@ -508,7 +508,7 @@ func (m *messageListCmp) GetSize() (int, int) {
 func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	return m.listCmp.SetSize(width-2, height-2) // for padding
+	return m.listCmp.SetSize(width-2, height-1) // for padding
 }
 
 // Blur implements MessageListCmp.

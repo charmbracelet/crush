@@ -193,6 +193,7 @@ func (dv *DiffView) clearSyntaxCache() {
 
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
+	dv.normalizeLineEndings()
 	dv.replaceTabs()
 	if err := dv.computeDiff(); err != nil {
 		return err.Error()
@@ -225,6 +226,12 @@ func (dv *DiffView) String() string {
 	default:
 		panic("unknown diffview layout")
 	}
+}
+
+// normalizeLineEndings ensures the file contents use Unix-style line endings.
+func (dv *DiffView) normalizeLineEndings() {
+	dv.before.content = strings.ReplaceAll(dv.before.content, "\r\n", "\n")
+	dv.after.content = strings.ReplaceAll(dv.after.content, "\r\n", "\n")
 }
 
 // replaceTabs replaces tabs in the before and after file contents with spaces
@@ -396,8 +403,7 @@ func (dv *DiffView) renderUnified() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.ReplaceAll(in, "\r\n", "\n")
-		content = strings.TrimSuffix(content, "\n")
+		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
@@ -520,8 +526,7 @@ func (dv *DiffView) renderSplit() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.ReplaceAll(in, "\r\n", "\n")
-		content = strings.TrimSuffix(content, "\n")
+		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")

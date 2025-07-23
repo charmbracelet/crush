@@ -127,7 +127,8 @@ type Options struct {
 	DebugLSP                bool        `json:"debug_lsp,omitempty"`
 	DisableAutoSummarize    bool        `json:"disable_auto_summarize,omitempty"`
 	DataDirectory           string      `json:"data_directory,omitempty"` // Relative to the cwd
-	SkipPermissionsRequests bool        `json:"-"`                        // Automatically accept all permissions (YOLO mode)
+	DisableNotifications    bool        `json:"disable_notifications,omitempty"`
+	SkipPermissionsRequests bool        `json:"-"` // Automatically accept all permissions (YOLO mode)
 }
 
 type MCPs map[string]MCPConfig

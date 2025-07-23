@@ -22,7 +22,7 @@ type chromaFormatter struct {
 // Format implements the chroma.Formatter interface.
 func (c chromaFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator) error {
 	for token := it(); token != chroma.EOF; token = it() {
-		value := strings.TrimSuffix(token.Value, "\n")
+		value := strings.TrimRight(token.Value, "\n")
 		value = ansiext.Escape(value)
 
 		entry := style.Get(token.Type)

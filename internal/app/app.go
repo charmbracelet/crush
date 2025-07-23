@@ -154,7 +154,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 			if result.Error != nil {
 				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-					slog.Info("Agent processing cancelled", "session_id", sess.ID)
+					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.Error)
@@ -162,12 +162,12 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 			msgContent := result.Message.Content().String()
 			if len(msgContent) < readBts {
-				// XXX: Log accordingly?
+				slog.Error("Non-interacgive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
 				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
 			}
 			fmt.Println(msgContent[readBts:])
 
-			slog.Info("Non-interactive run completed", "session_id", sess.ID)
+			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 			return nil
 
 		case event := <-messageEvents:

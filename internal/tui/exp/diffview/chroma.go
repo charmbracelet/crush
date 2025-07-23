@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
@@ -22,6 +23,7 @@ type chromaFormatter struct {
 func (c chromaFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator) error {
 	for token := it(); token != chroma.EOF; token = it() {
 		value := strings.TrimSuffix(token.Value, "\n")
+		value = ansiext.Escape(value)
 
 		entry := style.Get(token.Type)
 		if entry.IsZero() {

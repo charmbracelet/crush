@@ -12,10 +12,12 @@ Crush is a tool for building software with AI.
 
 ## Installation
 
+Crush has first class support for macOS, Linux, and Windows.
+
 Nightly builds are available while Crush is in development.
 
 - [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
-- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
+- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux, macOS and Windows
 
 You can also just install it with go:
 
@@ -44,8 +46,6 @@ Then, run Crush by typing `crush`.
 ***
 
 </details>
-
-Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 

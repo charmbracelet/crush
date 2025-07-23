@@ -107,7 +107,6 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
-		c.width = min(listWidth(c.list.Items()), maxCompletionsWidth)
 		c.height = min(msg.Height-c.y, 15)
 		return c, nil
 	case tea.KeyPressMsg:
@@ -180,7 +179,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c.x+width >= c.wWidth {
 			c.x = c.wWidth - width - 1
 		}
-		c.width = max(width, c.wWidth-minCompletionsWidth-1)
+		c.width = width
 		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
 		return c, tea.Batch(
 			c.list.SetItems(items),

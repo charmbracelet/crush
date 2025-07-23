@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -702,7 +703,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		if i >= responseContextHeight {
 			break
 		}
-		ln = escapeContent(ln)
+		ln = ansiext.Escape(ln)
 		ln = " " + ln // left padding
 		if len(ln) > width {
 			ln = v.fit(ln, width)
@@ -740,7 +741,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 
 	lines := strings.Split(truncated, "\n")
 	for i, ln := range lines {
-		lines[i] = escapeContent(ln)
+		lines[i] = ansiext.Escape(ln)
 	}
 
 	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, t.BgBase)
@@ -815,21 +816,4 @@ func prettifyToolName(name string) string {
 	default:
 		return name
 	}
-}
-
-// escapeContent replaces control characters with their Unicode Control Picture
-// representations to ensure they are displayed correctly in the UI.
-func escapeContent(content string) string {
-	var sb strings.Builder
-	for _, r := range content {
-		switch {
-		case r >= 0 && r <= 0x1f: // Control characters 0x00-0x1F
-			sb.WriteRune('\u2400' + r)
-		case r == ansi.DEL:
-			sb.WriteRune('\u2421')
-		default:
-			sb.WriteRune(r)
-		}
-	}
-	return sb.String()
 }

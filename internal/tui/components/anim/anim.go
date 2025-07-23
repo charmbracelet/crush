@@ -2,9 +2,12 @@
 package anim
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"image/color"
 	"math/rand/v2"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -58,6 +61,29 @@ func nextID() int {
 	return int(atomic.AddInt64(&lastID, 1))
 }
 
+// Cache for expensive animation calculations
+type animCache struct {
+	initialFrames  [][]string
+	cyclingFrames  [][]string
+	width          int
+	labelWidth     int
+	label          []string
+	ellipsisFrames []string
+}
+
+var (
+	animCacheMutex sync.RWMutex
+	animCacheMap   = make(map[string]*animCache)
+)
+
+// settingsHash creates a hash key for the settings to use for caching
+func settingsHash(opts Settings) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // StepMsg is a message type used to trigger the next step in the animation.
 type StepMsg struct{ id int }
 
@@ -109,79 +135,109 @@ func New(opts Settings) (a Anim) {
 	}
 
 	a.id = nextID()
-
 	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
-	a.labelWidth = lipgloss.Width(opts.Label)
 	a.labelColor = opts.LabelColor
 
-	// Total width of anim, in cells.
-	a.width = opts.Size
-	if opts.Label != "" {
-		a.width += labelGapWidth + lipgloss.Width(opts.Label)
-	}
+	// Check cache first
+	cacheKey := settingsHash(opts)
+	animCacheMutex.RLock()
+	cached, exists := animCacheMap[cacheKey]
+	animCacheMutex.RUnlock()
 
-	// Render the label
-	a.renderLabel(opts.Label)
-
-	// Pre-generate gradient.
-	var ramp []color.Color
-	numFrames := prerenderedFrames
-	if opts.CycleColors {
-		ramp = makeGradientRamp(a.width*3, opts.GradColorA, opts.GradColorB, opts.GradColorA, opts.GradColorB)
-		numFrames = a.width * 2
+	if exists {
+		// Use cached values
+		a.width = cached.width
+		a.labelWidth = cached.labelWidth
+		a.label = cached.label
+		a.ellipsisFrames = cached.ellipsisFrames
+		a.initialFrames = cached.initialFrames
+		a.cyclingFrames = cached.cyclingFrames
 	} else {
-		ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
-	}
+		// Generate new values and cache them
+		a.labelWidth = lipgloss.Width(opts.Label)
 
-	// Pre-render initial characters.
-	a.initialFrames = make([][]string, numFrames)
-	offset := 0
-	for i := range a.initialFrames {
-		a.initialFrames[i] = make([]string, a.width+labelGapWidth+a.labelWidth)
-		for j := range a.initialFrames[i] {
-			if j+offset >= len(ramp) {
-				continue // skip if we run out of colors
-			}
-
-			var c color.Color
-			if j <= a.cyclingCharWidth {
-				c = ramp[j+offset]
-			} else {
-				c = opts.LabelColor
-			}
-
-			// Also prerender the initial character with Lip Gloss to avoid
-			// processing in the render loop.
-			a.initialFrames[i][j] = lipgloss.NewStyle().
-				Foreground(c).
-				Render(string(initialChar))
+		// Total width of anim, in cells.
+		a.width = opts.Size
+		if opts.Label != "" {
+			a.width += labelGapWidth + lipgloss.Width(opts.Label)
 		}
+
+		// Render the label
+		a.renderLabel(opts.Label)
+
+		// Pre-generate gradient.
+		var ramp []color.Color
+		numFrames := prerenderedFrames
 		if opts.CycleColors {
-			offset++
+			ramp = makeGradientRamp(a.width*3, opts.GradColorA, opts.GradColorB, opts.GradColorA, opts.GradColorB)
+			numFrames = a.width * 2
+		} else {
+			ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
 		}
-	}
 
-	// Prerender scrambled rune frames for the animation.
-	a.cyclingFrames = make([][]string, numFrames)
-	offset = 0
-	for i := range a.cyclingFrames {
-		a.cyclingFrames[i] = make([]string, a.width)
-		for j := range a.cyclingFrames[i] {
-			if j+offset >= len(ramp) {
-				continue // skip if we run out of colors
+		// Pre-render initial characters.
+		a.initialFrames = make([][]string, numFrames)
+		offset := 0
+		for i := range a.initialFrames {
+			a.initialFrames[i] = make([]string, a.width+labelGapWidth+a.labelWidth)
+			for j := range a.initialFrames[i] {
+				if j+offset >= len(ramp) {
+					continue // skip if we run out of colors
+				}
+
+				var c color.Color
+				if j <= a.cyclingCharWidth {
+					c = ramp[j+offset]
+				} else {
+					c = opts.LabelColor
+				}
+
+				// Also prerender the initial character with Lip Gloss to avoid
+				// processing in the render loop.
+				a.initialFrames[i][j] = lipgloss.NewStyle().
+					Foreground(c).
+					Render(string(initialChar))
 			}
+			if opts.CycleColors {
+				offset++
+			}
+		}
 
-			// Also prerender the color with Lip Gloss here to avoid processing
-			// in the render loop.
-			r := availableRunes[rand.IntN(len(availableRunes))]
-			a.cyclingFrames[i][j] = lipgloss.NewStyle().
-				Foreground(ramp[j+offset]).
-				Render(string(r))
+		// Prerender scrambled rune frames for the animation.
+		a.cyclingFrames = make([][]string, numFrames)
+		offset = 0
+		for i := range a.cyclingFrames {
+			a.cyclingFrames[i] = make([]string, a.width)
+			for j := range a.cyclingFrames[i] {
+				if j+offset >= len(ramp) {
+					continue // skip if we run out of colors
+				}
+
+				// Also prerender the color with Lip Gloss here to avoid processing
+				// in the render loop.
+				r := availableRunes[rand.IntN(len(availableRunes))]
+				a.cyclingFrames[i][j] = lipgloss.NewStyle().
+					Foreground(ramp[j+offset]).
+					Render(string(r))
+			}
+			if opts.CycleColors {
+				offset++
+			}
 		}
-		if opts.CycleColors {
-			offset++
+
+		// Cache the results
+		cached = &animCache{
+			initialFrames:  a.initialFrames,
+			cyclingFrames:  a.cyclingFrames,
+			width:          a.width,
+			labelWidth:     a.labelWidth,
+			label:          a.label,
+			ellipsisFrames: a.ellipsisFrames,
 		}
+		animCacheMutex.Lock()
+		animCacheMap[cacheKey] = cached
+		animCacheMutex.Unlock()
 	}
 
 	// Random assign a birth to each character for a stagged entrance effect.

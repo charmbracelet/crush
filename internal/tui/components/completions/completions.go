@@ -51,18 +51,22 @@ type Completions interface {
 }
 
 type completionsCmp struct {
-	width  int
-	height int  // Height of the completions component`
-	x      int  // X position for the completions popup
-	y      int  // Y position for the completions popup
-	open   bool // Indicates if the completions are open
-	keyMap KeyMap
+	wWidth   int // The window width
+	width    int
+	height   int  // Height of the completions component`
+	x, xorig int  // X position for the completions popup
+	y        int  // Y position for the completions popup
+	open     bool // Indicates if the completions are open
+	keyMap   KeyMap
 
 	list  list.ListModel
 	query string // The current filter query
 }
 
-const maxCompletionsWidth = 80 // Maximum width for the completions popup
+const (
+	maxCompletionsWidth = 80 // Maximum width for the completions popup
+	minCompletionsWidth = 20 // Minimum width for the completions popup
+)
 
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
@@ -102,6 +106,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		c.wWidth = msg.Width
 		c.width = min(listWidth(c.list.Items()), maxCompletionsWidth)
 		c.height = min(msg.Height-c.y, 15)
 		return c, nil
@@ -160,7 +165,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OpenCompletionsMsg:
 		c.open = true
 		c.query = ""
-		c.x = msg.X
+		c.x, c.xorig = msg.X, msg.X
 		c.y = msg.Y
 		items := []util.Model{}
 		t := styles.CurrentTheme()
@@ -168,7 +173,14 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
 			items = append(items, item)
 		}
-		c.width = listWidth(msg.Completions)
+		width := listWidth(items)
+		if len(items) == 0 {
+			width = listWidth(c.list.Items())
+		}
+		if c.x+width >= c.wWidth {
+			c.x = c.wWidth - width - 1
+		}
+		c.width = max(width, c.wWidth-minCompletionsWidth-1)
 		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
 		return c, tea.Batch(
 			c.list.SetItems(items),
@@ -198,7 +210,13 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, c.list.Filter(msg.Query))
 		items := c.list.Items()
 		itemsLen := len(items)
-		c.width = listWidth(items)
+		width := listWidth(items)
+		if c.x < 0 {
+			c.x = c.xorig
+		} else if c.x+width >= c.wWidth {
+			c.x = c.wWidth - width - 1
+		}
+		c.width = width
 		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {

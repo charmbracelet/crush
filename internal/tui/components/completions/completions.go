@@ -51,13 +51,14 @@ type Completions interface {
 }
 
 type completionsCmp struct {
-	wWidth   int // The window width
-	width    int
-	height   int  // Height of the completions component`
-	x, xorig int  // X position for the completions popup
-	y        int  // Y position for the completions popup
-	open     bool // Indicates if the completions are open
-	keyMap   KeyMap
+	wWidth    int // The window width
+	width     int
+	lastWidth int
+	height    int  // Height of the completions component`
+	x, xorig  int  // X position for the completions popup
+	y         int  // Y position for the completions popup
+	open      bool // Indicates if the completions are open
+	keyMap    KeyMap
 
 	list  list.ListModel
 	query string // The current filter query
@@ -210,7 +211,8 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		items := c.list.Items()
 		itemsLen := len(items)
 		width := listWidth(items)
-		if c.x < 0 {
+		c.lastWidth = c.width
+		if c.x < 0 || width < c.lastWidth {
 			c.x = c.xorig
 		} else if c.x+width >= c.wWidth {
 			c.x = c.wWidth - width - 1

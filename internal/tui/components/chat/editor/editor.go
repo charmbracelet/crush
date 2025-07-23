@@ -187,9 +187,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			value = value[:m.completionsStartIndex]
 			value += item.Path
 			m.textarea.SetValue(value)
-			m.isCompletionsOpen = false
-			m.currentQuery = ""
-			m.completionsStartIndex = 0
+			if !msg.Insert {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+			}
 			return m, nil
 		}
 	case openEditorMsg:

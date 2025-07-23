@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -23,8 +22,10 @@ type BashPermissionsParams struct {
 }
 
 type BashResponseMetadata struct {
-	StartTime int64 `json:"start_time"`
-	EndTime   int64 `json:"end_time"`
+	StartTime        int64  `json:"start_time"`
+	EndTime          int64  `json:"end_time"`
+	Output           string `json:"output"`
+	WorkingDirectory string `json:"working_directory"`
 }
 type bashTool struct {
 	permissions permission.Service
@@ -55,6 +56,8 @@ var bannedCommands = []string{
 	"lynx",
 	"nc",
 	"safari",
+	"scp",
+	"ssh",
 	"telnet",
 	"w3m",
 	"wget",
@@ -144,6 +147,7 @@ Before executing the command, please follow these steps:
 5. Return Result:
  - Provide the processed output of the command.
  - If any errors occurred during execution, include those in the output.
+ - The result will also have metadata like the cwd (current working directory) at the end, included with <cwd></cwd> tags.
 
 Usage notes:
 - The command argument is required.
@@ -387,9 +391,12 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Millisecond)
 		defer cancel()
 	}
-	stdout, stderr, err := shell.
-		GetPersistentShell(b.workingDir).
-		Exec(ctx, params.Command)
+
+	persistentShell := shell.GetPersistentShell(b.workingDir)
+	stdout, stderr, err := persistentShell.Exec(ctx, params.Command)
+
+	// Get the current working directory after command execution
+	currentWorkingDir := persistentShell.GetWorkingDir()
 	interrupted := shell.IsInterrupt(err)
 	exitCode := shell.ExitCode(err)
 	if exitCode == 0 && !interrupted && err != nil {
@@ -398,15 +405,6 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	stdout = truncateOutput(stdout)
 	stderr = truncateOutput(stderr)
-
-	slog.Info("Bash command executed",
-		"command", params.Command,
-		"stdout", stdout,
-		"stderr", stderr,
-		"exit_code", exitCode,
-		"interrupted", interrupted,
-		"err", err,
-	)
 
 	errorMessage := stderr
 	if errorMessage == "" && err != nil {
@@ -436,9 +434,12 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	}
 
 	metadata := BashResponseMetadata{
-		StartTime: startTime.UnixMilli(),
-		EndTime:   time.Now().UnixMilli(),
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Output:           stdout,
+		WorkingDirectory: currentWorkingDir,
 	}
+	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
 	if stdout == "" {
 		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
 	}

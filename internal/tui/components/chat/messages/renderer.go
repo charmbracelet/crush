@@ -124,9 +124,9 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 	} else if v.cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
-	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
+	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(true, width-lipgloss.Width(tool), params...)
+	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
@@ -212,10 +212,19 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	args := newParamBuilder().addMain(cmd).build()
 
 	return br.renderWithParams(v, "Bash", args, func() string {
-		if v.result.Content == tools.BashNoOutput {
+		var meta tools.BashResponseMetadata
+		if err := br.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+		// for backwards compatibility with older tool calls.
+		if meta.Output == "" && v.result.Content != tools.BashNoOutput {
+			meta.Output = v.result.Content
+		}
+
+		if meta.Output == "" {
 			return ""
 		}
-		return renderPlainContent(v, v.result.Content)
+		return renderPlainContent(v, meta.Output)
 	})
 }
 

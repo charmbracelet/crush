@@ -143,9 +143,11 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	wasSmallScreen := s.isSmallScreen()
+	rerenderLogo := width != s.width
 	s.height = height
-	if width != s.width {
-		s.width = width
+	s.width = width
+	if rerenderLogo || wasSmallScreen != s.isSmallScreen() {
 		s.logoRendered = s.logoBlock()
 	}
 	// remove padding, logo height, gap, title space
@@ -541,9 +543,19 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) isSmallScreen() bool {
+	// Consider a screen small if either the width is less than 40 or if the
+	// height is less than 20
+	return s.width < 55 || s.height < 20
+}
+
 func (s *splashCmp) infoSection() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.PaddingLeft(2).Render(
+	infoStyle := t.S().Base.PaddingLeft(2)
+	if s.isSmallScreen() {
+		infoStyle = infoStyle.MarginTop(1)
+	}
+	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.cwd(),
@@ -556,14 +568,25 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
+	if s.isSmallScreen() {
+		// If the width is too small, render a smaller version of the logo
+		// NOTE: 20 is not correct because [splashCmp.height] is not the
+		// *actual* window height, instead, it is the height of the splash
+		// component and that depends on other variables like compact mode and
+		// the height of the editor.
+		return logoStyle.Render(
+			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
+		)
+	}
+	return logoStyle.Render(
 		logo.Render(version.Version, false, logo.Opts{
 			FieldColor:   t.Primary,
 			TitleColorA:  t.Secondary,
 			TitleColorB:  t.Primary,
 			CharmColor:   t.Secondary,
 			VersionColor: t.Primary,
-			Width:        s.width - 4,
+			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
 		}),
 	)
 }

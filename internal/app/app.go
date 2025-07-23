@@ -162,7 +162,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 			msgContent := result.Message.Content().String()
 			if len(msgContent) < readBts {
-				slog.Error("Non-interacgive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
+				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
 				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
 			}
 			fmt.Println(msgContent[readBts:])

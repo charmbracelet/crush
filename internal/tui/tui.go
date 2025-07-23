@@ -116,7 +116,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
 	// Completions messages
-	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg, completions.CloseCompletionsMsg:
+	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg, completions.CloseCompletionsMsg, completions.RepositionCompletionsMsg:
 		u, completionCmd := a.completions.Update(msg)
 		a.completions = u.(completions.Completions)
 		return a, completionCmd

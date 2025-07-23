@@ -29,6 +29,10 @@ type FilterCompletionsMsg struct {
 	Reopen bool
 }
 
+type RepositionCompletionsMsg struct {
+	X, Y int
+}
+
 type CompletionsClosedMsg struct{}
 
 type CompletionsOpenedMsg struct{}
@@ -52,6 +56,7 @@ type Completions interface {
 
 type completionsCmp struct {
 	wWidth    int // The window width
+	wHeight   int // The window height
 	width     int
 	lastWidth int
 	height    int  // Height of the completions component`
@@ -88,7 +93,7 @@ func New() Completions {
 	)
 	return &completionsCmp{
 		width:  0,
-		height: 0,
+		height: maxCompletionsHeight,
 		list:   l,
 		query:  "",
 		keyMap: completionsKeyMap,
@@ -107,8 +112,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		c.wWidth = msg.Width
-		c.height = min(msg.Height-c.y, 15)
+		c.wWidth, c.wHeight = msg.Width, msg.Height
 		return c, nil
 	case tea.KeyPressMsg:
 		switch {
@@ -159,6 +163,8 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, c.keyMap.Cancel):
 			return c, util.CmdHandler(CloseCompletionsMsg{})
 		}
+	case RepositionCompletionsMsg:
+		c.x, c.y = msg.X, msg.Y
 	case CloseCompletionsMsg:
 		c.open = false
 		return c, util.CmdHandler(CompletionsClosedMsg{})

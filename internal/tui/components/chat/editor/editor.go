@@ -161,10 +161,19 @@ func (m *editorCmp) send() tea.Cmd {
 	)
 }
 
+func (m *editorCmp) repositionCompletions() tea.Msg {
+	cur := m.textarea.Cursor()
+	x := cur.X + m.x // adjust for padding
+	y := cur.Y + m.y + 1
+	return completions.RepositionCompletionsMsg{X: x, Y: y}
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
 			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))

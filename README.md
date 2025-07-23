@@ -16,7 +16,7 @@ Crush has first class support for macOS, Linux, and Windows.
 
 Nightly builds are available while Crush is in development.
 
-- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
+- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian, RPM, APK, and PKG formats
 - [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux, macOS and Windows
 
 You can also just install it with go:
@@ -30,7 +30,7 @@ go install
 <details>
 <summary>Not a developer? Here’s a quick how-to.</summary>
 
-Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
+Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64 one](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
 
 Next, open a terminal and run the following commands:
 
@@ -38,7 +38,7 @@ Next, open a terminal and run the following commands:
 cd ~/Downloads
 tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
 sudo mv ./crush/crush /usr/local/bin/crush
-rm -rf crush
+rm -rf ./crush
 ```
 
 Then, run Crush by typing `crush`.

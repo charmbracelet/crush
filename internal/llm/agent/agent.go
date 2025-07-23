@@ -227,7 +227,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Cancel regular requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info(fmt.Sprintf("Request cancellation initiated for session: %s", sessionID))
+			slog.Info("Request cancellation initiated", "session_id", sessionID)
 			cancel()
 		}
 	}
@@ -235,7 +235,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Also check for summarize requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID + "-summarize"); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info(fmt.Sprintf("Summarize cancellation initiated for session: %s", sessionID))
+			slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 			cancel()
 		}
 	}
@@ -365,7 +365,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			})
 			titleErr := a.generateTitle(context.Background(), sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
-				slog.Error(fmt.Sprintf("failed to generate title: %v", titleErr))
+				slog.Error("failed to generate title", "error", titleErr)
 			}
 		}()
 	}

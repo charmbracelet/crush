@@ -9,17 +9,17 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
 
 func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 	switch p {
-	case string(provider.InferenceProviderOpenAI):
+	case string(catwalk.InferenceProviderOpenAI):
 		basePrompt = baseOpenAICoderPrompt
-	case string(provider.InferenceProviderGemini), string(provider.InferenceProviderVertexAI):
+	case string(catwalk.InferenceProviderGemini), string(catwalk.InferenceProviderVertexAI):
 		basePrompt = baseGeminiCoderPrompt
 	default:
 		basePrompt = baseAnthropicCoderPrompt

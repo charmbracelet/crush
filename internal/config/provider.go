@@ -7,17 +7,16 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/fur/client"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
 
 type ProviderClient interface {
-	GetProviders() ([]provider.Provider, error)
+	GetProviders() ([]catwalk.Provider, error)
 }
 
 var (
 	providerOnce sync.Once
-	providerList []provider.Provider
+	providerList []catwalk.Provider
 )
 
 // file to cache provider data
@@ -41,7 +40,7 @@ func providerCacheFileData() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, "providers.json")
 }
 
-func saveProvidersInCache(path string, providers []provider.Provider) error {
+func saveProvidersInCache(path string, providers []catwalk.Provider) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -55,18 +54,18 @@ func saveProvidersInCache(path string, providers []provider.Provider) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func loadProvidersFromCache(path string) ([]provider.Provider, error) {
+func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var providers []provider.Provider
+	var providers []catwalk.Provider
 	err = json.Unmarshal(data, &providers)
 	return providers, err
 }
 
-func loadProviders(path string, client ProviderClient) ([]provider.Provider, error) {
+func loadProviders(path string, client ProviderClient) ([]catwalk.Provider, error) {
 	providers, err := client.GetProviders()
 	if err != nil {
 		fallbackToCache, err := loadProvidersFromCache(path)
@@ -82,11 +81,11 @@ func loadProviders(path string, client ProviderClient) ([]provider.Provider, err
 	return providers, nil
 }
 
-func Providers() ([]provider.Provider, error) {
-	return LoadProviders(client.New())
+func Providers() ([]catwalk.Provider, error) {
+	return LoadProviders(catwalk.NewWithURL(catwalkURL))
 }
 
-func LoadProviders(client ProviderClient) ([]provider.Provider, error) {
+func LoadProviders(client ProviderClient) ([]catwalk.Provider, error) {
 	var err error
 	providerOnce.Do(func() {
 		providerList, err = loadProviders(providerCacheFileData(), client)

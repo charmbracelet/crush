@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -109,7 +109,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 		if err != nil {
 			return
 		}
-		filteredProviders := []provider.Provider{}
+		filteredProviders := []catwalk.Provider{}
 		simpleProviders := []string{
 			"anthropic",
 			"openai",
@@ -407,7 +407,7 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 	return nil
 }
 
-func (s *splashCmp) getProvider(providerID provider.InferenceProvider) (*provider.Provider, error) {
+func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
 	providers, err := config.Providers()
 	if err != nil {
 		return nil, err

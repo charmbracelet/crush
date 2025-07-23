@@ -279,7 +279,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if model.SupportsImages {
 				return p, util.CmdHandler(OpenFilePickerMsg{})
 			} else {
-				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Model)
+				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {

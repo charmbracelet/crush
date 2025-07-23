@@ -60,12 +60,16 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Options != nil && cfg.Options.SkipPermissionsRequests
+	allowedCommands := []string{}
+	if cfg.Options != nil && cfg.Options.AllowedCommands != nil {
+		allowedCommands = cfg.Options.AllowedCommands
+	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedCommands),
 		LSPClients:  make(map[string]*lsp.Client),
 
 		globalCtx: ctx,

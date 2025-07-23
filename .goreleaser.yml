@@ -119,6 +119,7 @@ npms:
 
 nfpms:
   - formats:
+      - apk
       - deb
       - rpm
       - archlinux

@@ -1,7 +1,6 @@
 package list
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -17,46 +16,50 @@ type Item interface {
 	ID() string
 }
 
-type List[T Item] interface {
-	util.Model
-	layout.Sizeable
-	layout.Focusable
-	MoveUp(int) tea.Cmd
-	MoveDown(int) tea.Cmd
-	GoToTop() tea.Cmd
-	GoToBottom() tea.Cmd
-	SelectItemAbove() tea.Cmd
-	SelectItemBelow() tea.Cmd
-	SetItems([]T) tea.Cmd
-	SetSelected(string) tea.Cmd
-	SelectedItem() *T
-	Items() []T
-	UpdateItem(string, T)
-	DeleteItem(string)
-	PrependItem(T) tea.Cmd
-	AppendItem(T) tea.Cmd
-}
+type (
+	renderedMsg  struct{}
+	List[T Item] interface {
+		util.Model
+		layout.Sizeable
+		layout.Focusable
+
+		// Just change state
+		MoveUp(int) tea.Cmd
+		MoveDown(int) tea.Cmd
+		GoToTop() tea.Cmd
+		GoToBottom() tea.Cmd
+		SelectItemAbove() tea.Cmd
+		SelectItemBelow() tea.Cmd
+		SetItems([]T) tea.Cmd
+		SetSelected(string) tea.Cmd
+		SelectedItem() *T
+		Items() []T
+		UpdateItem(string, T) tea.Cmd
+		DeleteItem(string) tea.Cmd
+		PrependItem(T) tea.Cmd
+		AppendItem(T) tea.Cmd
+	}
+)
 
 type direction int
 
 const (
-	Forward direction = iota
-	Backward
+	DirectionForward direction = iota
+	DirectionBackward
 )
 
 const (
-	NotFound          = -1
-	DefaultScrollSize = 2
+	ItemNotFound              = -1
+	ViewportDefaultScrollSize = 2
 )
-
-type setSelectedMsg struct {
-	selectedItemID string
-}
 
 type renderedItem struct {
 	id     string
 	view   string
+	dirty  bool
 	height int
+	start  int
+	end    int
 }
 
 type confOptions struct {
@@ -67,16 +70,20 @@ type confOptions struct {
 	keyMap       KeyMap
 	direction    direction
 	selectedItem string
+	focused      bool
 }
+
 type list[T Item] struct {
 	*confOptions
 
-	focused       bool
-	offset        int
-	items         []T
-	renderedItems []renderedItem
-	rendered      string
-	isReady       bool
+	offset int
+
+	indexMap map[string]int
+	items    []T
+
+	renderedItems map[string]renderedItem
+
+	rendered string
 }
 
 type listOption func(*confOptions)
@@ -96,10 +103,17 @@ func WithGap(gap int) listOption {
 	}
 }
 
-// WithDirection sets the direction of the list.
-func WithDirection(dir direction) listOption {
+// WithDirectionForward sets the direction to forward
+func WithDirectionForward() listOption {
 	return func(l *confOptions) {
-		l.direction = dir
+		l.direction = DirectionForward
+	}
+}
+
+// WithDirectionBackward sets the direction to forward
+func WithDirectionBackward() listOption {
+	return func(l *confOptions) {
+		l.direction = DirectionBackward
 	}
 }
 
@@ -122,55 +136,60 @@ func WithWrapNavigation() listOption {
 	}
 }
 
+func WithFocus(focus bool) listOption {
+	return func(l *confOptions) {
+		l.focused = focus
+	}
+}
+
 func New[T Item](items []T, opts ...listOption) List[T] {
 	list := &list[T]{
 		confOptions: &confOptions{
-			direction: Forward,
+			direction: DirectionForward,
 			keyMap:    DefaultKeyMap(),
+			focused:   true,
 		},
-		items: items,
+		items:         items,
+		indexMap:      make(map[string]int),
+		renderedItems: map[string]renderedItem{},
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)
+	}
+
+	for inx, item := range items {
+		list.indexMap[item.ID()] = inx
 	}
 	return list
 }
 
 // Init implements List.
 func (l *list[T]) Init() tea.Cmd {
-	var cmds []tea.Cmd
-	for _, item := range l.items {
-		cmd := item.Init()
-		cmds = append(cmds, cmd)
-	}
-	cmds = append(cmds, l.renderItems())
-	return tea.Batch(cmds...)
+	return l.render()
 }
 
 // Update implements List.
 func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case setSelectedMsg:
-		return l, l.SetSelected(msg.selectedItemID)
 	case tea.KeyPressMsg:
 		if l.focused {
 			switch {
 			case key.Matches(msg, l.keyMap.Down):
-				return l, l.MoveDown(DefaultScrollSize)
+				return l, l.MoveDown(ViewportDefaultScrollSize)
 			case key.Matches(msg, l.keyMap.Up):
-				return l, l.MoveUp(DefaultScrollSize)
+				return l, l.MoveUp(ViewportDefaultScrollSize)
 			case key.Matches(msg, l.keyMap.DownOneItem):
 				return l, l.SelectItemBelow()
 			case key.Matches(msg, l.keyMap.UpOneItem):
 				return l, l.SelectItemAbove()
 			case key.Matches(msg, l.keyMap.HalfPageDown):
-				return l, l.MoveDown(l.listHeight() / 2)
+				return l, l.MoveDown(l.height / 2)
 			case key.Matches(msg, l.keyMap.HalfPageUp):
-				return l, l.MoveUp(l.listHeight() / 2)
+				return l, l.MoveUp(l.height / 2)
 			case key.Matches(msg, l.keyMap.PageDown):
-				return l, l.MoveDown(l.listHeight())
+				return l, l.MoveDown(l.height)
 			case key.Matches(msg, l.keyMap.PageUp):
-				return l, l.MoveUp(l.listHeight())
+				return l, l.MoveUp(l.height)
 			case key.Matches(msg, l.keyMap.End):
 				return l, l.GoToBottom()
 			case key.Matches(msg, l.keyMap.Home):
@@ -197,14 +216,306 @@ func (l *list[T]) View() string {
 func (l *list[T]) viewPosition() (int, int) {
 	start, end := 0, 0
 	renderedLines := lipgloss.Height(l.rendered) - 1
-	if l.direction == Forward {
+	if l.direction == DirectionForward {
 		start = max(0, l.offset)
-		end = min(l.offset+l.listHeight()-1, renderedLines)
+		end = min(l.offset+l.height-1, renderedLines)
 	} else {
-		start = max(0, renderedLines-l.offset-l.listHeight()+1)
+		start = max(0, renderedLines-l.offset-l.height+1)
 		end = max(0, renderedLines-l.offset)
 	}
 	return start, end
+}
+
+func (l *list[T]) recalculateItemPositions() {
+	currentContentHeight := 0
+	for _, item := range l.items {
+		rItem, ok := l.renderedItems[item.ID()]
+		if !ok {
+			continue
+		}
+		rItem.start = currentContentHeight
+		rItem.end = currentContentHeight + rItem.height - 1
+		l.renderedItems[item.ID()] = rItem
+		currentContentHeight = rItem.end + 1 + l.gap
+	}
+}
+
+func (l *list[T]) render() tea.Cmd {
+	if l.width <= 0 || l.height <= 0 || len(l.items) == 0 {
+		return nil
+	}
+	l.setDefaultSelected()
+	focusCmd := l.focusSelectedItem()
+	// we are not rendering the first time
+	if l.rendered != "" {
+		l.rendered = ""
+		// rerender everything will mostly hit cache
+		_ = l.renderIterator(0, false)
+		if l.direction == DirectionBackward {
+			l.recalculateItemPositions()
+		}
+		// in the end scroll to the selected item
+		if l.focused {
+			l.scrollToSelection()
+		}
+		return focusCmd
+	}
+	finishIndex := l.renderIterator(0, true)
+	// recalculate for the initial items
+	if l.direction == DirectionBackward {
+		l.recalculateItemPositions()
+	}
+	renderCmd := func() tea.Msg {
+		// render the rest
+		_ = l.renderIterator(finishIndex, false)
+		// needed for backwards
+		if l.direction == DirectionBackward {
+			l.recalculateItemPositions()
+		}
+		// in the end scroll to the selected item
+		if l.focused {
+			l.scrollToSelection()
+		}
+		return renderedMsg{}
+	}
+	return tea.Batch(focusCmd, renderCmd)
+}
+
+func (l *list[T]) setDefaultSelected() {
+	if l.selectedItem == "" {
+		if l.direction == DirectionForward {
+			l.selectFirstItem()
+		} else {
+			l.selectLastItem()
+		}
+	}
+}
+
+func (l *list[T]) scrollToSelection() {
+	rItem, ok := l.renderedItems[l.selectedItem]
+	if !ok {
+		l.selectedItem = ""
+		l.setDefaultSelected()
+		return
+	}
+
+	start, end := l.viewPosition()
+	// item bigger or equal to the viewport do nothing
+	if rItem.start <= start && rItem.end >= end {
+		return
+	}
+	// item already in view do nothing
+	if rItem.start >= start && rItem.start <= end {
+		return
+	} else if rItem.end <= end && rItem.end >= start {
+		return
+	}
+
+	if rItem.height >= l.height {
+		if l.direction == DirectionForward {
+			l.offset = rItem.start
+		} else {
+			l.offset = max(0, lipgloss.Height(l.rendered)-(rItem.start+l.height))
+		}
+		return
+	}
+
+	itemMiddleStart := rItem.start + rItem.height/2 + 1
+	if l.direction == DirectionForward {
+		l.offset = itemMiddleStart - l.height/2
+	} else {
+		l.offset = max(0, lipgloss.Height(l.rendered)-(itemMiddleStart+l.height/2))
+	}
+}
+
+func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
+	rItem, ok := l.renderedItems[l.selectedItem]
+	if !ok {
+		return nil
+	}
+	start, end := l.viewPosition()
+	// item bigger than the viewport do nothing
+	if rItem.start <= start && rItem.end >= end {
+		return nil
+	}
+	// item already in view do nothing
+	if rItem.start >= start && rItem.end <= end {
+		return nil
+	}
+
+	itemMiddle := rItem.start + rItem.height/2
+
+	if itemMiddle < start {
+		// select the first item in the viewport
+		// the item is most likely an item coming after this item
+		inx := l.indexMap[rItem.id]
+		for {
+			inx = l.firstSelectableItemBelow(inx)
+			if inx == ItemNotFound {
+				return nil
+			}
+			item, ok := l.renderedItems[l.items[inx].ID()]
+			if !ok {
+				continue
+			}
+
+			// If the item is bigger than the viewport, select it
+			if item.start <= start && item.end >= end {
+				l.selectedItem = item.id
+				return l.render()
+			}
+			// item is in the view
+			if item.start >= start && item.start <= end {
+				l.selectedItem = item.id
+				return l.render()
+			}
+		}
+	} else if itemMiddle > end {
+		// select the first item in the viewport
+		// the item is most likely an item coming after this item
+		inx := l.indexMap[rItem.id]
+		for {
+			inx = l.firstSelectableItemAbove(inx)
+			if inx == ItemNotFound {
+				return nil
+			}
+			item, ok := l.renderedItems[l.items[inx].ID()]
+			if !ok {
+				continue
+			}
+
+			// If the item is bigger than the viewport, select it
+			if item.start <= start && item.end >= end {
+				l.selectedItem = item.id
+				return l.render()
+			}
+			// item is in the view
+			if item.end >= start && item.end <= end {
+				l.selectedItem = item.id
+				return l.render()
+			}
+		}
+	}
+	return nil
+}
+
+func (l *list[T]) selectFirstItem() {
+	inx := l.firstSelectableItemBelow(-1)
+	if inx != ItemNotFound {
+		l.selectedItem = l.items[inx].ID()
+	}
+}
+
+func (l *list[T]) selectLastItem() {
+	inx := l.firstSelectableItemAbove(len(l.items))
+	if inx != ItemNotFound {
+		l.selectedItem = l.items[inx].ID()
+	}
+}
+
+func (l *list[T]) firstSelectableItemAbove(inx int) int {
+	for i := inx - 1; i >= 0; i-- {
+		if _, ok := any(l.items[i]).(layout.Focusable); ok {
+			return i
+		}
+	}
+	if inx == 0 && l.wrap {
+		return l.firstSelectableItemAbove(len(l.items))
+	}
+	return ItemNotFound
+}
+
+func (l *list[T]) firstSelectableItemBelow(inx int) int {
+	for i := inx + 1; i < len(l.items); i++ {
+		if _, ok := any(l.items[i]).(layout.Focusable); ok {
+			return i
+		}
+	}
+	if inx == len(l.items)-1 && l.wrap {
+		return l.firstSelectableItemBelow(-1)
+	}
+	return ItemNotFound
+}
+
+func (l *list[T]) focusSelectedItem() tea.Cmd {
+	if l.selectedItem == "" || !l.focused {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, item := range l.items {
+		if f, ok := any(item).(layout.Focusable); ok {
+			if item.ID() == l.selectedItem && !f.IsFocused() {
+				cmds = append(cmds, f.Focus())
+				if cache, ok := l.renderedItems[item.ID()]; ok {
+					cache.dirty = true
+					l.renderedItems[item.ID()] = cache
+				}
+			} else if item.ID() != l.selectedItem && f.IsFocused() {
+				cmds = append(cmds, f.Blur())
+				if cache, ok := l.renderedItems[item.ID()]; ok {
+					cache.dirty = true
+					l.renderedItems[item.ID()] = cache
+				}
+			}
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func (l *list[T]) blurItems() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, item := range l.items {
+		if f, ok := any(item).(layout.Focusable); ok {
+			if item.ID() == l.selectedItem && f.IsFocused() {
+				cmds = append(cmds, f.Blur())
+				if cache, ok := l.renderedItems[item.ID()]; ok {
+					cache.dirty = true
+					l.renderedItems[item.ID()] = cache
+				}
+			}
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// render iterator renders items starting from the specific index and limits hight if limitHeight != -1
+// returns the last index
+func (l *list[T]) renderIterator(startInx int, limitHeight bool) int {
+	currentContentHeight := lipgloss.Height(l.rendered) - 1
+	for i := startInx; i < len(l.items); i++ {
+		if currentContentHeight >= l.height && limitHeight {
+			return i
+		}
+		// cool way to go through the list in both directions
+		inx := i
+
+		if l.direction != DirectionForward {
+			inx = (len(l.items) - 1) - i
+		}
+
+		item := l.items[inx]
+		var rItem renderedItem
+		if cache, ok := l.renderedItems[item.ID()]; ok && !cache.dirty {
+			rItem = cache
+		} else {
+			rItem = l.renderItem(item)
+			rItem.start = currentContentHeight
+			rItem.end = currentContentHeight + rItem.height - 1
+			l.renderedItems[item.ID()] = rItem
+		}
+		gap := l.gap + 1
+		if inx == len(l.items)-1 {
+			gap = 0
+		}
+
+		if l.direction == DirectionForward {
+			l.rendered += rItem.view + strings.Repeat("\n", gap)
+		} else {
+			l.rendered = rItem.view + strings.Repeat("\n", gap) + l.rendered
+		}
+		currentContentHeight = rItem.end + 1 + l.gap
+	}
+	return len(l.items)
 }
 
 func (l *list[T]) renderItem(item Item) renderedItem {
@@ -216,27 +527,66 @@ func (l *list[T]) renderItem(item Item) renderedItem {
 	}
 }
 
-func (l *list[T]) renderView() {
-	var sb strings.Builder
-	for i, rendered := range l.renderedItems {
-		sb.WriteString(rendered.view)
-		if i < len(l.renderedItems)-1 {
-			sb.WriteString(strings.Repeat("\n", l.gap+1))
-		}
-	}
-	l.rendered = sb.String()
+// AppendItem implements List.
+func (l *list[T]) AppendItem(T) tea.Cmd {
+	panic("unimplemented")
+}
+
+// Blur implements List.
+func (l *list[T]) Blur() tea.Cmd {
+	cmd := l.blurItems()
+	return tea.Batch(cmd, l.render())
+}
+
+// DeleteItem implements List.
+func (l *list[T]) DeleteItem(string) tea.Cmd {
+	panic("unimplemented")
+}
+
+// Focus implements List.
+func (l *list[T]) Focus() tea.Cmd {
+	l.focused = true
+	return l.render()
+}
+
+// GetSize implements List.
+func (l *list[T]) GetSize() (int, int) {
+	return l.width, l.height
+}
+
+// GoToBottom implements List.
+func (l *list[T]) GoToBottom() tea.Cmd {
+	l.offset = 0
+	l.direction = DirectionBackward
+	l.selectedItem = ""
+	return l.render()
+}
+
+// GoToTop implements List.
+func (l *list[T]) GoToTop() tea.Cmd {
+	l.offset = 0
+	l.direction = DirectionForward
+	l.selectedItem = ""
+	return l.render()
+}
+
+// IsFocused implements List.
+func (l *list[T]) IsFocused() bool {
+	return l.focused
+}
+
+// Items implements List.
+func (l *list[T]) Items() []T {
+	return l.items
 }
 
 func (l *list[T]) incrementOffset(n int) {
-	if !l.isReady {
-		return
-	}
 	renderedHeight := lipgloss.Height(l.rendered)
 	// no need for offset
-	if renderedHeight <= l.listHeight() {
+	if renderedHeight <= l.height {
 		return
 	}
-	maxOffset := renderedHeight - l.listHeight()
+	maxOffset := renderedHeight - l.height
 	n = min(n, maxOffset-l.offset)
 	if n <= 0 {
 		return
@@ -245,9 +595,6 @@ func (l *list[T]) incrementOffset(n int) {
 }
 
 func (l *list[T]) decrementOffset(n int) {
-	if !l.isReady {
-		return
-	}
 	n = min(n, l.offset)
 	if n <= 0 {
 		return
@@ -258,524 +605,117 @@ func (l *list[T]) decrementOffset(n int) {
 	}
 }
 
-// changeSelectedWhenNotVisible is called so we make sure we move to the next available selected that is visible
-func (l *list[T]) changeSelectedWhenNotVisible() tea.Cmd {
-	var cmds []tea.Cmd
-	start, end := l.viewPosition()
-	currentPosition := 0
-	itemWithinView := NotFound
-	needsMove := false
-
-	for i, item := range l.items {
-		rendered := l.renderedItems[i]
-		itemStart := currentPosition
-		// we remove 1 so that we actually have the row, e.x 1 row => height 1 => start 0, end 0
-		itemEnd := itemStart + rendered.height - 1
-		if itemStart >= start && itemEnd <= end {
-			itemWithinView = i
-		}
-		if item.ID() == l.selectedItem {
-			// item is completely above the viewport
-			if itemStart < start && itemEnd < start {
-				needsMove = true
-			}
-			// item is completely below the viewport
-			if itemStart > end && itemEnd > end {
-				needsMove = true
-			}
-			if needsMove {
-				if focusable, ok := any(item).(layout.Focusable); ok {
-					cmds = append(cmds, focusable.Blur())
-				}
-				l.renderedItems[i] = l.renderItem(item)
-			} else {
-				return nil
-			}
-		}
-		if itemWithinView != NotFound && needsMove {
-			newSelection := l.items[itemWithinView]
-			l.selectedItem = newSelection.ID()
-			if focusable, ok := any(newSelection).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Focus())
-			}
-			l.renderedItems[itemWithinView] = l.renderItem(newSelection)
-			break
-		}
-		currentPosition += rendered.height + l.gap
-	}
-	l.renderView()
-	return tea.Batch(cmds...)
-}
-
-func (l *list[T]) MoveUp(n int) tea.Cmd {
-	if l.direction == Forward {
-		l.decrementOffset(n)
-	} else {
-		l.incrementOffset(n)
-	}
-	return l.changeSelectedWhenNotVisible()
-}
-
+// MoveDown implements List.
 func (l *list[T]) MoveDown(n int) tea.Cmd {
-	if l.direction == Forward {
+	if l.direction == DirectionForward {
 		l.incrementOffset(n)
 	} else {
 		l.decrementOffset(n)
 	}
-	return l.changeSelectedWhenNotVisible()
+	return l.changeSelectionWhenScrolling()
 }
 
-func (l *list[T]) firstSelectableItemBefore(inx int) int {
-	for i := inx - 1; i >= 0; i-- {
-		if _, ok := any(l.items[i]).(layout.Focusable); ok {
-			return i
-		}
+// MoveUp implements List.
+func (l *list[T]) MoveUp(n int) tea.Cmd {
+	if l.direction == DirectionForward {
+		l.decrementOffset(n)
+	} else {
+		l.incrementOffset(n)
 	}
-	if inx == 0 && l.wrap {
-		return l.firstSelectableItemBefore(len(l.items))
-	}
-	return NotFound
+	return l.changeSelectionWhenScrolling()
 }
 
-func (l *list[T]) firstSelectableItemAfter(inx int) int {
-	for i := inx + 1; i < len(l.items); i++ {
-		if _, ok := any(l.items[i]).(layout.Focusable); ok {
-			return i
-		}
-	}
-	if inx == len(l.items)-1 && l.wrap {
-		return l.firstSelectableItemAfter(-1)
-	}
-	return NotFound
+// PrependItem implements List.
+func (l *list[T]) PrependItem(T) tea.Cmd {
+	panic("unimplemented")
 }
 
-// moveToSelected needs to be called after the view is rendered
-func (l *list[T]) moveToSelected(center bool) tea.Cmd {
-	var cmds []tea.Cmd
-	if l.selectedItem == "" || !l.isReady {
-		return nil
-	}
-	currentPosition := 0
-	start, end := l.viewPosition()
-	for _, item := range l.renderedItems {
-		if item.id == l.selectedItem {
-			itemStart := currentPosition
-			itemEnd := currentPosition + item.height - 1
-
-			if start <= itemStart && itemEnd <= end {
-				return nil
-			}
-
-			if center {
-				viewportCenter := l.listHeight() / 2
-				itemCenter := itemStart + item.height/2
-				targetOffset := itemCenter - viewportCenter
-				if l.direction == Forward {
-					if targetOffset > l.offset {
-						cmds = append(cmds, l.MoveDown(targetOffset-l.offset))
-					} else if targetOffset < l.offset {
-						cmds = append(cmds, l.MoveUp(l.offset-targetOffset))
-					}
-				} else {
-					renderedHeight := lipgloss.Height(l.rendered)
-					backwardTargetOffset := renderedHeight - targetOffset - l.listHeight()
-					if backwardTargetOffset > l.offset {
-						cmds = append(cmds, l.MoveUp(backwardTargetOffset-l.offset))
-					} else if backwardTargetOffset < l.offset {
-						cmds = append(cmds, l.MoveDown(l.offset-backwardTargetOffset))
-					}
-				}
-			} else {
-				if currentPosition < start {
-					cmds = append(cmds, l.MoveUp(start-currentPosition))
-				}
-				if currentPosition > end {
-					cmds = append(cmds, l.MoveDown(currentPosition-end))
-				}
-			}
-		}
-		currentPosition += item.height + l.gap
-	}
-	return tea.Batch(cmds...)
-}
-
+// SelectItemAbove implements List.
 func (l *list[T]) SelectItemAbove() tea.Cmd {
-	if !l.isReady {
+	inx, ok := l.indexMap[l.selectedItem]
+	if !ok {
 		return nil
 	}
-	var cmds []tea.Cmd
-	for i, item := range l.items {
-		if l.selectedItem == item.ID() {
-			inx := l.firstSelectableItemBefore(i)
-			if inx == NotFound {
-				// no item above
-				return nil
-			}
-			// blur the current item
-			if focusable, ok := any(item).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Blur())
-			}
-			// rerender the item
-			l.renderedItems[i] = l.renderItem(item)
-			// focus the item above
-			above := l.items[inx]
-			if focusable, ok := any(above).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Focus())
-			}
-			// rerender the item
-			l.renderedItems[inx] = l.renderItem(above)
-			l.selectedItem = above.ID()
-			break
-		}
+
+	newIndex := l.firstSelectableItemAbove(inx)
+	if newIndex == ItemNotFound {
+		// no item above
+		return nil
 	}
-	l.renderView()
-	l.moveToSelected(false)
-	return tea.Batch(cmds...)
+	item := l.items[newIndex]
+	l.selectedItem = item.ID()
+	return l.render()
 }
 
+// SelectItemBelow implements List.
 func (l *list[T]) SelectItemBelow() tea.Cmd {
-	if !l.isReady {
-		return nil
-	}
-	var cmds []tea.Cmd
-	for i, item := range l.items {
-		if l.selectedItem == item.ID() {
-			inx := l.firstSelectableItemAfter(i)
-			if inx == NotFound {
-				// no item below
-				return nil
-			}
-			// blur the current item
-			if focusable, ok := any(item).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Blur())
-			}
-			// rerender the item
-			l.renderedItems[i] = l.renderItem(item)
-
-			// focus the item below
-			below := l.items[inx]
-			if focusable, ok := any(below).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Focus())
-			}
-			// rerender the item
-			l.renderedItems[inx] = l.renderItem(below)
-			l.selectedItem = below.ID()
-			break
-		}
-	}
-
-	l.renderView()
-	l.moveToSelected(false)
-	return tea.Batch(cmds...)
-}
-
-func (l *list[T]) GoToTop() tea.Cmd {
-	if !l.isReady {
-		return nil
-	}
-	l.offset = 0
-	l.direction = Forward
-	return tea.Batch(l.selectFirstItem(), l.renderForward())
-}
-
-func (l *list[T]) GoToBottom() tea.Cmd {
-	if !l.isReady {
-		return nil
-	}
-	l.offset = 0
-	l.direction = Backward
-
-	return tea.Batch(l.selectLastItem(), l.renderBackward())
-}
-
-func (l *list[T]) renderForward() tea.Cmd {
-	// TODO: figure out a way to preserve items that did not change
-	l.renderedItems = make([]renderedItem, 0)
-	currentHeight := 0
-	currentIndex := 0
-	for i, item := range l.items {
-		currentIndex = i
-		if currentHeight-1 > l.listHeight() {
-			break
-		}
-		rendered := l.renderItem(item)
-		l.renderedItems = append(l.renderedItems, rendered)
-		currentHeight += rendered.height + l.gap
-	}
-
-	// initial render
-	l.renderView()
-
-	if currentIndex == len(l.items)-1 {
-		l.isReady = true
-		return nil
-	}
-	// render the rest
-	return func() tea.Msg {
-		for i := currentIndex; i < len(l.items); i++ {
-			rendered := l.renderItem(l.items[i])
-			l.renderedItems = append(l.renderedItems, rendered)
-		}
-		l.renderView()
-		l.isReady = true
-		return nil
-	}
-}
-
-func (l *list[T]) renderBackward() tea.Cmd {
-	// TODO: figure out a way to preserve items that did not change
-	l.renderedItems = make([]renderedItem, 0)
-	currentHeight := 0
-	currentIndex := 0
-	for i := len(l.items) - 1; i >= 0; i-- {
-		currentIndex = i
-		if currentHeight > l.listHeight() {
-			break
-		}
-		rendered := l.renderItem(l.items[i])
-		l.renderedItems = append([]renderedItem{rendered}, l.renderedItems...)
-		currentHeight += rendered.height + l.gap
-	}
-	// initial render
-	l.renderView()
-	if currentIndex == 0 {
-		l.isReady = true
-		return nil
-	}
-	return func() tea.Msg {
-		for i := currentIndex; i >= 0; i-- {
-			rendered := l.renderItem(l.items[i])
-			l.renderedItems = append([]renderedItem{rendered}, l.renderedItems...)
-		}
-		l.renderView()
-		l.isReady = true
-		return nil
-	}
-}
-
-func (l *list[T]) selectFirstItem() tea.Cmd {
-	var cmd tea.Cmd
-	inx := l.firstSelectableItemAfter(-1)
-	if inx != NotFound {
-		l.selectedItem = l.items[inx].ID()
-		if focusable, ok := any(l.items[inx]).(layout.Focusable); ok {
-			cmd = focusable.Focus()
-		}
-	}
-	return cmd
-}
-
-func (l *list[T]) selectLastItem() tea.Cmd {
-	var cmd tea.Cmd
-	inx := l.firstSelectableItemBefore(len(l.items))
-	if inx != NotFound {
-		l.selectedItem = l.items[inx].ID()
-		if focusable, ok := any(l.items[inx]).(layout.Focusable); ok {
-			cmd = focusable.Focus()
-		}
-	}
-	return cmd
-}
-
-func (l *list[T]) renderItems() tea.Cmd {
-	if l.height <= 0 || l.width <= 0 {
-		return nil
-	}
-	if len(l.items) == 0 {
+	inx, ok := l.indexMap[l.selectedItem]
+	if !ok {
 		return nil
 	}
 
-	if l.selectedItem == "" {
-		if l.direction == Forward {
-			l.selectFirstItem()
-		} else {
-			l.selectLastItem()
-		}
+	newIndex := l.firstSelectableItemBelow(inx)
+	if newIndex == ItemNotFound {
+		// no item above
+		return nil
 	}
-	if l.direction == Forward {
-		return l.renderForward()
-	}
-	return l.renderBackward()
+	item := l.items[newIndex]
+	l.selectedItem = item.ID()
+	return l.render()
 }
 
-func (l *list[T]) listHeight() int {
-	// for the moment its the same
-	return l.height
+// SelectedItem implements List.
+func (l *list[T]) SelectedItem() *T {
+	inx, ok := l.indexMap[l.selectedItem]
+	if !ok {
+		return nil
+	}
+	if inx > len(l.items)-1 {
+		return nil
+	}
+	item := l.items[inx]
+	return &item
 }
 
+// SetItems implements List.
 func (l *list[T]) SetItems(items []T) tea.Cmd {
 	l.items = items
-	var cmds []tea.Cmd
-	for _, item := range l.items {
-		cmds = append(cmds, item.Init())
-		// Set height to 0 to let the item calculate its own height
-		cmds = append(cmds, item.SetSize(l.width, 0))
-	}
-
-	cmds = append(cmds, l.renderItems())
-	if l.selectedItem != "" {
-		cmds = append(cmds, l.moveToSelected(true))
-	}
-	return tea.Batch(cmds...)
+	return l.reset()
 }
 
-// GetSize implements List.
-func (l *list[T]) GetSize() (int, int) {
-	return l.width, l.height
+// SetSelected implements List.
+func (l *list[T]) SetSelected(id string) tea.Cmd {
+	l.selectedItem = id
+	return l.render()
+}
+
+func (l *list[T]) reset() tea.Cmd {
+	var cmds []tea.Cmd
+	l.rendered = ""
+	l.indexMap = make(map[string]int)
+	l.renderedItems = make(map[string]renderedItem)
+	for inx, item := range l.items {
+		l.indexMap[item.ID()] = inx
+		if l.width > 0 && l.height > 0 {
+			cmds = append(cmds, item.SetSize(l.width, l.height))
+		}
+	}
+	cmds = append(cmds, l.render())
+	return tea.Batch(cmds...)
 }
 
 // SetSize implements List.
 func (l *list[T]) SetSize(width int, height int) tea.Cmd {
+	oldWidth := l.width
 	l.width = width
 	l.height = height
-	var cmds []tea.Cmd
-	for _, item := range l.items {
-		cmds = append(cmds, item.SetSize(width, height))
-	}
-
-	cmds = append(cmds, l.renderItems())
-	return tea.Batch(cmds...)
-}
-
-// Blur implements List.
-func (l *list[T]) Blur() tea.Cmd {
-	var cmd tea.Cmd
-	l.focused = false
-	for i, item := range l.items {
-		if item.ID() != l.selectedItem {
-			continue
-		}
-		if focusable, ok := any(item).(layout.Focusable); ok {
-			cmd = focusable.Blur()
-		}
-		l.renderedItems[i] = l.renderItem(item)
-	}
-	l.renderView()
-	return cmd
-}
-
-// Focus implements List.
-func (l *list[T]) Focus() tea.Cmd {
-	var cmd tea.Cmd
-	l.focused = true
-	if l.selectedItem != "" {
-		for i, item := range l.items {
-			if item.ID() != l.selectedItem {
-				continue
-			}
-			if focusable, ok := any(item).(layout.Focusable); ok {
-				cmd = focusable.Focus()
-			}
-			if len(l.renderedItems) > i {
-				l.renderedItems[i] = l.renderItem(item)
-			}
-		}
-		l.renderView()
-	}
-	return cmd
-}
-
-func (l *list[T]) SetSelected(id string) tea.Cmd {
-	if l.selectedItem == id {
-		return nil
-	}
-	var cmds []tea.Cmd
-	for i, item := range l.items {
-		if item.ID() == l.selectedItem {
-			if focusable, ok := any(item).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Blur())
-			}
-			if len(l.renderedItems) > i {
-				l.renderedItems[i] = l.renderItem(item)
-			}
-		} else if item.ID() == id {
-			if focusable, ok := any(item).(layout.Focusable); ok {
-				cmds = append(cmds, focusable.Focus())
-			}
-			if len(l.renderedItems) > i {
-				l.renderedItems[i] = l.renderItem(item)
-			}
-		}
-	}
-	l.selectedItem = id
-	l.renderView()
-	cmds = append(cmds, l.moveToSelected(true))
-	return tea.Batch(cmds...)
-}
-
-func (l *list[T]) SelectedItem() *T {
-	for _, item := range l.items {
-		if item.ID() == l.selectedItem {
-			return &item
-		}
+	if oldWidth != width {
+		return l.reset()
 	}
 	return nil
 }
 
-// IsFocused implements List.
-func (l *list[T]) IsFocused() bool {
-	return l.focused
-}
-
-func (l *list[T]) Items() []T {
-	return l.items
-}
-
-func (l *list[T]) UpdateItem(id string, item T) {
-	// TODO: preserve offset
-	for inx, item := range l.items {
-		if item.ID() == id {
-			l.items[inx] = item
-			l.renderedItems[inx] = l.renderItem(item)
-			l.renderView()
-			return
-		}
-	}
-}
-
-func (l *list[T]) DeleteItem(id string) {
-	// TODO: preserve offset
-	inx := NotFound
-	for i, item := range l.items {
-		if item.ID() == id {
-			inx = i
-			break
-		}
-	}
-
-	l.items = slices.Delete(l.items, inx, inx+1)
-	l.renderedItems = slices.Delete(l.renderedItems, inx, inx+1)
-	l.renderView()
-}
-
-func (l *list[T]) PrependItem(item T) tea.Cmd {
-	// TODO: preserve offset
-	var cmd tea.Cmd
-	l.items = append([]T{item}, l.items...)
-	l.renderedItems = append([]renderedItem{l.renderItem(item)}, l.renderedItems...)
-	if len(l.items) == 1 {
-		cmd = l.SetSelected(item.ID())
-	}
-	// the viewport did not move and the last item was focused
-	if l.direction == Backward && l.offset == 0 && l.selectedItem == l.items[0].ID() {
-		cmd = l.SetSelected(item.ID())
-	}
-	l.renderView()
-	return cmd
-}
-
-func (l *list[T]) AppendItem(item T) tea.Cmd {
-	// TODO: preserve offset
-	var cmd tea.Cmd
-	l.items = append(l.items, item)
-	l.renderedItems = append(l.renderedItems, l.renderItem(item))
-	if len(l.items) == 1 {
-		cmd = l.SetSelected(item.ID())
-	} else if l.direction == Backward && l.offset == 0 && l.selectedItem == l.items[len(l.items)-2].ID() {
-		// the viewport did not move and the last item was focused
-		cmd = l.SetSelected(item.ID())
-	} else {
-		l.renderView()
-	}
-	return cmd
+// UpdateItem implements List.
+func (l *list[T]) UpdateItem(string, T) tea.Cmd {
+	panic("unimplemented")
 }

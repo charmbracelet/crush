@@ -63,7 +63,7 @@ func New(app *app.App) MessageListCmp {
 	listCmp := list.New(
 		[]list.Item{},
 		list.WithGap(1),
-		list.WithDirection(list.Backward),
+		list.WithDirectionBackward(),
 		list.WithKeyMap(defaultListKeyMap),
 	)
 	return &messageListCmp{

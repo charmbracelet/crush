@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,10 +14,8 @@ import (
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fur/client"
 	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/log"
-	"golang.org/x/exp/slog"
 )
 
 // LoadReader config via io.Reader.
@@ -63,7 +62,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	)
 
 	// Load known providers, this loads the config from fur
-	providers, err := LoadProviders(client.New())
+	providers, err := Providers()
 	if err != nil || len(providers) == 0 {
 		return nil, fmt.Errorf("failed to load providers: %w", err)
 	}

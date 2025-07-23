@@ -102,7 +102,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		c.width = min(msg.Width-c.x, maxCompletionsWidth)
+		c.width = min(listWidth(c.list.Items()), maxCompletionsWidth)
 		c.height = min(msg.Height-c.y, 15)
 		return c, nil
 	case tea.KeyPressMsg:
@@ -168,10 +168,11 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
 			items = append(items, item)
 		}
+		c.width = listWidth(msg.Completions)
 		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
 		return c, tea.Batch(
-			c.list.SetSize(c.width, c.height),
 			c.list.SetItems(items),
+			c.list.SetSize(c.width, c.height),
 			util.CmdHandler(CompletionsOpenedMsg{}),
 		)
 	case FilterCompletionsMsg:
@@ -195,7 +196,9 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.query = msg.Query
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.list.Filter(msg.Query))
-		itemsLen := len(c.list.Items())
+		items := c.list.Items()
+		itemsLen := len(items)
+		c.width = listWidth(items)
 		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {
@@ -215,15 +218,34 @@ func (c *completionsCmp) View() string {
 		return ""
 	}
 
-	return c.style().Render(c.list.View())
-}
-
-func (c *completionsCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
-	return t.S().Base.
+	style := t.S().Base.
 		Width(c.width).
 		Height(c.height).
 		Background(t.BgSubtle)
+
+	return style.Render(c.list.View())
+}
+
+// listWidth returns the width of the last 10 items in the list, which is used
+// to determine the width of the completions popup.
+// Note this only works for [completionItemCmp] items.
+func listWidth[T any](items []T) int {
+	var width int
+	if len(items) == 0 {
+		return width
+	}
+
+	for i := len(items) - 1; i >= 0 && i >= len(items)-10; i-- {
+		item, ok := any(items[i]).(*completionItemCmp)
+		if !ok {
+			continue
+		}
+		itemWidth := lipgloss.Width(item.text) + 2 // +2 for padding
+		width = max(width, itemWidth)
+	}
+
+	return width
 }
 
 func (c *completionsCmp) Open() bool {

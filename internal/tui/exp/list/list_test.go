@@ -205,42 +205,6 @@ func TestList(t *testing.T) {
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 
-	t.Run("should go to selected item and center", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 30 {
-			content := strings.Repeat(fmt.Sprintf("Item %d\n", i), i+1)
-			content = strings.TrimSuffix(content, "\n")
-			item := NewSelectableItem(content)
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionForward(), WithSize(10, 10), WithSelectedItem(items[4].ID())).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, items[4].ID(), l.selectedItem)
-
-		golden.RequireEqual(t, []byte(l.View()))
-	})
-
-	t.Run("should go to selected item and center backwards", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 30 {
-			content := strings.Repeat(fmt.Sprintf("Item %d\n", i), i+1)
-			content = strings.TrimSuffix(content, "\n")
-			item := NewSelectableItem(content)
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionBackward(), WithSize(10, 10), WithSelectedItem(items[4].ID())).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, items[4].ID(), l.selectedItem)
-
-		golden.RequireEqual(t, []byte(l.View()))
-	})
-
 	t.Run("should go to selected item at the beginning", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}

@@ -56,7 +56,6 @@ const (
 type renderedItem struct {
 	id     string
 	view   string
-	dirty  bool
 	height int
 	start  int
 	end    int
@@ -84,6 +83,8 @@ type list[T Item] struct {
 	renderedItems map[string]renderedItem
 
 	rendered string
+
+	movingByItem bool
 }
 
 type listOption func(*confOptions)
@@ -209,7 +210,9 @@ func (l *list[T]) View() string {
 	lines := strings.Split(view, "\n")
 
 	start, end := l.viewPosition()
-	lines = lines[start : end+1]
+	viewStart := max(0, start)
+	viewEnd := min(len(lines), end+1)
+	lines = lines[viewStart:viewEnd]
 	return strings.Join(lines, "\n")
 }
 
@@ -245,7 +248,13 @@ func (l *list[T]) render() tea.Cmd {
 		return nil
 	}
 	l.setDefaultSelected()
-	focusCmd := l.focusSelectedItem()
+
+	var focusChangeCmd tea.Cmd
+	if l.focused {
+		focusChangeCmd = l.focusSelectedItem()
+	} else {
+		focusChangeCmd = l.blurSelectedItem()
+	}
 	// we are not rendering the first time
 	if l.rendered != "" {
 		l.rendered = ""
@@ -258,7 +267,7 @@ func (l *list[T]) render() tea.Cmd {
 		if l.focused {
 			l.scrollToSelection()
 		}
-		return focusCmd
+		return focusChangeCmd
 	}
 	finishIndex := l.renderIterator(0, true)
 	// recalculate for the initial items
@@ -276,9 +285,10 @@ func (l *list[T]) render() tea.Cmd {
 		if l.focused {
 			l.scrollToSelection()
 		}
+
 		return renderedMsg{}
 	}
-	return tea.Batch(focusCmd, renderCmd)
+	return tea.Batch(focusChangeCmd, renderCmd)
 }
 
 func (l *list[T]) setDefaultSelected() {
@@ -304,11 +314,21 @@ func (l *list[T]) scrollToSelection() {
 	if rItem.start <= start && rItem.end >= end {
 		return
 	}
-	// item already in view do nothing
-	if rItem.start >= start && rItem.start <= end {
-		return
-	} else if rItem.end <= end && rItem.end >= start {
-		return
+	// if we are moving by item we want to move the offset so that the
+	// whole item is visible not just portions of it
+	if l.movingByItem {
+		if rItem.start >= start && rItem.end <= end {
+			return
+		}
+		defer func() { l.movingByItem = false }()
+	} else {
+		// item already in view do nothing
+		if rItem.start >= start && rItem.start <= end {
+			return
+		}
+		if rItem.end >= start && rItem.end <= end {
+			return
+		}
 	}
 
 	if rItem.height >= l.height {
@@ -320,11 +340,22 @@ func (l *list[T]) scrollToSelection() {
 		return
 	}
 
-	itemMiddleStart := rItem.start + rItem.height/2 + 1
-	if l.direction == DirectionForward {
-		l.offset = itemMiddleStart - l.height/2
-	} else {
-		l.offset = max(0, lipgloss.Height(l.rendered)-(itemMiddleStart+l.height/2))
+	renderedLines := lipgloss.Height(l.rendered) - 1
+
+	// If item is above the viewport, make it the first item
+	if rItem.start < start {
+		if l.direction == DirectionForward {
+			l.offset = rItem.start
+		} else {
+			l.offset = max(0, renderedLines-rItem.start-l.height+1)
+		}
+	} else if rItem.end > end {
+		// If item is below the viewport, make it the last item
+		if l.direction == DirectionForward {
+			l.offset = max(0, rItem.end-l.height+1)
+		} else {
+			l.offset = max(0, renderedLines-rItem.end)
+		}
 	}
 }
 
@@ -446,32 +477,26 @@ func (l *list[T]) focusSelectedItem() tea.Cmd {
 		if f, ok := any(item).(layout.Focusable); ok {
 			if item.ID() == l.selectedItem && !f.IsFocused() {
 				cmds = append(cmds, f.Focus())
-				if cache, ok := l.renderedItems[item.ID()]; ok {
-					cache.dirty = true
-					l.renderedItems[item.ID()] = cache
-				}
+				delete(l.renderedItems, item.ID())
 			} else if item.ID() != l.selectedItem && f.IsFocused() {
 				cmds = append(cmds, f.Blur())
-				if cache, ok := l.renderedItems[item.ID()]; ok {
-					cache.dirty = true
-					l.renderedItems[item.ID()] = cache
-				}
+				delete(l.renderedItems, item.ID())
 			}
 		}
 	}
 	return tea.Batch(cmds...)
 }
 
-func (l *list[T]) blurItems() tea.Cmd {
+func (l *list[T]) blurSelectedItem() tea.Cmd {
+	if l.selectedItem == "" || l.focused {
+		return nil
+	}
 	var cmds []tea.Cmd
 	for _, item := range l.items {
 		if f, ok := any(item).(layout.Focusable); ok {
 			if item.ID() == l.selectedItem && f.IsFocused() {
 				cmds = append(cmds, f.Blur())
-				if cache, ok := l.renderedItems[item.ID()]; ok {
-					cache.dirty = true
-					l.renderedItems[item.ID()] = cache
-				}
+				delete(l.renderedItems, item.ID())
 			}
 		}
 	}
@@ -495,7 +520,7 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool) int {
 
 		item := l.items[inx]
 		var rItem renderedItem
-		if cache, ok := l.renderedItems[item.ID()]; ok && !cache.dirty {
+		if cache, ok := l.renderedItems[item.ID()]; ok {
 			rItem = cache
 		} else {
 			rItem = l.renderItem(item)
@@ -534,8 +559,8 @@ func (l *list[T]) AppendItem(T) tea.Cmd {
 
 // Blur implements List.
 func (l *list[T]) Blur() tea.Cmd {
-	cmd := l.blurItems()
-	return tea.Batch(cmd, l.render())
+	l.focused = false
+	return l.render()
 }
 
 // DeleteItem implements List.
@@ -644,6 +669,7 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 	}
 	item := l.items[newIndex]
 	l.selectedItem = item.ID()
+	l.movingByItem = true
 	return l.render()
 }
 
@@ -661,6 +687,7 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 	}
 	item := l.items[newIndex]
 	l.selectedItem = item.ID()
+	l.movingByItem = true
 	return l.render()
 }
 
@@ -692,6 +719,8 @@ func (l *list[T]) SetSelected(id string) tea.Cmd {
 func (l *list[T]) reset() tea.Cmd {
 	var cmds []tea.Cmd
 	l.rendered = ""
+	l.offset = 0
+	l.selectedItem = ""
 	l.indexMap = make(map[string]int)
 	l.renderedItems = make(map[string]renderedItem)
 	for inx, item := range l.items {

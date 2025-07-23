@@ -2,7 +2,6 @@
 package anim
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"image/color"
 	"math/rand/v2"
@@ -10,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/zeebo/xxh3"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -78,7 +79,7 @@ var (
 
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
-	h := sha256.New()
+	h := xxh3.New()
 	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
 		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
 	return fmt.Sprintf("%x", h.Sum(nil))

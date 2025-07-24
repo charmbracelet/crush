@@ -43,7 +43,7 @@ rm -rf ./crush
 
 Then, run Crush by typing `crush`.
 
-***
+---
 
 </details>
 
@@ -108,7 +108,7 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
   "mcp": {
     "filesystem": {
       "type": "stdio",
-      "command": "node", 
+      "command": "node",
       "args": ["/path/to/mcp-server.js"],
       "env": {
         "NODE_ENV": "production"
@@ -143,7 +143,7 @@ crush -d
 # View last 1000 lines
 crush logs
 
-# Follow logs in real-time  
+# Follow logs in real-time
 crush logs -f
 
 # Show last 500 lines
@@ -174,7 +174,7 @@ Crush supports all OpenAI-compatible APIs. Here's an example configuration for D
       "models": [
         {
           "id": "deepseek-chat",
-          "model": "Deepseek V3",
+          "name": "Deepseek V3",
           "cost_per_1m_in": 0.27,
           "cost_per_1m_out": 1.1,
           "cost_per_1m_in_cached": 0.07,

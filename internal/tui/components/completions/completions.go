@@ -187,7 +187,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.x = c.wWidth - width - 1
 		}
 		c.width = width
-		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
+		c.height = max(min(maxCompletionsHeight, len(items)), 1) // Ensure at least 1 item height
 		return c, tea.Batch(
 			c.list.SetItems(items),
 			c.list.SetSize(c.width, c.height),

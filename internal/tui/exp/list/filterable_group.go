@@ -14,76 +14,27 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-type FilterableItem interface {
-	Item
-	FilterValue() string
-}
-
-type FilterableList[T FilterableItem] interface {
-	List[T]
+type FilterableGroupList[T FilterableItem] interface {
+	GroupedList[T]
 	Cursor() *tea.Cursor
 	SetInputWidth(int)
 	SetInputPlaceholder(string)
 }
-
-type HasMatchIndexes interface {
-	MatchIndexes([]int)
-}
-
-type filterableOptions struct {
-	listOptions []ListOption
-	placeholder string
-	inputHidden bool
-	inputWidth  int
-	inputStyle  lipgloss.Style
-}
-type filterableList[T FilterableItem] struct {
-	*list[T]
+type filterableGroupList[T FilterableItem] struct {
+	*groupedList[T]
 	*filterableOptions
 	width, height int
+	groups        []Group[T]
 	// stores all available items
-	items      []T
 	input      textinput.Model
 	inputWidth int
 	query      string
 }
 
-type filterableListOption func(*filterableOptions)
-
-func WithFilterPlaceholder(ph string) filterableListOption {
-	return func(f *filterableOptions) {
-		f.placeholder = ph
-	}
-}
-
-func WithFilterInputHidden() filterableListOption {
-	return func(f *filterableOptions) {
-		f.inputHidden = true
-	}
-}
-
-func WithFilterInputStyle(inputStyle lipgloss.Style) filterableListOption {
-	return func(f *filterableOptions) {
-		f.inputStyle = inputStyle
-	}
-}
-
-func WithFilterListOptions(opts ...ListOption) filterableListOption {
-	return func(f *filterableOptions) {
-		f.listOptions = opts
-	}
-}
-
-func WithFilterInputWidth(inputWidth int) filterableListOption {
-	return func(f *filterableOptions) {
-		f.inputWidth = inputWidth
-	}
-}
-
-func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption) FilterableList[T] {
+func NewFilterableGroupedList[T FilterableItem](items []Group[T], opts ...filterableListOption) FilterableGroupList[T] {
 	t := styles.CurrentTheme()
 
-	f := &filterableList[T]{
+	f := &filterableGroupList[T]{
 		filterableOptions: &filterableOptions{
 			inputStyle:  t.S().Base,
 			placeholder: "Type to filter",
@@ -92,10 +43,9 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	for _, opt := range opts {
 		opt(f.filterableOptions)
 	}
-	f.list = New[T](items, f.listOptions...).(*list[T])
+	f.groupedList = NewGroupedList(items, f.listOptions...).(*groupedList[T])
 
 	f.updateKeyMaps()
-	f.items = f.list.items
 
 	if f.inputHidden {
 		return f
@@ -110,7 +60,7 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	return f
 }
 
-func (f *filterableList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (f *filterableGroupList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
@@ -125,8 +75,8 @@ func (f *filterableList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key.Matches(msg, f.keyMap.PageUp),
 			key.Matches(msg, f.keyMap.End),
 			key.Matches(msg, f.keyMap.Home):
-			u, cmd := f.list.Update(msg)
-			f.list = u.(*list[T])
+			u, cmd := f.groupedList.Update(msg)
+			f.groupedList = u.(*groupedList[T])
 			return f, cmd
 		default:
 			if !f.inputHidden {
@@ -144,25 +94,25 @@ func (f *filterableList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	u, cmd := f.list.Update(msg)
-	f.list = u.(*list[T])
+	u, cmd := f.groupedList.Update(msg)
+	f.groupedList = u.(*groupedList[T])
 	return f, cmd
 }
 
-func (f *filterableList[T]) View() string {
+func (f *filterableGroupList[T]) View() string {
 	if f.inputHidden {
-		return f.list.View()
+		return f.groupedList.View()
 	}
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		f.inputStyle.Render(f.input.View()),
-		f.list.View(),
+		f.groupedList.View(),
 	)
 }
 
 // removes bindings that are used for search
-func (f *filterableList[T]) updateKeyMaps() {
+func (f *filterableGroupList[T]) updateKeyMaps() {
 	alphanumeric := regexp.MustCompile("^[a-zA-Z0-9]*$")
 
 	removeLettersAndNumbers := func(bindings []string) []string {
@@ -205,29 +155,29 @@ func (f *filterableList[T]) updateKeyMaps() {
 	f.keyMap.Home = updateBinding(f.keyMap.Home)
 }
 
-func (m *filterableList[T]) GetSize() (int, int) {
+func (m *filterableGroupList[T]) GetSize() (int, int) {
 	return m.width, m.height
 }
 
-func (f *filterableList[T]) SetSize(w, h int) tea.Cmd {
+func (f *filterableGroupList[T]) SetSize(w, h int) tea.Cmd {
 	f.width = w
 	f.height = h
 	if f.inputHidden {
-		return f.list.SetSize(w, h)
+		return f.groupedList.SetSize(w, h)
 	}
 	if f.inputWidth == 0 {
 		f.input.SetWidth(w)
 	} else {
 		f.input.SetWidth(f.inputWidth)
 	}
-	return f.list.SetSize(w, h-(f.inputHeight()))
+	return f.groupedList.SetSize(w, h-(f.inputHeight()))
 }
 
-func (f *filterableList[T]) inputHeight() int {
+func (f *filterableGroupList[T]) inputHeight() int {
 	return lipgloss.Height(f.inputStyle.Render(f.input.View()))
 }
 
-func (f *filterableList[T]) Filter(query string) tea.Cmd {
+func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, item := range f.items {
 		if i, ok := any(item).(layout.Focusable); ok {
@@ -240,63 +190,71 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 
 	f.selectedItem = ""
 	if query == "" {
-		return f.list.SetItems(f.items)
+		return f.groupedList.SetGroups(f.groups)
 	}
 
-	words := make([]string, len(f.items))
-	for i, item := range f.items {
-		words[i] = strings.ToLower(item.FilterValue())
-	}
-
-	matches := fuzzy.Find(query, words)
-
-	sort.SliceStable(matches, func(i, j int) bool {
-		return matches[i].Score > matches[j].Score
-	})
-
-	var matchedItems []T
-	for _, match := range matches {
-		item := f.items[match.Index]
-		if i, ok := any(item).(HasMatchIndexes); ok {
-			i.MatchIndexes(match.MatchedIndexes)
+	var newGroups []Group[T]
+	for _, g := range f.groups {
+		words := make([]string, len(g.Items))
+		for i, item := range g.Items {
+			words[i] = strings.ToLower(item.FilterValue())
 		}
-		matchedItems = append(matchedItems, item)
-	}
 
-	cmds = append(cmds, f.list.SetItems(matchedItems))
+		matches := fuzzy.Find(query, words)
+
+		sort.SliceStable(matches, func(i, j int) bool {
+			return matches[i].Score > matches[j].Score
+		})
+
+		var matchedItems []T
+		for _, match := range matches {
+			item := g.Items[match.Index]
+			if i, ok := any(item).(HasMatchIndexes); ok {
+				i.MatchIndexes(match.MatchedIndexes)
+			}
+			matchedItems = append(matchedItems, item)
+		}
+		if len(matchedItems) > 0 {
+			newGroups = append(newGroups, Group[T]{
+				Section: g.Section,
+				Items:   matchedItems,
+			})
+		}
+	}
+	cmds = append(cmds, f.groupedList.SetGroups(newGroups))
 	return tea.Batch(cmds...)
 }
 
-func (f *filterableList[T]) SetItems(items []T) tea.Cmd {
-	f.items = items
-	return f.list.SetItems(items)
+func (f *filterableGroupList[T]) SetGroups(groups []Group[T]) tea.Cmd {
+	f.groups = groups
+	return f.groupedList.SetGroups(groups)
 }
 
-func (f *filterableList[T]) Cursor() *tea.Cursor {
+func (f *filterableGroupList[T]) Cursor() *tea.Cursor {
 	if f.inputHidden {
 		return nil
 	}
 	return f.input.Cursor()
 }
 
-func (f *filterableList[T]) Blur() tea.Cmd {
+func (f *filterableGroupList[T]) Blur() tea.Cmd {
 	f.input.Blur()
-	return f.list.Blur()
+	return f.groupedList.Blur()
 }
 
-func (f *filterableList[T]) Focus() tea.Cmd {
+func (f *filterableGroupList[T]) Focus() tea.Cmd {
 	f.input.Focus()
-	return f.list.Focus()
+	return f.groupedList.Focus()
 }
 
-func (f *filterableList[T]) IsFocused() bool {
-	return f.list.IsFocused()
+func (f *filterableGroupList[T]) IsFocused() bool {
+	return f.groupedList.IsFocused()
 }
 
-func (f *filterableList[T]) SetInputWidth(w int) {
+func (f *filterableGroupList[T]) SetInputWidth(w int) {
 	f.inputWidth = w
 }
 
-func (f *filterableList[T]) SetInputPlaceholder(ph string) {
+func (f *filterableGroupList[T]) SetInputPlaceholder(ph string) {
 	f.placeholder = ph
 }

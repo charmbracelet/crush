@@ -47,7 +47,7 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	items := make([]list.CompletionItem[session.Session], len(sessions))
 	if len(sessions) > 0 {
 		for i, session := range sessions {
-			items[i] = list.NewCompletionItem(session.Title, session, list.WithID(session.ID))
+			items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
 		}
 	}
 

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
@@ -22,30 +23,29 @@ type HasAnim interface {
 	Item
 	Spinning() bool
 }
-type (
-	renderedMsg  struct{}
-	List[T Item] interface {
-		util.Model
-		layout.Sizeable
-		layout.Focusable
+type renderedMsg struct{}
 
-		// Just change state
-		MoveUp(int) tea.Cmd
-		MoveDown(int) tea.Cmd
-		GoToTop() tea.Cmd
-		GoToBottom() tea.Cmd
-		SelectItemAbove() tea.Cmd
-		SelectItemBelow() tea.Cmd
-		SetItems([]T) tea.Cmd
-		SetSelected(string) tea.Cmd
-		SelectedItem() *T
-		Items() []T
-		UpdateItem(string, T) tea.Cmd
-		DeleteItem(string) tea.Cmd
-		PrependItem(T) tea.Cmd
-		AppendItem(T) tea.Cmd
-	}
-)
+type List[T Item] interface {
+	util.Model
+	layout.Sizeable
+	layout.Focusable
+
+	// Just change state
+	MoveUp(int) tea.Cmd
+	MoveDown(int) tea.Cmd
+	GoToTop() tea.Cmd
+	GoToBottom() tea.Cmd
+	SelectItemAbove() tea.Cmd
+	SelectItemBelow() tea.Cmd
+	SetItems([]T) tea.Cmd
+	SetSelected(string) tea.Cmd
+	SelectedItem() *T
+	Items() []T
+	UpdateItem(string, T) tea.Cmd
+	DeleteItem(string) tea.Cmd
+	PrependItem(T) tea.Cmd
+	AppendItem(T) tea.Cmd
+}
 
 type direction int
 
@@ -76,6 +76,7 @@ type confOptions struct {
 	direction    direction
 	selectedItem string
 	focused      bool
+	resize       bool
 }
 
 type list[T Item] struct {
@@ -93,10 +94,10 @@ type list[T Item] struct {
 	movingByItem bool
 }
 
-type listOption func(*confOptions)
+type ListOption func(*confOptions)
 
 // WithSize sets the size of the list.
-func WithSize(width, height int) listOption {
+func WithSize(width, height int) ListOption {
 	return func(l *confOptions) {
 		l.width = width
 		l.height = height
@@ -104,52 +105,58 @@ func WithSize(width, height int) listOption {
 }
 
 // WithGap sets the gap between items in the list.
-func WithGap(gap int) listOption {
+func WithGap(gap int) ListOption {
 	return func(l *confOptions) {
 		l.gap = gap
 	}
 }
 
 // WithDirectionForward sets the direction to forward
-func WithDirectionForward() listOption {
+func WithDirectionForward() ListOption {
 	return func(l *confOptions) {
 		l.direction = DirectionForward
 	}
 }
 
 // WithDirectionBackward sets the direction to forward
-func WithDirectionBackward() listOption {
+func WithDirectionBackward() ListOption {
 	return func(l *confOptions) {
 		l.direction = DirectionBackward
 	}
 }
 
 // WithSelectedItem sets the initially selected item in the list.
-func WithSelectedItem(id string) listOption {
+func WithSelectedItem(id string) ListOption {
 	return func(l *confOptions) {
 		l.selectedItem = id
 	}
 }
 
-func WithKeyMap(keyMap KeyMap) listOption {
+func WithKeyMap(keyMap KeyMap) ListOption {
 	return func(l *confOptions) {
 		l.keyMap = keyMap
 	}
 }
 
-func WithWrapNavigation() listOption {
+func WithWrapNavigation() ListOption {
 	return func(l *confOptions) {
 		l.wrap = true
 	}
 }
 
-func WithFocus(focus bool) listOption {
+func WithFocus(focus bool) ListOption {
 	return func(l *confOptions) {
 		l.focused = focus
 	}
 }
 
-func New[T Item](items []T, opts ...listOption) List[T] {
+func WithResizeByList() ListOption {
+	return func(l *confOptions) {
+		l.resize = true
+	}
+}
+
+func New[T Item](items []T, opts ...ListOption) List[T] {
 	list := &list[T]{
 		confOptions: &confOptions{
 			direction: DirectionForward,
@@ -165,6 +172,9 @@ func New[T Item](items []T, opts ...listOption) List[T] {
 	}
 
 	for inx, item := range items {
+		if i, ok := any(item).(Indexable); ok {
+			i.SetIndex(inx)
+		}
 		list.indexMap[item.ID()] = inx
 	}
 	return list
@@ -224,6 +234,7 @@ func (l *list[T]) View() string {
 	if l.height <= 0 || l.width <= 0 {
 		return ""
 	}
+	t := styles.CurrentTheme()
 	view := l.rendered
 	lines := strings.Split(view, "\n")
 
@@ -231,7 +242,13 @@ func (l *list[T]) View() string {
 	viewStart := max(0, start)
 	viewEnd := min(len(lines), end+1)
 	lines = lines[viewStart:viewEnd]
-	return strings.Join(lines, "\n")
+	if l.resize {
+		return strings.Join(lines, "\n")
+	}
+	return t.S().Base.
+		Height(l.height).
+		Width(l.width).
+		Render(strings.Join(lines, "\n"))
 }
 
 func (l *list[T]) viewPosition() (int, int) {
@@ -774,10 +791,26 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 		// no item above
 		return nil
 	}
+	var cmds []tea.Cmd
+	if newIndex == 1 {
+		peakAboveIndex := l.firstSelectableItemAbove(newIndex)
+		if peakAboveIndex == ItemNotFound {
+			// this means there is a section above move to the top
+			cmd := l.GoToTop()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	}
 	item := l.items[newIndex]
 	l.selectedItem = item.ID()
 	l.movingByItem = true
-	return l.render()
+	renderCmd := l.render()
+	if renderCmd != nil {
+		cmds = append(cmds, renderCmd)
+	}
+	return tea.Sequence(cmds...)
 }
 
 // SelectItemBelow implements List.
@@ -815,10 +848,13 @@ func (l *list[T]) SelectedItem() *T {
 func (l *list[T]) SetItems(items []T) tea.Cmd {
 	l.items = items
 	var cmds []tea.Cmd
-	for _, item := range l.items {
+	for inx, item := range l.items {
+		if i, ok := any(item).(Indexable); ok {
+			i.SetIndex(inx)
+		}
 		cmds = append(cmds, item.Init())
 	}
-	cmds = append(cmds, l.reset())
+	cmds = append(cmds, l.reset(""))
 	return tea.Batch(cmds...)
 }
 
@@ -828,11 +864,11 @@ func (l *list[T]) SetSelected(id string) tea.Cmd {
 	return l.render()
 }
 
-func (l *list[T]) reset() tea.Cmd {
+func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	var cmds []tea.Cmd
 	l.rendered = ""
 	l.offset = 0
-	l.selectedItem = ""
+	l.selectedItem = selectedItem
 	l.indexMap = make(map[string]int)
 	l.renderedItems = make(map[string]renderedItem)
 	for inx, item := range l.items {
@@ -851,7 +887,8 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 	l.width = width
 	l.height = height
 	if oldWidth != width {
-		return l.reset()
+		cmd := l.reset(l.selectedItem)
+		return cmd
 	}
 	return nil
 }

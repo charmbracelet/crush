@@ -4,6 +4,7 @@ import (
 	"image/color"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -11,6 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/rivo/uniseg"
 )
+
+type Indexable interface {
+	SetIndex(int)
+}
 
 type CompletionItem[T any] interface {
 	FilterableItem
@@ -39,33 +44,33 @@ type options struct {
 	shortcut     string
 }
 
-type completionOption func(*options)
+type CompletionItemOption func(*options)
 
-func WithBackgroundColor(c color.Color) completionOption {
+func WithCompletionBackgroundColor(c color.Color) CompletionItemOption {
 	return func(cmp *options) {
 		cmp.bgColor = c
 	}
 }
 
-func WithMatchIndexes(indexes ...int) completionOption {
+func WithCompletionMatchIndexes(indexes ...int) CompletionItemOption {
 	return func(cmp *options) {
 		cmp.matchIndexes = indexes
 	}
 }
 
-func WithShortcut(shortcut string) completionOption {
+func WithCompletionShortcut(shortcut string) CompletionItemOption {
 	return func(cmp *options) {
 		cmp.shortcut = shortcut
 	}
 }
 
-func WithID(id string) completionOption {
+func WithCompletionID(id string) CompletionItemOption {
 	return func(cmp *options) {
 		cmp.id = id
 	}
 }
 
-func NewCompletionItem[T any](text string, value T, opts ...completionOption) CompletionItem[T] {
+func NewCompletionItem[T any](text string, value T, opts ...CompletionItemOption) CompletionItem[T] {
 	c := &completionItemCmp[T]{
 		text:  text,
 		value: value,
@@ -305,4 +310,76 @@ func bytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 // ID implements CompletionItem.
 func (c *completionItemCmp[T]) ID() string {
 	return c.id
+}
+
+type ItemSection interface {
+	Item
+	layout.Sizeable
+	Indexable
+	SetInfo(info string)
+}
+type itemSectionModel struct {
+	width int
+	title string
+	inx   int
+	info  string
+}
+
+// ID implements ItemSection.
+func (m *itemSectionModel) ID() string {
+	return uuid.NewString()
+}
+
+func NewItemSection(title string) ItemSection {
+	return &itemSectionModel{
+		title: title,
+		inx:   -1,
+	}
+}
+
+func (m *itemSectionModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m *itemSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+	return m, nil
+}
+
+func (m *itemSectionModel) View() string {
+	t := styles.CurrentTheme()
+	title := ansi.Truncate(m.title, m.width-2, "…")
+	style := t.S().Base.Padding(1, 1, 0, 1)
+	if m.inx == 0 {
+		style = style.Padding(0, 1, 0, 1)
+	}
+	title = t.S().Muted.Render(title)
+	section := ""
+	if m.info != "" {
+		section = core.SectionWithInfo(title, m.width-2, m.info)
+	} else {
+		section = core.Section(title, m.width-2)
+	}
+
+	return style.Render(section)
+}
+
+func (m *itemSectionModel) GetSize() (int, int) {
+	return m.width, 1
+}
+
+func (m *itemSectionModel) SetSize(width int, height int) tea.Cmd {
+	m.width = width
+	return nil
+}
+
+func (m *itemSectionModel) IsSectionHeader() bool {
+	return true
+}
+
+func (m *itemSectionModel) SetInfo(info string) {
+	m.info = info
+}
+
+func (m *itemSectionModel) SetIndex(inx int) {
+	m.inx = inx
 }

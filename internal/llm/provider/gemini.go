@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
@@ -463,7 +463,7 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 	}
 }
 
-func (g *geminiClient) Model() provider.Model {
+func (g *geminiClient) Model() catwalk.Model {
 	return g.providerOptions.model(g.providerOptions.modelType)
 }
 

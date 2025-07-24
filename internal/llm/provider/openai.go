@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
@@ -66,7 +66,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 			textBlock := openai.ChatCompletionContentPartTextParam{Text: msg.Content().String()}
 			content = append(content, openai.ChatCompletionContentPartUnionParam{OfText: &textBlock})
 			for _, binaryContent := range msg.BinaryContent() {
-				imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: binaryContent.String(provider.InferenceProviderOpenAI)}
+				imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: binaryContent.String(catwalk.InferenceProviderOpenAI)}
 				imageBlock := openai.ChatCompletionContentPartImageParam{ImageURL: imageURL}
 
 				content = append(content, openai.ChatCompletionContentPartUnionParam{OfImageURL: &imageBlock})
@@ -486,6 +486,6 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 	}
 }
 
-func (o *openaiClient) Model() provider.Model {
+func (o *openaiClient) Model() catwalk.Model {
 	return o.providerOptions.model(o.providerOptions.modelType)
 }

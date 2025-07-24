@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,12 +54,12 @@ func TestConfig_setDefaults(t *testing.T) {
 }
 
 func TestConfig_configureProviders(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -80,12 +80,12 @@ func TestConfig_configureProviders(t *testing.T) {
 }
 
 func TestConfig_configureProvidersWithOverride(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -96,10 +96,10 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 			"openai": {
 				APIKey:  "xyz",
 				BaseURL: "https://api.openai.com/v2",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
-						ID:    "test-model",
-						Model: "Updated",
+						ID:   "test-model",
+						Name: "Updated",
 					},
 					{
 						ID: "another-model",
@@ -122,16 +122,16 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	assert.Equal(t, "xyz", cfg.Providers["openai"].APIKey)
 	assert.Equal(t, "https://api.openai.com/v2", cfg.Providers["openai"].BaseURL)
 	assert.Len(t, cfg.Providers["openai"].Models, 2)
-	assert.Equal(t, "Updated", cfg.Providers["openai"].Models[0].Model)
+	assert.Equal(t, "Updated", cfg.Providers["openai"].Models[0].Name)
 }
 
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -142,7 +142,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 			"custom": {
 				APIKey:  "xyz",
 				BaseURL: "https://api.someendpoint.com/v2",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID: "test-model",
 					},
@@ -172,12 +172,12 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 }
 
 func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderBedrock,
+			ID:          catwalk.InferenceProviderBedrock,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 			}},
 		},
@@ -201,12 +201,12 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderBedrock,
+			ID:          catwalk.InferenceProviderBedrock,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 			}},
 		},
@@ -223,12 +223,12 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderBedrock,
+			ID:          catwalk.InferenceProviderBedrock,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "some-random-model",
 			}},
 		},
@@ -246,12 +246,12 @@ func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderVertexAI,
+			ID:          catwalk.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -278,12 +278,12 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderVertexAI,
+			ID:          catwalk.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -304,12 +304,12 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
-			ID:          provider.InferenceProviderVertexAI,
+			ID:          catwalk.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -329,12 +329,12 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 }
 
 func TestConfig_configureProvidersSetProviderID(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -450,12 +450,12 @@ func TestConfig_IsConfigured(t *testing.T) {
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
-	knownProviders := []provider.Provider{
+	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []provider.Model{{
+			Models: []catwalk.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -489,7 +489,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 			Providers: map[string]ProviderConfig{
 				"custom": {
 					BaseURL: "https://api.custom.com/v1",
-					Models: []provider.Model{{
+					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -502,7 +502,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 1)
@@ -515,7 +515,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 			Providers: map[string]ProviderConfig{
 				"custom": {
 					APIKey: "test-key",
-					Models: []provider.Model{{
+					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -525,7 +525,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 0)
@@ -539,7 +539,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models:  []provider.Model{},
+					Models:  []catwalk.Model{},
 				},
 			},
 		}
@@ -547,7 +547,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 0)
@@ -562,7 +562,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
 					Type:    "unsupported",
-					Models: []provider.Model{{
+					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -572,7 +572,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 0)
@@ -586,8 +586,8 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    provider.TypeOpenAI,
-					Models: []provider.Model{{
+					Type:    catwalk.TypeOpenAI,
+					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -597,7 +597,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 1)
@@ -614,9 +614,9 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    provider.TypeOpenAI,
+					Type:    catwalk.TypeOpenAI,
 					Disable: true,
-					Models: []provider.Model{{
+					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -626,7 +626,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []provider.Provider{})
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
 		assert.Len(t, cfg.Providers, 0)
@@ -637,12 +637,12 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	t.Run("VertexAI provider removed when credentials missing with existing config", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
-				ID:          provider.InferenceProviderVertexAI,
+				ID:          catwalk.InferenceProviderVertexAI,
 				APIKey:      "",
 				APIEndpoint: "",
-				Models: []provider.Model{{
+				Models: []catwalk.Model{{
 					ID: "gemini-pro",
 				}},
 			},
@@ -670,12 +670,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("Bedrock provider removed when AWS credentials missing with existing config", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
-				ID:          provider.InferenceProviderBedrock,
+				ID:          catwalk.InferenceProviderBedrock,
 				APIKey:      "",
 				APIEndpoint: "",
-				Models: []provider.Model{{
+				Models: []catwalk.Model{{
 					ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 				}},
 			},
@@ -701,12 +701,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("provider removed when API key missing with existing config", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$MISSING_API_KEY",
 				APIEndpoint: "https://api.openai.com/v1",
-				Models: []provider.Model{{
+				Models: []catwalk.Model{{
 					ID: "test-model",
 				}},
 			},
@@ -732,12 +732,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("known provider should still be added if the endpoint is missing the client will use default endpoints", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$OPENAI_API_KEY",
 				APIEndpoint: "$MISSING_ENDPOINT",
-				Models: []provider.Model{{
+				Models: []catwalk.Model{{
 					ID: "test-model",
 				}},
 			},
@@ -767,13 +767,13 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 
 func TestConfig_defaultModelSelection(t *testing.T) {
 	t.Run("default behavior uses the default models for given provider", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -803,13 +803,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		assert.Equal(t, int64(500), small.MaxTokens)
 	})
 	t.Run("should error if no providers configured", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING_KEY",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -833,13 +833,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("should error if model is missing", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -863,13 +863,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 
 	t.Run("should configure the default models with a custom provider", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING", // will not be included in the config
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -887,7 +887,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models: []provider.Model{
+					Models: []catwalk.Model{
 						{
 							ID:               "model",
 							DefaultMaxTokens: 600,
@@ -912,13 +912,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 
 	t.Run("should fail if no model configured", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING", // will not be included in the config
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -936,7 +936,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models:  []provider.Model{},
+					Models:  []catwalk.Model{},
 				},
 			},
 		}
@@ -949,13 +949,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "set",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -973,7 +973,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models: []provider.Model{
+					Models: []catwalk.Model{
 						{
 							ID:               "large-model",
 							DefaultMaxTokens: 1000,
@@ -1000,13 +1000,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("should override defaults", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "larger-model",
 						DefaultMaxTokens: 2000,
@@ -1048,13 +1048,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		assert.Equal(t, int64(500), small.MaxTokens)
 	})
 	t.Run("should be possible to use multiple providers", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -1070,7 +1070,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				APIKey:              "abc",
 				DefaultLargeModelID: "a-large-model",
 				DefaultSmallModelID: "a-small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "a-large-model",
 						DefaultMaxTokens: 1000,
@@ -1111,13 +1111,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	})
 
 	t.Run("should override the max tokens only", func(t *testing.T) {
-		knownProviders := []provider.Provider{
+		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []provider.Model{
+				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,

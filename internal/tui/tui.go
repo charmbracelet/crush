@@ -113,6 +113,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		a.wWidth, a.wHeight = msg.Width, msg.Height
 		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
@@ -291,7 +292,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleWindowResize processes window resize events and updates all components.
 func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
-	a.wWidth, a.wHeight = width, height
 	if a.showingFullHelp {
 		height -= 5
 	} else {
@@ -424,6 +424,27 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
+	var view tea.View
+	t := styles.CurrentTheme()
+	view.BackgroundColor = t.BgBase
+	if a.wWidth < 25 || a.wHeight < 15 {
+		view.Layer = lipgloss.NewCanvas(
+			lipgloss.NewLayer(
+				t.S().Base.Width(a.wWidth).Height(a.wHeight).
+					Align(lipgloss.Center, lipgloss.Center).
+					Render(
+						t.S().Base.
+							Padding(1, 4).
+							Foreground(t.White).
+							BorderStyle(lipgloss.RoundedBorder()).
+							BorderForeground(t.Primary).
+							Render("Window too small!"),
+					),
+			),
+		)
+		return view
+	}
+
 	page := a.pages[a.currentPage]
 	if withHelp, ok := page.(core.KeyMapHelp); ok {
 		a.status.SetKeyMap(withHelp.Help())
@@ -475,10 +496,7 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
-	var view tea.View
-	t := styles.CurrentTheme()
 	view.Layer = canvas
-	view.BackgroundColor = t.BgBase
 	view.Cursor = cursor
 	return view
 }

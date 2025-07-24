@@ -93,35 +93,34 @@ func Load(workingDir string, debug bool) (*Config, error) {
 }
 
 func (c *Config) removeUnresponsiveProviders() {
-	// Test provider connections in parallel
-	var testResults sync.Map
-	var wg sync.WaitGroup
 	slog.Info("Testing provider connections")
 	defer slog.Info("Provider connection tests completed")
+
+	// Test provider connections in parallel
+	var wg sync.WaitGroup
+	testResults := csync.NewMap[string, bool]()
 	for _, p := range c.Providers.Seq2() {
-		if p.Type == catwalk.TypeOpenAI || p.Type == catwalk.TypeAnthropic {
-			wg.Add(1)
-			go func(provider ProviderConfig) {
-				defer wg.Done()
-				err := provider.TestConnection(c.resolver)
-				testResults.Store(provider.ID, err == nil)
-				if err != nil {
-					slog.Error("Provider connection test failed", "provider", provider.ID, "error", err)
-				}
-			}(p)
+		if p.Type != catwalk.TypeOpenAI && p.Type != catwalk.TypeAnthropic {
+			continue
 		}
+		wg.Add(1)
+		go func(provider ProviderConfig) {
+			defer wg.Done()
+			err := provider.TestConnection(c.resolver)
+			testResults.Set(provider.ID, err == nil)
+			if err != nil {
+				slog.Error("Provider connection test failed", "provider", provider.ID, "error", err)
+			}
+		}(p)
 	}
 	wg.Wait()
 
 	// Remove failed providers
-	testResults.Range(func(key, value any) bool {
-		providerID := key.(string)
-		passed := value.(bool)
+	for providerID, passed := range testResults.Seq2() {
 		if !passed {
 			c.Providers.Del(providerID)
 		}
-		return true
-	})
+	}
 }
 
 func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {

@@ -110,6 +110,7 @@ homebrew_casks:
   - repository:
       owner: charmbracelet
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
 
 npms:
   - name: "@charmland/crush"
@@ -133,6 +134,32 @@ nfpms:
         dst: /usr/share/zsh/site-functions/_crush
       - src: ./manpages/crush.1.gz
         dst: /usr/share/man/man1/crush.1.gz
+
+nix:
+  - repository:
+      owner: "charmbracelet"
+      name: nur
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    extra_install: |-
+      installManPage ./manpages/crush.1.gz.
+      installShellCompletion ./completions/*
+
+winget:
+  - publisher: charmbracelet
+    copyright: Charmbracelet, Inc
+    repository:
+      owner: "charmbracelet"
+      name: winget-pkgs
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      branch: "crush-{{.Version}}"
+      pull_request:
+        enabled: true
+        draft: false
+        check_boxes: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
 
 changelog:
   sort: asc

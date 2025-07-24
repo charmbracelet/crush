@@ -157,7 +157,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				Section: section,
 			}
 			for _, model := range configProvider.Models {
-				item := list.NewCompletionItem(model.Model, ModelOption{
+				item := list.NewCompletionItem(model.Name, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				},
@@ -195,14 +195,14 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers[string(provider.ID)]; ok {
+		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
 			section.SetInfo(configured)
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,
 		}
 		for _, model := range provider.Models {
-			item := list.NewCompletionItem(model.Model, ModelOption{
+			item := list.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
 				Model:    model,
 			},

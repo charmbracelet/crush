@@ -2,6 +2,7 @@ package list
 
 import (
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -37,8 +38,8 @@ func NewGroupedList[T Item](groups []Group[T], opts ...ListOption) GroupedList[T
 			keyMap:    DefaultKeyMap(),
 			focused:   true,
 		},
-		indexMap:      make(map[string]int),
-		renderedItems: map[string]renderedItem{},
+		indexMap:      csync.NewMap[string, int](),
+		renderedItems: csync.NewMap[string, renderedItem](),
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)

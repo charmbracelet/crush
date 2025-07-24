@@ -122,25 +122,23 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.list = d.(listModel)
 			return c, cmd
 		case key.Matches(msg, c.keyMap.UpInsert):
-			selectedItemInx := c.list.SelectedIndex() - 1
-			items := c.list.Items()
-			if selectedItemInx == list.NoSelection || selectedItemInx < 0 {
-				return c, nil // No item selected, do nothing
+			s := c.list.SelectedItem()
+			if s == nil {
+				return c, nil
 			}
-			selectedItem := items[selectedItemInx].(CompletionItem).Value()
-			c.list.SetSelected(selectedItemInx)
+			selectedItem := *s
+			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
 				Value:  selectedItem,
 				Insert: true,
 			})
 		case key.Matches(msg, c.keyMap.DownInsert):
-			selectedItemInx := c.list.SelectedIndex() + 1
-			items := c.list.Items()
-			if selectedItemInx == list.NoSelection || selectedItemInx >= len(items) {
-				return c, nil // No item selected, do nothing
+			s := c.list.SelectedItem()
+			if s == nil {
+				return c, nil
 			}
-			selectedItem := items[selectedItemInx].(CompletionItem).Value()
-			c.list.SetSelected(selectedItemInx)
+			selectedItem := *s
+			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
 				Value:  selectedItem,
 				Insert: true,

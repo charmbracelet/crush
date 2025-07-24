@@ -27,6 +27,8 @@ type OpenCompletionsMsg struct {
 type FilterCompletionsMsg struct {
 	Query  string // The query to filter completions
 	Reopen bool
+	X      int // X position for the completions popup
+	Y      int // Y position for the completions popup
 }
 
 type RepositionCompletionsMsg struct {
@@ -165,6 +167,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case RepositionCompletionsMsg:
 		c.x, c.y = msg.X, msg.Y
+		c.adjustPosition()
 	case CloseCompletionsMsg:
 		c.open = false
 		return c, util.CmdHandler(CompletionsClosedMsg{})
@@ -216,15 +219,9 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, c.list.Filter(msg.Query))
 		items := c.list.Items()
 		itemsLen := len(items)
-		width := listWidth(items)
-		c.lastWidth = c.width
-		if c.x < 0 || width < c.lastWidth {
-			c.x = c.xorig
-		} else if c.x+width >= c.wWidth {
-			c.x = c.wWidth - width - 1
-		}
-		c.width = width
-		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
+		c.xorig = msg.X
+		c.x, c.y = msg.X, msg.Y
+		c.adjustPosition()
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {
 			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
@@ -235,6 +232,20 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, tea.Batch(cmds...)
 	}
 	return c, nil
+}
+
+func (c *completionsCmp) adjustPosition() {
+	items := c.list.Items()
+	itemsLen := len(items)
+	width := listWidth(items)
+	c.lastWidth = c.width
+	if c.x < 0 || width < c.lastWidth {
+		c.x = c.xorig
+	} else if c.x+width >= c.wWidth {
+		c.x = c.wWidth - width - 1
+	}
+	c.width = width
+	c.height = max(min(maxCompletionsHeight, itemsLen), 1)
 }
 
 // View implements Completions.

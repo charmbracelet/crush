@@ -168,7 +168,13 @@ Crush includes a permission system to control which tools can be executed withou
 ```json
 {
   "permissions": {
-    "allowed_tools": ["view", "ls", "grep", "bash:read"]
+    "allowed_tools": [
+      "view",
+      "ls",
+      "grep",
+      "edit:write",
+      "mcp_context7_get-library-doc"
+    ]
   }
 }
 ```

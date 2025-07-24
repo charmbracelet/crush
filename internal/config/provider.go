@@ -44,7 +44,7 @@ func providerCacheFileData() string {
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {
-	slog.Info("Caching provider data")
+	slog.Info("Saving cached provider data", "path", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
@@ -94,13 +94,13 @@ func loadProviders(client ProviderClient, path string) (providerList []catwalk.P
 	// if cache is not stale, load from it
 	stale, exists := isCacheStale(path)
 	if !stale {
-		slog.Info("Using cached provider data")
+		slog.Info("Using cached provider data", "path", path)
 		providerList, err = loadProvidersFromCache(path)
 		if len(providerList) > 0 && err == nil {
 			go func() {
 				slog.Info("Updating provider cache in background")
 				updated, uerr := client.GetProviders()
-				if len(updated) == 0 && uerr == nil {
+				if len(updated) > 0 && uerr == nil {
 					_ = saveProvidersInCache(path, updated)
 				}
 			}()

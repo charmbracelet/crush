@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -109,7 +109,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 		if err != nil {
 			return
 		}
-		filteredProviders := []provider.Provider{}
+		filteredProviders := []catwalk.Provider{}
 		simpleProviders := []string{
 			"anthropic",
 			"openai",
@@ -143,9 +143,11 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	wasSmallScreen := s.isSmallScreen()
+	rerenderLogo := width != s.width
 	s.height = height
-	if width != s.width {
-		s.width = width
+	s.width = width
+	if rerenderLogo || wasSmallScreen != s.isSmallScreen() {
 		s.logoRendered = s.logoBlock()
 	}
 	// remove padding, logo height, gap, title space
@@ -405,7 +407,7 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 	return nil
 }
 
-func (s *splashCmp) getProvider(providerID provider.InferenceProvider) (*provider.Provider, error) {
+func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
 	providers, err := config.Providers()
 	if err != nil {
 		return nil, err
@@ -541,9 +543,19 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) isSmallScreen() bool {
+	// Consider a screen small if either the width is less than 40 or if the
+	// height is less than 20
+	return s.width < 55 || s.height < 20
+}
+
 func (s *splashCmp) infoSection() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.PaddingLeft(2).Render(
+	infoStyle := t.S().Base.PaddingLeft(2)
+	if s.isSmallScreen() {
+		infoStyle = infoStyle.MarginTop(1)
+	}
+	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.cwd(),
@@ -556,14 +568,25 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
+	if s.isSmallScreen() {
+		// If the width is too small, render a smaller version of the logo
+		// NOTE: 20 is not correct because [splashCmp.height] is not the
+		// *actual* window height, instead, it is the height of the splash
+		// component and that depends on other variables like compact mode and
+		// the height of the editor.
+		return logoStyle.Render(
+			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
+		)
+	}
+	return logoStyle.Render(
 		logo.Render(version.Version, false, logo.Opts{
 			FieldColor:   t.Primary,
 			TitleColorA:  t.Secondary,
 			TitleColorB:  t.Primary,
 			CharmColor:   t.Secondary,
 			VersionColor: t.Primary,
-			Width:        s.width - 4,
+			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
 		}),
 	)
 }

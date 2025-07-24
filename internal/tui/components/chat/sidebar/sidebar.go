@@ -9,10 +9,10 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -114,12 +114,22 @@ func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 
+	style := t.S().Base.
+		Width(m.width).
+		Height(m.height).
+		Padding(1)
+	if m.compactMode {
+		style = style.PaddingTop(0)
+	}
+
 	if !m.compactMode {
 		if m.height > LogoHeightBreakpoint {
 			parts = append(parts, m.logo)
 		} else {
 			// Use a smaller logo for smaller screens
-			parts = append(parts, m.smallerScreenLogo(), "")
+			parts = append(parts,
+				logo.SmallRender(m.width-style.GetHorizontalFrameSize()),
+				"")
 		}
 	}
 
@@ -159,13 +169,6 @@ func (m *sidebarCmp) View() string {
 		)
 	}
 
-	style := t.S().Base.
-		Width(m.width).
-		Height(m.height).
-		Padding(1)
-	if m.compactMode {
-		style = style.PaddingTop(0)
-	}
 	return style.Render(
 		lipgloss.JoinVertical(lipgloss.Left, parts...),
 	)
@@ -894,7 +897,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Model)
+	modelName := t.S().Text.Render(model.Name)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,
@@ -902,14 +905,14 @@ func (s *sidebarCmp) currentModelBlock() string {
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
 		switch modelProvider.Type {
-		case provider.TypeOpenAI:
+		case catwalk.TypeOpenAI:
 			reasoningEffort := model.DefaultReasoningEffort
 			if selectedModel.ReasoningEffort != "" {
 				reasoningEffort = selectedModel.ReasoningEffort
 			}
 			formatter := cases.Title(language.English, cases.NoLower)
 			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
-		case provider.TypeAnthropic:
+		case catwalk.TypeAnthropic:
 			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
@@ -932,19 +935,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 		lipgloss.Left,
 		parts...,
 	)
-}
-
-func (m *sidebarCmp) smallerScreenLogo() string {
-	t := styles.CurrentTheme()
-	title := t.S().Base.Foreground(t.Secondary).Render("Charm™")
-	title += " " + styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary)
-	remainingWidth := m.width - lipgloss.Width(title) - 3
-	if remainingWidth > 0 {
-		char := "╱"
-		lines := strings.Repeat(char, remainingWidth)
-		title += " " + t.S().Base.Foreground(t.Primary).Render(lines)
-	}
-	return title
 }
 
 // SetSession implements Sidebar.

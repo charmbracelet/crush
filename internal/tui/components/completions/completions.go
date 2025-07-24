@@ -36,7 +36,8 @@ type CompletionsOpenedMsg struct{}
 type CloseCompletionsMsg struct{}
 
 type SelectCompletionMsg struct {
-	Value any // The value of the selected completion item
+	Value  any // The value of the selected completion item
+	Insert bool
 }
 
 type Completions interface {
@@ -115,6 +116,30 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d, cmd := c.list.Update(msg)
 			c.list = d.(list.ListModel)
 			return c, cmd
+		case key.Matches(msg, c.keyMap.UpInsert):
+			selectedItemInx := c.list.SelectedIndex() - 1
+			items := c.list.Items()
+			if selectedItemInx == list.NoSelection || selectedItemInx < 0 {
+				return c, nil // No item selected, do nothing
+			}
+			selectedItem := items[selectedItemInx].(CompletionItem).Value()
+			c.list.SetSelected(selectedItemInx)
+			return c, util.CmdHandler(SelectCompletionMsg{
+				Value:  selectedItem,
+				Insert: true,
+			})
+		case key.Matches(msg, c.keyMap.DownInsert):
+			selectedItemInx := c.list.SelectedIndex() + 1
+			items := c.list.Items()
+			if selectedItemInx == list.NoSelection || selectedItemInx >= len(items) {
+				return c, nil // No item selected, do nothing
+			}
+			selectedItem := items[selectedItemInx].(CompletionItem).Value()
+			c.list.SetSelected(selectedItemInx)
+			return c, util.CmdHandler(SelectCompletionMsg{
+				Value:  selectedItem,
+				Insert: true,
+			})
 		case key.Matches(msg, c.keyMap.Select):
 			selectedItemInx := c.list.SelectedIndex()
 			if selectedItemInx == list.NoSelection {

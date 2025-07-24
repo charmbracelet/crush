@@ -20,3 +20,4 @@ jobs:
       fury_token: ${{ secrets.FURY_TOKEN }}
       nfpm_gpg_key: ${{ secrets.NFPM_GPG_KEY }}
       nfpm_passphrase: ${{ secrets.NFPM_PASSPHRASE }}
+      npm_token: ${{ secrets.NPM_TOKEN }}

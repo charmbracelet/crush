@@ -32,6 +32,6 @@ func GetPersistentShell(cwd string) *PersistentShell {
 // slog.dapter adapts the internal slog.package to the Logger interface
 type loggingAdapter struct{}
 
-func (l *loggingAdapter) InfoPersist(msg string, keysAndValues ...interface{}) {
+func (l *loggingAdapter) InfoPersist(msg string, keysAndValues ...any) {
 	slog.Info(msg, keysAndValues...)
 }

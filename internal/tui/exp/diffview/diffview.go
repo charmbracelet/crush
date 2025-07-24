@@ -11,6 +11,7 @@ import (
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/zeebo/xxh3"
 )
 
 const (
@@ -59,6 +60,13 @@ type DiffView struct {
 	extraColOnAfter bool // add extra column on after panel
 	beforeNumDigits int
 	afterNumDigits  int
+
+	// Cache lexer to avoid expensive file pattern matching on every line
+	cachedLexer chroma.Lexer
+
+	// Cache highlighted lines to avoid re-highlighting the same content
+	// Key: hash of (content + background color), Value: highlighted string
+	syntaxCache map[string]string
 }
 
 // New creates a new DiffView with default settings.
@@ -68,6 +76,7 @@ func New() *DiffView {
 		contextLines: udiff.DefaultContextLines,
 		lineNumbers:  true,
 		tabWidth:     8,
+		syntaxCache:  make(map[string]string),
 	}
 	dv.style = DefaultDarkStyle()
 	return dv
@@ -88,13 +97,24 @@ func (dv *DiffView) Split() *DiffView {
 // Before sets the "before" file for the DiffView.
 func (dv *DiffView) Before(path, content string) *DiffView {
 	dv.before = file{path: path, content: content}
+	// Clear caches when content changes
+	dv.clearCaches()
 	return dv
 }
 
 // After sets the "after" file for the DiffView.
 func (dv *DiffView) After(path, content string) *DiffView {
 	dv.after = file{path: path, content: content}
+	// Clear caches when content changes
+	dv.clearCaches()
 	return dv
+}
+
+// clearCaches clears all caches when content or major settings change.
+func (dv *DiffView) clearCaches() {
+	dv.cachedLexer = nil
+	dv.clearSyntaxCache()
+	dv.isComputed = false
 }
 
 // ContextLines sets the number of context lines for the DiffView.
@@ -156,11 +176,24 @@ func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
 // If nil, no syntax highlighting will be applied.
 func (dv *DiffView) ChromaStyle(style *chroma.Style) *DiffView {
 	dv.chromaStyle = style
+	// Clear syntax cache when style changes since highlighting will be different
+	dv.clearSyntaxCache()
 	return dv
+}
+
+// clearSyntaxCache clears the syntax highlighting cache.
+func (dv *DiffView) clearSyntaxCache() {
+	if dv.syntaxCache != nil {
+		// Clear the map but keep it allocated
+		for k := range dv.syntaxCache {
+			delete(dv.syntaxCache, k)
+		}
+	}
 }
 
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
+	dv.normalizeLineEndings()
 	dv.replaceTabs()
 	if err := dv.computeDiff(); err != nil {
 		return err.Error()
@@ -193,6 +226,12 @@ func (dv *DiffView) String() string {
 	default:
 		panic("unknown diffview layout")
 	}
+}
+
+// normalizeLineEndings ensures the file contents use Unix-style line endings.
+func (dv *DiffView) normalizeLineEndings() {
+	dv.before.content = strings.ReplaceAll(dv.before.content, "\r\n", "\n")
+	dv.after.content = strings.ReplaceAll(dv.after.content, "\r\n", "\n")
 }
 
 // replaceTabs replaces tabs in the before and after file contents with spaces
@@ -364,8 +403,7 @@ func (dv *DiffView) renderUnified() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.ReplaceAll(in, "\r\n", "\n")
-		content = strings.TrimSuffix(content, "\n")
+		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
@@ -488,8 +526,7 @@ func (dv *DiffView) renderSplit() string {
 	shouldWrite := func() bool { return printedLines >= 0 }
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
-		content = strings.ReplaceAll(in, "\r\n", "\n")
-		content = strings.TrimSuffix(content, "\n")
+		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
@@ -700,7 +737,15 @@ func (dv *DiffView) hightlightCode(source string, bgColor color.Color) string {
 		return source
 	}
 
-	l := dv.getChromaLexer(source)
+	// Create cache key from content and background color
+	cacheKey := dv.createSyntaxCacheKey(source, bgColor)
+
+	// Check if we already have this highlighted
+	if cached, exists := dv.syntaxCache[cacheKey]; exists {
+		return cached
+	}
+
+	l := dv.getChromaLexer()
 	f := dv.getChromaFormatter(bgColor)
 
 	it, err := l.Tokenise(nil, source)
@@ -712,22 +757,47 @@ func (dv *DiffView) hightlightCode(source string, bgColor color.Color) string {
 	if err := f.Format(&b, dv.chromaStyle, it); err != nil {
 		return source
 	}
-	return b.String()
+
+	result := b.String()
+
+	// Cache the result for future use
+	dv.syntaxCache[cacheKey] = result
+
+	return result
 }
 
-func (dv *DiffView) getChromaLexer(source string) chroma.Lexer {
+// createSyntaxCacheKey creates a cache key from source content and background color.
+// We use a simple hash to keep memory usage reasonable.
+func (dv *DiffView) createSyntaxCacheKey(source string, bgColor color.Color) string {
+	// Convert color to string representation
+	r, g, b, a := bgColor.RGBA()
+	colorStr := fmt.Sprintf("%d,%d,%d,%d", r, g, b, a)
+
+	// Create a hash of the content + color to use as cache key
+	h := xxh3.New()
+	h.Write([]byte(source))
+	h.Write([]byte(colorStr))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (dv *DiffView) getChromaLexer() chroma.Lexer {
+	if dv.cachedLexer != nil {
+		return dv.cachedLexer
+	}
+
 	l := lexers.Match(dv.before.path)
 	if l == nil {
-		l = lexers.Analyse(source)
+		l = lexers.Analyse(dv.before.content)
 	}
 	if l == nil {
 		l = lexers.Fallback
 	}
-	return chroma.Coalesce(l)
+	dv.cachedLexer = chroma.Coalesce(l)
+	return dv.cachedLexer
 }
 
-func (dv *DiffView) getChromaFormatter(gbColor color.Color) chroma.Formatter {
+func (dv *DiffView) getChromaFormatter(bgColor color.Color) chroma.Formatter {
 	return chromaFormatter{
-		bgColor: gbColor,
+		bgColor: bgColor,
 	}
 }

@@ -33,6 +33,13 @@ type WorkspaceWatcher struct {
 	registrationMu sync.RWMutex
 }
 
+func init() {
+	// Ensure the watcher is initialized with a reasonable file limit
+	if _, err := Ulimit(); err != nil {
+		slog.Error("Error setting file limit", "error", err)
+	}
+}
+
 // NewWorkspaceWatcher creates a new workspace watcher
 func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
@@ -83,7 +90,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 					slog.Debug("BaseURI", "baseURI", u)
 				}
 			default:
-				slog.Debug("GlobPattern", "unknown type", fmt.Sprintf("%T", v))
+				slog.Debug("GlobPattern unknown type", "type", fmt.Sprintf("%T", v))
 			}
 
 			// Log WatchKind

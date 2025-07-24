@@ -8,11 +8,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -193,30 +193,33 @@ func (m *messageCmp) renderAssistantMessage() string {
 	return m.style().Render(joined)
 }
 
-// renderUserMessage renders user messages with file attachments.
-// Displays message content and any attached files with appropriate icons.
+// renderUserMessage renders user messages with file attachments. It displays
+// message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
 	parts := []string{
 		m.toMarkdown(m.message.Content().String()),
 	}
+
 	attachmentStyles := t.S().Text.
 		MarginLeft(1).
 		Background(t.BgSubtle)
-	attachments := []string{}
-	for _, attachment := range m.message.BinaryContent() {
-		file := filepath.Base(attachment.Path)
-		var filename string
-		if len(file) > 10 {
-			filename = fmt.Sprintf(" %s %s... ", styles.DocumentIcon, file[0:7])
-		} else {
-			filename = fmt.Sprintf(" %s %s ", styles.DocumentIcon, file)
-		}
-		attachments = append(attachments, attachmentStyles.Render(filename))
+
+	attachments := make([]string, len(m.message.BinaryContent()))
+	for i, attachment := range m.message.BinaryContent() {
+		const maxFilenameWidth = 10
+		filename := filepath.Base(attachment.Path)
+		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
+			" %s %s ",
+			styles.DocumentIcon,
+			ansi.Truncate(filename, maxFilenameWidth, "..."),
+		))
 	}
+
 	if len(attachments) > 0 {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
+
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.style().Render(joined)
 }
@@ -263,7 +266,7 @@ func (m *messageCmp) renderThinkingContent() string {
 				Description: duration.String(),
 				NoIcon:      true,
 			}
-			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+			return t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
 			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {
@@ -366,11 +369,11 @@ func (m *assistantSectionModel) View() string {
 	model := config.Get().GetModel(m.message.Provider, m.message.Model)
 	if model == nil {
 		// This means the model is not configured anymore
-		model = &provider.Model{
-			Model: "Unknown Model",
+		model = &catwalk.Model{
+			Name: "Unknown Model",
 		}
 	}
-	modelFormatted := t.S().Muted.Render(model.Model)
+	modelFormatted := t.S().Muted.Render(model.Name)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return t.S().Base.PaddingLeft(2).Render(
 		core.Section(assistant, m.width-2),

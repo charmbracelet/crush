@@ -48,6 +48,7 @@ to assist developers in writing, debugging, and understanding code directly from
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load the config
+		// XXX: Handle errors.
 		debug, _ := cmd.Flags().GetBool("debug")
 		cwd, _ := cmd.Flags().GetString("cwd")
 		prompt, _ := cmd.Flags().GetString("prompt")
@@ -72,11 +73,14 @@ to assist developers in writing, debugging, and understanding code directly from
 		if err != nil {
 			return err
 		}
-		cfg.Options.SkipPermissionsRequests = yolo
+		if cfg.Permissions == nil {
+			cfg.Permissions = &config.Permissions{}
+		}
+		cfg.Permissions.SkipRequests = yolo
 
 		ctx := cmd.Context()
 
-		// Connect DB, this will also run migrations
+		// Connect to DB; this will also run migrations.
 		conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
 		if err != nil {
 			return err
@@ -84,34 +88,36 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		app, err := app.New(ctx, conn, cfg)
 		if err != nil {
-			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
+			slog.Error("Failed to create app instance", "error", err)
 			return err
 		}
 		defer app.Shutdown()
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
-			slog.Error(fmt.Sprintf("Failed to read from stdin: %v", err))
+			slog.Error("Failed to read from stdin", "error", err)
 			return err
 		}
 
-		// Non-interactive mode
+		// Non-interactive mode.
 		if prompt != "" {
 			// Run non-interactive flow using the App method
 			return app.RunNonInteractive(ctx, prompt, quiet)
 		}
 
-		// Set up the TUI
+		// Set up the TUI.
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
 			tea.WithContext(ctx),
+			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
+			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
-			slog.Error(fmt.Sprintf("TUI run error: %v", err))
+			slog.Error("TUI run error", "error", err)
 			return fmt.Errorf("TUI error: %v", err)
 		}
 		return nil

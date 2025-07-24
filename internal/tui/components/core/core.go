@@ -197,7 +197,7 @@ func SelectableButtonsVertical(buttons []ButtonOpts, spacing int) string {
 	for i, button := range buttons {
 		parts = append(parts, SelectableButton(button))
 		if i < len(buttons)-1 {
-			for j := 0; j < spacing; j++ {
+			for range spacing {
 				parts = append(parts, "")
 			}
 		}

@@ -196,6 +196,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if s.isOnboarding && !s.needsAPIKey {
 				modelInx := s.modelList.SelectedIndex()
+				if modelInx == -1 {
+					return s, nil
+				}
 				items := s.modelList.Items()
 				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
 				if s.isProviderConfigured(string(selectedItem.Provider.ID)) {

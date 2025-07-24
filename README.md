@@ -12,10 +12,12 @@ Crush is a tool for building software with AI.
 
 ## Installation
 
+Crush has first class support for macOS, Linux, and Windows.
+
 Nightly builds are available while Crush is in development.
 
-- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian and RPM formats
-- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux and macOS
+- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian, RPM, APK, and PKG formats
+- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux, macOS and Windows
 
 You can also just install it with go:
 
@@ -28,7 +30,7 @@ go install
 <details>
 <summary>Not a developer? Here’s a quick how-to.</summary>
 
-Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
+Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64 one](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
 
 Next, open a terminal and run the following commands:
 
@@ -36,16 +38,14 @@ Next, open a terminal and run the following commands:
 cd ~/Downloads
 tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
 sudo mv ./crush/crush /usr/local/bin/crush
-rm -rf crush
+rm -rf ./crush
 ```
 
 Then, run Crush by typing `crush`.
 
-***
+---
 
 </details>
-
-Note that Crush doesn't support Windows yet, however Windows support is planned and in progress.
 
 ## Getting Started
 
@@ -108,7 +108,7 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
   "mcp": {
     "filesystem": {
       "type": "stdio",
-      "command": "node", 
+      "command": "node",
       "args": ["/path/to/mcp-server.js"],
       "env": {
         "NODE_ENV": "production"
@@ -143,7 +143,7 @@ crush -d
 # View last 1000 lines
 crush logs
 
-# Follow logs in real-time  
+# Follow logs in real-time
 crush logs -f
 
 # Show last 500 lines
@@ -161,6 +161,31 @@ Add to your `crush.json` config file:
 }
 ```
 
+### Configurable Default Permissions
+
+Crush includes a permission system to control which tools can be executed without prompting. You can configure allowed tools in your `crush.json` config file:
+
+```json
+{
+  "permissions": {
+    "allowed_tools": [
+      "view",
+      "ls",
+      "grep",
+      "edit:write",
+      "mcp_context7_get-library-doc"
+    ]
+  }
+}
+```
+
+The `allowed_tools` array accepts:
+
+- Tool names (e.g., `"view"`) - allows all actions for that tool
+- Tool:action combinations (e.g., `"edit:write"`) - allows only specific actions
+
+You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
+
 ### OpenAI-Compatible APIs
 
 Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
@@ -174,7 +199,7 @@ Crush supports all OpenAI-compatible APIs. Here's an example configuration for D
       "models": [
         {
           "id": "deepseek-chat",
-          "model": "Deepseek V3",
+          "name": "Deepseek V3",
           "cost_per_1m_in": 0.27,
           "cost_per_1m_out": 1.1,
           "cost_per_1m_in_cached": 0.07,

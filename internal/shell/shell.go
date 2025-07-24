@@ -221,7 +221,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.blockHandler()),
+		interp.ExecHandlers(s.blockHandler(), s.coreUtilsHandler()),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)

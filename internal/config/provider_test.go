@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,11 +14,11 @@ type mockProviderClient struct {
 	shouldFail bool
 }
 
-func (m *mockProviderClient) GetProviders() ([]provider.Provider, error) {
+func (m *mockProviderClient) GetProviders() ([]catwalk.Provider, error) {
 	if m.shouldFail {
 		return nil, errors.New("failed to load providers")
 	}
-	return []provider.Provider{
+	return []catwalk.Provider{
 		{
 			Name: "Mock",
 		},
@@ -43,7 +43,7 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 	client := &mockProviderClient{shouldFail: true}
 	tmpPath := t.TempDir() + "/providers.json"
 	// store providers to a temporary file
-	oldProviders := []provider.Provider{
+	oldProviders := []catwalk.Provider{
 		{
 			Name: "OldProvider",
 		},

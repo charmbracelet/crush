@@ -5,14 +5,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
 )
 
 type emptyProviderClient struct{}
 
-func (m *emptyProviderClient) GetProviders() ([]provider.Provider, error) {
-	return []provider.Provider{}, nil
+func (m *emptyProviderClient) GetProviders() ([]catwalk.Provider, error) {
+	return []catwalk.Provider{}, nil
 }
 
 func TestProvider_loadProvidersEmptyResult(t *testing.T) {
@@ -33,7 +33,7 @@ func TestProvider_loadProvidersEmptyCache(t *testing.T) {
 	tmpPath := t.TempDir() + "/providers.json"
 
 	// Create an empty cache file
-	emptyProviders := []provider.Provider{}
+	emptyProviders := []catwalk.Provider{}
 	data, err := json.Marshal(emptyProviders)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(tmpPath, data, 0o644))

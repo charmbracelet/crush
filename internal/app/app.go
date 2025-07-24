@@ -59,13 +59,17 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
-	skipPermissionsRequests := cfg.Options != nil && cfg.Options.SkipPermissionsRequests
+	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
+	allowedTools := []string{}
+	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
+		allowedTools = cfg.Permissions.AllowedTools
+	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		LSPClients:  make(map[string]*lsp.Client),
 
 		globalCtx: ctx,
@@ -157,16 +161,20 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 			if result.Error != nil {
 				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-					slog.Info("Agent processing cancelled", "session_id", sess.ID)
+					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.Error)
 			}
 
-			part := result.Message.Content().String()[readBts:]
-			fmt.Println(part)
+			msgContent := result.Message.Content().String()
+			if len(msgContent) < readBts {
+				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
+				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
+			}
+			fmt.Println(msgContent[readBts:])
 
-			slog.Info("Non-interactive run completed", "session_id", sess.ID)
+			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 			return nil
 
 		case event := <-messageEvents:

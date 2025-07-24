@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"strings"
 
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
@@ -20,9 +22,12 @@ type chromaFormatter struct {
 // Format implements the chroma.Formatter interface.
 func (c chromaFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator) error {
 	for token := it(); token != chroma.EOF; token = it() {
+		value := strings.TrimRight(token.Value, "\n")
+		value = ansiext.Escape(value)
+
 		entry := style.Get(token.Type)
 		if entry.IsZero() {
-			if _, err := fmt.Fprint(w, token.Value); err != nil {
+			if _, err := fmt.Fprint(w, value); err != nil {
 				return err
 			}
 			continue
@@ -44,7 +49,7 @@ func (c chromaFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iter
 			s = s.Foreground(lipgloss.Color(entry.Colour.String()))
 		}
 
-		if _, err := fmt.Fprint(w, s.Render(token.Value)); err != nil {
+		if _, err := fmt.Fprint(w, s.Render(value)); err != nil {
 			return err
 		}
 	}

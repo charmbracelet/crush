@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
-	fur "github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // Common errors
@@ -52,7 +53,7 @@ type AgentEvent struct {
 
 type Service interface {
 	pubsub.Suscriber[AgentEvent]
-	Model() fur.Model
+	Model() catwalk.Model
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	CancelAll()
@@ -226,7 +227,7 @@ func NewAgent(
 	}, nil
 }
 
-func (a *agent) Model() fur.Model {
+func (a *agent) Model() catwalk.Model {
 	return *config.Get().GetModelByType(a.agentCfg.Model)
 }
 
@@ -234,7 +235,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Cancel regular requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info(fmt.Sprintf("Request cancellation initiated for session: %s", sessionID))
+			slog.Info("Request cancellation initiated", "session_id", sessionID)
 			cancel()
 		}
 	}
@@ -242,7 +243,7 @@ func (a *agent) Cancel(sessionID string) {
 	// Also check for summarize requests
 	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID + "-summarize"); exists {
 		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info(fmt.Sprintf("Summarize cancellation initiated for session: %s", sessionID))
+			slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 			cancel()
 		}
 	}
@@ -372,7 +373,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			})
 			titleErr := a.generateTitle(context.Background(), sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
-				slog.Error(fmt.Sprintf("failed to generate title: %v", titleErr))
+				slog.Error("failed to generate title", "error", titleErr)
 			}
 		}()
 	}
@@ -645,7 +646,7 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 	return nil
 }
 
-func (a *agent) TrackUsage(ctx context.Context, sessionID string, model fur.Model, usage provider.TokenUsage) error {
+func (a *agent) TrackUsage(ctx context.Context, sessionID string, model catwalk.Model, usage provider.TokenUsage) error {
 	sess, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -770,6 +771,8 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
+		shell := shell.GetPersistentShell(config.Get().WorkingDir())
+		summary += "\n\n**Current working directory of the persistent shell**\n\n" + shell.GetWorkingDir()
 		event = AgentEvent{
 			Type:     AgentEventTypeSummarize,
 			Progress: "Creating new session...",

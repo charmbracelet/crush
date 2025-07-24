@@ -1,14 +1,12 @@
 package status
 
 import (
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -74,18 +72,15 @@ func (m *statusCmp) infoMsg() string {
 	switch m.info.Type {
 	case util.InfoTypeError:
 		infoType = t.S().Base.Background(t.Red).Padding(0, 1).Render("ERROR")
-		width := m.width - lipgloss.Width(infoType)
-		message = t.S().Base.Background(t.Error).Foreground(t.White).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+		message = t.S().Base.Background(t.Error).Width(m.width).Foreground(t.White).Padding(0, 1).Render(m.info.Msg)
 	case util.InfoTypeWarn:
 		infoType = t.S().Base.Foreground(t.BgOverlay).Background(t.Yellow).Padding(0, 1).Render("WARNING")
-		width := m.width - lipgloss.Width(infoType)
-		message = t.S().Base.Foreground(t.BgOverlay).Background(t.Warning).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+		message = t.S().Base.Foreground(t.BgOverlay).Width(m.width).Background(t.Warning).Padding(0, 1).Render(m.info.Msg)
 	default:
 		infoType = t.S().Base.Foreground(t.BgOverlay).Background(t.Green).Padding(0, 1).Render("OKAY!")
-		width := m.width - lipgloss.Width(infoType)
-		message = t.S().Base.Background(t.Success).Foreground(t.White).Padding(0, 1).Width(width).Render(ansi.Truncate(m.info.Msg, width, "…"))
+		message = t.S().Base.Background(t.Success).Width(m.width).Foreground(t.White).Padding(0, 1).Render(m.info.Msg)
 	}
-	return strings.Join([]string{infoType, message}, "")
+	return ansi.Truncate(infoType+message, m.width, "…")
 }
 
 func (m *statusCmp) ToggleFullHelp() {

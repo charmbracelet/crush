@@ -5,8 +5,8 @@ import (
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -18,7 +18,7 @@ import (
 type ModelListComponent struct {
 	list      list.ListModel
 	modelType int
-	providers []provider.Provider
+	providers []catwalk.Provider
 }
 
 func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputPlaceholder string) *ModelListComponent {
@@ -109,19 +109,19 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.ContainsFunc(knownProviders, func(p provider.Provider) bool { return p.ID == provider.InferenceProvider(providerID) }) {
+		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
 			// Convert config provider to provider.Provider format
-			configProvider := provider.Provider{
+			configProvider := catwalk.Provider{
 				Name:   providerConfig.Name,
-				ID:     provider.InferenceProvider(providerID),
-				Models: make([]provider.Model, len(providerConfig.Models)),
+				ID:     catwalk.InferenceProvider(providerID),
+				Models: make([]catwalk.Model, len(providerConfig.Models)),
 			}
 
 			// Convert models
 			for i, model := range providerConfig.Models {
-				configProvider.Models[i] = provider.Model{
+				configProvider.Models[i] = catwalk.Model{
 					ID:                     model.ID,
-					Model:                  model.Model,
+					Name:                   model.Name,
 					CostPer1MIn:            model.CostPer1MIn,
 					CostPer1MOut:           model.CostPer1MOut,
 					CostPer1MInCached:      model.CostPer1MInCached,
@@ -144,7 +144,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			section.SetInfo(configured)
 			modelItems = append(modelItems, section)
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
+				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}))
@@ -179,7 +179,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 		modelItems = append(modelItems, section)
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Model, ModelOption{
+			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
 				Model:    model,
 			}))
@@ -201,6 +201,6 @@ func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
 	m.list.SetFilterPlaceholder(placeholder)
 }
 
-func (m *ModelListComponent) SetProviders(providers []provider.Provider) {
+func (m *ModelListComponent) SetProviders(providers []catwalk.Provider) {
 	m.providers = providers
 }

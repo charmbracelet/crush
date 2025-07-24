@@ -4,10 +4,10 @@ import (
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -270,7 +270,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil &&
-			providerCfg.Type == provider.TypeAnthropic && model.CanReason {
+			providerCfg.Type == catwalk.TypeAnthropic && model.CanReason {
 			selectedModel := cfg.Models[agentCfg.Model]
 			status := "Enable"
 			if selectedModel.Think {

@@ -10,17 +10,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/fur/client"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
 
 type ProviderClient interface {
-	GetProviders() ([]provider.Provider, error)
+	GetProviders() ([]catwalk.Provider, error)
 }
 
 var (
 	providerOnce sync.Once
-	providerList []provider.Provider
+	providerList []catwalk.Provider
 )
 
 // file to cache provider data
@@ -44,7 +43,7 @@ func providerCacheFileData() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, "providers.json")
 }
 
-func saveProvidersInCache(path string, providers []provider.Provider) error {
+func saveProvidersInCache(path string, providers []catwalk.Provider) error {
 	slog.Info("Caching provider data")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
@@ -61,26 +60,26 @@ func saveProvidersInCache(path string, providers []provider.Provider) error {
 	return nil
 }
 
-func loadProvidersFromCache(path string) ([]provider.Provider, error) {
+func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read provider cache file: %w", err)
 	}
 
-	var providers []provider.Provider
+	var providers []catwalk.Provider
 	if err := json.Unmarshal(data, &providers); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
 	return providers, nil
 }
 
-func Providers() ([]provider.Provider, error) {
-	client := client.New()
+func Providers() ([]catwalk.Provider, error) {
+	client := catwalk.NewWithURL(catwalkURL)
 	path := providerCacheFileData()
 	return loadProvidersOnce(client, path)
 }
 
-func loadProvidersOnce(client ProviderClient, path string) ([]provider.Provider, error) {
+func loadProvidersOnce(client ProviderClient, path string) ([]catwalk.Provider, error) {
 	var err error
 	providerOnce.Do(func() {
 		providerList, err = loadProviders(client, path)
@@ -91,7 +90,7 @@ func loadProvidersOnce(client ProviderClient, path string) ([]provider.Provider,
 	return providerList, nil
 }
 
-func loadProviders(client ProviderClient, path string) (providerList []provider.Provider, err error) {
+func loadProviders(client ProviderClient, path string) (providerList []catwalk.Provider, err error) {
 	// if cache is not stale, load from it
 	stale, exists := isCacheStale(path)
 	if !stale {

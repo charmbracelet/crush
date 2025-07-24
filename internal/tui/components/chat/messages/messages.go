@@ -8,11 +8,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -369,11 +369,11 @@ func (m *assistantSectionModel) View() string {
 	model := config.Get().GetModel(m.message.Provider, m.message.Model)
 	if model == nil {
 		// This means the model is not configured anymore
-		model = &provider.Model{
-			Model: "Unknown Model",
+		model = &catwalk.Model{
+			Name: "Unknown Model",
 		}
 	}
-	modelFormatted := t.S().Muted.Render(model.Model)
+	modelFormatted := t.S().Muted.Render(model.Name)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return t.S().Base.PaddingLeft(2).Render(
 		core.Section(assistant, m.width-2),

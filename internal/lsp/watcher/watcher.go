@@ -90,7 +90,7 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 					slog.Debug("BaseURI", "baseURI", u)
 				}
 			default:
-				slog.Debug("GlobPattern", "unknown type", fmt.Sprintf("%T", v))
+				slog.Debug("GlobPattern unknown type", "type", fmt.Sprintf("%T", v))
 			}
 
 			// Log WatchKind

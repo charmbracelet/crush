@@ -9,6 +9,8 @@ type KeyMap struct {
 	Up,
 	Select,
 	Cancel key.Binding
+	DownInsert,
+	UpInsert key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -28,6 +30,14 @@ func DefaultKeyMap() KeyMap {
 		Cancel: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
+		),
+		DownInsert: key.NewBinding(
+			key.WithKeys("ctrl+n"),
+			key.WithHelp("ctrl+n", "insert next"),
+		),
+		UpInsert: key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "insert previous"),
 		),
 	}
 }

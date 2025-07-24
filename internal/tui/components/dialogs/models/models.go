@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/list"
@@ -48,8 +48,8 @@ type ModelDialog interface {
 }
 
 type ModelOption struct {
-	Provider provider.Provider
-	Model    provider.Model
+	Provider catwalk.Provider
+	Model    catwalk.Model
 }
 
 type modelDialogCmp struct {
@@ -363,7 +363,7 @@ func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {
 	return false
 }
 
-func (m *modelDialogCmp) getProvider(providerID provider.InferenceProvider) (*provider.Provider, error) {
+func (m *modelDialogCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
 	providers, err := config.Providers()
 	if err != nil {
 		return nil, err

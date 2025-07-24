@@ -88,14 +88,14 @@ to assist developers in writing, debugging, and understanding code directly from
 
 		app, err := app.New(ctx, conn, cfg)
 		if err != nil {
-			slog.Error(fmt.Sprintf("Failed to create app instance: %v", err))
+			slog.Error("Failed to create app instance", "error", err)
 			return err
 		}
 		defer app.Shutdown()
 
 		prompt, err = maybePrependStdin(prompt)
 		if err != nil {
-			slog.Error(fmt.Sprintf("Failed to read from stdin: %v", err))
+			slog.Error("Failed to read from stdin", "error", err)
 			return err
 		}
 
@@ -117,7 +117,7 @@ to assist developers in writing, debugging, and understanding code directly from
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
-			slog.Error(fmt.Sprintf("TUI run error: %v", err))
+			slog.Error("TUI run error", "error", err)
 			return fmt.Errorf("TUI error: %v", err)
 		}
 		return nil

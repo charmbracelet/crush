@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/tidwall/sjson"
 	"golang.org/x/exp/slog"
 )
@@ -70,7 +70,7 @@ type ProviderConfig struct {
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type provider.Type `json:"type,omitempty"`
+	Type catwalk.Type `json:"type,omitempty"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty"`
 	// Marks the provider as disabled.
@@ -85,7 +85,7 @@ type ProviderConfig struct {
 	ExtraParams map[string]string `json:"-"`
 
 	// The provider models
-	Models []provider.Model `json:"models,omitempty"`
+	Models []catwalk.Model `json:"models,omitempty"`
 }
 
 type MCPType string
@@ -256,8 +256,8 @@ type Config struct {
 	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
-	dataConfigDir  string              `json:"-"`
-	knownProviders []provider.Provider `json:"-"`
+	dataConfigDir  string             `json:"-"`
+	knownProviders []catwalk.Provider `json:"-"`
 }
 
 func (c *Config) WorkingDir() string {
@@ -279,7 +279,7 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
-func (c *Config) GetModel(provider, model string) *provider.Model {
+func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers[provider]; ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
@@ -301,7 +301,7 @@ func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfi
 	return nil
 }
 
-func (c *Config) GetModelByType(modelType SelectedModelType) *provider.Model {
+func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
 	model, ok := c.Models[modelType]
 	if !ok {
 		return nil
@@ -309,7 +309,7 @@ func (c *Config) GetModelByType(modelType SelectedModelType) *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) LargeModel() *provider.Model {
+func (c *Config) LargeModel() *catwalk.Model {
 	model, ok := c.Models[SelectedModelTypeLarge]
 	if !ok {
 		return nil
@@ -317,7 +317,7 @@ func (c *Config) LargeModel() *provider.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) SmallModel() *provider.Model {
+func (c *Config) SmallModel() *catwalk.Model {
 	model, ok := c.Models[SelectedModelTypeSmall]
 	if !ok {
 		return nil
@@ -387,7 +387,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 		return nil
 	}
 
-	var foundProvider *provider.Provider
+	var foundProvider *catwalk.Provider
 	for _, p := range c.knownProviders {
 		if string(p.ID) == providerID {
 			foundProvider = &p
@@ -456,14 +456,14 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	headers := make(map[string]string)
 	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	switch c.Type {
-	case provider.TypeOpenAI:
+	case catwalk.TypeOpenAI:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
 		}
 		testURL = baseURL + "/models"
 		headers["Authorization"] = "Bearer " + apiKey
-	case provider.TypeAnthropic:
+	case catwalk.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://api.anthropic.com/v1"

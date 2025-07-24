@@ -182,7 +182,7 @@ Crush includes a permission system to control which tools can be executed withou
 The `allowed_tools` array accepts:
 
 - Tool names (e.g., `"view"`) - allows all actions for that tool
-- Tool:action combinations (e.g., `"bash:read"`) - allows only specific actions
+- Tool:action combinations (e.g., `"edit:write"`) - allows only specific actions
 
 You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
 
@@ -199,7 +199,7 @@ Crush supports all OpenAI-compatible APIs. Here's an example configuration for D
       "models": [
         {
           "id": "deepseek-chat",
-          "model": "Deepseek V3",
+          "name": "Deepseek V3",
           "cost_per_1m_in": 0.27,
           "cost_per_1m_out": 1.1,
           "cost_per_1m_in_cached": 0.07,

@@ -15,8 +15,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -71,7 +71,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			var contentBlocks []anthropic.ContentBlockParamUnion
 			contentBlocks = append(contentBlocks, content)
 			for _, binaryContent := range msg.BinaryContent() {
-				base64Image := binaryContent.String(provider.InferenceProviderAnthropic)
+				base64Image := binaryContent.String(catwalk.InferenceProviderAnthropic)
 				imageBlock := anthropic.NewImageBlockBase64(binaryContent.MIMEType, base64Image)
 				contentBlocks = append(contentBlocks, imageBlock)
 			}
@@ -248,7 +248,7 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 				return nil, retryErr
 			}
 			if retry {
-				slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
+				slog.Warn("Retrying due to rate limit", "attempt", attempts, "max_retries", maxRetries)
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -401,7 +401,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				return
 			}
 			if retry {
-				slog.Warn(fmt.Sprintf("Retrying due to rate limit... attempt %d of %d", attempts, maxRetries))
+				slog.Warn("Retrying due to rate limit", "attempt", attempts, "max_retries", maxRetries)
 				select {
 				case <-ctx.Done():
 					// context cancelled
@@ -529,6 +529,6 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 	}
 }
 
-func (a *anthropicClient) Model() provider.Model {
+func (a *anthropicClient) Model() catwalk.Model {
 	return a.providerOptions.model(a.providerOptions.modelType)
 }

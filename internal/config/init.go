@@ -5,40 +5,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 )
 
-const InitFlagFilename = "init"
+const (
+	InitFlagFilename = "init"
+)
 
 type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
 // TODO: we need to remove the global config instance keeping it now just until everything is migrated
-var (
-	instance *Config
-	cwd      string
-	once     sync.Once
-	wg       sync.WaitGroup
-)
+var instance atomic.Pointer[Config]
 
 func Init(workingDir string, debug bool) (*Config, error) {
-	var err error
-	wg.Add(1)
-	once.Do(func() {
-		cwd = workingDir
-		var cfg *Config
-		cfg, err = Load(cwd, debug)
-		instance = cfg
-		wg.Done()
-	})
-
-	return instance, err
+	cfg, err := Load(workingDir, debug)
+	if err != nil {
+		return nil, err
+	}
+	instance.Store(cfg)
+	return instance.Load(), nil
 }
 
 func Get() *Config {
-	wg.Wait()
-	return instance
+	cfg := instance.Load()
+	return cfg
 }
 
 func ProjectNeedsInitialization() (bool, error) {

@@ -315,6 +315,243 @@ func TestListMovement(t *testing.T) {
 		assert.Equal(t, 0, l.offset)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+
+	t.Run("should not change offset when new items are appended and we are at the bottom in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			content := strings.Repeat(fmt.Sprintf("Item %d\n", i), i+1)
+			content = strings.TrimSuffix(content, "\n")
+			item := NewSelectableItem(content)
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+		execCmd(l, l.AppendItem(NewSelectableItem("Testing")))
+
+		assert.Equal(t, 0, l.offset)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should stay at the position it is when new items are added but we moved up in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveUp(2))
+		viewBefore := l.View()
+		execCmd(l, l.AppendItem(NewSelectableItem("Testing\nHello\n")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 5, l.offset)
+		assert.Equal(t, 33, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should stay at the position it is when the hight of an item below is increased in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveUp(2))
+		viewBefore := l.View()
+		item := items[29]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 29\nLine 2\nLine 3")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 4, l.offset)
+		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should stay at the position it is when the hight of an item below is decreases in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		items = append(items, NewSelectableItem("Item 30\nLine 2\nLine 3"))
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveUp(2))
+		viewBefore := l.View()
+		item := items[30]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 30")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 0, l.offset)
+		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should stay at the position it is when the hight of an item above is increased in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveUp(2))
+		viewBefore := l.View()
+		item := items[1]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 1\nLine 2\nLine 3")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 2, l.offset)
+		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should stay at the position it is if an item is prepended and we are in backwards list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveUp(2))
+		viewBefore := l.View()
+		execCmd(l, l.PrependItem(NewSelectableItem("New")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 2, l.offset)
+		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should not change offset when new items are prepended and we are at the top in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			content := strings.Repeat(fmt.Sprintf("Item %d\n", i), i+1)
+			content = strings.TrimSuffix(content, "\n")
+			item := NewSelectableItem(content)
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+		execCmd(l, l.PrependItem(NewSelectableItem("Testing")))
+
+		assert.Equal(t, 0, l.offset)
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should stay at the position it is when new items are added but we moved down in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveDown(2))
+		viewBefore := l.View()
+		execCmd(l, l.PrependItem(NewSelectableItem("Testing\nHello\n")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 5, l.offset)
+		assert.Equal(t, 33, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should stay at the position it is when the hight of an item above is increased in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveDown(2))
+		viewBefore := l.View()
+		item := items[0]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 29\nLine 2\nLine 3")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 4, l.offset)
+		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should stay at the position it is when the hight of an item above is decreases in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		items = append(items, NewSelectableItem("At top\nLine 2\nLine 3"))
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveDown(3))
+		viewBefore := l.View()
+		item := items[0]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("At top")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 1, l.offset)
+		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+
+	t.Run("should stay at the position it is when the hight of an item below is increased in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveDown(2))
+		viewBefore := l.View()
+		item := items[29]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 29\nLine 2\nLine 3")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 2, l.offset)
+		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
+	t.Run("should stay at the position it is if an item is appended and we are in forward list", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		execCmd(l, l.MoveDown(2))
+		viewBefore := l.View()
+		execCmd(l, l.AppendItem(NewSelectableItem("New")))
+		viewAfter := l.View()
+		assert.Equal(t, viewBefore, viewAfter)
+		assert.Equal(t, 2, l.offset)
+		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		golden.RequireEqual(t, []byte(l.View()))
+	})
 }
 
 type SelectableItem interface {

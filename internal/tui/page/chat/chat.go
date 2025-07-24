@@ -604,6 +604,7 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	if err != nil {
 		return util.ReportError(err)
 	}
+	cmds = append(cmds, p.chat.GoToBottom())
 	return tea.Batch(cmds...)
 }
 

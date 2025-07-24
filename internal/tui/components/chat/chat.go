@@ -40,6 +40,7 @@ type MessageListCmp interface {
 	layout.Help
 
 	SetSession(session.Session) tea.Cmd
+	GoToBottom() tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -64,6 +65,7 @@ func New(app *app.App) MessageListCmp {
 		[]list.Item{},
 		list.WithGap(1),
 		list.WithDirectionBackward(),
+		list.WithFocus(false),
 		list.WithKeyMap(defaultListKeyMap),
 	)
 	return &messageListCmp{
@@ -76,7 +78,7 @@ func New(app *app.App) MessageListCmp {
 
 // Init initializes the component.
 func (m *messageListCmp) Init() tea.Cmd {
-	return tea.Sequence(m.listCmp.Init(), m.listCmp.Blur())
+	return m.listCmp.Init()
 }
 
 // Update handles incoming messages and updates the component state.
@@ -530,4 +532,8 @@ func (m *messageListCmp) IsFocused() bool {
 
 func (m *messageListCmp) Bindings() []key.Binding {
 	return m.defaultListKeyMap.KeyBindings()
+}
+
+func (m *messageListCmp) GoToBottom() tea.Cmd {
+	return m.listCmp.GoToBottom()
 }

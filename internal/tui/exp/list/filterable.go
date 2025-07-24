@@ -265,7 +265,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		matchedItems = append(matchedItems, item)
 	}
 
-	if f.list.direction == DirectionBackward {
+	if f.direction == DirectionBackward {
 		slices.Reverse(matchedItems)
 	}
 

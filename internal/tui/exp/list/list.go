@@ -846,7 +846,6 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		}
-
 	}
 	item, ok := l.items.Get(newIndex)
 	if !ok {

@@ -3,14 +3,5 @@
     "Go": {
       "command": "gopls"
     }
-  },
-  "mcp": {
-    "linear": {
-      "type": "stdio",
-      "command": "mcp-remote",
-      "args": [
-        "https://mcp.linear.app/sse"
-      ]
-    }
   }
 }

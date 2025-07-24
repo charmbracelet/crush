@@ -2,6 +2,7 @@ package list
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -24,6 +25,7 @@ type FilterableList[T FilterableItem] interface {
 	Cursor() *tea.Cursor
 	SetInputWidth(int)
 	SetInputPlaceholder(string)
+	Filter(q string) tea.Cmd
 }
 
 type HasMatchIndexes interface {
@@ -261,6 +263,10 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 			i.MatchIndexes(match.MatchedIndexes)
 		}
 		matchedItems = append(matchedItems, item)
+	}
+
+	if f.list.direction == DirectionBackward {
+		slices.Reverse(matchedItems)
 	}
 
 	cmds = append(cmds, f.list.SetItems(matchedItems))

@@ -67,6 +67,7 @@ func New(app *app.App) MessageListCmp {
 		list.WithDirectionBackward(),
 		list.WithFocus(false),
 		list.WithKeyMap(defaultListKeyMap),
+		list.WithEnableMouse(),
 	)
 	return &messageListCmp{
 		app:               app,
@@ -96,6 +97,11 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pubsub.Event[message.Message]:
 		cmd := m.handleMessageEvent(msg)
+		return m, cmd
+
+	case tea.MouseWheelMsg:
+		u, cmd := m.listCmp.Update(msg)
+		m.listCmp = u.(list.List[list.Item])
 		return m, cmd
 	default:
 		var cmds []tea.Cmd

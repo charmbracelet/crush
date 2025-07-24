@@ -23,7 +23,6 @@ type HasAnim interface {
 	Item
 	Spinning() bool
 }
-type renderedMsg struct{}
 
 type List[T Item] interface {
 	util.Model
@@ -77,6 +76,7 @@ type confOptions struct {
 	selectedItem string
 	focused      bool
 	resize       bool
+	enableMouse  bool
 }
 
 type list[T Item] struct {
@@ -156,6 +156,12 @@ func WithResizeByList() ListOption {
 	}
 }
 
+func WithEnableMouse() ListOption {
+	return func(l *confOptions) {
+		l.enableMouse = true
+	}
+}
+
 func New[T Item](items []T, opts ...ListOption) List[T] {
 	list := &list[T]{
 		confOptions: &confOptions{
@@ -188,6 +194,11 @@ func (l *list[T]) Init() tea.Cmd {
 // Update implements List.
 func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		if l.enableMouse {
+			return l.handleMouseWheel(msg)
+		}
+		return l, nil
 	case anim.StepMsg:
 		var cmds []tea.Cmd
 		for _, item := range l.items.Slice() {
@@ -227,6 +238,17 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return l, nil
+}
+
+func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg.Button {
+	case tea.MouseWheelDown:
+		cmd = l.MoveDown(ViewportDefaultScrollSize)
+	case tea.MouseWheelUp:
+		cmd = l.MoveUp(ViewportDefaultScrollSize)
+	}
+	return l, cmd
 }
 
 // View implements List.
@@ -292,9 +314,8 @@ func (l *list[T]) render() tea.Cmd {
 	}
 	// we are not rendering the first time
 	if l.rendered != "" {
-		l.rendered = ""
 		// rerender everything will mostly hit cache
-		_ = l.renderIterator(0, false)
+		l.rendered, _ = l.renderIterator(0, false, "")
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
 		}
@@ -304,14 +325,17 @@ func (l *list[T]) render() tea.Cmd {
 		}
 		return focusChangeCmd
 	}
-	finishIndex := l.renderIterator(0, true)
+	rendered, finishIndex := l.renderIterator(0, true, "")
+	l.rendered = rendered
+
 	// recalculate for the initial items
 	if l.direction == DirectionBackward {
 		l.recalculateItemPositions()
 	}
 	renderCmd := func() tea.Msg {
+		l.offset = 0
 		// render the rest
-		_ = l.renderIterator(finishIndex, false)
+		l.rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
 		// needed for backwards
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
@@ -321,7 +345,7 @@ func (l *list[T]) render() tea.Cmd {
 			l.scrollToSelection()
 		}
 
-		return renderedMsg{}
+		return nil
 	}
 	return tea.Batch(focusChangeCmd, renderCmd)
 }
@@ -568,13 +592,14 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 }
 
 // render iterator renders items starting from the specific index and limits hight if limitHeight != -1
-// returns the last index
-func (l *list[T]) renderIterator(startInx int, limitHeight bool) int {
-	currentContentHeight := lipgloss.Height(l.rendered) - 1
+// returns the last index and the rendered content so far
+// we pass the rendered content around and don't use l.rendered to prevent jumping of the content
+func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string) (string, int) {
+	currentContentHeight := lipgloss.Height(rendered) - 1
 	itemsLen := l.items.Len()
 	for i := startInx; i < itemsLen; i++ {
 		if currentContentHeight >= l.height && limitHeight {
-			return i
+			return rendered, i
 		}
 		// cool way to go through the list in both directions
 		inx := i
@@ -602,13 +627,13 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool) int {
 		}
 
 		if l.direction == DirectionForward {
-			l.rendered += rItem.view + strings.Repeat("\n", gap)
+			rendered += rItem.view + strings.Repeat("\n", gap)
 		} else {
-			l.rendered = rItem.view + strings.Repeat("\n", gap) + l.rendered
+			rendered = rItem.view + strings.Repeat("\n", gap) + rendered
 		}
 		currentContentHeight = rItem.end + 1 + l.gap
 	}
-	return itemsLen
+	return rendered, itemsLen
 }
 
 func (l *list[T]) renderItem(item Item) renderedItem {

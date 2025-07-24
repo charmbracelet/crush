@@ -164,6 +164,13 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
 		return p, nil
+	case tea.MouseWheelMsg:
+		if p.isMouseOverChat(msg.Mouse().X, msg.Mouse().Y) {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
 	case tea.WindowSizeMsg:
 		return p, p.SetSize(msg.Width, msg.Height)
 	case CancelTimerExpiredMsg:
@@ -905,4 +912,32 @@ func (p *chatPage) Help() help.KeyMap {
 
 func (p *chatPage) IsChatFocused() bool {
 	return p.focusedPane == PanelTypeChat
+}
+
+// isMouseOverChat checks if the given mouse coordinates are within the chat area bounds.
+// Returns true if the mouse is over the chat area, false otherwise.
+func (p *chatPage) isMouseOverChat(x, y int) bool {
+	// No session means no chat area
+	if p.session.ID == "" {
+		return false
+	}
+
+	var chatX, chatY, chatWidth, chatHeight int
+
+	if p.compact {
+		// In compact mode: chat area starts after header and spans full width
+		chatX = 0
+		chatY = HeaderHeight
+		chatWidth = p.width
+		chatHeight = p.height - EditorHeight - HeaderHeight
+	} else {
+		// In non-compact mode: chat area spans from left edge to sidebar
+		chatX = 0
+		chatY = 0
+		chatWidth = p.width - SideBarWidth
+		chatHeight = p.height - EditorHeight
+	}
+
+	// Check if mouse coordinates are within chat bounds
+	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
 }

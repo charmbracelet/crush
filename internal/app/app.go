@@ -61,8 +61,8 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Options != nil && cfg.Options.SkipPermissionsRequests
 	allowedCommands := []string{}
-	if cfg.Options != nil && cfg.Options.AllowedCommands != nil {
-		allowedCommands = cfg.Options.AllowedCommands
+	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
+		allowedCommands = cfg.Permissions.AllowedTools
 	}
 
 	app := &App{

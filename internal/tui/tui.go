@@ -319,26 +319,20 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 
 // handleKeyPressMsg processes keyboard input and routes to appropriate handlers.
 func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
+	if a.completions.Open() {
+		// completions
+		keyMap := a.completions.KeyMap()
+		switch {
+		case key.Matches(msg, keyMap.Up), key.Matches(msg, keyMap.Down),
+			key.Matches(msg, keyMap.Select), key.Matches(msg, keyMap.Cancel),
+			key.Matches(msg, keyMap.UpInsert), key.Matches(msg, keyMap.DownInsert):
+			u, cmd := a.completions.Update(msg)
+			a.completions = u.(completions.Completions)
+			return cmd
+		}
+	}
 	switch {
-	// completions
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Up):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Down):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Select):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Cancel):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-		// help
+	// help
 	case key.Matches(msg, a.keyMap.Help):
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp

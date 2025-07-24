@@ -2,6 +2,7 @@ package csync
 
 import (
 	"iter"
+	"slices"
 	"sync"
 )
 
@@ -29,6 +30,132 @@ func (s *LazySlice[K]) Seq() iter.Seq[K] {
 	return func(yield func(K) bool) {
 		for _, v := range s.inner {
 			if !yield(v) {
+				return
+			}
+		}
+	}
+}
+
+// Slice is a thread-safe slice implementation that provides concurrent access.
+type Slice[T any] struct {
+	inner []T
+	mu    sync.RWMutex
+}
+
+// NewSlice creates a new thread-safe slice.
+func NewSlice[T any]() *Slice[T] {
+	return &Slice[T]{
+		inner: make([]T, 0),
+	}
+}
+
+// NewSliceFrom creates a new thread-safe slice from an existing slice.
+func NewSliceFrom[T any](s []T) *Slice[T] {
+	inner := make([]T, len(s))
+	copy(inner, s)
+	return &Slice[T]{
+		inner: inner,
+	}
+}
+
+// Append adds an element to the end of the slice.
+func (s *Slice[T]) Append(item T) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inner = append(s.inner, item)
+}
+
+// Prepend adds an element to the beginning of the slice.
+func (s *Slice[T]) Prepend(item T) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inner = append([]T{item}, s.inner...)
+}
+
+// Delete removes the element at the specified index.
+func (s *Slice[T]) Delete(index int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 0 || index >= len(s.inner) {
+		return false
+	}
+	s.inner = slices.Delete(s.inner, index, index+1)
+	return true
+}
+
+// Get returns the element at the specified index.
+func (s *Slice[T]) Get(index int) (T, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var zero T
+	if index < 0 || index >= len(s.inner) {
+		return zero, false
+	}
+	return s.inner[index], true
+}
+
+// Set updates the element at the specified index.
+func (s *Slice[T]) Set(index int, item T) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 0 || index >= len(s.inner) {
+		return false
+	}
+	s.inner[index] = item
+	return true
+}
+
+// Len returns the number of elements in the slice.
+func (s *Slice[T]) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.inner)
+}
+
+// Slice returns a copy of the underlying slice.
+func (s *Slice[T]) Slice() []T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]T, len(s.inner))
+	copy(result, s.inner)
+	return result
+}
+
+// SetSlice replaces the entire slice with a new one.
+func (s *Slice[T]) SetSlice(items []T) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inner = make([]T, len(items))
+	copy(s.inner, items)
+}
+
+// Clear removes all elements from the slice.
+func (s *Slice[T]) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inner = s.inner[:0]
+}
+
+// Seq returns an iterator that yields elements from the slice.
+func (s *Slice[T]) Seq() iter.Seq[T] {
+	// Take a snapshot to avoid holding the lock during iteration
+	items := s.Slice()
+	return func(yield func(T) bool) {
+		for _, v := range items {
+			if !yield(v) {
+				return
+			}
+		}
+	}
+}
+
+// SeqWithIndex returns an iterator that yields index-value pairs from the slice.
+func (s *Slice[T]) SeqWithIndex() iter.Seq2[int, T] {
+	// Take a snapshot to avoid holding the lock during iteration
+	items := s.Slice()
+	return func(yield func(int, T) bool) {
+		for i, v := range items {
+			if !yield(i, v) {
 				return
 			}
 		}

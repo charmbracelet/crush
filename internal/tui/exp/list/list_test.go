@@ -30,7 +30,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
-		require.Len(t, l.items, 5)
+		require.Equal(t, 5, l.items.Len())
 		require.Equal(t, 5, l.renderedItems.Len())
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
@@ -60,7 +60,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[4].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
-		require.Len(t, l.items, 5)
+		require.Equal(t, 5, l.items.Len())
 		require.Equal(t, 5, l.renderedItems.Len())
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
@@ -91,7 +91,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
-		require.Len(t, l.items, 30)
+		require.Equal(t, 30, l.items.Len())
 		require.Equal(t, 30, l.renderedItems.Len())
 		assert.Equal(t, 30, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
@@ -121,7 +121,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[29].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
-		require.Len(t, l.items, 30)
+		require.Equal(t, 30, l.items.Len())
 		require.Equal(t, 30, l.renderedItems.Len())
 		assert.Equal(t, 30, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
@@ -154,7 +154,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
-		require.Len(t, l.items, 30)
+		require.Equal(t, 30, l.items.Len())
 		require.Equal(t, 30, l.renderedItems.Len())
 		expectedLines := 0
 		for i := range 30 {
@@ -192,7 +192,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, items[29].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
-		require.Len(t, l.items, 30)
+		require.Equal(t, 30, l.items.Len())
 		require.Equal(t, 30, l.renderedItems.Len())
 		expectedLines := 0
 		for i := range 30 {

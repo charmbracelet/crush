@@ -38,6 +38,7 @@ func NewGroupedList[T Item](groups []Group[T], opts ...ListOption) GroupedList[T
 			keyMap:    DefaultKeyMap(),
 			focused:   true,
 		},
+		items:         csync.NewSlice[Item](),
 		indexMap:      csync.NewMap[string, int](),
 		renderedItems: csync.NewMap[string, renderedItem](),
 	}
@@ -82,13 +83,13 @@ func (g *groupedList[T]) convertItems() {
 			items = append(items, g)
 		}
 	}
-	g.items = items
+	g.items.SetSlice(items)
 }
 
 func (g *groupedList[T]) SetGroups(groups []Group[T]) tea.Cmd {
 	g.groups = groups
 	g.convertItems()
-	return g.SetItems(g.items)
+	return g.SetItems(g.items.Slice())
 }
 
 func (g *groupedList[T]) Groups() []Group[T] {

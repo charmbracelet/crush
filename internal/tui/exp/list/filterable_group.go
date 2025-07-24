@@ -179,7 +179,7 @@ func (f *filterableGroupList[T]) inputHeight() int {
 
 func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 	var cmds []tea.Cmd
-	for _, item := range f.items {
+	for _, item := range f.items.Slice() {
 		if i, ok := any(item).(layout.Focusable); ok {
 			cmds = append(cmds, i.Blur())
 		}

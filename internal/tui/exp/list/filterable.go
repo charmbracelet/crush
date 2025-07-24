@@ -97,7 +97,7 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	f.list = New[T](items, f.listOptions...).(*list[T])
 
 	f.updateKeyMaps()
-	f.items = f.list.items
+	f.items = f.list.items.Slice()
 
 	if f.inputHidden {
 		return f

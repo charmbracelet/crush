@@ -73,7 +73,10 @@ to assist developers in writing, debugging, and understanding code directly from
 		if err != nil {
 			return err
 		}
-		cfg.Options.SkipPermissionsRequests = yolo
+		if cfg.Permissions == nil {
+			cfg.Permissions = &config.Permissions{}
+		}
+		cfg.Permissions.SkipRequests = yolo
 
 		ctx := cmd.Context()
 

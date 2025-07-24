@@ -161,6 +161,31 @@ Add to your `crush.json` config file:
 }
 ```
 
+### Configurable Default Permissions
+
+Crush includes a permission system to control which tools can be executed without prompting. You can configure allowed tools in your `crush.json` config file:
+
+```json
+{
+  "permissions": {
+    "allowed_tools": [
+      "view",
+      "ls",
+      "grep",
+      "edit:write",
+      "mcp_context7_get-library-doc"
+    ]
+  }
+}
+```
+
+The `allowed_tools` array accepts:
+
+- Tool names (e.g., `"view"`) - allows all actions for that tool
+- Tool:action combinations (e.g., `"edit:write"`) - allows only specific actions
+
+You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
+
 ### OpenAI-Compatible APIs
 
 Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.

@@ -120,14 +120,18 @@ type TUIOptions struct {
 	// Here we can add themes later or any TUI related options
 }
 
+type Permissions struct {
+	AllowedTools []string `json:"allowed_tools,omitempty"` // Tools that don't require permission prompts
+	SkipRequests bool     `json:"-"`                       // Automatically accept all permissions (YOLO mode)
+}
+
 type Options struct {
-	ContextPaths            []string    `json:"context_paths,omitempty"`
-	TUI                     *TUIOptions `json:"tui,omitempty"`
-	Debug                   bool        `json:"debug,omitempty"`
-	DebugLSP                bool        `json:"debug_lsp,omitempty"`
-	DisableAutoSummarize    bool        `json:"disable_auto_summarize,omitempty"`
-	DataDirectory           string      `json:"data_directory,omitempty"` // Relative to the cwd
-	SkipPermissionsRequests bool        `json:"-"`                        // Automatically accept all permissions (YOLO mode)
+	ContextPaths         []string    `json:"context_paths,omitempty"`
+	TUI                  *TUIOptions `json:"tui,omitempty"`
+	Debug                bool        `json:"debug,omitempty"`
+	DebugLSP             bool        `json:"debug_lsp,omitempty"`
+	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty"`
+	DataDirectory        string      `json:"data_directory,omitempty"` // Relative to the cwd
 }
 
 type MCPs map[string]MCPConfig
@@ -243,6 +247,8 @@ type Config struct {
 	LSP LSPs `json:"lsp,omitempty"`
 
 	Options *Options `json:"options,omitempty"`
+
+	Permissions *Permissions `json:"permissions,omitempty"`
 
 	// Internal
 	workingDir string `json:"-"`

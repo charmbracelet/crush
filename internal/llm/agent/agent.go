@@ -292,7 +292,7 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 				Parts: parts,
 			},
 		},
-		make([]tools.BaseTool, 0),
+		nil,
 	)
 
 	var finalResponse *provider.ProviderResponse
@@ -745,7 +745,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		response := a.summarizeProvider.StreamResponse(
 			summarizeCtx,
 			msgsWithPrompt,
-			make([]tools.BaseTool, 0),
+			nil,
 		)
 		var finalResponse *provider.ProviderResponse
 		for r := range response {

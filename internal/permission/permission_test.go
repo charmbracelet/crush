@@ -6,52 +6,52 @@ import (
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
 	tests := []struct {
-		name            string
-		allowedCommands []string
-		toolName        string
-		action          string
-		expected        bool
+		name         string
+		allowedTools []string
+		toolName     string
+		action       string
+		expected     bool
 	}{
 		{
-			name:            "tool in allowlist",
-			allowedCommands: []string{"bash", "view"},
-			toolName:        "bash",
-			action:          "execute",
-			expected:        true,
+			name:         "tool in allowlist",
+			allowedTools: []string{"bash", "view"},
+			toolName:     "bash",
+			action:       "execute",
+			expected:     true,
 		},
 		{
-			name:            "tool:action in allowlist",
-			allowedCommands: []string{"bash:execute", "edit:create"},
-			toolName:        "bash",
-			action:          "execute",
-			expected:        true,
+			name:         "tool:action in allowlist",
+			allowedTools: []string{"bash:execute", "edit:create"},
+			toolName:     "bash",
+			action:       "execute",
+			expected:     true,
 		},
 		{
-			name:            "tool not in allowlist",
-			allowedCommands: []string{"view", "ls"},
-			toolName:        "bash",
-			action:          "execute",
-			expected:        false,
+			name:         "tool not in allowlist",
+			allowedTools: []string{"view", "ls"},
+			toolName:     "bash",
+			action:       "execute",
+			expected:     false,
 		},
 		{
-			name:            "tool:action not in allowlist",
-			allowedCommands: []string{"bash:read", "edit:create"},
-			toolName:        "bash",
-			action:          "execute",
-			expected:        false,
+			name:         "tool:action not in allowlist",
+			allowedTools: []string{"bash:read", "edit:create"},
+			toolName:     "bash",
+			action:       "execute",
+			expected:     false,
 		},
 		{
-			name:            "empty allowlist",
-			allowedCommands: []string{},
-			toolName:        "bash",
-			action:          "execute",
-			expected:        false,
+			name:         "empty allowlist",
+			allowedTools: []string{},
+			toolName:     "bash",
+			action:       "execute",
+			expected:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service := NewPermissionService("/tmp", false, tt.allowedCommands)
+			service := NewPermissionService("/tmp", false, tt.allowedTools)
 
 			// Create a channel to capture the permission request
 			// Since we're testing the allowlist logic, we need to simulate the request
@@ -60,7 +60,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 			// Test the allowlist logic directly
 			commandKey := tt.toolName + ":" + tt.action
 			allowed := false
-			for _, cmd := range ps.allowedCommands {
+			for _, cmd := range ps.allowedTools {
 				if cmd == commandKey || cmd == tt.toolName {
 					allowed = true
 					break
@@ -69,7 +69,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 
 			if allowed != tt.expected {
 				t.Errorf("expected %v, got %v for tool %s action %s with allowlist %v",
-					tt.expected, allowed, tt.toolName, tt.action, tt.allowedCommands)
+					tt.expected, allowed, tt.toolName, tt.action, tt.allowedTools)
 			}
 		})
 	}

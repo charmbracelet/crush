@@ -43,7 +43,7 @@ rm -rf ./crush
 
 Then, run Crush by typing `crush`.
 
-***
+---
 
 </details>
 
@@ -108,7 +108,7 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
   "mcp": {
     "filesystem": {
       "type": "stdio",
-      "command": "node", 
+      "command": "node",
       "args": ["/path/to/mcp-server.js"],
       "env": {
         "NODE_ENV": "production"
@@ -143,7 +143,7 @@ crush -d
 # View last 1000 lines
 crush logs
 
-# Follow logs in real-time  
+# Follow logs in real-time
 crush logs -f
 
 # Show last 500 lines
@@ -160,6 +160,25 @@ Add to your `crush.json` config file:
   }
 }
 ```
+
+### Configurable Default Permissions
+
+Crush includes a permission system to control which tools can be executed without prompting. You can configure allowed tools in your `crush.json` config file:
+
+```json
+{
+  "permissions": {
+    "allowed_tools": ["view", "ls", "grep", "bash:read"]
+  }
+}
+```
+
+The `allowed_tools` array accepts:
+
+- Tool names (e.g., `"view"`) - allows all actions for that tool
+- Tool:action combinations (e.g., `"bash:read"`) - allows only specific actions
+
+You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
 
 ### OpenAI-Compatible APIs
 

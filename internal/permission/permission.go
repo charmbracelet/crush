@@ -50,7 +50,7 @@ type permissionService struct {
 	autoApproveSessions   []string
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
-	allowedCommands       []string
+	allowedTools          []string
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -85,7 +85,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedCommands, commandKey) || slices.Contains(s.allowedCommands, opts.ToolName) {
+	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return true
 	}
 
@@ -137,12 +137,12 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedCommands []string) Service {
+func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:             pubsub.NewBroker[PermissionRequest](),
 		workingDir:         workingDir,
 		sessionPermissions: make([]PermissionRequest, 0),
 		skip:               skip,
-		allowedCommands:    allowedCommands,
+		allowedTools:       allowedTools,
 	}
 }

@@ -494,9 +494,7 @@ func (s *splashCmp) View() string {
 		})
 
 		buttons := lipgloss.JoinHorizontal(lipgloss.Left, yesButton, "  ", noButton)
-		infoSection := s.infoSection()
-
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 
 		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).PaddingLeft(1).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -510,7 +508,7 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
-			infoSection,
+			"",
 			initContent,
 		)
 	} else {

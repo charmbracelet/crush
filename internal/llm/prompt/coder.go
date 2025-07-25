@@ -16,13 +16,18 @@ import (
 
 func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
-	switch p {
-	case string(catwalk.InferenceProviderOpenAI):
-		basePrompt = baseOpenAICoderPrompt
-	case string(catwalk.InferenceProviderGemini), string(catwalk.InferenceProviderVertexAI):
-		basePrompt = baseGeminiCoderPrompt
-	default:
-		basePrompt = baseAnthropicCoderPrompt
+
+	if os.Getenv("CRUSH_CODER_V2") == "true" {
+		basePrompt = baseCoderV2Prompt
+	} else {
+		switch p {
+		case string(catwalk.InferenceProviderOpenAI):
+			basePrompt = baseOpenAICoderPrompt
+		case string(catwalk.InferenceProviderGemini), string(catwalk.InferenceProviderVertexAI):
+			basePrompt = baseGeminiCoderPrompt
+		default:
+			basePrompt = baseAnthropicCoderPrompt
+		}
 	}
 	envInfo := getEnvironmentInfo()
 

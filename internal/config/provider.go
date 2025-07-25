@@ -2,10 +2,13 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
@@ -41,57 +44,88 @@ func providerCacheFileData() string {
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+	slog.Info("Saving cached provider data", "path", path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
 
 	data, err := json.MarshalIndent(providers, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write provider data to cache: %w", err)
+	}
+	return nil
 }
 
 func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read provider cache file: %w", err)
 	}
 
 	var providers []catwalk.Provider
-	err = json.Unmarshal(data, &providers)
-	return providers, err
-}
-
-func loadProviders(path string, client ProviderClient) ([]catwalk.Provider, error) {
-	providers, err := client.GetProviders()
-	if err != nil {
-		fallbackToCache, err := loadProvidersFromCache(path)
-		if err != nil {
-			return nil, err
-		}
-		providers = fallbackToCache
-	} else {
-		if err := saveProvidersInCache(path, providerList); err != nil {
-			return nil, err
-		}
+	if err := json.Unmarshal(data, &providers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
 	return providers, nil
 }
 
 func Providers() ([]catwalk.Provider, error) {
-	return LoadProviders(catwalk.NewWithURL(catwalkURL))
+	client := catwalk.NewWithURL(catwalkURL)
+	path := providerCacheFileData()
+	return loadProvidersOnce(client, path)
 }
 
-func LoadProviders(client ProviderClient) ([]catwalk.Provider, error) {
+func loadProvidersOnce(client ProviderClient, path string) ([]catwalk.Provider, error) {
 	var err error
 	providerOnce.Do(func() {
-		providerList, err = loadProviders(providerCacheFileData(), client)
+		providerList, err = loadProviders(client, path)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return providerList, nil
+}
+
+func loadProviders(client ProviderClient, path string) (providerList []catwalk.Provider, err error) {
+	// if cache is not stale, load from it
+	stale, exists := isCacheStale(path)
+	if !stale {
+		slog.Info("Using cached provider data", "path", path)
+		providerList, err = loadProvidersFromCache(path)
+		if len(providerList) > 0 && err == nil {
+			go func() {
+				slog.Info("Updating provider cache in background")
+				updated, uerr := client.GetProviders()
+				if len(updated) > 0 && uerr == nil {
+					_ = saveProvidersInCache(path, updated)
+				}
+			}()
+			return
+		}
+	}
+
+	slog.Info("Getting live provider data")
+	providerList, err = client.GetProviders()
+	if len(providerList) > 0 && err == nil {
+		err = saveProvidersInCache(path, providerList)
+		return
+	}
+	if !exists {
+		err = fmt.Errorf("failed to load providers")
+		return
+	}
+	providerList, err = loadProvidersFromCache(path)
+	return
+}
+
+func isCacheStale(path string) (stale, exists bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return true, false
+	}
+	return time.Since(info.ModTime()) > 24*time.Hour, true
 }

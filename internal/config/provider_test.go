@@ -28,7 +28,7 @@ func (m *mockProviderClient) GetProviders() ([]catwalk.Provider, error) {
 func TestProvider_loadProvidersNoIssues(t *testing.T) {
 	client := &mockProviderClient{shouldFail: false}
 	tmpPath := t.TempDir() + "/providers.json"
-	providers, err := loadProviders(tmpPath, client)
+	providers, err := loadProviders(client, tmpPath)
 	assert.NoError(t, err)
 	assert.NotNil(t, providers)
 	assert.Len(t, providers, 1)
@@ -57,7 +57,7 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to write old providers to file: %v", err)
 	}
-	providers, err := loadProviders(tmpPath, client)
+	providers, err := loadProviders(client, tmpPath)
 	assert.NoError(t, err)
 	assert.NotNil(t, providers)
 	assert.Len(t, providers, 1)
@@ -67,7 +67,7 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 func TestProvider_loadProvidersWithIssuesAndNoCache(t *testing.T) {
 	client := &mockProviderClient{shouldFail: true}
 	tmpPath := t.TempDir() + "/providers.json"
-	providers, err := loadProviders(tmpPath, client)
+	providers, err := loadProviders(client, tmpPath)
 	assert.Error(t, err)
 	assert.Nil(t, providers, "Expected nil providers when loading fails and no cache exists")
 }

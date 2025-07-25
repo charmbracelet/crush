@@ -84,7 +84,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	app.setupEvents()
 
 	// Initialize LSP clients in the background.
-	go app.initLSPClients(ctx)
+	app.initLSPClients(ctx)
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {

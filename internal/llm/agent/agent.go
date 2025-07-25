@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
@@ -68,7 +69,8 @@ type agent struct {
 	sessions session.Service
 	messages message.Service
 
-	tools      []tools.BaseTool
+	tools *csync.LazySlice[tools.BaseTool]
+
 	provider   provider.Provider
 	providerID string
 
@@ -95,25 +97,8 @@ func NewAgent(
 ) (Service, error) {
 	ctx := context.Background()
 	cfg := config.Get()
-	otherTools := GetMCPTools(ctx, permissions, cfg)
-	if len(lspClients) > 0 {
-		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
-	}
 
-	cwd := cfg.WorkingDir()
-	allTools := []tools.BaseTool{
-		tools.NewBashTool(permissions, cwd),
-		tools.NewDownloadTool(permissions, cwd),
-		tools.NewEditTool(lspClients, permissions, history, cwd),
-		tools.NewFetchTool(permissions, cwd),
-		tools.NewGlobTool(cwd),
-		tools.NewGrepTool(cwd),
-		tools.NewLsTool(cwd),
-		tools.NewSourcegraphTool(),
-		tools.NewViewTool(lspClients, cwd),
-		tools.NewWriteTool(lspClients, permissions, history, cwd),
-	}
-
+	var agentTool tools.BaseTool
 	if agentCfg.ID == "coder" {
 		taskAgentCfg := config.Get().Agents["task"]
 		if taskAgentCfg.ID == "" {
@@ -124,17 +109,9 @@ func NewAgent(
 			return nil, fmt.Errorf("failed to create task agent: %w", err)
 		}
 
-		allTools = append(
-			allTools,
-			NewAgentTool(
-				taskAgent,
-				sessions,
-				messages,
-			),
-		)
+		agentTool = NewAgentTool(taskAgent, sessions, messages)
 	}
 
-	allTools = append(allTools, otherTools...)
 	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)
 	if providerCfg == nil {
 		return nil, fmt.Errorf("provider for agent %s not found in config", agentCfg.Name)
@@ -191,32 +168,63 @@ func NewAgent(
 		return nil, err
 	}
 
-	agentTools := []tools.BaseTool{}
-	if agentCfg.AllowedTools == nil {
-		agentTools = allTools
-	} else {
+	toolFn := func() []tools.BaseTool {
+		slog.Info("Initializing agent tools", "agent", agentCfg.ID)
+		defer func() {
+			slog.Info("Initialized agent tools", "agent", agentCfg.ID)
+		}()
+
+		cwd := cfg.WorkingDir()
+		allTools := []tools.BaseTool{
+			tools.NewBashTool(permissions, cwd),
+			tools.NewDownloadTool(permissions, cwd),
+			tools.NewEditTool(lspClients, permissions, history, cwd),
+			tools.NewFetchTool(permissions, cwd),
+			tools.NewGlobTool(cwd),
+			tools.NewGrepTool(cwd),
+			tools.NewLsTool(cwd),
+			tools.NewSourcegraphTool(),
+			tools.NewViewTool(lspClients, cwd),
+			tools.NewWriteTool(lspClients, permissions, history, cwd),
+		}
+
+		mcpTools := GetMCPTools(ctx, permissions, cfg)
+		allTools = append(allTools, mcpTools...)
+
+		if len(lspClients) > 0 {
+			allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
+		}
+
+		if agentTool != nil {
+			allTools = append(allTools, agentTool)
+		}
+
+		if agentCfg.AllowedTools == nil {
+			return allTools
+		}
+
+		var filteredTools []tools.BaseTool
 		for _, tool := range allTools {
 			if slices.Contains(agentCfg.AllowedTools, tool.Name()) {
-				agentTools = append(agentTools, tool)
+				filteredTools = append(filteredTools, tool)
 			}
 		}
+		return filteredTools
 	}
 
-	agent := &agent{
+	return &agent{
 		Broker:              pubsub.NewBroker[AgentEvent](),
 		agentCfg:            agentCfg,
 		provider:            agentProvider,
 		providerID:          string(providerCfg.ID),
 		messages:            messages,
 		sessions:            sessions,
-		tools:               agentTools,
 		titleProvider:       titleProvider,
 		summarizeProvider:   summarizeProvider,
 		summarizeProviderID: string(smallModelProviderCfg.ID),
 		activeRequests:      sync.Map{},
-	}
-
-	return agent, nil
+		tools:               csync.NewLazySlice(toolFn),
+	}, nil
 }
 
 func (a *agent) Model() catwalk.Model {
@@ -284,7 +292,7 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 				Parts: parts,
 			},
 		},
-		make([]tools.BaseTool, 0),
+		nil,
 	)
 
 	var finalResponse *provider.ProviderResponse
@@ -438,7 +446,7 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
-	eventChan := a.provider.StreamResponse(ctx, msgHistory, a.tools)
+	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
 
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
@@ -487,7 +495,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		default:
 			// Continue processing
 			var tool tools.BaseTool
-			for _, availableTool := range a.tools {
+			for availableTool := range a.tools.Seq() {
 				if availableTool.Info().Name == toolCall.Name {
 					tool = availableTool
 					break
@@ -737,7 +745,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		response := a.summarizeProvider.StreamResponse(
 			summarizeCtx,
 			msgsWithPrompt,
-			make([]tools.BaseTool, 0),
+			nil,
 		)
 		var finalResponse *provider.ProviderResponse
 		for r := range response {
@@ -899,7 +907,7 @@ func (a *agent) UpdateModel() error {
 	smallModelCfg := cfg.Models[config.SelectedModelTypeSmall]
 	var smallModelProviderCfg config.ProviderConfig
 
-	for _, p := range cfg.Providers {
+	for _, p := range cfg.Providers.Seq2() {
 		if p.ID == smallModelCfg.Provider {
 			smallModelProviderCfg = p
 			break

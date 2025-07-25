@@ -42,10 +42,11 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/u-root/u-root v0.14.1-0.20250724181933-b01901710169
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/v3 v3.11.0
 )
+
+require golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

@@ -357,7 +357,7 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 
 func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {
 	cfg := config.Get()
-	if _, ok := cfg.Providers[providerID]; ok {
+	if _, ok := cfg.Providers.Get(providerID); ok {
 		return true
 	}
 	return false

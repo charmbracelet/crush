@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -79,7 +78,7 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	eventsChan := client.stream(ctx, messages, []tools.BaseTool{})
+	eventsChan := client.stream(ctx, messages, nil)
 
 	// Collect events - this will panic without the bounds check
 	for event := range eventsChan {

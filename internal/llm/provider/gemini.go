@@ -188,9 +188,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
 	}
-	if len(tools) > 0 {
-		config.Tools = g.convertTools(tools)
-	}
+	config.Tools = g.convertTools(tools)
 	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0
@@ -290,9 +288,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
 		},
 	}
-	if len(tools) > 0 {
-		config.Tools = g.convertTools(tools)
-	}
+	config.Tools = g.convertTools(tools)
 	chat, _ := g.client.Chats.Create(ctx, model.ID, config, history)
 
 	attempts := 0

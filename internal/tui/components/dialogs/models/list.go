@@ -103,7 +103,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	for providerID, providerConfig := range cfg.Providers {
+	for providerID, providerConfig := range cfg.Providers.Seq2() {
 		if providerConfig.Disable {
 			continue
 		}
@@ -164,7 +164,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers[string(provider.ID)]; exists && providerConfig.Disable {
+		if providerConfig, exists := cfg.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
 			continue
 		}
 
@@ -174,7 +174,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		section := commands.NewItemSection(name)
-		if _, ok := cfg.Providers[string(provider.ID)]; ok {
+		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
 			section.SetInfo(configured)
 		}
 		modelItems = append(modelItems, section)

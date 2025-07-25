@@ -249,6 +249,7 @@ func (a *agent) IsBusy() bool {
 	for cancelFunc := range a.activeRequests.Seq() {
 		if cancelFunc != nil {
 			busy = true
+			break
 		}
 	}
 	return busy

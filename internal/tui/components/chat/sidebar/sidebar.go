@@ -201,6 +201,7 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 			existing.Deletions = deletions
 			m.files.Set(file.Path, existing)
 			found = true
+			break
 		}
 		if found {
 			return nil

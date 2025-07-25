@@ -375,6 +375,11 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Suspend):
+		if a.app.CoderAgent.IsBusy() {
+			return util.ReportWarn("Agent is busy, please wait...")
+		}
+		return tea.Suspend
 	default:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)

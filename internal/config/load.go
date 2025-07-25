@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 )
 
-const catwalkURL = "https://catwalk.charm.sh"
+const defaultCatwalkURL = "https://catwalk.charm.sh"
 
 // LoadReader config via io.Reader.
 func LoadReader(fd io.Reader) (*Config, error) {

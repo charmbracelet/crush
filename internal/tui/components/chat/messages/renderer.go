@@ -309,7 +309,7 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 			truncateMessage := t.S().Muted.
 				Background(t.BgBaseLighter).
 				PaddingLeft(2).
-				Width(v.textWidth() - 4).
+				Width(v.textWidth() - 2).
 				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
 			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
 		}

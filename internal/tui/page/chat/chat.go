@@ -179,6 +179,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CancelTimerExpiredMsg:
 		p.isCanceling = false
 		return p, nil
+	case editor.OpenEditorMsg:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case chat.SendMsg:
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:

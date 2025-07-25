@@ -80,7 +80,7 @@ const (
 	maxAttachments = 5
 )
 
-type openEditorMsg struct {
+type OpenEditorMsg struct {
 	Text string
 }
 
@@ -119,7 +119,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
-		return openEditorMsg{
+		return OpenEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}
 	})
@@ -204,7 +204,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.completionsStartIndex = 0
 			}
 		}
-	case openEditorMsg:
+	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.KeyPressMsg:

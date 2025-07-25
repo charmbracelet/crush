@@ -116,9 +116,9 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
     },
     "github": {
       "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
+      "url": "https://example.com/mcp/",
       "headers": {
-        "Authorization": "$(echo Bearer $GH_MCP_TOKEN)"
+        "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
       }
     },
     "streaming-service": {

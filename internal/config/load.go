@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -78,8 +77,6 @@ func Load(workingDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
-	go cfg.removeUnresponsiveProviders()
-
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
 		return cfg, nil
@@ -90,37 +87,6 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	}
 	cfg.SetupAgents()
 	return cfg, nil
-}
-
-func (c *Config) removeUnresponsiveProviders() {
-	slog.Info("Testing provider connections")
-	defer slog.Info("Provider connection tests completed")
-
-	// Test provider connections in parallel
-	var wg sync.WaitGroup
-	testResults := csync.NewMap[string, bool]()
-	for _, p := range c.Providers.Seq2() {
-		if p.Type != catwalk.TypeOpenAI && p.Type != catwalk.TypeAnthropic {
-			continue
-		}
-		wg.Add(1)
-		go func(provider ProviderConfig) {
-			defer wg.Done()
-			err := provider.TestConnection(c.resolver)
-			testResults.Set(provider.ID, err == nil)
-			if err != nil {
-				slog.Error("Provider connection test failed", "provider", provider.ID, "error", err)
-			}
-		}(p)
-	}
-	wg.Wait()
-
-	// Remove failed providers
-	for providerID, passed := range testResults.Seq2() {
-		if !passed {
-			c.Providers.Del(providerID)
-		}
-	}
 }
 
 func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {

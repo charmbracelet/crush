@@ -104,6 +104,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return m, util.ReportError(fmt.Errorf("failed to copy message content to clipboard: %w", err))
 			}
+			return m, util.ReportInfo("Message copied to clipboard")
 		}
 	}
 	return m, nil

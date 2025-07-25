@@ -202,7 +202,7 @@ func (m *toolCallCmp) copyTool() tea.Cmd {
 	if err != nil {
 		return util.ReportError(fmt.Errorf("failed to copy tool content to clipboard: %w", err))
 	}
-	return nil
+	return util.ReportInfo("Tool content copied to clipboard")
 }
 
 func (m *toolCallCmp) formatToolForCopy() string {
@@ -640,7 +640,7 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 	}
 
 	if m.result.Content != "" {
-		result.WriteString(fmt.Sprintf("```\n%s\n```", m.result.Content))
+		result.WriteString(fmt.Sprintf("```markdown\n%s\n```", m.result.Content))
 	}
 
 	return result.String()

@@ -501,7 +501,8 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 		// If this tool call is the agent tool, fetch nested tool calls
 		if tc.Name == agent.AgentToolName {
 			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)
-			nestedUIMessages := m.convertMessagesToUI(nestedMessages, make(map[string]message.ToolResult))
+			nestedToolResultMap := m.buildToolResultMap(nestedMessages)
+			nestedUIMessages := m.convertMessagesToUI(nestedMessages, nestedToolResultMap)
 			nestedToolCalls := make([]messages.ToolCallCmp, 0, len(nestedUIMessages))
 			for _, nestedMsg := range nestedUIMessages {
 				if toolCall, ok := nestedMsg.(messages.ToolCallCmp); ok {

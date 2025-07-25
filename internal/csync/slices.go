@@ -149,8 +149,8 @@ func (s *Slice[T]) Seq() iter.Seq[T] {
 	}
 }
 
-// SeqWithIndex returns an iterator that yields index-value pairs from the slice.
-func (s *Slice[T]) SeqWithIndex() iter.Seq2[int, T] {
+// Seq2 returns an iterator that yields index-value pairs from the slice.
+func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
 	// Take a snapshot to avoid holding the lock during iteration
 	items := s.Slice()
 	return func(yield func(int, T) bool) {

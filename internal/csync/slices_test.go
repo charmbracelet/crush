@@ -250,7 +250,7 @@ func TestSlice(t *testing.T) {
 
 		var indices []int
 		var values []string
-		for i, v := range s.SeqWithIndex() {
+		for i, v := range s.Seq2() {
 			indices = append(indices, i)
 			values = append(values, v)
 		}

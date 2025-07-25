@@ -135,7 +135,6 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
 ### Logging
 
 Enable debug logging with the `-d` flag or in config. View logs with `crush logs`. Logs are stored in `.crush/logs/crush.log`.
-
 ```bash
 # Run with debug logging
 crush -d
@@ -186,16 +185,21 @@ The `allowed_tools` array accepts:
 
 You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
 
-### OpenAI-Compatible APIs
+### Custom Providers
 
-Crush supports all OpenAI-compatible APIs. Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+Crush supports custom provider configurations for both OpenAI-compatible and Anthropic-compatible APIs.
+
+#### OpenAI-Compatible APIs
+
+Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
 {
   "providers": {
     "deepseek": {
-      "provider_type": "openai",
+      "type": "openai",
       "base_url": "https://api.deepseek.com/v1",
+      "api_key": "$DEEPSEEK_API_KEY",
       "models": [
         {
           "id": "deepseek-chat",
@@ -206,6 +210,38 @@ Crush supports all OpenAI-compatible APIs. Here's an example configuration for D
           "cost_per_1m_out_cached": 1.1,
           "context_window": 64000,
           "default_max_tokens": 5000
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Anthropic-Compatible APIs
+
+You can also configure custom Anthropic-compatible providers:
+
+```json
+{
+  "providers": {
+    "custom-anthropic": {
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key": "$ANTHROPIC_API_KEY",
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "models": [
+        {
+          "id": "claude-3-sonnet",
+          "model": "Claude 3 Sonnet",
+          "cost_per_1m_in": 3000,
+          "cost_per_1m_out": 15000,
+          "cost_per_1m_in_cached": 300,
+          "cost_per_1m_out_cached": 15000,
+          "context_window": 200000,
+          "default_max_tokens": 4096,
+          "supports_attachments": true
         }
       ]
     }

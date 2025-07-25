@@ -23,6 +23,7 @@ type CompletionItem[T any] interface {
 	layout.Sizeable
 	HasMatchIndexes
 	Value() T
+	Text() string
 }
 
 type completionItemCmp[T any] struct {
@@ -310,6 +311,10 @@ func bytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 // ID implements CompletionItem.
 func (c *completionItemCmp[T]) ID() string {
 	return c.id
+}
+
+func (c *completionItemCmp[T]) Text() string {
+	return c.text
 }
 
 type ItemSection interface {

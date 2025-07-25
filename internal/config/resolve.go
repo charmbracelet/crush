@@ -35,34 +35,120 @@ func NewShellVariableResolver(env env.Env) VariableResolver {
 }
 
 // ResolveValue is a method for resolving values, such as environment variables.
-// it will expect strings that start with `$` to be resolved as environment variables or shell commands.
-// if the string does not start with `$`, it will return the string as is.
+// it will resolve shell-like variable substitution anywhere in the string, including:
+// - $(command) for command substitution
+// - $VAR or ${VAR} for environment variables
 func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
-	if !strings.HasPrefix(value, "$") {
+	// Special case: lone $ is an error (backward compatibility)
+	if value == "$" {
+		return "", fmt.Errorf("invalid value format: %s", value)
+	}
+
+	// If no $ found, return as-is
+	if !strings.Contains(value, "$") {
 		return value, nil
 	}
 
-	if strings.HasPrefix(value, "$(") && strings.HasSuffix(value, ")") {
-		command := strings.TrimSuffix(strings.TrimPrefix(value, "$("), ")")
+	result := value
+
+	// Handle command substitution: $(command)
+	for {
+		start := strings.Index(result, "$(")
+		if start == -1 {
+			break
+		}
+
+		// Find matching closing parenthesis
+		depth := 0
+		end := -1
+		for i := start + 2; i < len(result); i++ {
+			if result[i] == '(' {
+				depth++
+			} else if result[i] == ')' {
+				if depth == 0 {
+					end = i
+					break
+				}
+				depth--
+			}
+		}
+
+		if end == -1 {
+			return "", fmt.Errorf("unmatched $( in value: %s", value)
+		}
+
+		command := result[start+2 : end]
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
 
 		stdout, _, err := r.shell.Exec(ctx, command)
+		cancel()
 		if err != nil {
-			return "", fmt.Errorf("command execution failed: %w", err)
+			return "", fmt.Errorf("command execution failed for '%s': %w", command, err)
 		}
-		return strings.TrimSpace(stdout), nil
+
+		// Replace the $(command) with the output
+		replacement := strings.TrimSpace(stdout)
+		result = result[:start] + replacement + result[end+1:]
 	}
 
-	if after, ok := strings.CutPrefix(value, "$"); ok {
-		varName := after
-		value = r.env.Get(varName)
-		if value == "" {
+	// Handle environment variables: $VAR and ${VAR}
+	searchStart := 0
+	for {
+		start := strings.Index(result[searchStart:], "$")
+		if start == -1 {
+			break
+		}
+		start += searchStart // Adjust for the offset
+
+		// Skip if this is part of $( which we already handled
+		if start+1 < len(result) && result[start+1] == '(' {
+			// Skip past this $(...)
+			searchStart = start + 1
+			continue
+		}
+		var varName string
+		var end int
+
+		if start+1 < len(result) && result[start+1] == '{' {
+			// Handle ${VAR} format
+			closeIdx := strings.Index(result[start+2:], "}")
+			if closeIdx == -1 {
+				return "", fmt.Errorf("unmatched ${ in value: %s", value)
+			}
+			varName = result[start+2 : start+2+closeIdx]
+			end = start + 2 + closeIdx + 1
+		} else {
+			// Handle $VAR format - variable names must start with letter or underscore
+			if start+1 >= len(result) {
+				return "", fmt.Errorf("incomplete variable reference at end of string: %s", value)
+			}
+
+			if result[start+1] != '_' &&
+				(result[start+1] < 'a' || result[start+1] > 'z') &&
+				(result[start+1] < 'A' || result[start+1] > 'Z') {
+				return "", fmt.Errorf("invalid variable name starting with '%c' in: %s", result[start+1], value)
+			}
+
+			end = start + 1
+			for end < len(result) && (result[end] == '_' ||
+				(result[end] >= 'a' && result[end] <= 'z') ||
+				(result[end] >= 'A' && result[end] <= 'Z') ||
+				(result[end] >= '0' && result[end] <= '9')) {
+				end++
+			}
+			varName = result[start+1 : end]
+		}
+
+		envValue := r.env.Get(varName)
+		if envValue == "" {
 			return "", fmt.Errorf("environment variable %q not set", varName)
 		}
-		return value, nil
+
+		result = result[:start] + envValue + result[end:]
+		searchStart = start + len(envValue) // Continue searching after the replacement
 	}
-	return "", fmt.Errorf("invalid value format: %s", value)
+
+	return result, nil
 }
 
 type environmentVariableResolver struct {

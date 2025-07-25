@@ -173,7 +173,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.WindowSizeMsg:
-		return p, p.SetSize(msg.Width, msg.Height)
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, tea.Batch(p.SetSize(msg.Width, msg.Height), cmd)
 	case CancelTimerExpiredMsg:
 		p.isCanceling = false
 		return p, nil

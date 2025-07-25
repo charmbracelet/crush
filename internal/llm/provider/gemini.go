@@ -180,12 +180,16 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
 	}
+	systemMessage := g.providerOptions.systemMessage
+	if g.providerOptions.systemPromptPrefix != "" {
+		systemMessage = g.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(maxTokens),
 		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
+			Parts: []*genai.Part{{Text: systemMessage}},
 		},
 	}
 	config.Tools = g.convertTools(tools)
@@ -280,12 +284,16 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	if g.providerOptions.maxTokens > 0 {
 		maxTokens = g.providerOptions.maxTokens
 	}
+	systemMessage := g.providerOptions.systemMessage
+	if g.providerOptions.systemPromptPrefix != "" {
+		systemMessage = g.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(maxTokens),
 		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{{Text: g.providerOptions.systemMessage}},
+			Parts: []*genai.Part{{Text: systemMessage}},
 		},
 	}
 	config.Tools = g.convertTools(tools)

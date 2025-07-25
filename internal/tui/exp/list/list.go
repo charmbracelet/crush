@@ -746,17 +746,21 @@ func (l *list[T]) GetSize() (int, int) {
 
 // GoToBottom implements List.
 func (l *list[T]) GoToBottom() tea.Cmd {
+	if l.offset != 0 {
+		l.selectedItem = ""
+	}
 	l.offset = 0
 	l.direction = DirectionBackward
-	l.selectedItem = ""
 	return l.render()
 }
 
 // GoToTop implements List.
 func (l *list[T]) GoToTop() tea.Cmd {
+	if l.offset != 0 {
+		l.selectedItem = ""
+	}
 	l.offset = 0
 	l.direction = DirectionForward
-	l.selectedItem = ""
 	return l.render()
 }
 
@@ -997,6 +1001,7 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+
 				// if the item is at least partially below the viewport
 			} else if oldPosition < oldItem.end {
 				newItem, ok := l.renderedItems.Get(item.ID())

@@ -61,17 +61,18 @@ type Provider interface {
 }
 
 type providerClientOptions struct {
-	baseURL       string
-	config        config.ProviderConfig
-	apiKey        string
-	modelType     config.SelectedModelType
-	model         func(config.SelectedModelType) catwalk.Model
-	disableCache  bool
-	systemMessage string
-	maxTokens     int64
-	extraHeaders  map[string]string
-	extraBody     map[string]any
-	extraParams   map[string]string
+	baseURL            string
+	config             config.ProviderConfig
+	apiKey             string
+	modelType          config.SelectedModelType
+	model              func(config.SelectedModelType) catwalk.Model
+	disableCache       bool
+	systemMessage      string
+	systemPromptPrefix string
+	maxTokens          int64
+	extraHeaders       map[string]string
+	extraBody          map[string]any
+	extraParams        map[string]string
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -143,12 +144,23 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
 
+	// Resolve extra headers
+	resolvedExtraHeaders := make(map[string]string)
+	for key, value := range cfg.ExtraHeaders {
+		resolvedValue, err := config.Get().Resolve(value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
+		}
+		resolvedExtraHeaders[key] = resolvedValue
+	}
+
 	clientOptions := providerClientOptions{
-		baseURL:      cfg.BaseURL,
-		config:       cfg,
-		apiKey:       resolvedAPIKey,
-		extraHeaders: cfg.ExtraHeaders,
-		extraBody:    cfg.ExtraBody,
+		baseURL:            cfg.BaseURL,
+		config:             cfg,
+		apiKey:             resolvedAPIKey,
+		extraHeaders:       resolvedExtraHeaders,
+		extraBody:          cfg.ExtraBody,
+		systemPromptPrefix: cfg.SystemPromptPrefix,
 		model: func(tp config.SelectedModelType) catwalk.Model {
 			return *config.Get().GetModelByType(tp)
 		},

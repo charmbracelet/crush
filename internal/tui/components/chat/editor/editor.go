@@ -161,10 +161,17 @@ func (m *editorCmp) send() tea.Cmd {
 	)
 }
 
+func (m *editorCmp) repositionCompletions() tea.Msg {
+	x, y := m.completionsPosition()
+	return completions.RepositionCompletionsMsg{X: x, Y: y}
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
 			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
@@ -182,32 +189,37 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if item, ok := msg.Value.(FileCompletionItem); ok {
+			word := m.textarea.Word()
 			// If the selected item is a file, insert its path into the textarea
 			value := m.textarea.Value()
-			value = value[:m.completionsStartIndex]
-			value += item.Path
+			value = value[:m.completionsStartIndex] + // Remove the current query
+				item.Path + // Insert the file path
+				value[m.completionsStartIndex+len(word):] // Append the rest of the value
+			// XXX: This will always move the cursor to the end of the textarea.
 			m.textarea.SetValue(value)
+			m.textarea.MoveToEnd()
 			if !msg.Insert {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
 				m.completionsStartIndex = 0
 			}
-			return m, nil
 		}
 	case openEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.KeyPressMsg:
+		cur := m.textarea.Cursor()
+		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
 		// Completions
 		case msg.String() == "/" && !m.isCompletionsOpen &&
-			// only show if beginning of prompt, or if previous char is a space:
-			(len(m.textarea.Value()) == 0 || m.textarea.Value()[len(m.textarea.Value())-1] == ' '):
+			// only show if beginning of prompt, or if previous char is a space or newline:
+			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
-			m.completionsStartIndex = len(m.textarea.Value())
+			m.completionsStartIndex = curIdx
 			cmds = append(cmds, m.startCompletions)
-		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
+		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
@@ -244,6 +256,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
+			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
@@ -275,12 +288,18 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// XXX: wont' work if editing in the middle of the field.
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
+					x, y := m.completionsPosition()
+					x -= len(m.currentQuery)
 					m.isCompletionsOpen = true
-					cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-						Query:  m.currentQuery,
-						Reopen: m.isCompletionsOpen,
-					}))
-				} else {
+					cmds = append(cmds,
+						util.CmdHandler(completions.FilterCompletionsMsg{
+							Query:  m.currentQuery,
+							Reopen: m.isCompletionsOpen,
+							X:      x,
+							Y:      y,
+						}),
+					)
+				} else if m.isCompletionsOpen {
 					m.isCompletionsOpen = false
 					m.currentQuery = ""
 					m.completionsStartIndex = 0
@@ -291,6 +310,16 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *editorCmp) completionsPosition() (int, int) {
+	cur := m.textarea.Cursor()
+	if cur == nil {
+		return m.x, m.y + 1 // adjust for padding
+	}
+	x := cur.X + m.x
+	y := cur.Y + m.y + 1 // adjust for padding
+	return x, y
 }
 
 func (m *editorCmp) Cursor() *tea.Cursor {
@@ -373,9 +402,7 @@ func (m *editorCmp) startCompletions() tea.Msg {
 		})
 	}
 
-	cur := m.textarea.Cursor()
-	x := cur.X + m.x // adjust for padding
-	y := cur.Y + m.y + 1
+	x, y := m.completionsPosition()
 	return completions.OpenCompletionsMsg{
 		Completions: completionItems,
 		X:           x,

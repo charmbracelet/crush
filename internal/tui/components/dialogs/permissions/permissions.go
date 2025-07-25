@@ -240,12 +240,18 @@ func (p *permissionDialogCmp) renderHeader() string {
 			toolValue,
 		),
 		baseStyle.Render(strings.Repeat(" ", p.width)),
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			pathKey,
-			pathValue,
-		),
-		baseStyle.Render(strings.Repeat(" ", p.width)),
+	}
+
+	// Only show Path field for non-fetch tools
+	if p.permission.ToolName != tools.FetchToolName {
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				pathKey,
+				pathValue,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+		)
 	}
 
 	// Add tool-specific header information
@@ -306,7 +312,20 @@ func (p *permissionDialogCmp) renderHeader() string {
 			baseStyle.Render(strings.Repeat(" ", p.width)),
 		)
 	case tools.FetchToolName:
-		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+		if params, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
+			urlKey := t.S().Muted.Render("URL")
+			urlValue := t.S().Text.
+				Width(p.width - lipgloss.Width(urlKey)).
+				Render(fmt.Sprintf(" %s", params.URL))
+			headerParts = append(headerParts,
+				lipgloss.JoinHorizontal(
+					lipgloss.Left,
+					urlKey,
+					urlValue,
+				),
+				baseStyle.Render(strings.Repeat(" ", p.width)),
+			)
+		}
 	}
 
 	return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Left, headerParts...))
@@ -436,15 +455,6 @@ func (p *permissionDialogCmp) generateDownloadContent() string {
 }
 
 func (p *permissionDialogCmp) generateFetchContent() string {
-	t := styles.CurrentTheme()
-	baseStyle := t.S().Base.Background(t.BgSubtle)
-	if pr, ok := p.permission.Params.(tools.FetchPermissionsParams); ok {
-		finalContent := baseStyle.
-			Padding(1, 2).
-			Width(p.contentViewPort.Width()).
-			Render(pr.URL)
-		return finalContent
-	}
 	return ""
 }
 

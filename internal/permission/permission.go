@@ -3,7 +3,6 @@ package permission
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -149,7 +148,6 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if dir == "." {
 		dir = s.workingDir
 	}
-	slog.Info("Requesting permission", "session_id", opts.SessionID, "tool_name", opts.ToolName, "action", opts.Action, "path", dir)
 	permission := PermissionRequest{
 		ID:          uuid.New().String(),
 		Path:        dir,

@@ -275,7 +275,7 @@ func (j *jobStartTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	}
 
 	// Handle directory parameter
-	workingDir := config.WorkingDirectory()
+	workingDir := config.Get().WorkingDir()
 	if params.Directory != "" {
 		// Validate that directory is an absolute path
 		if !filepath.IsAbs(params.Directory) {

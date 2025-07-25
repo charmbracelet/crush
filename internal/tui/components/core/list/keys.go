@@ -5,58 +5,59 @@ import (
 )
 
 type KeyMap struct {
-	Down,
 	Up,
-	DownOneItem,
+	Down,
 	UpOneItem,
-	PageDown,
+	DownOneItem,
 	PageUp,
-	HalfPageDown,
+	PageDown,
 	HalfPageUp,
+	HalfPageDown,
 	Home,
 	End key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Down: key.NewBinding(
-			key.WithKeys("down", "ctrl+j", "ctrl+n", "j"),
-			key.WithHelp("↓", "down"),
-		),
-		Up: key.NewBinding(
-			key.WithKeys("up", "ctrl+k", "ctrl+p", "k"),
-			key.WithHelp("↑", "up"),
-		),
-		UpOneItem: key.NewBinding(
-			key.WithKeys("shift+up", "K"),
-			key.WithHelp("shift+↑", "up one item"),
-		),
-		DownOneItem: key.NewBinding(
-			key.WithKeys("shift+down", "J"),
-			key.WithHelp("shift+↓", "down one item"),
-		),
-		HalfPageDown: key.NewBinding(
-			key.WithKeys("d"),
-			key.WithHelp("d", "half page down"),
-		),
 		PageDown: key.NewBinding(
-			key.WithKeys("pgdown", " ", "f"),
+			key.WithKeys("pgdown", "f"),
 			key.WithHelp("f/pgdn", "page down"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("pgup", "b"),
 			key.WithHelp("b/pgup", "page up"),
-		), HalfPageUp: key.NewBinding(
+		),
+		HalfPageUp: key.NewBinding(
 			key.WithKeys("u"),
-			key.WithHelp("u", "half page up"),
+			key.WithHelp("u", "½ page up"),
+		),
+		HalfPageDown: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "½ page down"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑/k", "up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓/j", "down"),
+		),
+		UpOneItem: key.NewBinding(
+			key.WithKeys("shift+up"),
+			key.WithHelp("shift+↑", "up one item"),
+		),
+		DownOneItem: key.NewBinding(
+			key.WithKeys("shift+down"),
+			key.WithHelp("shift+↓", "down one item"),
 		),
 		Home: key.NewBinding(
 			key.WithKeys("g", "home"),
-			key.WithHelp("g", "home"),
+			key.WithHelp("g/home", "home"),
 		),
 		End: key.NewBinding(
 			key.WithKeys("G", "end"),
-			key.WithHelp("G", "end"),
+			key.WithHelp("G/end", "end"),
 		),
 	}
 }
@@ -68,6 +69,8 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Up,
 		k.DownOneItem,
 		k.UpOneItem,
+		k.PageDown,
+		k.PageUp,
 		k.HalfPageDown,
 		k.HalfPageUp,
 		k.Home,

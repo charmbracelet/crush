@@ -31,7 +31,7 @@ type quitDialogCmp struct {
 func NewQuitDialog() QuitDialog {
 	return &quitDialogCmp{
 		selectedNo: true, // Default to "No" for safety
-		keymap:     DefaultKeymap(),
+		keymap:     DefaultKeyMap(),
 	}
 }
 

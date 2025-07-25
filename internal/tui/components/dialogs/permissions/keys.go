@@ -46,7 +46,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("d", "deny"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "ctrl+y"),
+			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
 		ToggleDiffMode: key.NewBinding(

@@ -14,27 +14,27 @@ type KeyMap struct {
 	Close key.Binding
 }
 
-func DefaultKeymap() KeyMap {
+func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		LeftRight: key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←/→", "switch options"),
+			key.WithKeys("h", "l", "left", "right"),
+			key.WithHelp("←/→", "toggle"),
 		),
 		EnterSpace: key.NewBinding(
-			key.WithKeys("enter", " "),
-			key.WithHelp("enter/space", "confirm"),
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "confirm"),
 		),
 		Yes: key.NewBinding(
 			key.WithKeys("y", "Y", "ctrl+c"),
-			key.WithHelp("y/Y/ctrl+c", "yes"),
+			key.WithHelp("y", "Yes"),
 		),
 		No: key.NewBinding(
 			key.WithKeys("n", "N"),
-			key.WithHelp("n/N", "no"),
+			key.WithHelp("n", "No"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "switch options"),
+			key.WithHelp("tab", "toggle"),
 		),
 		Close: key.NewBinding(
 			key.WithKeys("esc"),

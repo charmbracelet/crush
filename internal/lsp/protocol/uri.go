@@ -70,7 +70,7 @@ func (uri *DocumentURI) UnmarshalText(data []byte) (err error) {
 // DocumentUri("").Path() returns the empty string.
 //
 // Path panics if called on a URI that is not a valid filename.
-func (uri DocumentURI) Path() string {
+func (uri DocumentURI) Path() (string, error) {
 	filename, err := filename(uri)
 	if err != nil {
 		// e.g. ParseRequestURI failed.
@@ -79,22 +79,33 @@ func (uri DocumentURI) Path() string {
 		// direct string manipulation; all DocumentUris
 		// received from the client pass through
 		// ParseRequestURI, which ensures validity.
-		panic(err)
+		return "", fmt.Errorf("invalid URI %q: %w", uri, err)
 	}
-	return filepath.FromSlash(filename)
+	return filepath.FromSlash(filename), nil
 }
 
 // Dir returns the URI for the directory containing the receiver.
-func (uri DocumentURI) Dir() DocumentURI {
+func (uri DocumentURI) Dir() (DocumentURI, error) {
+	// XXX: Legacy comment:
 	// This function could be more efficiently implemented by avoiding any call
 	// to Path(), but at least consolidates URI manipulation.
-	return URIFromPath(uri.DirPath())
+
+	path, err := uri.DirPath()
+	if err != nil {
+		return "", fmt.Errorf("invalid URI %q: %w", uri, err)
+	}
+
+	return URIFromPath(path), nil
 }
 
 // DirPath returns the file path to the directory containing this URI, which
 // must be a file URI.
-func (uri DocumentURI) DirPath() string {
-	return filepath.Dir(uri.Path())
+func (uri DocumentURI) DirPath() (string, error) {
+	path, err := uri.Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(path), nil
 }
 
 func filename(uri DocumentURI) (string, error) {

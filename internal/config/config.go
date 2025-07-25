@@ -270,7 +270,7 @@ func (c *Config) WorkingDir() string {
 
 func (c *Config) EnabledProviders() []ProviderConfig {
 	var enabled []ProviderConfig
-	for _, p := range c.Providers.Seq2() {
+	for p := range c.Providers.Seq() {
 		if !p.Disable {
 			enabled = append(enabled, p)
 		}

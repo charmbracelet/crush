@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -46,7 +47,7 @@ type permissionService struct {
 	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
-	pendingRequests       sync.Map
+	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   []string
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
@@ -54,9 +55,9 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- true
+		respCh <- true
 	}
 
 	s.sessionPermissionsMu.Lock()
@@ -65,16 +66,16 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- true
+		respCh <- true
 	}
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- false
+		respCh <- false
 	}
 }
 
@@ -122,8 +123,8 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	respCh := make(chan bool, 1)
 
-	s.pendingRequests.Store(permission.ID, respCh)
-	defer s.pendingRequests.Delete(permission.ID)
+	s.pendingRequests.Set(permission.ID, respCh)
+	defer s.pendingRequests.Del(permission.ID)
 
 	s.Publish(pubsub.CreatedEvent, permission)
 
@@ -144,5 +145,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions: make([]PermissionRequest, 0),
 		skip:               skip,
 		allowedTools:       allowedTools,
+		pendingRequests:    csync.NewMap[string, chan bool](),
 	}
 }

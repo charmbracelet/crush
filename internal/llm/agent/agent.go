@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -78,7 +77,7 @@ type agent struct {
 	summarizeProvider   provider.Provider
 	summarizeProviderID string
 
-	activeRequests sync.Map
+	activeRequests *csync.Map[string, context.CancelFunc]
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
@@ -222,7 +221,7 @@ func NewAgent(
 		titleProvider:       titleProvider,
 		summarizeProvider:   summarizeProvider,
 		summarizeProviderID: string(smallModelProviderCfg.ID),
-		activeRequests:      sync.Map{},
+		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               csync.NewLazySlice(toolFn),
 	}, nil
 }
@@ -233,38 +232,30 @@ func (a *agent) Model() catwalk.Model {
 
 func (a *agent) Cancel(sessionID string) {
 	// Cancel regular requests
-	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID); exists {
-		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info("Request cancellation initiated", "session_id", sessionID)
-			cancel()
-		}
+	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+		slog.Info("Request cancellation initiated", "session_id", sessionID)
+		cancel()
 	}
 
 	// Also check for summarize requests
-	if cancelFunc, exists := a.activeRequests.LoadAndDelete(sessionID + "-summarize"); exists {
-		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
-			slog.Info("Summarize cancellation initiated", "session_id", sessionID)
-			cancel()
-		}
+	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
+		cancel()
 	}
 }
 
 func (a *agent) IsBusy() bool {
-	busy := false
-	a.activeRequests.Range(func(key, value any) bool {
-		if cancelFunc, ok := value.(context.CancelFunc); ok {
-			if cancelFunc != nil {
-				busy = true
-				return false
-			}
+	var busy bool
+	for cancelFunc := range a.activeRequests.Seq() {
+		if cancelFunc != nil {
+			busy = true
 		}
-		return true
-	})
+	}
 	return busy
 }
 
 func (a *agent) IsSessionBusy(sessionID string) bool {
-	_, busy := a.activeRequests.Load(sessionID)
+	_, busy := a.activeRequests.Get(sessionID)
 	return busy
 }
 
@@ -335,7 +326,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 
 	genCtx, cancel := context.WithCancel(ctx)
 
-	a.activeRequests.Store(sessionID, cancel)
+	a.activeRequests.Set(sessionID, cancel)
 	go func() {
 		slog.Debug("Request started", "sessionID", sessionID)
 		defer log.RecoverPanic("agent.Run", func() {
@@ -350,7 +341,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 			slog.Error(result.Error.Error())
 		}
 		slog.Debug("Request completed", "sessionID", sessionID)
-		a.activeRequests.Delete(sessionID)
+		a.activeRequests.Del(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
 		events <- result
@@ -682,10 +673,10 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	summarizeCtx, cancel := context.WithCancel(ctx)
 
 	// Store the cancel function in activeRequests to allow cancellation
-	a.activeRequests.Store(sessionID+"-summarize", cancel)
+	a.activeRequests.Set(sessionID+"-summarize", cancel)
 
 	go func() {
-		defer a.activeRequests.Delete(sessionID + "-summarize")
+		defer a.activeRequests.Del(sessionID + "-summarize")
 		defer cancel()
 		event := AgentEvent{
 			Type:     AgentEventTypeSummarize,
@@ -850,10 +841,9 @@ func (a *agent) CancelAll() {
 	if !a.IsBusy() {
 		return
 	}
-	a.activeRequests.Range(func(key, value any) bool {
-		a.Cancel(key.(string)) // key is sessionID
-		return true
-	})
+	for key := range a.activeRequests.Seq2() {
+		a.Cancel(key) // key is sessionID
+	}
 
 	timeout := time.After(5 * time.Second)
 	for a.IsBusy() {
@@ -907,7 +897,7 @@ func (a *agent) UpdateModel() error {
 	smallModelCfg := cfg.Models[config.SelectedModelTypeSmall]
 	var smallModelProviderCfg config.ProviderConfig
 
-	for _, p := range cfg.Providers.Seq2() {
+	for p := range cfg.Providers.Seq() {
 		if p.ID == smallModelCfg.Provider {
 			smallModelProviderCfg = p
 			break

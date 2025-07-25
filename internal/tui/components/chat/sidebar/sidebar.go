@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
@@ -71,8 +72,7 @@ type sidebarCmp struct {
 	lspClients    map[string]*lsp.Client
 	compactMode   bool
 	history       history.Service
-	// Using a sync map here because we might receive file history events concurrently
-	files sync.Map
+	files         *csync.Map[string, SessionFile]
 }
 
 func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
@@ -80,6 +80,7 @@ func New(history history.Service, lspClients map[string]*lsp.Client, compact boo
 		lspClients:  lspClients,
 		history:     history,
 		compactMode: compact,
+		files:       csync.NewMap[string, SessionFile](),
 	}
 }
 
@@ -90,9 +91,9 @@ func (m *sidebarCmp) Init() tea.Cmd {
 func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SessionFilesMsg:
-		m.files = sync.Map{}
+		m.files = csync.NewMap[string, SessionFile]()
 		for _, file := range msg.Files {
-			m.files.Store(file.FilePath, file)
+			m.files.Set(file.FilePath, file)
 		}
 		return m, nil
 
@@ -178,31 +179,29 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 	return func() tea.Msg {
 		file := event.Payload
 		found := false
-		m.files.Range(func(key, value any) bool {
-			existing := value.(SessionFile)
-			if existing.FilePath == file.Path {
-				if existing.History.latestVersion.Version < file.Version {
-					existing.History.latestVersion = file
-				} else if file.Version == 0 {
-					existing.History.initialVersion = file
-				} else {
-					// If the version is not greater than the latest, we ignore it
-					return true
-				}
-				before := existing.History.initialVersion.Content
-				after := existing.History.latestVersion.Content
-				path := existing.History.initialVersion.Path
-				cwd := config.Get().WorkingDir()
-				path = strings.TrimPrefix(path, cwd)
-				_, additions, deletions := diff.GenerateDiff(before, after, path)
-				existing.Additions = additions
-				existing.Deletions = deletions
-				m.files.Store(file.Path, existing)
-				found = true
-				return false
+		for existing := range m.files.Seq() {
+			if existing.FilePath != file.Path {
+				continue
 			}
-			return true
-		})
+			if existing.History.latestVersion.Version < file.Version {
+				existing.History.latestVersion = file
+			} else if file.Version == 0 {
+				existing.History.initialVersion = file
+			} else {
+				// If the version is not greater than the latest, we ignore it
+				continue
+			}
+			before := existing.History.initialVersion.Content
+			after := existing.History.latestVersion.Content
+			path := existing.History.initialVersion.Path
+			cwd := config.Get().WorkingDir()
+			path = strings.TrimPrefix(path, cwd)
+			_, additions, deletions := diff.GenerateDiff(before, after, path)
+			existing.Additions = additions
+			existing.Deletions = deletions
+			m.files.Set(file.Path, existing)
+			found = true
+		}
 		if found {
 			return nil
 		}
@@ -215,7 +214,7 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 			Additions: 0,
 			Deletions: 0,
 		}
-		m.files.Store(file.Path, sf)
+		m.files.Set(file.Path, sf)
 		return nil
 	}
 }
@@ -386,12 +385,7 @@ func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
 
 	section := t.S().Subtle.Render("Modified Files")
 
-	files := make([]SessionFile, 0)
-	m.files.Range(func(key, value any) bool {
-		file := value.(SessionFile)
-		files = append(files, file)
-		return true
-	})
+	files := slices.Collect(m.files.Seq())
 
 	if len(files) == 0 {
 		content := lipgloss.JoinVertical(
@@ -620,12 +614,7 @@ func (m *sidebarCmp) filesBlock() string {
 		core.Section("Modified Files", m.getMaxWidth()),
 	)
 
-	files := make([]SessionFile, 0)
-	m.files.Range(func(key, value any) bool {
-		file := value.(SessionFile)
-		files = append(files, file)
-		return true // continue iterating
-	})
+	files := slices.Collect(m.files.Seq())
 	if len(files) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,

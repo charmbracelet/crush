@@ -287,6 +287,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
+			if p.app.CoderAgent.IsBusy() {
+				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
+			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
 			agentCfg := config.Get().Agents["coder"]

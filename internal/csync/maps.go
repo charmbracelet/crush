@@ -82,12 +82,8 @@ func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 
 // Seq returns an iter.Seq that yields values from the map.
 func (m *Map[K, V]) Seq() iter.Seq[V] {
-	dst := make(map[K]V)
-	m.mu.RLock()
-	maps.Copy(dst, m.inner)
-	m.mu.RUnlock()
 	return func(yield func(V) bool) {
-		for _, v := range dst {
+		for _, v := range m.Seq2() {
 			if !yield(v) {
 				return
 			}

@@ -746,20 +746,16 @@ func (l *list[T]) GetSize() (int, int) {
 
 // GoToBottom implements List.
 func (l *list[T]) GoToBottom() tea.Cmd {
-	if l.offset != 0 {
-		l.selectedItem = ""
-	}
 	l.offset = 0
+	l.selectedItem = ""
 	l.direction = DirectionBackward
 	return l.render()
 }
 
 // GoToTop implements List.
 func (l *list[T]) GoToTop() tea.Cmd {
-	if l.offset != 0 {
-		l.selectedItem = ""
-	}
 	l.offset = 0
+	l.selectedItem = ""
 	l.direction = DirectionForward
 	return l.render()
 }
@@ -996,14 +992,7 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 		if hasOldItem && l.direction == DirectionBackward {
 			// if we are the last item and there is no offset
 			// make sure to go to the bottom
-			if inx == l.items.Len()-1 && l.offset == 0 {
-				cmd = l.GoToBottom()
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-
-				// if the item is at least partially below the viewport
-			} else if oldPosition < oldItem.end {
+			if oldPosition < oldItem.end {
 				newItem, ok := l.renderedItems.Get(item.ID())
 				if ok {
 					newLines := newItem.height - oldItem.height

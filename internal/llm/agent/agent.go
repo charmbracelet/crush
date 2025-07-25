@@ -522,7 +522,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				defer wg.Done()
 				var tool tools.BaseTool
 				defer func() { processedTool[toolCall.ID] = true }()
-				for _, availableTool := range a.tools {
+				for availableTool := range a.tools.Seq() {
 					if availableTool.Info().Name == toolCall.Name {
 						tool = availableTool
 						break

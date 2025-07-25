@@ -80,6 +80,8 @@ github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674 h1:+Cz+VfxD5D
 github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674/go.mod h1:9gCUAHmVx5BwSafeyNr3GI0GgvlB1WYjL21SkPp1jyU=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe h1:i6ce4CcAlPpTj2ER69m1DBeLZ3RRcHnKExuwhKa3GfY=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250516160903-6f1e2c8f9ebe/go.mod h1:p3Q+aN4eQKeM5jhrmXPMgPrlKbmc59rWSnMsSA3udhk=
+github.com/charmbracelet/hotdiva2000 v0.0.0-20250626041657-42fba947ecdb h1:U3ccRKJYMsxOLF2HQXmGLm4hueZPjcmY/2OE5YOIYO0=
+github.com/charmbracelet/hotdiva2000 v0.0.0-20250626041657-42fba947ecdb/go.mod h1:9KGSzLBb3ARFkllODp0IGQBleFii+Awgzz9zT99tLQc=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0 h1:sWRGoSw/JsO2S4t2+fmmEkRbkOxphI0AxZkQPQVKWbs=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0/go.mod h1:XIuqKpZTUXtVyeyiN1k9Tc/U7EzfaDnVc34feFHfBws=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=
@@ -88,8 +90,6 @@ github.com/charmbracelet/ultraviolet v0.0.0-20250723145313-809e6f5b43a1 h1:tsw1m
 github.com/charmbracelet/ultraviolet v0.0.0-20250723145313-809e6f5b43a1/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
 github.com/charmbracelet/x/ansi v0.9.3 h1:BXt5DHS/MKF+LjuK4huWrC6NCvHtexww7dMayh6GXd0=
 github.com/charmbracelet/x/ansi v0.9.3/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
-github.com/charmbracelet/hotdiva2000 v0.0.0-20250428120649-83c28ea5905c h1:hUCUeLwIIxY3Hz5uFAZ2nGDOzwNMQXYSpB64qqALr/0=
-github.com/charmbracelet/hotdiva2000 v0.0.0-20250428120649-83c28ea5905c/go.mod h1:9KGSzLBb3ARFkllODp0IGQBleFii+Awgzz9zT99tLQc=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz0Z3rsiOtMYiz8axkT24i9yFiueDhJbzyNUADmME=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa/go.mod h1:xBlh2Yi3DL3zy/2n15kITpg0YZardf/aa/hgUaIM6Rk=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=

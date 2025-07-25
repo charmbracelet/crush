@@ -27,6 +27,12 @@ type OpenCompletionsMsg struct {
 type FilterCompletionsMsg struct {
 	Query  string // The query to filter completions
 	Reopen bool
+	X      int // X position for the completions popup
+	Y      int // Y position for the completions popup
+}
+
+type RepositionCompletionsMsg struct {
+	X, Y int
 }
 
 type CompletionsClosedMsg struct{}
@@ -51,18 +57,24 @@ type Completions interface {
 }
 
 type completionsCmp struct {
-	width  int
-	height int  // Height of the completions component`
-	x      int  // X position for the completions popup
-	y      int  // Y position for the completions popup
-	open   bool // Indicates if the completions are open
-	keyMap KeyMap
+	wWidth    int // The window width
+	wHeight   int // The window height
+	width     int
+	lastWidth int
+	height    int  // Height of the completions component`
+	x, xorig  int  // X position for the completions popup
+	y         int  // Y position for the completions popup
+	open      bool // Indicates if the completions are open
+	keyMap    KeyMap
 
 	list  list.ListModel
 	query string // The current filter query
 }
 
-const maxCompletionsWidth = 80 // Maximum width for the completions popup
+const (
+	maxCompletionsWidth = 80 // Maximum width for the completions popup
+	minCompletionsWidth = 20 // Minimum width for the completions popup
+)
 
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
@@ -83,7 +95,7 @@ func New() Completions {
 	)
 	return &completionsCmp{
 		width:  0,
-		height: 0,
+		height: maxCompletionsHeight,
 		list:   l,
 		query:  "",
 		keyMap: completionsKeyMap,
@@ -102,8 +114,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		c.width = min(msg.Width-c.x, maxCompletionsWidth)
-		c.height = min(msg.Height-c.y, 15)
+		c.wWidth, c.wHeight = msg.Width, msg.Height
 		return c, nil
 	case tea.KeyPressMsg:
 		switch {
@@ -154,13 +165,16 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, c.keyMap.Cancel):
 			return c, util.CmdHandler(CloseCompletionsMsg{})
 		}
+	case RepositionCompletionsMsg:
+		c.x, c.y = msg.X, msg.Y
+		c.adjustPosition()
 	case CloseCompletionsMsg:
 		c.open = false
 		return c, util.CmdHandler(CompletionsClosedMsg{})
 	case OpenCompletionsMsg:
 		c.open = true
 		c.query = ""
-		c.x = msg.X
+		c.x, c.xorig = msg.X, msg.X
 		c.y = msg.Y
 		items := []util.Model{}
 		t := styles.CurrentTheme()
@@ -168,10 +182,18 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
 			items = append(items, item)
 		}
-		c.height = max(min(c.height, len(items)), 1) // Ensure at least 1 item height
+		width := listWidth(items)
+		if len(items) == 0 {
+			width = listWidth(c.list.Items())
+		}
+		if c.x+width >= c.wWidth {
+			c.x = c.wWidth - width - 1
+		}
+		c.width = width
+		c.height = max(min(maxCompletionsHeight, len(items)), 1) // Ensure at least 1 item height
 		return c, tea.Batch(
-			c.list.SetSize(c.width, c.height),
 			c.list.SetItems(items),
+			c.list.SetSize(c.width, c.height),
 			util.CmdHandler(CompletionsOpenedMsg{}),
 		)
 	case FilterCompletionsMsg:
@@ -195,8 +217,11 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.query = msg.Query
 		var cmds []tea.Cmd
 		cmds = append(cmds, c.list.Filter(msg.Query))
-		itemsLen := len(c.list.Items())
-		c.height = max(min(maxCompletionsHeight, itemsLen), 1)
+		items := c.list.Items()
+		itemsLen := len(items)
+		c.xorig = msg.X
+		c.x, c.y = msg.X, msg.Y
+		c.adjustPosition()
 		cmds = append(cmds, c.list.SetSize(c.width, c.height))
 		if itemsLen == 0 {
 			cmds = append(cmds, util.CmdHandler(CloseCompletionsMsg{}))
@@ -209,21 +234,54 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return c, nil
 }
 
+func (c *completionsCmp) adjustPosition() {
+	items := c.list.Items()
+	itemsLen := len(items)
+	width := listWidth(items)
+	c.lastWidth = c.width
+	if c.x < 0 || width < c.lastWidth {
+		c.x = c.xorig
+	} else if c.x+width >= c.wWidth {
+		c.x = c.wWidth - width - 1
+	}
+	c.width = width
+	c.height = max(min(maxCompletionsHeight, itemsLen), 1)
+}
+
 // View implements Completions.
 func (c *completionsCmp) View() string {
 	if !c.open || len(c.list.Items()) == 0 {
 		return ""
 	}
 
-	return c.style().Render(c.list.View())
-}
-
-func (c *completionsCmp) style() lipgloss.Style {
 	t := styles.CurrentTheme()
-	return t.S().Base.
+	style := t.S().Base.
 		Width(c.width).
 		Height(c.height).
 		Background(t.BgSubtle)
+
+	return style.Render(c.list.View())
+}
+
+// listWidth returns the width of the last 10 items in the list, which is used
+// to determine the width of the completions popup.
+// Note this only works for [completionItemCmp] items.
+func listWidth[T any](items []T) int {
+	var width int
+	if len(items) == 0 {
+		return width
+	}
+
+	for i := len(items) - 1; i >= 0 && i >= len(items)-10; i-- {
+		item, ok := any(items[i]).(*completionItemCmp)
+		if !ok {
+			continue
+		}
+		itemWidth := lipgloss.Width(item.text) + 2 // +2 for padding
+		width = max(width, itemWidth)
+	}
+
+	return width
 }
 
 func (c *completionsCmp) Open() bool {

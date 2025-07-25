@@ -825,6 +825,10 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithKeys("up", "down"),
 					key.WithHelp("↑↓", "scroll"),
 				),
+				key.NewBinding(
+					key.WithKeys("c", "y"),
+					key.WithHelp("c/y", "copy"),
+				),
 			)
 			fullList = append(fullList,
 				[]key.Binding{

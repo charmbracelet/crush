@@ -39,8 +39,30 @@ func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicCl
 
 func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropic.Client {
 	anthropicClientOptions := []option.RequestOption{}
-	if opts.apiKey != "" {
-		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
+
+	// Check if Authorization header is provided in extra headers
+	hasBearerAuth := false
+	if opts.extraHeaders != nil {
+		for key := range opts.extraHeaders {
+			if strings.ToLower(key) == "authorization" {
+				hasBearerAuth = true
+				break
+			}
+		}
+	}
+
+	isBearerToken := strings.HasPrefix(opts.apiKey, "Bearer ")
+
+	if opts.apiKey != "" && !hasBearerAuth {
+		if isBearerToken {
+			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
+			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader("Authorization", opts.apiKey))
+		} else {
+			// Use standard X-Api-Key header
+			anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
+		}
+	} else if hasBearerAuth {
+		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
 	}
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
@@ -200,6 +222,25 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		maxTokens = int64(a.adjustedMaxTokens)
 	}
 
+	systemBlocks := []anthropic.TextBlockParam{}
+
+	// Add custom system prompt prefix if configured
+	if a.providerOptions.systemPromptPrefix != "" {
+		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+			Text: a.providerOptions.systemPromptPrefix,
+			CacheControl: anthropic.CacheControlEphemeralParam{
+				Type: "ephemeral",
+			},
+		})
+	}
+
+	systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+		Text: a.providerOptions.systemMessage,
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	})
+
 	return anthropic.MessageNewParams{
 		Model:       anthropic.Model(model.ID),
 		MaxTokens:   maxTokens,
@@ -207,14 +248,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 		Messages:    messages,
 		Tools:       tools,
 		Thinking:    thinkingParam,
-		System: []anthropic.TextBlockParam{
-			{
-				Text: a.providerOptions.systemMessage,
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			},
-		},
+		System:      systemBlocks,
 	}
 }
 
@@ -393,6 +427,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				close(eventChan)
 				return
 			}
+
 			// If there is an error we are going to see if we can retry the call
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {

@@ -613,6 +613,35 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		assert.Equal(t, "https://api.custom.com/v1", customProvider.BaseURL)
 	})
 
+	t.Run("custom anthropic provider is supported", func(t *testing.T) {
+		cfg := &Config{
+			Providers: map[string]ProviderConfig{
+				"custom-anthropic": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.anthropic.com/v1",
+					Type:    catwalk.TypeAnthropic,
+					Models: []catwalk.Model{{
+						ID: "claude-3-sonnet",
+					}},
+				},
+			},
+		}
+		cfg.setDefaults("/tmp")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		assert.NoError(t, err)
+
+		assert.Len(t, cfg.Providers, 1)
+		customProvider, exists := cfg.Providers["custom-anthropic"]
+		assert.True(t, exists)
+		assert.Equal(t, "custom-anthropic", customProvider.ID)
+		assert.Equal(t, "test-key", customProvider.APIKey)
+		assert.Equal(t, "https://api.anthropic.com/v1", customProvider.BaseURL)
+		assert.Equal(t, catwalk.TypeAnthropic, customProvider.Type)
+	})
+
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{

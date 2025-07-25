@@ -615,7 +615,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("custom anthropic provider is supported", func(t *testing.T) {
 		cfg := &Config{
-			Providers: map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
@@ -624,7 +624,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 						ID: "claude-3-sonnet",
 					}},
 				},
-			},
+			}),
 		}
 		cfg.setDefaults("/tmp")
 
@@ -633,8 +633,8 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
-		assert.Len(t, cfg.Providers, 1)
-		customProvider, exists := cfg.Providers["custom-anthropic"]
+		assert.Equal(t, cfg.Providers.Len(), 1)
+		customProvider, exists := cfg.Providers.Get("custom-anthropic")
 		assert.True(t, exists)
 		assert.Equal(t, "custom-anthropic", customProvider.ID)
 		assert.Equal(t, "test-key", customProvider.APIKey)

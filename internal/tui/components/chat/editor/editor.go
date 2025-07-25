@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,6 +60,12 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// Command history
+	history       []string
+	historyIndex  int
+	currentInput  string
+	historyLoaded bool
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -125,8 +132,87 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	})
 }
 
+func (m *editorCmp) loadHistory() tea.Cmd {
+	if m.historyLoaded || m.session.ID == "" {
+		return nil
+	}
+
+	return func() tea.Msg {
+		ctx := context.Background()
+		messages, err := m.app.Messages.List(ctx, m.session.ID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		var userMessages []string
+		for _, msg := range messages {
+			if msg.Role == message.User {
+				content := msg.Content()
+				if content.Text != "" {
+					userMessages = append(userMessages, content.Text)
+				}
+			}
+		}
+
+		return historyLoadedMsg{history: userMessages}
+	}
+}
+
+type historyLoadedMsg struct {
+	history []string
+}
+
+func (m *editorCmp) navigateHistory(direction int) {
+	if len(m.history) == 0 {
+		return
+	}
+
+	if m.historyIndex == -1 {
+		m.currentInput = m.textarea.Value()
+	}
+
+	newIndex := m.historyIndex + direction
+	if newIndex < -1 {
+		newIndex = -1
+	} else if newIndex >= len(m.history) {
+		newIndex = len(m.history) - 1
+	}
+
+	if newIndex == m.historyIndex {
+		return
+	}
+
+	m.historyIndex = newIndex
+
+	if m.historyIndex == -1 {
+		m.textarea.SetValue(m.currentInput)
+	} else {
+		m.textarea.SetValue(m.history[len(m.history)-1-m.historyIndex])
+	}
+	m.textarea.MoveToEnd()
+}
+
+func (m *editorCmp) addToHistory(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	if len(m.history) > 0 && m.history[len(m.history)-1] == text {
+		return
+	}
+
+	m.history = append(m.history, text)
+	const maxHistorySize = 100
+	if len(m.history) > maxHistorySize {
+		m.history = m.history[len(m.history)-maxHistorySize:]
+	}
+	m.historyIndex = -1
+	m.currentInput = ""
+}
+
 func (m *editorCmp) Init() tea.Cmd {
-	return nil
+	return m.loadHistory()
 }
 
 func (m *editorCmp) send() tea.Cmd {
@@ -146,6 +232,7 @@ func (m *editorCmp) send() tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
 	}
 
+	m.addToHistory(value)
 	m.textarea.Reset()
 	attachments := m.attachments
 
@@ -165,6 +252,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case historyLoadedMsg:
+		m.history = msg.history
+		m.historyLoaded = true
+		m.historyIndex = -1
+		return m, nil
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
 			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
@@ -198,6 +290,18 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.KeyPressMsg:
+		// Handle history navigation first, but only if textarea is focused and not in completions mode
+		if m.textarea.Focused() && !m.isCompletionsOpen {
+			if key.Matches(msg, m.keyMap.HistoryUp) {
+				m.navigateHistory(1)
+				return m, nil
+			}
+			if key.Matches(msg, m.keyMap.HistoryDown) {
+				m.navigateHistory(-1)
+				return m, nil
+			}
+		}
+
 		switch {
 		// Completions
 		case msg.String() == "/" && !m.isCompletionsOpen &&
@@ -264,6 +368,12 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
 		if ok {
+			// Reset history navigation when user starts typing
+			if !key.Matches(kp, m.keyMap.HistoryUp) && !key.Matches(kp, m.keyMap.HistoryDown) {
+				m.historyIndex = -1
+				m.currentInput = ""
+			}
+
 			if kp.String() == "space" || m.textarea.Value() == "" {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
@@ -408,7 +518,11 @@ func (c *editorCmp) Bindings() []key.Binding {
 // we need to move some functionality to the page level
 func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 	c.session = session
-	return nil
+	c.historyLoaded = false
+	c.history = nil
+	c.historyIndex = -1
+	c.currentInput = ""
+	return c.loadHistory()
 }
 
 func (c *editorCmp) IsCompletionsOpen() bool {
@@ -437,8 +551,10 @@ func New(app *app.App) Editor {
 
 	return &editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:          app,
+		textarea:     ta,
+		keyMap:       DefaultEditorKeyMap(),
+		history:      make([]string, 0),
+		historyIndex: -1,
 	}
 }

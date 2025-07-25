@@ -140,7 +140,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			selectedItem := *s
 			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value:  selectedItem,
+				Value:  selectedItem.Value(),
 				Insert: true,
 			})
 		case key.Matches(msg, c.keyMap.DownInsert):
@@ -151,7 +151,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			selectedItem := *s
 			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value:  selectedItem,
+				Value:  selectedItem.Value(),
 				Insert: true,
 			})
 		case key.Matches(msg, c.keyMap.Select):
@@ -162,7 +162,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			selectedItem := *s
 			c.open = false // Close completions after selection
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value: selectedItem,
+				Value: selectedItem.Value(),
 			})
 		case key.Matches(msg, c.keyMap.Cancel):
 			return c, util.CmdHandler(CloseCompletionsMsg{})
@@ -272,18 +272,14 @@ func (c *completionsCmp) View() string {
 // listWidth returns the width of the last 10 items in the list, which is used
 // to determine the width of the completions popup.
 // Note this only works for [completionItemCmp] items.
-func listWidth[T any](items []T) int {
+func listWidth(items []list.CompletionItem[any]) int {
 	var width int
 	if len(items) == 0 {
 		return width
 	}
 
 	for i := len(items) - 1; i >= 0 && i >= len(items)-10; i-- {
-		item, ok := any(items[i]).(*completionItemCmp)
-		if !ok {
-			continue
-		}
-		itemWidth := lipgloss.Width(item.text) + 2 // +2 for padding
+		itemWidth := lipgloss.Width(items[i].Text()) + 2 // +2 for padding
 		width = max(width, itemWidth)
 	}
 

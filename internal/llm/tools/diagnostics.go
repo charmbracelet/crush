@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"sort"
 	"strings"
@@ -118,7 +119,13 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 				return
 			}
 
-			if diagParams.URI.Path() == filePath || hasDiagnosticsChanged(client.GetDiagnostics(), originalDiags) {
+			path, err := diagParams.URI.Path()
+			if err != nil {
+				slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
+				return
+			}
+
+			if path == filePath || hasDiagnosticsChanged(client.GetDiagnostics(), originalDiags) {
 				select {
 				case diagChan <- struct{}{}:
 				default:
@@ -216,10 +223,15 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 		diagnostics := client.GetDiagnostics()
 		if len(diagnostics) > 0 {
 			for location, diags := range diagnostics {
-				isCurrentFile := location.Path() == filePath
+				path, err := location.Path()
+				if err != nil {
+					slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
+					continue
+				}
+				isCurrentFile := path == filePath
 
 				for _, diag := range diags {
-					formattedDiag := formatDiagnostic(location.Path(), diag, lspName)
+					formattedDiag := formatDiagnostic(path, diag, lspName)
 
 					if isCurrentFile {
 						fileDiagnostics = append(fileDiagnostics, formattedDiag)

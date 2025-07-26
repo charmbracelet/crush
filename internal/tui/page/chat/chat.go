@@ -843,7 +843,7 @@ func (p *chatPage) Help() help.KeyMap {
 					),
 					key.NewBinding(
 						key.WithKeys("g", "home"),
-						key.WithHelp("g", "hone"),
+						key.WithHelp("g", "home"),
 					),
 					key.NewBinding(
 						key.WithKeys("G", "end"),

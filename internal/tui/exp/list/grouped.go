@@ -1,6 +1,8 @@
 package list
 
 import (
+	"slices"
+
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -89,7 +91,7 @@ func (g *groupedList[T]) convertItems() {
 func (g *groupedList[T]) SetGroups(groups []Group[T]) tea.Cmd {
 	g.groups = groups
 	g.convertItems()
-	return g.SetItems(g.items.Slice())
+	return g.SetItems(slices.Collect(g.items.Seq()))
 }
 
 func (g *groupedList[T]) Groups() []Group[T] {

@@ -49,7 +49,7 @@ type messageCmp struct {
 	// Core message data and state
 	message  message.Message // The underlying message content
 	spinning bool            // Whether to show loading animation
-	anim     anim.Anim       // Animation component for loading states
+	anim     *anim.Anim      // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -95,7 +95,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
-			m.anim = u.(anim.Anim)
+			m.anim = u.(*anim.Anim)
 			return m, cmd
 		}
 	case tea.KeyPressMsg:

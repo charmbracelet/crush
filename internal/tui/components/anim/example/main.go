@@ -56,7 +56,7 @@ func (m model) View() tea.View {
 		return v
 	}
 
-	if a, ok := m.anim.(anim.Anim); ok {
+	if a, ok := m.anim.(*anim.Anim); ok {
 		l := lipgloss.NewLayer(a.View()).
 			Width(a.Width()).
 			X(m.w/2 - a.Width()/2).

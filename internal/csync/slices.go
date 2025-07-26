@@ -112,15 +112,6 @@ func (s *Slice[T]) Len() int {
 	return len(s.inner)
 }
 
-// Slice returns a copy of the underlying slice.
-func (s *Slice[T]) Slice() []T {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]T, len(s.inner))
-	copy(result, s.inner)
-	return result
-}
-
 // SetSlice replaces the entire slice with a new one.
 func (s *Slice[T]) SetSlice(items []T) {
 	s.mu.Lock()
@@ -138,10 +129,8 @@ func (s *Slice[T]) Clear() {
 
 // Seq returns an iterator that yields elements from the slice.
 func (s *Slice[T]) Seq() iter.Seq[T] {
-	// Take a snapshot to avoid holding the lock during iteration
-	items := s.Slice()
 	return func(yield func(T) bool) {
-		for _, v := range items {
+		for _, v := range s.Seq2() {
 			if !yield(v) {
 				return
 			}
@@ -151,8 +140,10 @@ func (s *Slice[T]) Seq() iter.Seq[T] {
 
 // Seq2 returns an iterator that yields index-value pairs from the slice.
 func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
-	// Take a snapshot to avoid holding the lock during iteration
-	items := s.Slice()
+	s.mu.RLock()
+	items := make([]T, len(s.inner))
+	copy(items, s.inner)
+	s.mu.RUnlock()
 	return func(yield func(int, T) bool) {
 		for i, v := range items {
 			if !yield(i, v) {

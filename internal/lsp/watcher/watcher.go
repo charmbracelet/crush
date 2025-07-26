@@ -617,7 +617,11 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 		return false
 	}
 	// For relative patterns
-	basePath = protocol.DocumentURI(basePath).Path()
+	if basePath, err = protocol.DocumentURI(basePath).Path(); err != nil {
+		// XXX: Do we want to return here, or send the error up the stack?
+		slog.Error("Error converting base path to URI", "basePath", basePath, "error", err)
+	}
+
 	basePath = filepath.ToSlash(basePath)
 
 	// Make path relative to basePath for matching
@@ -660,7 +664,13 @@ func (w *WorkspaceWatcher) debounceHandleFileEvent(ctx context.Context, uri stri
 // handleFileEvent sends file change notifications
 func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) {
 	// If the file is open and it's a change event, use didChange notification
-	filePath := protocol.DocumentURI(uri).Path()
+	filePath, err := protocol.DocumentURI(uri).Path()
+	if err != nil {
+		// XXX: Do we want to return here, or send the error up the stack?
+		slog.Error("Error converting URI to path", "uri", uri, "error", err)
+		return
+	}
+
 	if changeType == protocol.FileChangeType(protocol.Deleted) {
 		w.client.ClearDiagnosticsForURI(protocol.DocumentURI(uri))
 	} else if changeType == protocol.FileChangeType(protocol.Changed) && w.client.IsFileOpen(filePath) {

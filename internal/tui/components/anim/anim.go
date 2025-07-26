@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"math/rand/v2"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
+
+	"github.com/charmbracelet/crush/internal/csync"
 )
 
 const (
@@ -72,10 +73,7 @@ type animCache struct {
 	ellipsisFrames []string
 }
 
-var (
-	animCacheMutex sync.RWMutex
-	animCacheMap   = make(map[string]*animCache)
-)
+var animCacheMap = csync.NewMap[string, *animCache]()
 
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
@@ -105,22 +103,23 @@ const ()
 type Anim struct {
 	width            int
 	cyclingCharWidth int
-	label            []string
+	label            *csync.Slice[string]
 	labelWidth       int
 	labelColor       color.Color
 	startTime        time.Time
 	birthOffsets     []time.Duration
 	initialFrames    [][]string // frames for the initial characters
-	initialized      bool
-	cyclingFrames    [][]string // frames for the cycling characters
-	step             int        // current main frame step
-	ellipsisStep     int        // current ellipsis frame step
-	ellipsisFrames   []string   // ellipsis animation frames
+	initialized      atomic.Bool
+	cyclingFrames    [][]string           // frames for the cycling characters
+	step             atomic.Int64         // current main frame step
+	ellipsisStep     atomic.Int64         // current ellipsis frame step
+	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               int
 }
 
 // New creates a new Anim instance with the specified width and label.
-func New(opts Settings) (a Anim) {
+func New(opts Settings) *Anim {
+	a := &Anim{}
 	// Validate settings.
 	if opts.Size < 1 {
 		opts.Size = defaultNumCyclingChars
@@ -142,16 +141,14 @@ func New(opts Settings) (a Anim) {
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
-	animCacheMutex.RLock()
-	cached, exists := animCacheMap[cacheKey]
-	animCacheMutex.RUnlock()
+	cached, exists := animCacheMap.Get(cacheKey)
 
 	if exists {
 		// Use cached values
 		a.width = cached.width
 		a.labelWidth = cached.labelWidth
-		a.label = cached.label
-		a.ellipsisFrames = cached.ellipsisFrames
+		a.label = csync.NewSliceFrom(cached.label)
+		a.ellipsisFrames = csync.NewSliceFrom(cached.ellipsisFrames)
 		a.initialFrames = cached.initialFrames
 		a.cyclingFrames = cached.cyclingFrames
 	} else {
@@ -228,17 +225,23 @@ func New(opts Settings) (a Anim) {
 		}
 
 		// Cache the results
+		labelSlice := make([]string, a.label.Len())
+		for i, v := range a.label.Seq2() {
+			labelSlice[i] = v
+		}
+		ellipsisSlice := make([]string, a.ellipsisFrames.Len())
+		for i, v := range a.ellipsisFrames.Seq2() {
+			ellipsisSlice[i] = v
+		}
 		cached = &animCache{
 			initialFrames:  a.initialFrames,
 			cyclingFrames:  a.cyclingFrames,
 			width:          a.width,
 			labelWidth:     a.labelWidth,
-			label:          a.label,
-			ellipsisFrames: a.ellipsisFrames,
+			label:          labelSlice,
+			ellipsisFrames: ellipsisSlice,
 		}
-		animCacheMutex.Lock()
-		animCacheMap[cacheKey] = cached
-		animCacheMutex.Unlock()
+		animCacheMap.Set(cacheKey, cached)
 	}
 
 	// Random assign a birth to each character for a stagged entrance effect.
@@ -269,28 +272,30 @@ func (a *Anim) renderLabel(label string) {
 	if a.labelWidth > 0 {
 		// Pre-render the label.
 		labelRunes := []rune(label)
-		a.label = make([]string, len(labelRunes))
-		for i := range a.label {
-			a.label[i] = lipgloss.NewStyle().
+		a.label = csync.NewSlice[string]()
+		for i := range labelRunes {
+			rendered := lipgloss.NewStyle().
 				Foreground(a.labelColor).
 				Render(string(labelRunes[i]))
+			a.label.Append(rendered)
 		}
 
 		// Pre-render the ellipsis frames which come after the label.
-		a.ellipsisFrames = make([]string, len(ellipsisFrames))
-		for i, frame := range ellipsisFrames {
-			a.ellipsisFrames[i] = lipgloss.NewStyle().
+		a.ellipsisFrames = csync.NewSlice[string]()
+		for _, frame := range ellipsisFrames {
+			rendered := lipgloss.NewStyle().
 				Foreground(a.labelColor).
 				Render(frame)
+			a.ellipsisFrames.Append(rendered)
 		}
 	} else {
-		a.label = nil
-		a.ellipsisFrames = nil
+		a.label = csync.NewSlice[string]()
+		a.ellipsisFrames = csync.NewSlice[string]()
 	}
 }
 
 // Width returns the total width of the animation.
-func (a Anim) Width() (w int) {
+func (a *Anim) Width() (w int) {
 	w = a.width
 	if a.labelWidth > 0 {
 		w += labelGapWidth + a.labelWidth
@@ -308,12 +313,12 @@ func (a Anim) Width() (w int) {
 }
 
 // Init starts the animation.
-func (a Anim) Init() tea.Cmd {
+func (a *Anim) Init() tea.Cmd {
 	return a.Step()
 }
 
 // Update processes animation steps (or not).
-func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (a *Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case StepMsg:
 		if msg.id != a.id {
@@ -321,19 +326,19 @@ func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		a.step++
-		if a.step >= len(a.cyclingFrames) {
-			a.step = 0
+		step := a.step.Add(1)
+		if int(step) >= len(a.cyclingFrames) {
+			a.step.Store(0)
 		}
 
-		if a.initialized && a.labelWidth > 0 {
+		if a.initialized.Load() && a.labelWidth > 0 {
 			// Manage the ellipsis animation.
-			a.ellipsisStep++
-			if a.ellipsisStep >= ellipsisAnimSpeed*len(ellipsisFrames) {
-				a.ellipsisStep = 0
+			ellipsisStep := a.ellipsisStep.Add(1)
+			if int(ellipsisStep) >= ellipsisAnimSpeed*len(ellipsisFrames) {
+				a.ellipsisStep.Store(0)
 			}
-		} else if !a.initialized && time.Since(a.startTime) >= maxBirthOffset {
-			a.initialized = true
+		} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
+			a.initialized.Store(true)
 		}
 		return a, a.Step()
 	default:
@@ -342,35 +347,41 @@ func (a Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current state of the animation.
-func (a Anim) View() string {
+func (a *Anim) View() string {
 	var b strings.Builder
+	step := int(a.step.Load())
 	for i := range a.width {
 		switch {
-		case !a.initialized && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
+		case !a.initialized.Load() && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
 			// Birth offset not reached: render initial character.
-			b.WriteString(a.initialFrames[a.step][i])
+			b.WriteString(a.initialFrames[step][i])
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.
-			b.WriteString(a.cyclingFrames[a.step][i])
+			b.WriteString(a.cyclingFrames[step][i])
 		case i == a.cyclingCharWidth:
 			// Render label gap.
 			b.WriteString(labelGap)
 		case i > a.cyclingCharWidth:
 			// Label.
-			b.WriteString(a.label[i-a.cyclingCharWidth-labelGapWidth])
+			if labelChar, ok := a.label.Get(i - a.cyclingCharWidth - labelGapWidth); ok {
+				b.WriteString(labelChar)
+			}
 		}
 	}
 	// Render animated ellipsis at the end of the label if all characters
 	// have been initialized.
-	if a.initialized && a.labelWidth > 0 {
-		b.WriteString(a.ellipsisFrames[a.ellipsisStep/ellipsisAnimSpeed])
+	if a.initialized.Load() && a.labelWidth > 0 {
+		ellipsisStep := int(a.ellipsisStep.Load())
+		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
+			b.WriteString(ellipsisFrame)
+		}
 	}
 
 	return b.String()
 }
 
 // Step is a command that triggers the next step in the animation.
-func (a Anim) Step() tea.Cmd {
+func (a *Anim) Step() tea.Cmd {
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
 		return StepMsg{id: a.id}
 	})

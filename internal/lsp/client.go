@@ -449,7 +449,12 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 
 	// If we have any open files, try to get document symbols for one
 	for uri := range c.openFiles {
-		filePath := protocol.DocumentURI(uri).Path()
+		filePath, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Error("Failed to convert URI to path for TypeScript symbol collection", "uri", uri, "error", err)
+			continue
+		}
+
 		if strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".js") ||
 			strings.HasSuffix(filePath, ".tsx") || strings.HasSuffix(filePath, ".jsx") {
 			var symbols []protocol.DocumentSymbol
@@ -712,7 +717,11 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// First collect all URIs that need to be closed
 	for uri := range c.openFiles {
 		// Convert URI back to file path using proper URI handling
-		filePath := protocol.DocumentURI(uri).Path()
+		filePath, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Error("Failed to convert URI to path for file closing", "uri", uri, "error", err)
+			continue
+		}
 		filesToClose = append(filesToClose, filePath)
 	}
 	c.openFilesMu.Unlock()

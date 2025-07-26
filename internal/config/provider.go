@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -74,6 +75,7 @@ func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 }
 
 func Providers() ([]catwalk.Provider, error) {
+	catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
 	client := catwalk.NewWithURL(catwalkURL)
 	path := providerCacheFileData()
 	return loadProvidersOnce(client, path)

@@ -614,7 +614,6 @@ func (m *sidebarCmp) mcpBlockCompact(maxWidth int) string {
 }
 
 func (m *sidebarCmp) filesBlock() string {
-	return ""
 	t := styles.CurrentTheme()
 
 	section := t.S().Subtle.Render(

@@ -2,6 +2,7 @@ package list
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -179,7 +180,7 @@ func (f *filterableGroupList[T]) inputHeight() int {
 
 func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 	var cmds []tea.Cmd
-	for _, item := range f.items.Slice() {
+	for _, item := range slices.Collect(f.items.Seq()) {
 		if i, ok := any(item).(layout.Focusable); ok {
 			cmds = append(cmds, i.Blur())
 		}

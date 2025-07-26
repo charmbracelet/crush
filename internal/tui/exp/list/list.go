@@ -1,6 +1,7 @@
 package list
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -201,7 +202,7 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return l, nil
 	case anim.StepMsg:
 		var cmds []tea.Cmd
-		for _, item := range l.items.Slice() {
+		for _, item := range slices.Collect(l.items.Seq()) {
 			if i, ok := any(item).(HasAnim); ok && i.Spinning() {
 				updated, cmd := i.Update(msg)
 				cmds = append(cmds, cmd)
@@ -288,7 +289,7 @@ func (l *list[T]) viewPosition() (int, int) {
 
 func (l *list[T]) recalculateItemPositions() {
 	currentContentHeight := 0
-	for _, item := range l.items.Slice() {
+	for _, item := range slices.Collect(l.items.Seq()) {
 		rItem, ok := l.renderedItems.Get(item.ID())
 		if !ok {
 			continue
@@ -561,7 +562,7 @@ func (l *list[T]) focusSelectedItem() tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	for _, item := range l.items.Slice() {
+	for _, item := range slices.Collect(l.items.Seq()) {
 		if f, ok := any(item).(layout.Focusable); ok {
 			if item.ID() == l.selectedItem && !f.IsFocused() {
 				cmds = append(cmds, f.Focus())
@@ -580,7 +581,7 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	for _, item := range l.items.Slice() {
+	for _, item := range slices.Collect(l.items.Seq()) {
 		if f, ok := any(item).(layout.Focusable); ok {
 			if item.ID() == l.selectedItem && f.IsFocused() {
 				cmds = append(cmds, f.Blur())
@@ -655,7 +656,7 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 
 	l.items.Append(item)
 	l.indexMap = csync.NewMap[string, int]()
-	for inx, item := range l.items.Slice() {
+	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 	}
 	if l.width > 0 && l.height > 0 {
@@ -702,7 +703,7 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	}
 	l.items.Delete(inx)
 	l.renderedItems.Del(id)
-	for inx, item := range l.items.Slice() {
+	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 	}
 
@@ -767,7 +768,7 @@ func (l *list[T]) IsFocused() bool {
 
 // Items implements List.
 func (l *list[T]) Items() []T {
-	return l.items.Slice()
+	return slices.Collect(l.items.Seq())
 }
 
 func (l *list[T]) incrementOffset(n int) {
@@ -822,7 +823,7 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 	}
 	l.items.Prepend(item)
 	l.indexMap = csync.NewMap[string, int]()
-	for inx, item := range l.items.Slice() {
+	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 	}
 	if l.width > 0 && l.height > 0 {
@@ -926,7 +927,7 @@ func (l *list[T]) SelectedItem() *T {
 func (l *list[T]) SetItems(items []T) tea.Cmd {
 	l.items.SetSlice(items)
 	var cmds []tea.Cmd
-	for inx, item := range l.items.Slice() {
+	for inx, item := range slices.Collect(l.items.Seq()) {
 		if i, ok := any(item).(Indexable); ok {
 			i.SetIndex(inx)
 		}
@@ -949,7 +950,7 @@ func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	l.selectedItem = selectedItem
 	l.indexMap = csync.NewMap[string, int]()
 	l.renderedItems = csync.NewMap[string, renderedItem]()
-	for inx, item := range l.items.Slice() {
+	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 		if l.width > 0 && l.height > 0 {
 			cmds = append(cmds, item.SetSize(l.width, l.height))

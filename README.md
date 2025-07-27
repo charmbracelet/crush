@@ -258,9 +258,9 @@ Custom Anthropic-compatible providers follow this format:
 
 ## Logging
 
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of stuff. Logs are stored in `.crush/logs/crush.log` relative to the project.
+Sometimes you need to look at logs. Luckily, Crush logs all sorts of stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
 
-The CLI also contains some helper commands b
+The CLI also contains some helper commands to make perusing recent logs easier:
 
 ```bash
 # Print the last 1000 lines
@@ -269,7 +269,7 @@ crush logs
 # Print the last 500 lines
 crush logs --tail 500
 
-# Follow logs in real-time
+# Follow logs in real time
 crush logs --follow
 ```
 

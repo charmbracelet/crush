@@ -1,60 +1,87 @@
-> [!WARNING]
-> 🚧 This is a pre-release under heavy, active development. Things are still in flux but we’re excited to share early progress.
-
 # Crush
 
 <p>
-    <img width="450" alt="Charm Crush Art" src="https://stuff.charm.sh/crush/crush-header.png" /><br>
+    <img width="450" alt="Charm Crush Art" src="https://github.com/user-attachments/assets/9ab4c30c-9327-46b6-a722-3ad0e20f6976" /><br>
     <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
     <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
 </p>
 
 Crush is a tool for building software with AI.
 
+> [!WARNING]
+> Crush rocks. Make sure you’re ready for it.
+
 ## Installation
 
 Crush has first class support for macOS, Linux, and Windows.
 
-Nightly builds are available while Crush is in development.
+Use a package manager:
 
-- [Packages](https://github.com/charmbracelet/crush/releases/tag/nightly) are available in Debian, RPM, APK, and PKG formats
-- [Binaries](https://github.com/charmbracelet/crush/releases/tag/nightly) are available for Linux, macOS and Windows
+```bash
+# macOS or Linux
+brew install charmbracelet/tap/crush
 
-You can also just install it with go:
+# NPM
+npm insatll -g @charmland/crush
 
-```
-git clone git@github.com:charmbracelet/crush.git
-cd crush
-go install
+# Arch Linux (btw)
+yay -S crush-bin
+
+# Windows (with Winget)
+winget install charmbracelet.mods
+
+# Nix
+nix-shell -p nur.repos.charmbracelet.crush
 ```
 
 <details>
-<summary>Not a developer? Here’s a quick how-to.</summary>
-
-Download the latest [nightly release](https://github.com/charmbracelet/crush/releases) for your system. The [macOS ARM64 one](https://github.com/charmbracelet/crush/releases/download/nightly/crush_0.1.0-nightly_Darwin_arm64.tar.gz) is most likely what you want.
-
-Next, open a terminal and run the following commands:
+<summary><strong>Debian/Ubuntu</strong></summary>
 
 ```bash
-cd ~/Downloads
-tar -xvzf crush_0.1.0-nightly_Darwin_arm64.tar.gz -C crush
-sudo mv ./crush/crush /usr/local/bin/crush
-rm -rf ./crush
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+sudo apt update && sudo apt install sequin
 ```
-
-Then, run Crush by typing `crush`.
-
----
 
 </details>
 
+<details>
+<summary><strong>Fedora/RHEL</strong></summary>
+
+```bash
+echo '[charm]
+name=Charm
+baseurl=https://repo.charm.sh/yum/
+enabled=1
+gpgcheck=1
+gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
+sudo yum install sequin
+```
+
+</details>
+
+Or, download it:
+
+- [Packages][releases] are available in Debian and RPM formats
+- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
+
+[releases]: https://github.com/charmbracelet/sequin/releases
+
+Or just install it with go:
+
+```
+go install github.com/charmbracelet/crush@latest
+```
+
 ## Getting Started
 
-The quickest way to get started to grab an API key for your preferred
-provider such as Anthropic, OpenAI, or Groq, and just start Crush. You'll be
-prompted to enter your API key.
+The quickest way to get started to grab an API key for your preferred provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start Crush. You'll be prompted to enter your API key.
 
-That said, you can also set environment variables for preferred providers:
+That said, you can also set environment variables for preferred providers.
+
+<details>
+<summary><strong>Supported Environment Variables</strong></summary>
 
 | Environment Variable       | Provider                                           |
 | -------------------------- | -------------------------------------------------- |
@@ -71,12 +98,14 @@ That said, you can also set environment variables for preferred providers:
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
 
+</details>
+
 ## Configuration
 
-For many use cases, Crush can be run with no config. That said, if you do need config, it can be added either local to the project itself, or globally. Configuration has the following priority:
+Crush runs great with no configuration. That said, if you do need or want to customize Crush, configuration can be added either local to the project itself, or globally, with the following priority:
 
-1. `.crush.json`
-2. `crush.json`
+1. `./.crush.json`
+2. `./crush.json`
 3. `$HOME/.config/crush/crush.json`
 
 ### LSPs
@@ -94,7 +123,7 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
       "args": ["--stdio"]
     },
     "nix": {
-      "command": "alejandra"
+      "command": "nil"
     }
   }
 }
@@ -255,8 +284,9 @@ You can also configure custom Anthropic-compatible providers:
 We’d love to hear your thoughts on this project. Feel free to drop us a note!
 
 - [Twitter](https://twitter.com/charmcli)
+- [Discord](https://charm.land/discord)
+- [Slack](https://charm.land/slack)
 - [The Fediverse](https://mastodon.social/@charmcli)
-- [Discord](https://charm.sh/chat)
 
 ## License
 
@@ -266,7 +296,7 @@ We’d love to hear your thoughts on this project. Feel free to drop us a note!
 
 Part of [Charm](https://charm.land).
 
-<a href="https://charm.sh/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
+<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
 
 <!--prettier-ignore-->
 Charm热爱开源 • Charm loves open source

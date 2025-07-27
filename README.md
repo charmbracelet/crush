@@ -48,6 +48,85 @@ Then, run Crush by typing `crush`.
 
 </details>
 
+### Nix
+
+Crush provides a Nix flake for easy installation and configuration management.
+
+#### Installation
+
+Install directly from the flake:
+
+```bash
+nix profile install github:charmbracelet/crush
+```
+
+Or run without installing:
+
+```bash
+nix run github:charmbracelet/crush
+```
+#### NixOS Module
+
+Add Crush to your NixOS configuration:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    crush.url = "github:charmbracelet/crush";
+  };
+
+  outputs = { nixpkgs, crush, ... }: {
+    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        crush.nixosModules.default
+        {
+          programs.crush = {
+            enable = true;
+            settings = {
+              providers = {
+                openai = {
+                  name = "OpenAI";
+                  provider_type = "openai";
+                  api_key = "sk-fake123456789abcdef...";
+                };
+              };
+              lsp = {
+                go = { command = "gopls"; };
+                nix = { command = "nil"; };
+              };
+            };
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+#### Home Manager Module
+
+Home Manager configuration uses identical settings structure:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    crush.url = "github:charmbracelet/crush";
+  };
+
+  outputs = { nixpkgs, home-manager, crush, ... }: {
+    homeConfigurations.your-username = home-manager.lib.homeManagerConfiguration {
+      modules = [
+        crush.homeManagerModules.default
+        { programs.crush.enable = true; }
+      ];
+    };
+  };
+}
+```
+
 ## Getting Started
 
 The quickest way to get started to grab an API key for your preferred

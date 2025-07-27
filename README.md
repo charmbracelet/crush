@@ -13,8 +13,6 @@ Crush is a tool for building software with AI.
 
 ## Installation
 
-Crush has first class support for macOS, Linux, and Windows.
-
 Use a package manager:
 
 ```bash
@@ -33,6 +31,8 @@ winget install charmbracelet.mods
 # Nix
 nix-shell -p nur.repos.charmbracelet.crush
 ```
+
+Note that Crush for Windows does _not_ require WSL
 
 <details>
 <summary><strong>Debian/Ubuntu</strong></summary>
@@ -108,6 +108,16 @@ Crush runs great with no configuration. That said, if you do need or want to cus
 2. `./crush.json`
 3. `$HOME/.config/crush/crush.json`
 
+Configuration itself is stored as a JSON object:
+
+```json
+{
+   "this-setting": { }
+   "that-setting": { }
+}
+```
+
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just like you would. LSPs can be added manually like so:
@@ -131,7 +141,7 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ### MCPs
 
-Crush supports Model Context Protocol (MCP) servers through three transport types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse` for Server-Sent Events. Environment variable expansion is supported using `$(echo $VAR)` syntax.
+Crush also supports Model Context Protocol (MCP) servers through three transport types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse` for Server-Sent Events. Environment variable expansion is supported using `$(echo $VAR)` syntax.
 
 ```json
 {
@@ -162,37 +172,9 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
 }
 ```
 
-### Logging
+### Whitelisting Tools
 
-Enable debug logging with the `-d` flag or in config. View logs with `crush logs`. Logs are stored in `.crush/logs/crush.log`.
-```bash
-# Run with debug logging
-crush -d
-
-# View last 1000 lines
-crush logs
-
-# Follow logs in real-time
-crush logs -f
-
-# Show last 500 lines
-crush logs -t 500
-```
-
-Add to your `crush.json` config file:
-
-```json
-{
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
-```
-
-### Configurable Default Permissions
-
-Crush includes a permission system to control which tools can be executed without prompting. You can configure allowed tools in your `crush.json` config file:
+By default, Crush will ask you for permission before running tool calls. If you'd like, you can whitelist tools to be executed without prompting you for permissions. Use this with care.
 
 ```json
 {
@@ -201,19 +183,14 @@ Crush includes a permission system to control which tools can be executed withou
       "view",
       "ls",
       "grep",
-      "edit:write",
+      "edit",
       "mcp_context7_get-library-doc"
     ]
   }
 }
 ```
 
-The `allowed_tools` array accepts:
-
-- Tool names (e.g., `"view"`) - allows all actions for that tool
-- Tool:action combinations (e.g., `"edit:write"`) - allows only specific actions
-
-You can also skip all permission prompts entirely by running Crush with the `--yolo` flag.
+You can also skip all permission prompts entirely by running Crush with the `--yolo` flag. Be very, very careful with this feature.
 
 ### Custom Providers
 
@@ -221,7 +198,7 @@ Crush supports custom provider configurations for both OpenAI-compatible and Ant
 
 #### OpenAI-Compatible APIs
 
-Here's an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+Here’s an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
 {
@@ -249,7 +226,7 @@ Here's an example configuration for Deepseek, which uses an OpenAI-compatible AP
 
 #### Anthropic-Compatible APIs
 
-You can also configure custom Anthropic-compatible providers:
+Custom Anthropic-compatible providers follow this format:
 
 ```json
 {
@@ -275,6 +252,34 @@ You can also configure custom Anthropic-compatible providers:
         }
       ]
     }
+  }
+}
+```
+
+## Logging
+
+Sometimes you need to look at logs. Luckily, Crush logs all sorts of stuff. Logs are stored in `.crush/logs/crush.log` relative to the project.
+
+The CLI also contains some helper commands b
+
+```bash
+# Print the last 1000 lines
+crush logs
+
+# Print the last 500 lines
+crush logs --tail 500
+
+# Follow logs in real-time
+crush logs --follow
+```
+
+Want more logging? Run `crush` with the `--debug` flag, or enable it in the config:
+
+```json
+{
+  "options": {
+    "debug": true,
+    "debug_lsp": true
   }
 }
 ```

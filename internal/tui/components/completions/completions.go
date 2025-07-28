@@ -71,11 +71,6 @@ type completionsCmp struct {
 	query string // The current filter query
 }
 
-const (
-	maxCompletionsWidth = 80 // Maximum width for the completions popup
-	minCompletionsWidth = 20 // Minimum width for the completions popup
-)
-
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
 	keyMap := list.DefaultKeyMap()

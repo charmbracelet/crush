@@ -2,8 +2,10 @@ package editor
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -207,6 +209,45 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+	case tea.PasteMsg:
+		path := strings.ReplaceAll(string(msg), "\\ ", " ")
+		// try to get an image
+		path, err := filepath.Abs(path)
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		isAllowedType := false
+		for _, ext := range filepicker.AllowedTypes {
+			if strings.HasSuffix(path, ext) {
+				isAllowedType = true
+				break
+			}
+		}
+		if !isAllowedType {
+
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
+		if tooBig {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		fileName := filepath.Base(path)
+		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+		return m, util.CmdHandler(filepicker.FilePickedMsg{
+			Attachment: attachment,
+		})
+
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	maxAttachmentSize  = int64(5 * 1024 * 1024) // 5MB
+	MaxAttachmentSize  = int64(5 * 1024 * 1024) // 5MB
 	FilePickerID       = "filepicker"
 	fileSelectionHight = 10
 )
@@ -45,10 +45,12 @@ type model struct {
 	help            help.Model
 }
 
+var AllowedTypes = []string{".jpg", ".jpeg", ".png"}
+
 func NewFilePickerCmp(workingDir string) FilePicker {
 	t := styles.CurrentTheme()
 	fp := filepicker.New()
-	fp.AllowedTypes = []string{".jpg", ".jpeg", ".png"}
+	fp.AllowedTypes = AllowedTypes
 
 	if workingDir != "" {
 		fp.CurrentDirectory = workingDir
@@ -127,7 +129,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Sequence(
 			util.CmdHandler(dialogs.CloseDialogMsg{}),
 			func() tea.Msg {
-				isFileLarge, err := ValidateFileSize(path, maxAttachmentSize)
+				isFileLarge, err := IsFileTooBig(path, MaxAttachmentSize)
 				if err != nil {
 					return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
 				}
@@ -222,7 +224,7 @@ func (m *model) Position() (int, int) {
 	return row, col
 }
 
-func ValidateFileSize(filePath string, sizeLimit int64) (bool, error) {
+func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return false, fmt.Errorf("error getting file info: %w", err)

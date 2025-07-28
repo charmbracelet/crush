@@ -1,7 +1,7 @@
 # Crush
 
 <p>
-    <img width="450" alt="Charm Crush Art" src="https://github.com/user-attachments/assets/9ab4c30c-9327-46b6-a722-3ad0e20f6976" /><br>
+    <img width="450" alt="Charm Crush Art" src="https://github.com/user-attachments/assets/4cd517be-476b-4a78-971c-810a0b1af3f6" /><br>
     <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
     <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
 </p>

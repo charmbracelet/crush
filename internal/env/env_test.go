@@ -1,26 +1,24 @@
 package env
 
 import (
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOsEnv_Get(t *testing.T) {
 	env := New()
 
 	// Test getting an existing environment variable
-	os.Setenv("TEST_VAR", "test_value")
-	defer os.Unsetenv("TEST_VAR")
+	t.Setenv("TEST_VAR", "test_value")
 
 	value := env.Get("TEST_VAR")
-	assert.Equal(t, "test_value", value)
+	require.Equal(t, "test_value", value)
 
 	// Test getting a non-existent environment variable
 	value = env.Get("NON_EXISTENT_VAR")
-	assert.Equal(t, "", value)
+	require.Equal(t, "", value)
 }
 
 func TestOsEnv_Env(t *testing.T) {
@@ -29,12 +27,12 @@ func TestOsEnv_Env(t *testing.T) {
 	envVars := env.Env()
 
 	// Environment should not be empty in normal circumstances
-	assert.NotNil(t, envVars)
-	assert.Greater(t, len(envVars), 0)
+	require.NotNil(t, envVars)
+	require.Greater(t, len(envVars), 0)
 
 	// Each environment variable should be in key=value format
 	for _, envVar := range envVars {
-		assert.Contains(t, envVar, "=")
+		require.Contains(t, envVar, "=")
 	}
 }
 
@@ -45,8 +43,8 @@ func TestNewFromMap(t *testing.T) {
 	}
 
 	env := NewFromMap(testMap)
-	assert.NotNil(t, env)
-	assert.IsType(t, &mapEnv{}, env)
+	require.NotNil(t, env)
+	require.IsType(t, &mapEnv{}, env)
 }
 
 func TestMapEnv_Get(t *testing.T) {
@@ -58,11 +56,11 @@ func TestMapEnv_Get(t *testing.T) {
 	env := NewFromMap(testMap)
 
 	// Test getting existing keys
-	assert.Equal(t, "value1", env.Get("KEY1"))
-	assert.Equal(t, "value2", env.Get("KEY2"))
+	require.Equal(t, "value1", env.Get("KEY1"))
+	require.Equal(t, "value2", env.Get("KEY2"))
 
 	// Test getting non-existent key
-	assert.Equal(t, "", env.Get("NON_EXISTENT"))
+	require.Equal(t, "", env.Get("NON_EXISTENT"))
 }
 
 func TestMapEnv_Env(t *testing.T) {
@@ -75,30 +73,30 @@ func TestMapEnv_Env(t *testing.T) {
 		env := NewFromMap(testMap)
 		envVars := env.Env()
 
-		assert.Len(t, envVars, 2)
+		require.Len(t, envVars, 2)
 
 		// Convert to map for easier testing (order is not guaranteed)
 		envMap := make(map[string]string)
 		for _, envVar := range envVars {
 			parts := strings.SplitN(envVar, "=", 2)
-			assert.Len(t, parts, 2)
+			require.Len(t, parts, 2)
 			envMap[parts[0]] = parts[1]
 		}
 
-		assert.Equal(t, "value1", envMap["KEY1"])
-		assert.Equal(t, "value2", envMap["KEY2"])
+		require.Equal(t, "value1", envMap["KEY1"])
+		require.Equal(t, "value2", envMap["KEY2"])
 	})
 
 	t.Run("empty map", func(t *testing.T) {
 		env := NewFromMap(map[string]string{})
 		envVars := env.Env()
-		assert.Nil(t, envVars)
+		require.Nil(t, envVars)
 	})
 
 	t.Run("nil map", func(t *testing.T) {
 		env := NewFromMap(nil)
 		envVars := env.Env()
-		assert.Nil(t, envVars)
+		require.Nil(t, envVars)
 	})
 }
 
@@ -111,8 +109,8 @@ func TestMapEnv_GetEmptyValue(t *testing.T) {
 	env := NewFromMap(testMap)
 
 	// Test that empty values are returned correctly
-	assert.Equal(t, "", env.Get("EMPTY_KEY"))
-	assert.Equal(t, "value", env.Get("NORMAL_KEY"))
+	require.Equal(t, "", env.Get("EMPTY_KEY"))
+	require.Equal(t, "value", env.Get("NORMAL_KEY"))
 }
 
 func TestMapEnv_EnvFormat(t *testing.T) {
@@ -124,7 +122,7 @@ func TestMapEnv_EnvFormat(t *testing.T) {
 	env := NewFromMap(testMap)
 	envVars := env.Env()
 
-	assert.Len(t, envVars, 2)
+	require.Len(t, envVars, 2)
 
 	// Check that the format is correct even with special characters
 	found := make(map[string]bool)
@@ -137,6 +135,6 @@ func TestMapEnv_EnvFormat(t *testing.T) {
 		}
 	}
 
-	assert.True(t, found["equals"], "Should handle values with equals signs")
-	assert.True(t, found["spaces"], "Should handle values with spaces")
+	require.True(t, found["equals"], "Should handle values with equals signs")
+	require.True(t, found["spaces"], "Should handle values with spaces")
 }

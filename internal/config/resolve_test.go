@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockShell implements the Shell interface for testing
@@ -85,10 +85,10 @@ func TestShellVariableResolver_ResolveValue(t *testing.T) {
 			result, err := resolver.ResolveValue(tt.value)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
+				require.NoError(t, err)
+				require.Equal(t, tt.expected, result)
 			}
 		})
 	}
@@ -250,10 +250,10 @@ func TestShellVariableResolver_EnhancedResolveValue(t *testing.T) {
 			result, err := resolver.ResolveValue(tt.value)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
+				require.NoError(t, err)
+				require.Equal(t, tt.expected, result)
 			}
 		})
 	}
@@ -306,10 +306,10 @@ func TestEnvironmentVariableResolver_ResolveValue(t *testing.T) {
 			result, err := resolver.ResolveValue(tt.value)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
+				require.NoError(t, err)
+				require.Equal(t, tt.expected, result)
 			}
 		})
 	}
@@ -319,14 +319,14 @@ func TestNewShellVariableResolver(t *testing.T) {
 	testEnv := env.NewFromMap(map[string]string{"TEST": "value"})
 	resolver := NewShellVariableResolver(testEnv)
 
-	assert.NotNil(t, resolver)
-	assert.Implements(t, (*VariableResolver)(nil), resolver)
+	require.NotNil(t, resolver)
+	require.Implements(t, (*VariableResolver)(nil), resolver)
 }
 
 func TestNewEnvironmentVariableResolver(t *testing.T) {
 	testEnv := env.NewFromMap(map[string]string{"TEST": "value"})
 	resolver := NewEnvironmentVariableResolver(testEnv)
 
-	assert.NotNil(t, resolver)
-	assert.Implements(t, (*VariableResolver)(nil), resolver)
+	require.NotNil(t, resolver)
+	require.Implements(t, (*VariableResolver)(nil), resolver)
 }

@@ -1,18 +1,16 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/provider"
+	"github.com/charmbracelet/crush/internal/resolver"
 	"github.com/tidwall/sjson"
 )
 
@@ -45,73 +43,6 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
-type SelectedModel struct {
-	// The model id as used by the provider API.
-	// Required.
-	Model string `json:"model"`
-	// The model provider, same as the key/id used in the providers config.
-	// Required.
-	Provider string `json:"provider"`
-
-	// Only used by models that use the openai provider and need this set.
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-
-	// Overrides the default model configuration.
-	MaxTokens int64 `json:"max_tokens,omitempty"`
-
-	// Used by anthropic models that can reason to indicate if the model should think.
-	Think bool `json:"think,omitempty"`
-}
-
-type ProviderConfig struct {
-	// The provider's id.
-	ID string `json:"id,omitempty"`
-	// The provider's name, used for display purposes.
-	Name string `json:"name,omitempty"`
-	// The provider's API endpoint.
-	BaseURL string `json:"base_url,omitempty"`
-	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type catwalk.Type `json:"type,omitempty"`
-	// The provider's API key.
-	APIKey string `json:"api_key,omitempty"`
-	// Marks the provider as disabled.
-	Disable bool `json:"disable,omitempty"`
-
-	// Custom system prompt prefix.
-	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty"`
-
-	// Extra headers to send with each request to the provider.
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	// Extra body
-	ExtraBody map[string]any `json:"extra_body,omitempty"`
-
-	// Used to pass extra parameters to the provider.
-	ExtraParams map[string]string `json:"-"`
-
-	// The provider models
-	Models []catwalk.Model `json:"models,omitempty"`
-}
-
-type MCPType string
-
-const (
-	MCPStdio MCPType = "stdio"
-	MCPSse   MCPType = "sse"
-	MCPHttp  MCPType = "http"
-)
-
-type MCPConfig struct {
-	Command  string            `json:"command,omitempty" `
-	Env      map[string]string `json:"env,omitempty"`
-	Args     []string          `json:"args,omitempty"`
-	Type     MCPType           `json:"type"`
-	URL      string            `json:"url,omitempty"`
-	Disabled bool              `json:"disabled,omitempty"`
-
-	// TODO: maybe make it possible to get the value from the env
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
 type LSPConfig struct {
 	Disabled bool     `json:"enabled,omitempty"`
 	Command  string   `json:"command"`
@@ -138,11 +69,11 @@ type Options struct {
 	DataDirectory        string      `json:"data_directory,omitempty"` // Relative to the cwd
 }
 
-type MCPs map[string]MCPConfig
+type MCPs map[string]agent.MCPConfig
 
 type MCP struct {
-	Name string    `json:"name"`
-	MCP  MCPConfig `json:"mcp"`
+	Name string          `json:"name"`
+	MCP  agent.MCPConfig `json:"mcp"`
 }
 
 func (m MCPs) Sorted() []MCP {
@@ -180,71 +111,13 @@ func (l LSPs) Sorted() []LSP {
 	return sorted
 }
 
-func (m MCPConfig) ResolvedEnv() []string {
-	resolver := NewShellVariableResolver(env.New())
-	for e, v := range m.Env {
-		var err error
-		m.Env[e], err = resolver.ResolveValue(v)
-		if err != nil {
-			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
-			continue
-		}
-	}
-
-	env := make([]string, 0, len(m.Env))
-	for k, v := range m.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	return env
-}
-
-func (m MCPConfig) ResolvedHeaders() map[string]string {
-	resolver := NewShellVariableResolver(env.New())
-	for e, v := range m.Headers {
-		var err error
-		m.Headers[e], err = resolver.ResolveValue(v)
-		if err != nil {
-			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
-			continue
-		}
-	}
-	return m.Headers
-}
-
-type Agent struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	// This is the id of the system prompt used by the agent
-	Disabled bool `json:"disabled,omitempty"`
-
-	Model SelectedModelType `json:"model"`
-
-	// The available tools for the agent
-	//  if this is nil, all tools are available
-	AllowedTools []string `json:"allowed_tools,omitempty"`
-
-	// this tells us which MCPs are available for this agent
-	//  if this is empty all mcps are available
-	//  the string array is the list of tools from the AllowedMCP the agent has available
-	//  if the string array is nil, all tools from the AllowedMCP are available
-	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty"`
-
-	// The list of LSPs that this agent can use
-	//  if this is nil, all LSPs are available
-	AllowedLSP []string `json:"allowed_lsp,omitempty"`
-
-	// Overrides the context paths for this agent
-	ContextPaths []string `json:"context_paths,omitempty"`
-}
-
 // Config holds the configuration for crush.
 type Config struct {
 	// We currently only support large/small as values here.
-	Models map[SelectedModelType]SelectedModel `json:"models,omitempty"`
+	Models map[SelectedModelType]agent.Model `json:"models,omitempty"`
 
 	// The providers that are configured
-	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty"`
+	Providers *csync.Map[string, provider.Config] `json:"providers,omitempty"`
 
 	MCP MCPs `json:"mcp,omitempty"`
 
@@ -255,11 +128,8 @@ type Config struct {
 	Permissions *Permissions `json:"permissions,omitempty"`
 
 	// Internal
-	workingDir string `json:"-"`
-	// TODO: most likely remove this concept when I come back to it
-	Agents map[string]Agent `json:"-"`
-	// TODO: find a better way to do this this should probably not be part of the config
-	resolver       VariableResolver
+	workingDir     string `json:"-"`
+	resolver       resolver.Resolver
 	dataConfigDir  string             `json:"-"`
 	knownProviders []catwalk.Provider `json:"-"`
 }
@@ -268,8 +138,8 @@ func (c *Config) WorkingDir() string {
 	return c.workingDir
 }
 
-func (c *Config) EnabledProviders() []ProviderConfig {
-	var enabled []ProviderConfig
+func (c *Config) EnabledProviders() []provider.Config {
+	var enabled []provider.Config
 	for p := range c.Providers.Seq() {
 		if !p.Disable {
 			enabled = append(enabled, p)
@@ -294,7 +164,7 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
-func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
+func (c *Config) GetProviderForModel(modelType SelectedModelType) *provider.Config {
 	model, ok := c.Models[modelType]
 	if !ok {
 		return nil
@@ -344,7 +214,7 @@ func (c *Config) Resolve(key string) (string, error) {
 	return c.resolver.ResolveValue(key)
 }
 
-func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
+func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model agent.Model) error {
 	c.Models[modelType] = model
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
@@ -397,7 +267,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 
 	if foundProvider != nil {
 		// Create new provider config based on known provider
-		providerConfig = ProviderConfig{
+		providerConfig = provider.Config{
 			ID:           providerID,
 			Name:         foundProvider.Name,
 			BaseURL:      foundProvider.APIEndpoint,
@@ -416,82 +286,6 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	return nil
 }
 
-func (c *Config) SetupAgents() {
-	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
-			Name:         "Coder",
-			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: c.Options.ContextPaths,
-			// All tools allowed
-		},
-		"task": {
-			ID:           "task",
-			Name:         "Task",
-			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: []string{
-				"glob",
-				"grep",
-				"ls",
-				"sourcegraph",
-				"view",
-			},
-			// NO MCPs or LSPs by default
-			AllowedMCP: map[string][]string{},
-			AllowedLSP: []string{},
-		},
-	}
-	c.Agents = agents
-}
-
-func (c *Config) Resolver() VariableResolver {
+func (c *Config) Resolver() resolver.Resolver {
 	return c.resolver
-}
-
-func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	testURL := ""
-	headers := make(map[string]string)
-	apiKey, _ := resolver.ResolveValue(c.APIKey)
-	switch c.Type {
-	case catwalk.TypeOpenAI:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		testURL = baseURL + "/models"
-		headers["Authorization"] = "Bearer " + apiKey
-	case catwalk.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com/v1"
-		}
-		testURL = baseURL + "/models"
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
-	}
-	b, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
-	}
-	if b.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
-	}
-	_ = b.Body.Close()
-	return nil
 }

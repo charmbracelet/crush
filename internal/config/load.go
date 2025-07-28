@@ -14,7 +14,10 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/resolver"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -71,7 +74,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	env := env.New()
 	// Configure providers
-	valueResolver := NewShellVariableResolver(env)
+	valueResolver := resolver.NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
 	if err := cfg.configureProviders(env, valueResolver, providers); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
@@ -85,11 +88,10 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	if err := cfg.configureSelectedModels(providers); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-	cfg.SetupAgents()
 	return cfg, nil
 }
 
-func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(env env.Env, resolver resolver.Resolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
@@ -135,7 +137,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				p.Models = models
 			}
 		}
-		prepared := ProviderConfig{
+		prepared := provider.Config{
 			ID:           string(p.ID),
 			Name:         p.Name,
 			BaseURL:      p.APIEndpoint,
@@ -269,13 +271,13 @@ func (c *Config) setDefaults(workingDir string) {
 		c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 	}
 	if c.Providers == nil {
-		c.Providers = csync.NewMap[string, ProviderConfig]()
+		c.Providers = csync.NewMap[string, provider.Config]()
 	}
 	if c.Models == nil {
-		c.Models = make(map[SelectedModelType]SelectedModel)
+		c.Models = make(map[SelectedModelType]agent.Model)
 	}
 	if c.MCP == nil {
-		c.MCP = make(map[string]MCPConfig)
+		c.MCP = make(map[string]agent.MCPConfig)
 	}
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
@@ -287,7 +289,7 @@ func (c *Config) setDefaults(workingDir string) {
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel, smallModel agent.Model, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return
@@ -305,7 +307,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			err = fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
 			return
 		}
-		largeModel = SelectedModel{
+		largeModel = agent.Model{
 			Provider:        string(p.ID),
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
@@ -317,7 +319,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
 			return
 		}
-		smallModel = SelectedModel{
+		smallModel = agent.Model{
 			Provider:        string(p.ID),
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
@@ -327,7 +329,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	}
 
 	enabledProviders := c.EnabledProviders()
-	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
+	slices.SortFunc(enabledProviders, func(a, b provider.Config) int {
 		return strings.Compare(a.ID, b.ID)
 	})
 
@@ -342,13 +344,13 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		return
 	}
 	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	largeModel = SelectedModel{
+	largeModel = agent.Model{
 		Provider:  providerConfig.ID,
 		Model:     defaultLargeModel.ID,
 		MaxTokens: defaultLargeModel.DefaultMaxTokens,
 	}
 	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	smallModel = SelectedModel{
+	smallModel = agent.Model{
 		Provider:  providerConfig.ID,
 		Model:     defaultSmallModel.ID,
 		MaxTokens: defaultSmallModel.DefaultMaxTokens,

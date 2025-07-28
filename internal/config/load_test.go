@@ -11,6 +11,9 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/provider"
+	"github.com/charmbracelet/crush/internal/resolver"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -72,7 +75,7 @@ func TestConfig_configureProviders(t *testing.T) {
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, cfg.Providers.Len())
@@ -95,9 +98,9 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Providers: csync.NewMap[string, ProviderConfig](),
+		Providers: csync.NewMap[string, provider.Config](),
 	}
-	cfg.Providers.Set("openai", ProviderConfig{
+	cfg.Providers.Set("openai", provider.Config{
 		APIKey:  "xyz",
 		BaseURL: "https://api.openai.com/v2",
 		Models: []catwalk.Model{
@@ -115,7 +118,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, cfg.Providers.Len())
@@ -141,7 +144,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+		Providers: csync.NewMapFrom(map[string]provider.Config{
 			"custom": {
 				APIKey:  "xyz",
 				BaseURL: "https://api.someendpoint.com/v2",
@@ -157,7 +160,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Should be to because of the env variable
@@ -193,7 +196,7 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 		"AWS_ACCESS_KEY_ID":     "test-key-id",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Equal(t, cfg.Providers.Len(), 1)
@@ -219,7 +222,7 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	cfg := &Config{}
 	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without credentials
@@ -244,7 +247,7 @@ func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 		"AWS_ACCESS_KEY_ID":     "test-key-id",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.Error(t, err)
 }
@@ -268,7 +271,7 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 		"GOOGLE_CLOUD_PROJECT":      "test-project",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Equal(t, cfg.Providers.Len(), 1)
@@ -300,7 +303,7 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 		"GOOGLE_CLOUD_PROJECT":      "test-project",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without proper credentials
@@ -325,7 +328,7 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 		"GOOGLE_GENAI_USE_VERTEXAI": "true",
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	// Provider should not be configured without project
@@ -349,7 +352,7 @@ func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 	assert.Equal(t, cfg.Providers.Len(), 1)
@@ -362,7 +365,7 @@ func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 func TestConfig_EnabledProviders(t *testing.T) {
 	t.Run("all providers enabled", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					ID:      "openai",
 					APIKey:  "key1",
@@ -382,7 +385,7 @@ func TestConfig_EnabledProviders(t *testing.T) {
 
 	t.Run("some providers disabled", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					ID:      "openai",
 					APIKey:  "key1",
@@ -403,7 +406,7 @@ func TestConfig_EnabledProviders(t *testing.T) {
 
 	t.Run("empty providers map", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMap[string, ProviderConfig](),
+			Providers: csync.NewMap[string, provider.Config](),
 		}
 
 		enabled := cfg.EnabledProviders()
@@ -414,7 +417,7 @@ func TestConfig_EnabledProviders(t *testing.T) {
 func TestConfig_IsConfigured(t *testing.T) {
 	t.Run("returns true when at least one provider is enabled", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					ID:      "openai",
 					APIKey:  "key1",
@@ -428,7 +431,7 @@ func TestConfig_IsConfigured(t *testing.T) {
 
 	t.Run("returns false when no providers are configured", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMap[string, ProviderConfig](),
+			Providers: csync.NewMap[string, provider.Config](),
 		}
 
 		assert.False(t, cfg.IsConfigured())
@@ -436,7 +439,7 @@ func TestConfig_IsConfigured(t *testing.T) {
 
 	t.Run("returns false when all providers are disabled", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					ID:      "openai",
 					APIKey:  "key1",
@@ -467,7 +470,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+		Providers: csync.NewMapFrom(map[string]provider.Config{
 			"openai": {
 				Disable: true,
 			},
@@ -478,7 +481,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 	env := env.NewFromMap(map[string]string{
 		"OPENAI_API_KEY": "test-key",
 	})
-	resolver := NewEnvironmentVariableResolver(env)
+	resolver := resolver.NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	assert.NoError(t, err)
 
@@ -491,7 +494,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 	t.Run("custom provider with missing API key is allowed, but not known providers", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					BaseURL: "https://api.custom.com/v1",
 					Models: []catwalk.Model{{
@@ -506,7 +509,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -517,7 +520,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("custom provider with missing BaseURL is removed", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey: "test-key",
 					Models: []catwalk.Model{{
@@ -529,7 +532,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -540,7 +543,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("custom provider with no models is removed", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -551,7 +554,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -562,7 +565,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("custom provider with unsupported type is removed", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -576,7 +579,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -587,7 +590,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("valid custom provider is kept and ID is set", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -601,7 +604,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -615,7 +618,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("custom anthropic provider is supported", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
@@ -629,7 +632,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -644,7 +647,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -659,7 +662,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
 		assert.NoError(t, err)
 
@@ -683,7 +686,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"vertexai": {
 					BaseURL: "custom-url",
 				},
@@ -694,7 +697,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		env := env.NewFromMap(map[string]string{
 			"GOOGLE_GENAI_USE_VERTEXAI": "false",
 		})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -716,7 +719,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"bedrock": {
 					BaseURL: "custom-url",
 				},
@@ -725,7 +728,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -747,7 +750,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					BaseURL: "custom-url",
 				},
@@ -756,7 +759,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		cfg.setDefaults("/tmp")
 
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -778,7 +781,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"openai": {
 					APIKey: "test-key",
 				},
@@ -789,7 +792,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 		env := env.NewFromMap(map[string]string{
 			"OPENAI_API_KEY": "test-key",
 		})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -823,7 +826,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -859,7 +862,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -889,7 +892,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 		_, _, err = cfg.defaultModelSelection(knownProviders)
@@ -917,7 +920,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -932,7 +935,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 		large, small, err := cfg.defaultModelSelection(knownProviders)
@@ -966,7 +969,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -976,7 +979,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 		_, _, err = cfg.defaultModelSelection(knownProviders)
@@ -1003,7 +1006,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[string]provider.Config{
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
@@ -1018,7 +1021,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 		large, small, err := cfg.defaultModelSelection(knownProviders)
@@ -1058,7 +1061,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
+			Models: map[SelectedModelType]agent.Model{
 				"large": {
 					Model: "larger-model",
 				},
@@ -1066,7 +1069,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -1118,7 +1121,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
+			Models: map[SelectedModelType]agent.Model{
 				"small": {
 					Model:     "a-small-model",
 					Provider:  "anthropic",
@@ -1128,7 +1131,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 
@@ -1165,7 +1168,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
+			Models: map[SelectedModelType]agent.Model{
 				"large": {
 					MaxTokens: 100,
 				},
@@ -1173,7 +1176,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp")
 		env := env.NewFromMap(map[string]string{})
-		resolver := NewEnvironmentVariableResolver(env)
+		resolver := resolver.NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
 		assert.NoError(t, err)
 

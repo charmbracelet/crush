@@ -3,7 +3,6 @@ package lsp
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,16 +14,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 )
 
 type Client struct {
-	Cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr io.ReadCloser
+	Cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Reader
+	stderr  io.ReadCloser
+	workDir string
+	debug   bool
 
 	// Request ID counter
 	nextID atomic.Int32
@@ -53,7 +53,7 @@ type Client struct {
 	serverState atomic.Value
 }
 
-func NewClient(ctx context.Context, command string, args ...string) (*Client, error) {
+func NewClient(ctx context.Context, workDir string, command string, args ...string) (*Client, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	// Copy env
 	cmd.Env = os.Environ()
@@ -78,6 +78,7 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 		stdin:                 stdin,
 		stdout:                bufio.NewReader(stdout),
 		stderr:                stderr,
+		workDir:               workDir,
 		handlers:              make(map[int32]chan *Message),
 		notificationHandlers:  make(map[string]NotificationHandler),
 		serverRequestHandlers: make(map[string]ServerRequestHandler),
@@ -215,12 +216,11 @@ func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (
 	}
 
 	// Register handlers
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
-	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
-	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
-	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
-	c.RegisterNotificationHandler("textDocument/publishDiagnostics",
-		func(params json.RawMessage) { HandleDiagnostics(c, params) })
+	c.RegisterServerRequestHandler("workspace/applyEdit", c.HandleApplyEdit)
+	c.RegisterServerRequestHandler("workspace/configuration", c.HandleWorkspaceConfiguration)
+	c.RegisterServerRequestHandler("client/registerCapability", c.HandleRegisterCapability)
+	c.RegisterNotificationHandler("window/showMessage", c.HandleServerMessage)
+	c.RegisterNotificationHandler("textDocument/publishDiagnostics", c.HandleDiagnostics)
 
 	// Notify the LSP server
 	err := c.Initialized(ctx, protocol.InitializedParams{})
@@ -287,8 +287,6 @@ func (c *Client) SetServerState(state ServerState) {
 // WaitForServerReady waits for the server to be ready by polling the server
 // with a simple request until it responds successfully or times out
 func (c *Client) WaitForServerReady(ctx context.Context) error {
-	cfg := config.Get()
-
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -300,7 +298,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
@@ -309,7 +307,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 	// For TypeScript-like servers, we need to open some key files first
 	if serverType == ServerTypeTypeScript {
-		if cfg.Options.DebugLSP {
+		if c.debug {
 			slog.Debug("TypeScript-like server detected, opening key configuration files")
 		}
 		c.openKeyConfigFiles(ctx)
@@ -326,7 +324,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			if err == nil {
 				// Server responded successfully
 				c.SetServerState(StateReady)
-				if cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("LSP server is ready")
 				}
 				return nil
@@ -334,7 +332,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 
-			if cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
 			}
 		}
@@ -377,7 +375,6 @@ func (c *Client) detectServerType() ServerType {
 
 // openKeyConfigFiles opens important configuration files that help initialize the server
 func (c *Client) openKeyConfigFiles(ctx context.Context) {
-	workDir := config.Get().WorkingDir()
 	serverType := c.detectServerType()
 
 	var filesToOpen []string
@@ -386,22 +383,22 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 	case ServerTypeTypeScript:
 		// TypeScript servers need these config files to properly initialize
 		filesToOpen = []string{
-			filepath.Join(workDir, "tsconfig.json"),
-			filepath.Join(workDir, "package.json"),
-			filepath.Join(workDir, "jsconfig.json"),
+			filepath.Join(c.workDir, "tsconfig.json"),
+			filepath.Join(c.workDir, "package.json"),
+			filepath.Join(c.workDir, "jsconfig.json"),
 		}
 
 		// Also find and open a few TypeScript files to help the server initialize
-		c.openTypeScriptFiles(ctx, workDir)
+		c.openTypeScriptFiles(ctx, c.workDir)
 	case ServerTypeGo:
 		filesToOpen = []string{
-			filepath.Join(workDir, "go.mod"),
-			filepath.Join(workDir, "go.sum"),
+			filepath.Join(c.workDir, "go.mod"),
+			filepath.Join(c.workDir, "go.sum"),
 		}
 	case ServerTypeRust:
 		filesToOpen = []string{
-			filepath.Join(workDir, "Cargo.toml"),
-			filepath.Join(workDir, "Cargo.lock"),
+			filepath.Join(c.workDir, "Cargo.toml"),
+			filepath.Join(c.workDir, "Cargo.lock"),
 		}
 	}
 
@@ -470,8 +467,7 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 	}
 
 	// If we have no open TypeScript files, try to find and open one
-	workDir := config.Get().WorkingDir()
-	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(c.workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -502,7 +498,6 @@ func (c *Client) pingTypeScriptServer(ctx context.Context) error {
 
 // openTypeScriptFiles finds and opens TypeScript files to help initialize the server
 func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
-	cfg := config.Get()
 	filesOpened := 0
 	maxFilesToOpen := 5 // Limit to a reasonable number of files
 
@@ -532,7 +527,7 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 			// Try to open the file
 			if err := c.OpenFile(ctx, path); err == nil {
 				filesOpened++
-				if cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("Opened TypeScript file for initialization", "file", path)
 				}
 			}
@@ -541,11 +536,11 @@ func (c *Client) openTypeScriptFiles(ctx context.Context, workDir string) {
 		return nil
 	})
 
-	if err != nil && cfg.Options.DebugLSP {
+	if err != nil && c.debug {
 		slog.Debug("Error walking directory for TypeScript files", "error", err)
 	}
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Opened TypeScript files for initialization", "count", filesOpened)
 	}
 }
@@ -670,7 +665,6 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 }
 
 func (c *Client) CloseFile(ctx context.Context, filepath string) error {
-	cfg := config.Get()
 	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()
@@ -686,7 +680,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 		},
 	}
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Closing file", "file", filepath)
 	}
 	if err := c.Notify(ctx, "textDocument/didClose", params); err != nil {
@@ -710,7 +704,6 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files
 func (c *Client) CloseAllFiles(ctx context.Context) {
-	cfg := config.Get()
 	c.openFilesMu.Lock()
 	filesToClose := make([]string, 0, len(c.openFiles))
 
@@ -729,12 +722,12 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// Then close them all
 	for _, filePath := range filesToClose {
 		err := c.CloseFile(ctx, filePath)
-		if err != nil && cfg.Options.DebugLSP {
+		if err != nil && c.debug {
 			slog.Warn("Error closing file", "file", filePath, "error", err)
 		}
 	}
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Closed all files", "files", filesToClose)
 	}
 }
@@ -791,4 +784,8 @@ func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
 	c.diagnosticsMu.Lock()
 	defer c.diagnosticsMu.Unlock()
 	delete(c.diagnostics, uri)
+}
+
+func (c *Client) DebugMode() {
+	c.debug = true
 }

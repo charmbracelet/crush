@@ -5,19 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -52,200 +48,126 @@ type AgentEvent struct {
 
 type Service interface {
 	pubsub.Suscriber[AgentEvent]
-	Model() catwalk.Model
 	Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	Summarize(ctx context.Context, sessionID string) error
-	UpdateModel() error
+	SetDebug(debug bool)
+	UpdateModels(large, small Model) error
+	// for now, not really sure how to handle this better
+	WithAgentTool() error
+
+	ModelConfig() Model
+	Model() *catwalk.Model
+	Provider() *provider.Config
+}
+
+type Model struct {
+	// The model id as used by the provider API.
+	// Required.
+	Model string `json:"model"`
+	// The model provider, same as the key/id used in the providers config.
+	// Required.
+	Provider string `json:"provider"`
+
+	// Only used by models that use the openai provider and need this set.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+
+	// Overrides the default model configuration.
+	MaxTokens int64 `json:"max_tokens,omitempty"`
+
+	// Used by anthropic models that can reason to indicate if the model should think.
+	Think bool `json:"think,omitempty"`
 }
 
 type agent struct {
 	*pubsub.Broker[AgentEvent]
-	agentCfg config.Agent
+	ctx          context.Context
+	cwd          string
+	systemPrompt string
+	providers    map[string]provider.Config
+
 	sessions session.Service
 	messages message.Service
 
-	tools *csync.LazySlice[tools.BaseTool]
+	toolsRegistry tools.Registry
 
-	provider   provider.Provider
-	providerID string
-
-	titleProvider       provider.Provider
-	summarizeProvider   provider.Provider
-	summarizeProviderID string
+	large, small      Model
+	provider          provider.Provider
+	titleProvider     provider.Provider
+	summarizeProvider provider.Provider
 
 	activeRequests *csync.Map[string, context.CancelFunc]
-}
 
-var agentPromptMap = map[string]prompt.PromptID{
-	"coder": prompt.PromptCoder,
-	"task":  prompt.PromptTask,
+	debug bool
 }
 
 func NewAgent(
-	agentCfg config.Agent,
-	// These services are needed in the tools
-	permissions permission.Service,
+	ctx context.Context,
+	cwd string,
+	systemPrompt string,
+	toolsRegistry tools.Registry,
+	providers map[string]provider.Config,
+
+	smallModel Model,
+	largeModel Model,
+
 	sessions session.Service,
 	messages message.Service,
-	history history.Service,
-	lspClients map[string]*lsp.Client,
 ) (Service, error) {
-	ctx := context.Background()
-	cfg := config.Get()
-
-	var agentTool tools.BaseTool
-	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
-			return nil, fmt.Errorf("task agent not found in config")
-		}
-		taskAgent, err := NewAgent(taskAgentCfg, permissions, sessions, messages, history, lspClients)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create task agent: %w", err)
-		}
-
-		agentTool = NewAgentTool(taskAgent, sessions, messages)
+	agent := &agent{
+		Broker:         pubsub.NewBroker[AgentEvent](),
+		ctx:            ctx,
+		providers:      providers,
+		cwd:            cwd,
+		systemPrompt:   systemPrompt,
+		toolsRegistry:  toolsRegistry,
+		small:          smallModel,
+		large:          largeModel,
+		messages:       messages,
+		sessions:       sessions,
+		activeRequests: csync.NewMap[string, context.CancelFunc](),
 	}
 
-	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)
-	if providerCfg == nil {
-		return nil, fmt.Errorf("provider for agent %s not found in config", agentCfg.Name)
-	}
-	model := config.Get().GetModelByType(agentCfg.Model)
-
-	if model == nil {
-		return nil, fmt.Errorf("model not found for agent %s", agentCfg.Name)
-	}
-
-	promptID := agentPromptMap[agentCfg.ID]
-	if promptID == "" {
-		promptID = prompt.PromptDefault
-	}
-	opts := []provider.ProviderClientOption{
-		provider.WithModel(agentCfg.Model),
-		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID, config.Get().Options.ContextPaths...)),
-	}
-	agentProvider, err := provider.NewProvider(*providerCfg, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	smallModelCfg := cfg.Models[config.SelectedModelTypeSmall]
-	var smallModelProviderCfg *config.ProviderConfig
-	if smallModelCfg.Provider == providerCfg.ID {
-		smallModelProviderCfg = providerCfg
-	} else {
-		smallModelProviderCfg = cfg.GetProviderForModel(config.SelectedModelTypeSmall)
-
-		if smallModelProviderCfg.ID == "" {
-			return nil, fmt.Errorf("provider %s not found in config", smallModelCfg.Provider)
-		}
-	}
-	smallModel := cfg.GetModelByType(config.SelectedModelTypeSmall)
-	if smallModel.ID == "" {
-		return nil, fmt.Errorf("model %s not found in provider %s", smallModelCfg.Model, smallModelProviderCfg.ID)
-	}
-
-	titleOpts := []provider.ProviderClientOption{
-		provider.WithModel(config.SelectedModelTypeSmall),
-		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-	}
-	titleProvider, err := provider.NewProvider(*smallModelProviderCfg, titleOpts...)
-	if err != nil {
-		return nil, err
-	}
-	summarizeOpts := []provider.ProviderClientOption{
-		provider.WithModel(config.SelectedModelTypeSmall),
-		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
-	}
-	summarizeProvider, err := provider.NewProvider(*smallModelProviderCfg, summarizeOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	toolFn := func() []tools.BaseTool {
-		slog.Info("Initializing agent tools", "agent", agentCfg.ID)
-		defer func() {
-			slog.Info("Initialized agent tools", "agent", agentCfg.ID)
-		}()
-
-		cwd := cfg.WorkingDir()
-		allTools := []tools.BaseTool{
-			tools.NewBashTool(permissions, cwd),
-			tools.NewDownloadTool(permissions, cwd),
-			tools.NewEditTool(lspClients, permissions, history, cwd),
-			tools.NewFetchTool(permissions, cwd),
-			tools.NewGlobTool(cwd),
-			tools.NewGrepTool(cwd),
-			tools.NewLsTool(cwd),
-			tools.NewSourcegraphTool(),
-			tools.NewViewTool(lspClients, cwd),
-			tools.NewWriteTool(lspClients, permissions, history, cwd),
-		}
-
-		mcpTools := GetMCPTools(ctx, permissions, cfg)
-		allTools = append(allTools, mcpTools...)
-
-		if len(lspClients) > 0 {
-			allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
-		}
-
-		if agentTool != nil {
-			allTools = append(allTools, agentTool)
-		}
-
-		if agentCfg.AllowedTools == nil {
-			return allTools
-		}
-
-		var filteredTools []tools.BaseTool
-		for _, tool := range allTools {
-			if slices.Contains(agentCfg.AllowedTools, tool.Name()) {
-				filteredTools = append(filteredTools, tool)
-			}
-		}
-		return filteredTools
-	}
-
-	return &agent{
-		Broker:              pubsub.NewBroker[AgentEvent](),
-		agentCfg:            agentCfg,
-		provider:            agentProvider,
-		providerID:          string(providerCfg.ID),
-		messages:            messages,
-		sessions:            sessions,
-		titleProvider:       titleProvider,
-		summarizeProvider:   summarizeProvider,
-		summarizeProviderID: string(smallModelProviderCfg.ID),
-		activeRequests:      csync.NewMap[string, context.CancelFunc](),
-		tools:               csync.NewLazySlice(toolFn),
-	}, nil
+	err := agent.setProviders()
+	return agent, err
 }
 
-func (a *agent) Model() catwalk.Model {
-	return *config.Get().GetModelByType(a.agentCfg.Model)
+func (a *agent) ModelConfig() Model {
+	return a.large
+}
+
+func (a *agent) Model() *catwalk.Model {
+	return a.provider.Model(a.large.Model)
+}
+
+func (a *agent) Provider() *provider.Config {
+	for _, provider := range a.providers {
+		if provider.ID == a.large.Provider {
+			return &provider
+		}
+	}
+	return nil
 }
 
 func (a *agent) Cancel(sessionID string) {
 	// Cancel regular requests
-	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+	if cancel, exists := a.activeRequests.Take(sessionID); exists {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests
-	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, exists := a.activeRequests.Take(sessionID + "-summarize"); exists {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 }
 
 func (a *agent) IsBusy() bool {
-	var busy bool
+	busy := false
 	for cancelFunc := range a.activeRequests.Seq() {
 		if cancelFunc != nil {
 			busy = true
@@ -275,9 +197,9 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 		Text: fmt.Sprintf("Generate a concise title for the following content:\n\n%s", content),
 	}}
 
-	// Use streaming approach like summarization
-	response := a.titleProvider.StreamResponse(
+	response := a.titleProvider.Stream(
 		ctx,
+		a.small.Model,
 		[]message.Message{
 			{
 				Role:  message.User,
@@ -352,7 +274,6 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 }
 
 func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
-	cfg := config.Get()
 	// List existing messages; if none, start title generation asynchronously.
 	msgs, err := a.messages.List(ctx, sessionID)
 	if err != nil {
@@ -411,7 +332,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			}
 			return a.err(fmt.Errorf("failed to process events: %w", err))
 		}
-		if cfg.Options.Debug {
+		if a.debug {
 			slog.Info("Result", "message", agentMessage.FinishReason(), "toolResults", toolResults)
 		}
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
@@ -438,13 +359,13 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
-	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
+	eventChan := a.provider.Stream(ctx, a.large.Model, msgHistory, a.toolsRegistry.GetAllTools())
 
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
-		Model:    a.Model().ID,
-		Provider: a.providerID,
+		Model:    a.large.Model,
+		Provider: a.large.Provider,
 	})
 	if err != nil {
 		return assistantMsg, nil, fmt.Errorf("failed to create assistant message: %w", err)
@@ -487,7 +408,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		default:
 			// Continue processing
 			var tool tools.BaseTool
-			for availableTool := range a.tools.Seq() {
+			for _, availableTool := range a.toolsRegistry.GetAllTools() {
 				if availableTool.Info().Name == toolCall.Name {
 					tool = availableTool
 					break
@@ -578,7 +499,8 @@ out:
 	msg, err := a.messages.Create(context.Background(), assistantMsg.SessionID, message.CreateMessageParams{
 		Role:     message.Tool,
 		Parts:    parts,
-		Provider: a.providerID,
+		Model:    a.large.Model,
+		Provider: a.large.Provider,
 	})
 	if err != nil {
 		return assistantMsg, nil, fmt.Errorf("failed to create cancelled tool message: %w", err)
@@ -632,7 +554,11 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)
 		}
-		return a.TrackUsage(ctx, sessionID, a.Model(), event.Response.Usage)
+		model := a.Model()
+		if model == nil {
+			return nil
+		}
+		return a.TrackUsage(ctx, sessionID, *model, event.Response.Usage)
 	}
 
 	return nil
@@ -734,8 +660,9 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		a.Publish(pubsub.CreatedEvent, event)
 
 		// Send the messages to the summarize provider
-		response := a.summarizeProvider.StreamResponse(
+		response := a.summarizeProvider.Stream(
 			summarizeCtx,
+			a.large.Model,
 			msgsWithPrompt,
 			nil,
 		)
@@ -763,7 +690,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
-		shell := shell.GetPersistentShell(config.Get().WorkingDir())
+		shell := shell.GetPersistentShell(a.cwd)
 		summary += "\n\n**Current working directory of the persistent shell**\n\n" + shell.GetWorkingDir()
 		event = AgentEvent{
 			Type:     AgentEventTypeSummarize,
@@ -792,8 +719,8 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 					Time:   time.Now().Unix(),
 				},
 			},
-			Model:    a.summarizeProvider.Model().ID,
-			Provider: a.summarizeProviderID,
+			Model:    a.large.Model,
+			Provider: a.large.Provider,
 		})
 		if err != nil {
 			event = AgentEvent{
@@ -808,7 +735,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		oldSession.SummaryMessageID = msg.ID
 		oldSession.CompletionTokens = finalResponse.Usage.OutputTokens
 		oldSession.PromptTokens = 0
-		model := a.summarizeProvider.Model()
+		model := a.summarizeProvider.Model(a.large.Model)
 		usage := finalResponse.Usage
 		cost := model.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 			model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
@@ -857,92 +784,101 @@ func (a *agent) CancelAll() {
 	}
 }
 
-func (a *agent) UpdateModel() error {
-	cfg := config.Get()
+func (a *agent) UpdateModels(small, large Model) error {
+	a.small = small
+	a.large = large
+	return a.setProviders()
+}
 
-	// Get current provider configuration
-	currentProviderCfg := cfg.GetProviderForModel(a.agentCfg.Model)
-	if currentProviderCfg == nil || currentProviderCfg.ID == "" {
-		return fmt.Errorf("provider for agent %s not found in config", a.agentCfg.Name)
+func (a *agent) SetDebug(debug bool) {
+	a.debug = debug
+	if a.provider != nil {
+		a.provider.SetDebug(debug)
+	}
+	if a.titleProvider != nil {
+		a.titleProvider.SetDebug(debug)
+	}
+	if a.summarizeProvider != nil {
+		a.summarizeProvider.SetDebug(debug)
+	}
+}
+
+func (a *agent) setProviders() error {
+	opts := []provider.Option{
+		provider.WithSystemMessage(a.systemPrompt),
+		provider.WithThinking(a.large.Think),
 	}
 
-	// Check if provider has changed
-	if string(currentProviderCfg.ID) != a.providerID {
-		// Provider changed, need to recreate the main provider
-		model := cfg.GetModelByType(a.agentCfg.Model)
-		if model.ID == "" {
-			return fmt.Errorf("model not found for agent %s", a.agentCfg.Name)
-		}
-
-		promptID := agentPromptMap[a.agentCfg.ID]
-		if promptID == "" {
-			promptID = prompt.PromptDefault
-		}
-
-		opts := []provider.ProviderClientOption{
-			provider.WithModel(a.agentCfg.Model),
-			provider.WithSystemMessage(prompt.GetPrompt(promptID, currentProviderCfg.ID, cfg.Options.ContextPaths...)),
-		}
-
-		newProvider, err := provider.NewProvider(*currentProviderCfg, opts...)
-		if err != nil {
-			return fmt.Errorf("failed to create new provider: %w", err)
-		}
-
-		// Update the provider and provider ID
-		a.provider = newProvider
-		a.providerID = string(currentProviderCfg.ID)
+	if a.large.MaxTokens > 0 {
+		opts = append(opts, provider.WithMaxTokens(a.large.MaxTokens))
+	}
+	if a.large.ReasoningEffort != "" {
+		opts = append(opts, provider.WithReasoningEffort(a.large.ReasoningEffort))
 	}
 
-	// Check if small model provider has changed (affects title and summarize providers)
-	smallModelCfg := cfg.Models[config.SelectedModelTypeSmall]
-	var smallModelProviderCfg config.ProviderConfig
-
-	for p := range cfg.Providers.Seq() {
-		if p.ID == smallModelCfg.Provider {
-			smallModelProviderCfg = p
-			break
-		}
+	providerCfg, ok := a.providers[a.large.Provider]
+	if !ok {
+		return fmt.Errorf("provider %s not found in config", a.large.Provider)
+	}
+	var err error
+	a.provider, err = provider.NewProvider(providerCfg, opts...)
+	if err != nil {
+		return fmt.Errorf("failed to create provider: %w", err)
 	}
 
-	if smallModelProviderCfg.ID == "" {
-		return fmt.Errorf("provider %s not found in config", smallModelCfg.Provider)
+	titleOpts := []provider.Option{
+		provider.WithSystemMessage(prompt.TitlePrompt()),
+		provider.WithMaxTokens(40),
 	}
 
-	// Check if summarize provider has changed
-	if string(smallModelProviderCfg.ID) != a.summarizeProviderID {
-		smallModel := cfg.GetModelByType(config.SelectedModelTypeSmall)
-		if smallModel == nil {
-			return fmt.Errorf("model %s not found in provider %s", smallModelCfg.Model, smallModelProviderCfg.ID)
-		}
-
-		// Recreate title provider
-		titleOpts := []provider.ProviderClientOption{
-			provider.WithModel(config.SelectedModelTypeSmall),
-			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-			// We want the title to be short, so we limit the max tokens
-			provider.WithMaxTokens(40),
-		}
-		newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
-		if err != nil {
-			return fmt.Errorf("failed to create new title provider: %w", err)
-		}
-
-		// Recreate summarize provider
-		summarizeOpts := []provider.ProviderClientOption{
-			provider.WithModel(config.SelectedModelTypeSmall),
-			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
-		}
-		newSummarizeProvider, err := provider.NewProvider(smallModelProviderCfg, summarizeOpts...)
-		if err != nil {
-			return fmt.Errorf("failed to create new summarize provider: %w", err)
-		}
-
-		// Update the providers and provider ID
-		a.titleProvider = newTitleProvider
-		a.summarizeProvider = newSummarizeProvider
-		a.summarizeProviderID = string(smallModelProviderCfg.ID)
+	titleProviderCfg, ok := a.providers[a.small.Provider]
+	if !ok {
+		return fmt.Errorf("small model provider %s not found in config", a.small.Provider)
 	}
 
+	a.titleProvider, err = provider.NewProvider(titleProviderCfg, titleOpts...)
+	if err != nil {
+		return err
+	}
+	summarizeOpts := []provider.Option{
+		provider.WithSystemMessage(prompt.SummarizerPrompt()),
+	}
+	a.summarizeProvider, err = provider.NewProvider(providerCfg, summarizeOpts...)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := a.toolsRegistry.GetTool(AgentToolName); ok {
+		// reset the agent tool
+		a.WithAgentTool()
+	}
+
+	a.SetDebug(a.debug)
+	return nil
+}
+
+func (a *agent) WithAgentTool() error {
+	agent, err := NewAgent(
+		a.ctx,
+		a.cwd,
+		prompt.TaskPrompt(a.cwd),
+		NewTaskTools(a.cwd),
+		a.providers,
+		a.small,
+		a.large,
+		a.sessions,
+		a.messages,
+	)
+	if err != nil {
+		return err
+	}
+
+	agentTool := NewAgentTool(
+		agent,
+		a.sessions,
+		a.messages,
+	)
+
+	a.toolsRegistry.SetTool(AgentToolName, agentTool)
 	return nil
 }

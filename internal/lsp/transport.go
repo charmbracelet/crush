@@ -8,19 +8,16 @@ import (
 	"io"
 	"log/slog"
 	"strings"
-
-	"github.com/charmbracelet/crush/internal/config"
 )
 
 // WriteMessage writes an LSP message to the given writer
-func WriteMessage(w io.Writer, msg *Message) error {
+func WriteMessage(w io.Writer, msg *Message, debug bool) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
-	cfg := config.Get()
 
-	if cfg.Options.DebugLSP {
+	if debug {
 		slog.Debug("Sending message to server", "method", msg.Method, "id", msg.ID)
 	}
 
@@ -38,8 +35,7 @@ func WriteMessage(w io.Writer, msg *Message) error {
 }
 
 // ReadMessage reads a single LSP message from the given reader
-func ReadMessage(r *bufio.Reader) (*Message, error) {
-	cfg := config.Get()
+func ReadMessage(r *bufio.Reader, debug bool) (*Message, error) {
 	// Read headers
 	var contentLength int
 	for {
@@ -49,7 +45,7 @@ func ReadMessage(r *bufio.Reader) (*Message, error) {
 		}
 		line = strings.TrimSpace(line)
 
-		if cfg.Options.DebugLSP {
+		if debug {
 			slog.Debug("Received header", "line", line)
 		}
 
@@ -65,7 +61,7 @@ func ReadMessage(r *bufio.Reader) (*Message, error) {
 		}
 	}
 
-	if cfg.Options.DebugLSP {
+	if debug {
 		slog.Debug("Content-Length", "length", contentLength)
 	}
 
@@ -76,7 +72,7 @@ func ReadMessage(r *bufio.Reader) (*Message, error) {
 		return nil, fmt.Errorf("failed to read content: %w", err)
 	}
 
-	if cfg.Options.DebugLSP {
+	if debug {
 		slog.Debug("Received content", "content", string(content))
 	}
 
@@ -91,11 +87,10 @@ func ReadMessage(r *bufio.Reader) (*Message, error) {
 
 // handleMessages reads and dispatches messages in a loop
 func (c *Client) handleMessages() {
-	cfg := config.Get()
 	for {
-		msg, err := ReadMessage(c.stdout)
+		msg, err := ReadMessage(c.stdout, c.debug)
 		if err != nil {
-			if cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Error("Error reading message", "error", err)
 			}
 			return
@@ -103,7 +98,7 @@ func (c *Client) handleMessages() {
 
 		// Handle server->client request (has both Method and ID)
 		if msg.Method != "" && msg.ID != 0 {
-			if cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Debug("Received request from server", "method", msg.Method, "id", msg.ID)
 			}
 
@@ -143,7 +138,7 @@ func (c *Client) handleMessages() {
 			}
 
 			// Send response back to server
-			if err := WriteMessage(c.stdin, response); err != nil {
+			if err := WriteMessage(c.stdin, response, c.debug); err != nil {
 				slog.Error("Error sending response to server", "error", err)
 			}
 
@@ -157,11 +152,11 @@ func (c *Client) handleMessages() {
 			c.notificationMu.RUnlock()
 
 			if ok {
-				if cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("Handling notification", "method", msg.Method)
 				}
 				go handler(msg.Params)
-			} else if cfg.Options.DebugLSP {
+			} else if c.debug {
 				slog.Debug("No handler for notification", "method", msg.Method)
 			}
 			continue
@@ -174,12 +169,12 @@ func (c *Client) handleMessages() {
 			c.handlersMu.RUnlock()
 
 			if ok {
-				if cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("Received response for request", "id", msg.ID)
 				}
 				ch <- msg
 				close(ch)
-			} else if cfg.Options.DebugLSP {
+			} else if c.debug {
 				slog.Debug("No handler for response", "id", msg.ID)
 			}
 		}
@@ -188,10 +183,9 @@ func (c *Client) handleMessages() {
 
 // Call makes a request and waits for the response
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
-	cfg := config.Get()
 	id := c.nextID.Add(1)
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Making call", "method", method, "id", id)
 	}
 
@@ -213,11 +207,11 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	}()
 
 	// Send request
-	if err := WriteMessage(c.stdin, msg); err != nil {
+	if err := WriteMessage(c.stdin, msg, c.debug); err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Request sent", "method", method, "id", id)
 	}
 
@@ -226,7 +220,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 	case <-ctx.Done():
 		return ctx.Err()
 	case resp := <-ch:
-		if cfg.Options.DebugLSP {
+		if c.debug {
 			slog.Debug("Received response", "id", id)
 		}
 
@@ -252,8 +246,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 
 // Notify sends a notification (a request without an ID that doesn't expect a response)
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
-	cfg := config.Get()
-	if cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Sending notification", "method", method)
 	}
 
@@ -262,7 +255,7 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 		return fmt.Errorf("failed to create notification: %w", err)
 	}
 
-	if err := WriteMessage(c.stdin, msg); err != nil {
+	if err := WriteMessage(c.stdin, msg, c.debug); err != nil {
 		return fmt.Errorf("failed to send notification: %w", err)
 	}
 

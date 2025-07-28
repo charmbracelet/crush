@@ -12,7 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
+	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -71,9 +73,10 @@ type splashCmp struct {
 	selectedModel *models.ModelOption
 	isAPIKeyValid bool
 	apiKeyValue   string
+	config        *config.Config
 }
 
-func New() Splash {
+func New(cfg *config.Config) Splash {
 	keyMap := DefaultKeyMap()
 	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
@@ -85,12 +88,13 @@ func New() Splash {
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	modelList := models.NewModelListComponent(listKeyMap, "Find your fave", false)
+	modelList := models.NewModelListComponent(cfg, listKeyMap, "Find your fave", false)
 	apiKeyInput := models.NewAPIKeyInput()
 
 	return &splashCmp{
 		width:        0,
 		height:       0,
+		config:       cfg,
 		keyMap:       keyMap,
 		logoRendered: "",
 		modelList:    modelList,
@@ -214,16 +218,16 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return s, nil
 				}
 
-				provider, err := s.getProvider(s.selectedModel.Provider.ID)
-				if err != nil || provider == nil {
+				selectedProvider, err := s.getProvider(s.selectedModel.Provider.ID)
+				if err != nil || selectedProvider == nil {
 					return s, util.ReportError(fmt.Errorf("provider %s not found", s.selectedModel.Provider.ID))
 				}
-				providerConfig := config.ProviderConfig{
+				providerConfig := provider.Config{
 					ID:      string(s.selectedModel.Provider.ID),
 					Name:    s.selectedModel.Provider.Name,
 					APIKey:  s.apiKeyValue,
-					Type:    provider.Type,
-					BaseURL: provider.APIEndpoint,
+					Type:    selectedProvider.Type,
+					BaseURL: selectedProvider.APIEndpoint,
 				}
 				return s, tea.Sequence(
 					util.CmdHandler(models.APIKeyStateChangeMsg{
@@ -231,7 +235,7 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}),
 					func() tea.Msg {
 						start := time.Now()
-						err := providerConfig.TestConnection(config.Get().Resolver())
+						err := providerConfig.TestConnection(s.config.Resolver())
 						// intentionally wait for at least 750ms to make sure the user sees the spinner
 						elapsed := time.Since(start)
 						if elapsed < 750*time.Millisecond {
@@ -320,8 +324,7 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 		return util.ReportError(fmt.Errorf("no model selected"))
 	}
 
-	cfg := config.Get()
-	err := cfg.SetProviderAPIKey(string(s.selectedModel.Provider.ID), apiKey)
+	err := s.config.SetProviderAPIKey(string(s.selectedModel.Provider.ID), apiKey)
 	if err != nil {
 		return util.ReportError(fmt.Errorf("failed to save API key: %w", err))
 	}
@@ -338,7 +341,7 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 func (s *splashCmp) initializeProject() tea.Cmd {
 	s.needsProjectInit = false
 
-	if err := config.MarkProjectInitialized(); err != nil {
+	if err := config.MarkProjectInitialized(s.config); err != nil {
 		return util.ReportError(err)
 	}
 	var cmds []tea.Cmd
@@ -356,20 +359,19 @@ func (s *splashCmp) initializeProject() tea.Cmd {
 }
 
 func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
-	cfg := config.Get()
-	model := cfg.GetModel(string(selectedItem.Provider.ID), selectedItem.Model.ID)
+	model := s.config.GetModel(string(selectedItem.Provider.ID), selectedItem.Model.ID)
 	if model == nil {
 		return util.ReportError(fmt.Errorf("model %s not found for provider %s", selectedItem.Model.ID, selectedItem.Provider.ID))
 	}
 
-	selectedModel := config.SelectedModel{
+	selectedModel := agent.Model{
 		Model:           selectedItem.Model.ID,
 		Provider:        string(selectedItem.Provider.ID),
 		ReasoningEffort: model.DefaultReasoningEffort,
 		MaxTokens:       model.DefaultMaxTokens,
 	}
 
-	err := cfg.UpdatePreferredModel(config.SelectedModelTypeLarge, selectedModel)
+	err := s.config.UpdatePreferredModel(config.SelectedModelTypeLarge, selectedModel)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -381,33 +383,32 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 	}
 	if knownProvider == nil {
 		// for local provider we just use the same model
-		err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
+		err = s.config.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
 		if err != nil {
 			return util.ReportError(err)
 		}
 	} else {
 		smallModel := knownProvider.DefaultSmallModelID
-		model := cfg.GetModel(string(selectedItem.Provider.ID), smallModel)
+		model := s.config.GetModel(string(selectedItem.Provider.ID), smallModel)
 		// should never happen
 		if model == nil {
-			err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
+			err = s.config.UpdatePreferredModel(config.SelectedModelTypeSmall, selectedModel)
 			if err != nil {
 				return util.ReportError(err)
 			}
 			return nil
 		}
-		smallSelectedModel := config.SelectedModel{
+		smallSelectedModel := agent.Model{
 			Model:           smallModel,
 			Provider:        string(selectedItem.Provider.ID),
 			ReasoningEffort: model.DefaultReasoningEffort,
 			MaxTokens:       model.DefaultMaxTokens,
 		}
-		err = cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallSelectedModel)
+		err = s.config.UpdatePreferredModel(config.SelectedModelTypeSmall, smallSelectedModel)
 		if err != nil {
 			return util.ReportError(err)
 		}
 	}
-	cfg.SetupAgents()
 	return nil
 }
 
@@ -425,8 +426,7 @@ func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.
 }
 
 func (s *splashCmp) isProviderConfigured(providerID string) bool {
-	cfg := config.Get()
-	if _, ok := cfg.Providers.Get(providerID); ok {
+	if _, ok := s.config.Providers.Get(providerID); ok {
 		return true
 	}
 	return false
@@ -652,7 +652,7 @@ func (s *splashCmp) getMaxInfoWidth() int {
 }
 
 func (s *splashCmp) cwd() string {
-	cwd := config.Get().WorkingDir()
+	cwd := s.config.WorkingDir()
 	t := styles.CurrentTheme()
 	homeDir, err := os.UserHomeDir()
 	if err == nil && cwd != homeDir {
@@ -662,10 +662,10 @@ func (s *splashCmp) cwd() string {
 	return t.S().Muted.Width(maxWidth).Render(cwd)
 }
 
-func LSPList(maxWidth int) []string {
+func LSPList(cfg *config.Config, maxWidth int) []string {
 	t := styles.CurrentTheme()
 	lspList := []string{}
-	lsp := config.Get().LSP.Sorted()
+	lsp := cfg.LSP.Sorted()
 	if len(lsp) == 0 {
 		return []string{t.S().Base.Foreground(t.Border).Render("None")}
 	}
@@ -692,7 +692,7 @@ func (s *splashCmp) lspBlock() string {
 	t := styles.CurrentTheme()
 	maxWidth := s.getMaxInfoWidth() / 2
 	section := t.S().Subtle.Render("LSPs")
-	lspList := append([]string{section, ""}, LSPList(maxWidth-1)...)
+	lspList := append([]string{section, ""}, LSPList(s.config, maxWidth-1)...)
 	return t.S().Base.Width(maxWidth).PaddingRight(1).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -701,10 +701,10 @@ func (s *splashCmp) lspBlock() string {
 	)
 }
 
-func MCPList(maxWidth int) []string {
+func MCPList(cfg *config.Config, maxWidth int) []string {
 	t := styles.CurrentTheme()
 	mcpList := []string{}
-	mcps := config.Get().MCP.Sorted()
+	mcps := cfg.MCP.Sorted()
 	if len(mcps) == 0 {
 		return []string{t.S().Base.Foreground(t.Border).Render("None")}
 	}
@@ -731,7 +731,7 @@ func (s *splashCmp) mcpBlock() string {
 	t := styles.CurrentTheme()
 	maxWidth := s.getMaxInfoWidth() / 2
 	section := t.S().Subtle.Render("MCPs")
-	mcpList := append([]string{section, ""}, MCPList(maxWidth-1)...)
+	mcpList := append([]string{section, ""}, MCPList(s.config, maxWidth-1)...)
 	return t.S().Base.Width(maxWidth).PaddingRight(1).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,

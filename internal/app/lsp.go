@@ -23,7 +23,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	slog.Info("Creating LSP client", "name", name, "command", command, "args", args)
 
 	// Create LSP client.
-	lspClient, err := lsp.NewClient(ctx, command, args...)
+	lspClient, err := lsp.NewClient(ctx, app.config.WorkingDir(), command, args...)
 	if err != nil {
 		slog.Error("Failed to create LSP client for", name, err)
 		return
@@ -60,7 +60,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	watchCtx, cancelFunc := context.WithCancel(ctx)
 
 	// Create the workspace watcher.
-	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient)
+	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient, app.config.Options.DebugLSP)
 
 	// Store the cancel function to be called during cleanup.
 	app.watcherCancelFuncs.Append(cancelFunc)

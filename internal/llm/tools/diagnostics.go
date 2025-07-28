@@ -113,7 +113,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 		maps.Copy(originalDiags, client.GetDiagnostics())
 
 		handler := func(params json.RawMessage) {
-			lsp.HandleDiagnostics(client, params)
+			client.HandleDiagnostics(params)
 			var diagParams protocol.PublishDiagnosticsParams
 			if err := json.Unmarshal(params, &diagParams); err != nil {
 				return

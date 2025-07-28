@@ -6,27 +6,25 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-type azureClient struct {
-	*openaiClient
+type azureProvider struct {
+	*openaiProvider
 }
 
-type AzureClient ProviderClient
-
-func newAzureClient(opts providerClientOptions) AzureClient {
-	apiVersion := opts.extraParams["apiVersion"]
+func NewAzureProvider(base *baseProvider) Provider {
+	apiVersion := base.extraParams["apiVersion"]
 	if apiVersion == "" {
 		apiVersion = "2025-01-01-preview"
 	}
 
 	reqOpts := []option.RequestOption{
-		azure.WithEndpoint(opts.baseURL, apiVersion),
+		azure.WithEndpoint(base.baseURL, apiVersion),
 	}
 
-	reqOpts = append(reqOpts, azure.WithAPIKey(opts.apiKey))
-	base := &openaiClient{
-		providerOptions: opts,
-		client:          openai.NewClient(reqOpts...),
+	reqOpts = append(reqOpts, azure.WithAPIKey(base.apiKey))
+	client := &openaiProvider{
+		baseProvider: base,
+		client:       openai.NewClient(reqOpts...),
 	}
 
-	return &azureClient{openaiClient: base}
+	return &azureProvider{openaiProvider: client}
 }

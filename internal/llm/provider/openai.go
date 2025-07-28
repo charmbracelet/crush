@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
@@ -18,30 +17,25 @@ import (
 	"github.com/openai/openai-go/shared"
 )
 
-type openaiClient struct {
-	providerOptions providerClientOptions
-	client          openai.Client
+type openaiProvider struct {
+	*baseProvider
+	client openai.Client
 }
 
-type OpenAIClient ProviderClient
-
-func newOpenAIClient(opts providerClientOptions) OpenAIClient {
-	return &openaiClient{
-		providerOptions: opts,
-		client:          createOpenAIClient(opts),
+func NewOpenAIProvider(base *baseProvider) Provider {
+	return &openaiProvider{
+		baseProvider: base,
+		client:       createOpenAIClient(base),
 	}
 }
 
-func createOpenAIClient(opts providerClientOptions) openai.Client {
+func createOpenAIClient(opts *baseProvider) openai.Client {
 	openaiClientOptions := []option.RequestOption{}
 	if opts.apiKey != "" {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
 	}
 	if opts.baseURL != "" {
-		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
-		if err == nil {
-			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
-		}
+		openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(opts.baseURL))
 	}
 
 	for key, value := range opts.extraHeaders {
@@ -55,11 +49,11 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	return openai.NewClient(openaiClientOptions...)
 }
 
-func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
+func (o *openaiProvider) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
 	// Add system message first
-	systemMessage := o.providerOptions.systemMessage
-	if o.providerOptions.systemPromptPrefix != "" {
-		systemMessage = o.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	systemMessage := o.systemMessage
+	if o.systemPromptPrefix != "" {
+		systemMessage = o.systemPromptPrefix + "\n" + systemMessage
 	}
 	openaiMessages = append(openaiMessages, openai.SystemMessage(systemMessage))
 
@@ -126,7 +120,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 	return
 }
 
-func (o *openaiClient) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {
+func (o *openaiProvider) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {
 	openaiTools := make([]openai.ChatCompletionToolParam, len(tools))
 
 	for i, tool := range tools {
@@ -147,7 +141,7 @@ func (o *openaiClient) convertTools(tools []tools.BaseTool) []openai.ChatComplet
 	return openaiTools
 }
 
-func (o *openaiClient) finishReason(reason string) message.FinishReason {
+func (o *openaiProvider) finishReason(reason string) message.FinishReason {
 	switch reason {
 	case "stop":
 		return message.FinishReasonEndTurn
@@ -160,16 +154,13 @@ func (o *openaiClient) finishReason(reason string) message.FinishReason {
 	}
 }
 
-func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
-	model := o.providerOptions.model(o.providerOptions.modelType)
-	cfg := config.Get()
+func (o *openaiProvider) preparedParams(modelID string, messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
+	model := o.Model(modelID)
 
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if o.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	reasoningEffort := o.reasoningEffort
+	if reasoningEffort == "" {
+		reasoningEffort = model.DefaultReasoningEffort
 	}
-
-	reasoningEffort := modelConfig.ReasoningEffort
 
 	params := openai.ChatCompletionNewParams{
 		Model:    openai.ChatModel(model.ID),
@@ -178,14 +169,10 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	}
 
 	maxTokens := model.DefaultMaxTokens
-	if modelConfig.MaxTokens > 0 {
-		maxTokens = modelConfig.MaxTokens
+	if o.maxTokens > 0 {
+		maxTokens = o.maxTokens
 	}
 
-	// Override max tokens if set in provider options
-	if o.providerOptions.maxTokens > 0 {
-		maxTokens = o.providerOptions.maxTokens
-	}
 	if model.CanReason {
 		params.MaxCompletionTokens = openai.Int(maxTokens)
 		switch reasoningEffort {
@@ -205,10 +192,14 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	return params
 }
 
-func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
-	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
-	cfg := config.Get()
-	if cfg.Options.Debug {
+func (o *openaiProvider) Send(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
+	messages = o.cleanMessages(messages)
+	return o.send(ctx, model, messages, tools)
+}
+
+func (o *openaiProvider) send(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
+	params := o.preparedParams(model, o.convertMessages(messages), o.convertTools(tools))
+	if o.debug {
 		jsonData, _ := json.Marshal(params)
 		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
@@ -262,14 +253,18 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 	}
 }
 
-func (o *openaiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
+func (o *openaiProvider) Stream(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	messages = o.cleanMessages(messages)
+	return o.stream(ctx, model, messages, tools)
+}
+
+func (o *openaiProvider) stream(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	params := o.preparedParams(model, o.convertMessages(messages), o.convertTools(tools))
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
 	}
 
-	cfg := config.Get()
-	if cfg.Options.Debug {
+	if o.debug {
 		jsonData, _ := json.Marshal(params)
 		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
@@ -350,7 +345,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
-				if cfg.Options.Debug {
+				if o.debug {
 					jsonData, _ := json.Marshal(acc.ChatCompletion)
 					slog.Debug("Response", "messages", string(jsonData))
 				}
@@ -421,7 +416,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	return eventChan
 }
 
-func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error) {
+func (o *openaiProvider) shouldRetry(attempts int, err error) (bool, int64, error) {
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) {
 		return false, 0, err
@@ -433,11 +428,11 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if apiErr.StatusCode == 401 {
-		o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
+		o.apiKey, err = o.resolver.ResolveValue(o.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
-		o.client = createOpenAIClient(o.providerOptions)
+		o.client = createOpenAIClient(o.baseProvider)
 		return true, 0, nil
 	}
 
@@ -459,7 +454,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	return true, int64(retryMs), nil
 }
 
-func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.ToolCall {
+func (o *openaiProvider) toolCalls(completion openai.ChatCompletion) []message.ToolCall {
 	var toolCalls []message.ToolCall
 
 	if len(completion.Choices) > 0 && len(completion.Choices[0].Message.ToolCalls) > 0 {
@@ -478,7 +473,7 @@ func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.Too
 	return toolCalls
 }
 
-func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
+func (o *openaiProvider) usage(completion openai.ChatCompletion) TokenUsage {
 	cachedTokens := completion.Usage.PromptTokensDetails.CachedTokens
 	inputTokens := completion.Usage.PromptTokens - cachedTokens
 
@@ -488,8 +483,4 @@ func (o *openaiClient) usage(completion openai.ChatCompletion) TokenUsage {
 		CacheCreationTokens: 0, // OpenAI doesn't provide this directly
 		CacheReadTokens:     cachedTokens,
 	}
-}
-
-func (o *openaiClient) Model() catwalk.Model {
-	return o.providerOptions.model(o.providerOptions.modelType)
 }

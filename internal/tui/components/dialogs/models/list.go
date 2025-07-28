@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -18,9 +19,10 @@ type ModelListComponent struct {
 	list      listModel
 	modelType int
 	providers []catwalk.Provider
+	config    *config.Config
 }
 
-func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
+func NewModelListComponent(cfg *config.Config, keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
 	options := []list.ListOption{
@@ -42,6 +44,7 @@ func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldRe
 	return &ModelListComponent{
 		list:      modelList,
 		modelType: LargeModelType,
+		config:    cfg,
 	}
 }
 
@@ -94,12 +97,11 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	// first none section
 	selectedItemID := ""
 
-	cfg := config.Get()
-	var currentModel config.SelectedModel
+	var currentModel agent.Model
 	if m.modelType == LargeModelType {
-		currentModel = cfg.Models[config.SelectedModelTypeLarge]
+		currentModel = m.config.Models[config.SelectedModelTypeLarge]
 	} else {
-		currentModel = cfg.Models[config.SelectedModelTypeSmall]
+		currentModel = m.config.Models[config.SelectedModelTypeSmall]
 	}
 
 	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
@@ -114,7 +116,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	for providerID, providerConfig := range cfg.Providers.Seq2() {
+	for providerID, providerConfig := range m.config.Providers.Seq2() {
 		if providerConfig.Disable {
 			continue
 		}
@@ -185,7 +187,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
+		if providerConfig, exists := m.config.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
 			continue
 		}
 
@@ -195,7 +197,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
+		if _, ok := m.config.Providers.Get(string(provider.ID)); ok {
 			section.SetInfo(configured)
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{

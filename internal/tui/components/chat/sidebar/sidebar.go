@@ -10,12 +10,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -69,16 +68,14 @@ type sidebarCmp struct {
 	session       session.Session
 	logo          string
 	cwd           string
-	lspClients    map[string]*lsp.Client
 	compactMode   bool
-	history       history.Service
 	files         *csync.Map[string, SessionFile]
+	app           *app.App
 }
 
-func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
+func New(app *app.App, compact bool) Sidebar {
 	return &sidebarCmp{
-		lspClients:  lspClients,
-		history:     history,
+		app:         app,
 		compactMode: compact,
 		files:       csync.NewMap[string, SessionFile](),
 	}
@@ -194,7 +191,7 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 			before := existing.History.initialVersion.Content
 			after := existing.History.latestVersion.Content
 			path := existing.History.initialVersion.Path
-			cwd := config.Get().WorkingDir()
+			cwd := m.app.Config().WorkingDir()
 			path = strings.TrimPrefix(path, cwd)
 			_, additions, deletions := diff.GenerateDiff(before, after, path)
 			existing.Additions = additions
@@ -221,7 +218,7 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 }
 
 func (m *sidebarCmp) loadSessionFiles() tea.Msg {
-	files, err := m.history.ListBySession(context.Background(), m.session.ID)
+	files, err := m.app.History.ListBySession(context.Background(), m.session.ID)
 	if err != nil {
 		return util.InfoMsg{
 			Type: util.InfoTypeError,
@@ -247,7 +244,7 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 	sessionFiles := make([]SessionFile, 0, len(fileMap))
 	for path, fh := range fileMap {
-		cwd := config.Get().WorkingDir()
+		cwd := m.app.Config().WorkingDir()
 		path = strings.TrimPrefix(path, cwd)
 		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, path)
 		sessionFiles = append(sessionFiles, SessionFile{
@@ -265,7 +262,7 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
 	m.logo = m.logoBlock()
-	m.cwd = cwd()
+	m.cwd = cwd(m.app.Config().WorkingDir())
 	m.width = width
 	m.height = height
 	return nil
@@ -428,7 +425,7 @@ func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
+		cwd := m.app.Config().WorkingDir() + string(os.PathSeparator)
 		filePath := file.FilePath
 		filePath = strings.TrimPrefix(filePath, cwd)
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
@@ -471,7 +468,7 @@ func (m *sidebarCmp) lspBlockCompact(maxWidth int) string {
 
 	lspList := []string{section, ""}
 
-	lsp := config.Get().LSP.Sorted()
+	lsp := m.app.Config().LSP.Sorted()
 	if len(lsp) == 0 {
 		content := lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -505,7 +502,7 @@ func (m *sidebarCmp) lspBlockCompact(maxWidth int) string {
 			protocol.SeverityHint:        0,
 			protocol.SeverityInformation: 0,
 		}
-		if client, ok := m.lspClients[l.Name]; ok {
+		if client, ok := m.app.LSPClients[l.Name]; ok {
 			for _, diagnostics := range client.GetDiagnostics() {
 				for _, diagnostic := range diagnostics {
 					if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -559,7 +556,7 @@ func (m *sidebarCmp) mcpBlockCompact(maxWidth int) string {
 
 	mcpList := []string{section, ""}
 
-	mcps := config.Get().MCP.Sorted()
+	mcps := m.app.Config().MCP.Sorted()
 	if len(mcps) == 0 {
 		content := lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -653,7 +650,7 @@ func (m *sidebarCmp) filesBlock() string {
 		}
 
 		extraContent := strings.Join(statusParts, " ")
-		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
+		cwd := m.app.Config().WorkingDir() + string(os.PathSeparator)
 		filePath := file.FilePath
 		filePath = strings.TrimPrefix(filePath, cwd)
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
@@ -701,7 +698,7 @@ func (m *sidebarCmp) lspBlock() string {
 
 	lspList := []string{section, ""}
 
-	lsp := config.Get().LSP.Sorted()
+	lsp := m.app.Config().LSP.Sorted()
 	if len(lsp) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -729,7 +726,7 @@ func (m *sidebarCmp) lspBlock() string {
 			protocol.SeverityHint:        0,
 			protocol.SeverityInformation: 0,
 		}
-		if client, ok := m.lspClients[l.Name]; ok {
+		if client, ok := m.app.LSPClients[l.Name]; ok {
 			for _, diagnostics := range client.GetDiagnostics() {
 				for _, diagnostic := range diagnostics {
 					if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -789,7 +786,7 @@ func (m *sidebarCmp) mcpBlock() string {
 
 	mcpList := []string{section, ""}
 
-	mcps := config.Get().MCP.Sorted()
+	mcps := m.app.Config().MCP.Sorted()
 	if len(mcps) == 0 {
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -876,13 +873,9 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	cfg := config.Get()
-	agentCfg := cfg.Agents["coder"]
-
-	selectedModel := cfg.Models[agentCfg.Model]
-
-	model := config.Get().GetModelByType(agentCfg.Model)
-	modelProvider := config.Get().GetProviderForModel(agentCfg.Model)
+	model := s.app.CoderAgent.Model()
+	selectedModel := s.app.CoderAgent.ModelConfig()
+	modelProvider := s.app.CoderAgent.Provider()
 
 	t := styles.CurrentTheme()
 
@@ -938,8 +931,7 @@ func (m *sidebarCmp) SetCompactMode(compact bool) {
 	m.compactMode = compact
 }
 
-func cwd() string {
-	cwd := config.Get().WorkingDir()
+func cwd(cwd string) string {
 	t := styles.CurrentTheme()
 	// Replace home directory with ~, unless we're at the top level of the
 	// home directory).

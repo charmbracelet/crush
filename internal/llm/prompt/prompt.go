@@ -6,9 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/resolver"
 )
 
 type PromptID string
@@ -20,23 +18,6 @@ const (
 	PromptSummarizer PromptID = "summarizer"
 	PromptDefault    PromptID = "default"
 )
-
-func GetPrompt(promptID PromptID, provider string, contextPaths ...string) string {
-	basePrompt := ""
-	switch promptID {
-	case PromptCoder:
-		basePrompt = CoderPrompt(provider, contextPaths...)
-	case PromptTitle:
-		basePrompt = TitlePrompt()
-	case PromptTask:
-		basePrompt = TaskPrompt()
-	case PromptSummarizer:
-		basePrompt = SummarizerPrompt()
-	default:
-		basePrompt = "You are a helpful assistant"
-	}
-	return basePrompt
-}
 
 func getContextFromPaths(workingDir string, contextPaths []string) string {
 	return processContextPaths(workingDir, contextPaths)
@@ -59,7 +40,7 @@ func expandPath(path string) string {
 
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
-		resolver := config.NewEnvironmentVariableResolver(env.New())
+		resolver := resolver.New()
 		if expanded, err := resolver.ResolveValue(path); err == nil {
 			path = expanded
 		}
@@ -75,7 +56,8 @@ func processContextPaths(workDir string, paths []string) string {
 	)
 
 	// Track processed files to avoid duplicates
-	processedFiles := csync.NewMap[string, bool]()
+	processedFiles := make(map[string]bool)
+	var processedMutex sync.Mutex
 
 	for _, path := range paths {
 		wg.Add(1)
@@ -106,8 +88,14 @@ func processContextPaths(workDir string, paths []string) string {
 						// Check if we've already processed this file (case-insensitive)
 						lowerPath := strings.ToLower(path)
 
-						if alreadyProcessed, _ := processedFiles.Get(lowerPath); !alreadyProcessed {
-							processedFiles.Set(lowerPath, true)
+						processedMutex.Lock()
+						alreadyProcessed := processedFiles[lowerPath]
+						if !alreadyProcessed {
+							processedFiles[lowerPath] = true
+						}
+						processedMutex.Unlock()
+
+						if !alreadyProcessed {
 							if result := processFile(path); result != "" {
 								resultCh <- result
 							}
@@ -120,8 +108,14 @@ func processContextPaths(workDir string, paths []string) string {
 				// Check if we've already processed this file (case-insensitive)
 				lowerPath := strings.ToLower(fullPath)
 
-				if alreadyProcessed, _ := processedFiles.Get(lowerPath); !alreadyProcessed {
-					processedFiles.Set(lowerPath, true)
+				processedMutex.Lock()
+				alreadyProcessed := processedFiles[lowerPath]
+				if !alreadyProcessed {
+					processedFiles[lowerPath] = true
+				}
+				processedMutex.Unlock()
+
+				if !alreadyProcessed {
 					result := processFile(fullPath)
 					if result != "" {
 						resultCh <- result

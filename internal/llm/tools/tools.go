@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"slices"
+
+	"github.com/charmbracelet/crush/internal/csync"
 )
 
 type ToolInfo struct {
@@ -82,4 +85,52 @@ func GetContextValues(ctx context.Context) (string, string) {
 		return sessionID.(string), ""
 	}
 	return sessionID.(string), messageID.(string)
+}
+
+type Registry interface {
+	GetTool(name string) (BaseTool, bool)
+	SetTool(name string, tool BaseTool)
+	GetAllTools() []BaseTool
+}
+
+type registry struct {
+	tools *csync.LazySlice[BaseTool]
+}
+
+func (r *registry) GetAllTools() []BaseTool {
+	return slices.Collect(r.tools.Seq())
+}
+
+func (r *registry) GetTool(name string) (BaseTool, bool) {
+	for tool := range r.tools.Seq() {
+		if tool.Name() == name {
+			return tool, true
+		}
+	}
+
+	return nil, false
+}
+
+func (r *registry) SetTool(name string, tool BaseTool) {
+	for k, tool := range r.tools.Seq2() {
+		if tool.Name() == name {
+			r.tools.Set(k, tool)
+			return
+		}
+	}
+	r.tools.Append(tool)
+}
+
+type LazyToolsFn func() []BaseTool
+
+func NewRegistry(lazyTools LazyToolsFn) Registry {
+	return &registry{
+		tools: csync.NewLazySlice(lazyTools),
+	}
+}
+
+func NewRegistryFromTools(tools []BaseTool) Registry {
+	return &registry{
+		tools: csync.NewLazySlice(func() []BaseTool { return tools }),
+	}
 }

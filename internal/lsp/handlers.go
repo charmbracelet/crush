@@ -4,19 +4,17 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/config"
-
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/lsp/util"
 )
 
 // Requests
 
-func HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
+func (c *Client) HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
 	return []map[string]any{{}}, nil
 }
 
-func HandleRegisterCapability(params json.RawMessage) (any, error) {
+func (c *Client) HandleRegisterCapability(params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
 	if err := json.Unmarshal(params, &registerParams); err != nil {
 		slog.Error("Error unmarshaling registration params", "error", err)
@@ -47,7 +45,7 @@ func HandleRegisterCapability(params json.RawMessage) (any, error) {
 	return nil, nil
 }
 
-func HandleApplyEdit(params json.RawMessage) (any, error) {
+func (c *Client) HandleApplyEdit(params json.RawMessage) (any, error) {
 	var edit protocol.ApplyWorkspaceEditParams
 	if err := json.Unmarshal(params, &edit); err != nil {
 		return nil, err
@@ -82,28 +80,27 @@ func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatche
 
 // Notifications
 
-func HandleServerMessage(params json.RawMessage) {
-	cfg := config.Get()
+func (c *Client) HandleServerMessage(params json.RawMessage) {
 	var msg struct {
 		Type    int    `json:"type"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(params, &msg); err == nil {
-		if cfg.Options.DebugLSP {
+		if c.debug {
 			slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
 		}
 	}
 }
 
-func HandleDiagnostics(client *Client, params json.RawMessage) {
+func (c *Client) HandleDiagnostics(params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostics params", "error", err)
 		return
 	}
 
-	client.diagnosticsMu.Lock()
-	defer client.diagnosticsMu.Unlock()
+	c.diagnosticsMu.Lock()
+	defer c.diagnosticsMu.Unlock()
 
-	client.diagnostics[diagParams.URI] = diagParams.Diagnostics
+	c.diagnostics[diagParams.URI] = diagParams.Diagnostics
 }

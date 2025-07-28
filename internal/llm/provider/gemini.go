@@ -10,43 +10,39 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
 	"google.golang.org/genai"
 )
 
-type geminiClient struct {
-	providerOptions providerClientOptions
-	client          *genai.Client
+type geminiProvider struct {
+	*baseProvider
+	client *genai.Client
 }
 
-type GeminiClient ProviderClient
-
-func newGeminiClient(opts providerClientOptions) GeminiClient {
-	client, err := createGeminiClient(opts)
+func NewGeminiProvider(base *baseProvider) Provider {
+	client, err := createGeminiClient(base)
 	if err != nil {
 		slog.Error("Failed to create Gemini client", "error", err)
 		return nil
 	}
 
-	return &geminiClient{
-		providerOptions: opts,
-		client:          client,
+	return &geminiProvider{
+		baseProvider: base,
+		client:       client,
 	}
 }
 
-func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: opts.apiKey, Backend: genai.BackendGeminiAPI})
+func createGeminiClient(base *baseProvider) (*genai.Client, error) {
+	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: base.apiKey, Backend: genai.BackendGeminiAPI})
 	if err != nil {
 		return nil, err
 	}
 	return client, nil
 }
 
-func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Content {
+func (g *geminiProvider) convertMessages(messages []message.Message) []*genai.Content {
 	var history []*genai.Content
 	for _, msg := range messages {
 		switch msg.Role {
@@ -128,7 +124,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 	return history
 }
 
-func (g *geminiClient) convertTools(tools []tools.BaseTool) []*genai.Tool {
+func (g *geminiProvider) convertTools(tools []tools.BaseTool) []*genai.Tool {
 	geminiTool := &genai.Tool{}
 	geminiTool.FunctionDeclarations = make([]*genai.FunctionDeclaration, 0, len(tools))
 
@@ -150,7 +146,7 @@ func (g *geminiClient) convertTools(tools []tools.BaseTool) []*genai.Tool {
 	return []*genai.Tool{geminiTool}
 }
 
-func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishReason {
+func (g *geminiProvider) finishReason(reason genai.FinishReason) message.FinishReason {
 	switch reason {
 	case genai.FinishReasonStop:
 		return message.FinishReasonEndTurn
@@ -161,28 +157,27 @@ func (g *geminiClient) finishReason(reason genai.FinishReason) message.FinishRea
 	}
 }
 
-func (g *geminiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
+func (g *geminiProvider) Send(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
+	messages = g.cleanMessages(messages)
+	return g.send(ctx, model, messages, tools)
+}
+
+func (g *geminiProvider) send(ctx context.Context, modelID string, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
-	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := config.Get()
-	if cfg.Options.Debug {
+	if g.debug {
 		jsonData, _ := json.Marshal(geminiMessages)
 		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
-	}
-
+	model := g.Model(modelID)
 	maxTokens := model.DefaultMaxTokens
-	if modelConfig.MaxTokens > 0 {
-		maxTokens = modelConfig.MaxTokens
+	if g.maxTokens > 0 {
+		maxTokens = g.maxTokens
 	}
-	systemMessage := g.providerOptions.systemMessage
-	if g.providerOptions.systemPromptPrefix != "" {
-		systemMessage = g.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	systemMessage := g.systemMessage
+	if g.systemPromptPrefix != "" {
+		systemMessage = g.systemPromptPrefix + "\n" + systemMessage
 	}
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
@@ -260,34 +255,31 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	}
 }
 
-func (g *geminiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+func (g *geminiProvider) Stream(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	messages = g.cleanMessages(messages)
+	return g.stream(ctx, model, messages, tools)
+}
+
+func (g *geminiProvider) stream(ctx context.Context, modelID string, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 
-	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := config.Get()
-	if cfg.Options.Debug {
+	model := g.Model(modelID)
+	if g.debug {
 		jsonData, _ := json.Marshal(geminiMessages)
 		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
-	}
 	maxTokens := model.DefaultMaxTokens
-	if modelConfig.MaxTokens > 0 {
-		maxTokens = modelConfig.MaxTokens
+	if g.maxTokens > 0 {
+		maxTokens = g.maxTokens
 	}
 
-	// Override max tokens if set in provider options
-	if g.providerOptions.maxTokens > 0 {
-		maxTokens = g.providerOptions.maxTokens
+	systemMessage := g.systemMessage
+	if g.systemPromptPrefix != "" {
+		systemMessage = g.systemPromptPrefix + "\n" + systemMessage
 	}
-	systemMessage := g.providerOptions.systemMessage
-	if g.providerOptions.systemPromptPrefix != "" {
-		systemMessage = g.providerOptions.systemPromptPrefix + "\n" + systemMessage
-	}
+
 	history := geminiMessages[:len(geminiMessages)-1] // All but last message
 	lastMsg := geminiMessages[len(geminiMessages)-1]
 	config := &genai.GenerateContentConfig{
@@ -412,7 +404,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	return eventChan
 }
 
-func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error) {
+func (g *geminiProvider) shouldRetry(attempts int, err error) (bool, int64, error) {
 	// Check if error is a rate limit error
 	if attempts > maxRetries {
 		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
@@ -429,11 +421,11 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
+		g.apiKey, err = g.resolver.ResolveValue(g.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
-		g.client, err = createGeminiClient(g.providerOptions)
+		g.client, err = createGeminiClient(g.baseProvider)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to create Gemini client after API key refresh: %w", err)
 		}
@@ -454,7 +446,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	return true, int64(retryMs), nil
 }
 
-func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
+func (g *geminiProvider) usage(resp *genai.GenerateContentResponse) TokenUsage {
 	if resp == nil || resp.UsageMetadata == nil {
 		return TokenUsage{}
 	}
@@ -465,10 +457,6 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 		CacheCreationTokens: 0, // Not directly provided by Gemini
 		CacheReadTokens:     int64(resp.UsageMetadata.CachedContentTokenCount),
 	}
-}
-
-func (g *geminiClient) Model() catwalk.Model {
-	return g.providerOptions.model(g.providerOptions.modelType)
 }
 
 // Helper functions

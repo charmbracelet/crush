@@ -351,6 +351,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 				messages.NewAssistantSection(
 					msg,
 					time.Unix(m.lastUserMessageTime, 0),
+					m.app.Config(),
 				),
 			)
 		}
@@ -472,7 +473,7 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 		case message.Assistant:
 			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				uiMessages = append(uiMessages, messages.NewAssistantSection(msg, time.Unix(m.lastUserMessageTime, 0)))
+				uiMessages = append(uiMessages, messages.NewAssistantSection(msg, time.Unix(m.lastUserMessageTime, 0), m.app.Config()))
 			}
 		}
 	}

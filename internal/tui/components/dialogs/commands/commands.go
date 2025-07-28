@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -49,6 +49,7 @@ type commandDialogCmp struct {
 	wWidth  int // Width of the terminal window
 	wHeight int // Height of the terminal window
 
+	app          *app.App
 	commandList  listModel
 	keyMap       CommandsDialogKeyMap
 	help         help.Model
@@ -67,7 +68,7 @@ type (
 	}
 )
 
-func NewCommandDialog(sessionID string) CommandsDialog {
+func NewCommandDialog(app *app.App, sessionID string) CommandsDialog {
 	keyMap := DefaultCommandsDialogKeyMap()
 	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
@@ -89,6 +90,7 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 	help := help.New()
 	help.Styles = t.S().Help
 	return &commandDialogCmp{
+		app:         app,
 		commandList: commandList,
 		width:       defaultWidth,
 		keyMap:      DefaultCommandsDialogKeyMap(),
@@ -99,7 +101,7 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 }
 
 func (c *commandDialogCmp) Init() tea.Cmd {
-	commands, err := LoadCustomCommands()
+	commands, err := LoadCustomCommands(c.app.Config())
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -274,13 +276,12 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	// Only show thinking toggle for Anthropic models that can reason
-	cfg := config.Get()
-	if agentCfg, ok := cfg.Agents["coder"]; ok {
-		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
-		model := cfg.GetModelByType(agentCfg.Model)
+	if c.app.CoderAgent != nil {
+		providerCfg := c.app.CoderAgent.Provider()
+		model := c.app.CoderAgent.Model()
 		if providerCfg != nil && model != nil &&
 			providerCfg.Type == catwalk.TypeAnthropic && model.CanReason {
-			selectedModel := cfg.Models[agentCfg.Model]
+			selectedModel := c.app.CoderAgent.ModelConfig()
 			status := "Enable"
 			if selectedModel.Think {
 				status = "Disable"

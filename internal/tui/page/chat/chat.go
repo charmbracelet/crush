@@ -117,29 +117,28 @@ func New(app *app.App) ChatPage {
 	return &chatPage{
 		app:         app,
 		keyMap:      DefaultKeyMap(),
-		header:      header.New(app.LSPClients),
-		sidebar:     sidebar.New(app.History, app.LSPClients, false),
+		header:      header.New(app),
+		sidebar:     sidebar.New(app, false),
 		chat:        chat.New(app),
 		editor:      editor.New(app),
-		splash:      splash.New(),
+		splash:      splash.New(app.Config()),
 		focusedPane: PanelTypeSplash,
 	}
 }
 
 func (p *chatPage) Init() tea.Cmd {
-	cfg := config.Get()
-	compact := cfg.Options.TUI.CompactMode
+	compact := p.app.Config().Options.TUI.CompactMode
 	p.compact = compact
 	p.forceCompact = compact
 	p.sidebar.SetCompactMode(p.compact)
 
 	// Set splash state based on config
-	if !config.HasInitialDataConfig() {
+	if !config.HasInitialDataConfig(p.app.Config()) {
 		// First-time setup: show model selection
 		p.splash.SetOnboarding(true)
 		p.isOnboarding = true
 		p.splashFullScreen = true
-	} else if b, _ := config.ProjectNeedsInitialization(); b {
+	} else if b, _ := config.ProjectNeedsInitialization(p.app.Config()); b {
 		// Project needs CRUSH.md initialization
 		p.splash.SetProjectInit(true)
 		p.isProjectInit = true
@@ -275,7 +274,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case splash.OnboardingCompleteMsg:
 		p.splashFullScreen = false
-		if b, _ := config.ProjectNeedsInitialization(); b {
+		if b, _ := config.ProjectNeedsInitialization(p.app.Config()); b {
 			p.splash.SetProjectInit(true)
 			p.splashFullScreen = true
 			return p, p.SetSize(p.width, p.height)
@@ -296,8 +295,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			agentCfg := config.Get().Agents["coder"]
-			model := config.Get().GetModelByType(agentCfg.Model)
+			model := p.app.CoderAgent.Model()
 			if model.SupportsImages {
 				return p, util.CmdHandler(OpenFilePickerMsg{})
 			} else {
@@ -441,7 +439,7 @@ func (p *chatPage) View() string {
 
 func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 	return func() tea.Msg {
-		err := config.Get().SetCompactMode(compact)
+		err := p.app.Config().SetCompactMode(compact)
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -454,13 +452,11 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 
 func (p *chatPage) toggleThinking() tea.Cmd {
 	return func() tea.Msg {
-		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
-		currentModel := cfg.Models[agentCfg.Model]
+		currentModel := p.app.CoderAgent.ModelConfig()
 
 		// Toggle the thinking mode
 		currentModel.Think = !currentModel.Think
-		cfg.Models[agentCfg.Model] = currentModel
+		p.app.Config().Models[config.SelectedModelTypeLarge] = currentModel
 
 		// Update the agent with the new configuration
 		if err := p.app.UpdateAgentModel(); err != nil {

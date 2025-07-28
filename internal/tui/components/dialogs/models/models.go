@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
@@ -34,7 +36,7 @@ const (
 
 // ModelSelectedMsg is sent when a model is selected
 type ModelSelectedMsg struct {
-	Model     config.SelectedModel
+	Model     agent.Model
 	ModelType config.SelectedModelType
 }
 
@@ -56,6 +58,7 @@ type modelDialogCmp struct {
 	wWidth  int
 	wHeight int
 
+	config    *config.Config
 	modelList *ModelListComponent
 	keyMap    KeyMap
 	help      help.Model
@@ -69,7 +72,7 @@ type modelDialogCmp struct {
 	apiKeyValue       string
 }
 
-func NewModelDialogCmp() ModelDialog {
+func NewModelDialogCmp(cfg *config.Config) ModelDialog {
 	keyMap := DefaultKeyMap()
 
 	listKeyMap := list.DefaultKeyMap()
@@ -79,7 +82,7 @@ func NewModelDialogCmp() ModelDialog {
 	listKeyMap.UpOneItem = keyMap.Previous
 
 	t := styles.CurrentTheme()
-	modelList := NewModelListComponent(listKeyMap, "Choose a model for large, complex tasks", true)
+	modelList := NewModelListComponent(cfg, listKeyMap, "Choose a model for large, complex tasks", true)
 	apiKeyInput := NewAPIKeyInput()
 	apiKeyInput.SetShowTitle(false)
 	help := help.New()
@@ -91,6 +94,7 @@ func NewModelDialogCmp() ModelDialog {
 		width:       defaultWidth,
 		keyMap:      DefaultKeyMap(),
 		help:        help,
+		config:      cfg,
 	}
 }
 
@@ -119,16 +123,16 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.needsAPIKey {
 				// Handle API key submission
 				m.apiKeyValue = m.apiKeyInput.Value()
-				provider, err := m.getProvider(m.selectedModel.Provider.ID)
-				if err != nil || provider == nil {
+				selectedProvider, err := m.getProvider(m.selectedModel.Provider.ID)
+				if err != nil || selectedProvider == nil {
 					return m, util.ReportError(fmt.Errorf("provider %s not found", m.selectedModel.Provider.ID))
 				}
-				providerConfig := config.ProviderConfig{
+				providerConfig := provider.Config{
 					ID:      string(m.selectedModel.Provider.ID),
 					Name:    m.selectedModel.Provider.Name,
 					APIKey:  m.apiKeyValue,
-					Type:    provider.Type,
-					BaseURL: provider.APIEndpoint,
+					Type:    selectedProvider.Type,
+					BaseURL: selectedProvider.APIEndpoint,
 				}
 				return m, tea.Sequence(
 					util.CmdHandler(APIKeyStateChangeMsg{
@@ -136,7 +140,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}),
 					func() tea.Msg {
 						start := time.Now()
-						err := providerConfig.TestConnection(config.Get().Resolver())
+						err := providerConfig.TestConnection(m.config.Resolver())
 						// intentionally wait for at least 750ms to make sure the user sees the spinner
 						elapsed := time.Since(start)
 						if elapsed < 750*time.Millisecond {
@@ -169,7 +173,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Sequence(
 					util.CmdHandler(dialogs.CloseDialogMsg{}),
 					util.CmdHandler(ModelSelectedMsg{
-						Model: config.SelectedModel{
+						Model: agent.Model{
 							Model:    selectedItem.Model.ID,
 							Provider: string(selectedItem.Provider.ID),
 						},
@@ -342,8 +346,7 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 }
 
 func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {
-	cfg := config.Get()
-	if _, ok := cfg.Providers.Get(providerID); ok {
+	if _, ok := m.config.Providers.Get(providerID); ok {
 		return true
 	}
 	return false
@@ -367,8 +370,7 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 		return util.ReportError(fmt.Errorf("no model selected"))
 	}
 
-	cfg := config.Get()
-	err := cfg.SetProviderAPIKey(string(m.selectedModel.Provider.ID), apiKey)
+	err := m.config.SetProviderAPIKey(string(m.selectedModel.Provider.ID), apiKey)
 	if err != nil {
 		return util.ReportError(fmt.Errorf("failed to save API key: %w", err))
 	}
@@ -378,7 +380,7 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	return tea.Sequence(
 		util.CmdHandler(dialogs.CloseDialogMsg{}),
 		util.CmdHandler(ModelSelectedMsg{
-			Model: config.SelectedModel{
+			Model: agent.Model{
 				Model:    selectedModel.Model.ID,
 				Provider: string(selectedModel.Provider.ID),
 			},

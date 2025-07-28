@@ -29,8 +29,7 @@ type commandSource struct {
 	prefix string
 }
 
-func LoadCustomCommands() ([]Command, error) {
-	cfg := config.Get()
+func LoadCustomCommands(cfg *config.Config) ([]Command, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}

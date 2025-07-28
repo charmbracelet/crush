@@ -93,7 +93,7 @@ func (a appModel) Init() tea.Cmd {
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
-	a.isConfigured = config.HasInitialDataConfig()
+	a.isConfigured = config.HasInitialDataConfig(a.app.Config())
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
@@ -162,7 +162,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.SwitchModelMsg:
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
-				Model: models.NewModelDialogCmp(),
+				Model: models.NewModelDialogCmp(a.app.Config()),
 			},
 		)
 	// Compact
@@ -173,7 +173,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Model Switch
 	case models.ModelSelectedMsg:
-		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
+		a.app.Config().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
@@ -234,7 +234,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				model := a.app.CoderAgent.Model()
 				contextWindow := model.ContextWindow
 				tokens := session.CompletionTokens + session.PromptTokens
-				if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
+				if (tokens >= int64(float64(contextWindow)*0.95)) && !a.app.Config().Options.DisableAutoSummarize { // Show compact confirmation dialog
 					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
 						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),
 					}))
@@ -244,7 +244,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, tea.Batch(cmds...)
 	case splash.OnboardingCompleteMsg:
-		a.isConfigured = config.HasInitialDataConfig()
+		a.isConfigured = config.HasInitialDataConfig(a.app.Config())
 		updated, pageCmd := a.pages[a.currentPage].Update(msg)
 		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, pageCmd)
@@ -355,7 +355,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: commands.NewCommandDialog(a.selectedSessionID),
+			Model: commands.NewCommandDialog(a.app, a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
 		// if the app is not configured show no sessions

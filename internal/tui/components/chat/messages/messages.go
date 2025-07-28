@@ -352,6 +352,7 @@ type AssistantSection interface {
 }
 type assistantSectionModel struct {
 	width               int
+	config              *config.Config
 	id                  string
 	message             message.Message
 	lastUserMessageTime time.Time
@@ -362,9 +363,10 @@ func (m *assistantSectionModel) ID() string {
 	return m.id
 }
 
-func NewAssistantSection(message message.Message, lastUserMessageTime time.Time) AssistantSection {
+func NewAssistantSection(message message.Message, lastUserMessageTime time.Time, cfg *config.Config) AssistantSection {
 	return &assistantSectionModel{
 		width:               0,
+		config:              cfg,
 		id:                  uuid.NewString(),
 		message:             message,
 		lastUserMessageTime: lastUserMessageTime,
@@ -386,7 +388,7 @@ func (m *assistantSectionModel) View() string {
 	duration := finishTime.Sub(m.lastUserMessageTime)
 	infoMsg := t.S().Subtle.Render(duration.String())
 	icon := t.S().Subtle.Render(styles.ModelIcon)
-	model := config.Get().GetModel(m.message.Provider, m.message.Model)
+	model := m.config.GetModel(m.message.Provider, m.message.Model)
 	if model == nil {
 		// This means the model is not configured anymore
 		model = &catwalk.Model{

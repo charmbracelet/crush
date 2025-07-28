@@ -36,6 +36,32 @@ func (s *LazySlice[K]) Seq() iter.Seq[K] {
 	}
 }
 
+func (s *LazySlice[K]) Seq2() iter.Seq2[int, K] {
+	s.wg.Wait()
+	return func(yield func(int, K) bool) {
+		for i, v := range s.inner {
+			if !yield(i, v) {
+				return
+			}
+		}
+	}
+}
+
+func (s *LazySlice[K]) Set(index int, item K) bool {
+	s.wg.Wait()
+	if index < 0 || index >= len(s.inner) {
+		return false
+	}
+	s.inner[index] = item
+	return true
+}
+
+func (s *LazySlice[K]) Append(item K) bool {
+	s.wg.Wait()
+	s.inner = append(s.inner, item)
+	return true
+}
+
 // Slice is a thread-safe slice implementation that provides concurrent access.
 type Slice[T any] struct {
 	inner []T

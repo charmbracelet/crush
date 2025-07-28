@@ -7,11 +7,9 @@ import (
 	"google.golang.org/genai"
 )
 
-type VertexAIClient ProviderClient
-
-func newVertexAIClient(opts providerClientOptions) VertexAIClient {
-	project := opts.extraHeaders["project"]
-	location := opts.extraHeaders["location"]
+func NewVertexAIProvider(base *baseProvider) Provider {
+	project := base.extraHeaders["project"]
+	location := base.extraHeaders["location"]
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		Project:  project,
 		Location: location,
@@ -22,8 +20,8 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 		return nil
 	}
 
-	return &geminiClient{
-		providerOptions: opts,
-		client:          client,
+	return &geminiProvider{
+		baseProvider: base,
+		client:       client,
 	}
 }

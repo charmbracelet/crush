@@ -17,12 +17,12 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/provider"
 	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/pubsub"
-
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 )
 
@@ -196,7 +196,9 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 }
 
 func (app *App) UpdateAgentModel() error {
-	return app.CoderAgent.UpdateModel()
+	small := app.config.Models[config.SelectedModelTypeSmall]
+	large := app.config.Models[config.SelectedModelTypeLarge]
+	return app.CoderAgent.UpdateModels(small, large)
 }
 
 func (app *App) setupEvents() {
@@ -250,21 +252,30 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent() error {
-	coderAgentCfg := app.config.Agents["coder"]
-	if coderAgentCfg.ID == "" {
-		return fmt.Errorf("coder agent configuration is missing")
-	}
 	var err error
-	app.CoderAgent, err = agent.NewAgent(
-		coderAgentCfg,
-		app.Permissions,
+	providers := map[string]provider.Config{}
+	maps.Insert(providers, app.config.Providers.Seq2())
+	app.CoderAgent, err = agent.NewCoderAgent(
+		app.globalCtx,
+		app.config.WorkingDir(),
+		providers,
+		app.config.Models[config.SelectedModelTypeSmall],
+		app.config.Models[config.SelectedModelTypeLarge],
+		app.config.Options.ContextPaths,
 		app.Sessions,
 		app.Messages,
-		app.History,
+		app.Permissions,
 		app.LSPClients,
+		app.History,
+		app.config.MCP,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
+		return err
+	}
+	err = app.CoderAgent.WithAgentTool()
+	if err != nil {
+		slog.Error("Failed to create agent tool", "err", err)
 		return err
 	}
 	setupSubscriber(app.eventsCtx, app.serviceEventsWG, "coderAgent", app.CoderAgent.Subscribe, app.events)

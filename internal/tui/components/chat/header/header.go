@@ -5,9 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -27,14 +26,14 @@ type Header interface {
 type header struct {
 	width       int
 	session     session.Session
-	lspClients  map[string]*lsp.Client
+	app         *app.App
 	detailsOpen bool
 }
 
-func New(lspClients map[string]*lsp.Client) Header {
+func New(app *app.App) Header {
 	return &header{
-		lspClients: lspClients,
-		width:      0,
+		app:   app,
+		width: 0,
 	}
 }
 
@@ -88,13 +87,13 @@ func (p *header) View() string {
 
 func (h *header) details() string {
 	t := styles.CurrentTheme()
-	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), 4)
+	cwd := fsext.DirTrim(fsext.PrettyPath(h.app.Config().WorkingDir()), 4)
 	parts := []string{
 		t.S().Muted.Render(cwd),
 	}
 
 	errorCount := 0
-	for _, l := range h.lspClients {
+	for _, l := range h.app.LSPClients {
 		for _, diagnostics := range l.GetDiagnostics() {
 			for _, diagnostic := range diagnostics {
 				if diagnostic.Severity == protocol.SeverityError {
@@ -108,8 +107,7 @@ func (h *header) details() string {
 		parts = append(parts, t.S().Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
 	}
 
-	agentCfg := config.Get().Agents["coder"]
-	model := config.Get().GetModelByType(agentCfg.Model)
+	model := h.app.CoderAgent.Model()
 	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.S().Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

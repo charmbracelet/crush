@@ -3,11 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/resolver"
 )
 
 type EventType string
@@ -52,44 +54,169 @@ type ProviderEvent struct {
 	ToolCall  *message.ToolCall
 	Error     error
 }
-type Provider interface {
-	SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 
-	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
+type Config struct {
+	// The provider's id.
+	ID string `json:"id,omitempty"`
+	// The provider's name, used for display purposes.
+	Name string `json:"name,omitempty"`
+	// The provider's API endpoint.
+	BaseURL string `json:"base_url,omitempty"`
+	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
+	Type catwalk.Type `json:"type,omitempty"`
+	// The provider's API key.
+	APIKey string `json:"api_key,omitempty"`
+	// Marks the provider as disabled.
+	Disable bool `json:"disable,omitempty"`
 
-	Model() catwalk.Model
+	// Custom system prompt prefix.
+	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty"`
+
+	// Extra headers to send with each request to the provider.
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// Extra body
+	ExtraBody map[string]any `json:"extra_body,omitempty"`
+
+	// Used to pass extra parameters to the provider.
+	ExtraParams map[string]string `json:"-"`
+
+	// The provider models
+	Models []catwalk.Model `json:"models,omitempty"`
 }
 
-type providerClientOptions struct {
+type Provider interface {
+	Send(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
+
+	Stream(ctx context.Context, model string, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
+
+	Model(modelID string) *catwalk.Model
+
+	SetDebug(debug bool)
+}
+
+type baseProvider struct {
 	baseURL            string
-	config             config.ProviderConfig
+	debug              bool
+	config             Config
 	apiKey             string
-	modelType          config.SelectedModelType
-	model              func(config.SelectedModelType) catwalk.Model
 	disableCache       bool
 	systemMessage      string
 	systemPromptPrefix string
 	maxTokens          int64
+	think              bool
+	reasoningEffort    string
+	resolver           resolver.Resolver
 	extraHeaders       map[string]string
 	extraBody          map[string]any
 	extraParams        map[string]string
 }
 
-type ProviderClientOption func(*providerClientOptions)
+type Option func(*baseProvider)
 
-type ProviderClient interface {
-	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
-	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
-
-	Model() catwalk.Model
+func WithDisableCache(disableCache bool) Option {
+	return func(options *baseProvider) {
+		options.disableCache = disableCache
+	}
 }
 
-type baseProvider[C ProviderClient] struct {
-	options providerClientOptions
-	client  C
+func WithSystemMessage(systemMessage string) Option {
+	return func(options *baseProvider) {
+		options.systemMessage = systemMessage
+	}
 }
 
-func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []message.Message) {
+func WithMaxTokens(maxTokens int64) Option {
+	return func(options *baseProvider) {
+		options.maxTokens = maxTokens
+	}
+}
+
+func WithThinking(think bool) Option {
+	return func(options *baseProvider) {
+		options.think = think
+	}
+}
+
+func WithReasoningEffort(reasoningEffort string) Option {
+	return func(options *baseProvider) {
+		options.reasoningEffort = reasoningEffort
+	}
+}
+
+func WithDebug(debug bool) Option {
+	return func(options *baseProvider) {
+		options.debug = debug
+	}
+}
+
+func WithResolver(resolver resolver.Resolver) Option {
+	return func(options *baseProvider) {
+		options.resolver = resolver
+	}
+}
+
+func newBaseProvider(cfg Config, opts ...Option) (*baseProvider, error) {
+	provider := &baseProvider{
+		baseURL:            cfg.BaseURL,
+		config:             cfg,
+		apiKey:             cfg.APIKey,
+		extraHeaders:       cfg.ExtraHeaders,
+		extraBody:          cfg.ExtraBody,
+		systemPromptPrefix: cfg.SystemPromptPrefix,
+		resolver:           resolver.New(),
+	}
+	for _, o := range opts {
+		o(provider)
+	}
+
+	resolvedAPIKey, err := provider.resolver.ResolveValue(cfg.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
+	}
+
+	resolvedBaseURL, err := provider.resolver.ResolveValue(cfg.BaseURL)
+	if err != nil {
+		resolvedBaseURL = ""
+	}
+	// Resolve extra headers
+	resolvedExtraHeaders := make(map[string]string)
+	for key, value := range cfg.ExtraHeaders {
+		resolvedValue, err := provider.resolver.ResolveValue(value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
+		}
+		resolvedExtraHeaders[key] = resolvedValue
+	}
+
+	provider.apiKey = resolvedAPIKey
+	provider.baseURL = resolvedBaseURL
+	provider.extraHeaders = resolvedExtraHeaders
+	return provider, nil
+}
+
+func NewProvider(cfg Config, opts ...Option) (Provider, error) {
+	base, err := newBaseProvider(cfg, opts...)
+	if err != nil {
+		return nil, err
+	}
+	switch cfg.Type {
+	case catwalk.TypeAnthropic:
+		return NewAnthropicProvider(base, false), nil
+	case catwalk.TypeOpenAI:
+		return NewOpenAIProvider(base), nil
+	case catwalk.TypeGemini:
+		return NewGeminiProvider(base), nil
+	case catwalk.TypeBedrock:
+		return NewBedrockProvider(base), nil
+	case catwalk.TypeAzure:
+		return NewAzureProvider(base), nil
+	case catwalk.TypeVertexAI:
+		return NewVertexAIProvider(base), nil
+	}
+	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)
+}
+
+func (p *baseProvider) cleanMessages(messages []message.Message) (cleaned []message.Message) {
 	for _, msg := range messages {
 		// The message has no content
 		if len(msg.Parts) == 0 {
@@ -100,111 +227,60 @@ func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []m
 	return
 }
 
-func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
-	messages = p.cleanMessages(messages)
-	return p.client.send(ctx, messages, tools)
-}
-
-func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	messages = p.cleanMessages(messages)
-	return p.client.stream(ctx, messages, tools)
-}
-
-func (p *baseProvider[C]) Model() catwalk.Model {
-	return p.client.Model()
-}
-
-func WithModel(model config.SelectedModelType) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.modelType = model
-	}
-}
-
-func WithDisableCache(disableCache bool) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.disableCache = disableCache
-	}
-}
-
-func WithSystemMessage(systemMessage string) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.systemMessage = systemMessage
-	}
-}
-
-func WithMaxTokens(maxTokens int64) ProviderClientOption {
-	return func(options *providerClientOptions) {
-		options.maxTokens = maxTokens
-	}
-}
-
-func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
-	resolvedAPIKey, err := config.Get().Resolve(cfg.APIKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
-	}
-
-	// Resolve extra headers
-	resolvedExtraHeaders := make(map[string]string)
-	for key, value := range cfg.ExtraHeaders {
-		resolvedValue, err := config.Get().Resolve(value)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
+func (o *baseProvider) Model(model string) *catwalk.Model {
+	for _, m := range o.config.Models {
+		if m.ID == model {
+			return &m
 		}
-		resolvedExtraHeaders[key] = resolvedValue
 	}
+	return nil
+}
 
-	clientOptions := providerClientOptions{
-		baseURL:            cfg.BaseURL,
-		config:             cfg,
-		apiKey:             resolvedAPIKey,
-		extraHeaders:       resolvedExtraHeaders,
-		extraBody:          cfg.ExtraBody,
-		systemPromptPrefix: cfg.SystemPromptPrefix,
-		model: func(tp config.SelectedModelType) catwalk.Model {
-			return *config.Get().GetModelByType(tp)
-		},
-	}
-	for _, o := range opts {
-		o(&clientOptions)
-	}
-	switch cfg.Type {
-	case catwalk.TypeAnthropic:
-		return &baseProvider[AnthropicClient]{
-			options: clientOptions,
-			client:  newAnthropicClient(clientOptions, false),
-		}, nil
+func (o *baseProvider) SetDebug(debug bool) {
+	o.debug = debug
+}
+
+func (c *Config) TestConnection(resolver resolver.Resolver) error {
+	testURL := ""
+	headers := make(map[string]string)
+	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	switch c.Type {
 	case catwalk.TypeOpenAI:
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
-	case catwalk.TypeGemini:
-		return &baseProvider[GeminiClient]{
-			options: clientOptions,
-			client:  newGeminiClient(clientOptions),
-		}, nil
-	case catwalk.TypeBedrock:
-		return &baseProvider[BedrockClient]{
-			options: clientOptions,
-			client:  newBedrockClient(clientOptions),
-		}, nil
-	case catwalk.TypeAzure:
-		return &baseProvider[AzureClient]{
-			options: clientOptions,
-			client:  newAzureClient(clientOptions),
-		}, nil
-	case catwalk.TypeVertexAI:
-		return &baseProvider[VertexAIClient]{
-			options: clientOptions,
-			client:  newVertexAIClient(clientOptions),
-		}, nil
-	case catwalk.TypeXAI:
-		clientOptions.baseURL = "https://api.x.ai/v1"
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + apiKey
+	case catwalk.TypeAnthropic:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["x-api-key"] = apiKey
+		headers["anthropic-version"] = "2023-06-01"
 	}
-	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	for k, v := range c.ExtraHeaders {
+		req.Header.Set(k, v)
+	}
+	b, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+	if b.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	}
+	_ = b.Body.Close()
+	return nil
 }

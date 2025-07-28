@@ -4,26 +4,23 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
 
-func CoderPrompt(p string, contextFiles ...string) string {
+func CoderPrompt(cwd string, contextFiles ...string) string {
 	var basePrompt string
 
 	basePrompt = string(baseCoderPrompt)
-	envInfo := getEnvironmentInfo()
+	envInfo := getEnvironmentInfo(cwd)
 
-	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
+	basePrompt = fmt.Sprintf("%s\n\n%s", basePrompt, envInfo)
 
-	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
-	slog.Debug("Context content", "Context", contextContent)
+	contextContent := getContextFromPaths(cwd, contextFiles)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
 	}
@@ -33,8 +30,7 @@ func CoderPrompt(p string, contextFiles ...string) string {
 //go:embed coder.md
 var baseCoderPrompt []byte
 
-func getEnvironmentInfo() string {
-	cwd := config.Get().WorkingDir()
+func getEnvironmentInfo(cwd string) string {
 	isGit := isGitRepo(cwd)
 	platform := runtime.GOOS
 	date := time.Now().Format("1/2/2006")
@@ -60,18 +56,7 @@ func isGitRepo(dir string) bool {
 	return err == nil
 }
 
-func lspInformation() string {
-	cfg := config.Get()
-	hasLSP := false
-	for _, v := range cfg.LSP {
-		if !v.Disabled {
-			hasLSP = true
-			break
-		}
-	}
-	if !hasLSP {
-		return ""
-	}
+func LSPInformation() string {
 	return `# LSP Information
 Tools that support it will also include useful diagnostics such as linting and typechecking.
 - These diagnostics will be automatically enabled when you run the tool, and will be displayed in the output at the bottom within the <file_diagnostics></file_diagnostics> and <project_diagnostics></project_diagnostics> tags.

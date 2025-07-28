@@ -63,9 +63,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, comman
 	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient)
 
 	// Store the cancel function to be called during cleanup.
-	app.cancelFuncsMutex.Lock()
-	app.watcherCancelFuncs = append(app.watcherCancelFuncs, cancelFunc)
-	app.cancelFuncsMutex.Unlock()
+	app.watcherCancelFuncs.Append(cancelFunc)
 
 	// Add to map with mutex protection before starting goroutine
 	app.clientsMutex.Lock()

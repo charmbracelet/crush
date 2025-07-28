@@ -1,6 +1,7 @@
 package csync
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -145,7 +146,7 @@ func TestSlice(t *testing.T) {
 		assert.Equal(t, 4, s.Len())
 
 		expected := []int{1, 2, 4, 5}
-		actual := s.Slice()
+		actual := slices.Collect(s.Seq())
 		assert.Equal(t, expected, actual)
 
 		// Delete out of bounds
@@ -203,7 +204,7 @@ func TestSlice(t *testing.T) {
 		s.SetSlice(newItems)
 
 		assert.Equal(t, 3, s.Len())
-		assert.Equal(t, newItems, s.Slice())
+		assert.Equal(t, newItems, slices.Collect(s.Seq()))
 
 		// Verify it's a copy
 		newItems[0] = 999
@@ -212,23 +213,15 @@ func TestSlice(t *testing.T) {
 		assert.Equal(t, 10, val)
 	})
 
-	t.Run("Clear", func(t *testing.T) {
-		s := NewSliceFrom([]int{1, 2, 3})
-		assert.Equal(t, 3, s.Len())
-
-		s.Clear()
-		assert.Equal(t, 0, s.Len())
-	})
-
 	t.Run("Slice", func(t *testing.T) {
 		original := []int{1, 2, 3}
 		s := NewSliceFrom(original)
 
-		copy := s.Slice()
-		assert.Equal(t, original, copy)
+		copied := slices.Collect(s.Seq())
+		assert.Equal(t, original, copied)
 
 		// Verify it's a copy
-		copy[0] = 999
+		copied[0] = 999
 		val, ok := s.Get(0)
 		require.True(t, ok)
 		assert.Equal(t, 1, val)

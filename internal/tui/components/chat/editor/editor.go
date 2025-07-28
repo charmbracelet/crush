@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -157,6 +156,10 @@ func (m *editorCmp) send() tea.Cmd {
 	if value == "" {
 		return nil
 	}
+
+	// Change the placeholder when sending a new message.
+	m.randomizePlaceholders()
+
 	return tea.Batch(
 		util.CmdHandler(chat.SendMsg{
 			Text:        value,
@@ -272,10 +275,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Otherwise, send the message
 				return m, m.send()
 			}
-		}
-	case pubsub.Event[message.Message]:
-		if msg.Type == pubsub.CreatedEvent {
-			m.randomizePlaceholders()
 		}
 	}
 

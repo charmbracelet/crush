@@ -240,11 +240,6 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
-		// Update the editor placeholder if a new message is sent
-		u, cmd := p.editor.Update(msg)
-		p.editor = u.(editor.Editor)
-		cmds = append(cmds, cmd)
-
 		return p, tea.Batch(cmds...)
 
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:

@@ -248,9 +248,9 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	status, ok := interp.IsExitStatus(err)
-	if ok {
-		return int(status)
+	var exitErr interp.ExitStatus
+	if errors.As(err, &exitErr) {
+		return int(exitErr)
 	}
 	return 1
 }

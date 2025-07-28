@@ -6,16 +6,16 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewMap(t *testing.T) {
 	t.Parallel()
 
 	m := NewMap[string, int]()
-	assert.NotNil(t, m)
-	assert.NotNil(t, m.inner)
-	assert.Equal(t, 0, m.Len())
+	require.NotNil(t, m)
+	require.NotNil(t, m.inner)
+	require.Equal(t, 0, m.Len())
 }
 
 func TestNewMapFrom(t *testing.T) {
@@ -27,13 +27,13 @@ func TestNewMapFrom(t *testing.T) {
 	}
 
 	m := NewMapFrom(original)
-	assert.NotNil(t, m)
-	assert.Equal(t, original, m.inner)
-	assert.Equal(t, 2, m.Len())
+	require.NotNil(t, m)
+	require.Equal(t, original, m.inner)
+	require.Equal(t, 2, m.Len())
 
 	value, ok := m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 1, value)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 }
 
 func TestMap_Set(t *testing.T) {
@@ -43,15 +43,15 @@ func TestMap_Set(t *testing.T) {
 
 	m.Set("key1", 42)
 	value, ok := m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
-	assert.Equal(t, 1, m.Len())
+	require.True(t, ok)
+	require.Equal(t, 42, value)
+	require.Equal(t, 1, m.Len())
 
 	m.Set("key1", 100)
 	value, ok = m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 100, value)
-	assert.Equal(t, 1, m.Len())
+	require.True(t, ok)
+	require.Equal(t, 100, value)
+	require.Equal(t, 1, m.Len())
 }
 
 func TestMap_Get(t *testing.T) {
@@ -60,13 +60,13 @@ func TestMap_Get(t *testing.T) {
 	m := NewMap[string, int]()
 
 	value, ok := m.Get("nonexistent")
-	assert.False(t, ok)
-	assert.Equal(t, 0, value)
+	require.False(t, ok)
+	require.Equal(t, 0, value)
 
 	m.Set("key1", 42)
 	value, ok = m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
+	require.True(t, ok)
+	require.Equal(t, 42, value)
 }
 
 func TestMap_Del(t *testing.T) {
@@ -76,38 +76,38 @@ func TestMap_Del(t *testing.T) {
 	m.Set("key1", 42)
 	m.Set("key2", 100)
 
-	assert.Equal(t, 2, m.Len())
+	require.Equal(t, 2, m.Len())
 
 	m.Del("key1")
 	_, ok := m.Get("key1")
-	assert.False(t, ok)
-	assert.Equal(t, 1, m.Len())
+	require.False(t, ok)
+	require.Equal(t, 1, m.Len())
 
 	value, ok := m.Get("key2")
-	assert.True(t, ok)
-	assert.Equal(t, 100, value)
+	require.True(t, ok)
+	require.Equal(t, 100, value)
 
 	m.Del("nonexistent")
-	assert.Equal(t, 1, m.Len())
+	require.Equal(t, 1, m.Len())
 }
 
 func TestMap_Len(t *testing.T) {
 	t.Parallel()
 
 	m := NewMap[string, int]()
-	assert.Equal(t, 0, m.Len())
+	require.Equal(t, 0, m.Len())
 
 	m.Set("key1", 1)
-	assert.Equal(t, 1, m.Len())
+	require.Equal(t, 1, m.Len())
 
 	m.Set("key2", 2)
-	assert.Equal(t, 2, m.Len())
+	require.Equal(t, 2, m.Len())
 
 	m.Del("key1")
-	assert.Equal(t, 1, m.Len())
+	require.Equal(t, 1, m.Len())
 
 	m.Del("key2")
-	assert.Equal(t, 0, m.Len())
+	require.Equal(t, 0, m.Len())
 }
 
 func TestMap_Take(t *testing.T) {
@@ -117,19 +117,19 @@ func TestMap_Take(t *testing.T) {
 	m.Set("key1", 42)
 	m.Set("key2", 100)
 
-	assert.Equal(t, 2, m.Len())
+	require.Equal(t, 2, m.Len())
 
 	value, ok := m.Take("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
-	assert.Equal(t, 1, m.Len())
+	require.True(t, ok)
+	require.Equal(t, 42, value)
+	require.Equal(t, 1, m.Len())
 
 	_, exists := m.Get("key1")
-	assert.False(t, exists)
+	require.False(t, exists)
 
 	value, ok = m.Get("key2")
-	assert.True(t, ok)
-	assert.Equal(t, 100, value)
+	require.True(t, ok)
+	require.Equal(t, 100, value)
 }
 
 func TestMap_Take_NonexistentKey(t *testing.T) {
@@ -139,13 +139,13 @@ func TestMap_Take_NonexistentKey(t *testing.T) {
 	m.Set("key1", 42)
 
 	value, ok := m.Take("nonexistent")
-	assert.False(t, ok)
-	assert.Equal(t, 0, value)
-	assert.Equal(t, 1, m.Len())
+	require.False(t, ok)
+	require.Equal(t, 0, value)
+	require.Equal(t, 1, m.Len())
 
 	value, ok = m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
+	require.True(t, ok)
+	require.Equal(t, 42, value)
 }
 
 func TestMap_Take_EmptyMap(t *testing.T) {
@@ -154,9 +154,9 @@ func TestMap_Take_EmptyMap(t *testing.T) {
 	m := NewMap[string, int]()
 
 	value, ok := m.Take("key1")
-	assert.False(t, ok)
-	assert.Equal(t, 0, value)
-	assert.Equal(t, 0, m.Len())
+	require.False(t, ok)
+	require.Equal(t, 0, value)
+	require.Equal(t, 0, m.Len())
 }
 
 func TestMap_Take_SameKeyTwice(t *testing.T) {
@@ -166,14 +166,14 @@ func TestMap_Take_SameKeyTwice(t *testing.T) {
 	m.Set("key1", 42)
 
 	value, ok := m.Take("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
-	assert.Equal(t, 0, m.Len())
+	require.True(t, ok)
+	require.Equal(t, 42, value)
+	require.Equal(t, 0, m.Len())
 
 	value, ok = m.Take("key1")
-	assert.False(t, ok)
-	assert.Equal(t, 0, value)
-	assert.Equal(t, 0, m.Len())
+	require.False(t, ok)
+	require.Equal(t, 0, value)
+	require.Equal(t, 0, m.Len())
 }
 
 func TestMap_Seq2(t *testing.T) {
@@ -186,10 +186,10 @@ func TestMap_Seq2(t *testing.T) {
 
 	collected := maps.Collect(m.Seq2())
 
-	assert.Equal(t, 3, len(collected))
-	assert.Equal(t, 1, collected["key1"])
-	assert.Equal(t, 2, collected["key2"])
-	assert.Equal(t, 3, collected["key3"])
+	require.Equal(t, 3, len(collected))
+	require.Equal(t, 1, collected["key1"])
+	require.Equal(t, 2, collected["key2"])
+	require.Equal(t, 3, collected["key3"])
 }
 
 func TestMap_Seq2_EarlyReturn(t *testing.T) {
@@ -208,7 +208,7 @@ func TestMap_Seq2_EarlyReturn(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 2, count)
+	require.Equal(t, 2, count)
 }
 
 func TestMap_Seq2_EmptyMap(t *testing.T) {
@@ -221,7 +221,7 @@ func TestMap_Seq2_EmptyMap(t *testing.T) {
 		count++
 	}
 
-	assert.Equal(t, 0, count)
+	require.Equal(t, 0, count)
 }
 
 func TestMap_Seq(t *testing.T) {
@@ -237,10 +237,10 @@ func TestMap_Seq(t *testing.T) {
 		collected = append(collected, v)
 	}
 
-	assert.Equal(t, 3, len(collected))
-	assert.Contains(t, collected, 1)
-	assert.Contains(t, collected, 2)
-	assert.Contains(t, collected, 3)
+	require.Equal(t, 3, len(collected))
+	require.Contains(t, collected, 1)
+	require.Contains(t, collected, 2)
+	require.Contains(t, collected, 3)
 }
 
 func TestMap_Seq_EarlyReturn(t *testing.T) {
@@ -259,7 +259,7 @@ func TestMap_Seq_EarlyReturn(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 2, count)
+	require.Equal(t, 2, count)
 }
 
 func TestMap_Seq_EmptyMap(t *testing.T) {
@@ -272,7 +272,7 @@ func TestMap_Seq_EmptyMap(t *testing.T) {
 		count++
 	}
 
-	assert.Equal(t, 0, count)
+	require.Equal(t, 0, count)
 }
 
 func TestMap_MarshalJSON(t *testing.T) {
@@ -283,16 +283,16 @@ func TestMap_MarshalJSON(t *testing.T) {
 	m.Set("key2", 2)
 
 	data, err := json.Marshal(m)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	result := &Map[string, int]{}
 	err = json.Unmarshal(data, result)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, result.Len())
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Len())
 	v1, _ := result.Get("key1")
 	v2, _ := result.Get("key2")
-	assert.Equal(t, 1, v1)
-	assert.Equal(t, 2, v2)
+	require.Equal(t, 1, v1)
+	require.Equal(t, 2, v2)
 }
 
 func TestMap_MarshalJSON_EmptyMap(t *testing.T) {
@@ -301,8 +301,8 @@ func TestMap_MarshalJSON_EmptyMap(t *testing.T) {
 	m := NewMap[string, int]()
 
 	data, err := json.Marshal(m)
-	assert.NoError(t, err)
-	assert.Equal(t, "{}", string(data))
+	require.NoError(t, err)
+	require.Equal(t, "{}", string(data))
 }
 
 func TestMap_UnmarshalJSON(t *testing.T) {
@@ -312,16 +312,16 @@ func TestMap_UnmarshalJSON(t *testing.T) {
 
 	m := NewMap[string, int]()
 	err := json.Unmarshal([]byte(jsonData), m)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.Equal(t, 2, m.Len())
+	require.Equal(t, 2, m.Len())
 	value, ok := m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 1, value)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 
 	value, ok = m.Get("key2")
-	assert.True(t, ok)
-	assert.Equal(t, 2, value)
+	require.True(t, ok)
+	require.Equal(t, 2, value)
 }
 
 func TestMap_UnmarshalJSON_EmptyJSON(t *testing.T) {
@@ -331,8 +331,8 @@ func TestMap_UnmarshalJSON_EmptyJSON(t *testing.T) {
 
 	m := NewMap[string, int]()
 	err := json.Unmarshal([]byte(jsonData), m)
-	assert.NoError(t, err)
-	assert.Equal(t, 0, m.Len())
+	require.NoError(t, err)
+	require.Equal(t, 0, m.Len())
 }
 
 func TestMap_UnmarshalJSON_InvalidJSON(t *testing.T) {
@@ -342,7 +342,7 @@ func TestMap_UnmarshalJSON_InvalidJSON(t *testing.T) {
 
 	m := NewMap[string, int]()
 	err := json.Unmarshal([]byte(jsonData), m)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 func TestMap_UnmarshalJSON_OverwritesExistingData(t *testing.T) {
@@ -353,15 +353,15 @@ func TestMap_UnmarshalJSON_OverwritesExistingData(t *testing.T) {
 
 	jsonData := `{"key1": 1, "key2": 2}`
 	err := json.Unmarshal([]byte(jsonData), m)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.Equal(t, 2, m.Len())
+	require.Equal(t, 2, m.Len())
 	_, ok := m.Get("existing")
-	assert.False(t, ok)
+	require.False(t, ok)
 
 	value, ok := m.Get("key1")
-	assert.True(t, ok)
-	assert.Equal(t, 1, value)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 }
 
 func TestMap_JSONRoundTrip(t *testing.T) {
@@ -373,18 +373,18 @@ func TestMap_JSONRoundTrip(t *testing.T) {
 	original.Set("key3", 3)
 
 	data, err := json.Marshal(original)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	restored := NewMap[string, int]()
 	err = json.Unmarshal(data, restored)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.Equal(t, original.Len(), restored.Len())
+	require.Equal(t, original.Len(), restored.Len())
 
 	for k, v := range original.Seq2() {
 		restoredValue, ok := restored.Get(k)
-		assert.True(t, ok)
-		assert.Equal(t, v, restoredValue)
+		require.True(t, ok)
+		require.Equal(t, v, restoredValue)
 	}
 }
 
@@ -405,15 +405,15 @@ func TestMap_ConcurrentAccess(t *testing.T) {
 				key := id*numOperations + j
 				m.Set(key, key*2)
 				value, ok := m.Get(key)
-				assert.True(t, ok)
-				assert.Equal(t, key*2, value)
+				require.True(t, ok)
+				require.Equal(t, key*2, value)
 			}
 		}(i)
 	}
 
 	wg.Wait()
 
-	assert.Equal(t, numGoroutines*numOperations, m.Len())
+	require.Equal(t, numGoroutines*numOperations, m.Len())
 }
 
 func TestMap_ConcurrentReadWrite(t *testing.T) {
@@ -438,7 +438,7 @@ func TestMap_ConcurrentReadWrite(t *testing.T) {
 				key := j % 1000
 				value, ok := m.Get(key)
 				if ok {
-					assert.Equal(t, key, value)
+					require.Equal(t, key, value)
 				}
 				_ = m.Len()
 			}
@@ -478,10 +478,10 @@ func TestMap_ConcurrentSeq2(t *testing.T) {
 			defer wg.Done()
 			count := 0
 			for k, v := range m.Seq2() {
-				assert.Equal(t, k*2, v)
+				require.Equal(t, k*2, v)
 				count++
 			}
-			assert.Equal(t, 100, count)
+			require.Equal(t, 100, count)
 		}()
 	}
 
@@ -509,9 +509,9 @@ func TestMap_ConcurrentSeq(t *testing.T) {
 				values[v] = true
 				count++
 			}
-			assert.Equal(t, 100, count)
+			require.Equal(t, 100, count)
 			for i := range 100 {
-				assert.True(t, values[i*2])
+				require.True(t, values[i*2])
 			}
 		}()
 	}
@@ -548,19 +548,19 @@ func TestMap_ConcurrentTake(t *testing.T) {
 
 	wg.Wait()
 
-	assert.Equal(t, 0, m.Len())
+	require.Equal(t, 0, m.Len())
 
 	allTaken := make(map[int]bool)
 	for _, workerTaken := range taken {
 		for _, value := range workerTaken {
-			assert.False(t, allTaken[value], "Value %d was taken multiple times", value)
+			require.False(t, allTaken[value], "Value %d was taken multiple times", value)
 			allTaken[value] = true
 		}
 	}
 
-	assert.Equal(t, numItems, len(allTaken))
+	require.Equal(t, numItems, len(allTaken))
 	for i := range numItems {
-		assert.True(t, allTaken[i*2], "Expected value %d to be taken", i*2)
+		require.True(t, allTaken[i*2], "Expected value %d to be taken", i*2)
 	}
 }
 
@@ -570,20 +570,20 @@ func TestMap_TypeSafety(t *testing.T) {
 	stringIntMap := NewMap[string, int]()
 	stringIntMap.Set("key", 42)
 	value, ok := stringIntMap.Get("key")
-	assert.True(t, ok)
-	assert.Equal(t, 42, value)
+	require.True(t, ok)
+	require.Equal(t, 42, value)
 
 	intStringMap := NewMap[int, string]()
 	intStringMap.Set(42, "value")
 	strValue, ok := intStringMap.Get(42)
-	assert.True(t, ok)
-	assert.Equal(t, "value", strValue)
+	require.True(t, ok)
+	require.Equal(t, "value", strValue)
 
 	structMap := NewMap[string, struct{ Name string }]()
 	structMap.Set("key", struct{ Name string }{Name: "test"})
 	structValue, ok := structMap.Get("key")
-	assert.True(t, ok)
-	assert.Equal(t, "test", structValue.Name)
+	require.True(t, ok)
+	require.Equal(t, "test", structValue.Name)
 }
 
 func TestMap_InterfaceCompliance(t *testing.T) {

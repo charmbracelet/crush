@@ -317,7 +317,7 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	if s.selectedModel == nil {
-		return util.ReportError(fmt.Errorf("no model selected"))
+		return nil
 	}
 
 	cfg := config.Get()

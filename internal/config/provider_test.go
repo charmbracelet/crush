@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockProviderClient struct {
@@ -29,14 +29,14 @@ func TestProvider_loadProvidersNoIssues(t *testing.T) {
 	client := &mockProviderClient{shouldFail: false}
 	tmpPath := t.TempDir() + "/providers.json"
 	providers, err := loadProviders(client, tmpPath)
-	assert.NoError(t, err)
-	assert.NotNil(t, providers)
-	assert.Len(t, providers, 1)
+	require.NoError(t, err)
+	require.NotNil(t, providers)
+	require.Len(t, providers, 1)
 
 	// check if file got saved
 	fileInfo, err := os.Stat(tmpPath)
-	assert.NoError(t, err)
-	assert.False(t, fileInfo.IsDir(), "Expected a file, not a directory")
+	require.NoError(t, err)
+	require.False(t, fileInfo.IsDir(), "Expected a file, not a directory")
 }
 
 func TestProvider_loadProvidersWithIssues(t *testing.T) {
@@ -58,16 +58,16 @@ func TestProvider_loadProvidersWithIssues(t *testing.T) {
 		t.Fatalf("Failed to write old providers to file: %v", err)
 	}
 	providers, err := loadProviders(client, tmpPath)
-	assert.NoError(t, err)
-	assert.NotNil(t, providers)
-	assert.Len(t, providers, 1)
-	assert.Equal(t, "OldProvider", providers[0].Name, "Expected to keep old provider when loading fails")
+	require.NoError(t, err)
+	require.NotNil(t, providers)
+	require.Len(t, providers, 1)
+	require.Equal(t, "OldProvider", providers[0].Name, "Expected to keep old provider when loading fails")
 }
 
 func TestProvider_loadProvidersWithIssuesAndNoCache(t *testing.T) {
 	client := &mockProviderClient{shouldFail: true}
 	tmpPath := t.TempDir() + "/providers.json"
 	providers, err := loadProviders(client, tmpPath)
-	assert.Error(t, err)
-	assert.Nil(t, providers, "Expected nil providers when loading fails and no cache exists")
+	require.Error(t, err)
+	require.Nil(t, providers, "Expected nil providers when loading fails and no cache exists")
 }

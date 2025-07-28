@@ -97,8 +97,7 @@ func TestProcessContextPaths(t *testing.T) {
 
 	// Test with tilde expansion (if we can create a file in home directory)
 	tmpDir = t.TempDir()
-	rollback := setHomeEnv(tmpDir)
-	defer rollback()
+	setHomeEnv(t, tmpDir)
 	homeTestFile := filepath.Join(tmpDir, "crush_test_file.txt")
 	err = os.WriteFile(homeTestFile, []byte(testContent), 0o644)
 	if err == nil {
@@ -114,12 +113,11 @@ func TestProcessContextPaths(t *testing.T) {
 	}
 }
 
-func setHomeEnv(path string) (rollback func()) {
+func setHomeEnv(tb testing.TB, path string) {
+	tb.Helper()
 	key := "HOME"
 	if runtime.GOOS == "windows" {
 		key = "USERPROFILE"
 	}
-	original := os.Getenv(key)
-	os.Setenv(key, path)
-	return func() { os.Setenv(key, original) }
+	tb.Setenv(key, path)
 }

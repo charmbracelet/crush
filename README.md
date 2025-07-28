@@ -117,7 +117,6 @@ Configuration itself is stored as a JSON object:
 }
 ```
 
-
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just like you would. LSPs can be added manually like so:
@@ -295,7 +294,7 @@ We’d love to hear your thoughts on this project. Feel free to drop us a note!
 
 ## License
 
-[MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)
+[FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE)
 
 ---
 

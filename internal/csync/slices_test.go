@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +24,7 @@ func TestLazySlice_Seq(t *testing.T) {
 		result = append(result, v)
 	}
 
-	assert.Equal(t, data, result)
+	require.Equal(t, data, result)
 }
 
 func TestLazySlice_SeqWaitsForLoading(t *testing.T) {
@@ -41,15 +40,15 @@ func TestLazySlice_SeqWaitsForLoading(t *testing.T) {
 		return data
 	})
 
-	assert.False(t, loaded.Load(), "should not be loaded immediately")
+	require.False(t, loaded.Load(), "should not be loaded immediately")
 
 	var result []string
 	for v := range s.Seq() {
 		result = append(result, v)
 	}
 
-	assert.True(t, loaded.Load(), "should be loaded after Seq")
-	assert.Equal(t, data, result)
+	require.True(t, loaded.Load(), "should be loaded after Seq")
+	require.Equal(t, data, result)
 }
 
 func TestLazySlice_EmptySlice(t *testing.T) {
@@ -64,7 +63,7 @@ func TestLazySlice_EmptySlice(t *testing.T) {
 		result = append(result, v)
 	}
 
-	assert.Empty(t, result)
+	require.Empty(t, result)
 }
 
 func TestLazySlice_EarlyBreak(t *testing.T) {
@@ -85,25 +84,25 @@ func TestLazySlice_EarlyBreak(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, []string{"a", "b"}, result)
+	require.Equal(t, []string{"a", "b"}, result)
 }
 
 func TestSlice(t *testing.T) {
 	t.Run("NewSlice", func(t *testing.T) {
 		s := NewSlice[int]()
-		assert.Equal(t, 0, s.Len())
+		require.Equal(t, 0, s.Len())
 	})
 
 	t.Run("NewSliceFrom", func(t *testing.T) {
 		original := []int{1, 2, 3}
 		s := NewSliceFrom(original)
-		assert.Equal(t, 3, s.Len())
+		require.Equal(t, 3, s.Len())
 
 		// Verify it's a copy, not a reference
 		original[0] = 999
 		val, ok := s.Get(0)
 		require.True(t, ok)
-		assert.Equal(t, 1, val)
+		require.Equal(t, 1, val)
 	})
 
 	t.Run("Append", func(t *testing.T) {
@@ -111,14 +110,14 @@ func TestSlice(t *testing.T) {
 		s.Append("hello")
 		s.Append("world")
 
-		assert.Equal(t, 2, s.Len())
+		require.Equal(t, 2, s.Len())
 		val, ok := s.Get(0)
 		require.True(t, ok)
-		assert.Equal(t, "hello", val)
+		require.Equal(t, "hello", val)
 
 		val, ok = s.Get(1)
 		require.True(t, ok)
-		assert.Equal(t, "world", val)
+		require.Equal(t, "world", val)
 	})
 
 	t.Run("Prepend", func(t *testing.T) {
@@ -126,14 +125,14 @@ func TestSlice(t *testing.T) {
 		s.Append("world")
 		s.Prepend("hello")
 
-		assert.Equal(t, 2, s.Len())
+		require.Equal(t, 2, s.Len())
 		val, ok := s.Get(0)
 		require.True(t, ok)
-		assert.Equal(t, "hello", val)
+		require.Equal(t, "hello", val)
 
 		val, ok = s.Get(1)
 		require.True(t, ok)
-		assert.Equal(t, "world", val)
+		require.Equal(t, "world", val)
 	})
 
 	t.Run("Delete", func(t *testing.T) {
@@ -141,22 +140,22 @@ func TestSlice(t *testing.T) {
 
 		// Delete middle element
 		ok := s.Delete(2)
-		assert.True(t, ok)
-		assert.Equal(t, 4, s.Len())
+		require.True(t, ok)
+		require.Equal(t, 4, s.Len())
 
 		expected := []int{1, 2, 4, 5}
 		actual := s.Slice()
-		assert.Equal(t, expected, actual)
+		require.Equal(t, expected, actual)
 
 		// Delete out of bounds
 		ok = s.Delete(10)
-		assert.False(t, ok)
-		assert.Equal(t, 4, s.Len())
+		require.False(t, ok)
+		require.Equal(t, 4, s.Len())
 
 		// Delete negative index
 		ok = s.Delete(-1)
-		assert.False(t, ok)
-		assert.Equal(t, 4, s.Len())
+		require.False(t, ok)
+		require.Equal(t, 4, s.Len())
 	})
 
 	t.Run("Get", func(t *testing.T) {
@@ -164,34 +163,34 @@ func TestSlice(t *testing.T) {
 
 		val, ok := s.Get(1)
 		require.True(t, ok)
-		assert.Equal(t, "b", val)
+		require.Equal(t, "b", val)
 
 		// Out of bounds
 		_, ok = s.Get(10)
-		assert.False(t, ok)
+		require.False(t, ok)
 
 		// Negative index
 		_, ok = s.Get(-1)
-		assert.False(t, ok)
+		require.False(t, ok)
 	})
 
 	t.Run("Set", func(t *testing.T) {
 		s := NewSliceFrom([]string{"a", "b", "c"})
 
 		ok := s.Set(1, "modified")
-		assert.True(t, ok)
+		require.True(t, ok)
 
 		val, ok := s.Get(1)
 		require.True(t, ok)
-		assert.Equal(t, "modified", val)
+		require.Equal(t, "modified", val)
 
 		// Out of bounds
 		ok = s.Set(10, "invalid")
-		assert.False(t, ok)
+		require.False(t, ok)
 
 		// Negative index
 		ok = s.Set(-1, "invalid")
-		assert.False(t, ok)
+		require.False(t, ok)
 	})
 
 	t.Run("SetSlice", func(t *testing.T) {
@@ -202,22 +201,22 @@ func TestSlice(t *testing.T) {
 		newItems := []int{10, 20, 30}
 		s.SetSlice(newItems)
 
-		assert.Equal(t, 3, s.Len())
-		assert.Equal(t, newItems, s.Slice())
+		require.Equal(t, 3, s.Len())
+		require.Equal(t, newItems, s.Slice())
 
 		// Verify it's a copy
 		newItems[0] = 999
 		val, ok := s.Get(0)
 		require.True(t, ok)
-		assert.Equal(t, 10, val)
+		require.Equal(t, 10, val)
 	})
 
 	t.Run("Clear", func(t *testing.T) {
 		s := NewSliceFrom([]int{1, 2, 3})
-		assert.Equal(t, 3, s.Len())
+		require.Equal(t, 3, s.Len())
 
 		s.Clear()
-		assert.Equal(t, 0, s.Len())
+		require.Equal(t, 0, s.Len())
 	})
 
 	t.Run("Slice", func(t *testing.T) {
@@ -225,13 +224,13 @@ func TestSlice(t *testing.T) {
 		s := NewSliceFrom(original)
 
 		copy := s.Slice()
-		assert.Equal(t, original, copy)
+		require.Equal(t, original, copy)
 
 		// Verify it's a copy
 		copy[0] = 999
 		val, ok := s.Get(0)
 		require.True(t, ok)
-		assert.Equal(t, 1, val)
+		require.Equal(t, 1, val)
 	})
 
 	t.Run("Seq", func(t *testing.T) {
@@ -242,7 +241,7 @@ func TestSlice(t *testing.T) {
 			result = append(result, v)
 		}
 
-		assert.Equal(t, []int{1, 2, 3}, result)
+		require.Equal(t, []int{1, 2, 3}, result)
 	})
 
 	t.Run("SeqWithIndex", func(t *testing.T) {
@@ -255,8 +254,8 @@ func TestSlice(t *testing.T) {
 			values = append(values, v)
 		}
 
-		assert.Equal(t, []int{0, 1, 2}, indices)
-		assert.Equal(t, []string{"a", "b", "c"}, values)
+		require.Equal(t, []int{0, 1, 2}, indices)
+		require.Equal(t, []string{"a", "b", "c"}, values)
 	})
 
 	t.Run("ConcurrentAccess", func(t *testing.T) {
@@ -291,6 +290,6 @@ func TestSlice(t *testing.T) {
 		wg.Wait()
 
 		// Should have all items
-		assert.Equal(t, numGoroutines*itemsPerGoroutine, s.Len())
+		require.Equal(t, numGoroutines*itemsPerGoroutine, s.Len())
 	})
 }

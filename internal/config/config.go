@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -471,6 +472,12 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		testURL = baseURL + "/models"
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
+	case catwalk.TypeGemini:
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://generativelanguage.googleapis.com"
+		}
+		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

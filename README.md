@@ -6,17 +6,18 @@
     <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
 </p>
 
-Your new coding bestie, available in your favourite terminal. Your tools, your code, and your workflows, wired into your LLM of choice.
+Your new coding bestie, available in your favourite terminal. Your tools, your
+code, and your workflows, wired into your LLM of choice.
 
 <img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/a67e22a5-167f-4aa0-bcbf-4248740b6fd4" />
 
 ## Features
 
-* Session-based: maintain multiple work sessions and contexts per-project
-* Multi-model: choose from a wide range of LLMs or add your own via OpenAI or Anthropic-compatible API
-* Flexible: switch LLMs mid-session while perserving context
-* LSP-enhanced: Crush uses LSPs for additional context, the same way you do
-* Extensible: add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Session-based:** maintain multiple work sessions and contexts per project
+- **Multi-model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible API
+- **Flexible:** switch LLMs mid-session while preserving context
+- **LSP-enhanced:** Crush uses LSPs for additional context, just like you do
+- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
 
 ## Installation
 
@@ -82,11 +83,15 @@ go install github.com/charmbracelet/crush@latest
 ```
 
 > [!WARNING]
-> Productivity may increase when using Crush and you may find yourself nerd sniped when first using the application. If the symptoms persist, join the [Discord][discord] and nerd snipe the rest of us.
+> Productivity may increase when using Crush and you may find yourself nerd
+> sniped when first using the application. If the symptoms persist, join the
+> [Discord][discord] and nerd snipe the rest of us.
 
 ## Getting Started
 
-The quickest way to get started is to grab an API key for your preferred provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start Crush. You'll be prompted to enter your API key.
+The quickest way to get started is to grab an API key for your preferred
+provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
+Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
 
@@ -112,7 +117,9 @@ That said, you can also set environment variables for preferred providers.
 
 ## Configuration
 
-Crush runs great with no configuration. That said, if you do need or want to customize Crush, configuration can be added either local to the project itself, or globally, with the following priority:
+Crush runs great with no configuration. That said, if you do need or want to
+customize Crush, configuration can be added either local to the project itself,
+or globally, with the following priority:
 
 1. `./.crush.json`
 2. `./crush.json`
@@ -129,7 +136,8 @@ Configuration itself is stored as a JSON object:
 
 ### LSPs
 
-Crush can use LSPs for additional context to help inform its decisions, just like you would. LSPs can be added manually like so:
+Crush can use LSPs for additional context to help inform its decisions, just
+like you would. LSPs can be added manually like so:
 
 ```json
 {
@@ -150,7 +158,10 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ### MCPs
 
-Crush also supports Model Context Protocol (MCP) servers through three transport types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse` for Server-Sent Events. Environment variable expansion is supported using `$(echo $VAR)` syntax.
+Crush also supports Model Context Protocol (MCP) servers through three
+transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
+and `sse` for Server-Sent Events. Environment variable expansion is supported
+using `$(echo $VAR)` syntax.
 
 ```json
 {
@@ -183,7 +194,9 @@ Crush also supports Model Context Protocol (MCP) servers through three transport
 
 ### Whitelisting Tools
 
-By default, Crush will ask you for permission before running tool calls. If you'd like, you can whitelist tools to be executed without prompting you for permissions. Use this with care.
+By default, Crush will ask you for permission before running tool calls. If
+you'd like, you can whitelist tools to be executed without prompting you for
+permissions. Use this with care.
 
 ```json
 {
@@ -199,15 +212,18 @@ By default, Crush will ask you for permission before running tool calls. If you'
 }
 ```
 
-You can also skip all permission prompts entirely by running Crush with the `--yolo` flag. Be very, very careful with this feature.
+You can also skip all permission prompts entirely by running Crush with the
+`--yolo` flag. Be very, very careful with this feature.
 
 ### Custom Providers
 
-Crush supports custom provider configurations for both OpenAI-compatible and Anthropic-compatible APIs.
+Crush supports custom provider configurations for both OpenAI-compatible and
+Anthropic-compatible APIs.
 
 #### OpenAI-Compatible APIs
 
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
+API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
 {
@@ -249,16 +265,16 @@ Custom Anthropic-compatible providers follow this format:
       },
       "models": [
         {
-           "id": "claude-sonnet-4-20250514",
-            "name": "Claude Sonnet 4",
-            "cost_per_1m_in": 3,
-            "cost_per_1m_out": 15,
-            "cost_per_1m_in_cached": 3.75,
-            "cost_per_1m_out_cached": 0.3,
-            "context_window": 200000,
-            "default_max_tokens": 50000,
-            "can_reason": true,
-            "supports_attachments": true
+          "id": "claude-sonnet-4-20250514",
+          "name": "Claude Sonnet 4",
+          "cost_per_1m_in": 3,
+          "cost_per_1m_out": 15,
+          "cost_per_1m_in_cached": 3.75,
+          "cost_per_1m_out_cached": 0.3,
+          "context_window": 200000,
+          "default_max_tokens": 50000,
+          "can_reason": true,
+          "supports_attachments": true
         }
       ]
     }
@@ -268,7 +284,8 @@ Custom Anthropic-compatible providers follow this format:
 
 ## Logging
 
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
+Sometimes you need to look at logs. Luckily, Crush logs all sorts of
+stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
 
 The CLI also contains some helper commands to make perusing recent logs easier:
 
@@ -283,7 +300,8 @@ crush logs --tail 500
 crush logs --follow
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the config:
+Want more logging? Run `crush` with the `--debug` flag, or enable it in the
+config:
 
 ```json
 {

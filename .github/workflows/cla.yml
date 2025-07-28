@@ -1,0 +1,35 @@
+name: "CLA Assistant"
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  CLAAssistant:
+    if: github.repository == 'charmbracelet/crush'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "CLA Assistant"
+        if: |
+          github.event.comment.body == 'recheck' ||
+          github.event.comment.body == 'I have read the Contributor License Agreement (CLA) and hereby sign the CLA.' ||
+          github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: ".github/cla-signatures.json"
+          path-to-document: "https://github.com/charmbracelet/crush/blob/main/CLA.md" # TODO: provide the CLA.md file (Christian)
+          branch: "main" # WARN: if we make `main` protected, this will start failing
+          allowlist: dependabot[bot]
+          custom-pr-sign-comment: "I have read the Contributor License Agreement (CLA) and hereby sign the CLA."
+          lock-pullrequest-aftermerge: false
+          signed-commit-message: "chore(legal): @$contributorName has signed the CLA in $owner/$repo#$pullRequestNo"

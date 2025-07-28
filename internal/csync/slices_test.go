@@ -266,22 +266,22 @@ func TestSlice(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Concurrent appends
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(start int) {
 				defer wg.Done()
-				for j := 0; j < itemsPerGoroutine; j++ {
+				for j := range itemsPerGoroutine {
 					s.Append(start*itemsPerGoroutine + j)
 				}
 			}(i)
 		}
 
 		// Concurrent reads
-		for i := 0; i < numGoroutines; i++ {
+		for range numGoroutines {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for j := 0; j < itemsPerGoroutine; j++ {
+				for range itemsPerGoroutine {
 					s.Len() // Just read the length
 				}
 			}()

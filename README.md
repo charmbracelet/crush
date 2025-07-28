@@ -13,10 +13,10 @@ Your new coding bestie, available in your favourite terminal. Your tools, your c
 ## Features
 
 * Session-based: maintain multiple work sessions and contexts per-project
-* Multi-model: choose from a wide range of LLMs
+* Multi-model: choose from a wide range of LLMs or add your own via OpenAI or Anthropic-compatible API
 * Flexible: switch LLMs mid-session while perserving context
 * LSP-enhanced: Crush uses LSPs for addtional context, the same way you do
-* Extensible: add MCPs and any OpenAI or Anthropic-compatible LLM
+* Extensible: add capabilities via MCPs (`http`, `stdio`, and `sse`)
 
 ## Installation
 
@@ -80,6 +80,9 @@ Or just install it with go:
 ```
 go install github.com/charmbracelet/crush@latest
 ```
+
+> [!WARNING]
+> Productivity may increase when using Crush and you may find yourself nerd sniped when first using the application. If the symptoms persist, join the [Discord][discord] and nerd snipe the rest of us.
 
 ## Getting Started
 
@@ -246,15 +249,16 @@ Custom Anthropic-compatible providers follow this format:
       },
       "models": [
         {
-          "id": "claude-3-sonnet",
-          "model": "Claude 3 Sonnet",
-          "cost_per_1m_in": 3000,
-          "cost_per_1m_out": 15000,
-          "cost_per_1m_in_cached": 300,
-          "cost_per_1m_out_cached": 15000,
-          "context_window": 200000,
-          "default_max_tokens": 4096,
-          "supports_attachments": true
+           "id": "claude-sonnet-4-20250514",
+            "name": "Claude Sonnet 4",
+            "cost_per_1m_in": 3,
+            "cost_per_1m_out": 15,
+            "cost_per_1m_in_cached": 3.75,
+            "cost_per_1m_out_cached": 0.3,
+            "context_window": 200000,
+            "default_max_tokens": 50000,
+            "can_reason": true,
+            "supports_attachments": true
         }
       ]
     }
@@ -295,9 +299,11 @@ Want more logging? Run `crush` with the `--debug` flag, or enable it in the conf
 We’d love to hear your thoughts on this project. Feel free to drop us a note!
 
 - [Twitter](https://twitter.com/charmcli)
-- [Discord](https://charm.land/discord)
+- [Discord][discord]
 - [Slack](https://charm.land/slack)
 - [The Fediverse](https://mastodon.social/@charmcli)
+
+[discord]: https://charm.land/discord
 
 ## License
 

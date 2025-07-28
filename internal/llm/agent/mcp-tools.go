@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 
 	"github.com/charmbracelet/crush/internal/permission"
@@ -196,9 +198,8 @@ func GetMCPTools(ctx context.Context, permissions permission.Service, cfg *confi
 }
 
 func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
-	var mu sync.Mutex
 	var wg sync.WaitGroup
-	var result []tools.BaseTool
+	result := csync.NewSlice[tools.BaseTool]()
 	for name, m := range cfg.MCP {
 		if m.Disabled {
 			slog.Debug("skipping disabled mcp", "name", name)
@@ -219,9 +220,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					return
 				}
 
-				mu.Lock()
-				result = append(result, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
-				mu.Unlock()
+				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 			case config.MCPHttp:
 				c, err := client.NewStreamableHttpClient(
 					m.URL,
@@ -231,9 +230,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					slog.Error("error creating mcp client", "error", err)
 					return
 				}
-				mu.Lock()
-				result = append(result, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
-				mu.Unlock()
+				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 			case config.MCPSse:
 				c, err := client.NewSSEMCPClient(
 					m.URL,
@@ -243,12 +240,10 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					slog.Error("error creating mcp client", "error", err)
 					return
 				}
-				mu.Lock()
-				result = append(result, getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
-				mu.Unlock()
+				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
 			}
 		}(name, m)
 	}
 	wg.Wait()
-	return result
+	return slices.Collect(result.Seq())
 }

@@ -56,6 +56,15 @@ func (m *Map[K, V]) Len() int {
 	return len(m.inner)
 }
 
+// Take gets an item and then deletes it.
+func (m *Map[K, V]) Take(key K) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.inner[key]
+	delete(m.inner, key)
+	return v, ok
+}
+
 // Seq2 returns an iter.Seq2 that yields key-value pairs from the map.
 func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 	dst := make(map[K]V)
@@ -65,6 +74,17 @@ func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		for k, v := range dst {
 			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+// Seq returns an iter.Seq that yields values from the map.
+func (m *Map[K, V]) Seq() iter.Seq[V] {
+	return func(yield func(V) bool) {
+		for _, v := range m.Seq2() {
+			if !yield(v) {
 				return
 			}
 		}

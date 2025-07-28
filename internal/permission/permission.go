@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -57,7 +58,7 @@ type permissionService struct {
 	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
-	pendingRequests       sync.Map
+	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
@@ -73,9 +74,9 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
 	})
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- true
+		respCh <- true
 	}
 
 	s.sessionPermissionsMu.Lock()
@@ -92,9 +93,9 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
 	})
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- true
+		respCh <- true
 	}
 
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
@@ -108,9 +109,9 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 		Granted:    false,
 		Denied:     true,
 	})
-	respCh, ok := s.pendingRequests.Load(permission.ID)
+	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh.(chan bool) <- false
+		respCh <- false
 	}
 
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
@@ -180,8 +181,8 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	s.activeRequest = &permission
 
 	respCh := make(chan bool, 1)
-	s.pendingRequests.Store(permission.ID, respCh)
-	defer s.pendingRequests.Delete(permission.ID)
+	s.pendingRequests.Set(permission.ID, respCh)
+	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
@@ -208,5 +209,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
 		allowedTools:        allowedTools,
+		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -40,6 +40,7 @@ type MessageListCmp interface {
 	layout.Help
 
 	SetSession(session.Session) tea.Cmd
+	GoToBottom() tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -49,8 +50,8 @@ type messageListCmp struct {
 	app              *app.App
 	width, height    int
 	session          session.Session
-	listCmp          list.ListModel
-	previousSelected int // Last selected item index for restoring focus
+	listCmp          list.List[list.Item]
+	previousSelected string // Last selected item index for restoring focus
 
 	lastUserMessageTime int64
 	defaultListKeyMap   list.KeyMap
@@ -61,21 +62,24 @@ type messageListCmp struct {
 func New(app *app.App) MessageListCmp {
 	defaultListKeyMap := list.DefaultKeyMap()
 	listCmp := list.New(
-		list.WithGapSize(1),
-		list.WithReverse(true),
+		[]list.Item{},
+		list.WithGap(1),
+		list.WithDirectionBackward(),
+		list.WithFocus(false),
 		list.WithKeyMap(defaultListKeyMap),
+		list.WithEnableMouse(),
 	)
 	return &messageListCmp{
 		app:               app,
 		listCmp:           listCmp,
-		previousSelected:  list.NoSelection,
+		previousSelected:  "",
 		defaultListKeyMap: defaultListKeyMap,
 	}
 }
 
 // Init initializes the component.
 func (m *messageListCmp) Init() tea.Cmd {
-	return tea.Sequence(m.listCmp.Init(), m.listCmp.Blur())
+	return m.listCmp.Init()
 }
 
 // Update handles incoming messages and updates the component state.
@@ -89,15 +93,20 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case SessionClearedMsg:
 		m.session = session.Session{}
-		return m, m.listCmp.SetItems([]util.Model{})
+		return m, m.listCmp.SetItems([]list.Item{})
 
 	case pubsub.Event[message.Message]:
 		cmd := m.handleMessageEvent(msg)
 		return m, cmd
+
+	case tea.MouseWheelMsg:
+		u, cmd := m.listCmp.Update(msg)
+		m.listCmp = u.(list.List[list.Item])
+		return m, cmd
 	default:
 		var cmds []tea.Cmd
 		u, cmd := m.listCmp.Update(msg)
-		m.listCmp = u.(list.ListModel)
+		m.listCmp = u.(list.List[list.Item])
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
@@ -169,7 +178,7 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 
 	toolCall.SetNestedToolCalls(nestedToolCalls)
 	m.listCmp.UpdateItem(
-		toolCallInx,
+		toolCall.ID(),
 		toolCall,
 	)
 	return tea.Batch(cmds...)
@@ -233,7 +242,7 @@ func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
 		if toolCallIndex := m.findToolCallByID(items, tr.ToolCallID); toolCallIndex != NotFound {
 			toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 			toolCall.SetToolResult(tr)
-			m.listCmp.UpdateItem(toolCallIndex, toolCall)
+			m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 		}
 	}
 	return nil
@@ -241,7 +250,7 @@ func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
 
 // findToolCallByID searches for a tool call with the specified ID.
 // Returns the index if found, NotFound otherwise.
-func (m *messageListCmp) findToolCallByID(items []util.Model, toolCallID string) int {
+func (m *messageListCmp) findToolCallByID(items []list.Item, toolCallID string) int {
 	// Search backwards as tool calls are more likely to be recent
 	for i := len(items) - 1; i >= 0; i-- {
 		if toolCall, ok := items[i].(messages.ToolCallCmp); ok && toolCall.GetToolCall().ID == toolCallID {
@@ -274,7 +283,7 @@ func (m *messageListCmp) handleUpdateAssistantMessage(msg message.Message) tea.C
 }
 
 // findAssistantMessageAndToolCalls locates the assistant message and its tool calls.
-func (m *messageListCmp) findAssistantMessageAndToolCalls(items []util.Model, messageID string) (int, map[int]messages.ToolCallCmp) {
+func (m *messageListCmp) findAssistantMessageAndToolCalls(items []list.Item, messageID string) (int, map[int]messages.ToolCallCmp) {
 	assistantIndex := NotFound
 	toolCalls := make(map[int]messages.ToolCallCmp)
 
@@ -310,7 +319,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 		uiMsg := items[assistantIndex].(messages.MessageCmp)
 		uiMsg.SetMessage(msg)
 		m.listCmp.UpdateItem(
-			assistantIndex,
+			items[assistantIndex].ID(),
 			uiMsg,
 		)
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
@@ -322,7 +331,8 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 			)
 		}
 	} else if hasToolCallsOnly {
-		m.listCmp.DeleteItem(assistantIndex)
+		items := m.listCmp.Items()
+		m.listCmp.DeleteItem(items[assistantIndex].ID())
 	}
 
 	return cmd
@@ -349,13 +359,13 @@ func (m *messageListCmp) updateToolCalls(msg message.Message, existingToolCalls 
 // updateOrAddToolCall updates an existing tool call or adds a new one.
 func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.ToolCall, existingToolCalls map[int]messages.ToolCallCmp) tea.Cmd {
 	// Try to find existing tool call
-	for index, existingTC := range existingToolCalls {
+	for _, existingTC := range existingToolCalls {
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
 				existingTC.SetCancelled()
 			}
-			m.listCmp.UpdateItem(index, existingTC)
+			m.listCmp.UpdateItem(tc.ID, existingTC)
 			return nil
 		}
 	}
@@ -400,7 +410,7 @@ func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
 	}
 
 	if len(sessionMessages) == 0 {
-		return m.listCmp.SetItems([]util.Model{})
+		return m.listCmp.SetItems([]list.Item{})
 	}
 
 	// Initialize with first message timestamp
@@ -427,8 +437,8 @@ func (m *messageListCmp) buildToolResultMap(messages []message.Message) map[stri
 }
 
 // convertMessagesToUI converts database messages to UI components.
-func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
-	uiMessages := make([]util.Model, 0)
+func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, toolResultMap map[string]message.ToolResult) []list.Item {
+	uiMessages := make([]list.Item, 0)
 
 	for _, msg := range sessionMessages {
 		switch msg.Role {
@@ -447,8 +457,8 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 }
 
 // convertAssistantMessage converts an assistant message and its tool calls to UI components.
-func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResultMap map[string]message.ToolResult) []util.Model {
-	var uiMessages []util.Model
+func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResultMap map[string]message.ToolResult) []list.Item {
+	var uiMessages []list.Item
 
 	// Add assistant message if it should be displayed
 	if m.shouldShowAssistantMessage(msg) {
@@ -528,4 +538,8 @@ func (m *messageListCmp) IsFocused() bool {
 
 func (m *messageListCmp) Bindings() []key.Binding {
 	return m.defaultListKeyMap.KeyBindings()
+}
+
+func (m *messageListCmp) GoToBottom() tea.Cmd {
+	return m.listCmp.GoToBottom()
 }

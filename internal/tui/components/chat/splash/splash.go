@@ -14,12 +14,11 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -86,9 +85,7 @@ func New() Splash {
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	t := styles.CurrentTheme()
-	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
+	modelList := models.NewModelListComponent(listKeyMap, "Find your fave", false)
 	apiKeyInput := models.NewAPIKeyInput()
 
 	return &splashCmp{
@@ -195,20 +192,18 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
 			}
 			if s.isOnboarding && !s.needsAPIKey {
-				modelInx := s.modelList.SelectedIndex()
-				if modelInx == -1 {
+				selectedItem := s.modelList.SelectedModel()
+				if selectedItem == nil {
 					return s, nil
 				}
-				items := s.modelList.Items()
-				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
 				if s.isProviderConfigured(string(selectedItem.Provider.ID)) {
-					cmd := s.setPreferredModel(selectedItem)
+					cmd := s.setPreferredModel(*selectedItem)
 					s.isOnboarding = false
 					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 				} else {
 					// Provider not configured, show API key input
 					s.needsAPIKey = true
-					s.selectedModel = &selectedItem
+					s.selectedModel = selectedItem
 					s.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
 					return s, nil
 				}
@@ -267,6 +262,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
+			if s.isOnboarding {
+				return s, nil
+			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
@@ -277,6 +275,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
+			if s.isOnboarding {
+				return s, nil
+			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
@@ -606,7 +607,7 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 		cursor.Y += offset
 		cursor.X = cursor.X + 1
 	} else if s.isOnboarding {
-		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 3
+		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 2
 		cursor.Y += offset
 		cursor.X = cursor.X + 1
 	}

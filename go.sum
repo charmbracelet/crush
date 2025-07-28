@@ -70,8 +70,8 @@ github.com/charlievieth/fastwalk v1.0.11 h1:5sLT/q9+d9xMdpKExawLppqvXFZCVKf6JHnr
 github.com/charlievieth/fastwalk v1.0.11/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5 h1:GTcMIfDQJKyNKS+xVt7GkNIwz+tBuQtIuiP50WpzNgs=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250717140350-bb75e8f6b6ac h1:murtkvFYxZ/73vk4Z/tpE4biB+WDZcFmmBp8je/yV6M=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250717140350-bb75e8f6b6ac/go.mod h1:m240IQxo1/eDQ7klblSzOCAUyc3LddHcV3Rc/YEGAgw=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250724172607-5ba56e2bec69 h1:nXLMl4ows2qogDXhuEtDNgFNXQiU+PJer+UEBsQZuns=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250724172607-5ba56e2bec69/go.mod h1:XIQ1qQfRph6Z5o2EikCydjumo0oDInQySRHuPATzbZc=
 github.com/charmbracelet/catwalk v0.3.1 h1:MkGWspcMyE659zDkqS+9wsaCMTKRFEDBFY2A2sap6+U=
 github.com/charmbracelet/catwalk v0.3.1/go.mod h1:gUUCqqZ8bk4D7ZzGTu3I77k7cC2x4exRuJBN1H2u2pc=
 github.com/charmbracelet/colorprofile v0.3.1 h1:k8dTHMd7fgw4bnFd7jXTLZrSU/CQrKnL3m+AxCzDz40=

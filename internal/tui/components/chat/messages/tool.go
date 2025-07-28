@@ -29,6 +29,7 @@ type ToolCallCmp interface {
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
+	ID() string
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -296,7 +297,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished or if the result doesn't match the call ID.
 func (m *toolCallCmp) shouldSpin() bool {
-	return !m.call.Finished
+	return !m.call.Finished && !m.cancelled
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation
@@ -310,4 +311,8 @@ func (m *toolCallCmp) Spinning() bool {
 		}
 	}
 	return m.spinning
+}
+
+func (m *toolCallCmp) ID() string {
+	return m.call.ID
 }

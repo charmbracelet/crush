@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -33,26 +34,18 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-// MouseEventFilter filters mouse events based on the current focus state
-// This is used with tea.WithFilter to prevent mouse scroll events from
-// interfering with typing performance in the editor
+var lastMouseEvent time.Time
+
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
-	// Only filter mouse events
 	switch msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
-		// Check if we have an appModel and if editor is focused
-		if appModel, ok := m.(*appModel); ok {
-			if appModel.currentPage == chat.ChatPageID {
-				if chatPage, ok := appModel.pages[appModel.currentPage].(chat.ChatPage); ok {
-					// If editor is focused (not chatFocused), filter out mouse wheel/motion events
-					if !chatPage.IsChatFocused() {
-						return nil // Filter out the event
-					}
-				}
-			}
+		now := time.Now()
+		// trackpad is sending too many requests
+		if now.Sub(lastMouseEvent) < 5*time.Millisecond {
+			return nil
 		}
+		lastMouseEvent = now
 	}
-	// Allow all other events to pass through
 	return msg
 }
 

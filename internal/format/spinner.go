@@ -20,7 +20,7 @@ type Spinner struct {
 
 type model struct {
 	cancel context.CancelFunc
-	anim   anim.Anim
+	anim   *anim.Anim
 }
 
 func (m model) Init() tea.Cmd { return m.anim.Init() }
@@ -37,7 +37,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	mm, cmd := m.anim.Update(msg)
-	m.anim = mm.(anim.Anim)
+	m.anim = mm.(*anim.Anim)
 	return m, cmd
 }
 

@@ -112,28 +112,12 @@ func (s *Slice[T]) Len() int {
 	return len(s.inner)
 }
 
-// Slice returns a copy of the underlying slice.
-func (s *Slice[T]) Slice() []T {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]T, len(s.inner))
-	copy(result, s.inner)
-	return result
-}
-
 // SetSlice replaces the entire slice with a new one.
 func (s *Slice[T]) SetSlice(items []T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inner = make([]T, len(items))
 	copy(s.inner, items)
-}
-
-// Clear removes all elements from the slice.
-func (s *Slice[T]) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.inner = s.inner[:0]
 }
 
 // Seq returns an iterator that yields elements from the slice.

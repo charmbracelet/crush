@@ -46,7 +46,8 @@ func DefaultKeyMap() KeyMap {
 		PageUp: key.NewBinding(
 			key.WithKeys("pgup", "b"),
 			key.WithHelp("b/pgup", "page up"),
-		), HalfPageUp: key.NewBinding(
+		),
+		HalfPageUp: key.NewBinding(
 			key.WithKeys("u"),
 			key.WithHelp("u", "half page up"),
 		),
@@ -61,7 +62,6 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
-// KeyBindings implements layout.KeyMapProvider
 func (k KeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Down,

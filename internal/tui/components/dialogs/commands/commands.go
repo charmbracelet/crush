@@ -10,10 +10,9 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -28,6 +27,8 @@ const (
 	SystemCommands int = iota
 	UserCommands
 )
+
+type listModel = list.FilterableList[list.CompletionItem[Command]]
 
 // Command represents a command that can be executed
 type Command struct {
@@ -48,7 +49,7 @@ type commandDialogCmp struct {
 	wWidth  int // Width of the terminal window
 	wHeight int // Height of the terminal window
 
-	commandList  list.ListModel
+	commandList  listModel
 	keyMap       CommandsDialogKeyMap
 	help         help.Model
 	commandType  int       // SystemCommands or UserCommands
@@ -67,24 +68,23 @@ type (
 )
 
 func NewCommandDialog(sessionID string) CommandsDialog {
-	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultCommandsDialogKeyMap()
-
+	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
-	listKeyMap.HalfPageDown.SetEnabled(false)
-	listKeyMap.HalfPageUp.SetEnabled(false)
-	listKeyMap.Home.SetEnabled(false)
-	listKeyMap.End.SetEnabled(false)
-
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
 	t := styles.CurrentTheme()
-	commandList := list.New(
-		list.WithFilterable(true),
-		list.WithKeyMap(listKeyMap),
-		list.WithWrapNavigation(true),
+	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
+	commandList := list.NewFilterableList(
+		[]list.CompletionItem[Command]{},
+		list.WithFilterInputStyle(inputStyle),
+		list.WithFilterListOptions(
+			list.WithKeyMap(listKeyMap),
+			list.WithWrapNavigation(),
+			list.WithResizeByList(),
+		),
 	)
 	help := help.New()
 	help.Styles = t.S().Help
@@ -103,10 +103,8 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-
 	c.userCommands = commands
-	c.SetCommandType(c.commandType)
-	return c.commandList.Init()
+	return c.SetCommandType(c.commandType)
 }
 
 func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -114,22 +112,23 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
-		c.SetCommandType(c.commandType)
 		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Select):
-			selectedItemInx := c.commandList.SelectedIndex()
-			if selectedItemInx == list.NoSelection {
+			selectedItem := c.commandList.SelectedItem()
+			if selectedItem == nil {
 				return c, nil // No item selected, do nothing
 			}
-			items := c.commandList.Items()
-			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(Command)
+			command := (*selectedItem).Value()
 			return c, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				selectedItem.Handler(selectedItem),
+				command.Handler(command),
 			)
 		case key.Matches(msg, c.keyMap.Tab):
+			if len(c.userCommands) == 0 {
+				return c, nil
+			}
 			// Toggle command type between System and User commands
 			if c.commandType == SystemCommands {
 				return c, c.SetCommandType(UserCommands)
@@ -140,7 +139,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := c.commandList.Update(msg)
-			c.commandList = u.(list.ListModel)
+			c.commandList = u.(listModel)
 			return c, cmd
 		}
 	}
@@ -151,9 +150,14 @@ func (c *commandDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := c.commandList
 	radio := c.commandTypeRadio()
+
+	header := t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5) + " " + radio)
+	if len(c.userCommands) == 0 {
+		header = t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-4))
+	}
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5)+" "+radio),
+		header,
 		listView.View(),
 		"",
 		t.S().Base.Width(c.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(c.help.View(c.keyMap)),
@@ -197,13 +201,18 @@ func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
 		commands = c.userCommands
 	}
 
-	commandItems := []util.Model{}
+	commandItems := []list.CompletionItem[Command]{}
 	for _, cmd := range commands {
-		opts := []completions.CompletionOption{}
-		if cmd.Shortcut != "" {
-			opts = append(opts, completions.WithShortcut(cmd.Shortcut))
+		opts := []list.CompletionItemOption{
+			list.WithCompletionID(cmd.ID),
 		}
-		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd, opts...))
+		if cmd.Shortcut != "" {
+			opts = append(
+				opts,
+				list.WithCompletionShortcut(cmd.Shortcut),
+			)
+		}
+		commandItems = append(commandItems, list.NewCompletionItem(cmd.Title, cmd, opts...))
 	}
 	return c.commandList.SetItems(commandItems)
 }

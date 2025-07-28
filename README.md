@@ -15,7 +15,7 @@ Your new coding bestie, available in your favourite terminal. Your tools, your c
 * Session-based: maintain multiple work sessions and contexts per-project
 * Multi-model: choose from a wide range of LLMs or add your own via OpenAI or Anthropic-compatible API
 * Flexible: switch LLMs mid-session while perserving context
-* LSP-enhanced: Crush uses LSPs for addtional context, the same way you do
+* LSP-enhanced: Crush uses LSPs for additional context, the same way you do
 * Extensible: add capabilities via MCPs (`http`, `stdio`, and `sse`)
 
 ## Installation
@@ -86,7 +86,7 @@ go install github.com/charmbracelet/crush@latest
 
 ## Getting Started
 
-The quickest way to get started to grab an API key for your preferred provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start Crush. You'll be prompted to enter your API key.
+The quickest way to get started is to grab an API key for your preferred provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
 

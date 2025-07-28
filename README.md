@@ -26,7 +26,7 @@ npm insatll -g @charmland/crush
 yay -S crush-bin
 
 # Windows (with Winget)
-winget install charmbracelet.mods
+winget install charmbracelet.crush
 
 # Nix
 nix-shell -p nur.repos.charmbracelet.crush

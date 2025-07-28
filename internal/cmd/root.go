@@ -19,6 +19,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func init() {
+	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
+
+	rootCmd.Flags().BoolP("help", "h", false, "Help")
+	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+
+	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	rootCmd.AddCommand(runCmd)
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "crush",
 	Short: "Terminal-based AI assistant for software development",
@@ -157,17 +168,6 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 
 	return appInstance, nil
-}
-
-func init() {
-	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
-	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
-
-	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
-
-	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
-	rootCmd.AddCommand(runCmd)
 }
 
 func maybePrependStdin(prompt string) (string, error) {

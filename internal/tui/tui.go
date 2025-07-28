@@ -253,6 +253,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 
+	case tea.MouseWheelMsg:
+		if !a.dialog.HasDialogs() {
+			updated, pageCmd := a.pages[a.currentPage].Update(msg)
+			a.pages[a.currentPage] = updated.(util.Model)
+			cmds = append(cmds, pageCmd)
+		}
+		return a, tea.Batch(cmds...)
 	case tea.PasteMsg:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)

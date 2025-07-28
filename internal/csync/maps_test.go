@@ -110,6 +110,72 @@ func TestMap_Len(t *testing.T) {
 	assert.Equal(t, 0, m.Len())
 }
 
+func TestMap_Take(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("key1", 42)
+	m.Set("key2", 100)
+
+	assert.Equal(t, 2, m.Len())
+
+	value, ok := m.Take("key1")
+	assert.True(t, ok)
+	assert.Equal(t, 42, value)
+	assert.Equal(t, 1, m.Len())
+
+	_, exists := m.Get("key1")
+	assert.False(t, exists)
+
+	value, ok = m.Get("key2")
+	assert.True(t, ok)
+	assert.Equal(t, 100, value)
+}
+
+func TestMap_Take_NonexistentKey(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("key1", 42)
+
+	value, ok := m.Take("nonexistent")
+	assert.False(t, ok)
+	assert.Equal(t, 0, value)
+	assert.Equal(t, 1, m.Len())
+
+	value, ok = m.Get("key1")
+	assert.True(t, ok)
+	assert.Equal(t, 42, value)
+}
+
+func TestMap_Take_EmptyMap(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+
+	value, ok := m.Take("key1")
+	assert.False(t, ok)
+	assert.Equal(t, 0, value)
+	assert.Equal(t, 0, m.Len())
+}
+
+func TestMap_Take_SameKeyTwice(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("key1", 42)
+
+	value, ok := m.Take("key1")
+	assert.True(t, ok)
+	assert.Equal(t, 42, value)
+	assert.Equal(t, 0, m.Len())
+
+	value, ok = m.Take("key1")
+	assert.False(t, ok)
+	assert.Equal(t, 0, value)
+	assert.Equal(t, 0, m.Len())
+}
+
 func TestMap_Seq2(t *testing.T) {
 	t.Parallel()
 
@@ -152,6 +218,57 @@ func TestMap_Seq2_EmptyMap(t *testing.T) {
 
 	count := 0
 	for range m.Seq2() {
+		count++
+	}
+
+	assert.Equal(t, 0, count)
+}
+
+func TestMap_Seq(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("key1", 1)
+	m.Set("key2", 2)
+	m.Set("key3", 3)
+
+	collected := make([]int, 0)
+	for v := range m.Seq() {
+		collected = append(collected, v)
+	}
+
+	assert.Equal(t, 3, len(collected))
+	assert.Contains(t, collected, 1)
+	assert.Contains(t, collected, 2)
+	assert.Contains(t, collected, 3)
+}
+
+func TestMap_Seq_EarlyReturn(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("key1", 1)
+	m.Set("key2", 2)
+	m.Set("key3", 3)
+
+	count := 0
+	for range m.Seq() {
+		count++
+		if count == 2 {
+			break
+		}
+	}
+
+	assert.Equal(t, 2, count)
+}
+
+func TestMap_Seq_EmptyMap(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+
+	count := 0
+	for range m.Seq() {
 		count++
 	}
 
@@ -371,6 +488,82 @@ func TestMap_ConcurrentSeq2(t *testing.T) {
 	wg.Wait()
 }
 
+func TestMap_ConcurrentSeq(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[int, int]()
+	for i := range 100 {
+		m.Set(i, i*2)
+	}
+
+	var wg sync.WaitGroup
+	const numIterators = 10
+
+	wg.Add(numIterators)
+	for range numIterators {
+		go func() {
+			defer wg.Done()
+			count := 0
+			values := make(map[int]bool)
+			for v := range m.Seq() {
+				values[v] = true
+				count++
+			}
+			assert.Equal(t, 100, count)
+			for i := range 100 {
+				assert.True(t, values[i*2])
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestMap_ConcurrentTake(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[int, int]()
+	const numItems = 1000
+
+	for i := range numItems {
+		m.Set(i, i*2)
+	}
+
+	var wg sync.WaitGroup
+	const numWorkers = 10
+	taken := make([][]int, numWorkers)
+
+	wg.Add(numWorkers)
+	for i := range numWorkers {
+		go func(workerID int) {
+			defer wg.Done()
+			taken[workerID] = make([]int, 0)
+			for j := workerID; j < numItems; j += numWorkers {
+				if value, ok := m.Take(j); ok {
+					taken[workerID] = append(taken[workerID], value)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, 0, m.Len())
+
+	allTaken := make(map[int]bool)
+	for _, workerTaken := range taken {
+		for _, value := range workerTaken {
+			assert.False(t, allTaken[value], "Value %d was taken multiple times", value)
+			allTaken[value] = true
+		}
+	}
+
+	assert.Equal(t, numItems, len(allTaken))
+	for i := range numItems {
+		assert.True(t, allTaken[i*2], "Expected value %d to be taken", i*2)
+	}
+}
+
 func TestMap_TypeSafety(t *testing.T) {
 	t.Parallel()
 
@@ -427,6 +620,38 @@ func BenchmarkMap_Seq2(b *testing.B) {
 
 	for b.Loop() {
 		for range m.Seq2() {
+		}
+	}
+}
+
+func BenchmarkMap_Seq(b *testing.B) {
+	m := NewMap[int, int]()
+	for i := range 1000 {
+		m.Set(i, i*2)
+	}
+
+	for b.Loop() {
+		for range m.Seq() {
+		}
+	}
+}
+
+func BenchmarkMap_Take(b *testing.B) {
+	m := NewMap[int, int]()
+	for i := range 1000 {
+		m.Set(i, i*2)
+	}
+
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		key := i % 1000
+		m.Take(key)
+		if i%1000 == 999 {
+			b.StopTimer()
+			for j := range 1000 {
+				m.Set(j, j*2)
+			}
+			b.StartTimer()
 		}
 	}
 }

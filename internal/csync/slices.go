@@ -59,10 +59,10 @@ func NewSliceFrom[T any](s []T) *Slice[T] {
 }
 
 // Append adds an element to the end of the slice.
-func (s *Slice[T]) Append(item T) {
+func (s *Slice[T]) Append(items ...T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.inner = append(s.inner, item)
+	s.inner = append(s.inner, items...)
 }
 
 // Prepend adds an element to the beginning of the slice.
@@ -110,6 +110,15 @@ func (s *Slice[T]) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.inner)
+}
+
+// Slice returns a copy of the underlying slice.
+func (s *Slice[T]) Slice() []T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]T, len(s.inner))
+	copy(result, s.inner)
+	return result
 }
 
 // SetSlice replaces the entire slice with a new one.

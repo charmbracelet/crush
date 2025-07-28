@@ -12,6 +12,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -25,8 +26,7 @@ type WorkspaceWatcher struct {
 	workspacePath string
 
 	debounceTime time.Duration
-	debounceMap  map[string]*time.Timer
-	debounceMu   sync.Mutex
+	debounceMap  *csync.Map[string, *time.Timer]
 
 	// File watchers registered by the server
 	registrations  []protocol.FileSystemWatcher
@@ -46,7 +46,7 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 		name:          name,
 		client:        client,
 		debounceTime:  300 * time.Millisecond,
-		debounceMap:   make(map[string]*time.Timer),
+		debounceMap:   csync.NewMap[string, *time.Timer](),
 		registrations: []protocol.FileSystemWatcher{},
 	}
 }
@@ -639,26 +639,21 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 
 // debounceHandleFileEvent handles file events with debouncing to reduce notifications
 func (w *WorkspaceWatcher) debounceHandleFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) {
-	w.debounceMu.Lock()
-	defer w.debounceMu.Unlock()
-
 	// Create a unique key based on URI and change type
 	key := fmt.Sprintf("%s:%d", uri, changeType)
 
 	// Cancel existing timer if any
-	if timer, exists := w.debounceMap[key]; exists {
+	if timer, exists := w.debounceMap.Get(key); exists {
 		timer.Stop()
 	}
 
 	// Create new timer
-	w.debounceMap[key] = time.AfterFunc(w.debounceTime, func() {
+	w.debounceMap.Set(key, time.AfterFunc(w.debounceTime, func() {
 		w.handleFileEvent(ctx, uri, changeType)
 
 		// Cleanup timer after execution
-		w.debounceMu.Lock()
-		delete(w.debounceMap, key)
-		w.debounceMu.Unlock()
-	})
+		w.debounceMap.Del(key)
+	}))
 }
 
 // handleFileEvent sends file change notifications

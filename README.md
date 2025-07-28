@@ -6,10 +6,17 @@
     <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
 </p>
 
-Crush is a tool for building software with AI.
+Your new coding bestie, available in your favourite terminal. Your tools, your code, and your workflows, wired into your LLM of choice.
 
-> [!WARNING]
-> Crush rocks. Make sure you’re ready for it.
+<img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/a67e22a5-167f-4aa0-bcbf-4248740b6fd4" />
+
+## Features
+
+* Session-based: maintain multiple work sessions and contexts per-project
+* Multi-model: choose from a wide range of LLMs
+* Flexible: switch LLMs mid-session while perserving context
+* LSP-enhanced: Crush uses LSPs for addtional context, the same way you do
+* Extensible: add MCPs and any OpenAI or Anthropic-compatible LLM
 
 ## Installation
 

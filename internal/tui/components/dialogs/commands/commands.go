@@ -60,6 +60,9 @@ type commandDialogCmp struct {
 type (
 	SwitchSessionsMsg    struct{}
 	SwitchModelMsg       struct{}
+	QuitMsg              struct{}
+	OpenFilePickerMsg    struct{}
+	ToggleHelpMsg        struct{}
 	ToggleCompactModeMsg struct{}
 	ToggleThinkingMsg    struct{}
 	CompactMsg           struct {
@@ -248,13 +251,20 @@ func (c *commandDialogCmp) Position() (int, int) {
 func (c *commandDialogCmp) defaultCommands() []Command {
 	commands := []Command{
 		{
-			ID:          "init",
-			Title:       "Initialize Project",
-			Description: "Create/Update the CRUSH.md memory file",
+			ID:          "switch_session",
+			Title:       "Switch Session",
+			Description: "Switch to a different session",
+			Shortcut:    "ctrl+s",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(chat.SendMsg{
-					Text: prompt.Initialize(),
-				})
+				return util.CmdHandler(SwitchSessionsMsg{})
+			},
+		},
+		{
+			ID:          "switch_model",
+			Title:       "Switch Model",
+			Description: "Switch to a different model",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchModelMsg{})
 			},
 		},
 	}
@@ -307,23 +317,49 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			},
 		})
 	}
+	if c.sessionID != "" {
+		agentCfg := config.Get().Agents["coder"]
+		model := config.Get().GetModelByType(agentCfg.Model)
+		if model.SupportsImages {
+			commands = append(commands, Command{
+				ID:          "file_picker",
+				Title:       "Open File Picker",
+				Shortcut:    "ctrl+f",
+				Description: "Open file picker",
+				Handler: func(cmd Command) tea.Cmd {
+					return util.CmdHandler(OpenFilePickerMsg{})
+				},
+			})
+		}
+	}
 
 	return append(commands, []Command{
 		{
-			ID:          "switch_session",
-			Title:       "Switch Session",
-			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
+			ID:          "toggle_help",
+			Title:       "Toggle Help",
+			Shortcut:    "ctrl+g",
+			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchSessionsMsg{})
+				return util.CmdHandler(ToggleHelpMsg{})
 			},
 		},
 		{
-			ID:          "switch_model",
-			Title:       "Switch Model",
-			Description: "Switch to a different model",
+			ID:          "init",
+			Title:       "Initialize Project",
+			Description: "Create/Update the CRUSH.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchModelMsg{})
+				return util.CmdHandler(chat.SendMsg{
+					Text: prompt.Initialize(),
+				})
+			},
+		},
+		{
+			ID:          "quit",
+			Title:       "Quit",
+			Description: "Quit",
+			Shortcut:    "ctrl+c",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(QuitMsg{})
 			},
 		},
 	}...)

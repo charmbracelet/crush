@@ -170,7 +170,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
-
+	case commands.QuitMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(),
+		})
+	case commands.ToggleHelpMsg:
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
@@ -187,7 +194,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker
-	case chat.OpenFilePickerMsg:
+	case commands.OpenFilePickerMsg:
 		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})

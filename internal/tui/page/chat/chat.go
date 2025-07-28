@@ -37,8 +37,7 @@ import (
 var ChatPageID page.PageID = "chat"
 
 type (
-	OpenFilePickerMsg struct{}
-	ChatFocusedMsg    struct {
+	ChatFocusedMsg struct {
 		Focused bool
 	}
 	CancelTimerExpiredMsg struct{}
@@ -299,7 +298,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			agentCfg := config.Get().Agents["coder"]
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
-				return p, util.CmdHandler(OpenFilePickerMsg{})
+				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
 			} else {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}

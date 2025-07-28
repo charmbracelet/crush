@@ -225,7 +225,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if !isAllowedType {
-
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd
 		}

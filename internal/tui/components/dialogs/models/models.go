@@ -149,7 +149,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if elapsed < 750*time.Millisecond {
 							time.Sleep(750*time.Millisecond - elapsed)
 						}
-						if err == nil {
+						if err != nil {
 							m.isAPIKeyValid = true
 							return APIKeyStateChangeMsg{
 								State: APIKeyInputStateVerified,

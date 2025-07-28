@@ -57,7 +57,7 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 }
 
 func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
-	isAnthropicModel := o.providerOptions.config.ID == "openrouter" && strings.HasPrefix(o.Model().ID, "anthropic/")
+	isAnthropicModel := o.providerOptions.config.ID == string(catwalk.InferenceProviderOpenRouter) && strings.HasPrefix(o.Model().ID, "anthropic/")
 	// Add system message first
 	systemMessage := o.providerOptions.systemMessage
 	if o.providerOptions.systemPromptPrefix != "" {

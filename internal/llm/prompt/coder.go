@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
@@ -18,18 +17,7 @@ import (
 func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 
-	if os.Getenv("CRUSH_CODER_V2") == "true" {
-		basePrompt = string(baseCoderV2Prompt)
-	} else {
-		switch p {
-		case string(catwalk.InferenceProviderOpenAI):
-			basePrompt = string(baseOpenAICoderPrompt)
-		case string(catwalk.InferenceProviderGemini), string(catwalk.InferenceProviderVertexAI):
-			basePrompt = string(baseGeminiCoderPrompt)
-		default:
-			basePrompt = string(baseAnthropicCoderPrompt)
-		}
-	}
+	basePrompt = string(baseCoderPrompt)
 	envInfo := getEnvironmentInfo()
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
@@ -42,17 +30,8 @@ func CoderPrompt(p string, contextFiles ...string) string {
 	return basePrompt
 }
 
-//go:embed v2.md
-var baseCoderV2Prompt []byte
-
-//go:embed openai.md
-var baseOpenAICoderPrompt []byte
-
-//go:embed anthropic.md
-var baseAnthropicCoderPrompt []byte
-
-//go:embed gemini.md
-var baseGeminiCoderPrompt []byte
+//go:embed coder.md
+var baseCoderPrompt []byte
 
 func getEnvironmentInfo() string {
 	cwd := config.Get().WorkingDir()

@@ -115,11 +115,23 @@ furies:
     account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
     secret_name: FURY_TOKEN
 
-homebrew_casks:
+brews:
   - repository:
-      owner: charmbracelet
+      owner: "charmbracelet"
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Kujtim Hoxha"
+      email: "kujtim@charm.sh"
+    dependencies:
+      - name: git
+      - name: bash
+    install: |-
+      bin.install "{{ with .Var.binary_name }}{{ . }}{{ else }}{{ .ProjectName }}{{ end }}"
+      bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
+      zsh_completion.install "completions/{{ .ProjectName }}.zsh" => "_{{ .ProjectName }}"
+      fish_completion.install "completions/{{ .ProjectName }}.fish"
+      man1.install "manpages/{{ .ProjectName }}.1.gz"
 
 npms:
   - name: "@charmland/crush"

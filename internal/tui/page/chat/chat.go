@@ -287,6 +287,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.isProjectInit = false
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
+	case commands.NewSessionsMsg:
+		if p.app.CoderAgent.IsBusy() {
+			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
+		}
+		return p, p.newSession()
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):

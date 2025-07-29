@@ -59,6 +59,7 @@ type commandDialogCmp struct {
 
 type (
 	SwitchSessionsMsg    struct{}
+	NewSessionsMsg       struct{}
 	SwitchModelMsg       struct{}
 	QuitMsg              struct{}
 	OpenFilePickerMsg    struct{}
@@ -250,6 +251,15 @@ func (c *commandDialogCmp) Position() (int, int) {
 
 func (c *commandDialogCmp) defaultCommands() []Command {
 	commands := []Command{
+		{
+			ID:          "new_session",
+			Title:       "New Session",
+			Description: "start a new session",
+			Shortcut:    "ctrl+n",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(NewSessionsMsg{})
+			},
+		},
 		{
 			ID:          "switch_session",
 			Title:       "Switch Session",

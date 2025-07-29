@@ -228,7 +228,7 @@ NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTAN
 
 **When to verify with `pwd`:**
 
-- After a command fails with "file not found" or similar path-related errors
+- After a command fails with "file not found" or similar path-related or `exit status 1` errors
 - When resuming work or continuing from a previous step if uncertain
 - When you realize you may have lost track of your current location
 

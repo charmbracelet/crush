@@ -168,6 +168,14 @@ signs:
     artifacts: checksum
     output: true
 
+source:
+  enabled: true
+
+sboms:
+  - artifacts: archive
+  - id: source
+    artifacts: source
+
 nix:
   - repository:
       owner: "charmbracelet"

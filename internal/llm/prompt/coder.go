@@ -4,12 +4,13 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 )
@@ -17,21 +18,38 @@ import (
 func CoderPrompt(p string, contextFiles ...string) string {
 	var basePrompt string
 
-	basePrompt = string(baseCoderPrompt)
+	basePrompt = string(anthropicCoderPrompt)
+	switch p {
+	case string(catwalk.InferenceProviderOpenAI):
+		basePrompt = string(openaiCoderPrompt)
+	case string(catwalk.InferenceProviderGemini):
+		basePrompt = string(geminiCoderPrompt)
+	}
+	if ok, _ := strconv.ParseBool(os.Getenv("CRUSH_CODER_V2")); ok {
+		basePrompt = string(coderV2Prompt)
+	}
 	envInfo := getEnvironmentInfo()
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
 	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
-	slog.Debug("Context content", "Context", contextContent)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
 	}
 	return basePrompt
 }
 
-//go:embed coder.md
-var baseCoderPrompt []byte
+//go:embed anthropic.md
+var anthropicCoderPrompt []byte
+
+//go:embed gemini.md
+var geminiCoderPrompt []byte
+
+//go:embed openai.md
+var openaiCoderPrompt []byte
+
+//go:embed v2.md
+var coderV2Prompt []byte
 
 func getEnvironmentInfo() string {
 	cwd := config.Get().WorkingDir()

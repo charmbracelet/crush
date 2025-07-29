@@ -10,7 +10,7 @@ includes:
 
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
-  license: "MIT"
+  license: "FSL-1.1-MIT"
   homepage: "https://charm.sh/crush"
   description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
   maintainers:

@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go run . schema > .github/crush-schema.json
+      - run: go run . schema > ./schema.json
       - uses: stefanzweifel/git-auto-commit-action@778341af668090896ca464160c2def5d1d1a3eb0 # v5
         with:
           commit_message: "chore: auto-update generated files"

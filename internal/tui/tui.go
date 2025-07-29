@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -259,8 +258,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
-
-		slog.Info("TUI Update", "msg", msg, "key", msg.String())
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg:

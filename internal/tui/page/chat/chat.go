@@ -254,6 +254,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.chat = u.(chat.MessageListCmp)
 			cmds = append(cmds, cmd)
 		}
+
 		return p, tea.Batch(cmds...)
 
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:

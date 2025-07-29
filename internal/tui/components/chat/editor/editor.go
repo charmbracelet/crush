@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -48,14 +49,16 @@ type FileCompletionItem struct {
 }
 
 type editorCmp struct {
-	width       int
-	height      int
-	x, y        int
-	app         *app.App
-	session     session.Session
-	textarea    textarea.Model
-	attachments []message.Attachment
-	deleteMode  bool
+	width              int
+	height             int
+	x, y               int
+	app                *app.App
+	session            session.Session
+	textarea           textarea.Model
+	attachments        []message.Attachment
+	deleteMode         bool
+	readyPlaceholder   string
+	workingPlaceholder string
 
 	keyMap EditorKeyMap
 
@@ -157,6 +160,10 @@ func (m *editorCmp) send() tea.Cmd {
 	if value == "" {
 		return nil
 	}
+
+	// Change the placeholder when sending a new message.
+	m.randomizePlaceholders()
+
 	return tea.Batch(
 		util.CmdHandler(chat.SendMsg{
 			Text:        value,
@@ -379,8 +386,31 @@ func (m *editorCmp) Cursor() *tea.Cursor {
 	return cursor
 }
 
+var readyPlaceholders = [...]string{
+	"Ready!",
+	"Ready...",
+	"Ready?",
+}
+
+var workingPlaceholders = [...]string{
+	"Working!",
+	"Working...",
+	"Working?",
+}
+
+func (m *editorCmp) randomizePlaceholders() {
+	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
+	// Update placeholder
+	if m.app.CoderAgent.IsBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+	} else {
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),
@@ -510,14 +540,18 @@ func New(app *app.App) Editor {
 	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
-	ta.Placeholder = "Tell me more about this project..."
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	return &editorCmp{
+	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
 	}
+
+	e.randomizePlaceholders()
+	e.textarea.Placeholder = e.readyPlaceholder
+
+	return e
 }

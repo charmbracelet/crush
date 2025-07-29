@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -58,11 +60,16 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg    struct{}
-	SwitchModelMsg       struct{}
-	ToggleCompactModeMsg struct{}
-	ToggleThinkingMsg    struct{}
-	CompactMsg           struct {
+	SwitchSessionsMsg     struct{}
+	NewSessionsMsg        struct{}
+	SwitchModelMsg        struct{}
+	QuitMsg               struct{}
+	OpenFilePickerMsg     struct{}
+	ToggleHelpMsg         struct{}
+	ToggleCompactModeMsg  struct{}
+	ToggleThinkingMsg     struct{}
+	OpenExternalEditorMsg struct{}
+	CompactMsg            struct {
 		SessionID string
 	}
 )
@@ -248,13 +255,29 @@ func (c *commandDialogCmp) Position() (int, int) {
 func (c *commandDialogCmp) defaultCommands() []Command {
 	commands := []Command{
 		{
-			ID:          "init",
-			Title:       "Initialize Project",
-			Description: "Create/Update the CRUSH.md memory file",
+			ID:          "new_session",
+			Title:       "New Session",
+			Description: "start a new session",
+			Shortcut:    "ctrl+n",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(chat.SendMsg{
-					Text: prompt.Initialize(),
-				})
+				return util.CmdHandler(NewSessionsMsg{})
+			},
+		},
+		{
+			ID:          "switch_session",
+			Title:       "Switch Session",
+			Description: "Switch to a different session",
+			Shortcut:    "ctrl+s",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchSessionsMsg{})
+			},
+		},
+		{
+			ID:          "switch_model",
+			Title:       "Switch Model",
+			Description: "Switch to a different model",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchModelMsg{})
 			},
 		},
 	}
@@ -307,23 +330,62 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			},
 		})
 	}
+	if c.sessionID != "" {
+		agentCfg := config.Get().Agents["coder"]
+		model := config.Get().GetModelByType(agentCfg.Model)
+		if model.SupportsImages {
+			commands = append(commands, Command{
+				ID:          "file_picker",
+				Title:       "Open File Picker",
+				Shortcut:    "ctrl+f",
+				Description: "Open file picker",
+				Handler: func(cmd Command) tea.Cmd {
+					return util.CmdHandler(OpenFilePickerMsg{})
+				},
+			})
+		}
+	}
+
+	// Add external editor command if $EDITOR is available
+	if os.Getenv("EDITOR") != "" {
+		commands = append(commands, Command{
+			ID:          "open_external_editor",
+			Title:       "Open External Editor",
+			Shortcut:    "ctrl+o",
+			Description: "Open external editor to compose message",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenExternalEditorMsg{})
+			},
+		})
+	}
 
 	return append(commands, []Command{
 		{
-			ID:          "switch_session",
-			Title:       "Switch Session",
-			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
+			ID:          "toggle_help",
+			Title:       "Toggle Help",
+			Shortcut:    "ctrl+g",
+			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchSessionsMsg{})
+				return util.CmdHandler(ToggleHelpMsg{})
 			},
 		},
 		{
-			ID:          "switch_model",
-			Title:       "Switch Model",
-			Description: "Switch to a different model",
+			ID:          "init",
+			Title:       "Initialize Project",
+			Description: "Create/Update the CRUSH.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchModelMsg{})
+				return util.CmdHandler(chat.SendMsg{
+					Text: prompt.Initialize(),
+				})
+			},
+		},
+		{
+			ID:          "quit",
+			Title:       "Quit",
+			Description: "Quit",
+			Shortcut:    "ctrl+c",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(QuitMsg{})
 			},
 		},
 	}...)

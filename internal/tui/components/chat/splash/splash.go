@@ -562,6 +562,8 @@ func (s *splashCmp) infoSection() string {
 			lipgloss.Left,
 			s.cwd(),
 			"",
+			s.currentModelBlock(),
+			"",
 			lipgloss.JoinHorizontal(lipgloss.Left, s.lspBlock(), s.mcpBlock()),
 			"",
 		),
@@ -737,6 +739,24 @@ func (s *splashCmp) mcpBlock() string {
 			lipgloss.Left,
 			mcpList...,
 		),
+	)
+}
+
+func (s *splashCmp) currentModelBlock() string {
+	cfg := config.Get()
+	agentCfg := cfg.Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
+	t := styles.CurrentTheme()
+	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+	modelName := t.S().Text.Render(model.Name)
+	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
+	parts := []string{
+		modelInfo,
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
 	)
 }
 

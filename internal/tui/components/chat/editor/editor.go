@@ -2,8 +2,10 @@ package editor
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -36,6 +39,7 @@ type Editor interface {
 
 	SetSession(session session.Session) tea.Cmd
 	IsCompletionsOpen() bool
+	HasAttachments() bool
 	Cursor() *tea.Cursor
 }
 
@@ -80,7 +84,7 @@ const (
 	maxAttachments = 5
 )
 
-type openEditorMsg struct {
+type OpenEditorMsg struct {
 	Text string
 }
 
@@ -119,7 +123,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
-		return openEditorMsg{
+		return OpenEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}
 	})
@@ -204,9 +208,53 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.completionsStartIndex = 0
 			}
 		}
-	case openEditorMsg:
+
+	case commands.OpenExternalEditorMsg:
+		if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
+			return m, util.ReportWarn("Agent is working, please wait...")
+		}
+		return m, m.openEditor(m.textarea.Value())
+	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+	case tea.PasteMsg:
+		path := strings.ReplaceAll(string(msg), "\\ ", " ")
+		// try to get an image
+		path, err := filepath.Abs(path)
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		isAllowedType := false
+		for _, ext := range filepicker.AllowedTypes {
+			if strings.HasSuffix(path, ext) {
+				isAllowedType = true
+				break
+			}
+		}
+		if !isAllowedType {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
+		if tooBig {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		fileName := filepath.Base(path)
+		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+		return m, util.CmdHandler(filepicker.FilePickedMsg{
+			Attachment: attachment,
+		})
+
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -440,6 +488,10 @@ func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 
 func (c *editorCmp) IsCompletionsOpen() bool {
 	return c.isCompletionsOpen
+}
+
+func (c *editorCmp) HasAttachments() bool {
+	return len(c.attachments) > 0
 }
 
 func New(app *app.App) Editor {

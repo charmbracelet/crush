@@ -176,7 +176,7 @@ nix:
       name: nur
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     extra_install: |-
-      installManPage ./manpages/crush.1.gz.
+      installManPage ./manpages/crush.1.gz
       installShellCompletion ./completions/*
 
 winget:

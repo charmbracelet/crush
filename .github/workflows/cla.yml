@@ -24,12 +24,12 @@ jobs:
           github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CRUSH_CLA_BOT }}
         with:
           path-to-signatures: ".github/cla-signatures.json"
-          path-to-document: "https://github.com/charmbracelet/crush/blob/main/CLA.md" # TODO: provide the CLA.md file (Christian)
-          branch: "main" # WARN: if we make `main` protected, this will start failing
+          path-to-document: "https://github.com/charmbracelet/crush/blob/main/CLA.md"
+          branch: "main"
           allowlist: dependabot[bot]
           custom-pr-sign-comment: "I have read the Contributor License Agreement (CLA) and hereby sign the CLA."
           lock-pullrequest-aftermerge: false
-          signed-commit-message: "chore(legal): @$contributorName has signed the CLA in $owner/$repo#$pullRequestNo"
+          signed-commit-message: "chore(legal): @$contributorName has signed the CLA in $pullRequestNo"

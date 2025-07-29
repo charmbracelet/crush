@@ -144,6 +144,26 @@ nfpms:
       - src: ./manpages/crush.1.gz
         dst: /usr/share/man/man1/crush.1.gz
 
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+source:
+  enabled: true
+
+sboms:
+  - artifacts: archive
+  - id: source
+    artifacts: source
+
 nix:
   - repository:
       owner: "charmbracelet"
@@ -210,3 +230,9 @@ changelog:
       order: 400
     - title: Other work
       order: 9999
+
+release:
+  prerelease: auto
+  footer:
+    from_url:
+      url: https://raw.githubusercontent.com/charmbracelet/meta/main/footer.md

@@ -24,9 +24,6 @@
 Use a package manager:
 
 ```bash
-# macOS or Linux
-brew install charmbracelet/tap/crush
-
 # NPM
 npm install -g @charmland/crush
 

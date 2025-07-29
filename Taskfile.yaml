@@ -48,5 +48,5 @@ tasks:
   schema:
     desc: Generate JSON schema for configuration
     cmds:
-      - go run cmd/schema/main.go > crush-schema.json
-      - echo "Generated crush-schema.json"
+      - go run main.go schema > schema.json
+      - echo "Generated schema.json"

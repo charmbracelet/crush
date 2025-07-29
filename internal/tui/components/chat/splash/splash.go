@@ -747,6 +747,9 @@ func (s *splashCmp) currentModelBlock() string {
 	cfg := config.Get()
 	agentCfg := cfg.Agents["coder"]
 	model := config.Get().GetModelByType(agentCfg.Model)
+	if model == nil {
+		return ""
+	}
 	t := styles.CurrentTheme()
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
 	modelName := t.S().Text.Render(model.Name)

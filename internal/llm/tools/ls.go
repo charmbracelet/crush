@@ -121,12 +121,10 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = l.workingDir
 	}
 
-	if searchPath == "~" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return ToolResponse{}, fmt.Errorf("error resolving home directory: %w", err)
-		}
-		searchPath = homeDir
+	var err error
+	searchPath, err = fsext.Expand(searchPath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error expanding path: %w", err)
 	}
 
 	if !filepath.IsAbs(searchPath) {

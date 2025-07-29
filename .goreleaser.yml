@@ -242,3 +242,9 @@ changelog:
       order: 400
     - title: Other work
       order: 9999
+
+release:
+  prerelease: auto
+  footer:
+    from_url:
+      url: https://raw.githubusercontent.com/charmbracelet/meta/main/footer.md

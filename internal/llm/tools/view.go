@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 type ViewParams struct {
@@ -20,9 +21,16 @@ type ViewParams struct {
 	Limit    int    `json:"limit"`
 }
 
+type ViewPermissionsParams struct {
+	FilePath string `json:"file_path"`
+	Offset   int    `json:"offset"`
+	Limit    int    `json:"limit"`
+}
+
 type viewTool struct {
-	lspClients map[string]*lsp.Client
-	workingDir string
+	lspClients  map[string]*lsp.Client
+	workingDir  string
+	permissions permission.Service
 }
 
 type ViewResponseMetadata struct {
@@ -46,6 +54,7 @@ HOW TO USE:
 - Provide the path to the file you want to view
 - Optionally specify an offset to start reading from a specific line
 - Optionally specify a limit to control how many lines are read
+- Do not use this for directories use the ls tool instead
 
 FEATURES:
 - Displays file contents with line numbers for easy reference
@@ -72,10 +81,11 @@ TIPS:
 - When viewing large files, use the offset parameter to read specific sections`
 )
 
-func NewViewTool(lspClients map[string]*lsp.Client, workingDir string) BaseTool {
+func NewViewTool(lspClients map[string]*lsp.Client, permissions permission.Service, workingDir string) BaseTool {
 	return &viewTool{
-		lspClients: lspClients,
-		workingDir: workingDir,
+		lspClients:  lspClients,
+		workingDir:  workingDir,
+		permissions: permissions,
 	}
 }
 
@@ -120,6 +130,42 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	filePath := params.FilePath
 	if !filepath.IsAbs(filePath) {
 		filePath = filepath.Join(v.workingDir, filePath)
+	}
+
+	// Check if file is outside working directory and request permission if needed
+	absWorkingDir, err := filepath.Abs(v.workingDir)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(absWorkingDir, absFilePath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// File is outside working directory, request permission
+		sessionID, messageID := GetContextValues(ctx)
+		if sessionID == "" || messageID == "" {
+			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing files outside working directory")
+		}
+
+		granted := v.permissions.Request(
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        absFilePath,
+				ToolCallID:  call.ID,
+				ToolName:    ViewToolName,
+				Action:      "read",
+				Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
+				Params:      ViewPermissionsParams(params),
+			},
+		)
+
+		if !granted {
+			return ToolResponse{}, permission.ErrorPermissionDenied
+		}
 	}
 
 	// Check if file exists

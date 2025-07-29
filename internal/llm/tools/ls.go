@@ -9,9 +9,15 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 type LSParams struct {
+	Path   string   `json:"path"`
+	Ignore []string `json:"ignore"`
+}
+
+type LSPermissionsParams struct {
 	Path   string   `json:"path"`
 	Ignore []string `json:"ignore"`
 }
@@ -29,7 +35,8 @@ type LSResponseMetadata struct {
 }
 
 type lsTool struct {
-	workingDir string
+	workingDir  string
+	permissions permission.Service
 }
 
 const (
@@ -71,9 +78,10 @@ TIPS:
 - Combine with other tools for more effective exploration`
 )
 
-func NewLsTool(workingDir string) BaseTool {
+func NewLsTool(permissions permission.Service, workingDir string) BaseTool {
 	return &lsTool{
-		workingDir: workingDir,
+		workingDir:  workingDir,
+		permissions: permissions,
 	}
 }
 
@@ -117,20 +125,51 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = filepath.Join(l.workingDir, searchPath)
 	}
 
-	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-		return NewTextErrorResponse(fmt.Sprintf("path does not exist: %s", searchPath)), nil
+	// Check if directory is outside working directory and request permission if needed
+	absWorkingDir, err := filepath.Abs(l.workingDir)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 	}
 
+	absSearchPath, err := filepath.Abs(searchPath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving search path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// Directory is outside working directory, request permission
+		sessionID, messageID := GetContextValues(ctx)
+		if sessionID == "" || messageID == "" {
+			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing directories outside working directory")
+		}
+
+		granted := l.permissions.Request(
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        absSearchPath,
+				ToolCallID:  call.ID,
+				ToolName:    LSToolName,
+				Action:      "list",
+				Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
+				Params:      LSPermissionsParams(params),
+			},
+		)
+
+		if !granted {
+			return ToolResponse{}, permission.ErrorPermissionDenied
+		}
+	}
+
+	output, err := ListDirectoryTree(searchPath, params.Ignore)
+	if err != nil {
+		return ToolResponse{}, err
+	}
+
+	// Get file count for metadata
 	files, truncated, err := fsext.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
 	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error listing directory: %w", err)
-	}
-
-	tree := createFileTree(files)
-	output := printTree(tree, searchPath)
-
-	if truncated {
-		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+		return ToolResponse{}, fmt.Errorf("error listing directory for metadata: %w", err)
 	}
 
 	return WithResponseMetadata(
@@ -140,6 +179,26 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 			Truncated:     truncated,
 		},
 	), nil
+}
+
+func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
+	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("path does not exist: %s", searchPath)
+	}
+
+	files, truncated, err := fsext.ListDirectory(searchPath, ignore, MaxLSFiles)
+	if err != nil {
+		return "", fmt.Errorf("error listing directory: %w", err)
+	}
+
+	tree := createFileTree(files)
+	output := printTree(tree, searchPath)
+
+	if truncated {
+		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+	}
+
+	return output, nil
 }
 
 func createFileTree(sortedPaths []string) []*TreeNode {

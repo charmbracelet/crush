@@ -181,9 +181,9 @@ func NewAgent(
 			tools.NewFetchTool(permissions, cwd),
 			tools.NewGlobTool(cwd),
 			tools.NewGrepTool(cwd),
-			tools.NewLsTool(cwd),
+			tools.NewLsTool(permissions, cwd),
 			tools.NewSourcegraphTool(),
-			tools.NewViewTool(lspClients, cwd),
+			tools.NewViewTool(lspClients, permissions, cwd),
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 

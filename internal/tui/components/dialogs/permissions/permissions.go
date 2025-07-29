@@ -321,6 +321,34 @@ func (p *permissionDialogCmp) renderHeader() string {
 		)
 	case tools.FetchToolName:
 		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+	case tools.ViewToolName:
+		params := p.permission.Params.(tools.ViewPermissionsParams)
+		fileKey := t.S().Muted.Render("File")
+		filePath := t.S().Text.
+			Width(p.width - lipgloss.Width(fileKey)).
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.FilePath)))
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				fileKey,
+				filePath,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+		)
+	case tools.LSToolName:
+		params := p.permission.Params.(tools.LSPermissionsParams)
+		pathKey := t.S().Muted.Render("Directory")
+		pathValue := t.S().Text.
+			Width(p.width - lipgloss.Width(pathKey)).
+			Render(fmt.Sprintf(" %s", fsext.PrettyPath(params.Path)))
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				pathKey,
+				pathValue,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+		)
 	}
 
 	return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Left, headerParts...))
@@ -347,6 +375,10 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateMultiEditContent()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
+	case tools.ViewToolName:
+		content = p.generateViewContent()
+	case tools.LSToolName:
+		content = p.generateLSContent()
 	default:
 		content = p.generateDefaultContent()
 	}
@@ -481,6 +513,45 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 			Padding(1, 2).
 			Width(p.contentViewPort.Width()).
 			Render(pr.URL)
+		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateViewContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.ViewPermissionsParams); ok {
+		content := fmt.Sprintf("File: %s", fsext.PrettyPath(pr.FilePath))
+		if pr.Offset > 0 {
+			content += fmt.Sprintf("\nStarting from line: %d", pr.Offset+1)
+		}
+		if pr.Limit > 0 && pr.Limit != 2000 { // 2000 is the default limit
+			content += fmt.Sprintf("\nLines to read: %d", pr.Limit)
+		}
+
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
+		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateLSContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.LSPermissionsParams); ok {
+		content := fmt.Sprintf("Directory: %s", fsext.PrettyPath(pr.Path))
+		if len(pr.Ignore) > 0 {
+			content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(pr.Ignore, ", "))
+		}
+
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
 		return finalContent
 	}
 	return ""
@@ -623,6 +694,12 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	case tools.FetchToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
+	case tools.ViewToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.4)
+	case tools.LSToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.4)
 	default:
 		p.width = int(float64(p.wWidth) * 0.7)
 		p.height = int(float64(p.wHeight) * 0.5)

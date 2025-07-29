@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -145,7 +146,16 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
-	dir := filepath.Dir(opts.Path)
+	fileInfo, err := os.Stat(opts.Path)
+	dir := opts.Path
+	if err == nil {
+		if fileInfo.IsDir() {
+			dir = opts.Path
+		} else {
+			dir = filepath.Dir(opts.Path)
+		}
+	}
+
 	if dir == "." {
 		dir = s.workingDir
 	}

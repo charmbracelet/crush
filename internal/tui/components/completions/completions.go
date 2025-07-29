@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -56,6 +56,8 @@ type Completions interface {
 	Height() int
 }
 
+type listModel = list.FilterableList[list.CompletionItem[any]]
+
 type completionsCmp struct {
 	wWidth    int // The window width
 	wHeight   int // The window height
@@ -67,14 +69,9 @@ type completionsCmp struct {
 	open      bool // Indicates if the completions are open
 	keyMap    KeyMap
 
-	list  list.ListModel
+	list  listModel
 	query string // The current filter query
 }
-
-const (
-	maxCompletionsWidth = 80 // Maximum width for the completions popup
-	minCompletionsWidth = 20 // Minimum width for the completions popup
-)
 
 func New() Completions {
 	completionsKeyMap := DefaultKeyMap()
@@ -88,10 +85,13 @@ func New() Completions {
 	keyMap.UpOneItem = completionsKeyMap.Up
 	keyMap.DownOneItem = completionsKeyMap.Down
 
-	l := list.New(
-		list.WithReverse(true),
-		list.WithKeyMap(keyMap),
-		list.WithHideFilterInput(true),
+	l := list.NewFilterableList(
+		[]list.CompletionItem[any]{},
+		list.WithFilterInputHidden(),
+		list.WithFilterListOptions(
+			list.WithDirectionBackward(),
+			list.WithKeyMap(keyMap),
+		),
 	)
 	return &completionsCmp{
 		width:  0,
@@ -120,47 +120,44 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, c.keyMap.Up):
 			u, cmd := c.list.Update(msg)
-			c.list = u.(list.ListModel)
+			c.list = u.(listModel)
 			return c, cmd
 
 		case key.Matches(msg, c.keyMap.Down):
 			d, cmd := c.list.Update(msg)
-			c.list = d.(list.ListModel)
+			c.list = d.(listModel)
 			return c, cmd
 		case key.Matches(msg, c.keyMap.UpInsert):
-			selectedItemInx := c.list.SelectedIndex() - 1
-			items := c.list.Items()
-			if selectedItemInx == list.NoSelection || selectedItemInx < 0 {
-				return c, nil // No item selected, do nothing
+			s := c.list.SelectedItem()
+			if s == nil {
+				return c, nil
 			}
-			selectedItem := items[selectedItemInx].(CompletionItem).Value()
-			c.list.SetSelected(selectedItemInx)
+			selectedItem := *s
+			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value:  selectedItem,
+				Value:  selectedItem.Value(),
 				Insert: true,
 			})
 		case key.Matches(msg, c.keyMap.DownInsert):
-			selectedItemInx := c.list.SelectedIndex() + 1
-			items := c.list.Items()
-			if selectedItemInx == list.NoSelection || selectedItemInx >= len(items) {
-				return c, nil // No item selected, do nothing
+			s := c.list.SelectedItem()
+			if s == nil {
+				return c, nil
 			}
-			selectedItem := items[selectedItemInx].(CompletionItem).Value()
-			c.list.SetSelected(selectedItemInx)
+			selectedItem := *s
+			c.list.SetSelected(selectedItem.ID())
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value:  selectedItem,
+				Value:  selectedItem.Value(),
 				Insert: true,
 			})
 		case key.Matches(msg, c.keyMap.Select):
-			selectedItemInx := c.list.SelectedIndex()
-			if selectedItemInx == list.NoSelection {
-				return c, nil // No item selected, do nothing
+			s := c.list.SelectedItem()
+			if s == nil {
+				return c, nil
 			}
-			items := c.list.Items()
-			selectedItem := items[selectedItemInx].(CompletionItem).Value()
+			selectedItem := *s
 			c.open = false // Close completions after selection
 			return c, util.CmdHandler(SelectCompletionMsg{
-				Value: selectedItem,
+				Value: selectedItem.Value(),
 			})
 		case key.Matches(msg, c.keyMap.Cancel):
 			return c, util.CmdHandler(CloseCompletionsMsg{})
@@ -176,10 +173,14 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c.query = ""
 		c.x, c.xorig = msg.X, msg.X
 		c.y = msg.Y
-		items := []util.Model{}
+		items := []list.CompletionItem[any]{}
 		t := styles.CurrentTheme()
 		for _, completion := range msg.Completions {
-			item := NewCompletionItem(completion.Title, completion.Value, WithBackgroundColor(t.BgSubtle))
+			item := list.NewCompletionItem(
+				completion.Title,
+				completion.Value,
+				list.WithCompletionBackgroundColor(t.BgSubtle),
+			)
 			items = append(items, item)
 		}
 		width := listWidth(items)
@@ -266,18 +267,14 @@ func (c *completionsCmp) View() string {
 // listWidth returns the width of the last 10 items in the list, which is used
 // to determine the width of the completions popup.
 // Note this only works for [completionItemCmp] items.
-func listWidth[T any](items []T) int {
+func listWidth(items []list.CompletionItem[any]) int {
 	var width int
 	if len(items) == 0 {
 		return width
 	}
 
 	for i := len(items) - 1; i >= 0 && i >= len(items)-10; i-- {
-		item, ok := any(items[i]).(*completionItemCmp)
-		if !ok {
-			continue
-		}
-		itemWidth := lipgloss.Width(item.text) + 2 // +2 for padding
+		itemWidth := lipgloss.Width(items[i].Text()) + 2 // +2 for padding
 		width = max(width, itemWidth)
 	}
 

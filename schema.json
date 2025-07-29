@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/charmbracelet/crush/internal/config/config",
+  "$ref": "#/$defs/Config",
+  "$defs": {
+    "Config": {
+      "properties": {
+        "models": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SelectedModel"
+          },
+          "type": "object",
+          "description": "Model configurations for different model types"
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProviderConfig"
+          },
+          "type": "object",
+          "description": "AI provider configurations"
+        },
+        "mcp": {
+          "$ref": "#/$defs/MCPs",
+          "description": "Model Context Protocol server configurations"
+        },
+        "lsp": {
+          "$ref": "#/$defs/LSPs",
+          "description": "Language Server Protocol configurations"
+        },
+        "options": {
+          "$ref": "#/$defs/Options",
+          "description": "General application options"
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions",
+          "description": "Permission settings for tool usage"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "LSPConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this LSP server is disabled",
+          "default": false
+        },
+        "command": {
+          "type": "string",
+          "description": "Command to execute for the LSP server",
+          "examples": [
+            "gopls"
+          ]
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Arguments to pass to the LSP server command"
+        },
+        "options": {
+          "description": "LSP server-specific configuration options"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "command"
+      ]
+    },
+    "LSPs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LSPConfig"
+      },
+      "type": "object"
+    },
+    "MCPConfig": {
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to execute for stdio MCP servers",
+          "examples": [
+            "npx"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Environment variables to set for the MCP server"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Arguments to pass to the MCP server command"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "http"
+          ],
+          "description": "Type of MCP connection",
+          "default": "stdio"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL for HTTP or SSE MCP servers",
+          "examples": [
+            "http://localhost:3000/mcp"
+          ]
+        },
+        "disabled": {
+          "type": "boolean",
+          "description": "Whether this MCP server is disabled",
+          "default": false
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "HTTP headers for HTTP/SSE MCP servers"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ]
+    },
+    "MCPs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MCPConfig"
+      },
+      "type": "object"
+    },
+    "Model": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "cost_per_1m_in": {
+          "type": "number"
+        },
+        "cost_per_1m_out": {
+          "type": "number"
+        },
+        "cost_per_1m_in_cached": {
+          "type": "number"
+        },
+        "cost_per_1m_out_cached": {
+          "type": "number"
+        },
+        "context_window": {
+          "type": "integer"
+        },
+        "default_max_tokens": {
+          "type": "integer"
+        },
+        "can_reason": {
+          "type": "boolean"
+        },
+        "has_reasoning_efforts": {
+          "type": "boolean"
+        },
+        "default_reasoning_effort": {
+          "type": "string"
+        },
+        "supports_attachments": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "cost_per_1m_in",
+        "cost_per_1m_out",
+        "cost_per_1m_in_cached",
+        "cost_per_1m_out_cached",
+        "context_window",
+        "default_max_tokens",
+        "can_reason",
+        "has_reasoning_efforts",
+        "supports_attachments"
+      ]
+    },
+    "Options": {
+      "properties": {
+        "context_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              ".cursorrules",
+              "CRUSH.md"
+            ]
+          },
+          "type": "array",
+          "description": "Paths to files containing context information for the AI"
+        },
+        "tui": {
+          "$ref": "#/$defs/TUIOptions",
+          "description": "Terminal user interface options"
+        },
+        "debug": {
+          "type": "boolean",
+          "description": "Enable debug logging",
+          "default": false
+        },
+        "debug_lsp": {
+          "type": "boolean",
+          "description": "Enable debug logging for LSP servers",
+          "default": false
+        },
+        "disable_auto_summarize": {
+          "type": "boolean",
+          "description": "Disable automatic conversation summarization",
+          "default": false
+        },
+        "data_directory": {
+          "type": "string",
+          "description": "Directory for storing application data (relative to working directory)",
+          "default": ".crush",
+          "examples": [
+            ".crush"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Permissions": {
+      "properties": {
+        "allowed_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "bash",
+              "view"
+            ]
+          },
+          "type": "array",
+          "description": "List of tools that don't require permission prompts"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ProviderConfig": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the provider",
+          "examples": [
+            "openai"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for the provider",
+          "examples": [
+            "OpenAI"
+          ]
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL for the provider's API",
+          "examples": [
+            "https://api.openai.com/v1"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "azure",
+            "vertexai"
+          ],
+          "description": "Provider type that determines the API format",
+          "default": "openai"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key for authentication with the provider",
+          "examples": [
+            "$OPENAI_API_KEY"
+          ]
+        },
+        "disable": {
+          "type": "boolean",
+          "description": "Whether this provider is disabled",
+          "default": false
+        },
+        "system_prompt_prefix": {
+          "type": "string",
+          "description": "Custom prefix to add to system prompts for this provider"
+        },
+        "extra_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Additional HTTP headers to send with requests"
+        },
+        "extra_body": {
+          "type": "object",
+          "description": "Additional fields to include in request bodies"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/Model"
+          },
+          "type": "array",
+          "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SelectedModel": {
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The model ID as used by the provider API",
+          "examples": [
+            "gpt-4o"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "description": "The model provider ID that matches a key in the providers config",
+          "examples": [
+            "openai"
+          ]
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Reasoning effort level for OpenAI models that support it"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "maximum": 200000,
+          "minimum": 1,
+          "description": "Maximum number of tokens for model responses",
+          "examples": [
+            4096
+          ]
+        },
+        "think": {
+          "type": "boolean",
+          "description": "Enable thinking mode for Anthropic models that support reasoning"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model",
+        "provider"
+      ]
+    },
+    "TUIOptions": {
+      "properties": {
+        "compact_mode": {
+          "type": "boolean",
+          "description": "Enable compact mode for the TUI interface",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  }
+}

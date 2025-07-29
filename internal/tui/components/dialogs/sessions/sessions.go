@@ -6,10 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -22,6 +21,8 @@ type SessionDialog interface {
 	dialogs.DialogModel
 }
 
+type SessionsList = list.FilterableList[list.CompletionItem[session.Session]]
+
 type sessionDialogCmp struct {
 	selectedInx       int
 	wWidth            int
@@ -29,8 +30,7 @@ type sessionDialogCmp struct {
 	width             int
 	selectedSessionID string
 	keyMap            KeyMap
-	sessionsList      list.ListModel
-	renderedSelected  bool
+	sessionsList      SessionsList
 	help              help.Model
 }
 
@@ -39,39 +39,31 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultKeyMap()
-
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
-	listKeyMap.HalfPageDown.SetEnabled(false)
-	listKeyMap.HalfPageUp.SetEnabled(false)
-	listKeyMap.Home.SetEnabled(false)
-	listKeyMap.End.SetEnabled(false)
-
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	selectedInx := 0
-	items := make([]util.Model, len(sessions))
+	items := make([]list.CompletionItem[session.Session], len(sessions))
 	if len(sessions) > 0 {
 		for i, session := range sessions {
-			items[i] = completions.NewCompletionItem(session.Title, session)
-			if session.ID == selectedID {
-				selectedInx = i
-			}
+			items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
 		}
 	}
 
-	sessionsList := list.New(
-		list.WithFilterable(true),
+	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
+	sessionsList := list.NewFilterableList(
+		items,
 		list.WithFilterPlaceholder("Enter a session name"),
-		list.WithKeyMap(listKeyMap),
-		list.WithItems(items),
-		list.WithWrapNavigation(true),
+		list.WithFilterInputStyle(inputStyle),
+		list.WithFilterListOptions(
+			list.WithKeyMap(listKeyMap),
+			list.WithWrapNavigation(),
+		),
 	)
 	help := help.New()
 	help.Styles = t.S().Help
 	s := &sessionDialogCmp{
-		selectedInx:       selectedInx,
 		selectedSessionID: selectedID,
 		keyMap:            DefaultKeyMap(),
 		sessionsList:      sessionsList,
@@ -82,32 +74,35 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 }
 
 func (s *sessionDialogCmp) Init() tea.Cmd {
-	return s.sessionsList.Init()
+	var cmds []tea.Cmd
+	cmds = append(cmds, s.sessionsList.Init())
+	cmds = append(cmds, s.sessionsList.Focus())
+	return tea.Sequence(cmds...)
 }
 
 func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		var cmds []tea.Cmd
 		s.wWidth = msg.Width
 		s.wHeight = msg.Height
-		s.width = s.wWidth / 2
-		var cmds []tea.Cmd
+		s.width = min(120, s.wWidth-8)
+		s.sessionsList.SetInputWidth(s.listWidth() - 2)
 		cmds = append(cmds, s.sessionsList.SetSize(s.listWidth(), s.listHeight()))
-		if !s.renderedSelected {
-			cmds = append(cmds, s.sessionsList.SetSelected(s.selectedInx))
-			s.renderedSelected = true
+		if s.selectedSessionID != "" {
+			cmds = append(cmds, s.sessionsList.SetSelected(s.selectedSessionID))
 		}
-		return s, tea.Sequence(cmds...)
+		return s, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Select):
-			if len(s.sessionsList.Items()) > 0 {
-				items := s.sessionsList.Items()
-				selectedItemInx := s.sessionsList.SelectedIndex()
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem != nil {
+				selected := *selectedItem
 				return s, tea.Sequence(
 					util.CmdHandler(dialogs.CloseDialogMsg{}),
 					util.CmdHandler(
-						chat.SessionSelectedMsg(items[selectedItemInx].(completions.CompletionItem).Value().(session.Session)),
+						chat.SessionSelectedMsg(selected.Value()),
 					),
 				)
 			}
@@ -115,7 +110,7 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := s.sessionsList.Update(msg)
-			s.sessionsList = u.(list.ListModel)
+			s.sessionsList = u.(SessionsList)
 			return s, cmd
 		}
 	}

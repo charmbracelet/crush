@@ -10,10 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -71,22 +70,16 @@ type modelDialogCmp struct {
 }
 
 func NewModelDialogCmp() ModelDialog {
-	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultKeyMap()
 
+	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
-	listKeyMap.HalfPageDown.SetEnabled(false)
-	listKeyMap.HalfPageUp.SetEnabled(false)
-	listKeyMap.Home.SetEnabled(false)
-	listKeyMap.End.SetEnabled(false)
-
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
 	t := styles.CurrentTheme()
-	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := NewModelListComponent(listKeyMap, inputStyle, "Choose a model for large, complex tasks")
+	modelList := NewModelListComponent(listKeyMap, "Choose a model for large, complex tasks", true)
 	apiKeyInput := NewAPIKeyInput()
 	apiKeyInput.SetShowTitle(false)
 	help := help.New()
@@ -162,12 +155,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			}
 			// Normal model selection
-			selectedItemInx := m.modelList.SelectedIndex()
-			if selectedItemInx == list.NoSelection {
-				return m, nil
-			}
-			items := m.modelList.Items()
-			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(ModelOption)
+			selectedItem := m.modelList.SelectedModel()
 
 			var modelType config.SelectedModelType
 			if m.modelList.GetModelType() == LargeModelType {
@@ -191,7 +179,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Provider not configured, show API key input
 				m.needsAPIKey = true
-				m.selectedModel = &selectedItem
+				m.selectedModel = selectedItem
 				m.selectedModelType = modelType
 				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
 				return m, nil
@@ -310,13 +298,11 @@ func (m *modelDialogCmp) style() lipgloss.Style {
 }
 
 func (m *modelDialogCmp) listWidth() int {
-	return defaultWidth - 2 // 4 for padding
+	return m.width - 2
 }
 
 func (m *modelDialogCmp) listHeight() int {
-	items := m.modelList.Items()
-	listHeigh := len(items) + 2 + 4
-	return min(listHeigh, m.wHeight/2)
+	return m.wHeight / 2
 }
 
 func (m *modelDialogCmp) Position() (int, int) {

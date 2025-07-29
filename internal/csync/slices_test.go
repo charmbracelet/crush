@@ -1,6 +1,7 @@
 package csync
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -144,7 +145,7 @@ func TestSlice(t *testing.T) {
 		require.Equal(t, 4, s.Len())
 
 		expected := []int{1, 2, 4, 5}
-		actual := s.Slice()
+		actual := slices.Collect(s.Seq())
 		require.Equal(t, expected, actual)
 
 		// Delete out of bounds
@@ -202,7 +203,7 @@ func TestSlice(t *testing.T) {
 		s.SetSlice(newItems)
 
 		require.Equal(t, 3, s.Len())
-		require.Equal(t, newItems, s.Slice())
+		require.Equal(t, newItems, slices.Collect(s.Seq()))
 
 		// Verify it's a copy
 		newItems[0] = 999
@@ -211,23 +212,15 @@ func TestSlice(t *testing.T) {
 		require.Equal(t, 10, val)
 	})
 
-	t.Run("Clear", func(t *testing.T) {
-		s := NewSliceFrom([]int{1, 2, 3})
-		require.Equal(t, 3, s.Len())
-
-		s.Clear()
-		require.Equal(t, 0, s.Len())
-	})
-
 	t.Run("Slice", func(t *testing.T) {
 		original := []int{1, 2, 3}
 		s := NewSliceFrom(original)
 
-		copy := s.Slice()
-		require.Equal(t, original, copy)
+		copied := slices.Collect(s.Seq())
+		require.Equal(t, original, copied)
 
 		// Verify it's a copy
-		copy[0] = 999
+		copied[0] = 999
 		val, ok := s.Get(0)
 		require.True(t, ok)
 		require.Equal(t, 1, val)
@@ -267,18 +260,13 @@ func TestSlice(t *testing.T) {
 
 		// Concurrent appends
 		for i := range numGoroutines {
-			wg.Add(1)
+			wg.Add(2)
 			go func(start int) {
 				defer wg.Done()
 				for j := range itemsPerGoroutine {
 					s.Append(start*itemsPerGoroutine + j)
 				}
 			}(i)
-		}
-
-		// Concurrent reads
-		for range numGoroutines {
-			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for range itemsPerGoroutine {

@@ -46,9 +46,18 @@ builds:
       - linux
       - darwin
       - windows
+      - freebsd
+      # TODO: those fail to build
+      # - openbsd
+      # - netbsd
     goarch:
       - amd64
       - arm64
+      - "386"
+      - arm
+    goarm:
+      - "7"
+
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
 

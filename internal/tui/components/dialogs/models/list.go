@@ -7,27 +7,36 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
+type listModel = list.FilterableGroupList[list.CompletionItem[ModelOption]]
+
 type ModelListComponent struct {
-	list      list.ListModel
+	list      listModel
 	modelType int
 	providers []catwalk.Provider
 }
 
-func NewModelListComponent(keyMap list.KeyMap, inputStyle lipgloss.Style, inputPlaceholder string) *ModelListComponent {
-	modelList := list.New(
-		list.WithFilterable(true),
+func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
+	t := styles.CurrentTheme()
+	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
+	options := []list.ListOption{
 		list.WithKeyMap(keyMap),
-		list.WithInputStyle(inputStyle),
+		list.WithWrapNavigation(),
+	}
+	if shouldResize {
+		options = append(options, list.WithResizeByList())
+	}
+	modelList := list.NewFilterableGroupedList(
+		[]list.Group[list.CompletionItem[ModelOption]]{},
+		list.WithFilterInputStyle(inputStyle),
 		list.WithFilterPlaceholder(inputPlaceholder),
-		list.WithWrapNavigation(true),
+		list.WithFilterListOptions(
+			options...,
+		),
 	)
 
 	return &ModelListComponent{
@@ -51,7 +60,7 @@ func (m *ModelListComponent) Init() tea.Cmd {
 
 func (m *ModelListComponent) Update(msg tea.Msg) (*ModelListComponent, tea.Cmd) {
 	u, cmd := m.list.Update(msg)
-	m.list = u.(list.ListModel)
+	m.list = u.(listModel)
 	return m, cmd
 }
 
@@ -67,21 +76,23 @@ func (m *ModelListComponent) SetSize(width, height int) tea.Cmd {
 	return m.list.SetSize(width, height)
 }
 
-func (m *ModelListComponent) Items() []util.Model {
-	return m.list.Items()
-}
-
-func (m *ModelListComponent) SelectedIndex() int {
-	return m.list.SelectedIndex()
+func (m *ModelListComponent) SelectedModel() *ModelOption {
+	s := m.list.SelectedItem()
+	if s == nil {
+		return nil
+	}
+	sv := *s
+	model := sv.Value()
+	return &model
 }
 
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
-	modelItems := []util.Model{}
+	var groups []list.Group[list.CompletionItem[ModelOption]]
 	// first none section
-	selectIndex := 1
+	selectedItemID := ""
 
 	cfg := config.Get()
 	var currentModel config.SelectedModel
@@ -140,18 +151,28 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			if name == "" {
 				name = string(configProvider.ID)
 			}
-			section := commands.NewItemSection(name)
+			section := list.NewItemSection(name)
 			section.SetInfo(configured)
-			modelItems = append(modelItems, section)
+			group := list.Group[list.CompletionItem[ModelOption]]{
+				Section: section,
+			}
 			for _, model := range configProvider.Models {
-				modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+				item := list.NewCompletionItem(model.Name, ModelOption{
 					Provider: configProvider,
 					Model:    model,
-				}))
+				},
+					list.WithCompletionID(
+						fmt.Sprintf("%s:%s", providerConfig.ID, model.ID),
+					),
+				)
+
+				group.Items = append(group.Items, item)
 				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
-					selectIndex = len(modelItems) - 1 // Set the selected index to the current model
+					selectedItemID = item.ID()
 				}
 			}
+			groups = append(groups, group)
+
 			addedProviders[providerID] = true
 		}
 	}
@@ -173,23 +194,43 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			name = string(provider.ID)
 		}
 
-		section := commands.NewItemSection(name)
+		section := list.NewItemSection(name)
 		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
 			section.SetInfo(configured)
 		}
-		modelItems = append(modelItems, section)
+		group := list.Group[list.CompletionItem[ModelOption]]{
+			Section: section,
+		}
 		for _, model := range provider.Models {
-			modelItems = append(modelItems, completions.NewCompletionItem(model.Name, ModelOption{
+			item := list.NewCompletionItem(model.Name, ModelOption{
 				Provider: provider,
 				Model:    model,
-			}))
+			},
+				list.WithCompletionID(
+					fmt.Sprintf("%s:%s", provider.ID, model.ID),
+				),
+			)
+			group.Items = append(group.Items, item)
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
-				selectIndex = len(modelItems) - 1 // Set the selected index to the current model
+				selectedItemID = item.ID()
 			}
 		}
+		groups = append(groups, group)
 	}
 
-	return tea.Sequence(m.list.SetItems(modelItems), m.list.SetSelected(selectIndex))
+	var cmds []tea.Cmd
+
+	cmd := m.list.SetGroups(groups)
+
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	cmd = m.list.SetSelected(selectedItemID)
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	return tea.Sequence(cmds...)
 }
 
 // GetModelType returns the current model type
@@ -198,7 +239,7 @@ func (m *ModelListComponent) GetModelType() int {
 }
 
 func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
-	m.list.SetFilterPlaceholder(placeholder)
+	m.list.SetInputPlaceholder(placeholder)
 }
 
 func (m *ModelListComponent) SetProviders(providers []catwalk.Provider) {

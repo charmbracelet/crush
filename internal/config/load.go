@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -135,6 +136,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				p.Models = models
 			}
 		}
+
+		headers := map[string]string{}
+		if len(p.DefaultHeaders) > 0 {
+			maps.Copy(headers, p.DefaultHeaders)
+		}
+		if len(config.ExtraHeaders) > 0 {
+			maps.Copy(headers, config.ExtraHeaders)
+		}
 		prepared := ProviderConfig{
 			ID:           string(p.ID),
 			Name:         p.Name,
@@ -142,7 +151,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			APIKey:       p.APIKey,
 			Type:         p.Type,
 			Disable:      config.Disable,
-			ExtraHeaders: config.ExtraHeaders,
+			ExtraHeaders: headers,
 			ExtraBody:    config.ExtraBody,
 			ExtraParams:  make(map[string]string),
 			Models:       p.Models,

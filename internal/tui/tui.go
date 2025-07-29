@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -33,26 +35,18 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-// MouseEventFilter filters mouse events based on the current focus state
-// This is used with tea.WithFilter to prevent mouse scroll events from
-// interfering with typing performance in the editor
+var lastMouseEvent time.Time
+
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
-	// Only filter mouse events
 	switch msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
-		// Check if we have an appModel and if editor is focused
-		if appModel, ok := m.(*appModel); ok {
-			if appModel.currentPage == chat.ChatPageID {
-				if chatPage, ok := appModel.pages[appModel.currentPage].(chat.ChatPage); ok {
-					// If editor is focused (not chatFocused), filter out mouse wheel/motion events
-					if !chatPage.IsChatFocused() {
-						return nil // Filter out the event
-					}
-				}
-			}
+		now := time.Now()
+		// trackpad is sending too many requests
+		if now.Sub(lastMouseEvent) < 5*time.Millisecond {
+			return nil
 		}
+		lastMouseEvent = now
 	}
-	// Allow all other events to pass through
 	return msg
 }
 
@@ -177,7 +171,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
-
+	case commands.QuitMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(),
+		})
+	case commands.ToggleHelpMsg:
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
@@ -194,7 +195,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker
-	case chat.OpenFilePickerMsg:
+	case commands.OpenFilePickerMsg:
 		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
@@ -203,6 +204,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
+	case pubsub.Event[permission.PermissionNotification]:
+		// forward to page
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
+		return a, cmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: permissions.NewPermissionDialogCmp(msg.Payload),
@@ -253,8 +259,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
+
+		slog.Info("TUI Update", "msg", msg, "key", msg.String())
 		return a, a.handleKeyPressMsg(msg)
 
+	case tea.MouseWheelMsg:
+		if !a.dialog.HasDialogs() {
+			updated, pageCmd := a.pages[a.currentPage].Update(msg)
+			a.pages[a.currentPage] = updated.(util.Model)
+			cmds = append(cmds, pageCmd)
+		}
+		return a, tea.Batch(cmds...)
 	case tea.PasteMsg:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
@@ -377,6 +392,11 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Suspend):
+		if a.app.CoderAgent.IsBusy() {
+			return util.ReportWarn("Agent is busy, please wait...")
+		}
+		return tea.Suspend
 	default:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)

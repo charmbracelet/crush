@@ -1,10 +1,21 @@
 package messages
 
 import (
+	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -29,6 +40,9 @@ type ToolCallCmp interface {
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
+	ID() string
+	SetPermissionRequested() // Mark permission request
+	SetPermissionGranted()   // Mark permission granted
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -39,10 +53,12 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID string             // ID of the message that initiated this tool call
-	call            message.ToolCall   // The tool call being executed
-	result          message.ToolResult // The result of the tool execution
-	cancelled       bool               // Whether the tool call was cancelled
+	parentMessageID     string             // ID of the message that initiated this tool call
+	call                message.ToolCall   // The tool call being executed
+	result              message.ToolResult // The result of the tool execution
+	cancelled           bool               // Whether the tool call was cancelled
+	permissionRequested bool
+	permissionGranted   bool
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -80,9 +96,21 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	}
 }
 
+func WithToolPermissionRequested() ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.permissionRequested = true
+	}
+}
+
+func WithToolPermissionGranted() ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.permissionGranted = true
+	}
+}
+
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
-func NewToolCallCmp(parentMessageID string, tc message.ToolCall, opts ...ToolCallOption) ToolCallCmp {
+func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions permission.Service, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
 		call:            tc,
 		parentMessageID: parentMessageID,
@@ -136,6 +164,10 @@ func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
+	case tea.KeyPressMsg:
+		if key.Matches(msg, copyKey) {
+			return m, m.copyTool()
+		}
 	}
 	return m, nil
 }
@@ -162,6 +194,456 @@ func (m *toolCallCmp) View() string {
 // SetCancelled marks the tool call as cancelled
 func (m *toolCallCmp) SetCancelled() {
 	m.cancelled = true
+}
+
+func (m *toolCallCmp) copyTool() tea.Cmd {
+	content := m.formatToolForCopy()
+	err := clipboard.WriteAll(content)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to copy tool content to clipboard: %w", err))
+	}
+	return util.ReportInfo("Tool content copied to clipboard")
+}
+
+func (m *toolCallCmp) formatToolForCopy() string {
+	var parts []string
+
+	toolName := prettifyToolName(m.call.Name)
+	parts = append(parts, fmt.Sprintf("## %s Tool Call", toolName))
+
+	if m.call.Input != "" {
+		params := m.formatParametersForCopy()
+		if params != "" {
+			parts = append(parts, "### Parameters:")
+			parts = append(parts, params)
+		}
+	}
+
+	if m.result.ToolCallID != "" {
+		if m.result.IsError {
+			parts = append(parts, "### Error:")
+			parts = append(parts, m.result.Content)
+		} else {
+			parts = append(parts, "### Result:")
+			content := m.formatResultForCopy()
+			if content != "" {
+				parts = append(parts, content)
+			}
+		}
+	} else if m.cancelled {
+		parts = append(parts, "### Status:")
+		parts = append(parts, "Cancelled")
+	} else {
+		parts = append(parts, "### Status:")
+		parts = append(parts, "Pending...")
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+func (m *toolCallCmp) formatParametersForCopy() string {
+	switch m.call.Name {
+	case tools.BashToolName:
+		var params tools.BashParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			cmd := strings.ReplaceAll(params.Command, "\n", " ")
+			cmd = strings.ReplaceAll(cmd, "\t", "    ")
+			return fmt.Sprintf("**Command:** %s", cmd)
+		}
+	case tools.ViewToolName:
+		var params tools.ViewParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
+			if params.Limit > 0 {
+				parts = append(parts, fmt.Sprintf("**Limit:** %d", params.Limit))
+			}
+			if params.Offset > 0 {
+				parts = append(parts, fmt.Sprintf("**Offset:** %d", params.Offset))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.EditToolName:
+		var params tools.EditParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
+		}
+	case tools.MultiEditToolName:
+		var params tools.MultiEditParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
+			parts = append(parts, fmt.Sprintf("**Edits:** %d", len(params.Edits)))
+			return strings.Join(parts, "\n")
+		}
+	case tools.WriteToolName:
+		var params tools.WriteParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
+		}
+	case tools.FetchToolName:
+		var params tools.FetchParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			if params.Format != "" {
+				parts = append(parts, fmt.Sprintf("**Format:** %s", params.Format))
+			}
+			if params.Timeout > 0 {
+				parts = append(parts, fmt.Sprintf("**Timeout:** %s", (time.Duration(params.Timeout)*time.Second).String()))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.GrepToolName:
+		var params tools.GrepParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
+			if params.Path != "" {
+				parts = append(parts, fmt.Sprintf("**Path:** %s", params.Path))
+			}
+			if params.Include != "" {
+				parts = append(parts, fmt.Sprintf("**Include:** %s", params.Include))
+			}
+			if params.LiteralText {
+				parts = append(parts, "**Literal:** true")
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.GlobToolName:
+		var params tools.GlobParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
+			if params.Path != "" {
+				parts = append(parts, fmt.Sprintf("**Path:** %s", params.Path))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.LSToolName:
+		var params tools.LSParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			path := params.Path
+			if path == "" {
+				path = "."
+			}
+			return fmt.Sprintf("**Path:** %s", fsext.PrettyPath(path))
+		}
+	case tools.DownloadToolName:
+		var params tools.DownloadParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			parts = append(parts, fmt.Sprintf("**File Path:** %s", fsext.PrettyPath(params.FilePath)))
+			if params.Timeout > 0 {
+				parts = append(parts, fmt.Sprintf("**Timeout:** %s", (time.Duration(params.Timeout)*time.Second).String()))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.SourcegraphToolName:
+		var params tools.SourcegraphParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**Query:** %s", params.Query))
+			if params.Count > 0 {
+				parts = append(parts, fmt.Sprintf("**Count:** %d", params.Count))
+			}
+			if params.ContextWindow > 0 {
+				parts = append(parts, fmt.Sprintf("**Context:** %d", params.ContextWindow))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.DiagnosticsToolName:
+		return "**Project:** diagnostics"
+	case agent.AgentToolName:
+		var params agent.AgentParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
+		}
+	}
+
+	var params map[string]any
+	if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+		var parts []string
+		for key, value := range params {
+			displayKey := strings.ReplaceAll(key, "_", " ")
+			if len(displayKey) > 0 {
+				displayKey = strings.ToUpper(displayKey[:1]) + displayKey[1:]
+			}
+			parts = append(parts, fmt.Sprintf("**%s:** %v", displayKey, value))
+		}
+		return strings.Join(parts, "\n")
+	}
+
+	return ""
+}
+
+func (m *toolCallCmp) formatResultForCopy() string {
+	switch m.call.Name {
+	case tools.BashToolName:
+		return m.formatBashResultForCopy()
+	case tools.ViewToolName:
+		return m.formatViewResultForCopy()
+	case tools.EditToolName:
+		return m.formatEditResultForCopy()
+	case tools.MultiEditToolName:
+		return m.formatMultiEditResultForCopy()
+	case tools.WriteToolName:
+		return m.formatWriteResultForCopy()
+	case tools.FetchToolName:
+		return m.formatFetchResultForCopy()
+	case agent.AgentToolName:
+		return m.formatAgentResultForCopy()
+	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName:
+		return fmt.Sprintf("```\n%s\n```", m.result.Content)
+	default:
+		return m.result.Content
+	}
+}
+
+func (m *toolCallCmp) formatBashResultForCopy() string {
+	var meta tools.BashResponseMetadata
+	if m.result.Metadata != "" {
+		json.Unmarshal([]byte(m.result.Metadata), &meta)
+	}
+
+	output := meta.Output
+	if output == "" && m.result.Content != tools.BashNoOutput {
+		output = m.result.Content
+	}
+
+	if output == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("```bash\n%s\n```", output)
+}
+
+func (m *toolCallCmp) formatViewResultForCopy() string {
+	var meta tools.ViewResponseMetadata
+	if m.result.Metadata != "" {
+		json.Unmarshal([]byte(m.result.Metadata), &meta)
+	}
+
+	if meta.Content == "" {
+		return m.result.Content
+	}
+
+	lang := ""
+	if meta.FilePath != "" {
+		ext := strings.ToLower(filepath.Ext(meta.FilePath))
+		switch ext {
+		case ".go":
+			lang = "go"
+		case ".js", ".mjs":
+			lang = "javascript"
+		case ".ts":
+			lang = "typescript"
+		case ".py":
+			lang = "python"
+		case ".rs":
+			lang = "rust"
+		case ".java":
+			lang = "java"
+		case ".c":
+			lang = "c"
+		case ".cpp", ".cc", ".cxx":
+			lang = "cpp"
+		case ".sh", ".bash":
+			lang = "bash"
+		case ".json":
+			lang = "json"
+		case ".yaml", ".yml":
+			lang = "yaml"
+		case ".xml":
+			lang = "xml"
+		case ".html":
+			lang = "html"
+		case ".css":
+			lang = "css"
+		case ".md":
+			lang = "markdown"
+		}
+	}
+
+	var result strings.Builder
+	if lang != "" {
+		result.WriteString(fmt.Sprintf("```%s\n", lang))
+	} else {
+		result.WriteString("```\n")
+	}
+	result.WriteString(meta.Content)
+	result.WriteString("\n```")
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatEditResultForCopy() string {
+	var meta tools.EditResponseMetadata
+	if m.result.Metadata == "" {
+		return m.result.Content
+	}
+
+	if json.Unmarshal([]byte(m.result.Metadata), &meta) != nil {
+		return m.result.Content
+	}
+
+	var params tools.EditParams
+	json.Unmarshal([]byte(m.call.Input), &params)
+
+	var result strings.Builder
+
+	if meta.OldContent != "" || meta.NewContent != "" {
+		fileName := params.FilePath
+		if fileName != "" {
+			fileName = fsext.PrettyPath(fileName)
+		}
+		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
+
+		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		result.WriteString("```diff\n")
+		result.WriteString(diffContent)
+		result.WriteString("\n```")
+	}
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatMultiEditResultForCopy() string {
+	var meta tools.MultiEditResponseMetadata
+	if m.result.Metadata == "" {
+		return m.result.Content
+	}
+
+	if json.Unmarshal([]byte(m.result.Metadata), &meta) != nil {
+		return m.result.Content
+	}
+
+	var params tools.MultiEditParams
+	json.Unmarshal([]byte(m.call.Input), &params)
+
+	var result strings.Builder
+	if meta.OldContent != "" || meta.NewContent != "" {
+		fileName := params.FilePath
+		if fileName != "" {
+			fileName = fsext.PrettyPath(fileName)
+		}
+		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
+
+		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		result.WriteString("```diff\n")
+		result.WriteString(diffContent)
+		result.WriteString("\n```")
+	}
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatWriteResultForCopy() string {
+	var params tools.WriteParams
+	if json.Unmarshal([]byte(m.call.Input), &params) != nil {
+		return m.result.Content
+	}
+
+	lang := ""
+	if params.FilePath != "" {
+		ext := strings.ToLower(filepath.Ext(params.FilePath))
+		switch ext {
+		case ".go":
+			lang = "go"
+		case ".js", ".mjs":
+			lang = "javascript"
+		case ".ts":
+			lang = "typescript"
+		case ".py":
+			lang = "python"
+		case ".rs":
+			lang = "rust"
+		case ".java":
+			lang = "java"
+		case ".c":
+			lang = "c"
+		case ".cpp", ".cc", ".cxx":
+			lang = "cpp"
+		case ".sh", ".bash":
+			lang = "bash"
+		case ".json":
+			lang = "json"
+		case ".yaml", ".yml":
+			lang = "yaml"
+		case ".xml":
+			lang = "xml"
+		case ".html":
+			lang = "html"
+		case ".css":
+			lang = "css"
+		case ".md":
+			lang = "markdown"
+		}
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("File: %s\n", fsext.PrettyPath(params.FilePath)))
+	if lang != "" {
+		result.WriteString(fmt.Sprintf("```%s\n", lang))
+	} else {
+		result.WriteString("```\n")
+	}
+	result.WriteString(params.Content)
+	result.WriteString("\n```")
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatFetchResultForCopy() string {
+	var params tools.FetchParams
+	if json.Unmarshal([]byte(m.call.Input), &params) != nil {
+		return m.result.Content
+	}
+
+	var result strings.Builder
+	if params.URL != "" {
+		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+	}
+
+	switch params.Format {
+	case "html":
+		result.WriteString("```html\n")
+	case "text":
+		result.WriteString("```\n")
+	default: // markdown
+		result.WriteString("```markdown\n")
+	}
+	result.WriteString(m.result.Content)
+	result.WriteString("\n```")
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatAgentResultForCopy() string {
+	var result strings.Builder
+
+	if len(m.nestedToolCalls) > 0 {
+		result.WriteString("### Nested Tool Calls:\n")
+		for i, nestedCall := range m.nestedToolCalls {
+			nestedContent := nestedCall.(*toolCallCmp).formatToolForCopy()
+			indentedContent := strings.ReplaceAll(nestedContent, "\n", "\n  ")
+			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, indentedContent))
+			if i < len(m.nestedToolCalls)-1 {
+				result.WriteString("\n")
+			}
+		}
+
+		if m.result.Content != "" {
+			result.WriteString("\n### Final Result:\n")
+		}
+	}
+
+	if m.result.Content != "" {
+		result.WriteString(fmt.Sprintf("```markdown\n%s\n```", m.result.Content))
+	}
+
+	return result.String()
 }
 
 // SetToolCall updates the tool call data and stops spinning if finished
@@ -296,7 +778,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished or if the result doesn't match the call ID.
 func (m *toolCallCmp) shouldSpin() bool {
-	return !m.call.Finished
+	return !m.call.Finished && !m.cancelled
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation
@@ -310,4 +792,18 @@ func (m *toolCallCmp) Spinning() bool {
 		}
 	}
 	return m.spinning
+}
+
+func (m *toolCallCmp) ID() string {
+	return m.call.ID
+}
+
+// SetPermissionRequested marks that a permission request was made for this tool call
+func (m *toolCallCmp) SetPermissionRequested() {
+	m.permissionRequested = true
+}
+
+// SetPermissionGranted marks that permission was granted for this tool call
+func (m *toolCallCmp) SetPermissionGranted() {
+	m.permissionGranted = true
 }

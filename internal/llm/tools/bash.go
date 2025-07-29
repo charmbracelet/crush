@@ -440,10 +440,10 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		Output:           stdout,
 		WorkingDirectory: currentWorkingDir,
 	}
-	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
 	if stdout == "" {
 		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
 	}
+	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
 	return WithResponseMetadata(NewTextResponse(stdout), metadata), nil
 }
 

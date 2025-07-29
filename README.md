@@ -18,8 +18,7 @@ code, and your workflows, wired into your LLM of choice.
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Works Everywhere:** first-class support in every terminal on Linux, macOS, Windows, and BSD
-- **Windows Ready:** works great in PowerShell and WSL
+- **Works Everywhere:** first-class support in every terminal on Linux, macOS, BSD and Windows (PowerShell and WSL)
 
 ## Installation
 

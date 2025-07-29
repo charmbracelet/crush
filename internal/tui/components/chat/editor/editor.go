@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -38,6 +39,7 @@ type Editor interface {
 
 	SetSession(session session.Session) tea.Cmd
 	IsCompletionsOpen() bool
+	HasAttachments() bool
 	Cursor() *tea.Cursor
 }
 
@@ -206,6 +208,12 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.completionsStartIndex = 0
 			}
 		}
+
+	case commands.OpenExternalEditorMsg:
+		if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
+			return m, util.ReportWarn("Agent is working, please wait...")
+		}
+		return m, m.openEditor(m.textarea.Value())
 	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
@@ -480,6 +488,10 @@ func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 
 func (c *editorCmp) IsCompletionsOpen() bool {
 	return c.isCompletionsOpen
+}
+
+func (c *editorCmp) HasAttachments() bool {
+	return len(c.attachments) > 0
 }
 
 func New(app *app.App) Editor {

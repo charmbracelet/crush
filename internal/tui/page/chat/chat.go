@@ -204,6 +204,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case commands.ToggleThinkingMsg:
 		return p, p.toggleThinking()
+	case commands.OpenExternalEditorMsg:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -896,9 +900,13 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("/", "add file"),
 					),
 					key.NewBinding(
-						key.WithKeys("ctrl+v"),
-						key.WithHelp("ctrl+v", "open editor"),
+						key.WithKeys("ctrl+o"),
+						key.WithHelp("ctrl+o", "open editor"),
 					),
+				})
+
+			if p.editor.HasAttachments() {
+				fullList = append(fullList, []key.Binding{
 					key.NewBinding(
 						key.WithKeys("ctrl+r"),
 						key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
@@ -912,6 +920,7 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("esc", "cancel delete mode"),
 					),
 				})
+			}
 		}
 		shortList = append(shortList,
 			// Quit

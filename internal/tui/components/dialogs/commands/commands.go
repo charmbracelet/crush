@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -66,6 +68,7 @@ type (
 	ToggleHelpMsg        struct{}
 	ToggleCompactModeMsg struct{}
 	ToggleThinkingMsg    struct{}
+	OpenExternalEditorMsg struct{}
 	CompactMsg           struct {
 		SessionID string
 	}
@@ -341,6 +344,19 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 				},
 			})
 		}
+	}
+
+	// Add external editor command if $EDITOR is available
+	if os.Getenv("EDITOR") != "" {
+		commands = append(commands, Command{
+			ID:          "open_external_editor",
+			Title:       "Open External Editor",
+			Shortcut:    "ctrl+o",
+			Description: "Open external editor to compose message",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenExternalEditorMsg{})
+			},
+		})
 	}
 
 	return append(commands, []Command{

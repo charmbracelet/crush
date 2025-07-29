@@ -331,6 +331,7 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	cmd := s.setPreferredModel(*s.selectedModel)
 	s.isOnboarding = false
 	s.selectedModel = nil
+	s.isAPIKeyValid = false
 
 	return tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 }

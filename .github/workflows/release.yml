@@ -14,6 +14,8 @@ concurrency:
 jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
+    with:
+      macos_sign_entitlements: "./.github/entitlements.plist"
     secrets:
       docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
       docker_token: ${{ secrets.DOCKERHUB_TOKEN }}

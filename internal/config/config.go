@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
@@ -45,16 +44,6 @@ const (
 	SelectedModelTypeLarge SelectedModelType = "large"
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
-
-// JSONSchema returns the JSON schema for SelectedModelType
-func (SelectedModelType) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Model type selection for different use cases",
-		Enum:        []any{"large", "small"},
-		Default:     "large",
-	}
-}
 
 type SelectedModel struct {
 	// The model id as used by the provider API.
@@ -110,16 +99,6 @@ const (
 	MCPSse   MCPType = "sse"
 	MCPHttp  MCPType = "http"
 )
-
-// JSONSchema returns the JSON schema for MCPType
-func (MCPType) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Type of MCP connection protocol",
-		Enum:        []any{"stdio", "sse", "http"},
-		Default:     "stdio",
-	}
-}
 
 type MCPConfig struct {
 	Command  string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
@@ -239,7 +218,7 @@ type Agent struct {
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
 
-	Model SelectedModelType `json:"model"`
+	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
 
 	// The available tools for the agent
 	//  if this is nil, all tools are available

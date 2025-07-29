@@ -100,8 +100,14 @@
           "description": "Arguments to pass to the MCP server command"
         },
         "type": {
-          "$ref": "#/$defs/MCPType",
-          "description": "Type of MCP connection"
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "http"
+          ],
+          "description": "Type of MCP connection",
+          "default": "stdio"
         },
         "url": {
           "type": "string",
@@ -129,16 +135,6 @@
       "required": [
         "type"
       ]
-    },
-    "MCPType": {
-      "type": "string",
-      "enum": [
-        "stdio",
-        "sse",
-        "http"
-      ],
-      "description": "Type of MCP connection protocol",
-      "default": "stdio"
     },
     "MCPs": {
       "additionalProperties": {

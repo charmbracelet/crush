@@ -8,3 +8,4 @@ jobs:
     uses: charmbracelet/meta/.github/workflows/lint.yml@main
     with:
       golangci_path: .golangci.yml
+      timeout: 10m

@@ -85,6 +85,7 @@ Crush can use LSPs for additional context to help inform its decisions, just lik
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "lsp": {
     "go": {
       "command": "gopls"
@@ -106,6 +107,7 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "mcp": {
     "filesystem": {
       "type": "stdio",
@@ -136,6 +138,7 @@ Crush supports Model Context Protocol (MCP) servers through three transport type
 ### Logging
 
 Enable debug logging with the `-d` flag or in config. View logs with `crush logs`. Logs are stored in `.crush/logs/crush.log`.
+
 ```bash
 # Run with debug logging
 crush -d
@@ -154,6 +157,7 @@ Add to your `crush.json` config file:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "options": {
     "debug": true,
     "debug_lsp": true
@@ -167,6 +171,7 @@ Crush includes a permission system to control which tools can be executed withou
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "permissions": {
     "allowed_tools": [
       "view",
@@ -196,6 +201,7 @@ Here's an example configuration for Deepseek, which uses an OpenAI-compatible AP
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "providers": {
     "deepseek": {
       "type": "openai",
@@ -224,6 +230,7 @@ You can also configure custom Anthropic-compatible providers:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "providers": {
     "custom-anthropic": {
       "type": "anthropic",

@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -95,6 +96,24 @@ func NewModelDialogCmp() ModelDialog {
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
+	providers, err := config.Providers()
+	if err == nil {
+		filteredProviders := []catwalk.Provider{}
+		simpleProviders := []string{
+			"anthropic",
+			"openai",
+			"gemini",
+			"xai",
+			"groq",
+			"openrouter",
+		}
+		for _, p := range providers {
+			if slices.Contains(simpleProviders, string(p.ID)) {
+				filteredProviders = append(filteredProviders, p)
+			}
+		}
+		m.modelList.SetProviders(filteredProviders)
+	}
 	return tea.Batch(m.modelList.Init(), m.apiKeyInput.Init())
 }
 

@@ -308,6 +308,7 @@ config:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "options": {
     "debug": true,
     "debug_lsp": true

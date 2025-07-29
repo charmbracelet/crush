@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -130,7 +129,6 @@ func (m *messageListCmp) View() string {
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
 	items := m.listCmp.Items()
-	slog.Info("Handling permission request", "tool_call_id", permission.ToolCallID, "granted", permission.Granted)
 	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 		toolCall.SetPermissionRequested()

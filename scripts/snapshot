@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -e
-goreleaser build --clean --snapshot --skip validate

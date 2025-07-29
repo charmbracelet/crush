@@ -88,8 +88,6 @@ github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0/go.mod h1:XIuqKpZTUXtVyeyiN1k9Tc/U7EzfaDnVc34feFHfBws=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
-github.com/charmbracelet/ultraviolet v0.0.0-20250728213340-d73950b67624 h1:D6cSAhkOFnx8TG8pyUiVWTbQ058xM4FXcOdaZXtBz+A=
-github.com/charmbracelet/ultraviolet v0.0.0-20250728213340-d73950b67624/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
 github.com/charmbracelet/ultraviolet v0.0.0-20250729133950-5d2ddf68d813 h1:A3omGay8ZBDBmmGZ4Hcffpo7Ywz92rb2GUbFb9YABkM=
 github.com/charmbracelet/ultraviolet v0.0.0-20250729133950-5d2ddf68d813/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
 github.com/charmbracelet/x/ansi v0.9.3 h1:BXt5DHS/MKF+LjuK4huWrC6NCvHtexww7dMayh6GXd0=
@@ -404,5 +402,7 @@ modernc.org/memory v1.9.1 h1:V/Z1solwAVmMW1yttq3nDdZPJqV1rM05Ccq6KMSZ34g=
 modernc.org/memory v1.9.1/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw=
 modernc.org/sqlite v1.36.2 h1:vjcSazuoFve9Wm0IVNHgmJECoOXLZM1KfMXbcX2axHA=
 modernc.org/sqlite v1.36.2/go.mod h1:ADySlx7K4FdY5MaJcEv86hTJ0PjedAloTUuif0YS3ws=
+mvdan.cc/sh/moreinterp v0.0.0-20250728215232-2a48d813e586 h1:x334pEWjG1riMGEKPwo+YvxBI0mITfKBiRV3EYvHf+4=
+mvdan.cc/sh/moreinterp v0.0.0-20250728215232-2a48d813e586/go.mod h1:1G8/kbIyHLFP9tW5/looMowvWpgAiNE+cT92x6j7Nuo=
 mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8 h1:yOKqXg3uKDx7VxqnrKRUzB+InP3whTBi7jeggyFkfX0=
 mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8/go.mod h1:Se6Cj17eYSn+sNooLZiEUnNNmNxg0imoYlTu4CyaGyg=

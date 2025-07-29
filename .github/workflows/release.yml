@@ -24,3 +24,9 @@ jobs:
       nfpm_passphrase: ${{ secrets.NFPM_PASSPHRASE }}
       npm_token: ${{ secrets.NPM_TOKEN }}
       snapcraft_token: ${{ secrets.SNAPCRAFT_TOKEN }}
+      aur_key: ${{ secrets.AUR_KEY }}
+      macos_sign_p12: ${{ secrets.MACOS_SIGN_P12 }}
+      macos_sign_password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+      macos_notary_issuer_id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      macos_notary_key_id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      macos_notary_key: ${{ secrets.MACOS_NOTARY_KEY }}

@@ -13,11 +13,12 @@ code, and your workflows, wired into your LLM of choice.
 
 ## Features
 
-- **Session-based:** maintain multiple work sessions and contexts per project
 - **Multi-model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible API
+- **Session-based:** maintain multiple work sessions and contexts per project
 - **Flexible:** switch LLMs mid-session while preserving context
 - **LSP-enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Works everywhere:** first-class support in every terminal on Linux, macOS, Windows (both PowerShell and WSL), and BSD
 
 ## Installation
 
@@ -39,8 +40,6 @@ winget install charmbracelet.crush
 # Nix
 nix-shell -p nur.repos.charmbracelet.crush
 ```
-
-Note that Crush for Windows does _not_ require WSL
 
 <details>
 <summary><strong>Debian/Ubuntu</strong></summary>

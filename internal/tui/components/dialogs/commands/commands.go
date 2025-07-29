@@ -60,16 +60,16 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg    struct{}
-	NewSessionsMsg       struct{}
-	SwitchModelMsg       struct{}
-	QuitMsg              struct{}
-	OpenFilePickerMsg    struct{}
-	ToggleHelpMsg        struct{}
-	ToggleCompactModeMsg struct{}
-	ToggleThinkingMsg    struct{}
+	SwitchSessionsMsg     struct{}
+	NewSessionsMsg        struct{}
+	SwitchModelMsg        struct{}
+	QuitMsg               struct{}
+	OpenFilePickerMsg     struct{}
+	ToggleHelpMsg         struct{}
+	ToggleCompactModeMsg  struct{}
+	ToggleThinkingMsg     struct{}
 	OpenExternalEditorMsg struct{}
-	CompactMsg           struct {
+	CompactMsg            struct {
 		SessionID string
 	}
 )

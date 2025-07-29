@@ -29,7 +29,7 @@ Use a package manager:
 brew install charmbracelet/tap/crush
 
 # NPM
-npm insatll -g @charmland/crush
+npm install -g @charmland/crush
 
 # Arch Linux (btw)
 yay -S crush-bin
@@ -73,7 +73,7 @@ Or, download it:
 - [Packages][releases] are available in Debian and RPM formats
 - [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
 
-[releases]: https://github.com/charmbracelet/sequin/releases
+[releases]: https://github.com/charmbracelet/crush/releases
 
 Or just install it with go:
 

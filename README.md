@@ -24,6 +24,9 @@
 Use a package manager:
 
 ```bash
+# Homebrew
+brew install charmbracelet/tap/crush
+
 # NPM
 npm install -g @charmland/crush
 

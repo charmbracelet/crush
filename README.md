@@ -139,6 +139,7 @@ like you would. LSPs can be added manually like so:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "lsp": {
     "go": {
       "command": "gopls"
@@ -163,6 +164,7 @@ using `$(echo $VAR)` syntax.
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "mcp": {
     "filesystem": {
       "type": "stdio",
@@ -198,6 +200,7 @@ permissions. Use this with care.
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "permissions": {
     "allowed_tools": [
       "view",
@@ -225,6 +228,7 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "providers": {
     "deepseek": {
       "type": "openai",
@@ -253,6 +257,7 @@ Custom Anthropic-compatible providers follow this format:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "providers": {
     "custom-anthropic": {
       "type": "anthropic",
@@ -303,6 +308,7 @@ config:
 
 ```json
 {
+  "$schema": "https://charm.land/crush.json",
   "options": {
     "debug": true,
     "debug_lsp": true

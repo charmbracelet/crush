@@ -47,9 +47,8 @@ builds:
       - darwin
       - windows
       - freebsd
-      # TODO: those fail to build
-      # - openbsd
-      # - netbsd
+      - openbsd
+      - netbsd
     goarch:
       - amd64
       - arm64

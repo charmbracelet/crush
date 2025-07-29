@@ -31,5 +31,6 @@ jobs:
           branch: "main"
           allowlist: dependabot[bot]
           custom-pr-sign-comment: "I have read the Contributor License Agreement (CLA) and hereby sign the CLA."
+          custom-notsigned-precomment: "Thank you for your submission. We really appreciate it! Like many open-source projects, we ask that you sign our [Contributor License Agreement](https://github.com/charmbracelet/crush/blob/main/CLA.md) before we can accept your contribution. You can sign the CLA by just posting a Pull Request Comment same as the below format."
           lock-pullrequest-aftermerge: false
           signed-commit-message: "chore(legal): @$contributorName has signed the CLA in $pullRequestNo"

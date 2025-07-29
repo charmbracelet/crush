@@ -121,6 +121,14 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = l.workingDir
 	}
 
+	if searchPath == "~" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ToolResponse{}, fmt.Errorf("error resolving home directory: %w", err)
+		}
+		searchPath = homeDir
+	}
+
 	if !filepath.IsAbs(searchPath) {
 		searchPath = filepath.Join(l.workingDir, searchPath)
 	}

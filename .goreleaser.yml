@@ -156,6 +156,18 @@ nfpms:
       - src: ./manpages/crush.1.gz
         dst: /usr/share/man/man1/crush.1.gz
 
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
 nix:
   - repository:
       owner: "charmbracelet"

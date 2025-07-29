@@ -15,9 +15,12 @@ jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
     secrets:
+      docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      docker_token: ${{ secrets.DOCKERHUB_TOKEN }}
       gh_pat: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       goreleaser_key: ${{ secrets.GORELEASER_KEY }}
       fury_token: ${{ secrets.FURY_TOKEN }}
       nfpm_gpg_key: ${{ secrets.NFPM_GPG_KEY }}
       nfpm_passphrase: ${{ secrets.NFPM_PASSPHRASE }}
       npm_token: ${{ secrets.NPM_TOKEN }}
+      snapcraft_token: ${{ secrets.SNAPCRAFT_TOKEN }}

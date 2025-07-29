@@ -9,7 +9,7 @@
 Your new coding bestie, available in your favourite terminal. Your tools, your
 code, and your workflows, wired into your LLM of choice.
 
-<img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/a67e22a5-167f-4aa0-bcbf-4248740b6fd4" />
+<img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" />
 
 ## Features
 

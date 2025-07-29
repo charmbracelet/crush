@@ -143,6 +143,15 @@ nfpms:
         dst: /usr/share/zsh/site-functions/_crush
       - src: ./manpages/crush.1.gz
         dst: /usr/share/man/man1/crush.1.gz
+    apk:
+      signature:
+        key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
+    rpm:
+      signature:
+        key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
+    deb:
+      signature:
+        key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
 
 signs:
   - cmd: cosign

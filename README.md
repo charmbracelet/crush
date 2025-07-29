@@ -33,9 +33,6 @@ npm install -g @charmland/crush
 # Arch Linux (btw)
 yay -S crush-bin
 
-# Windows (with Winget)
-winget install charmbracelet.crush
-
 # Nix
 nix-shell -p nur.repos.charmbracelet.crush
 ```

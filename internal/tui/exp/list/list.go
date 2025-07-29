@@ -236,6 +236,18 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, l.keyMap.Home):
 				return l, l.GoToTop()
 			}
+			s := l.SelectedItem()
+			if s == nil {
+				return l, nil
+			}
+			item := *s
+			var cmds []tea.Cmd
+			updated, cmd := item.Update(msg)
+			cmds = append(cmds, cmd)
+			if u, ok := updated.(T); ok {
+				cmds = append(cmds, l.UpdateItem(u.ID(), u))
+			}
+			return l, tea.Batch(cmds...)
 		}
 	}
 	return l, nil

@@ -170,7 +170,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
-
+	case commands.QuitMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(),
+		})
+	case commands.ToggleHelpMsg:
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
@@ -187,7 +194,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker
-	case chat.OpenFilePickerMsg:
+	case commands.OpenFilePickerMsg:
 		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
@@ -196,6 +203,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
+	case pubsub.Event[permission.PermissionNotification]:
+		// forward to page
+		updated, cmd := a.pages[a.currentPage].Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
+		return a, cmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: permissions.NewPermissionDialogCmp(msg.Payload),
@@ -248,6 +260,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 
+	case tea.MouseWheelMsg:
+		if !a.dialog.HasDialogs() {
+			updated, pageCmd := a.pages[a.currentPage].Update(msg)
+			a.pages[a.currentPage] = updated.(util.Model)
+			cmds = append(cmds, pageCmd)
+		}
+		return a, tea.Batch(cmds...)
 	case tea.PasteMsg:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
@@ -370,6 +389,11 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Suspend):
+		if a.app.CoderAgent.IsBusy() {
+			return util.ReportWarn("Agent is busy, please wait...")
+		}
+		return tea.Suspend
 	default:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)

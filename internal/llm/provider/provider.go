@@ -199,12 +199,6 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 			options: clientOptions,
 			client:  newVertexAIClient(clientOptions),
 		}, nil
-	case catwalk.TypeXAI:
-		clientOptions.baseURL = "https://api.x.ai/v1"
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
-		}, nil
 	}
 	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)
 }

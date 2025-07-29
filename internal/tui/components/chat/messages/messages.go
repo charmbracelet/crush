@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/google/uuid"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -22,6 +24,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
+
+var copyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
 
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
@@ -93,6 +97,14 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u.(*anim.Anim)
 			return m, cmd
+		}
+	case tea.KeyPressMsg:
+		if key.Matches(msg, copyKey) {
+			err := clipboard.WriteAll(m.message.Content().Text)
+			if err != nil {
+				return m, util.ReportError(fmt.Errorf("failed to copy message content to clipboard: %w", err))
+			}
+			return m, util.ReportInfo("Message copied to clipboard")
 		}
 	}
 	return m, nil

@@ -94,7 +94,7 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	for _, opt := range opts {
 		opt(f.filterableOptions)
 	}
-	f.list = New[T](items, f.listOptions...).(*list[T])
+	f.list = New(items, f.listOptions...).(*list[T])
 
 	f.updateKeyMaps()
 	f.items = slices.Collect(f.list.items.Seq())

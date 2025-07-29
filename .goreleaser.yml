@@ -115,11 +115,17 @@ furies:
     account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
     secret_name: FURY_TOKEN
 
-homebrew_casks:
+brews:
   - repository:
       owner: charmbracelet
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    goarm: 7
+    extra_install: |-
+      bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
+      zsh_completion.install "completions/{{ .ProjectName }}.zsh" => "_{{ .ProjectName }}"
+      fish_completion.install "completions/{{ .ProjectName }}.fish"
+      man1.install "manpages/{{ .ProjectName }}.1.gz"
 
 npms:
   - name: "@charmland/crush"

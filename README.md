@@ -312,7 +312,7 @@ config:
 
 ## Whatcha think?
 
-We’d love to hear your thoughts on this project. Feel free to drop us a note!
+We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
 
 - [Twitter](https://twitter.com/charmcli)
 - [Discord][discord]

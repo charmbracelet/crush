@@ -390,12 +390,16 @@ var readyPlaceholders = [...]string{
 	"Ready!",
 	"Ready...",
 	"Ready?",
+	"Ready for instructions",
 }
 
 var workingPlaceholders = [...]string{
 	"Working!",
 	"Working...",
-	"Working?",
+	"Brrrrr...",
+	"Prrrrrrrr...",
+	"Processing...",
+	"Thinking...",
 }
 
 func (m *editorCmp) randomizePlaceholders() {

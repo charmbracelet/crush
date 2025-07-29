@@ -215,15 +215,10 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 		content,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -341,15 +336,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -476,15 +466,10 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        filePath,
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",

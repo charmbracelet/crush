@@ -1,7 +1,6 @@
 package prompt
 
 import (
-	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -38,10 +37,7 @@ func getEnvironmentInfo() string {
 	isGit := isGitRepo(cwd)
 	platform := runtime.GOOS
 	date := time.Now().Format("1/2/2006")
-	ls := tools.NewLsTool(cwd)
-	r, _ := ls.Run(context.Background(), tools.ToolCall{
-		Input: `{"path":"."}`,
-	})
+	output, _ := tools.ListDirectoryTree(cwd, nil)
 	return fmt.Sprintf(`Here is useful information about the environment you are running in:
 <env>
 Working directory: %s
@@ -52,7 +48,7 @@ Today's date: %s
 <project>
 %s
 </project>
-		`, cwd, boolToYesNo(isGit), platform, date, r.Content)
+		`, cwd, boolToYesNo(isGit), platform, date, output)
 }
 
 func isGitRepo(dir string) bool {

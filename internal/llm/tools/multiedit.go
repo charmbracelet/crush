@@ -249,15 +249,10 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 
 	// Check permissions
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-	rootDir := m.workingDir
-	permissionPath := filepath.Dir(params.FilePath)
-	if strings.HasPrefix(params.FilePath, rootDir) {
-		permissionPath = rootDir
-	}
 
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
-		Path:        permissionPath,
+		Path:        params.FilePath,
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",
@@ -364,15 +359,10 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 
 	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-	rootDir := m.workingDir
-	permissionPath := filepath.Dir(params.FilePath)
-	if strings.HasPrefix(params.FilePath, rootDir) {
-		permissionPath = rootDir
-	}
 
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
-		Path:        permissionPath,
+		Path:        params.FilePath,
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",

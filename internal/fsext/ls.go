@@ -156,7 +156,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 
 		return nil
 	})
-	if err != nil {
+	if err != nil && len(results) == 0 {
 		return nil, truncated, err
 	}
 

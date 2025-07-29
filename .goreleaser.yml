@@ -4,10 +4,10 @@ version: 2
 
 project_name: crush
 
-# includes:
-#   - from_url:
-#       url: charmbracelet/meta/main/notarize.yaml
-#
+includes:
+  - from_url:
+      url: charmbracelet/meta/main/notarize.yaml
+
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
   license: "MIT"

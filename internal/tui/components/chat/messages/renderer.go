@@ -780,13 +780,21 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	return strings.Join(out, "\n")
 }
 
-func pad(v any, width int) string {
-	s := fmt.Sprintf("%v", v)
-	w := ansi.StringWidth(s)
-	if w >= width {
-		return s
+func getDigits(n int) int {
+	if n == 0 {
+		return 1
 	}
-	return strings.Repeat(" ", width-w) + s
+	if n < 0 {
+		n = -n
+	}
+
+	digits := 0
+	for n > 0 {
+		n /= 10
+		digits++
+	}
+
+	return digits
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
@@ -811,15 +819,16 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	}
 
 	maxLineNumber := len(lines) + offset
-	padding := lipgloss.Width(fmt.Sprintf("%d", maxLineNumber))
+	maxDigits := getDigits(maxLineNumber)
+	numFmt := fmt.Sprintf("%%%dd", maxDigits)
+	w := v.textWidth() - (maxDigits + 2) - 1 - 2
 	for i, ln := range lines {
 		num := t.S().Base.
 			Foreground(t.FgMuted).
 			Background(t.BgBase).
 			PaddingRight(1).
 			PaddingLeft(1).
-			Render(pad(i+1+offset, padding))
-		w := v.textWidth() - 10 - lipgloss.Width(num) // -4 for left padding
+			Render(fmt.Sprintf(numFmt, i+1+offset))
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			" ",

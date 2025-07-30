@@ -15,11 +15,9 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-var (
-	// Pre-compiled regex for checking if a string is alphanumeric.
-	// Note: This is duplicated from filterable.go to avoid circular dependencies.
-	alphanumericRegexGroup = regexp.MustCompile(`^[a-zA-Z0-9]*$`)
-)
+// Pre-compiled regex for checking if a string is alphanumeric.
+// Note: This is duplicated from filterable.go to avoid circular dependencies.
+var alphanumericRegexGroup = regexp.MustCompile(`^[a-zA-Z0-9]*$`)
 
 type FilterableGroupList[T FilterableItem] interface {
 	GroupedList[T]

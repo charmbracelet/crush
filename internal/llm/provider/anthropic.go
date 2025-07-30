@@ -21,10 +21,8 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
-var (
-	// Pre-compiled regex for parsing context limit errors.
-	contextLimitRegex = regexp.MustCompile(`input length and ` + "`max_tokens`" + ` exceed context limit: (\d+) \+ (\d+) > (\d+)`)
-)
+// Pre-compiled regex for parsing context limit errors.
+var contextLimitRegex = regexp.MustCompile(`input length and ` + "`max_tokens`" + ` exceed context limit: (\d+) \+ (\d+) > (\d+)`)
 
 type anthropicClient struct {
 	providerOptions   providerClientOptions

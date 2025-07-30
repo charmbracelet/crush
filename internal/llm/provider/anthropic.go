@@ -223,7 +223,6 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	}
 
 	systemBlocks := []anthropic.TextBlockParam{}
-	slog.Info("Testing", "prefix", a.providerOptions.systemPromptPrefix)
 
 	// Add custom system prompt prefix if configured
 	if a.providerOptions.systemPromptPrefix != "" {

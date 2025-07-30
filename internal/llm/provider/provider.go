@@ -160,6 +160,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		apiKey:             resolvedAPIKey,
 		extraHeaders:       resolvedExtraHeaders,
 		extraBody:          cfg.ExtraBody,
+		extraParams:        cfg.ExtraParams,
 		systemPromptPrefix: cfg.SystemPromptPrefix,
 		model: func(tp config.SelectedModelType) catwalk.Model {
 			return *config.Get().GetModelByType(tp)

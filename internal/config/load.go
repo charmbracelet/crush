@@ -189,6 +189,10 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				}
 				continue
 			}
+			prepared.ExtraParams["region"] = env.Get("AWS_REGION")
+			if prepared.ExtraParams["region"] == "" {
+				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
+			}
 			for _, model := range p.Models {
 				if !strings.HasPrefix(model.ID, "anthropic.") {
 					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)

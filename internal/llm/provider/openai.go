@@ -331,8 +331,14 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			var currentToolCallID string
 			var currentToolCall openai.ChatCompletionMessageToolCall
 			var msgToolCalls []openai.ChatCompletionMessageToolCall
+			currentToolIndex := 0
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
+				// Kujtim: this is an issue with openrouter qwen, its sending -1 for the tool index
+				if len(chunk.Choices) > 0 && len(chunk.Choices[0].Delta.ToolCalls) > 0 && chunk.Choices[0].Delta.ToolCalls[0].Index == -1 {
+					chunk.Choices[0].Delta.ToolCalls[0].Index = int64(currentToolIndex)
+					currentToolIndex++
+				}
 				acc.AddChunk(chunk)
 				// This fixes multiple tool calls for some providers
 				for _, choice := range chunk.Choices {
@@ -348,6 +354,14 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 						if currentToolCallID == "" {
 							if toolCall.ID != "" {
 								currentToolCallID = toolCall.ID
+								eventChan <- ProviderEvent{
+									Type: EventToolUseStart,
+									ToolCall: &message.ToolCall{
+										ID:       toolCall.ID,
+										Name:     toolCall.Function.Name,
+										Finished: false,
+									},
+								}
 								currentToolCall = openai.ChatCompletionMessageToolCall{
 									ID:   toolCall.ID,
 									Type: "function",
@@ -359,13 +373,21 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 							}
 						} else {
 							// Delta tool use
-							if toolCall.ID == "" {
+							if toolCall.ID == "" || toolCall.ID == currentToolCallID {
 								currentToolCall.Function.Arguments += toolCall.Function.Arguments
 							} else {
 								// Detect new tool use
 								if toolCall.ID != currentToolCallID {
 									msgToolCalls = append(msgToolCalls, currentToolCall)
 									currentToolCallID = toolCall.ID
+									eventChan <- ProviderEvent{
+										Type: EventToolUseStart,
+										ToolCall: &message.ToolCall{
+											ID:       toolCall.ID,
+											Name:     toolCall.Function.Name,
+											Finished: false,
+										},
+									}
 									currentToolCall = openai.ChatCompletionMessageToolCall{
 										ID:   toolCall.ID,
 										Type: "function",
@@ -378,7 +400,8 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 							}
 						}
 					}
-					if choice.FinishReason == "tool_calls" {
+					// Kujtim: some models send finish stop even for tool calls
+					if choice.FinishReason == "tool_calls" || (choice.FinishReason == "stop" && currentToolCallID != "") {
 						msgToolCalls = append(msgToolCalls, currentToolCall)
 						if len(acc.Choices) > 0 {
 							acc.Choices[0].Message.ToolCalls = msgToolCalls

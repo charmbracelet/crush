@@ -37,6 +37,9 @@ var defaultContextPaths = []string{
 	"Crush.local.md",
 	"CRUSH.md",
 	"CRUSH.local.md",
+	"AGENTS.md",
+	"agents.md",
+	"Agents.md",
 }
 
 type SelectedModelType string

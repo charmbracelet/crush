@@ -306,7 +306,8 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 		}
 	}
 
-	var lines []string
+	// Pre-allocate slice with expected capacity
+	lines := make([]string, 0, limit)
 	lineCount = offset
 
 	for scanner.Scan() && len(lines) < limit {

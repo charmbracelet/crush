@@ -21,6 +21,11 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 )
 
+var (
+	// Pre-compiled regex for parsing context limit errors.
+	contextLimitRegex = regexp.MustCompile(`input length and ` + "`max_tokens`" + ` exceed context limit: (\d+) \+ (\d+) > (\d+)`)
+)
+
 type anthropicClient struct {
 	providerOptions   providerClientOptions
 	useBedrock        bool
@@ -512,8 +517,7 @@ func (a *anthropicClient) handleContextLimitError(apiErr *anthropic.Error) (int,
 	// Parse error message like: "input length and max_tokens exceed context limit: 154978 + 50000 > 200000"
 	errorMsg := apiErr.Error()
 
-	re := regexp.MustCompile("input length and `max_tokens` exceed context limit: (\\d+) \\+ (\\d+) > (\\d+)")
-	matches := re.FindStringSubmatch(errorMsg)
+	matches := contextLimitRegex.FindStringSubmatch(errorMsg)
 
 	if len(matches) != 4 {
 		return 0, false

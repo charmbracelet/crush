@@ -15,6 +15,12 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+var (
+	// Pre-compiled regex for checking if a string is alphanumeric.
+	// Note: This is duplicated from filterable.go to avoid circular dependencies.
+	alphanumericRegexGroup = regexp.MustCompile(`^[a-zA-Z0-9]*$`)
+)
+
 type FilterableGroupList[T FilterableItem] interface {
 	GroupedList[T]
 	Cursor() *tea.Cursor
@@ -114,8 +120,6 @@ func (f *filterableGroupList[T]) View() string {
 
 // removes bindings that are used for search
 func (f *filterableGroupList[T]) updateKeyMaps() {
-	alphanumeric := regexp.MustCompile("^[a-zA-Z0-9]*$")
-
 	removeLettersAndNumbers := func(bindings []string) []string {
 		var keep []string
 		for _, b := range bindings {
@@ -126,7 +130,7 @@ func (f *filterableGroupList[T]) updateKeyMaps() {
 			if b == " " {
 				continue
 			}
-			m := alphanumeric.MatchString(b)
+			m := alphanumericRegexGroup.MatchString(b)
 			if !m {
 				keep = append(keep, b)
 			}

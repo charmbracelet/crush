@@ -38,6 +38,24 @@ nix-shell -p nur.repos.charmbracelet.crush
 ```
 
 <details>
+<summary><strong>Nix</strong></summary>
+    
+Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
+
+You can also try out Crush via `nix-shell`:
+
+```bash
+# Add the NUR channel.
+nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
+nix-channel --update
+
+# Get Crush in a Nix shell.
+nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
+```
+
+</details>
+
+<details>
 <summary><strong>Debian/Ubuntu</strong></summary>
 
 ```bash

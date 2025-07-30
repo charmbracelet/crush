@@ -15,6 +15,13 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+var (
+	// Pre-compiled regex for checking if a string contains alphabetic characters.
+	alphaRegex = regexp.MustCompile(`[a-zA-Z]`)
+	// Pre-compiled regex for checking if a string is alphanumeric.
+	alphanumericRegex = regexp.MustCompile(`^[a-zA-Z0-9]*$`)
+)
+
 type FilterableItem interface {
 	Item
 	FilterValue() string
@@ -165,8 +172,6 @@ func (f *filterableList[T]) View() string {
 
 // removes bindings that are used for search
 func (f *filterableList[T]) updateKeyMaps() {
-	alphanumeric := regexp.MustCompile("^[a-zA-Z0-9]*$")
-
 	removeLettersAndNumbers := func(bindings []string) []string {
 		var keep []string
 		for _, b := range bindings {
@@ -177,7 +182,7 @@ func (f *filterableList[T]) updateKeyMaps() {
 			if b == " " {
 				continue
 			}
-			m := alphanumeric.MatchString(b)
+			m := alphanumericRegex.MatchString(b)
 			if !m {
 				keep = append(keep, b)
 			}

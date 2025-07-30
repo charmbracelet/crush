@@ -420,6 +420,12 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			msgHistory = append(msgHistory, agentMessage, *toolResults)
 			continue
 		}
+		if agentMessage.FinishReason() == "" {
+			// Kujtim: could not track down where this is happening but this means its cancelled
+			agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
+			_ = a.messages.Update(context.Background(), agentMessage)
+			return a.err(ErrRequestCancelled)
+		}
 		return AgentEvent{
 			Type:    AgentEventTypeResponse,
 			Message: agentMessage,

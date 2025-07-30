@@ -88,8 +88,8 @@ github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0/go.mod h1:XIuqKpZTUXtVyeyiN1k9Tc/U7EzfaDnVc34feFHfBws=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
-github.com/charmbracelet/ultraviolet v0.0.0-20250729133950-5d2ddf68d813 h1:A3omGay8ZBDBmmGZ4Hcffpo7Ywz92rb2GUbFb9YABkM=
-github.com/charmbracelet/ultraviolet v0.0.0-20250729133950-5d2ddf68d813/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
+github.com/charmbracelet/ultraviolet v0.0.0-20250730133440-876e32b4e1f5 h1:ZUPo5AgMkGe1cUyPZfoN0ErT4QV9KcrtQKFgAHOCuXM=
+github.com/charmbracelet/ultraviolet v0.0.0-20250730133440-876e32b4e1f5/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
 github.com/charmbracelet/x/ansi v0.9.3 h1:BXt5DHS/MKF+LjuK4huWrC6NCvHtexww7dMayh6GXd0=
 github.com/charmbracelet/x/ansi v0.9.3/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz0Z3rsiOtMYiz8axkT24i9yFiueDhJbzyNUADmME=

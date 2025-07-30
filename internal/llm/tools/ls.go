@@ -197,7 +197,7 @@ func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
 		return "", fmt.Errorf("error listing directory: %w", err)
 	}
 
-	tree := createFileTree(files)
+	tree := createFileTree(files, searchPath)
 	output := printTree(tree, searchPath)
 
 	if truncated {
@@ -207,12 +207,13 @@ func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
 	return output, nil
 }
 
-func createFileTree(sortedPaths []string) []*TreeNode {
+func createFileTree(sortedPaths []string, rootPath string) []*TreeNode {
 	root := []*TreeNode{}
 	pathMap := make(map[string]*TreeNode)
 
 	for _, path := range sortedPaths {
-		parts := strings.Split(path, string(filepath.Separator))
+		relativePath := strings.TrimPrefix(path, rootPath)
+		parts := strings.Split(relativePath, string(filepath.Separator))
 		currentPath := ""
 		var parentPath string
 
@@ -241,7 +242,7 @@ func createFileTree(sortedPaths []string) []*TreeNode {
 			}
 
 			isLastPart := i == len(parts)-1
-			isDir := !isLastPart || strings.HasSuffix(path, string(filepath.Separator))
+			isDir := !isLastPart || strings.HasSuffix(relativePath, string(filepath.Separator))
 			nodeType := "file"
 			if isDir {
 				nodeType = "directory"
@@ -273,7 +274,12 @@ func createFileTree(sortedPaths []string) []*TreeNode {
 func printTree(tree []*TreeNode, rootPath string) string {
 	var result strings.Builder
 
-	result.WriteString(fmt.Sprintf("- %s%s\n", rootPath, string(filepath.Separator)))
+	result.WriteString("- ")
+	result.WriteString(rootPath)
+	if rootPath[len(rootPath)-1] != '/' {
+		result.WriteByte(filepath.Separator)
+	}
+	result.WriteByte('\n')
 
 	for _, node := range tree {
 		printNode(&result, node, 1)

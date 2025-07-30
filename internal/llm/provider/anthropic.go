@@ -70,8 +70,8 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
-	for _, header := range opts.extraHeaders {
-		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(header, opts.extraHeaders[header]))
+	for key, header := range opts.extraHeaders {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(key, header))
 	}
 	for key, value := range opts.extraBody {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithJSONSet(key, value))

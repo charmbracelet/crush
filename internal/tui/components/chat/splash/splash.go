@@ -109,6 +109,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 		filteredProviders := []catwalk.Provider{}
 		simpleProviders := []string{
 			"anthropic",
+			"bedrock",
 			"openai",
 			"gemini",
 			"xai",

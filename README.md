@@ -105,9 +105,6 @@ Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
 
-<details>
-<summary><strong>Supported Environment Variables</strong></summary>
-
 | Environment Variable       | Provider                                           |
 | -------------------------- | -------------------------------------------------- |
 | `ANTHROPIC_API_KEY`        | Anthropic                                          |
@@ -122,8 +119,6 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
-
-</details>
 
 ### By the Way
 

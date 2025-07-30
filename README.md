@@ -89,7 +89,7 @@ Or, download it:
 
 [releases]: https://github.com/charmbracelet/crush/releases
 
-Or just install it with go:
+Or just install it with Go:
 
 ```
 go install github.com/charmbracelet/crush@latest

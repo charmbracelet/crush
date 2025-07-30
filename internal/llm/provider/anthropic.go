@@ -67,8 +67,8 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
-	for _, header := range opts.extraHeaders {
-		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(header, opts.extraHeaders[header]))
+	for key, header := range opts.extraHeaders {
+		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(key, header))
 	}
 	for key, value := range opts.extraBody {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithJSONSet(key, value))
@@ -223,6 +223,7 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	}
 
 	systemBlocks := []anthropic.TextBlockParam{}
+	slog.Info("Testing", "prefix", a.providerOptions.systemPromptPrefix)
 
 	// Add custom system prompt prefix if configured
 	if a.providerOptions.systemPromptPrefix != "" {

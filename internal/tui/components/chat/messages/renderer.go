@@ -800,12 +800,13 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 		lines[i] = ansiext.Escape(ln)
 	}
 
-	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, t.BgBase)
+	bg := t.BgBase
+	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, bg)
 	lines = strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
-			Background(t.BgBase).
+			Background(bg).
 			Render(fmt.Sprintf(" …(%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
@@ -821,9 +822,12 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 		w := v.textWidth() - 10 - lipgloss.Width(num) // -4 for left padding
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
+			" ",
 			t.S().Base.
-				PaddingLeft(1).
-				Render(v.fit(ln, w-1)))
+				Width(w).
+				Background(bg).
+				Render(v.fit(ln, w)),
+		)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)

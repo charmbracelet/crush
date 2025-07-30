@@ -120,7 +120,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
+		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) ||
+			!slices.ContainsFunc(m.providers, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
 			// Convert config provider to provider.Provider format
 			configProvider := catwalk.Provider{
 				Name:   providerConfig.Name,

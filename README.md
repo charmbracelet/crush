@@ -32,9 +32,6 @@ npm install -g @charmland/crush
 
 # Arch Linux (btw)
 yay -S crush-bin
-
-# Nix
-nix-shell -p nur.repos.charmbracelet.crush
 ```
 
 <details>

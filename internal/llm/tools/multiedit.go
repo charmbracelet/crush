@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -250,14 +251,9 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 	// Check permissions
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
 
-	permissionPath := params.FilePath
-	if strings.HasPrefix(params.FilePath, m.workingDir) {
-		permissionPath = m.workingDir
-	}
-
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
-		Path:        permissionPath,
+		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",
@@ -364,13 +360,9 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 
 	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-	permissionPath := params.FilePath
-	if strings.HasPrefix(params.FilePath, m.workingDir) {
-		permissionPath = m.workingDir
-	}
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
-		Path:        permissionPath,
+		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
 		ToolCallID:  call.ID,
 		ToolName:    MultiEditToolName,
 		Action:      "write",

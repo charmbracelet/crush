@@ -211,7 +211,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		searchPath = g.workingDir
 	}
 
-	matches, truncated, err := g.searchFiles(searchPattern, searchPath, params.Include, 100)
+	matches, truncated, err := searchFiles(searchPattern, searchPath, params.Include, 100)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 	}
@@ -252,7 +252,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	), nil
 }
 
-func (g *grepTool) searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
+func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
 	matches, err := searchWithRipgrep(pattern, rootPath, include)
 	if err != nil {
 		matches, err = searchFilesWithRegex(pattern, rootPath, include)
@@ -284,6 +284,7 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 		"--ignore-file", filepath.Join(path, ".gitignore"),
 		"--ignore-file", filepath.Join(path, ".crushignore"),
 	)
+
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {

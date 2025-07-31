@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -67,6 +68,12 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 	} else if hasBearerAuth {
 		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
 	}
+
+	if config.Get().Options.Debug {
+		httpClient := log.NewHTTPClient(nil)
+		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
+	}
+
 	if useBedrock {
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
 	}
@@ -279,7 +286,7 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
-			slog.Error("Error in Anthropic API call", "error", err)
+			slog.Error("Anthropic API error", "error", err.Error(), "attempt", attempts, "max_retries", maxRetries)
 			retry, after, retryErr := a.shouldRetry(attempts, err)
 			if retryErr != nil {
 				return nil, retryErr

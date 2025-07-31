@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -44,6 +45,11 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 		if err == nil {
 			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
 		}
+	}
+
+	if config.Get().Options.Debug {
+		httpClient := log.NewHTTPClient(nil)
+		openaiClientOptions = append(openaiClientOptions, option.WithHTTPClient(httpClient))
 	}
 
 	for key, value := range opts.extraHeaders {
@@ -525,7 +531,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 			slog.Warn("Retry-After header", "values", retryAfterValues)
 		}
 	} else {
-		slog.Warn("OpenAI API error", "error", err.Error())
+		slog.Error("OpenAI API error", "error", err.Error(), "attempt", attempts, "max_retries", maxRetries)
 	}
 
 	backoffMs := 2000 * (1 << (attempts - 1))

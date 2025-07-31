@@ -242,3 +242,23 @@ func DirTrim(pwd string, lim int) string {
 	out = filepath.Join("~", out)
 	return out
 }
+
+// PathOrPrefix returns the prefix if the path starts with it, or falls back to
+// the path otherwise.
+func PathOrPrefix(path, prefix string) string {
+	if HasPrefix(path, prefix) {
+		return prefix
+	}
+	return path
+}
+
+// HasPrefix checks if the given path starts with the specified prefix.
+func HasPrefix(path, prefix string) bool {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if abs, err := filepath.Abs(prefix); err == nil {
+		prefix = abs
+	}
+	return strings.HasPrefix(path, prefix)
+}

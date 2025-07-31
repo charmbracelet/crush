@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -215,14 +216,10 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 		content,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	permissionPath := filePath
-	if strings.HasPrefix(filePath, e.workingDir) {
-		permissionPath = e.workingDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -340,15 +337,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	permissionPath := filePath
-	if strings.HasPrefix(filePath, e.workingDir) {
-		permissionPath = e.workingDir
-	}
-
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
@@ -476,14 +468,10 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	permissionPath := filePath
-	if strings.HasPrefix(filePath, e.workingDir) {
-		permissionPath = e.workingDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
 			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -172,15 +173,10 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		strings.TrimPrefix(filePath, w.workingDir),
 	)
 
-	permissionPath := filePath
-	if strings.HasPrefix(filePath, w.workingDir) {
-		permissionPath = w.workingDir
-	}
-
 	p := w.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, w.workingDir),
 			ToolCallID:  call.ID,
 			ToolName:    WriteToolName,
 			Action:      "write",

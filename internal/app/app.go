@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/update"
 )
 
 type App struct {
@@ -87,6 +88,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
+
+	// Check for updates in the background.
+	go app.checkForUpdates(ctx)
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
@@ -335,5 +339,29 @@ func (app *App) Shutdown() {
 		if cleanup != nil {
 			cleanup()
 		}
+	}
+}
+
+// checkForUpdates checks for available updates in the background.
+func (app *App) checkForUpdates(ctx context.Context) {
+	// Use a timeout to avoid hanging indefinitely.
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Check for updates asynchronously.
+	updateCh := update.CheckForUpdateAsync(checkCtx, app.config.Options.DataDirectory)
+
+	select {
+	case info := <-updateCh:
+		if info != nil && info.Available {
+			// Send update notification through the event system.
+			app.events <- pubsub.UpdateAvailableMsg{
+				CurrentVersion: info.CurrentVersion,
+				LatestVersion:  info.LatestVersion,
+			}
+		}
+	case <-checkCtx.Done():
+		// Timeout or context cancelled.
+		return
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/log/v2"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -211,7 +212,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		searchPath = g.workingDir
 	}
 
-	matches, truncated, err := searchFiles(searchPattern, searchPath, params.Include, 100)
+	matches, truncated, err := g.searchFiles(searchPattern, searchPath, params.Include, 100)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 	}
@@ -252,7 +253,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	), nil
 }
 
-func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
+func (g *grepTool) searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
 	matches, err := searchWithRipgrep(pattern, rootPath, include)
 	if err != nil {
 		matches, err = searchFilesWithRegex(pattern, rootPath, include)
@@ -279,16 +280,14 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
-	// Add gitignore and crushignore support to ripgrep
-	cmd.Args = append(cmd.Args, "--respect-gitignore")
-	// Check for crushignore file and add it as an additional ignore file
-	crushignorePath := filepath.Join(path, ".crushignore")
-	if _, err := os.Stat(crushignorePath); err == nil {
-		cmd.Args = append(cmd.Args, "--ignore-file", crushignorePath)
-	}
-
-	output, err := cmd.Output()
+	cmd.Args = append(
+		cmd.Args,
+		"--ignore-file", filepath.Join(path, ".gitignore"),
+		"--ignore-file", filepath.Join(path, ".crushignore"),
+	)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Error("rg failed", "args", cmd.Args, "output", string(output), "error", err)
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return []grepMatch{}, nil
 		}

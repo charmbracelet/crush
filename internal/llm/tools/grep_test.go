@@ -6,8 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegexCache(t *testing.T) {
@@ -71,26 +72,17 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 
 	for path, content := range testFiles {
 		fullPath := filepath.Join(tempDir, path)
-		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("Failed to create dir %s: %v", dir, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
-			t.Fatalf("Failed to write file %s: %v", fullPath, err)
-		}
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
 	}
 
 	// Create .gitignore file
 	gitignoreContent := "ignored/\n*.key\n"
-	if err := os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte(gitignoreContent), 0o644); err != nil {
-		t.Fatalf("Failed to write .gitignore: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte(gitignoreContent), 0o644))
 
 	// Create .crushignore file
 	crushignoreContent := "node_modules/\n"
-	if err := os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644); err != nil {
-		t.Fatalf("Failed to write .crushignore: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644))
 
 	// Create grep tool
 	grepTool := NewGrepTool(tempDir)
@@ -101,37 +93,23 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 		Path:    tempDir,
 	}
 	paramsJSON, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("Failed to marshal params: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Run grep
 	call := ToolCall{Input: string(paramsJSON)}
 	response, err := grepTool.Run(context.Background(), call)
-	if err != nil {
-		t.Fatalf("Grep failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Check results - should only find file1.txt and file2.txt
 	// ignored/file3.txt should be ignored by .gitignore
 	// node_modules/lib.js should be ignored by .crushignore
 	// secret.key should be ignored by .gitignore
 	result := response.Content
-	if !strings.Contains(result, "file1.txt") {
-		t.Error("Expected to find file1.txt in results")
-	}
-	if !strings.Contains(result, "file2.txt") {
-		t.Error("Expected to find file2.txt in results")
-	}
-	if strings.Contains(result, "file3.txt") {
-		t.Error("Expected file3.txt to be ignored by .gitignore")
-	}
-	if strings.Contains(result, "lib.js") {
-		t.Error("Expected lib.js to be ignored by .crushignore")
-	}
-	if strings.Contains(result, "secret.key") {
-		t.Error("Expected secret.key to be ignored by .gitignore")
-	}
+	require.Contains(t, result, "file1.txt")
+	require.Contains(t, result, "file2.txt")
+	require.NotContains(t, result, "file3.txt")
+	require.NotContains(t, result, "lib.js")
+	require.NotContains(t, result, "secret.key")
 }
 
 // Benchmark to show performance improvement

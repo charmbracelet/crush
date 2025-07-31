@@ -821,7 +821,8 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	maxLineNumber := len(lines) + offset
 	maxDigits := getDigits(maxLineNumber)
 	numFmt := fmt.Sprintf("%%%dd", maxDigits)
-	w := v.textWidth() - (maxDigits + 2) - 1 - 2
+	const numPR, numPL, codePR, codePL = 1, 1, 1, 2
+	w := v.textWidth() - maxDigits - numPL - numPR - 2 // -2 for left padding
 	for i, ln := range lines {
 		num := t.S().Base.
 			Foreground(t.FgMuted).
@@ -836,7 +837,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 				Background(bg).
 				PaddingRight(1).
 				PaddingLeft(2).
-				Render(v.fit(ln, w)),
+				Render(v.fit(ln, w-codePL-codePR)),
 		)
 	}
 

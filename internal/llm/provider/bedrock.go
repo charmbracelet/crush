@@ -52,7 +52,7 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		opts.disableCache = true // Disable cache for Bedrock
 		return &bedrockClient{
 			providerOptions: opts,
-			childProvider:   newAnthropicClient(anthropicOpts, true),
+			childProvider:   newAnthropicClient(anthropicOpts, AnthropicClientTypeBedrock),
 		}
 	}
 

@@ -6750,6 +6750,7 @@ const (
 	LangXML             LanguageKind = "xml"
 	LangXSL             LanguageKind = "xsl"
 	LangYAML            LanguageKind = "yaml"
+	LangZig             LanguageKind = "zig"
 	// Describes the content type that a client supports in various
 	// result literals like `Hover`, `ParameterInfo` or `CompletionItem`.
 	//

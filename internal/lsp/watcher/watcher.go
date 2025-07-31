@@ -257,6 +257,12 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 			"**/build.gradle",
 			"**/src/main/java/**/*.java",
 		}
+	case "zls":
+		patterns = []string{
+			"**/build.zig",
+			"**/build.zig.zon",
+			"**/src/main.zig",
+		}
 	default:
 		// For unknown servers, use common configuration files
 		patterns = []string{
@@ -908,6 +914,8 @@ func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
 		shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
 	case "java", "jdtls":
 		shouldOpen = ext == ".java"
+	case "zls":
+		shouldOpen = ext == ".zig" || ext == ".zon"
 	}
 
 	if shouldOpen {
@@ -965,6 +973,11 @@ func isHighPriorityFile(path string, serverName string) bool {
 		return fileName == "pom.xml" ||
 			fileName == "build.gradle" ||
 			ext == ".java" // Java servers often need to see source files
+	case "zls":
+		// For Zig, open key project files
+		return fileName == "build.zig" ||
+			fileName == "build.zig.zon" ||
+			fileName == "main.zig"
 	}
 
 	// For unknown servers, prioritize common configuration files

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/log/v2"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -285,9 +284,8 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 		"--ignore-file", filepath.Join(path, ".gitignore"),
 		"--ignore-file", filepath.Join(path, ".crushignore"),
 	)
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		log.Error("rg failed", "args", cmd.Args, "output", string(output), "error", err)
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return []grepMatch{}, nil
 		}

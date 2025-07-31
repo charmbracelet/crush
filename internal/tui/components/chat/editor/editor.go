@@ -410,7 +410,7 @@ func (m *editorCmp) randomizePlaceholders() {
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
 	// Update placeholder
-	if m.app.CoderAgent.IsBusy() {
+	if m.app.CoderAgent != nil && m.app.CoderAgent.IsBusy() {
 		m.textarea.Placeholder = m.workingPlaceholder
 	} else {
 		m.textarea.Placeholder = m.readyPlaceholder

@@ -263,7 +263,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, s.keyMap.Yes):
 			if s.isOnboarding {
-				return s, nil
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
 			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
@@ -276,7 +278,9 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, s.keyMap.No):
 			if s.isOnboarding {
-				return s, nil
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
 			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)

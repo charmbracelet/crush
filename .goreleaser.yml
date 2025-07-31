@@ -246,6 +246,7 @@ winget:
 changelog:
   sort: asc
   disable: "{{ .IsNightly }}"
+  use: github
   filters:
     exclude:
       - "^(build|ci): "

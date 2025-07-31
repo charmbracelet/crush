@@ -210,6 +210,16 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
+### Ignoring Files
+
+Crush respects `.gitignore` files by default, but you can also create a
+`.crushignore` file to specify additional files and directories that Crush
+should ignore. This is useful for excluding files that you want in version
+control but don't want Crush to consider when providing context.
+
+The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
+in the root of your project or in subdirectories.
+
 ### Whitelisting Tools
 
 By default, Crush will ask you for permission before running tool calls. If

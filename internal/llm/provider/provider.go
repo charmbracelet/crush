@@ -173,7 +173,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 	case catwalk.TypeAnthropic:
 		return &baseProvider[AnthropicClient]{
 			options: clientOptions,
-			client:  newAnthropicClient(clientOptions, false),
+			client:  newAnthropicClient(clientOptions, AnthropicClientTypeNormal),
 		}, nil
 	case catwalk.TypeOpenAI:
 		return &baseProvider[OpenAIClient]{

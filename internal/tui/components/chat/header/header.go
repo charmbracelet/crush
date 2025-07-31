@@ -110,9 +110,23 @@ func (h *header) details() string {
 
 	agentCfg := config.Get().Agents["coder"]
 	model := config.Get().GetModelByType(agentCfg.Model)
-	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
-	formattedPercentage := t.S().Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
-	parts = append(parts, formattedPercentage)
+	totalTokens := h.session.CompletionTokens + h.session.PromptTokens
+	percentage := (float64(totalTokens) / float64(model.ContextWindow)) * 100
+	
+	// Format token display based on whether details are open
+	var tokenDisplay string
+	if h.detailsOpen {
+		// Show detailed token information when details are open
+		tokenDisplay = fmt.Sprintf("%d%% (%s/%s tokens)", 
+			int(percentage),
+			formatTokenCount(totalTokens),
+			formatTokenCount(model.ContextWindow))
+	} else {
+		// Show just percentage when closed
+		tokenDisplay = fmt.Sprintf("%d%%", int(percentage))
+	}
+	
+	parts = append(parts, t.S().Muted.Render(tokenDisplay))
 
 	if h.detailsOpen {
 		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" close"))
@@ -142,4 +156,14 @@ func (h *header) SetWidth(width int) tea.Cmd {
 // ShowingDetails implements Header.
 func (h *header) ShowingDetails() bool {
 	return h.detailsOpen
+}
+
+// formatTokenCount formats token counts in a human-readable way
+func formatTokenCount(count int64) string {
+	if count >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
+	} else if count >= 1_000 {
+		return fmt.Sprintf("%.1fk", float64(count)/1_000)
+	}
+	return fmt.Sprintf("%d", count)
 }

@@ -105,6 +105,10 @@ crush run -q "Generate a README for this project"
 		}
 		defer app.Shutdown()
 
+		if !app.Config().IsConfigured() {
+			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+		}
+
 		prompt := strings.Join(args, " ")
 
 		prompt, err = maybePrependStdin(prompt)

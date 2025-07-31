@@ -58,11 +58,7 @@ func TestGlobToRegexCaching(t *testing.T) {
 }
 
 func TestGrepWithIgnoreFiles(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "grep_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	tempDir := t.TempDir()
 
 	// Create test files
 	testFiles := map[string]string{

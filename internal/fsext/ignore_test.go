@@ -18,12 +18,12 @@ func TestCrushIgnore(t *testing.T) {
 	defer os.Chdir(oldWd)
 
 	// Create test files
-	require.NoError(t, os.WriteFile("test1.txt", []byte("test"), 0644))
-	require.NoError(t, os.WriteFile("test2.log", []byte("test"), 0644))
-	require.NoError(t, os.WriteFile("test3.tmp", []byte("test"), 0644))
+	require.NoError(t, os.WriteFile("test1.txt", []byte("test"), 0o644))
+	require.NoError(t, os.WriteFile("test2.log", []byte("test"), 0o644))
+	require.NoError(t, os.WriteFile("test3.tmp", []byte("test"), 0o644))
 
 	// Create a .crushignore file that ignores .log files
-	require.NoError(t, os.WriteFile(".crushignore", []byte("*.log\n"), 0644))
+	require.NoError(t, os.WriteFile(".crushignore", []byte("*.log\n"), 0o644))
 
 	// Test DirectoryLister
 	t.Run("DirectoryLister respects .crushignore", func(t *testing.T) {
@@ -37,7 +37,7 @@ func TestCrushIgnore(t *testing.T) {
 	// Test FastGlobWalker
 	t.Run("FastGlobWalker respects .crushignore", func(t *testing.T) {
 		walker := NewFastGlobWalker(tempDir)
-		
+
 		require.True(t, walker.gitignore == nil, "gitignore should be nil")
 		require.NotNil(t, walker.crushignore, "crushignore should not be nil")
 	})

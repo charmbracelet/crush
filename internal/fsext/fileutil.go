@@ -143,19 +143,17 @@ func (w *FastGlobWalker) shouldSkip(path string) bool {
 
 	relPath, err := filepath.Rel(w.rootPath, path)
 	if err != nil {
-		relPath = path
+		return false
 	}
 
-	// Check gitignore patterns if available
 	if w.gitignore != nil {
-		if err == nil && w.gitignore.MatchesPath(relPath) {
+		if w.gitignore.MatchesPath(relPath) {
 			return true
 		}
 	}
 
-	// Check crushignore patterns if available
 	if w.crushignore != nil {
-		if err == nil && w.crushignore.MatchesPath(relPath) {
+		if w.crushignore.MatchesPath(relPath) {
 			return true
 		}
 	}

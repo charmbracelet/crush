@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 )
 
@@ -132,6 +133,9 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 
 			if len(msg.ToolCalls()) > 0 {
 				hasContent = true
+				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
+					OfString: param.NewOpt(msg.Content().String()),
+				}
 				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
 				for i, call := range msg.ToolCalls() {
 					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{

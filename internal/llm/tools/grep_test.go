@@ -63,7 +63,6 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
 
 	// Create test files
 	testFiles := map[string]string{

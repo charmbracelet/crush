@@ -136,7 +136,8 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 	return walker
 }
 
-func (w *FastGlobWalker) shouldSkip(path string) bool {
+// ShouldSkip checks if a path should be skipped based on gitignore, crushignore, and hidden file rules
+func (w *FastGlobWalker) ShouldSkip(path string) bool {
 	if SkipHidden(path) {
 		return true
 	}
@@ -161,11 +162,6 @@ func (w *FastGlobWalker) shouldSkip(path string) bool {
 	return false
 }
 
-// ShouldSkip checks if a path should be skipped based on gitignore, crushignore, and hidden file rules
-func (w *FastGlobWalker) ShouldSkip(path string) bool {
-	return w.shouldSkip(path)
-}
-
 func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
 	walker := NewFastGlobWalker(searchPath)
 	var matches []FileInfo
@@ -181,13 +177,13 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		}
 
 		if d.IsDir() {
-			if walker.shouldSkip(path) {
+			if walker.ShouldSkip(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if walker.shouldSkip(path) {
+		if walker.ShouldSkip(path) {
 			return nil
 		}
 

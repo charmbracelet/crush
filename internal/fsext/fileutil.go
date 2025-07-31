@@ -107,8 +107,9 @@ func SkipHidden(path string) bool {
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
 type FastGlobWalker struct {
-	gitignore *ignore.GitIgnore
-	rootPath  string
+	gitignore   *ignore.GitIgnore
+	crushignore *ignore.GitIgnore
+	rootPath    string
 }
 
 func NewFastGlobWalker(searchPath string) *FastGlobWalker {
@@ -124,6 +125,14 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 		}
 	}
 
+	// Load crushignore if it exists
+	crushignorePath := filepath.Join(searchPath, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
+			walker.crushignore = ci
+		}
+	}
+
 	return walker
 }
 
@@ -132,9 +141,21 @@ func (w *FastGlobWalker) shouldSkip(path string) bool {
 		return true
 	}
 
+	relPath, err := filepath.Rel(w.rootPath, path)
+	if err != nil {
+		relPath = path
+	}
+
+	// Check gitignore patterns if available
 	if w.gitignore != nil {
-		relPath, err := filepath.Rel(w.rootPath, path)
 		if err == nil && w.gitignore.MatchesPath(relPath) {
+			return true
+		}
+	}
+
+	// Check crushignore patterns if available
+	if w.crushignore != nil {
+		if err == nil && w.crushignore.MatchesPath(relPath) {
 			return true
 		}
 	}

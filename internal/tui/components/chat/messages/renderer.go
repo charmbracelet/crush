@@ -831,10 +831,11 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 			Render(fmt.Sprintf(numFmt, i+1+offset))
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
-			" ",
 			t.S().Base.
 				Width(w).
 				Background(bg).
+				PaddingRight(1).
+				PaddingLeft(2).
 				Render(v.fit(ln, w)),
 		)
 	}

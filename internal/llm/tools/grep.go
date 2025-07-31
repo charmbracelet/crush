@@ -125,6 +125,11 @@ LIMITATIONS:
 - Very large binary files may be skipped
 - Hidden files (starting with '.') are skipped
 
+IGNORE FILE SUPPORT:
+- Respects .gitignore patterns to skip ignored files and directories
+- Respects .crushignore patterns for additional ignore rules
+- Both ignore files are automatically detected in the search root directory
+
 CROSS-PLATFORM NOTES:
 - Uses ripgrep (rg) command if available for better performance
 - Falls back to built-in Go implementation if ripgrep is not available
@@ -274,6 +279,14 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
+	// Add gitignore and crushignore support to ripgrep
+	cmd.Args = append(cmd.Args, "--respect-gitignore")
+	// Check for crushignore file and add it as an additional ignore file
+	crushignorePath := filepath.Join(path, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		cmd.Args = append(cmd.Args, "--ignore-file", crushignorePath)
+	}
+
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -337,6 +350,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 		}
 	}
 
+	// Create walker with gitignore and crushignore support
+	walker := fsext.NewFastGlobWalker(rootPath)
+
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
@@ -346,7 +362,8 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil // Skip directories
 		}
 
-		if fsext.SkipHidden(path) {
+		// Use walker's shouldSkip method instead of just SkipHidden
+		if walker.ShouldSkip(path) {
 			return nil
 		}
 

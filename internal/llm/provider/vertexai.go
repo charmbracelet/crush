@@ -10,8 +10,8 @@ import (
 type VertexAIClient ProviderClient
 
 func newVertexAIClient(opts providerClientOptions) VertexAIClient {
-	project := opts.extraHeaders["project"]
-	location := opts.extraHeaders["location"]
+	project := opts.extraParams["project"]
+	location := opts.extraParams["location"]
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		Project:  project,
 		Location: location,

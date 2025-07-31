@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,7 +30,7 @@ func init() {
 	}
 }
 
-func GetRgCmd(globPattern string) *exec.Cmd {
+func GetRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -44,10 +45,10 @@ func GetRgCmd(globPattern string) *exec.Cmd {
 		}
 		rgArgs = append(rgArgs, "--glob", globPattern)
 	}
-	return exec.Command(rgPath, rgArgs...)
+	return exec.CommandContext(ctx, rgPath, rgArgs...)
 }
 
-func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
+func GetRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -58,7 +59,7 @@ func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
 	}
 	args = append(args, path)
 
-	return exec.Command(rgPath, args...)
+	return exec.CommandContext(ctx, rgPath, args...)
 }
 
 type FileInfo struct {

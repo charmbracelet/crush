@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
@@ -28,6 +29,10 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 		return nil
 	}
 
+	model := opts.model(opts.modelType)
+	if strings.Contains(model.ID, "anthropic") || strings.Contains(model.ID, "claude-sonnet") {
+		return newAnthropicClient(opts, AnthropicClientTypeVertex)
+	}
 	return &geminiClient{
 		providerOptions: opts,
 		client:          client,

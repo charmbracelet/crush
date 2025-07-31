@@ -15,6 +15,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -27,21 +28,30 @@ var contextLimitRegex = regexp.MustCompile(`input length and ` + "`max_tokens`" 
 
 type anthropicClient struct {
 	providerOptions   providerClientOptions
-	useBedrock        bool
+	tp                AnthropicClientType
 	client            anthropic.Client
 	adjustedMaxTokens int // Used when context limit is hit
 }
 
 type AnthropicClient ProviderClient
 
-func newAnthropicClient(opts providerClientOptions, useBedrock bool) AnthropicClient {
+type AnthropicClientType string
+
+const (
+	AnthropicClientTypeNormal  AnthropicClientType = "normal"
+	AnthropicClientTypeBedrock AnthropicClientType = "bedrock"
+	AnthropicClientTypeVertex  AnthropicClientType = "vertex"
+)
+
+func newAnthropicClient(opts providerClientOptions, tp AnthropicClientType) AnthropicClient {
 	return &anthropicClient{
 		providerOptions: opts,
-		client:          createAnthropicClient(opts, useBedrock),
+		tp:              tp,
+		client:          createAnthropicClient(opts, tp),
 	}
 }
 
-func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropic.Client {
+func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) anthropic.Client {
 	anthropicClientOptions := []option.RequestOption{}
 
 	// Check if Authorization header is provided in extra headers
@@ -74,8 +84,13 @@ func createAnthropicClient(opts providerClientOptions, useBedrock bool) anthropi
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
 	}
 
-	if useBedrock {
+	switch tp {
+	case AnthropicClientTypeBedrock:
 		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
+	case AnthropicClientTypeVertex:
+		project := opts.extraParams["project"]
+		location := opts.extraParams["location"]
+		anthropicClientOptions = append(anthropicClientOptions, vertex.WithGoogleAuth(context.Background(), location, project))
 	}
 	for key, header := range opts.extraHeaders {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(key, header))
@@ -485,7 +500,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}
-		a.client = createAnthropicClient(a.providerOptions, a.useBedrock)
+		a.client = createAnthropicClient(a.providerOptions, a.tp)
 		return true, 0, nil
 	}
 

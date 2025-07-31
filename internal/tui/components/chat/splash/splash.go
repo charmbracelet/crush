@@ -262,30 +262,34 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
-			if s.isOnboarding {
-				return s, nil
-			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
 				return s, cmd
 			}
-
+			if s.isOnboarding {
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
+			}
 			if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
-			if s.isOnboarding {
-				return s, nil
-			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
 				return s, cmd
 			}
-
-			s.selectedNo = true
-			return s, s.initializeProject()
+			if s.isOnboarding {
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
+			}
+			if s.needsProjectInit {
+				s.selectedNo = true
+				return s, s.initializeProject()
+			}
 		default:
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)

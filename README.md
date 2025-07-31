@@ -17,7 +17,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), and FreeBSD
+- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
 
 ## Installation
 
@@ -32,10 +32,13 @@ npm install -g @charmland/crush
 
 # Arch Linux (btw)
 yay -S crush-bin
+
+# Nix
+nix run github:numtide/nix-ai-tools#crush
 ```
 
 <details>
-<summary><strong>Nix</strong></summary>
+<summary><strong>Nix (NUR)</strong></summary>
     
 Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
 

@@ -86,17 +86,6 @@ checksum:
 aur_sources:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush.git"
-
-    # TODO: remove this block when fix is out in goreleaser
-    homepage: "https://charm.sh/crush"
-    description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
-    maintainers:
-      - "kujtimiihoxha <kujtim@charm.sh>"
-      - "caarlos0 <carlos@charm.sh>"
-    license: "FSL-1.1-MIT"
-
-    depends:
-      - git
     makedepends:
       - go
       - git

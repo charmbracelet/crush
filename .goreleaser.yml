@@ -57,7 +57,6 @@ builds:
       - arm
     goarm:
       - "7"
-
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
 
@@ -257,6 +256,7 @@ changelog:
       - "^chore: typo$"
       - "^chore: update schema$"
       - "^chore: update$"
+      - "^chore\\(legal\\): "
       - "^chore\\(deps\\): "
       - "^docs: update$"
       - "^test:"

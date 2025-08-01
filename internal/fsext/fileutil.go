@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,7 +30,7 @@ func init() {
 	}
 }
 
-func GetRgCmd(globPattern string) *exec.Cmd {
+func GetRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -44,10 +45,10 @@ func GetRgCmd(globPattern string) *exec.Cmd {
 		}
 		rgArgs = append(rgArgs, "--glob", globPattern)
 	}
-	return exec.Command(rgPath, rgArgs...)
+	return exec.CommandContext(ctx, rgPath, rgArgs...)
 }
 
-func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
+func GetRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -58,7 +59,7 @@ func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
 	}
 	args = append(args, path)
 
-	return exec.Command(rgPath, args...)
+	return exec.CommandContext(ctx, rgPath, args...)
 }
 
 type FileInfo struct {
@@ -107,8 +108,9 @@ func SkipHidden(path string) bool {
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
 type FastGlobWalker struct {
-	gitignore *ignore.GitIgnore
-	rootPath  string
+	gitignore   *ignore.GitIgnore
+	crushignore *ignore.GitIgnore
+	rootPath    string
 }
 
 func NewFastGlobWalker(searchPath string) *FastGlobWalker {
@@ -124,6 +126,14 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 		}
 	}
 
+	// Load crushignore if it exists
+	crushignorePath := filepath.Join(searchPath, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
+			walker.crushignore = ci
+		}
+	}
+
 	return walker
 }
 
@@ -132,9 +142,19 @@ func (w *FastGlobWalker) shouldSkip(path string) bool {
 		return true
 	}
 
+	relPath, err := filepath.Rel(w.rootPath, path)
+	if err != nil {
+		return false
+	}
+
 	if w.gitignore != nil {
-		relPath, err := filepath.Rel(w.rootPath, path)
-		if err == nil && w.gitignore.MatchesPath(relPath) {
+		if w.gitignore.MatchesPath(relPath) {
+			return true
+		}
+	}
+
+	if w.crushignore != nil {
+		if w.crushignore.MatchesPath(relPath) {
 			return true
 		}
 	}
@@ -241,4 +261,24 @@ func DirTrim(pwd string, lim int) string {
 	}
 	out = filepath.Join("~", out)
 	return out
+}
+
+// PathOrPrefix returns the prefix if the path starts with it, or falls back to
+// the path otherwise.
+func PathOrPrefix(path, prefix string) string {
+	if HasPrefix(path, prefix) {
+		return prefix
+	}
+	return path
+}
+
+// HasPrefix checks if the given path starts with the specified prefix.
+// Uses filepath.Rel to determine if path is within prefix.
+func HasPrefix(path, prefix string) bool {
+	rel, err := filepath.Rel(prefix, path)
+	if err != nil {
+		return false
+	}
+	// If path is within prefix, Rel will not return a path starting with ".."
+	return !strings.HasPrefix(rel, "..")
 }

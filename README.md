@@ -112,6 +112,7 @@ That said, you can also set environment variables for preferred providers.
 | -------------------------- | -------------------------------------------------- |
 | `ANTHROPIC_API_KEY`        | Anthropic                                          |
 | `OPENAI_API_KEY`           | OpenAI                                             |
+| `OPENROUTER_API_KEY`       | OpenRouter                                         |
 | `GEMINI_API_KEY`           | Google Gemini                                      |
 | `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
@@ -209,6 +210,16 @@ using `$(echo $VAR)` syntax.
   }
 }
 ```
+
+### Ignoring Files
+
+Crush respects `.gitignore` files by default, but you can also create a
+`.crushignore` file to specify additional files and directories that Crush
+should ignore. This is useful for excluding files that you want in version
+control but don't want Crush to consider when providing context.
+
+The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
+in the root of your project or in subdirectories.
 
 ### Whitelisting Tools
 

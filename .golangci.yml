@@ -33,6 +33,10 @@ linters:
     generated: lax
     presets:
       - common-false-positives
+    rules:
+      - text: '(slog|log)\.\w+'
+        linters:
+          - noctx
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -7,8 +7,7 @@
 "area: mcp":
   - "/mcp/i"
 "area: mouse":
-  - "/mouse/i"
-  - "/scroll/i"
+  - "/(mouse|scroll)/i"
 "area: permissions":
   - "/permission/i"
 "area: session":
@@ -20,15 +19,13 @@
 "os: linux":
   - "/linux/i"
 "os: macos":
-  - "/macos/i"
+  - "/(macos|osx)/i"
 "os: windows":
   - "/windows/i"
 "provider: anthropic claude":
-  - "/anthropic/i"
-  - "/claude/i"
+  - "/(anthropic|claude)/i"
 "provider: aws bedrock":
-  - "/aws/i"
-  - "/bedrock/i"
+  - "/(aws|bedrock)/i"
 "provider: google gemini":
   - "/gemini/i"
 "provider: google vertex":
@@ -38,10 +35,8 @@
 "provider: kimi":
   - "/kimi/i"
 "provider: ollama":
-  - "/ollama/i"
   - "/llama/i"
 "provider: openai chatgpt":
-  - "/openai/i"
-  - "/gpt/i"
+  - "/(openai|gpt)/i"
 "provider: openrouter":
   - "/openrouter/i"

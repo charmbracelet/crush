@@ -103,7 +103,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return runTool(ctx, b.mcpName, b.tool.Name, params.Input)
 }
 
-func NewMcpTool(name string, tool mcp.Tool, client *client.Client, permissions permission.Service, workingDir string) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, workingDir string) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
@@ -122,7 +122,7 @@ func getTools(ctx context.Context, name string, permissions permission.Service, 
 		return mcpTools
 	}
 	for _, t := range tools.Tools {
-		mcpTools = append(mcpTools, NewMcpTool(name, t, c, permissions, workingDir))
+		mcpTools = append(mcpTools, NewMcpTool(name, t, permissions, workingDir))
 	}
 	return mcpTools
 }

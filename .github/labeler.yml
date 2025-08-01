@@ -23,7 +23,7 @@
   - "/macos/i"
 "os: windows":
   - "/windows/i"
-"provider: anthropic / claude":
+"provider: anthropic claude":
   - "/anthropic/i"
   - "/claude/i"
 "provider: aws bedrock":
@@ -40,7 +40,7 @@
 "provider: ollama":
   - "/ollama/i"
   - "/llama/i"
-"provider: openai / chatpgt":
+"provider: openai chatgpt":
   - "/openai/i"
   - "/gpt/i"
 "provider: openrouter":

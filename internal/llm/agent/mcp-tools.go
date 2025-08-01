@@ -169,14 +169,16 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 }
 
 func doInitClient(ctx context.Context, name string, c *client.Client) error {
-	initRequest := mcp.InitializeRequest{}
-	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "Crush",
-		Version: version.Version,
+	initRequest := mcp.InitializeRequest{
+		Params: mcp.InitializeParams{
+			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
+			ClientInfo: mcp.Implementation{
+				Name:    "Crush",
+				Version: version.Version,
+			},
+		},
 	}
-	_, err := c.Initialize(ctx, initRequest)
-	if err != nil {
+	if _, err := c.Initialize(ctx, initRequest); err != nil {
 		c.Close()
 		return err
 	}

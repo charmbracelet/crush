@@ -17,6 +17,12 @@
   - "/theme/i"
 "area: tools":
   - "/tool/i"
+"os: linux":
+  - "/linux/i"
+"os: macos":
+  - "/macos/i"
+"os: windows":
+  - "/windows/i"
 "provider: anthropic / claude":
   - "/anthropic/i"
   - "/claude/i"

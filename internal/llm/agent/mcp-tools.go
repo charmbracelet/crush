@@ -23,19 +23,9 @@ import (
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	client      MCPClient
+	client      *client.Client
 	permissions permission.Service
 	workingDir  string
-}
-
-type MCPClient interface {
-	Initialize(
-		ctx context.Context,
-		request mcp.InitializeRequest,
-	) (*mcp.InitializeResult, error)
-	ListTools(ctx context.Context, request mcp.ListToolsRequest) (*mcp.ListToolsResult, error)
-	CallTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error)
-	Close() error
 }
 
 func (b *mcpTool) Name() string {
@@ -55,7 +45,7 @@ func (b *mcpTool) Info() tools.ToolInfo {
 	}
 }
 
-func runTool(ctx context.Context, c MCPClient, toolName string, input string) (tools.ToolResponse, error) {
+func runTool(ctx context.Context, c *client.Client, toolName string, input string) (tools.ToolResponse, error) {
 	toolRequest := mcp.CallToolRequest{}
 	toolRequest.Params.Name = toolName
 	var args map[string]any
@@ -104,7 +94,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return runTool(ctx, b.client, b.tool.Name, params.Input)
 }
 
-func NewMcpTool(name string, tool mcp.Tool, client MCPClient, permissions permission.Service, workingDir string) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, client *client.Client, permissions permission.Service, workingDir string) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
@@ -114,7 +104,7 @@ func NewMcpTool(name string, tool mcp.Tool, client MCPClient, permissions permis
 	}
 }
 
-func getTools(ctx context.Context, name string, permissions permission.Service, c MCPClient, workingDir string) []tools.BaseTool {
+func getTools(ctx context.Context, name string, permissions permission.Service, c *client.Client, workingDir string) []tools.BaseTool {
 	var mcpTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION

@@ -1,0 +1,41 @@
+"area: diff":
+  - "/diff/i"
+"area: images":
+  - "/image/i"
+"area: lsp":
+  - "/lsp/i"
+"area: mcp":
+  - "/mcp/i"
+"area: mouse":
+  - "/mouse/i"
+  - "/scroll/i"
+"area: permissions":
+  - "/permission/i"
+"area: session":
+  - "/session/i"
+"area: themes":
+  - "/theme/i"
+"area: tools":
+  - "/tool/i"
+"provider: anthropic / claude":
+  - "/anthropic/i"
+  - "/claude/i"
+"provider: aws bedrock":
+  - "/aws/i"
+  - "/bedrock/i"
+"provider: google gemini":
+  - "/gemini/i"
+"provider: google vertex":
+  - "/vertex/i"
+"provider: grok":
+  - "/grok/i"
+"provider: kimi":
+  - "/kimi/i"
+"provider: ollama":
+  - "/ollama/i"
+  - "/llama/i"
+"provider: openai / chatpgt":
+  - "/openai/i"
+  - "/gpt/i"
+"provider: openrouter":
+  - "/openrouter/i"

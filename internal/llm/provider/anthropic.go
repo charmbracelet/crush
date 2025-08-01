@@ -278,17 +278,11 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 }
 
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
-	cfg := config.Get()
-
 	attempts := 0
 	for {
 		attempts++
 		// Prepare messages on each attempt in case max_tokens was adjusted
 		preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
-		if cfg.Options.Debug {
-			jsonData, _ := json.Marshal(preparedMessages)
-			slog.Debug("Prepared messages", "messages", string(jsonData))
-		}
 
 		var opts []option.RequestOption
 		if a.isThinkingEnabled() {
@@ -334,7 +328,6 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 }
 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	cfg := config.Get()
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
 	go func() {
@@ -342,10 +335,6 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			attempts++
 			// Prepare messages on each attempt in case max_tokens was adjusted
 			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
-			if cfg.Options.Debug {
-				jsonData, _ := json.Marshal(preparedMessages)
-				slog.Debug("Prepared messages", "messages", string(jsonData))
-			}
 
 			var opts []option.RequestOption
 			if a.isThinkingEnabled() {

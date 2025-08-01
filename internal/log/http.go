@@ -29,6 +29,28 @@ type HTTPRoundTripLogger struct {
 
 // RoundTrip implements http.RoundTripper interface with logging.
 func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, error) {
+	var err error
+	var save io.ReadCloser
+	save, req.Body, err = drainBody(req.Body)
+	if err != nil {
+		slog.Error(
+			"HTTP request failed",
+			"method", req.Method,
+			"url", req.URL,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	rb, _ := io.ReadAll(save)
+	slog.Debug(
+		"HTTP Request",
+		"method", req.Method,
+		"url", req.URL,
+		"content_length", len(rb),
+		"body", string(rb),
+	)
+
 	start := time.Now()
 	resp, err := h.Transport.RoundTrip(req)
 	duration := time.Since(start)
@@ -38,36 +60,24 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 			"method", req.Method,
 			"url", req.URL,
 			"duration_ms", duration.Milliseconds(),
-			"errorr", err,
+			"error", err,
 		)
 		return resp, err
 	}
 
-	var body []byte
-	if resp.Body != nil {
-		body, err = io.ReadAll(resp.Body)
-		if err != nil {
-			slog.Debug("Failed to read response body for logging", "error", err)
-		} else {
-			resp.Body = io.NopCloser(bytes.NewReader(body))
-		}
-	}
-
-	if len(body) > 10000 {
-		body = body[:10000]
-		body = append(body, []byte("... (truncated)")...)
-	}
-
+	save, resp.Body, err = drainBody(resp.Body)
+	rb, _ = io.ReadAll(save)
 	slog.Debug(
 		"HTTP Response",
 		"status_code", resp.StatusCode,
 		"status", resp.Status,
 		"headers", formatHeaders(resp.Header),
-		"body", string(body),
-		"content_length", len(body),
+		"body", string(rb),
+		"content_length", resp.ContentLength,
 		"duration_ms", duration.Milliseconds(),
+		"error", err,
 	)
-	return resp, nil
+	return resp, err
 }
 
 // formatHeaders formats HTTP headers for logging, filtering out sensitive information.
@@ -86,4 +96,18 @@ func formatHeaders(headers http.Header) map[string][]string {
 		}
 	}
 	return filtered
+}
+
+func drainBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {
+	if b == nil || b == http.NoBody {
+		return http.NoBody, http.NoBody, nil
+	}
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(b); err != nil {
+		return nil, b, err
+	}
+	if err = b.Close(); err != nil {
+		return nil, b, err
+	}
+	return io.NopCloser(&buf), io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }

@@ -174,10 +174,6 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	geminiMessages := g.convertMessages(messages)
 	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(geminiMessages)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
 	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
@@ -274,10 +270,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(geminiMessages)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
 	if g.providerOptions.modelType == config.SelectedModelTypeSmall {

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -256,11 +255,6 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
-	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(params)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 	attempts := 0
 	for {
 		attempts++
@@ -315,12 +309,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
-	}
-
-	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(params)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
 	attempts := 0

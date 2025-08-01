@@ -11,19 +11,24 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/version"
 
 	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/version"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+var (
+	mcpToolsOnce sync.Once
+	mcpTools     []tools.BaseTool
+	mcpClients   = csync.NewMap[string, *client.Client]()
+)
+
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	client      *client.Client
 	permissions permission.Service
 	workingDir  string
 }
@@ -45,7 +50,7 @@ func (b *mcpTool) Info() tools.ToolInfo {
 	}
 }
 
-func runTool(ctx context.Context, c *client.Client, toolName string, input string) (tools.ToolResponse, error) {
+func runTool(ctx context.Context, name, toolName string, input string) (tools.ToolResponse, error) {
 	toolRequest := mcp.CallToolRequest{}
 	toolRequest.Params.Name = toolName
 	var args map[string]any
@@ -53,6 +58,10 @@ func runTool(ctx context.Context, c *client.Client, toolName string, input strin
 		return tools.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
 	toolRequest.Params.Arguments = args
+	c, ok := mcpClients.Get(name)
+	if !ok {
+		return tools.NewTextErrorResponse("mcp '" + name + "' not available"), nil
+	}
 	result, err := c.CallTool(ctx, toolRequest)
 	if err != nil {
 		return tools.NewTextErrorResponse(err.Error()), nil
@@ -91,14 +100,13 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	return runTool(ctx, b.client, b.tool.Name, params.Input)
+	return runTool(ctx, b.mcpName, b.tool.Name, params.Input)
 }
 
 func NewMcpTool(name string, tool mcp.Tool, client *client.Client, permissions permission.Service, workingDir string) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
-		client:      client,
 		permissions: permissions,
 		workingDir:  workingDir,
 	}
@@ -106,19 +114,6 @@ func NewMcpTool(name string, tool mcp.Tool, client *client.Client, permissions p
 
 func getTools(ctx context.Context, name string, permissions permission.Service, c *client.Client, workingDir string) []tools.BaseTool {
 	var mcpTools []tools.BaseTool
-	initRequest := mcp.InitializeRequest{}
-	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "Crush",
-		Version: version.Version,
-	}
-
-	_, err := c.Initialize(ctx, initRequest)
-	if err != nil {
-		slog.Error("error initializing mcp client", "error", err)
-		c.Close()
-		return mcpTools
-	}
 	toolsRequest := mcp.ListToolsRequest{}
 	tools, err := c.ListTools(ctx, toolsRequest)
 	if err != nil {
@@ -132,16 +127,18 @@ func getTools(ctx context.Context, name string, permissions permission.Service, 
 	return mcpTools
 }
 
-var (
-	mcpToolsOnce sync.Once
-	mcpTools     []tools.BaseTool
-)
-
 func GetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
 	mcpToolsOnce.Do(func() {
 		mcpTools = doGetMCPTools(ctx, permissions, cfg)
 	})
 	return mcpTools
+}
+
+// CloseMCPClients closes all MCP clients. This should be called during application shutdown.
+func CloseMCPClients() {
+	for c := range mcpClients.Seq() {
+		_ = c.Close()
+	}
 }
 
 func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
@@ -155,42 +152,57 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
 			defer wg.Done()
-			switch m.Type {
-			case config.MCPStdio:
-				c, err := client.NewStdioMCPClient(
-					m.Command,
-					m.ResolvedEnv(),
-					m.Args...,
-				)
-				if err != nil {
-					slog.Error("error creating mcp client", "error", err)
-					return
-				}
-
-				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
-			case config.MCPHttp:
-				c, err := client.NewStreamableHttpClient(
-					m.URL,
-					transport.WithHTTPHeaders(m.ResolvedHeaders()),
-				)
-				if err != nil {
-					slog.Error("error creating mcp client", "error", err)
-					return
-				}
-				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
-			case config.MCPSse:
-				c, err := client.NewSSEMCPClient(
-					m.URL,
-					client.WithHeaders(m.ResolvedHeaders()),
-				)
-				if err != nil {
-					slog.Error("error creating mcp client", "error", err)
-					return
-				}
-				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
+			c, err := doGetClient(m)
+			if err != nil {
+				slog.Error("error creating mcp client", "error", err)
+				return
 			}
+			if err := doInitClient(ctx, name, c); err != nil {
+				slog.Error("error initializing mcp client", "error", err)
+				return
+			}
+			result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 		}(name, m)
 	}
 	wg.Wait()
 	return slices.Collect(result.Seq())
+}
+
+func doInitClient(ctx context.Context, name string, c *client.Client) error {
+	initRequest := mcp.InitializeRequest{}
+	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcp.Implementation{
+		Name:    "Crush",
+		Version: version.Version,
+	}
+	_, err := c.Initialize(ctx, initRequest)
+	if err != nil {
+		c.Close()
+		return err
+	}
+	mcpClients.Set(name, c)
+	return nil
+}
+
+func doGetClient(m config.MCPConfig) (*client.Client, error) {
+	switch m.Type {
+	case config.MCPStdio:
+		return client.NewStdioMCPClient(
+			m.Command,
+			m.ResolvedEnv(),
+			m.Args...,
+		)
+	case config.MCPHttp:
+		return client.NewStreamableHttpClient(
+			m.URL,
+			transport.WithHTTPHeaders(m.ResolvedHeaders()),
+		)
+	case config.MCPSse:
+		return client.NewSSEMCPClient(
+			m.URL,
+			client.WithHeaders(m.ResolvedHeaders()),
+		)
+	default:
+		return nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
+	}
 }

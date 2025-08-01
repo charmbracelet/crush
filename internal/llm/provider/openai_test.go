@@ -17,7 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_, err := config.Init(".", true)
+	_, err := config.Init("../../..", true)
 	if err != nil {
 		panic("Failed to initialize config: " + err.Error())
 	}
@@ -86,5 +86,43 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 		if event.Type == EventError || event.Type == EventComplete {
 			break
 		}
+	}
+}
+
+func TestOpenAIClientToolErrorResult(t *testing.T) {
+	client := &openaiClient{
+		providerOptions: providerClientOptions{
+			systemMessage: "sys",
+			modelType:     config.SelectedModelTypeLarge,
+			model: func(config.SelectedModelType) catwalk.Model {
+				return catwalk.Model{ID: "test-model"}
+			},
+		},
+		client: openai.NewClient(),
+	}
+
+	messages := []message.Message{
+		{
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "call-1", Content: "boom", IsError: true},
+			},
+		},
+	}
+
+	openaiMessages := client.convertMessages(messages)
+	if len(openaiMessages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(openaiMessages))
+	}
+
+	toolMsg := openaiMessages[1].OfTool
+	structured := struct {
+		Content string `json:"content"`
+		IsError bool   `json:"is_error"`
+	}{Content: "boom", IsError: true}
+	expectedJSON, _ := json.Marshal(structured)
+
+	if toolMsg.Content.OfString.Value != string(expectedJSON) {
+		t.Fatalf("expected %s, got %s", expectedJSON, toolMsg.Content.OfString.Value)
 	}
 }

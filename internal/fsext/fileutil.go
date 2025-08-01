@@ -97,6 +97,8 @@ func (w *FastGlobWalker) ShouldSkip(path string) bool {
 
 	relPath, err := filepath.Rel(w.rootPath, path)
 	if err != nil {
+		// If we can't get relative path, skip gitignore/crushignore checks
+		// but still allow the file to be processed
 		return false
 	}
 

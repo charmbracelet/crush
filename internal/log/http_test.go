@@ -22,7 +22,12 @@ func TestHTTPRoundTripLogger(t *testing.T) {
 	client := NewHTTPClient(nil)
 
 	// Make a request
-	req, err := http.NewRequest("POST", server.URL, strings.NewReader(`{"test": "data"}`))
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		server.URL,
+		strings.NewReader(`{"test": "data"}`),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

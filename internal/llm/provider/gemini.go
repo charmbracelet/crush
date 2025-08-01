@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
 	"google.golang.org/genai"
@@ -39,7 +40,14 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 }
 
 func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{APIKey: opts.apiKey, Backend: genai.BackendGeminiAPI})
+	cc := &genai.ClientConfig{
+		APIKey:  opts.apiKey,
+		Backend: genai.BackendGeminiAPI,
+	}
+	if config.Get().Options.Debug {
+		cc.HTTPClient = log.NewHTTPClient()
+	}
+	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +174,6 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	geminiMessages := g.convertMessages(messages)
 	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(geminiMessages)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
 	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
@@ -266,10 +270,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 	model := g.providerOptions.model(g.providerOptions.modelType)
 	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(geminiMessages)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 
 	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
 	if g.providerOptions.modelType == config.SelectedModelTypeSmall {

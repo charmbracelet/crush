@@ -211,7 +211,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		searchPath = g.workingDir
 	}
 
-	matches, truncated, err := searchFiles(searchPattern, searchPath, params.Include, 100)
+	matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 	}
@@ -252,8 +252,8 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	), nil
 }
 
-func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(pattern, rootPath, include)
+func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
+	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
 	if err != nil {
 		matches, err = searchFilesWithRegex(pattern, rootPath, include)
 		if err != nil {
@@ -273,8 +273,8 @@ func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, boo
 	return matches, truncated, nil
 }
 
-func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
-	cmd := fsext.GetRgSearchCmd(pattern, path, include)
+func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+	cmd := fsext.GetRgSearchCmd(ctx, pattern, path, include)
 	if cmd == nil {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}

@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,7 +30,7 @@ func init() {
 	}
 }
 
-func GetRgCmd(globPattern string) *exec.Cmd {
+func GetRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -44,10 +45,10 @@ func GetRgCmd(globPattern string) *exec.Cmd {
 		}
 		rgArgs = append(rgArgs, "--glob", globPattern)
 	}
-	return exec.Command(rgPath, rgArgs...)
+	return exec.CommandContext(ctx, rgPath, rgArgs...)
 }
 
-func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
+func GetRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
 	if rgPath == "" {
 		return nil
 	}
@@ -58,7 +59,7 @@ func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
 	}
 	args = append(args, path)
 
-	return exec.Command(rgPath, args...)
+	return exec.CommandContext(ctx, rgPath, args...)
 }
 
 type FileInfo struct {
@@ -261,4 +262,24 @@ func DirTrim(pwd string, lim int) string {
 	}
 	out = filepath.Join("~", out)
 	return out
+}
+
+// PathOrPrefix returns the prefix if the path starts with it, or falls back to
+// the path otherwise.
+func PathOrPrefix(path, prefix string) string {
+	if HasPrefix(path, prefix) {
+		return prefix
+	}
+	return path
+}
+
+// HasPrefix checks if the given path starts with the specified prefix.
+// Uses filepath.Rel to determine if path is within prefix.
+func HasPrefix(path, prefix string) bool {
+	rel, err := filepath.Rel(prefix, path)
+	if err != nil {
+		return false
+	}
+	// If path is within prefix, Rel will not return a path starting with ".."
+	return !strings.HasPrefix(rel, "..")
 }

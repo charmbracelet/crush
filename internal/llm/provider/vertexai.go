@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/log"
 	"google.golang.org/genai"
 )
 
@@ -13,11 +15,15 @@ type VertexAIClient ProviderClient
 func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 	project := opts.extraParams["project"]
 	location := opts.extraParams["location"]
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+	cc := &genai.ClientConfig{
 		Project:  project,
 		Location: location,
 		Backend:  genai.BackendVertexAI,
-	})
+	}
+	if config.Get().Options.Debug {
+		cc.HTTPClient = log.NewHTTPClient()
+	}
+	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
 		slog.Error("Failed to create VertexAI client", "error", err)
 		return nil

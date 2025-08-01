@@ -67,6 +67,7 @@ type agent struct {
 	agentCfg config.Agent
 	sessions session.Service
 	messages message.Service
+	mcpTools []McpTool
 
 	tools *csync.LazySlice[tools.BaseTool]
 
@@ -86,6 +87,7 @@ var agentPromptMap = map[string]prompt.PromptID{
 }
 
 func NewAgent(
+	ctx context.Context,
 	agentCfg config.Agent,
 	// These services are needed in the tools
 	permissions permission.Service,
@@ -94,7 +96,6 @@ func NewAgent(
 	history history.Service,
 	lspClients map[string]*lsp.Client,
 ) (Service, error) {
-	ctx := context.Background()
 	cfg := config.Get()
 
 	var agentTool tools.BaseTool
@@ -103,7 +104,7 @@ func NewAgent(
 		if taskAgentCfg.ID == "" {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
-		taskAgent, err := NewAgent(taskAgentCfg, permissions, sessions, messages, history, lspClients)
+		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create task agent: %w", err)
 		}
@@ -188,7 +189,9 @@ func NewAgent(
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 
-		mcpTools := GetMCPTools(ctx, permissions, cfg)
+		mcpToolsOnce.Do(func() {
+			mcpTools = doGetMCPTools(ctx, permissions, cfg)
+		})
 		allTools = append(allTools, mcpTools...)
 
 		if len(lspClients) > 0 {

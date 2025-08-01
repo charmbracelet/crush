@@ -119,6 +119,7 @@ func getTools(ctx context.Context, name string, permissions permission.Service, 
 	if err != nil {
 		slog.Error("error listing tools", "error", err)
 		c.Close()
+		mcpClients.Del(name)
 		return mcpTools
 	}
 	for _, t := range tools.Tools {

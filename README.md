@@ -112,6 +112,7 @@ That said, you can also set environment variables for preferred providers.
 | -------------------------- | -------------------------------------------------- |
 | `ANTHROPIC_API_KEY`        | Anthropic                                          |
 | `OPENAI_API_KEY`           | OpenAI                                             |
+| `OPENROUTER_API_KEY`       | OpenRouter                                         |
 | `GEMINI_API_KEY`           | Google Gemini                                      |
 | `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |

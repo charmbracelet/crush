@@ -780,13 +780,21 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	return strings.Join(out, "\n")
 }
 
-func pad(v any, width int) string {
-	s := fmt.Sprintf("%v", v)
-	w := ansi.StringWidth(s)
-	if w >= width {
-		return s
+func getDigits(n int) int {
+	if n == 0 {
+		return 1
 	}
-	return strings.Repeat(" ", width-w) + s
+	if n < 0 {
+		n = -n
+	}
+
+	digits := 0
+	for n > 0 {
+		n /= 10
+		digits++
+	}
+
+	return digits
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
@@ -800,30 +808,37 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 		lines[i] = ansiext.Escape(ln)
 	}
 
-	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, t.BgBase)
+	bg := t.BgBase
+	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, bg)
 	lines = strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
-			Background(t.BgBase).
+			Background(bg).
 			Render(fmt.Sprintf(" …(%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
 	maxLineNumber := len(lines) + offset
-	padding := lipgloss.Width(fmt.Sprintf("%d", maxLineNumber))
+	maxDigits := getDigits(maxLineNumber)
+	numFmt := fmt.Sprintf("%%%dd", maxDigits)
+	const numPR, numPL, codePR, codePL = 1, 1, 1, 2
+	w := v.textWidth() - maxDigits - numPL - numPR - 2 // -2 for left padding
 	for i, ln := range lines {
 		num := t.S().Base.
 			Foreground(t.FgMuted).
 			Background(t.BgBase).
 			PaddingRight(1).
 			PaddingLeft(1).
-			Render(pad(i+1+offset, padding))
-		w := v.textWidth() - 10 - lipgloss.Width(num) // -4 for left padding
+			Render(fmt.Sprintf(numFmt, i+1+offset))
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			t.S().Base.
-				PaddingLeft(1).
-				Render(v.fit(ln, w-1)))
+				Width(w).
+				Background(bg).
+				PaddingRight(1).
+				PaddingLeft(2).
+				Render(v.fit(ln, w-codePL-codePR)),
+		)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)

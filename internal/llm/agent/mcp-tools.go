@@ -26,18 +26,18 @@ var (
 	mcpClients   = csync.NewMap[string, *client.Client]()
 )
 
-type mcpTool struct {
+type McpTool struct {
 	mcpName     string
 	tool        mcp.Tool
 	permissions permission.Service
 	workingDir  string
 }
 
-func (b *mcpTool) Name() string {
+func (b *McpTool) Name() string {
 	return fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name)
 }
 
-func (b *mcpTool) Info() tools.ToolInfo {
+func (b *McpTool) Info() tools.ToolInfo {
 	required := b.tool.InputSchema.Required
 	if required == nil {
 		required = make([]string, 0)
@@ -79,7 +79,7 @@ func runTool(ctx context.Context, name, toolName string, input string) (tools.To
 	return tools.NewTextResponse(output), nil
 }
 
-func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
+func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
 	sessionID, messageID := tools.GetContextValues(ctx)
 	if sessionID == "" || messageID == "" {
 		return tools.ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
@@ -104,7 +104,7 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 }
 
 func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, workingDir string) tools.BaseTool {
-	return &mcpTool{
+	return &McpTool{
 		mcpName:     name,
 		tool:        tool,
 		permissions: permissions,

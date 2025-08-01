@@ -28,9 +28,9 @@ const (
 	SessionIDContextKey sessionIDContextKey = "session_id"
 	MessageIDContextKey messageIDContextKey = "message_id"
 
-	MaxResponseWidth  = 3000
-	MaxResponseHeight = 5000
-	MaxResponseChars  = 50000
+	maxResponseWidth  = 3000
+	maxResponseHeight = 5000
+	maxResponseChars  = 50000
 )
 
 type ToolResponse struct {
@@ -48,13 +48,13 @@ func NewTextResponse(content string) ToolResponse {
 }
 
 func truncateContent(content string) string {
-	if len(content) <= MaxResponseChars {
+	if len(content) <= maxResponseChars {
 		return truncateWidthAndHeight(content)
 	}
 
-	truncated := content[:MaxResponseChars]
+	truncated := content[:maxResponseChars]
 
-	if lastNewline := strings.LastIndex(truncated, "\n"); lastNewline > MaxResponseChars/2 {
+	if lastNewline := strings.LastIndex(truncated, "\n"); lastNewline > maxResponseChars/2 {
 		truncated = truncated[:lastNewline]
 	}
 
@@ -67,12 +67,12 @@ func truncateWidthAndHeight(content string) string {
 	lines := strings.Split(content, "\n")
 
 	heightTruncated := false
-	if len(lines) > MaxResponseHeight {
-		keepLines := MaxResponseHeight - 3
+	if len(lines) > maxResponseHeight {
+		keepLines := maxResponseHeight - 3
 		firstHalf := keepLines / 2
 		secondHalf := keepLines - firstHalf
 
-		truncatedLines := make([]string, 0, MaxResponseHeight)
+		truncatedLines := make([]string, 0, maxResponseHeight)
 		truncatedLines = append(truncatedLines, lines[:firstHalf]...)
 		truncatedLines = append(truncatedLines, "")
 		truncatedLines = append(truncatedLines, fmt.Sprintf("... [%d lines truncated] ...", len(lines)-keepLines))
@@ -85,14 +85,14 @@ func truncateWidthAndHeight(content string) string {
 
 	widthTruncated := false
 	for i, line := range lines {
-		if len(line) > MaxResponseWidth {
-			if MaxResponseWidth > 20 {
-				keepChars := MaxResponseWidth - 10
+		if len(line) > maxResponseWidth {
+			if maxResponseWidth > 20 {
+				keepChars := maxResponseWidth - 10
 				firstHalf := keepChars / 2
 				secondHalf := keepChars - firstHalf
 				lines[i] = line[:firstHalf] + " ... " + line[len(line)-secondHalf:]
 			} else {
-				lines[i] = line[:MaxResponseWidth]
+				lines[i] = line[:maxResponseWidth]
 			}
 			widthTruncated = true
 		}

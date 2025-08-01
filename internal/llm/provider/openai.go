@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -44,6 +44,11 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 		if err == nil {
 			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
 		}
+	}
+
+	if config.Get().Options.Debug {
+		httpClient := log.NewHTTPClient()
+		openaiClientOptions = append(openaiClientOptions, option.WithHTTPClient(httpClient))
 	}
 
 	for key, value := range opts.extraHeaders {
@@ -250,11 +255,6 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
-	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(params)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
-	}
 	attempts := 0
 	for {
 		attempts++
@@ -309,12 +309,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
-	}
-
-	cfg := config.Get()
-	if cfg.Options.Debug {
-		jsonData, _ := json.Marshal(params)
-		slog.Debug("Prepared messages", "messages", string(jsonData))
 	}
 
 	attempts := 0
@@ -420,11 +414,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
-				if cfg.Options.Debug {
-					jsonData, _ := json.Marshal(acc.ChatCompletion)
-					slog.Debug("Response", "messages", string(jsonData))
-				}
-
 				if len(acc.Choices) == 0 {
 					eventChan <- ProviderEvent{
 						Type:  EventError,
@@ -525,7 +514,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 			slog.Warn("Retry-After header", "values", retryAfterValues)
 		}
 	} else {
-		slog.Warn("OpenAI API error", "error", err.Error())
+		slog.Error("OpenAI API error", "error", err.Error(), "attempt", attempts, "max_retries", maxRetries)
 	}
 
 	backoffMs := 2000 * (1 << (attempts - 1))

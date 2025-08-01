@@ -53,7 +53,7 @@ func GetRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cm
 		return nil
 	}
 	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern, "-q"}
+	args := []string{"-H", "-n", pattern}
 	if include != "" {
 		args = append(args, "--glob", include)
 	}

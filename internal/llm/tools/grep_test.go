@@ -112,6 +112,56 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	require.NotContains(t, result, "secret.key")
 }
 
+func TestSearchImplementations(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	for path, content := range map[string]string{
+		"file1.go":         "package main\nfunc main() {\n\tfmt.Println(\"hello world\")\n}",
+		"file2.js":         "console.log('hello world');",
+		"file3.txt":        "hello world from text file",
+		"binary.exe":       "\x00\x01\x02\x03",
+		"empty.txt":        "",
+		"subdir/nested.go": "package nested\n// hello world comment",
+		".hidden.txt":      "hello world in hidden file",
+		"file4.txt":        "hello world from a banana",
+		"file5.txt":        "hello world from a grape",
+	} {
+		fullPath := filepath.Join(tempDir, path)
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte("file4.txt\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte("file5.txt\n"), 0o644))
+
+	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+		"regex": searchFilesWithRegex,
+		"rg": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(context.Background(), pattern, path, include)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := fn("hello world", tempDir, "")
+			require.NoError(t, err)
+
+			require.Equal(t, len(matches), 4)
+			for _, match := range matches {
+				require.NotEmpty(t, match.path)
+				require.NotZero(t, match.lineNum)
+				require.NotEmpty(t, match.lineText)
+				require.NotZero(t, match.modTime)
+				require.NotContains(t, match.path, ".hidden.txt")
+				require.NotContains(t, match.path, "file4.txt")
+				require.NotContains(t, match.path, "file5.txt")
+				require.NotContains(t, match.path, "binary.exe")
+			}
+		})
+	}
+}
+
 // Benchmark to show performance improvement
 func BenchmarkRegexCacheVsCompile(b *testing.B) {
 	cache := newRegexCache()

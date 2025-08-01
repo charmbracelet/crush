@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -236,8 +235,6 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		params.Tools = nil
 	}
 
-	// Note: Stream parameter is controlled by calling NewStreaming vs New on the client
-
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
@@ -377,19 +374,10 @@ func (o *openaiClient) sendCompatible(ctx context.Context, messages []message.Me
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 	
-	// Read the raw response body for debugging
+	// Read the response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-	
-	// Debug: log the raw response
-	if cfg.Options.Debug {
-		debugFile, _ := os.OpenFile("/tmp/crush-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if debugFile != nil {
-			fmt.Fprintf(debugFile, "DEBUG: Raw Cerebras response: %s\n", string(bodyBytes))
-			debugFile.Close()
-		}
 	}
 	
 	// Use flexible JSON parsing for compatibility mode
@@ -398,14 +386,6 @@ func (o *openaiClient) sendCompatible(ctx context.Context, messages []message.Me
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	
-	// Debug: log parsed response structure
-	if cfg.Options.Debug {
-		debugFile, _ := os.OpenFile("/tmp/crush-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if debugFile != nil {
-			fmt.Fprintf(debugFile, "DEBUG: Successfully parsed generic response\n")
-			debugFile.Close()
-		}
-	}
 	
 	// Extract choices
 	choicesInterface, ok := genericResponse["choices"]

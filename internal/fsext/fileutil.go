@@ -1,11 +1,8 @@
 package fsext
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,54 +10,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/log"
 
 	ignore "github.com/sabhiram/go-gitignore"
 )
-
-var rgPath string
-
-func init() {
-	var err error
-	rgPath, err = exec.LookPath("rg")
-	if err != nil {
-		if log.Initialized() {
-			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
-		}
-	}
-}
-
-func GetRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	rgArgs := []string{
-		"--files",
-		"-L",
-		"--null",
-	}
-	if globPattern != "" {
-		if !filepath.IsAbs(globPattern) && !strings.HasPrefix(globPattern, "/") {
-			globPattern = "/" + globPattern
-		}
-		rgArgs = append(rgArgs, "--glob", globPattern)
-	}
-	return exec.CommandContext(ctx, rgPath, rgArgs...)
-}
-
-func GetRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern}
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, path)
-
-	return exec.CommandContext(ctx, rgPath, args...)
-}
 
 type FileInfo struct {
 	Path    string

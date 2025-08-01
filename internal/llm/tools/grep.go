@@ -274,7 +274,7 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 }
 
 func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	cmd := fsext.GetRgSearchCmd(ctx, pattern, path, include)
+	cmd := getRgSearchCmd(ctx, pattern, path, include)
 	if cmd == nil {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}

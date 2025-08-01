@@ -138,12 +138,15 @@ func TestSearchImplementations(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(context.Background(), pattern, path, include)
+			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+			if name == "rg" && getRg() == "" {
+				t.Skip("rg is not in $PATH")
+			}
 
+			t.Parallel()
 			matches, err := fn("hello world", tempDir, "")
 			require.NoError(t, err)
 

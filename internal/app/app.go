@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sort"
 	"sync"
 	"time"
 
@@ -317,12 +318,17 @@ func (app *App) Shutdown() {
 
 	// Get all LSP clients.
 	app.clientsMutex.RLock()
-	clients := make(map[string]*lsp.Client, len(app.LSPClients))
+	clientNames := make([]string, 0, len(app.LSPClients))
+	for name := range app.LSPClients {
+		clientNames = append(clientNames, name)
+	}
 	maps.Copy(clients, app.LSPClients)
 	app.clientsMutex.RUnlock()
 
 	// Shutdown all LSP clients.
-	for name, client := range clients {
+	sort.Strings(clientNames)
+	for _, name := range clientNames {
+		client := clients[name]
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
 		if err := client.Shutdown(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)

@@ -17,7 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_, err := config.Init("../../..", true)
+	_, err := config.Init(".", true)
 	if err != nil {
 		panic("Failed to initialize config: " + err.Error())
 	}

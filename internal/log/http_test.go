@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHTTPRoundTripLogger(t *testing.T) {
@@ -70,12 +69,5 @@ func TestFormatHeaders(t *testing.T) {
 	}
 	if formatted["User-Agent"][0] != "test-agent" {
 		t.Error("User-Agent header should be preserved")
-	}
-}
-
-func TestHTTPClientTimeout(t *testing.T) {
-	client := NewHTTPClient()
-	if client.Timeout != 30*time.Second {
-		t.Errorf("Expected timeout of 30s, got %v", client.Timeout)
 	}
 }

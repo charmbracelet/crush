@@ -113,16 +113,15 @@ func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, work
 }
 
 func getTools(ctx context.Context, name string, permissions permission.Service, c *client.Client, workingDir string) []tools.BaseTool {
-	var mcpTools []tools.BaseTool
-	toolsRequest := mcp.ListToolsRequest{}
-	tools, err := c.ListTools(ctx, toolsRequest)
+	result, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		slog.Error("error listing tools", "error", err)
 		c.Close()
 		mcpClients.Del(name)
-		return mcpTools
+		return nil
 	}
-	for _, t := range tools.Tools {
+	mcpTools := make([]tools.BaseTool, 0, len(result.Tools))
+	for _, t := range result.Tools {
 		mcpTools = append(mcpTools, NewMcpTool(name, t, permissions, workingDir))
 	}
 	return mcpTools

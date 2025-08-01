@@ -214,7 +214,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{
-				DiffSplitMode: config.Get().Options.TUI.DiffSplitMode,
+				DiffMode: config.Get().Options.TUI.DiffMode,
 			}),
 		})
 	case permissions.PermissionResponseMsg:

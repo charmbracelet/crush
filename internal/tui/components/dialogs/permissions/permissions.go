@@ -41,11 +41,6 @@ type PermissionDialogCmp interface {
 	dialogs.DialogModel
 }
 
-// Options for create a new permission dialog
-type Options struct {
-	DiffSplitMode *bool // nil means use defaultDiffSplitMode, true for split, false for unified
-}
-
 // permissionDialogCmp is the implementation of PermissionDialog
 type permissionDialogCmp struct {
 	wWidth          int
@@ -83,7 +78,7 @@ func NewPermissionDialogCmp(permission permission.PermissionRequest, opts *Optio
 		contentViewPort: contentViewport,
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
-		diffSplitMode:   opts.DiffSplitMode,
+		diffSplitMode:   opts.diffMode(),
 		keyMap:          DefaultKeyMap(),
 		contentDirty:    true, // Mark as dirty initially
 	}
@@ -749,4 +744,25 @@ func (p *permissionDialogCmp) ID() dialogs.DialogID {
 // Position implements PermissionDialogCmp.
 func (p *permissionDialogCmp) Position() (int, int) {
 	return p.positionRow, p.positionCol
+}
+
+// Options for create a new permission dialog
+type Options struct {
+	DiffMode string // split or unified, empty means use defaultDiffSplitMode
+}
+
+// diffMode returns internal representation of diff mode switch
+func (o Options) diffMode() *bool {
+	var split bool
+
+	switch o.DiffMode {
+	case "split":
+		split = true
+	case "unified":
+		split = false
+	default:
+		return nil
+	}
+
+	return &split
 }

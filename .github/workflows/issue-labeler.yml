@@ -5,6 +5,7 @@ on:
     types: [opened]
   pull_request:
     types: [opened]
+  workflow_dispatch: # allows manual triggering
 
 permissions:
   issues: write

@@ -426,11 +426,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
-				if cfg.Options.Debug {
-					jsonData, _ := json.Marshal(acc.ChatCompletion)
-					slog.Debug("Response", "messages", string(jsonData))
-				}
-
 				if len(acc.Choices) == 0 {
 					eventChan <- ProviderEvent{
 						Type:  EventError,

@@ -12,6 +12,9 @@ import (
 
 // NewHTTPClient creates an HTTP client with debug logging enabled when debug mode is on.
 func NewHTTPClient() *http.Client {
+	if !slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
+		return http.DefaultClient
+	}
 	return &http.Client{
 		Transport: &HTTPRoundTripLogger{
 			Transport: http.DefaultTransport,
@@ -26,15 +29,17 @@ type HTTPRoundTripLogger struct {
 
 // RoundTrip implements http.RoundTripper interface with logging.
 func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, error) {
-	if !slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
-		return h.Transport.RoundTrip(req)
-	}
-
 	start := time.Now()
 	resp, err := h.Transport.RoundTrip(req)
 	duration := time.Since(start)
 	if err != nil {
-		logHTTPError(req.Method, req.URL.String(), 0, nil, nil, duration)
+		slog.Error(
+			"HTTP request failed",
+			"method", req.Method,
+			"url", req.URL,
+			"duration_ms", duration.Milliseconds(),
+			"errorr", err,
+		)
 		return resp, err
 	}
 
@@ -48,26 +53,11 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 	}
 
-	if resp.StatusCode >= 400 {
-		logHTTPError(req.Method, req.URL.String(), resp.StatusCode, body, resp.Header, duration)
-	} else {
-		logHTTPResponse(resp, body, duration)
-	}
-
-	return resp, nil
-}
-
-func logHTTPResponse(resp *http.Response, body []byte, duration time.Duration) {
-	if !slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
-		return
-	}
-
 	if len(body) > 10000 {
 		body = body[:10000]
 		body = append(body, []byte("... (truncated)")...)
 	}
 
-	// Log response details
 	slog.Debug(
 		"HTTP Response",
 		"status_code", resp.StatusCode,
@@ -77,23 +67,7 @@ func logHTTPResponse(resp *http.Response, body []byte, duration time.Duration) {
 		"content_length", len(body),
 		"duration_ms", duration.Milliseconds(),
 	)
-}
-
-// logHTTPError logs detailed HTTP error information.
-func logHTTPError(method, url string, statusCode int, body []byte, headers http.Header, duration time.Duration) {
-	if len(body) > 10000 {
-		body = body[:10000]
-		body = append(body, []byte("... (truncated)")...)
-	}
-	slog.Error(
-		"HTTP Request Failed",
-		"method", method,
-		"url", url,
-		"status_code", statusCode,
-		"headers", formatHeaders(headers),
-		"body", string(body),
-		"duration_ms", duration.Milliseconds(),
-	)
+	return resp, nil
 }
 
 // formatHeaders formats HTTP headers for logging, filtering out sensitive information.

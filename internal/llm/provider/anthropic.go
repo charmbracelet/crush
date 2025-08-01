@@ -80,7 +80,7 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 	}
 
 	if config.Get().Options.Debug {
-		httpClient := log.NewHTTPClient(nil)
+		httpClient := log.NewHTTPClient()
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
 	}
 

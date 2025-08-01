@@ -54,7 +54,7 @@ func TestFormatHeaders(t *testing.T) {
 		"User-Agent":    []string{"test-agent"},
 	}
 
-	formatted := FormatHeaders(headers)
+	formatted := formatHeaders(headers)
 
 	// Check that sensitive headers are redacted
 	if formatted["Authorization"][0] != "[REDACTED]" {

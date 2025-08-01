@@ -189,7 +189,9 @@ func NewAgent(
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 
-		mcpTools := GetMCPTools(ctx, permissions, cfg)
+		mcpToolsOnce.Do(func() {
+			mcpTools = doGetMCPTools(ctx, permissions, cfg)
+		})
 		allTools = append(allTools, mcpTools...)
 
 		if len(lspClients) > 0 {

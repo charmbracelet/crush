@@ -256,6 +256,7 @@ func (app *App) InitCoderAgent() error {
 	}
 	var err error
 	app.CoderAgent, err = agent.NewAgent(
+		app.globalCtx,
 		coderAgentCfg,
 		app.Permissions,
 		app.Sessions,

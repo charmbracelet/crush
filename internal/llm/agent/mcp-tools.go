@@ -20,9 +20,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-type mcpTool struct {
+type McpTool struct {
 	mcpName     string
 	tool        mcp.Tool
+	client      MCPClient
 	mcpConfig   config.MCPConfig
 	permissions permission.Service
 	workingDir  string
@@ -38,11 +39,11 @@ type MCPClient interface {
 	Close() error
 }
 
-func (b *mcpTool) Name() string {
+func (b *McpTool) Name() string {
 	return fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name)
 }
 
-func (b *mcpTool) Info() tools.ToolInfo {
+func (b *McpTool) Info() tools.ToolInfo {
 	required := b.tool.InputSchema.Required
 	if required == nil {
 		required = make([]string, 0)
@@ -56,7 +57,6 @@ func (b *mcpTool) Info() tools.ToolInfo {
 }
 
 func runTool(ctx context.Context, c MCPClient, toolName string, input string) (tools.ToolResponse, error) {
-	defer c.Close()
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcp.Implementation{
@@ -93,7 +93,7 @@ func runTool(ctx context.Context, c MCPClient, toolName string, input string) (t
 	return tools.NewTextResponse(output), nil
 }
 
-func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
+func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
 	sessionID, messageID := tools.GetContextValues(ctx)
 	if sessionID == "" || messageID == "" {
 		return tools.ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
@@ -114,43 +114,13 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	switch b.mcpConfig.Type {
-	case config.MCPStdio:
-		c, err := client.NewStdioMCPClient(
-			b.mcpConfig.Command,
-			b.mcpConfig.ResolvedEnv(),
-			b.mcpConfig.Args...,
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	case config.MCPHttp:
-		c, err := client.NewStreamableHttpClient(
-			b.mcpConfig.URL,
-			transport.WithHTTPHeaders(b.mcpConfig.ResolvedHeaders()),
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	case config.MCPSse:
-		c, err := client.NewSSEMCPClient(
-			b.mcpConfig.URL,
-			client.WithHeaders(b.mcpConfig.ResolvedHeaders()),
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	}
-
-	return tools.NewTextErrorResponse("invalid mcp type"), nil
+	return runTool(ctx, b.client, b.tool.Name, params.Input)
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig, workingDir string) tools.BaseTool {
-	return &mcpTool{
+func NewMcpTool(name string, c MCPClient, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig, workingDir string) tools.BaseTool {
+	return &McpTool{
 		mcpName:     name,
+		client:      c,
 		tool:        tool,
 		mcpConfig:   mcpConfig,
 		permissions: permissions,
@@ -179,9 +149,8 @@ func getTools(ctx context.Context, name string, m config.MCPConfig, permissions 
 		return stdioTools
 	}
 	for _, t := range tools.Tools {
-		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m, workingDir))
+		stdioTools = append(stdioTools, NewMcpTool(name, c, t, permissions, m, workingDir))
 	}
-	defer c.Close()
 	return stdioTools
 }
 

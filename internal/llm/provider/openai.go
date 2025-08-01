@@ -48,7 +48,7 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	}
 
 	if config.Get().Options.Debug {
-		httpClient := log.NewHTTPClient(nil)
+		httpClient := log.NewHTTPClient()
 		openaiClientOptions = append(openaiClientOptions, option.WithHTTPClient(httpClient))
 	}
 

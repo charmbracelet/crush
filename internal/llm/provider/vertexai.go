@@ -21,7 +21,7 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 		Backend:  genai.BackendVertexAI,
 	}
 	if config.Get().Options.Debug {
-		cc.HTTPClient = log.NewHTTPClient(nil)
+		cc.HTTPClient = log.NewHTTPClient()
 	}
 	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {

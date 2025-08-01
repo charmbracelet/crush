@@ -25,7 +25,7 @@ func newAzureClient(opts providerClientOptions) AzureClient {
 	}
 
 	if config.Get().Options.Debug {
-		httpClient := log.NewHTTPClient(nil)
+		httpClient := log.NewHTTPClient()
 		reqOpts = append(reqOpts, option.WithHTTPClient(httpClient))
 	}
 

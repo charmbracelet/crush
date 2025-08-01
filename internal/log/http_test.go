@@ -19,7 +19,7 @@ func TestHTTPRoundTripLogger(t *testing.T) {
 	defer server.Close()
 
 	// Create HTTP client with logging
-	client := NewHTTPClient(nil)
+	client := NewHTTPClient()
 
 	// Make a request
 	req, err := http.NewRequestWithContext(
@@ -74,7 +74,7 @@ func TestFormatHeaders(t *testing.T) {
 }
 
 func TestHTTPClientTimeout(t *testing.T) {
-	client := NewHTTPClient(nil)
+	client := NewHTTPClient()
 	if client.Timeout != 30*time.Second {
 		t.Errorf("Expected timeout of 30s, got %v", client.Timeout)
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -375,22 +376,103 @@ func (o *openaiClient) sendCompatible(ctx context.Context, messages []message.Me
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 	
-	var openaiResponse openai.ChatCompletion
-	if err := json.NewDecoder(resp.Body).Decode(&openaiResponse); err != nil {
+	// Read the raw response body for debugging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	// Debug: log the raw response
+	if cfg.Options.Debug {
+		debugFile, _ := os.OpenFile("/tmp/crush-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if debugFile != nil {
+			fmt.Fprintf(debugFile, "DEBUG: Raw Cerebras response: %s\n", string(bodyBytes))
+			debugFile.Close()
+		}
+	}
+	
+	// Use flexible JSON parsing for compatibility mode
+	var genericResponse map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &genericResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	
-	if len(openaiResponse.Choices) == 0 {
-		return nil, fmt.Errorf("received empty response from API")
+	// Debug: log parsed response structure
+	if cfg.Options.Debug {
+		debugFile, _ := os.OpenFile("/tmp/crush-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if debugFile != nil {
+			fmt.Fprintf(debugFile, "DEBUG: Successfully parsed generic response\n")
+			debugFile.Close()
+		}
+	}
+	
+	// Extract choices
+	choicesInterface, ok := genericResponse["choices"]
+	if !ok {
+		return nil, fmt.Errorf("no choices in response")
+	}
+	
+	choices, ok := choicesInterface.([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("received empty choices from API")
+	}
+	
+	firstChoice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid choice format")
+	}
+	
+	// Extract message content
+	messageInterface, ok := firstChoice["message"]
+	if !ok {
+		return nil, fmt.Errorf("no message in choice")
+	}
+	
+	messageMap, ok := messageInterface.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid message format")
 	}
 	
 	content := ""
-	if openaiResponse.Choices[0].Message.Content != "" {
-		content = openaiResponse.Choices[0].Message.Content
+	if contentInterface, exists := messageMap["content"]; exists {
+		if contentStr, ok := contentInterface.(string); ok {
+			content = contentStr
+		}
 	}
 	
-	toolCalls := o.toolCalls(openaiResponse)
-	finishReason := o.finishReason(string(openaiResponse.Choices[0].FinishReason))
+	// Extract finish reason
+	finishReasonStr := "stop" // default
+	if finishReasonInterface, exists := firstChoice["finish_reason"]; exists {
+		if finishReasonVal, ok := finishReasonInterface.(string); ok {
+			finishReasonStr = finishReasonVal
+		}
+	}
+	
+	finishReason := o.finishReason(finishReasonStr)
+	
+	// Create usage info - simplified for compatibility mode
+	usage := TokenUsage{
+		InputTokens:  0,
+		OutputTokens: 0,
+	}
+	
+	if usageInterface, exists := genericResponse["usage"]; exists {
+		if usageMap, ok := usageInterface.(map[string]interface{}); ok {
+			if promptTokens, exists := usageMap["prompt_tokens"]; exists {
+				if promptTokensInt, ok := promptTokens.(float64); ok {
+					usage.InputTokens = int64(promptTokensInt)
+				}
+			}
+			if completionTokens, exists := usageMap["completion_tokens"]; exists {
+				if completionTokensInt, ok := completionTokens.(float64); ok {
+					usage.OutputTokens = int64(completionTokensInt)
+				}
+			}
+		}
+	}
+	
+	// No tool calls in compatibility mode for now  
+	var toolCalls []message.ToolCall
 	
 	if len(toolCalls) > 0 {
 		finishReason = message.FinishReasonToolUse
@@ -399,9 +481,39 @@ func (o *openaiClient) sendCompatible(ctx context.Context, messages []message.Me
 	return &ProviderResponse{
 		Content:      content,
 		ToolCalls:    toolCalls,
-		Usage:        o.usage(openaiResponse),
+		Usage:        usage,
 		FinishReason: finishReason,
 	}, nil
+}
+
+// streamCompatible sends a streaming request using custom HTTP call to avoid OpenAI client limitations
+func (o *openaiClient) streamCompatible(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	eventChan := make(chan ProviderEvent)
+	
+	go func() {
+		defer close(eventChan)
+		
+		// For now, fall back to non-streaming compatibility mode and convert to streaming
+		response, err := o.sendCompatible(ctx, messages, tools)
+		if err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: err}
+			return
+		}
+		
+		// Convert the non-streaming response to streaming events
+		if response.Content != "" {
+			// Send content as a single delta
+			eventChan <- ProviderEvent{
+				Type:    EventContentDelta,
+				Content: response.Content,
+			}
+		}
+		
+		// Send the complete event
+		eventChan <- ProviderEvent{Type: EventComplete, Response: response}
+	}()
+	
+	return eventChan
 }
 
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
@@ -481,6 +593,12 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			eventChan <- ProviderEvent{Type: EventComplete, Response: response}
 		}()
 		return eventChan
+	}
+	
+	// Check if compatibility mode is enabled
+	compatibilityMode := o.providerOptions.extraParams["compatibility_mode"]
+	if compatibilityMode == "true" {
+		return o.streamCompatible(ctx, messages, tools)
 	}
 
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))

@@ -384,6 +384,10 @@
           "type": "boolean",
           "description": "Enable compact mode for the TUI interface",
           "default": false
+        },
+        "diff_split_mode": {
+          "type": "boolean",
+          "description": "Enable/disable diff split mode for the TUI interface"
         }
       },
       "additionalProperties": false,

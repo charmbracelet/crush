@@ -124,7 +124,8 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	CompactMode   bool  `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffSplitMode *bool `json:"diff_split_mode,omitempty" jsonschema:"description=Enable/disable diff split mode for the TUI interface"`
 	// Here we can add themes later or any TUI related options
 }
 

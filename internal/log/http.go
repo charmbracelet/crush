@@ -3,6 +3,7 @@ package log
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,13 +43,11 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, err
 	}
 
-	rb, _ := io.ReadAll(save)
 	slog.Debug(
 		"HTTP Request",
 		"method", req.Method,
 		"url", req.URL,
-		"content_length", len(rb),
-		"body", string(rb),
+		"body", bodyToString(save),
 	)
 
 	start := time.Now()
@@ -66,18 +65,31 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 
 	save, resp.Body, err = drainBody(resp.Body)
-	rb, _ = io.ReadAll(save)
 	slog.Debug(
 		"HTTP Response",
 		"status_code", resp.StatusCode,
 		"status", resp.Status,
 		"headers", formatHeaders(resp.Header),
-		"body", string(rb),
+		"body", bodyToString(save),
 		"content_length", resp.ContentLength,
 		"duration_ms", duration.Milliseconds(),
 		"error", err,
 	)
 	return resp, err
+}
+
+func bodyToString(body io.ReadCloser) string {
+	src, err := io.ReadAll(body)
+	if err != nil {
+		slog.Error("Failed to read body", "error", err)
+		return ""
+	}
+	var b bytes.Buffer
+	if json.Compact(&b, bytes.TrimSpace(src)) != nil {
+		// not json probably
+		return string(src)
+	}
+	return b.String()
 }
 
 // formatHeaders formats HTTP headers for logging, filtering out sensitive information.

@@ -225,6 +225,8 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		Tools:    tools,
 	}
 
+	// Note: Stream parameter is controlled by calling NewStreaming vs New on the client
+
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
 		maxTokens = modelConfig.MaxTokens
@@ -306,6 +308,22 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 }
 
 func (o *openaiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	// Check if streaming is disabled for this provider
+	if o.providerOptions.extraParams["disable_streaming"] == "true" {
+		// Use non-streaming send() and convert to streaming events
+		eventChan := make(chan ProviderEvent, 1)
+		go func() {
+			defer close(eventChan)
+			response, err := o.send(ctx, messages, tools)
+			if err != nil {
+				eventChan <- ProviderEvent{Type: EventError, Error: err}
+				return
+			}
+			eventChan <- ProviderEvent{Type: EventComplete, Response: response}
+		}()
+		return eventChan
+	}
+
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),

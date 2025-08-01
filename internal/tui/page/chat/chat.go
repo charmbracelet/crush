@@ -300,6 +300,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
+			// if we have no agent do nothing
+			if p.app.CoderAgent == nil {
+				return p, nil
+			}
 			if p.app.CoderAgent.IsBusy() {
 				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 			}

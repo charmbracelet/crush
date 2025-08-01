@@ -132,6 +132,16 @@ func CloseMCPClients() {
 	}
 }
 
+var mcpInitRequest = mcp.InitializeRequest{
+	Params: mcp.InitializeParams{
+		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
+		ClientInfo: mcp.Implementation{
+			Name:    "Crush",
+			Version: version.Version,
+		},
+	},
+}
+
 func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
@@ -153,23 +163,16 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				_ = c.Close()
 				return
 			}
-			initRequest := mcp.InitializeRequest{
-				Params: mcp.InitializeParams{
-					ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
-					ClientInfo: mcp.Implementation{
-						Name:    "Crush",
-						Version: version.Version,
-					},
-				},
-			}
-			if _, err := c.Initialize(ctx, initRequest); err != nil {
+			if _, err := c.Initialize(ctx, mcpInitRequest); err != nil {
 				slog.Error("error initializing mcp client", "error", err, "name", name)
 				_ = c.Close()
 				return
 			}
-			mcpClients.Set(name, c)
-			result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
+
 			slog.Info("Initialized mcp client", "name", name)
+			mcpClients.Set(name, c)
+
+			result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 		}(name, m)
 	}
 	wg.Wait()

@@ -23,7 +23,7 @@ import (
 type mcpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	mcpConfig   config.MCPConfig
+	client      MCPClient
 	permissions permission.Service
 	workingDir  string
 }
@@ -56,23 +56,10 @@ func (b *mcpTool) Info() tools.ToolInfo {
 }
 
 func runTool(ctx context.Context, c MCPClient, toolName string, input string) (tools.ToolResponse, error) {
-	defer c.Close()
-	initRequest := mcp.InitializeRequest{}
-	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "Crush",
-		Version: version.Version,
-	}
-
-	_, err := c.Initialize(ctx, initRequest)
-	if err != nil {
-		return tools.NewTextErrorResponse(err.Error()), nil
-	}
-
 	toolRequest := mcp.CallToolRequest{}
 	toolRequest.Params.Name = toolName
 	var args map[string]any
-	if err = json.Unmarshal([]byte(input), &args); err != nil {
+	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return tools.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
 	toolRequest.Params.Arguments = args
@@ -114,52 +101,21 @@ func (b *mcpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	switch b.mcpConfig.Type {
-	case config.MCPStdio:
-		c, err := client.NewStdioMCPClient(
-			b.mcpConfig.Command,
-			b.mcpConfig.ResolvedEnv(),
-			b.mcpConfig.Args...,
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	case config.MCPHttp:
-		c, err := client.NewStreamableHttpClient(
-			b.mcpConfig.URL,
-			transport.WithHTTPHeaders(b.mcpConfig.ResolvedHeaders()),
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	case config.MCPSse:
-		c, err := client.NewSSEMCPClient(
-			b.mcpConfig.URL,
-			client.WithHeaders(b.mcpConfig.ResolvedHeaders()),
-		)
-		if err != nil {
-			return tools.NewTextErrorResponse(err.Error()), nil
-		}
-		return runTool(ctx, c, b.tool.Name, params.Input)
-	}
-
-	return tools.NewTextErrorResponse("invalid mcp type"), nil
+	return runTool(ctx, b.client, b.tool.Name, params.Input)
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, mcpConfig config.MCPConfig, workingDir string) tools.BaseTool {
+func NewMcpTool(name string, tool mcp.Tool, client MCPClient, permissions permission.Service, workingDir string) tools.BaseTool {
 	return &mcpTool{
 		mcpName:     name,
 		tool:        tool,
-		mcpConfig:   mcpConfig,
+		client:      client,
 		permissions: permissions,
 		workingDir:  workingDir,
 	}
 }
 
-func getTools(ctx context.Context, name string, m config.MCPConfig, permissions permission.Service, c MCPClient, workingDir string) []tools.BaseTool {
-	var stdioTools []tools.BaseTool
+func getTools(ctx context.Context, name string, permissions permission.Service, c MCPClient, workingDir string) []tools.BaseTool {
+	var mcpTools []tools.BaseTool
 	initRequest := mcp.InitializeRequest{}
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcp.Implementation{
@@ -170,19 +126,20 @@ func getTools(ctx context.Context, name string, m config.MCPConfig, permissions 
 	_, err := c.Initialize(ctx, initRequest)
 	if err != nil {
 		slog.Error("error initializing mcp client", "error", err)
-		return stdioTools
+		c.Close()
+		return mcpTools
 	}
 	toolsRequest := mcp.ListToolsRequest{}
 	tools, err := c.ListTools(ctx, toolsRequest)
 	if err != nil {
 		slog.Error("error listing tools", "error", err)
-		return stdioTools
+		c.Close()
+		return mcpTools
 	}
 	for _, t := range tools.Tools {
-		stdioTools = append(stdioTools, NewMcpTool(name, t, permissions, m, workingDir))
+		mcpTools = append(mcpTools, NewMcpTool(name, t, c, permissions, workingDir))
 	}
-	defer c.Close()
-	return stdioTools
+	return mcpTools
 }
 
 var (
@@ -220,7 +177,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					return
 				}
 
-				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
+				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 			case config.MCPHttp:
 				c, err := client.NewStreamableHttpClient(
 					m.URL,
@@ -230,7 +187,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					slog.Error("error creating mcp client", "error", err)
 					return
 				}
-				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
+				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 			case config.MCPSse:
 				c, err := client.NewSSEMCPClient(
 					m.URL,
@@ -240,7 +197,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					slog.Error("error creating mcp client", "error", err)
 					return
 				}
-				result.Append(getTools(ctx, name, m, permissions, c, cfg.WorkingDir())...)
+				result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 			}
 		}(name, m)
 	}

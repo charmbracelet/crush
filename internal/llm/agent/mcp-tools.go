@@ -51,18 +51,20 @@ func (b *McpTool) Info() tools.ToolInfo {
 }
 
 func runTool(ctx context.Context, name, toolName string, input string) (tools.ToolResponse, error) {
-	toolRequest := mcp.CallToolRequest{}
-	toolRequest.Params.Name = toolName
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return tools.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
-	toolRequest.Params.Arguments = args
 	c, ok := mcpClients.Get(name)
 	if !ok {
 		return tools.NewTextErrorResponse("mcp '" + name + "' not available"), nil
 	}
-	result, err := c.CallTool(ctx, toolRequest)
+	result, err := c.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		},
+	})
 	if err != nil {
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}
@@ -103,15 +105,6 @@ func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	return runTool(ctx, b.mcpName, b.tool.Name, params.Input)
 }
 
-func NewMcpTool(name string, tool mcp.Tool, permissions permission.Service, workingDir string) tools.BaseTool {
-	return &McpTool{
-		mcpName:     name,
-		tool:        tool,
-		permissions: permissions,
-		workingDir:  workingDir,
-	}
-}
-
 func getTools(ctx context.Context, name string, permissions permission.Service, c *client.Client, workingDir string) []tools.BaseTool {
 	result, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
@@ -121,16 +114,14 @@ func getTools(ctx context.Context, name string, permissions permission.Service, 
 		return nil
 	}
 	mcpTools := make([]tools.BaseTool, 0, len(result.Tools))
-	for _, t := range result.Tools {
-		mcpTools = append(mcpTools, NewMcpTool(name, t, permissions, workingDir))
+	for _, tool := range result.Tools {
+		mcpTools = append(mcpTools, &McpTool{
+			mcpName:     name,
+			tool:        tool,
+			permissions: permissions,
+			workingDir:  workingDir,
+		})
 	}
-	return mcpTools
-}
-
-func GetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
-	mcpToolsOnce.Do(func() {
-		mcpTools = doGetMCPTools(ctx, permissions, cfg)
-	})
 	return mcpTools
 }
 

@@ -142,11 +142,12 @@ func TestSearchImplementations(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			if name == "rg" && getRg() == "" {
 				t.Skip("rg is not in $PATH")
 			}
 
-			t.Parallel()
 			matches, err := fn("hello world", tempDir, "")
 			require.NoError(t, err)
 

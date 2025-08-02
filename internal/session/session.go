@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -110,7 +111,8 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
 		},
-		Cost: session.Cost,
+		Cost:      session.Cost,
+		UpdatedAt: time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return Session{}, err

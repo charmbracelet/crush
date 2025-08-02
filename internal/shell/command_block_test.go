@@ -2,7 +2,6 @@ package shell
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 )
@@ -92,18 +91,14 @@ func TestCommandBlocking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a temporary directory for each test
-			tmpDir, err := os.MkdirTemp("", "shell-test-*")
-			if err != nil {
-				t.Fatalf("Failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			shell := NewShell(&Options{
 				WorkingDir: tmpDir,
 				BlockFuncs: tt.blockFuncs,
 			})
 
-			_, _, err = shell.Exec(context.Background(), tt.command)
+			_, _, err := shell.Exec(context.Background(), tt.command)
 
 			if tt.shouldBlock {
 				if err == nil {

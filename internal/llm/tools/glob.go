@@ -139,7 +139,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
-	cmdRg := fsext.GetRgCmd(ctx, pattern)
+	cmdRg := getRgCmd(ctx, pattern)
 	if cmdRg != nil {
 		cmdRg.Dir = searchPath
 		matches, err := runRipgrep(cmdRg, searchPath, limit)

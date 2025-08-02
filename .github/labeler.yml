@@ -1,3 +1,5 @@
+"area: ci":
+  - "/^ci: /i"
 "area: diff":
   - "/diff/i"
 "area: images":

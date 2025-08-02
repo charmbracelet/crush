@@ -2,7 +2,7 @@ package models
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -99,16 +99,8 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 	providers, err := config.Providers()
 	if err == nil {
 		filteredProviders := []catwalk.Provider{}
-		simpleProviders := []string{
-			"anthropic",
-			"openai",
-			"gemini",
-			"xai",
-			"groq",
-			"openrouter",
-		}
 		for _, p := range providers {
-			if slices.Contains(simpleProviders, string(p.ID)) {
+			if strings.HasPrefix(p.APIKey, "$") && p.ID != catwalk.InferenceProviderAzure {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}

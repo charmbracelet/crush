@@ -70,8 +70,9 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 		systemMessage = o.providerOptions.systemPromptPrefix + "\n" + systemMessage
 	}
 
-	systemTextBlock := openai.ChatCompletionContentPartTextParam{Text: systemMessage}
+	system := openai.SystemMessage(systemMessage)
 	if isAnthropicModel && !o.providerOptions.disableCache {
+		systemTextBlock := openai.ChatCompletionContentPartTextParam{Text: systemMessage}
 		systemTextBlock.SetExtraFields(
 			map[string]any{
 				"cache_control": map[string]string{
@@ -79,10 +80,10 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				},
 			},
 		)
+		var content []openai.ChatCompletionContentPartTextParam
+		content = append(content, systemTextBlock)
+		system = openai.SystemMessage(content)
 	}
-	var content []openai.ChatCompletionContentPartTextParam
-	content = append(content, systemTextBlock)
-	system := openai.SystemMessage(content)
 	openaiMessages = append(openaiMessages, system)
 
 	for i, msg := range messages {
@@ -93,9 +94,12 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 		switch msg.Role {
 		case message.User:
 			var content []openai.ChatCompletionContentPartUnionParam
+
 			textBlock := openai.ChatCompletionContentPartTextParam{Text: msg.Content().String()}
 			content = append(content, openai.ChatCompletionContentPartUnionParam{OfText: &textBlock})
+			hasBinaryContent := false
 			for _, binaryContent := range msg.BinaryContent() {
+				hasBinaryContent = true
 				imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: binaryContent.String(catwalk.InferenceProviderOpenAI)}
 				imageBlock := openai.ChatCompletionContentPartImageParam{ImageURL: imageURL}
 
@@ -108,8 +112,11 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 					},
 				})
 			}
-
-			openaiMessages = append(openaiMessages, openai.UserMessage(content))
+			if hasBinaryContent || (isAnthropicModel && !o.providerOptions.disableCache) {
+				openaiMessages = append(openaiMessages, openai.UserMessage(content))
+			} else {
+				openaiMessages = append(openaiMessages, openai.UserMessage(msg.Content().String()))
+			}
 
 		case message.Assistant:
 			assistantMsg := openai.ChatCompletionAssistantMessageParam{
@@ -134,13 +141,15 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 						},
 					},
 				}
+				if !isAnthropicModel {
+					assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
+						OfString: param.NewOpt(msg.Content().String()),
+					}
+				}
 			}
 
 			if len(msg.ToolCalls()) > 0 {
 				hasContent = true
-				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
-					OfString: param.NewOpt(msg.Content().String()),
-				}
 				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
 				for i, call := range msg.ToolCalls() {
 					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{

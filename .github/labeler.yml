@@ -40,3 +40,5 @@
   - "/(openai|gpt)/i"
 "provider: openrouter":
   - "/openrouter/i"
+"provider: qwen":
+  - "/qwen/i"

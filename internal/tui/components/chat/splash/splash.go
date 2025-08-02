@@ -3,7 +3,6 @@ package splash
 import (
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -107,16 +106,9 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 			return
 		}
 		filteredProviders := []catwalk.Provider{}
-		simpleProviders := []string{
-			"anthropic",
-			"openai",
-			"gemini",
-			"xai",
-			"groq",
-			"openrouter",
-		}
+
 		for _, p := range providers {
-			if slices.Contains(simpleProviders, string(p.ID)) {
+			if strings.HasPrefix(p.APIKey, "$") && p.ID != catwalk.InferenceProviderAzure {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}

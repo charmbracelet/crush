@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
@@ -139,6 +140,8 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 }
 
 func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+	restore := config.PushPopCrushEnv()
+	defer restore()
 	resolvedAPIKey, err := config.Get().Resolve(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)

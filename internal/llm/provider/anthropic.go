@@ -288,12 +288,12 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		if a.isThinkingEnabled() {
 			opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 		}
-		
-		slog.Debug("Making Anthropic API request", 
+
+		slog.Debug("Making Anthropic API request",
 			"api_key", log.MaskAPIKey(a.providerOptions.apiKey),
 			"model", preparedMessages.Model,
 			"attempt", attempts)
-		
+
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
@@ -347,7 +347,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 				opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 			}
 
-			slog.Debug("Making Anthropic streaming API request", 
+			slog.Debug("Making Anthropic streaming API request",
 				"api_key", log.MaskAPIKey(a.providerOptions.apiKey),
 				"model", preparedMessages.Model,
 				"attempt", attempts)

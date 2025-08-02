@@ -54,11 +54,11 @@ func MaskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return "***EMPTY***"
 	}
-	
+
 	// Remove common prefixes
 	key := strings.TrimPrefix(apiKey, "Bearer ")
 	key = strings.TrimPrefix(key, "sk-")
-	
+
 	keyLen := len(key)
 	if keyLen <= 4 {
 		return strings.Repeat("*", keyLen)

@@ -267,11 +267,11 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
-		slog.Debug("Making OpenAI API request", 
+		slog.Debug("Making OpenAI API request",
 			"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
 			"model", params.Model,
 			"attempt", attempts)
-		
+
 		openaiResponse, err := o.client.Chat.Completions.New(
 			ctx,
 			params,
@@ -335,12 +335,12 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			if len(params.Tools) == 0 {
 				params.Tools = nil
 			}
-			
-			slog.Debug("Making OpenAI streaming API request", 
+
+			slog.Debug("Making OpenAI streaming API request",
 				"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
 				"model", params.Model,
 				"attempt", attempts)
-			
+
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
@@ -370,61 +370,39 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 							Content: choice.Delta.Content,
 						}
 						currentContent += choice.Delta.Content
-					} else if len(choice.Delta.ToolCalls) > 0 {
-						toolCall := choice.Delta.ToolCalls[0]
+					}
+
+					for _, toolCall := range choice.Delta.ToolCalls {
 						// Detect tool use start
-						if currentToolCallID == "" {
-							if toolCall.ID != "" {
-								currentToolCallID = toolCall.ID
-								eventChan <- ProviderEvent{
-									Type: EventToolUseStart,
-									ToolCall: &message.ToolCall{
-										ID:       toolCall.ID,
-										Name:     toolCall.Function.Name,
-										Finished: false,
-									},
-								}
-								currentToolCall = openai.ChatCompletionMessageToolCall{
-									ID:   toolCall.ID,
-									Type: "function",
-									Function: openai.ChatCompletionMessageToolCallFunction{
-										Name:      toolCall.Function.Name,
-										Arguments: toolCall.Function.Arguments,
-									},
-								}
+						if toolCall.ID != "" {
+							currentToolCallID = toolCall.ID
+							eventChan <- ProviderEvent{
+								Type: EventToolUseStart,
+								ToolCall: &message.ToolCall{
+									ID:       toolCall.ID,
+									Name:     toolCall.Function.Name,
+									Finished: false,
+								},
 							}
+							currentToolCall = openai.ChatCompletionMessageToolCall{
+								ID:   toolCall.ID,
+								Type: "function",
+								Function: openai.ChatCompletionMessageToolCallFunction{
+									Name:      toolCall.Function.Name,
+									Arguments: toolCall.Function.Arguments,
+								},
+							}
+							msgToolCalls = append(msgToolCalls, currentToolCall)
 						} else {
 							// Delta tool use
-							if toolCall.ID == "" || toolCall.ID == currentToolCallID {
-								currentToolCall.Function.Arguments += toolCall.Function.Arguments
-							} else {
-								// Detect new tool use
-								if toolCall.ID != currentToolCallID {
-									msgToolCalls = append(msgToolCalls, currentToolCall)
-									currentToolCallID = toolCall.ID
-									eventChan <- ProviderEvent{
-										Type: EventToolUseStart,
-										ToolCall: &message.ToolCall{
-											ID:       toolCall.ID,
-											Name:     toolCall.Function.Name,
-											Finished: false,
-										},
-									}
-									currentToolCall = openai.ChatCompletionMessageToolCall{
-										ID:   toolCall.ID,
-										Type: "function",
-										Function: openai.ChatCompletionMessageToolCallFunction{
-											Name:      toolCall.Function.Name,
-											Arguments: toolCall.Function.Arguments,
-										},
-									}
-								}
+							if len(msgToolCalls) > 0 {
+								msgToolCalls[len(msgToolCalls)-1].Function.Arguments += toolCall.Function.Arguments
 							}
 						}
 					}
+
 					// Kujtim: some models send finish stop even for tool calls
 					if choice.FinishReason == "tool_calls" || (choice.FinishReason == "stop" && currentToolCallID != "") {
-						msgToolCalls = append(msgToolCalls, currentToolCall)
 						if len(acc.Choices) > 0 {
 							acc.Choices[0].Message.ToolCalls = msgToolCalls
 						}

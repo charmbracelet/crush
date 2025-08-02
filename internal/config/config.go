@@ -140,6 +140,8 @@ type Options struct {
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
 	DataDirectory        string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisableCoAuthor      bool        `json:"disable_co_author,omitempty" jsonschema:"description=Disable the 'Generated with Crush, Co-Authored-By' footer in commit messages,default=false"`
+	AllowCommitOverride  bool        `json:"allow_commit_override,omitempty" jsonschema:"description=Allow users to override standard commit message behavior,default=false"`
 }
 
 type MCPs map[string]MCPConfig
@@ -339,6 +341,36 @@ func (c *Config) SetCompactMode(enabled bool) error {
 	}
 	c.Options.TUI.CompactMode = enabled
 	return c.SetConfigField("options.tui.compact_mode", enabled)
+}
+
+func (c *Config) SetDisableCoAuthor(disabled bool) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	c.Options.DisableCoAuthor = disabled
+	return c.SetConfigField("options.disable_co_author", disabled)
+}
+
+func (c *Config) SetAllowCommitOverride(allowed bool) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	c.Options.AllowCommitOverride = allowed
+	return c.SetConfigField("options.allow_commit_override", allowed)
+}
+
+func (c *Config) GetDisableCoAuthor() bool {
+	if c.Options == nil {
+		return false
+	}
+	return c.Options.DisableCoAuthor
+}
+
+func (c *Config) GetAllowCommitOverride() bool {
+	if c.Options == nil {
+		return false
+	}
+	return c.Options.AllowCommitOverride
 }
 
 func (c *Config) Resolve(key string) (string, error) {

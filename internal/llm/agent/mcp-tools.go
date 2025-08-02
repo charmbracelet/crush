@@ -132,6 +132,16 @@ func CloseMCPClients() {
 	}
 }
 
+var mcpInitRequest = mcp.InitializeRequest{
+	Params: mcp.InitializeParams{
+		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
+		ClientInfo: mcp.Implementation{
+			Name:    "Crush",
+			Version: version.Version,
+		},
+	},
+}
+
 func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
@@ -143,15 +153,25 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
 			defer wg.Done()
-			c, err := doGetClient(m)
+			c, err := createMcpClient(m)
 			if err != nil {
-				slog.Error("error creating mcp client", "error", err)
+				slog.Error("error creating mcp client", "error", err, "name", name)
 				return
 			}
-			if err := doInitClient(ctx, name, c); err != nil {
-				slog.Error("error initializing mcp client", "error", err)
+			if err := c.Start(ctx); err != nil {
+				slog.Error("error starting mcp client", "error", err, "name", name)
+				_ = c.Close()
 				return
 			}
+			if _, err := c.Initialize(ctx, mcpInitRequest); err != nil {
+				slog.Error("error initializing mcp client", "error", err, "name", name)
+				_ = c.Close()
+				return
+			}
+
+			slog.Info("Initialized mcp client", "name", name)
+			mcpClients.Set(name, c)
+
 			result.Append(getTools(ctx, name, permissions, c, cfg.WorkingDir())...)
 		}(name, m)
 	}
@@ -159,25 +179,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 	return slices.Collect(result.Seq())
 }
 
-func doInitClient(ctx context.Context, name string, c *client.Client) error {
-	initRequest := mcp.InitializeRequest{
-		Params: mcp.InitializeParams{
-			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
-			ClientInfo: mcp.Implementation{
-				Name:    "Crush",
-				Version: version.Version,
-			},
-		},
-	}
-	if _, err := c.Initialize(ctx, initRequest); err != nil {
-		c.Close()
-		return err
-	}
-	mcpClients.Set(name, c)
-	return nil
-}
-
-func doGetClient(m config.MCPConfig) (*client.Client, error) {
+func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		return client.NewStdioMCPClient(

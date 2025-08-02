@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -164,8 +165,23 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 
 		case message.Tool:
 			for _, result := range msg.ToolResults() {
+				content := result.Content
+				if result.IsError {
+					structured := struct {
+						Content string `json:"content"`
+						IsError bool   `json:"is_error"`
+					}{
+						Content: result.Content,
+						IsError: true,
+					}
+					if data, err := json.Marshal(structured); err == nil {
+						content = string(data)
+					} else {
+						slog.Warn("failed to marshal tool error", "err", err)
+					}
+				}
 				openaiMessages = append(openaiMessages,
-					openai.ToolMessage(result.Content, result.ToolCallID),
+					openai.ToolMessage(content, result.ToolCallID),
 				)
 			}
 		}

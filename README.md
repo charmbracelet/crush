@@ -30,6 +30,10 @@ brew install charmbracelet/tap/crush
 # NPM
 npm install -g @charmland/crush
 
+# aqua or mise
+aqua generate -i charmbracelet/crush
+mise use -g aqua:charmbracelet/crush
+
 # Arch Linux (btw)
 yay -S crush-bin
 
@@ -39,7 +43,7 @@ nix run github:numtide/nix-ai-tools#crush
 
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
-    
+
 Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
 
 You can also try out Crush via `nix-shell`:

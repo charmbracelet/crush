@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -258,6 +259,11 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
+		slog.Info("Making OpenAI API request", 
+			"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
+			"model", params.Model,
+			"attempt", attempts)
+		
 		openaiResponse, err := o.client.Chat.Completions.New(
 			ctx,
 			params,
@@ -327,6 +333,12 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			if len(params.Tools) == 0 {
 				params.Tools = nil
 			}
+			
+			slog.Info("Making OpenAI streaming API request", 
+				"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
+				"model", params.Model,
+				"attempt", attempts)
+			
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,

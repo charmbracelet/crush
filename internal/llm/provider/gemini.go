@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
 	"google.golang.org/genai"
@@ -198,6 +199,11 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
+		slog.Info("Making Gemini API request", 
+			"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
+			"model", model.ID,
+			"attempt", attempts)
+		
 		var toolCalls []message.ToolCall
 
 		var lastMsgParts []genai.Part
@@ -307,6 +313,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 		for {
 			attempts++
+			
+			slog.Info("Making Gemini streaming API request", 
+				"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
+				"model", model.ID,
+				"attempt", attempts)
 
 			currentContent := ""
 			toolCalls := []message.ToolCall{}

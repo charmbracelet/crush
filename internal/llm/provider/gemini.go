@@ -336,7 +336,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 							return
 						case <-time.After(time.Duration(after) * time.Millisecond):
-							break
+							continue
 						}
 					} else {
 						eventChan <- ProviderEvent{Type: EventError, Error: err}

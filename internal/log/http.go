@@ -79,6 +79,9 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func bodyToString(body io.ReadCloser) string {
+	if body == nil {
+		return ""
+	}
 	src, err := io.ReadAll(body)
 	if err != nil {
 		slog.Error("Failed to read body", "error", err)

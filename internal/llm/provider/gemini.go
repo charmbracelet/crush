@@ -202,7 +202,7 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
-		slog.Info("Making Gemini API request", 
+		slog.Debug("Making Gemini API request", 
 			"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
 			"model", model.ID,
 			"attempt", attempts)
@@ -313,7 +313,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 		for {
 			attempts++
 			
-			slog.Info("Making Gemini streaming API request", 
+			slog.Debug("Making Gemini streaming API request", 
 				"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
 				"model", model.ID,
 				"attempt", attempts)

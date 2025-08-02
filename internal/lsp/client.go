@@ -350,6 +350,7 @@ const (
 	ServerTypeTypeScript
 	ServerTypeRust
 	ServerTypePython
+	ServerTypeZig
 	ServerTypeGeneric
 )
 
@@ -370,6 +371,8 @@ func (c *Client) detectServerType() ServerType {
 		return ServerTypeRust
 	case strings.Contains(cmdPath, "pyright") || strings.Contains(cmdPath, "pylsp") || strings.Contains(cmdPath, "python"):
 		return ServerTypePython
+	case strings.Contains(cmdPath, "zls"):
+		return ServerTypeZig
 	default:
 		return ServerTypeGeneric
 	}
@@ -402,6 +405,11 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 		filesToOpen = []string{
 			filepath.Join(workDir, "Cargo.toml"),
 			filepath.Join(workDir, "Cargo.lock"),
+		}
+	case ServerTypeZig:
+		filesToOpen = []string{
+			filepath.Join(workDir, "build.zig"),
+			filepath.Join(workDir, "build.zig.zon"),
 		}
 	}
 

@@ -148,6 +148,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Session
 	case cmpChat.SessionSelectedMsg:
 		a.selectedSessionID = msg.ID
+	case cmpChat.SessionDeletedMsg:
+		err := a.app.Sessions.Delete(context.Background(), msg.Session.ID)
+		if err != nil {
+			return a, util.ReportError(err)
+		}
+
+		if msg.Session.ID == a.selectedSessionID {
+			a.selectedSessionID = ""
+		}
+
+		return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 	case cmpChat.SessionClearedMsg:
 		a.selectedSessionID = ""
 	// Commands

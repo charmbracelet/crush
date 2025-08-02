@@ -106,6 +106,15 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					),
 				)
 			}
+		case key.Matches(msg, s.keyMap.Delete):
+			if len(s.sessionsList.Items()) > 0 {
+				items := s.sessionsList.Items()
+				selectedItemInx := s.sessionsList.SelectedIndex()
+				selectedSession := items[selectedItemInx].(completions.CompletionItem).Value().(session.Session)
+				return s, util.CmdHandler(dialogs.OpenDialogMsg{
+					Model: NewDeleteSessionDialog(selectedSession),
+				})
+			}
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:

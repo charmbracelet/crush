@@ -28,6 +28,10 @@ type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
 
+type SessionDeletedMsg struct {
+	Session session.Session
+}
+
 const (
 	NotFound = -1
 )
@@ -98,6 +102,15 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session = session.Session{}
 		return m, m.listCmp.SetItems([]list.Item{})
 
+	case SessionDeletedMsg:
+		if msg.Session.ID == m.session.ID {
+			m.session = session.Session{}
+			return m, tea.Batch(
+				m.listCmp.SetItems([]util.Model{}),
+				func() tea.Msg { return SessionClearedMsg{} },
+			)
+		}
+		return m, nil
 	case pubsub.Event[message.Message]:
 		cmd := m.handleMessageEvent(msg)
 		return m, cmd

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/themes"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -165,6 +166,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: models.NewModelDialogCmp(),
 			},
 		)
+	case commands.SwitchThemeMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: themes.NewThemeDialog(),
+			},
+		)
 	// Compact
 	case commands.CompactMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
@@ -195,6 +202,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			modelTypeName = "small"
 		}
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
+
+	// Theme Switch
+	case themes.ThemeSelectedMsg:
+		manager := styles.DefaultManager()
+		if err := manager.SetTheme(msg.ThemeName); err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to switch theme: %v", err))
+		}
+		return a, util.ReportInfo(fmt.Sprintf("Theme changed to %s", msg.ThemeName))
 
 	// File Picker
 	case commands.OpenFilePickerMsg:

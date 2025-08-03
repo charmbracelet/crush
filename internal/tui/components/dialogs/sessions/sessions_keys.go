@@ -10,6 +10,7 @@ type SessionsListKeyMap struct {
 	Previous,
 	Rename,
 	Delete,
+	DeleteAll,
 	Close key.Binding
 }
 
@@ -35,6 +36,10 @@ func SessionsKeyMap() SessionsListKeyMap {
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "delete"),
 		),
+		DeleteAll: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "delete all"),
+		),
 		Close: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
@@ -50,6 +55,7 @@ func (k SessionsListKeyMap) KeyBindings() []key.Binding {
 		k.Previous,
 		k.Rename,
 		k.Delete,
+		k.DeleteAll,
 		k.Close,
 	}
 }
@@ -76,6 +82,7 @@ func (k SessionsListKeyMap) ShortHelp() []key.Binding {
 		k.Select,
 		k.Rename,
 		k.Delete,
+		k.DeleteAll,
 		k.Close,
 	}
 }

@@ -3,7 +3,6 @@ package sessions
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -127,7 +126,6 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		case key.Matches(msg, s.keyMap.Delete):
 			selectedItem := s.sessionsList.SelectedItem()
-			slog.Info("deleting session", "selected_item", selectedItem)
 			if selectedItem != nil {
 				selected := *selectedItem
 				err := s.sessions.Delete(context.Background(), selected.ID())
@@ -143,6 +141,16 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			u, cmd := s.sessionsList.Update(msg)
 			s.sessionsList = u.(SessionsList)
 			return s, cmd
+		case key.Matches(msg, s.keyMap.DeleteAll):
+			ctx := context.Background()
+			for _, item := range s.sessionsList.Items() {
+				err := s.sessions.Delete(ctx, item.ID())
+				if err != nil {
+					return s, util.ReportError(fmt.Errorf("cannot delete session: %w", err))
+				}
+				s.sessions.Delete(ctx, item.ID())
+			}
+			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:

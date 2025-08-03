@@ -400,6 +400,9 @@ func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
 
 	fileList := []string{section, ""}
 	sort.Slice(files, func(i, j int) bool {
+		if files[i].History.latestVersion.CreatedAt == files[j].History.latestVersion.CreatedAt {
+			return files[i].FilePath < files[j].FilePath
+		}
 		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
 	})
 
@@ -626,8 +629,11 @@ func (m *sidebarCmp) filesBlock() string {
 	}
 
 	fileList := []string{section, ""}
-	// order files by the latest version's created time
+	// order files by the latest version's created time, then by path for stability
 	sort.Slice(files, func(i, j int) bool {
+		if files[i].History.latestVersion.CreatedAt == files[j].History.latestVersion.CreatedAt {
+			return files[i].FilePath < files[j].FilePath
+		}
 		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
 	})
 

@@ -132,6 +132,16 @@ func CloseMCPClients() {
 	}
 }
 
+// CloseMCPClient closes a specific MCP client by name and removes it from the clients map.
+// This should be called when an MCP server is intentionally disabled.
+func CloseMCPClient(name string) {
+	if c, ok := mcpClients.Get(name); ok {
+		slog.Info("Closing MCP client", "name", name)
+		_ = c.Close()
+		mcpClients.Del(name)
+	}
+}
+
 var mcpInitRequest = mcp.InitializeRequest{
 	Params: mcp.InitializeParams{
 		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,

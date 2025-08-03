@@ -23,11 +23,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcptoggle"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcptoggle"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -185,6 +185,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: mcptoggle.NewMCPToggleDialog(),
 			},
 		)
+	case mcptoggle.MCPServerDisabledMsg:
+		// Properly close the MCP client when server is disabled
+		agent.CloseMCPClient(msg.ServerName)
+		return a, nil
 	// Model Switch
 	case models.ModelSelectedMsg:
 		if a.app.CoderAgent.IsBusy() {

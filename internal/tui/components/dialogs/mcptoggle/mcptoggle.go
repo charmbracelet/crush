@@ -21,6 +21,10 @@ const (
 	defaultWidth      int              = 60
 )
 
+type MCPServerDisabledMsg struct {
+	ServerName string
+}
+
 type MCPToggleDialog interface {
 	dialogs.DialogModel
 }
@@ -222,7 +226,14 @@ func (m *mcpToggleDialogCmp) toggleMCPServer(serverName string) tea.Cmd {
 		if selectedID != "" {
 			cmds = append(cmds, m.mcpList.SetSelected(selectedID))
 		}
-		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("MCP server '%s' %s", serverName, statusText)))
+
+		// If we're disabling the server, notify the main app to close the client
+		if newDisabled {
+			cmds = append(cmds, util.CmdHandler(MCPServerDisabledMsg{ServerName: serverName}))
+			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("MCP server '%s' disabled and disconnected", serverName)))
+		} else {
+			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("MCP server '%s' %s", serverName, statusText)))
+		}
 
 		return tea.Sequence(cmds...)
 	}
@@ -251,6 +262,7 @@ func (m *mcpToggleDialogCmp) toggleAllMCPServers() tea.Cmd {
 	newDisabled := anyEnabled // If any are enabled, disable all
 
 	var cmds []tea.Cmd
+	var disabledServers []string
 	for serverName, mcpConfig := range cfg.MCP {
 		if mcpConfig.Disabled != newDisabled {
 			// Update config
@@ -263,6 +275,11 @@ func (m *mcpToggleDialogCmp) toggleAllMCPServers() tea.Cmd {
 			// Update in-memory config
 			mcpConfig.Disabled = newDisabled
 			cfg.MCP[serverName] = mcpConfig
+
+			// Track disabled servers for cleanup
+			if newDisabled {
+				disabledServers = append(disabledServers, serverName)
+			}
 
 			// Update display
 			for i, server := range m.servers {
@@ -294,7 +311,17 @@ func (m *mcpToggleDialogCmp) toggleAllMCPServers() tea.Cmd {
 	if selectedID != "" {
 		cmds = append(cmds, m.mcpList.SetSelected(selectedID))
 	}
-	cmds = append(cmds, util.ReportInfo(fmt.Sprintf("All MCP servers %s", statusText)))
+
+	// Send disabled messages for proper cleanup
+	for _, serverName := range disabledServers {
+		cmds = append(cmds, util.CmdHandler(MCPServerDisabledMsg{ServerName: serverName}))
+	}
+
+	if len(disabledServers) > 0 {
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("All MCP servers %s and disconnected", statusText)))
+	} else {
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("All MCP servers %s", statusText)))
+	}
 
 	return tea.Sequence(cmds...)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcptoggle"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -178,6 +179,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
+	case commands.ToggleMCPServersMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: mcptoggle.NewMCPToggleDialog(),
+			},
+		)
 	// Model Switch
 	case models.ModelSelectedMsg:
 		if a.app.CoderAgent.IsBusy() {

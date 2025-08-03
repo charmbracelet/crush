@@ -69,6 +69,7 @@ type (
 	ToggleCompactModeMsg  struct{}
 	ToggleThinkingMsg     struct{}
 	OpenExternalEditorMsg struct{}
+	ToggleMCPServersMsg   struct{}
 	CompactMsg            struct {
 		SessionID string
 	}
@@ -360,6 +361,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "toggle_mcp_servers",
+			Title:       "Toggle MCP Servers",
+			Description: "Enable/Disable MCP servers",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ToggleMCPServersMsg{})
+			},
+		},
 		{
 			ID:          "toggle_help",
 			Title:       "Toggle Help",

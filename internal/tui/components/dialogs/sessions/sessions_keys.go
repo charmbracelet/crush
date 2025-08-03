@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 )
 
-type KeyMap struct {
+type SessionsListKeyMap struct {
 	Select,
 	Next,
 	Previous,
@@ -13,8 +13,8 @@ type KeyMap struct {
 	Close key.Binding
 }
 
-func DefaultKeyMap() KeyMap {
-	return KeyMap{
+func SessionsKeyMap() SessionsListKeyMap {
+	return SessionsListKeyMap{
 		Select: key.NewBinding(
 			key.WithKeys("enter", "tab", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
@@ -43,7 +43,7 @@ func DefaultKeyMap() KeyMap {
 }
 
 // KeyBindings implements layout.KeyMapProvider
-func (k KeyMap) KeyBindings() []key.Binding {
+func (k SessionsListKeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Select,
 		k.Next,
@@ -55,7 +55,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 }
 
 // FullHelp implements help.KeyMap.
-func (k KeyMap) FullHelp() [][]key.Binding {
+func (k SessionsListKeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
 	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
@@ -66,7 +66,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 }
 
 // ShortHelp implements help.KeyMap.
-func (k KeyMap) ShortHelp() []key.Binding {
+func (k SessionsListKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(
 

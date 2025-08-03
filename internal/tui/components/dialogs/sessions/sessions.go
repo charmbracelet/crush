@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -27,12 +28,11 @@ type SessionDialog interface {
 type SessionsList = list.FilterableList[list.CompletionItem[session.Session]]
 
 type sessionDialogCmp struct {
-	selectedInx       int
 	wWidth            int
 	wHeight           int
 	width             int
 	selectedSessionID string
-	keyMap            KeyMap
+	keyMap            SessionsListKeyMap
 	sessions          session.Service
 	sessionsList      SessionsList
 	help              help.Model
@@ -42,7 +42,7 @@ type sessionDialogCmp struct {
 func NewSessionDialogCmp(sessions session.Service, selectedID string) SessionDialog {
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
-	keyMap := DefaultKeyMap()
+	keyMap := SessionsKeyMap()
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
 	listKeyMap.DownOneItem = keyMap.Next
@@ -71,7 +71,7 @@ func NewSessionDialogCmp(sessions session.Service, selectedID string) SessionDia
 	help.Styles = t.S().Help
 	s := &sessionDialogCmp{
 		selectedSessionID: selectedID,
-		keyMap:            DefaultKeyMap(),
+		keyMap:            SessionsKeyMap(),
 		sessions:          sessions,
 		sessionsList:      sessionsList,
 		help:              help,
@@ -113,13 +113,27 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					),
 				)
 			}
+		case key.Matches(msg, s.keyMap.Rename):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem == nil {
+				return s, nil
+			}
+			selected := *selectedItem
+			return s, tea.Sequence(
+				util.CmdHandler(dialogs.CloseDialogMsg{}),
+				util.CmdHandler(dialogs.OpenDialogMsg{
+					Model: NewSessionRenameDialogCmp(s.sessions, selected.Value()),
+				}),
+			)
 		case key.Matches(msg, s.keyMap.Delete):
 			selectedItem := s.sessionsList.SelectedItem()
 			slog.Info("deleting session", "selected_item", selectedItem)
 			if selectedItem != nil {
 				selected := *selectedItem
-				// TODO(@bbrodriges): display deletion error in TUI
-				_ = s.sessions.Delete(context.Background(), selected.ID())
+				err := s.sessions.Delete(context.Background(), selected.ID())
+				if err != nil {
+					return s, util.ReportError(fmt.Errorf("cannot delete session: %w", err))
+				}
 				s.sessionsList.DeleteItem(selected.ID())
 				// close dialog on last item deletion
 				if len(s.sessionsList.Items()) == 0 {

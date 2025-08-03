@@ -106,6 +106,7 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 			"xai",
 			"groq",
 			"openrouter",
+      "venice"
 		}
 		for _, p := range providers {
 			if slices.Contains(simpleProviders, string(p.ID)) {

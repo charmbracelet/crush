@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -53,10 +52,8 @@ func (m *ModelListComponent) Init() tea.Cmd {
 		providers, err := config.Providers()
 		filteredProviders := []catwalk.Provider{}
 		for _, p := range providers {
-			hasApiKeyEnv := strings.HasPrefix(p.APIKey, "$")
-			resolver := config.NewEnvironmentVariableResolver(env.New())
-			endpoint, _ := resolver.ResolveValue(p.APIEndpoint)
-			if endpoint != "" && hasApiKeyEnv {
+			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
+			if hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}

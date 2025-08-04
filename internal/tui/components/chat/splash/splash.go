@@ -112,6 +112,7 @@ func (s *splashCmp) SetOnboarding(onboarding bool) {
 			"openai",
 			"gemini",
 			"xai",
+			"zai",
 			"groq",
 			"openrouter",
 		}

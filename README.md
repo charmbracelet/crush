@@ -39,7 +39,7 @@ nix run github:numtide/nix-ai-tools#crush
 
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
-    
+
 Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
 
 You can also try out Crush via `nix-shell`:
@@ -221,10 +221,10 @@ control but don't want Crush to consider when providing context.
 The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
-### Whitelisting Tools
+### Allowing Tools
 
 By default, Crush will ask you for permission before running tool calls. If
-you'd like, you can whitelist tools to be executed without prompting you for
+you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
 ```json

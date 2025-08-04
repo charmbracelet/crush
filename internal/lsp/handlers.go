@@ -103,7 +103,17 @@ func HandleDiagnostics(client *Client, params json.RawMessage) {
 	}
 
 	client.diagnosticsMu.Lock()
-	defer client.diagnosticsMu.Unlock()
-
 	client.diagnostics[diagParams.URI] = diagParams.Diagnostics
+
+	// Calculate total diagnostic count
+	totalCount := 0
+	for _, diagnostics := range client.diagnostics {
+		totalCount += len(diagnostics)
+	}
+	client.diagnosticsMu.Unlock()
+
+	// Trigger callback if set
+	if client.onDiagnosticsChanged != nil {
+		client.onDiagnosticsChanged(client.name, totalCount)
+	}
 }

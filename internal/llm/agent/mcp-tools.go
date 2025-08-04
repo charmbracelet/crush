@@ -299,8 +299,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 			mcpClients.Set(name, c)
 
 			tools := getTools(ctx, name, permissions, c, cfg.WorkingDir())
-			toolCount := len(tools)
-			updateMCPState(name, MCPStateConnected, nil, c, toolCount)
+			updateMCPState(name, MCPStateConnected, nil, c, len(tools))
 			result.Append(tools...)
 		}(name, m)
 	}

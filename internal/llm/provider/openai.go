@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -348,8 +349,18 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					chunk.Choices[0].Delta.ToolCalls[0].Index = 0
 				}
 				acc.AddChunk(chunk)
-				// This fixes multiple tool calls for some providers
 				for i, choice := range chunk.Choices {
+					reasoning, ok := choice.Delta.JSON.ExtraFields["reasoning"]
+					if ok && reasoning.Raw() != "" {
+						reasoningStr := ""
+						json.Unmarshal([]byte(reasoning.Raw()), &reasoningStr)
+						if reasoningStr != "" {
+							eventChan <- ProviderEvent{
+								Type:     EventThinkingDelta,
+								Thinking: reasoningStr,
+							}
+						}
+					}
 					if choice.Delta.Content != "" {
 						eventChan <- ProviderEvent{
 							Type:    EventContentDelta,

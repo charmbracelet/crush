@@ -59,7 +59,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	// Setup logs
 	log.Setup(
-		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+		LogPath(cfg.Options.DataDirectory),
 		cfg.Options.Debug,
 	)
 

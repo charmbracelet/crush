@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -94,7 +93,8 @@ func renderConfigSection(t *styles.Theme, configFile string, cfg *config.Config,
 			t.S().Text.Render(configFile)))
 
 	// Log path
-	logPath := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
+	logPath := config.LogPath(cfg.Options.DataDirectory)
+
 	details = append(details,
 		fmt.Sprintf("%s %s",
 			t.S().Subtle.Render("Log Path:"),

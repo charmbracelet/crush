@@ -12,11 +12,9 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
-
-	"github.com/charmbracelet/crush/internal/permission"
-
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -319,6 +317,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		return client.NewStreamableHttpClient(
 			m.URL,
 			transport.WithHTTPHeaders(m.ResolvedHeaders()),
+			transport.WithLogger(mcpHTTPLogger{}),
 		)
 	case config.MCPSse:
 		return client.NewSSEMCPClient(
@@ -329,3 +328,9 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		return nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
 	}
 }
+
+// for MCP's HTTP client.
+type mcpHTTPLogger struct{}
+
+func (l mcpHTTPLogger) Errorf(format string, v ...any) { slog.Error(fmt.Sprintf(format, v...)) }
+func (l mcpHTTPLogger) Infof(format string, v ...any)  { slog.Info(fmt.Sprintf(format, v...)) }

@@ -59,6 +59,9 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 
 	// Sort files by the latest version's created time
 	sort.Slice(fileSlice, func(i, j int) bool {
+		if fileSlice[i].History.LatestVersion.CreatedAt == fileSlice[j].History.LatestVersion.CreatedAt {
+			return strings.Compare(fileSlice[i].FilePath, fileSlice[j].FilePath) < 0
+		}
 		return fileSlice[i].History.LatestVersion.CreatedAt > fileSlice[j].History.LatestVersion.CreatedAt
 	})
 

@@ -101,7 +101,7 @@ func truncateWidthAndHeight(content string) string {
 	result := strings.Join(lines, "\n")
 
 	if heightTruncated || widthTruncated {
-		notices := []string{}
+		notices := make([]string, 0, 2)
 		if heightTruncated {
 			notices = append(notices, "height")
 		}

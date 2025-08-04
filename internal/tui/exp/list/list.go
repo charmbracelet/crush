@@ -1,6 +1,7 @@
 package list
 
 import (
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 type Item interface {
@@ -45,6 +47,8 @@ type List[T Item] interface {
 	DeleteItem(string) tea.Cmd
 	PrependItem(T) tea.Cmd
 	AppendItem(T) tea.Cmd
+	StartSelection(col, line int)
+	EndSelection(col, line int)
 }
 
 type direction int
@@ -92,7 +96,11 @@ type list[T Item] struct {
 
 	rendered string
 
-	movingByItem bool
+	movingByItem       bool
+	selectionStartCol  int
+	selectionStartLine int
+	selectionEndCol    int
+	selectionEndLine   int
 }
 
 type ListOption func(*confOptions)
@@ -170,9 +178,13 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 			keyMap:    DefaultKeyMap(),
 			focused:   true,
 		},
-		items:         csync.NewSliceFrom(items),
-		indexMap:      csync.NewMap[string, int](),
-		renderedItems: csync.NewMap[string, renderedItem](),
+		items:              csync.NewSliceFrom(items),
+		indexMap:           csync.NewMap[string, int](),
+		renderedItems:      csync.NewMap[string, renderedItem](),
+		selectionStartCol:  -1,
+		selectionStartLine: -1,
+		selectionEndLine:   -1,
+		selectionEndCol:    -1,
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)
@@ -280,10 +292,132 @@ func (l *list[T]) View() string {
 	if l.resize {
 		return strings.Join(lines, "\n")
 	}
-	return t.S().Base.
+	view = t.S().Base.
 		Height(l.height).
 		Width(l.width).
 		Render(strings.Join(lines, "\n"))
+	if l.selectionStartCol < 0 {
+		return view
+	}
+	area := uv.Rect(0, 0, l.width, l.height)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	uv.NewStyledString(view).Draw(scr, area)
+
+	selArea := uv.Rectangle{
+		Min: uv.Pos(l.selectionStartCol, l.selectionStartLine),
+		Max: uv.Pos(l.selectionEndCol, l.selectionEndLine),
+	}
+	selArea = selArea.Canon()
+
+	specialChars := make(map[string]bool, len(styles.AllIcons))
+	for _, icon := range styles.AllIcons {
+		specialChars[icon] = true
+	}
+
+	isNonWhitespace := func(r rune) bool {
+		return r != ' ' && r != '\t' && r != 0 && r != '\n' && r != '\r'
+	}
+
+	type selectionBounds struct {
+		startX, endX int
+		inSelection  bool
+	}
+	lineSelections := make([]selectionBounds, scr.Height())
+
+	for y := range scr.Height() {
+		bounds := selectionBounds{startX: -1, endX: -1, inSelection: false}
+
+		if y >= selArea.Min.Y && y <= selArea.Max.Y {
+			bounds.inSelection = true
+			if selArea.Min.Y == selArea.Max.Y {
+				// Single line selection
+				bounds.startX = selArea.Min.X
+				bounds.endX = selArea.Max.X
+			} else if y == selArea.Min.Y {
+				// First line of multi-line selection
+				bounds.startX = selArea.Min.X
+				bounds.endX = scr.Width()
+			} else if y == selArea.Max.Y {
+				// Last line of multi-line selection
+				bounds.startX = 0
+				bounds.endX = selArea.Max.X
+			} else {
+				// Middle lines
+				bounds.startX = 0
+				bounds.endX = scr.Width()
+			}
+		}
+		lineSelections[y] = bounds
+	}
+
+	type lineBounds struct {
+		start, end int
+	}
+	lineTextBounds := make([]lineBounds, scr.Height())
+
+	// First pass: find text bounds for lines that have selections
+	for y := range scr.Height() {
+		bounds := lineBounds{start: -1, end: -1}
+
+		// Only process lines that might have selections
+		if lineSelections[y].inSelection {
+			for x := range scr.Width() {
+				cell := scr.CellAt(x, y)
+				if cell == nil {
+					continue
+				}
+
+				cellStr := cell.String()
+				if len(cellStr) == 0 {
+					continue
+				}
+
+				char := rune(cellStr[0])
+				isSpecial := specialChars[cellStr]
+
+				if (isNonWhitespace(char) && !isSpecial) || cell.Style.Bg != nil {
+					if bounds.start == -1 {
+						bounds.start = x
+					}
+					bounds.end = x + 1 // Position after last character
+				}
+			}
+		}
+		lineTextBounds[y] = bounds
+	}
+
+	// Second pass: apply selection highlighting
+	for y := range scr.Height() {
+		selBounds := lineSelections[y]
+		if !selBounds.inSelection {
+			continue
+		}
+
+		textBounds := lineTextBounds[y]
+		if textBounds.start < 0 {
+			continue // No text on this line
+		}
+
+		// Only scan within the intersection of text bounds and selection bounds
+		scanStart := max(textBounds.start, selBounds.startX)
+		scanEnd := min(textBounds.end, selBounds.endX)
+
+		for x := scanStart; x < scanEnd; x++ {
+			cell := scr.CellAt(x, y)
+			if cell == nil {
+				continue
+			}
+
+			cellStr := cell.String()
+			if len(cellStr) > 0 && !specialChars[cellStr] {
+				cell = cell.Clone()
+				cell.Style = cell.Style.Background(t.BgOverlay).Foreground(t.White)
+				scr.SetCell(x, y, cell)
+			}
+		}
+	}
+
+	return scr.Render()
 }
 
 func (l *list[T]) viewPosition() (int, int) {
@@ -1021,4 +1155,20 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 		}
 	}
 	return tea.Sequence(cmds...)
+}
+
+// StartSelection implements List.
+func (l *list[T]) StartSelection(col, line int) {
+	l.selectionStartCol = col
+	l.selectionStartLine = line
+	l.selectionEndCol = col
+	l.selectionEndLine = line
+	slog.Info("Position", "col", col, "line", line)
+}
+
+// EndSelection implements List.
+func (l *list[T]) EndSelection(col, line int) {
+	l.selectionEndCol = col
+	l.selectionEndLine = line
+	slog.Info("Position", "col", col, "line", line)
 }

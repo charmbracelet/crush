@@ -15,4 +15,25 @@ const (
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
+
+	BorderThin string = "│"
 )
+
+var AllIcons = []string{
+	CheckIcon,
+	ErrorIcon,
+	WarningIcon,
+	InfoIcon,
+	HintIcon,
+	SpinnerIcon,
+	LoadingIcon,
+	DocumentIcon,
+	ModelIcon,
+
+	// Tool call icons
+	ToolPending,
+	ToolSuccess,
+	ToolError,
+
+	BorderThin,
+}

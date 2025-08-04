@@ -86,6 +86,26 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.StartSelection(msg.X, msg.Y-1)
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.EndSelection(msg.X, msg.Y-1)
+			if msg.Y <= 1 {
+				return m, m.listCmp.MoveUp(1)
+			} else if msg.Y >= m.height-1 {
+				return m, m.listCmp.MoveDown(1)
+			}
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.EndSelection(msg.X, msg.Y-1)
+		}
+		return m, nil
 	case pubsub.Event[permission.PermissionNotification]:
 		return m, m.handlePermissionRequest(msg.Payload)
 	case SessionSelectedMsg:

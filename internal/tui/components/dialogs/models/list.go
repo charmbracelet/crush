@@ -61,7 +61,7 @@ func (m *ModelListComponent) Init() tea.Cmd {
 			}
 		}
 
-		m.providers = providers
+		m.providers = filteredProviders
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		}

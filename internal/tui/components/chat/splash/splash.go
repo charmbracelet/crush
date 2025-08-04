@@ -100,20 +100,6 @@ func New() Splash {
 
 func (s *splashCmp) SetOnboarding(onboarding bool) {
 	s.isOnboarding = onboarding
-	if onboarding {
-		providers, err := config.Providers()
-		if err != nil {
-			return
-		}
-		filteredProviders := []catwalk.Provider{}
-
-		for _, p := range providers {
-			if strings.HasPrefix(p.APIKey, "$") && p.ID != catwalk.InferenceProviderAzure {
-				filteredProviders = append(filteredProviders, p)
-			}
-		}
-		s.modelList.SetProviders(filteredProviders)
-	}
 }
 
 func (s *splashCmp) SetProjectInit(needsInit bool) {

@@ -3,10 +3,12 @@ package models
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -49,6 +51,16 @@ func (m *ModelListComponent) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if len(m.providers) == 0 {
 		providers, err := config.Providers()
+		filteredProviders := []catwalk.Provider{}
+		for _, p := range providers {
+			hasApiKeyEnv := strings.HasPrefix(p.APIKey, "$")
+			resolver := config.NewEnvironmentVariableResolver(env.New())
+			endpoint, _ := resolver.ResolveValue(p.APIEndpoint)
+			if endpoint != "" && hasApiKeyEnv {
+				filteredProviders = append(filteredProviders, p)
+			}
+		}
+
 		m.providers = providers
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -241,8 +253,4 @@ func (m *ModelListComponent) GetModelType() int {
 
 func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
 	m.list.SetInputPlaceholder(placeholder)
-}
-
-func (m *ModelListComponent) SetProviders(providers []catwalk.Provider) {
-	m.providers = providers
 }

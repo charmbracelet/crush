@@ -2,7 +2,6 @@ package models
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -96,16 +95,6 @@ func NewModelDialogCmp() ModelDialog {
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
-	providers, err := config.Providers()
-	if err == nil {
-		filteredProviders := []catwalk.Provider{}
-		for _, p := range providers {
-			if strings.HasPrefix(p.APIKey, "$") && p.ID != catwalk.InferenceProviderAzure {
-				filteredProviders = append(filteredProviders, p)
-			}
-		}
-		m.modelList.SetProviders(filteredProviders)
-	}
 	return tea.Batch(m.modelList.Init(), m.apiKeyInput.Init())
 }
 

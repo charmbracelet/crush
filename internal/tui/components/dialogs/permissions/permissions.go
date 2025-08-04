@@ -156,13 +156,13 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.contentDirty = true // Mark content as dirty when scrolling
 				return p, nil
 			}
-		default:
-			// Pass other keys to viewport
-			viewPort, cmd := p.contentViewPort.Update(msg)
-			p.contentViewPort = viewPort
-			cmds = append(cmds, cmd)
 		}
 	}
+
+	// Pass other keys to viewport
+	viewPort, cmd := p.contentViewPort.Update(msg)
+	p.contentViewPort = viewPort
+	cmds = append(cmds, cmd)
 
 	return p, tea.Batch(cmds...)
 }

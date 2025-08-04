@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -40,7 +39,6 @@ type LSPClientInfo struct {
 var (
 	lspStates = csync.NewMap[string, LSPClientInfo]()
 	lspBroker = pubsub.NewBroker[LSPEvent]()
-	lspMutex  sync.RWMutex
 )
 
 // SubscribeLSPEvents returns a channel for LSP events

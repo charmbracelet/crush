@@ -158,7 +158,7 @@ As an additional note, Crush also stores ephemeral data, such as application sta
 $HOME/.local/shared/crush/crush.json
 
 # Windows
-%USERPROFILE%\AppData\Local\crush\crush.json
+%LOCALAPPDATA%\crush\crush.json
 ```
 
 ### LSPs

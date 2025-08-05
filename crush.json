@@ -4,5 +4,10 @@
     "Go": {
       "command": "gopls"
     }
+  },
+  "keymaps": {
+    "quit": ["ctrl+q"],
+    "help": "?",
+    "commands": "ctrl+k"
   }
 }

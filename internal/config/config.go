@@ -170,6 +170,11 @@ type LSP struct {
 	LSP  LSPConfig `json:"lsp"`
 }
 
+type (
+	KeyMap  string
+	KeyMaps map[string]KeyMap
+)
+
 func (l LSPs) Sorted() []LSP {
 	sorted := make([]LSP, 0, len(l))
 	for k, v := range l {
@@ -257,6 +262,8 @@ type Config struct {
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+
+	KeyMaps KeyMaps `json:"keymaps,omitempty" jsonschema:"description=Keymaps for the TUI"`
 
 	// Internal
 	workingDir string `json:"-"`

@@ -34,9 +34,19 @@
         "permissions": {
           "$ref": "#/$defs/Permissions",
           "description": "Permission settings for tool usage"
+        },
+        "keymaps": {
+          "$ref": "#/$defs/KeyMaps",
+          "description": "Keymaps for the TUI"
         }
       },
       "additionalProperties": false,
+      "type": "object"
+    },
+    "KeyMaps": {
+      "additionalProperties": {
+        "type": "string"
+      },
       "type": "object"
     },
     "LSPConfig": {

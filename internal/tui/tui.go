@@ -515,7 +515,7 @@ func (a *appModel) View() tea.View {
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
 	chatPage := chat.New(app)
-	keyMap := DefaultKeyMap()
+	keyMap := NewKeyMapWithCustom(app.Config().KeyMaps)
 	keyMap.pageBindings = chatPage.Bindings()
 
 	model := &appModel{

@@ -9,7 +9,7 @@ updates:
       time: "05:00"
       timezone: "America/New_York"
     labels:
-      - "dependencies"
+      - "area: dependencies"
     commit-message:
       prefix: "chore"
       include: "scope"
@@ -22,7 +22,7 @@ updates:
       time: "05:00"
       timezone: "America/New_York"
     labels:
-      - "dependencies"
+      - "area: dependencies"
     commit-message:
       prefix: "chore"
       include: "scope"

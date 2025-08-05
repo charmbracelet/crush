@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -94,6 +95,7 @@ type list[T Item] struct {
 
 	renderedItems *csync.Map[string, renderedItem]
 
+	renderMu sync.Mutex
 	rendered string
 
 	movingByItem       bool
@@ -462,7 +464,9 @@ func (l *list[T]) render() tea.Cmd {
 	// we are not rendering the first time
 	if l.rendered != "" {
 		// rerender everything will mostly hit cache
+		l.renderMu.Lock()
 		l.rendered, _ = l.renderIterator(0, false, "")
+		l.renderMu.Unlock()
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
 		}
@@ -472,9 +476,10 @@ func (l *list[T]) render() tea.Cmd {
 		}
 		return focusChangeCmd
 	}
+	l.renderMu.Lock()
 	rendered, finishIndex := l.renderIterator(0, true, "")
 	l.rendered = rendered
-
+	l.renderMu.Unlock()
 	// recalculate for the initial items
 	if l.direction == DirectionBackward {
 		l.recalculateItemPositions()
@@ -482,7 +487,10 @@ func (l *list[T]) render() tea.Cmd {
 	renderCmd := func() tea.Msg {
 		l.offset = 0
 		// render the rest
+
+		l.renderMu.Lock()
 		l.rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
+		l.renderMu.Unlock()
 		// needed for backwards
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
@@ -491,7 +499,6 @@ func (l *list[T]) render() tea.Cmd {
 		if l.focused {
 			l.scrollToSelection()
 		}
-
 		return nil
 	}
 	return tea.Batch(focusChangeCmd, renderCmd)

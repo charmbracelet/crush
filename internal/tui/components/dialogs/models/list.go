@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -49,7 +50,15 @@ func (m *ModelListComponent) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if len(m.providers) == 0 {
 		providers, err := config.Providers()
-		m.providers = providers
+		filteredProviders := []catwalk.Provider{}
+		for _, p := range providers {
+			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
+			if hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure {
+				filteredProviders = append(filteredProviders, p)
+			}
+		}
+
+		m.providers = filteredProviders
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		}
@@ -241,8 +250,4 @@ func (m *ModelListComponent) GetModelType() int {
 
 func (m *ModelListComponent) SetInputPlaceholder(placeholder string) {
 	m.list.SetInputPlaceholder(placeholder)
-}
-
-func (m *ModelListComponent) SetProviders(providers []catwalk.Provider) {
-	m.providers = providers
 }

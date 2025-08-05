@@ -519,7 +519,7 @@ func (a *appModel) View() tea.View {
 func New(app *app.App) tea.Model {
 	// Initialize global keymaps with user customizations at startup
 	keymap.InitializeGlobalKeyMap(app.Config().KeyMaps)
-	
+
 	chatPage := chat.New(app)
 	keyMap := NewKeyMapWithCustom(app.Config().KeyMaps)
 	keyMap.pageBindings = chatPage.Bindings()

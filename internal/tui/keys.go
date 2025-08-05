@@ -23,17 +23,17 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Sessions,
 		k.Suspend,
 	}
-	
+
 	// Create map of app binding descriptions to custom bindings for replacement
 	appBindingByDesc := make(map[string]key.Binding)
 	for _, binding := range appBindings {
 		appBindingByDesc[binding.Help().Desc] = binding
 	}
-	
+
 	var mergedPageBindings []key.Binding
 	for _, pageBinding := range k.pageBindings {
 		desc := pageBinding.Help().Desc
-		
+
 		// Check if this page binding should be replaced with custom app binding
 		if customBinding, exists := appBindingByDesc[desc]; exists {
 			// Replace with the custom binding that has the same description
@@ -45,12 +45,12 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			mergedPageBindings = append(mergedPageBindings, pageBinding)
 		}
 	}
-	
+
 	// Add any remaining app bindings that weren't merged
 	for _, binding := range appBindingByDesc {
 		mergedPageBindings = append(mergedPageBindings, binding)
 	}
-	
+
 	return mergedPageBindings
 }
 
@@ -87,45 +87,45 @@ func DefaultKeyMap() KeyMap {
 
 func NewKeyMapWithCustom(customKeymaps config.KeyMaps) KeyMap {
 	keyMap := DefaultKeyMap()
-	
+
 	if customKeymaps == nil {
 		return keyMap
 	}
-	
+
 	if quitKey, ok := customKeymaps["quit"]; ok {
 		keyMap.Quit = key.NewBinding(
 			key.WithKeys(string(quitKey)),
 			key.WithHelp(string(quitKey), "quit"),
 		)
 	}
-	
+
 	if helpKey, ok := customKeymaps["help"]; ok {
 		keyMap.Help = key.NewBinding(
 			key.WithKeys(string(helpKey)),
 			key.WithHelp(string(helpKey), "more"),
 		)
 	}
-	
+
 	if commandsKey, ok := customKeymaps["commands"]; ok {
 		keyMap.Commands = key.NewBinding(
 			key.WithKeys(string(commandsKey)),
 			key.WithHelp(string(commandsKey), "commands"),
 		)
 	}
-	
+
 	if suspendKey, ok := customKeymaps["suspend"]; ok {
 		keyMap.Suspend = key.NewBinding(
 			key.WithKeys(string(suspendKey)),
 			key.WithHelp(string(suspendKey), "suspend"),
 		)
 	}
-	
+
 	if sessionsKey, ok := customKeymaps["sessions"]; ok {
 		keyMap.Sessions = key.NewBinding(
 			key.WithKeys(string(sessionsKey)),
 			key.WithHelp(string(sessionsKey), "sessions"),
 		)
 	}
-	
+
 	return keyMap
 }

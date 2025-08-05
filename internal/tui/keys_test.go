@@ -58,7 +58,7 @@ func TestNewKeyMapWithCustom_NilKeymaps(t *testing.T) {
 				return
 			}
 			if tt.custom.Keys()[0] != tt.default_.Keys()[0] {
-				t.Errorf("Expected custom %s key to match default %s, got %s vs %s", 
+				t.Errorf("Expected custom %s key to match default %s, got %s vs %s",
 					tt.name, tt.name, tt.custom.Keys()[0], tt.default_.Keys()[0])
 			}
 		})
@@ -87,10 +87,10 @@ func TestNewKeyMapWithCustom_PartialOverride(t *testing.T) {
 		binding  key.Binding
 		expected string
 	}{
-		{"quit", keyMap.Quit, "ctrl+c"},      // should remain default
-		{"help", keyMap.Help, "?"},           // should be custom
+		{"quit", keyMap.Quit, "ctrl+c"},         // should remain default
+		{"help", keyMap.Help, "?"},              // should be custom
 		{"commands", keyMap.Commands, "ctrl+k"}, // should be custom
-		{"suspend", keyMap.Suspend, "ctrl+z"}, // should remain default
+		{"suspend", keyMap.Suspend, "ctrl+z"},   // should remain default
 		{"sessions", keyMap.Sessions, "ctrl+s"}, // should remain default
 	}
 
@@ -150,9 +150,9 @@ func TestNewKeyMapWithCustom_HelpMessages(t *testing.T) {
 	keyMap := NewKeyMapWithCustom(customKeymaps)
 
 	tests := []struct {
-		name        string
-		binding     key.Binding
-		expectedKey string
+		name         string
+		binding      key.Binding
+		expectedKey  string
 		expectedHelp string
 	}{
 		{"help", keyMap.Help, "?", "more"},
@@ -181,12 +181,12 @@ func TestKeyMap_HelpInterface(t *testing.T) {
 		"commands": "ctrl+k",
 	}
 	keyMap := NewKeyMapWithCustom(customKeymaps)
-	
+
 	// Add mock page bindings that simulate real page help including matching descriptions
 	mockPageBinding := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit"))
 	pageCommandsBinding := key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "commands")) // default "commands" desc
-	pageHelpBinding := key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "more"))       // default "more" desc
-	pageQuitBinding := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))       // default "quit" desc
+	pageHelpBinding := key.NewBinding(key.WithKeys("ctrl+g"), key.WithHelp("ctrl+g", "more"))         // default "more" desc
+	pageQuitBinding := key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))         // default "quit" desc
 	keyMap.pageBindings = []key.Binding{mockPageBinding, pageCommandsBinding, pageHelpBinding, pageQuitBinding}
 
 	// Test ShortHelp merges correctly

@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 type EditorKeyMap struct {
@@ -12,7 +13,11 @@ type EditorKeyMap struct {
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
-	return EditorKeyMap{
+	return NewEditorKeyMapWithCustom(nil)
+}
+
+func NewEditorKeyMapWithCustom(customKeymaps config.KeyMaps) EditorKeyMap {
+	keyMap := EditorKeyMap{
 		AddFile: key.NewBinding(
 			key.WithKeys("/"),
 			key.WithHelp("/", "add file"),
@@ -33,6 +38,45 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			key.WithHelp("ctrl+j", "newline"),
 		),
 	}
+
+	// Override with custom keymaps if provided
+	if customKeymaps != nil {
+		if addFileKey, ok := customKeymaps["editor_add_file"]; ok {
+			keyMap.AddFile = key.NewBinding(
+				key.WithKeys(string(addFileKey)),
+				key.WithHelp(string(addFileKey), "add file"),
+			)
+		}
+		if sendMessageKey, ok := customKeymaps["editor_send_message"]; ok {
+			keyMap.SendMessage = key.NewBinding(
+				key.WithKeys(string(sendMessageKey)),
+				key.WithHelp(string(sendMessageKey), "send"),
+			)
+		}
+		if openEditorKey, ok := customKeymaps["editor_open_editor"]; ok {
+			keyMap.OpenEditor = key.NewBinding(
+				key.WithKeys(string(openEditorKey)),
+				key.WithHelp(string(openEditorKey), "open editor"),
+			)
+		}
+		if newlineKey, ok := customKeymaps["editor_newline"]; ok {
+			keyMap.Newline = key.NewBinding(
+				key.WithKeys(string(newlineKey)),
+				key.WithHelp(string(newlineKey), "newline"),
+			)
+		} else {
+			// Check if suspend key conflicts with default newline key (ctrl+j)
+			if suspendKey, ok := customKeymaps["suspend"]; ok && string(suspendKey) == "ctrl+j" {
+				// If suspend is mapped to ctrl+j, remove it from newline and only use shift+enter
+				keyMap.Newline = key.NewBinding(
+					key.WithKeys("shift+enter"),
+					key.WithHelp("shift+enter", "newline"),
+				)
+			}
+		}
+	}
+
+	return keyMap
 }
 
 // KeyBindings implements layout.KeyMapProvider

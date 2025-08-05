@@ -389,6 +389,11 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 
 		textBounds := lineTextBounds[y]
 		if textBounds.start < 0 {
+			if textOnly {
+				// We don't want to get rid of all empty lines in text-only mode
+				selectedText.WriteByte('\n')
+			}
+
 			continue // No text on this line
 		}
 

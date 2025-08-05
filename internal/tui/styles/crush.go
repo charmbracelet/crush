@@ -1,11 +1,12 @@
 package styles
 
 import (
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 func NewCrushTheme() *Theme {
-	return &Theme{
+	t := &Theme{
 		Name:   "crush",
 		IsDark: true,
 
@@ -54,4 +55,12 @@ func NewCrushTheme() *Theme {
 		RedLight: charmtone.Salmon,
 		Cherry:   charmtone.Cherry,
 	}
+
+	// LSP and MCP status.
+	t.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
+	t.ItemBusyIcon = t.ItemOfflineIcon.Foreground(charmtone.Citron)
+	t.ItemErrorIcon = t.ItemOfflineIcon.Foreground(charmtone.Coral)
+	t.ItemOnlineIcon = t.ItemOfflineIcon.Foreground(charmtone.Guac)
+
+	return t
 }

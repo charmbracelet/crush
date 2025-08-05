@@ -98,8 +98,6 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 		fileList = append(fileList,
 			core.Status(
 				core.StatusOpts{
-					IconColor:    t.FgMuted,
-					NoIcon:       true,
 					Title:        filePath,
 					ExtraContent: extraContent,
 				},

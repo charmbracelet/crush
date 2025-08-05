@@ -278,7 +278,6 @@ func (m *messageCmp) renderThinkingContent() string {
 			opts := core.StatusOpts{
 				Title:       "Thought for",
 				Description: duration.String(),
-				NoIcon:      true,
 			}
 			return t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {

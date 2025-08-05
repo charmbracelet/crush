@@ -57,22 +57,22 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 		}
 
 		// Determine icon color and description based on state
-		iconColor := t.FgMuted
+		// iconColor := t.FgMuted
+		icon := t.ItemOfflineIcon
 		description := l.LSP.Command
 
 		if l.LSP.Disabled {
-			iconColor = t.FgMuted
 			description = t.S().Subtle.Render("disabled")
 		} else if state, exists := lspStates[l.Name]; exists {
 			switch state.State {
 			case lsp.StateStarting:
-				iconColor = t.Yellow
+				icon = t.ItemBusyIcon
 				description = t.S().Subtle.Render("starting...")
 			case lsp.StateReady:
-				iconColor = t.Success
+				icon = t.ItemOnlineIcon
 				description = l.LSP.Command
 			case lsp.StateError:
-				iconColor = t.Red
+				icon = t.ItemErrorIcon
 				if state.Error != nil {
 					description = t.S().Subtle.Render(fmt.Sprintf("error: %s", state.Error.Error()))
 				} else {
@@ -119,7 +119,7 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 		lspList = append(lspList,
 			core.Status(
 				core.StatusOpts{
-					IconColor:    iconColor,
+					Icon:         icon.String(),
 					Title:        l.Name,
 					Description:  description,
 					ExtraContent: extraContent,

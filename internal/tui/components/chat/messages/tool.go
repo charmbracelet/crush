@@ -198,11 +198,14 @@ func (m *toolCallCmp) SetCancelled() {
 
 func (m *toolCallCmp) copyTool() tea.Cmd {
 	content := m.formatToolForCopy()
-	err := clipboard.WriteAll(content)
-	if err != nil {
-		return util.ReportError(fmt.Errorf("failed to copy tool content to clipboard: %w", err))
-	}
-	return util.ReportInfo("Tool content copied to clipboard")
+	return tea.Sequence(
+		tea.SetClipboard(content),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(content)
+			return nil
+		},
+		util.ReportInfo("Tool content copied to clipboard"),
+	)
 }
 
 func (m *toolCallCmp) formatToolForCopy() string {

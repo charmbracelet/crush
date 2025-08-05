@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -45,7 +44,7 @@ type MessageListCmp interface {
 	SetSession(session.Session) tea.Cmd
 	GoToBottom() tea.Cmd
 	GetSelectedText() string
-	CopySelectedText() tea.Cmd
+	CopySelectedText(bool) tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -96,6 +95,10 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if key.Matches(msg, messages.CopyKey) && m.listCmp.HasSelection() {
+			return m, m.CopySelectedText(true)
+		}
 	case tea.MouseClickMsg:
 		x := msg.X - 1 // Adjust for padding
 		y := msg.Y - 1 // Adjust for padding
@@ -128,11 +131,10 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft {
 			if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
 				m.listCmp.SelectionStop()
-				return m, m.CopySelectedText()
+			} else {
+				m.listCmp.EndSelection(x, y)
+				m.listCmp.SelectionStop()
 			}
-			m.listCmp.EndSelection(x, y)
-			m.listCmp.SelectionStop()
-			return m, m.CopySelectedText()
 		}
 		return m, nil
 	case pubsub.Event[permission.PermissionNotification]:
@@ -155,13 +157,11 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := m.listCmp.Update(msg)
 		m.listCmp = u.(list.List[list.Item])
 		return m, cmd
-	default:
-		var cmds []tea.Cmd
-		u, cmd := m.listCmp.Update(msg)
-		m.listCmp = u.(list.List[list.Item])
-		cmds = append(cmds, cmd)
-		return m, tea.Batch(cmds...)
 	}
+
+	u, cmd := m.listCmp.Update(msg)
+	m.listCmp = u.(list.List[list.Item])
+	return m, cmd
 }
 
 // View renders the message list or an initial screen if empty.
@@ -654,24 +654,51 @@ func (m *messageListCmp) handleMouseClick(x, y int) tea.Cmd {
 	return nil
 }
 
+// SelectionClear clears the current selection in the list component.
+func (m *messageListCmp) SelectionClear() tea.Cmd {
+	m.listCmp.SelectionClear()
+	m.previousSelected = ""
+	m.lastClickX, m.lastClickY = 0, 0
+	m.clickCount = 0
+	return nil
+}
+
+// HasSelection checks if there is a selection in the list component.
+func (m *messageListCmp) HasSelection() bool {
+	return m.listCmp.HasSelection()
+}
+
 // GetSelectedText returns the currently selected text from the list component.
 func (m *messageListCmp) GetSelectedText() string {
 	return m.listCmp.GetSelectedText(3) // 3 padding for the left border/padding
 }
 
-// CopySelectedText copies the currently selected text to the clipboard.
-func (m *messageListCmp) CopySelectedText() tea.Cmd {
-	return nil
+// CopySelectedText copies the currently selected text to the clipboard. When
+// clear is true, it clears the selection after copying.
+func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
+	if !m.listCmp.HasSelection() {
+		return nil
+	}
+
 	selectedText := m.GetSelectedText()
 	if selectedText == "" {
 		return util.ReportInfo("No text selected")
 	}
 
-	err := clipboard.WriteAll(selectedText)
-	if err != nil {
-		return util.ReportError(fmt.Errorf("failed to copy selected text to clipboard: %w", err))
+	if clear {
+		defer func() { m.SelectionClear() }()
 	}
-	return util.ReportInfo("Selected text copied to clipboard")
+
+	return tea.Sequence(
+		// We use both OSC 52 and native clipboard for compatibility with different
+		// terminal emulators and environments.
+		tea.SetClipboard(selectedText),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(selectedText)
+			return nil
+		},
+		util.ReportInfo("Selected text copied to clipboard"),
+	)
 }
 
 // abs returns the absolute value of an integer.

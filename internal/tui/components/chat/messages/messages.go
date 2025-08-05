@@ -101,11 +101,14 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyPressMsg:
 		if key.Matches(msg, CopyKey) {
-			err := clipboard.WriteAll(m.message.Content().Text)
-			if err != nil {
-				return m, util.ReportError(fmt.Errorf("failed to copy message content to clipboard: %w", err))
-			}
-			return m, util.ReportInfo("Message copied to clipboard")
+			return m, tea.Sequence(
+				tea.SetClipboard(m.message.Content().Text),
+				func() tea.Msg {
+					_ = clipboard.WriteAll(m.message.Content().Text)
+					return nil
+				},
+				util.ReportInfo("Message copied to clipboard"),
+			)
 		}
 	}
 	return m, nil

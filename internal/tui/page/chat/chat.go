@@ -172,10 +172,18 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
+		if p.isMouseOverChat(msg.X, msg.Y) {
+			p.focusedPane = PanelTypeChat
+			p.chat.Focus()
+			p.editor.Blur()
+		} else {
+			p.focusedPane = PanelTypeEditor
+			p.editor.Focus()
+			p.chat.Blur()
+		}
 		u, cmd := p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)
 		return p, cmd
-		return p, nil
 	case tea.MouseMotionMsg:
 		if msg.Button == tea.MouseLeft {
 			u, cmd := p.chat.Update(msg)

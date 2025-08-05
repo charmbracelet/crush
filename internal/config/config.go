@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
@@ -183,6 +184,32 @@ const (
 )
 
 type KeyMaps map[CommandName]KeyMap
+
+func (KeyMaps) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Type = "object"
+	schema.Properties = jsonschema.NewProperties()
+	schema.Properties.Set("quit", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for quit command",
+	})
+	schema.Properties.Set("help", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for help command",
+	})
+	schema.Properties.Set("commands", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for commands command",
+	})
+	schema.Properties.Set("sessions", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for sessions command",
+	})
+	schema.Properties.Set("suspend", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for suspend command",
+	})
+	schema.AdditionalProperties = jsonschema.FalseSchema
+}
 
 func (l LSPs) Sorted() []LSP {
 	sorted := make([]LSP, 0, len(l))

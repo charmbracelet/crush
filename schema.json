@@ -44,9 +44,29 @@
       "type": "object"
     },
     "KeyMaps": {
-      "additionalProperties": {
-        "type": "string"
+      "properties": {
+        "quit": {
+          "type": "string",
+          "description": "Key binding for quit command"
+        },
+        "help": {
+          "type": "string",
+          "description": "Key binding for help command"
+        },
+        "commands": {
+          "type": "string",
+          "description": "Key binding for commands command"
+        },
+        "sessions": {
+          "type": "string",
+          "description": "Key binding for sessions command"
+        },
+        "suspend": {
+          "type": "string",
+          "description": "Key binding for suspend command"
+        }
       },
+      "additionalProperties": false,
       "type": "object"
     },
     "LSPConfig": {

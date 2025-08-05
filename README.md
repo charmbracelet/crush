@@ -103,7 +103,7 @@ go install github.com/charmbracelet/crush@latest
 ## Getting Started
 
 The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
+provider such as Anthropic, OpenAI, Groq, xAI, Venice or OpenRouter and just start
 Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
@@ -123,6 +123,7 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
+| `VENICE_API_KEY`           | Venice.ai                                          |
 
 ### By the Way
 

@@ -74,6 +74,12 @@ type Theme struct {
 	RedLight color.Color
 	Cherry   color.Color
 
+	// LSP and MCP status indicators.
+	ItemOfflineIcon lipgloss.Style
+	ItemBusyIcon    lipgloss.Style
+	ItemErrorIcon   lipgloss.Style
+	ItemOnlineIcon  lipgloss.Style
+
 	styles *Styles
 }
 

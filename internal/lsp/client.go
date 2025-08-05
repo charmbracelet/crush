@@ -26,6 +26,12 @@ type Client struct {
 	stdout *bufio.Reader
 	stderr io.ReadCloser
 
+	// Client name for identification
+	name string
+
+	// Diagnostic change callback
+	onDiagnosticsChanged func(name string, count int)
+
 	// Request ID counter
 	nextID atomic.Int32
 
@@ -53,7 +59,7 @@ type Client struct {
 	serverState atomic.Value
 }
 
-func NewClient(ctx context.Context, command string, args ...string) (*Client, error) {
+func NewClient(ctx context.Context, name, command string, args ...string) (*Client, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	// Copy env
 	cmd.Env = os.Environ()
@@ -75,6 +81,7 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 
 	client := &Client{
 		Cmd:                   cmd,
+		name:                  name,
 		stdin:                 stdin,
 		stdout:                bufio.NewReader(stdout),
 		stderr:                stderr,
@@ -282,6 +289,16 @@ func (c *Client) GetServerState() ServerState {
 // SetServerState sets the current state of the LSP server
 func (c *Client) SetServerState(state ServerState) {
 	c.serverState.Store(state)
+}
+
+// GetName returns the name of the LSP client
+func (c *Client) GetName() string {
+	return c.name
+}
+
+// SetDiagnosticsCallback sets the callback function for diagnostic changes
+func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
+	c.onDiagnosticsChanged = callback
 }
 
 // WaitForServerReady waits for the server to be ready by polling the server

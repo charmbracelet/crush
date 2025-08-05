@@ -274,11 +274,13 @@ func (m *messageCmp) renderThinkingContent() string {
 	if reasoningContent.StartedAt > 0 {
 		duration := m.message.ThinkingDuration()
 		if reasoningContent.FinishedAt > 0 {
+			if duration.String() == "0s" {
+				return ""
+			}
 			m.anim.SetLabel("")
 			opts := core.StatusOpts{
 				Title:       "Thought for",
 				Description: duration.String(),
-				NoIcon:      true,
 			}
 			return t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {

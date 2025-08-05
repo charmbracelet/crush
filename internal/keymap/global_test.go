@@ -9,9 +9,9 @@ import (
 func TestInitializeGlobalKeyMap(t *testing.T) {
 	// Test with custom keymaps
 	customKeymaps := config.KeyMaps{
-		"quit":     "ctrl+q",
-		"help":     "?",
-		"commands": "ctrl+k",
+		config.CommandQuit:     "ctrl+q",
+		config.CommandHelp:     "?",
+		config.CommandCommands: "ctrl+k",
 	}
 
 	InitializeGlobalKeyMap(customKeymaps)
@@ -64,8 +64,8 @@ func TestInitializeGlobalKeyMapWithDefaults(t *testing.T) {
 func TestGlobalKeyGetters(t *testing.T) {
 	// Set up custom keymaps
 	customKeymaps := config.KeyMaps{
-		"help":     "?",
-		"commands": "ctrl+k",
+		config.CommandHelp:     "?",
+		config.CommandCommands: "ctrl+k",
 	}
 	InitializeGlobalKeyMap(customKeymaps)
 

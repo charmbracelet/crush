@@ -14,67 +14,70 @@ var GlobalKeyBindings struct {
 	Suspend  key.Binding
 }
 
-// InitializeGlobalKeyMap merges user custom keymaps with defaults and stores them globally
-// This should be called once at app startup
+// InitializeGlobalKeyMap merges user custom keymaps with defaults and stores them for use while the app is running
 func InitializeGlobalKeyMap(customKeymaps config.KeyMaps) {
-	// Initialize with defaults, then override with custom keymaps
-	GlobalKeyBindings.Quit = key.NewBinding(
-		key.WithKeys("ctrl+c"),
-		key.WithHelp("ctrl+c", "quit"),
-	)
-	if quitKey, ok := customKeymaps["quit"]; ok {
+	if quitKey, ok := customKeymaps[config.CommandQuit]; ok {
 		GlobalKeyBindings.Quit = key.NewBinding(
 			key.WithKeys(string(quitKey)),
 			key.WithHelp(string(quitKey), "quit"),
 		)
+	} else {
+		GlobalKeyBindings.Quit = key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit"),
+		)
 	}
 
-	GlobalKeyBindings.Help = key.NewBinding(
-		key.WithKeys("ctrl+g"),
-		key.WithHelp("ctrl+g", "more"),
-	)
-	if helpKey, ok := customKeymaps["help"]; ok {
+	if helpKey, ok := customKeymaps[config.CommandHelp]; ok {
 		GlobalKeyBindings.Help = key.NewBinding(
 			key.WithKeys(string(helpKey)),
 			key.WithHelp(string(helpKey), "more"),
 		)
+	} else {
+		GlobalKeyBindings.Help = key.NewBinding(
+			key.WithKeys("ctrl+g"),
+			key.WithHelp("ctrl+g", "more"),
+		)
 	}
 
-	GlobalKeyBindings.Commands = key.NewBinding(
-		key.WithKeys("ctrl+p"),
-		key.WithHelp("ctrl+p", "commands"),
-	)
-	if commandsKey, ok := customKeymaps["commands"]; ok {
+	if commandsKey, ok := customKeymaps[config.CommandCommands]; ok {
 		GlobalKeyBindings.Commands = key.NewBinding(
 			key.WithKeys(string(commandsKey)),
 			key.WithHelp(string(commandsKey), "commands"),
 		)
+	} else {
+		GlobalKeyBindings.Commands = key.NewBinding(
+			key.WithKeys("ctrl+p"),
+			key.WithHelp("ctrl+p", "commands"),
+		)
 	}
 
-	GlobalKeyBindings.Sessions = key.NewBinding(
-		key.WithKeys("ctrl+s"),
-		key.WithHelp("ctrl+s", "sessions"),
-	)
-	if sessionsKey, ok := customKeymaps["sessions"]; ok {
+	if sessionsKey, ok := customKeymaps[config.CommandSessions]; ok {
 		GlobalKeyBindings.Sessions = key.NewBinding(
 			key.WithKeys(string(sessionsKey)),
 			key.WithHelp(string(sessionsKey), "sessions"),
 		)
+	} else {
+		GlobalKeyBindings.Sessions = key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "sessions"),
+		)
 	}
 
-	GlobalKeyBindings.Suspend = key.NewBinding(
-		key.WithKeys("ctrl+z"),
-		key.WithHelp("ctrl+z", "suspend"),
-	)
-	if suspendKey, ok := customKeymaps["suspend"]; ok {
+	if suspendKey, ok := customKeymaps[config.CommandSuspend]; ok {
 		GlobalKeyBindings.Suspend = key.NewBinding(
 			key.WithKeys(string(suspendKey)),
 			key.WithHelp(string(suspendKey), "suspend"),
 		)
+	} else {
+		GlobalKeyBindings.Suspend = key.NewBinding(
+			key.WithKeys("ctrl+z"),
+			key.WithHelp("ctrl+z", "suspend"),
+		)
 	}
 }
 
-// GetGlobalQuitKey returns the merged quit key as a string
+// GetGlobalQuitKey returns the resolved quit keymap
 func GetGlobalQuitKey() string {
 	if len(GlobalKeyBindings.Quit.Keys()) > 0 {
 		return GlobalKeyBindings.Quit.Keys()[0]
@@ -82,7 +85,7 @@ func GetGlobalQuitKey() string {
 	return "ctrl+c"
 }
 
-// GetGlobalHelpKey returns the merged help key as a string
+// GetGlobalHelpKey returns the resolved help keymap
 func GetGlobalHelpKey() string {
 	if len(GlobalKeyBindings.Help.Keys()) > 0 {
 		return GlobalKeyBindings.Help.Keys()[0]
@@ -90,7 +93,7 @@ func GetGlobalHelpKey() string {
 	return "ctrl+g"
 }
 
-// GetGlobalCommandsKey returns the merged commands key as a string
+// GetGlobalCommandsKey returns the resolved commands keymap
 func GetGlobalCommandsKey() string {
 	if len(GlobalKeyBindings.Commands.Keys()) > 0 {
 		return GlobalKeyBindings.Commands.Keys()[0]
@@ -98,7 +101,7 @@ func GetGlobalCommandsKey() string {
 	return "ctrl+p"
 }
 
-// GetGlobalSessionsKey returns the merged sessions key as a string
+// GetGlobalSessionsKey returns the session keymap
 func GetGlobalSessionsKey() string {
 	if len(GlobalKeyBindings.Sessions.Keys()) > 0 {
 		return GlobalKeyBindings.Sessions.Keys()[0]
@@ -106,7 +109,7 @@ func GetGlobalSessionsKey() string {
 	return "ctrl+s"
 }
 
-// GetGlobalSuspendKey returns the merged suspend key as a string
+// GetGlobalSuspendKey returns the sus
 func GetGlobalSuspendKey() string {
 	if len(GlobalKeyBindings.Suspend.Keys()) > 0 {
 		return GlobalKeyBindings.Suspend.Keys()[0]

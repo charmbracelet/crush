@@ -170,10 +170,19 @@ type LSP struct {
 	LSP  LSPConfig `json:"lsp"`
 }
 
-type (
-	KeyMap  string
-	KeyMaps map[string]KeyMap
+type KeyMap string
+
+type CommandName string
+
+const (
+	CommandQuit     CommandName = "quit"
+	CommandHelp     CommandName = "help"
+	CommandCommands CommandName = "commands"
+	CommandSessions CommandName = "sessions"
+	CommandSuspend  CommandName = "suspend"
 )
+
+type KeyMaps map[CommandName]KeyMap
 
 func (l LSPs) Sorted() []LSP {
 	sorted := make([]LSP, 0, len(l))

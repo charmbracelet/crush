@@ -77,8 +77,8 @@ func TestNewKeyMapWithCustom_EmptyKeymaps(t *testing.T) {
 
 func TestNewKeyMapWithCustom_PartialOverride(t *testing.T) {
 	customKeymaps := config.KeyMaps{
-		"help":     "?",
-		"commands": "ctrl+k",
+		config.CommandHelp:     "?",
+		config.CommandCommands: "ctrl+k",
 	}
 	keyMap := NewKeyMapWithCustom(customKeymaps)
 
@@ -109,11 +109,11 @@ func TestNewKeyMapWithCustom_PartialOverride(t *testing.T) {
 
 func TestNewKeyMapWithCustom_FullOverride(t *testing.T) {
 	customKeymaps := config.KeyMaps{
-		"quit":     "ctrl+q",
-		"help":     "h",
-		"commands": "ctrl+space",
-		"suspend":  "ctrl+j",
-		"sessions": "ctrl+l",
+		config.CommandQuit:     "ctrl+q",
+		config.CommandHelp:     "h",
+		config.CommandCommands: "ctrl+space",
+		config.CommandSuspend:  "ctrl+j",
+		config.CommandSessions: "ctrl+l",
 	}
 	keyMap := NewKeyMapWithCustom(customKeymaps)
 
@@ -144,8 +144,8 @@ func TestNewKeyMapWithCustom_FullOverride(t *testing.T) {
 
 func TestNewKeyMapWithCustom_HelpMessages(t *testing.T) {
 	customKeymaps := config.KeyMaps{
-		"help":     "?",
-		"commands": "ctrl+k",
+		config.CommandHelp:     "?",
+		config.CommandCommands: "ctrl+k",
 	}
 	keyMap := NewKeyMapWithCustom(customKeymaps)
 
@@ -177,8 +177,8 @@ func TestNewKeyMapWithCustom_HelpMessages(t *testing.T) {
 
 func TestKeyMap_HelpInterface(t *testing.T) {
 	customKeymaps := config.KeyMaps{
-		"help":     "?",
-		"commands": "ctrl+k",
+		config.CommandHelp:     "?",
+		config.CommandCommands: "ctrl+k",
 	}
 	keyMap := NewKeyMapWithCustom(customKeymaps)
 

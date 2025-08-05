@@ -92,35 +92,35 @@ func NewKeyMapWithCustom(customKeymaps config.KeyMaps) KeyMap {
 		return keyMap
 	}
 
-	if quitKey, ok := customKeymaps["quit"]; ok {
+	if quitKey, ok := customKeymaps[config.CommandQuit]; ok {
 		keyMap.Quit = key.NewBinding(
 			key.WithKeys(string(quitKey)),
 			key.WithHelp(string(quitKey), "quit"),
 		)
 	}
 
-	if helpKey, ok := customKeymaps["help"]; ok {
+	if helpKey, ok := customKeymaps[config.CommandHelp]; ok {
 		keyMap.Help = key.NewBinding(
 			key.WithKeys(string(helpKey)),
 			key.WithHelp(string(helpKey), "more"),
 		)
 	}
 
-	if commandsKey, ok := customKeymaps["commands"]; ok {
+	if commandsKey, ok := customKeymaps[config.CommandCommands]; ok {
 		keyMap.Commands = key.NewBinding(
 			key.WithKeys(string(commandsKey)),
 			key.WithHelp(string(commandsKey), "commands"),
 		)
 	}
 
-	if suspendKey, ok := customKeymaps["suspend"]; ok {
+	if suspendKey, ok := customKeymaps[config.CommandSuspend]; ok {
 		keyMap.Suspend = key.NewBinding(
 			key.WithKeys(string(suspendKey)),
 			key.WithHelp(string(suspendKey), "suspend"),
 		)
 	}
 
-	if sessionsKey, ok := customKeymaps["sessions"]; ok {
+	if sessionsKey, ok := customKeymaps[config.CommandSessions]; ok {
 		keyMap.Sessions = key.NewBinding(
 			key.WithKeys(string(sessionsKey)),
 			key.WithHelp(string(sessionsKey), "sessions"),

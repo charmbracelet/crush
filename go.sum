@@ -76,8 +76,6 @@ github.com/charlievieth/fastwalk v1.0.11 h1:5sLT/q9+d9xMdpKExawLppqvXFZCVKf6JHnr
 github.com/charlievieth/fastwalk v1.0.11/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5 h1:GTcMIfDQJKyNKS+xVt7GkNIwz+tBuQtIuiP50WpzNgs=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250730165737-56ff7146d52d h1:YMXLZHSo8DjytVY/b5dK8LDuyQsVUmBK3ydQMpu2Ui4=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250730165737-56ff7146d52d/go.mod h1:XIQ1qQfRph6Z5o2EikCydjumo0oDInQySRHuPATzbZc=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250805190305-70e94a2e0b2d h1:1C2whi5rgs+APtsQDE4riA+W5neYaMNY+Y+5o6J/rDU=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250805190305-70e94a2e0b2d/go.mod h1:XIQ1qQfRph6Z5o2EikCydjumo0oDInQySRHuPATzbZc=
 github.com/charmbracelet/catwalk v0.4.6 h1:Y0JDq5V4agK8oO3lKC/hhInrYXePGwZPNo8I1Lk08jc=
@@ -94,8 +92,8 @@ github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mS
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
 github.com/charmbracelet/ultraviolet v0.0.0-20250805154935-01be9d7ef65d h1:miSXsyi0ARm35O+DulTdaLYoUioWdGkoBfFoIhdqpCA=
 github.com/charmbracelet/ultraviolet v0.0.0-20250805154935-01be9d7ef65d/go.mod h1:XrrgNFfXLrFAyd9DUmrqVc3yQFVv8Uk+okj4PsNNzpc=
-github.com/charmbracelet/x/ansi v0.9.3 h1:BXt5DHS/MKF+LjuK4huWrC6NCvHtexww7dMayh6GXd0=
-github.com/charmbracelet/x/ansi v0.9.3/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
+github.com/charmbracelet/x/ansi v0.10.0 h1:jnOP9pFxY6/gw5nYjkpi6f17K0P/sN4fqT0Y1ioaORI=
+github.com/charmbracelet/x/ansi v0.10.0/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa h1:lphz0Z3rsiOtMYiz8axkT24i9yFiueDhJbzyNUADmME=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250516160309-24eee56f89fa/go.mod h1:xBlh2Yi3DL3zy/2n15kITpg0YZardf/aa/hgUaIM6Rk=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=

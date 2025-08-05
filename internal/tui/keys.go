@@ -24,34 +24,31 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Suspend,
 	}
 
-	// Create map of app binding descriptions to custom bindings for replacement
-	appBindingByDesc := make(map[string]key.Binding)
+	// Create a map of descriptions to app bindings for quick lookup
+	appBindingByDesc := make(map[string]key.Binding, len(appBindings))
 	for _, binding := range appBindings {
 		appBindingByDesc[binding.Help().Desc] = binding
 	}
 
-	var mergedPageBindings []key.Binding
+	// Start with page bindings, replacing any that conflict with app bindings
+	result := make([]key.Binding, 0, len(k.pageBindings)+len(appBindings))
 	for _, pageBinding := range k.pageBindings {
-		desc := pageBinding.Help().Desc
-
-		// Check if this page binding should be replaced with custom app binding
-		if customBinding, exists := appBindingByDesc[desc]; exists {
-			// Replace with the custom binding that has the same description
-			mergedPageBindings = append(mergedPageBindings, customBinding)
-			// Remove from app bindings to avoid duplicates later
-			delete(appBindingByDesc, desc)
+		if appBinding, hasConflict := appBindingByDesc[pageBinding.Help().Desc]; hasConflict {
+			// Use app binding instead of page binding
+			result = append(result, appBinding)
+			delete(appBindingByDesc, pageBinding.Help().Desc) // Mark as used
 		} else {
-			// Keep the page binding as-is (no conflict)
-			mergedPageBindings = append(mergedPageBindings, pageBinding)
+			// No conflict, keep page binding
+			result = append(result, pageBinding)
 		}
 	}
 
-	// Add any remaining app bindings that weren't merged
+	// Add any remaining app bindings that weren't used to resolve conflicts
 	for _, binding := range appBindingByDesc {
-		mergedPageBindings = append(mergedPageBindings, binding)
+		result = append(result, binding)
 	}
 
-	return mergedPageBindings
+	return result
 }
 
 func (k KeyMap) FullHelp() [][]key.Binding {

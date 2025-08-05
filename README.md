@@ -138,17 +138,27 @@ Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, configuration can be added either local to the project itself,
 or globally, with the following priority:
 
-1. `./.crush.json`
-2. `./crush.json`
-3. `$HOME/.config/crush/crush.json`
+1. `.crush.json`
+2. `crush.json`
+3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
 
 Configuration itself is stored as a JSON object:
 
 ```json
 {
-   "this-setting": { }
-   "that-setting": { }
+   "this-setting": {"this": "that"},
+   "that-setting": ["ceci", "cela"]
 }
+```
+
+As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
+
+```bash
+# Unix
+$HOME/.local/shared/crush/crush.json
+
+# Windows
+%LOCALAPPDATA%\crush\crush.json
 ```
 
 ### LSPs
@@ -244,6 +254,53 @@ permissions. Use this with care.
 
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
+
+### Local Models
+
+Local models can also be configured via OpenAI-compatible API. Here are two common examples:
+
+#### Ollama
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen3:30b",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+}
+```
+
+#### LM Studio
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:1234/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen/qwen3-30b-a3b-2507",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}
+```
 
 ### Custom Providers
 

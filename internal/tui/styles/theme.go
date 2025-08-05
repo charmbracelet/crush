@@ -509,7 +509,7 @@ func NewManager() *Manager {
 	}
 
 	t := NewCharmtoneTheme() // default theme
-	m.Register(NewCharmtoneTheme())
+	m.Register(t)
 	m.current = m.themes[t.Name]
 
 	return m

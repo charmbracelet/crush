@@ -57,7 +57,6 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 		}
 
 		// Determine icon color and description based on state
-		// iconColor := t.FgMuted
 		icon := t.ItemOfflineIcon
 		description := l.LSP.Command
 

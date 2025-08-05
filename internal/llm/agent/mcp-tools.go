@@ -203,7 +203,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 	}
 }
 
-// for MCP's HTTP client.
+// for MCP's clients.
 type mcpLogger struct{}
 
 func (l mcpLogger) Errorf(format string, v ...any) { slog.Error(fmt.Sprintf(format, v...)) }

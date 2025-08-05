@@ -314,6 +314,48 @@ Custom Anthropic-compatible providers follow this format:
 }
 ```
 
+### Amazon Bedrock
+
+Crush currently supports running Anthropic models through Bedrock, with caching disabled.
+
+* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+
+### Vertex AI Platform
+
+Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
+
+```bash
+gcloud auth application-default login
+```
+
+To add specific models to the configuration, configure as such:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "vertexai": {
+      "models": [
+        {
+          "id": "claude-sonnet-4@20250514",
+          "name": "VertexAI Sonnet 4",
+          "cost_per_1m_in": 3,
+          "cost_per_1m_out": 15,
+          "cost_per_1m_in_cached": 3.75,
+          "cost_per_1m_out_cached": 0.3,
+          "context_window": 200000,
+          "default_max_tokens": 50000,
+          "can_reason": true,
+          "supports_attachments": true
+        }
+      ]
+    }
+  }
+}
+```
+
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of

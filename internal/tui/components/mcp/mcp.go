@@ -54,25 +54,24 @@ func RenderMCPList(opts RenderOptions) []string {
 		}
 
 		// Determine icon and color based on state
-		iconColor := t.FgMuted
+		icon := t.ItemOfflineIcon
 		description := l.MCP.Command
 		extraContent := ""
 
 		if state, exists := mcpStates[l.Name]; exists {
 			switch state.State {
 			case agent.MCPStateDisabled:
-				iconColor = t.FgMuted
 				description = t.S().Subtle.Render("disabled")
 			case agent.MCPStateStarting:
-				iconColor = t.Yellow
+				icon = t.ItemBusyIcon
 				description = t.S().Subtle.Render("starting...")
 			case agent.MCPStateConnected:
-				iconColor = t.Success
+				icon = t.ItemOnlineIcon
 				if state.ToolCount > 0 {
 					extraContent = t.S().Subtle.Render(fmt.Sprintf("(%d tools)", state.ToolCount))
 				}
 			case agent.MCPStateError:
-				iconColor = t.Red
+				icon = t.ItemErrorIcon
 				if state.Error != nil {
 					description = t.S().Subtle.Render(fmt.Sprintf("error: %s", state.Error.Error()))
 				} else {
@@ -80,14 +79,13 @@ func RenderMCPList(opts RenderOptions) []string {
 				}
 			}
 		} else if l.MCP.Disabled {
-			iconColor = t.FgMuted
 			description = t.S().Subtle.Render("disabled")
 		}
 
 		mcpList = append(mcpList,
 			core.Status(
 				core.StatusOpts{
-					IconColor:    iconColor,
+					Icon:         icon.String(),
 					Title:        l.Name,
 					Description:  description,
 					ExtraContent: extraContent,

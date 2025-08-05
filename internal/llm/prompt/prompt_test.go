@@ -82,7 +82,7 @@ func TestProcessContextPaths(t *testing.T) {
 	}
 
 	// Test with absolute path to file
-	result := processContextPaths("", []string{testFile})
+	result := ProcessContextPaths("", []string{testFile})
 	expected := "# From:" + testFile + "\n" + testContent
 
 	if result != expected {
@@ -90,7 +90,7 @@ func TestProcessContextPaths(t *testing.T) {
 	}
 
 	// Test with directory path (should process all files in directory)
-	result = processContextPaths("", []string{tmpDir})
+	result = ProcessContextPaths("", []string{tmpDir})
 	if !strings.Contains(result, testContent) {
 		t.Errorf("processContextPaths with directory path failed to include file content")
 	}
@@ -104,7 +104,7 @@ func TestProcessContextPaths(t *testing.T) {
 		defer os.Remove(homeTestFile) // Clean up
 
 		tildeFile := "~/crush_test_file.txt"
-		result = processContextPaths("", []string{tildeFile})
+		result = ProcessContextPaths("", []string{tildeFile})
 		expected = "# From:" + homeTestFile + "\n" + testContent
 
 		if result != expected {

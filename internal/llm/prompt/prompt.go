@@ -39,7 +39,7 @@ func GetPrompt(promptID PromptID, provider string, contextPaths ...string) strin
 }
 
 func getContextFromPaths(workingDir string, contextPaths []string) string {
-	return processContextPaths(workingDir, contextPaths)
+	return ProcessContextPaths(workingDir, contextPaths)
 }
 
 // expandPath expands ~ and environment variables in file paths
@@ -68,7 +68,7 @@ func expandPath(path string) string {
 	return path
 }
 
-func processContextPaths(workDir string, paths []string) string {
+func ProcessContextPaths(workDir string, paths []string) string {
 	var (
 		wg       sync.WaitGroup
 		resultCh = make(chan string)

@@ -6,7 +6,7 @@
     }
   },
   "keymaps": {
-    "quit": ["ctrl+q"],
+    "quit": "ctrl+q",
     "help": "?",
     "commands": "ctrl+k"
   }

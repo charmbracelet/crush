@@ -458,8 +458,10 @@ func (a *appModel) View() tea.View {
 
 	page := a.pages[a.currentPage]
 	if withHelp, ok := page.(core.KeyMapHelp); ok {
-		a.status.SetKeyMap(withHelp.Help())
+		pageHelp := withHelp.Help()
+		a.keyMap.pageBindings = pageHelp.ShortHelp()
 	}
+	a.status.SetKeyMap(a.keyMap)
 	pageView := page.View()
 	components := []string{
 		pageView,

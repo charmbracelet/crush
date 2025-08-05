@@ -166,6 +166,12 @@ brews:
       fish_completion.install "completions/{{ .ProjectName }}.fish"
       man1.install "manpages/{{ .ProjectName }}.1.gz"
 
+scoops:
+  - repository:
+      owner: charmbracelet
+      name: scoop-bucket
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+
 npms:
   - name: "@charmland/crush"
     repository: "git+https://github.com/charmbracelet/crush.git"

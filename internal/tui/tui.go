@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/keymap"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -516,6 +517,9 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
+	// Initialize global keymaps with user customizations at startup
+	keymap.InitializeGlobalKeyMap(app.Config().KeyMaps)
+	
 	chatPage := chat.New(app)
 	keyMap := NewKeyMapWithCustom(app.Config().KeyMaps)
 	keyMap.pageBindings = chatPage.Bindings()

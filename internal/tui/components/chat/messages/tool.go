@@ -165,7 +165,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
-		if key.Matches(msg, copyKey) {
+		if key.Matches(msg, CopyKey) {
 			return m, m.copyTool()
 		}
 	}

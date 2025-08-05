@@ -25,7 +25,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
-var copyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
+// CopyKey is the key binding for copying message content to the clipboard.
+var CopyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
 
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
@@ -99,7 +100,7 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.KeyPressMsg:
-		if key.Matches(msg, copyKey) {
+		if key.Matches(msg, CopyKey) {
 			err := clipboard.WriteAll(m.message.Content().Text)
 			if err != nil {
 				return m, util.ReportError(fmt.Errorf("failed to copy message content to clipboard: %w", err))

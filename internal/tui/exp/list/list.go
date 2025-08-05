@@ -1,7 +1,6 @@
 package list
 
 import (
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 )
 
 type Item interface {
@@ -50,6 +51,11 @@ type List[T Item] interface {
 	AppendItem(T) tea.Cmd
 	StartSelection(col, line int)
 	EndSelection(col, line int)
+	SelectionStop()
+	SelectionClear()
+	SelectWord(col, line int)
+	SelectParagraph(col, line int)
+	GetSelectedText(paddingLeft int) string
 }
 
 type direction int
@@ -103,6 +109,8 @@ type list[T Item] struct {
 	selectionStartLine int
 	selectionEndCol    int
 	selectionEndLine   int
+
+	selectionActive bool
 }
 
 type ListOption func(*confOptions)
@@ -298,7 +306,8 @@ func (l *list[T]) View() string {
 		Height(l.height).
 		Width(l.width).
 		Render(strings.Join(lines, "\n"))
-	if l.selectionStartCol < 0 {
+
+	if !l.hasSelection() {
 		return view
 	}
 	area := uv.Rect(0, 0, l.width, l.height)
@@ -311,8 +320,8 @@ func (l *list[T]) View() string {
 	}
 	selArea = selArea.Canon()
 
-	specialChars := make(map[string]bool, len(styles.AllIcons))
-	for _, icon := range styles.AllIcons {
+	specialChars := make(map[string]bool, len(styles.SelectionIgnoreIcons))
+	for _, icon := range styles.SelectionIgnoreIcons {
 		specialChars[icon] = true
 	}
 
@@ -951,20 +960,66 @@ func (l *list[T]) decrementOffset(n int) {
 
 // MoveDown implements List.
 func (l *list[T]) MoveDown(n int) tea.Cmd {
+	oldOffset := l.offset
 	if l.direction == DirectionForward {
 		l.incrementOffset(n)
 	} else {
 		l.decrementOffset(n)
+	}
+
+	if oldOffset == l.offset {
+		// no change in offset, so no need to change selection
+		return nil
+	}
+	// if we are not actively selecting move the whole selection down
+	if l.hasSelection() && !l.selectionActive {
+		if l.selectionStartLine < l.selectionEndLine {
+			l.selectionStartLine -= n
+			l.selectionEndLine -= n
+		} else {
+			l.selectionStartLine -= n
+			l.selectionEndLine -= n
+		}
+	}
+	if l.selectionActive {
+		if l.selectionStartLine < l.selectionEndLine {
+			l.selectionStartLine -= n
+		} else {
+			l.selectionEndLine -= n
+		}
 	}
 	return l.changeSelectionWhenScrolling()
 }
 
 // MoveUp implements List.
 func (l *list[T]) MoveUp(n int) tea.Cmd {
+	oldOffset := l.offset
 	if l.direction == DirectionForward {
 		l.decrementOffset(n)
 	} else {
 		l.incrementOffset(n)
+	}
+
+	if oldOffset == l.offset {
+		// no change in offset, so no need to change selection
+		return nil
+	}
+
+	if l.hasSelection() && !l.selectionActive {
+		if l.selectionStartLine > l.selectionEndLine {
+			l.selectionStartLine += n
+			l.selectionEndLine += n
+		} else {
+			l.selectionStartLine += n
+			l.selectionEndLine += n
+		}
+	}
+	if l.selectionActive {
+		if l.selectionStartLine > l.selectionEndLine {
+			l.selectionStartLine += n
+		} else {
+			l.selectionEndLine += n
+		}
 	}
 	return l.changeSelectionWhenScrolling()
 }
@@ -1164,18 +1219,224 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+func (l *list[T]) hasSelection() bool {
+	return l.selectionEndCol != l.selectionStartCol || l.selectionEndLine != l.selectionStartLine
+}
+
 // StartSelection implements List.
 func (l *list[T]) StartSelection(col, line int) {
 	l.selectionStartCol = col
 	l.selectionStartLine = line
 	l.selectionEndCol = col
 	l.selectionEndLine = line
-	slog.Info("Position", "col", col, "line", line)
+	l.selectionActive = true
 }
 
 // EndSelection implements List.
 func (l *list[T]) EndSelection(col, line int) {
+	if !l.selectionActive {
+		return
+	}
 	l.selectionEndCol = col
 	l.selectionEndLine = line
-	slog.Info("Position", "col", col, "line", line)
+}
+
+func (l *list[T]) SelectionStop() {
+	l.selectionActive = false
+}
+
+func (l *list[T]) SelectionClear() {
+	l.selectionStartCol = -1
+	l.selectionStartLine = -1
+	l.selectionEndCol = -1
+	l.selectionEndLine = -1
+	l.selectionActive = false
+}
+
+func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
+	lines := strings.Split(l.rendered, "\n")
+	for i, l := range lines {
+		lines[i] = ansi.Strip(l)
+	}
+
+	if l.direction == DirectionBackward {
+		line = ((len(lines) - 1) - l.height) + line + 1
+	}
+
+	if l.offset > 0 {
+		if l.direction == DirectionBackward {
+			line -= l.offset
+		} else {
+			line += l.offset
+		}
+	}
+
+	currentLine := lines[line]
+	gr := uniseg.NewGraphemes(currentLine)
+	startCol = -1
+	upTo := col
+	for gr.Next() {
+		if gr.IsWordBoundary() && upTo > 0 {
+			startCol = col - upTo + 1
+		} else if gr.IsWordBoundary() && upTo < 0 {
+			endCol = col - upTo + 1
+			break
+		}
+		if upTo == 0 && gr.Str() == " " {
+			return 0, 0
+		}
+		upTo -= 1
+	}
+	if startCol == -1 {
+		return 0, 0
+	}
+	return
+}
+
+func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, found bool) {
+	lines := strings.Split(l.rendered, "\n")
+	for i, l := range lines {
+		lines[i] = ansi.Strip(l)
+		for _, icon := range styles.SelectionIgnoreIcons {
+			lines[i] = strings.ReplaceAll(lines[i], icon, " ")
+		}
+	}
+	if l.direction == DirectionBackward {
+		line = (len(lines) - 1) - l.height + line + 1
+	}
+
+	if strings.TrimSpace(lines[line]) == "" {
+		return 0, 0, false
+	}
+
+	if l.offset > 0 {
+		if l.direction == DirectionBackward {
+			line -= l.offset
+		} else {
+			line += l.offset
+		}
+	}
+
+	// Ensure line is within bounds
+	if line < 0 || line >= len(lines) {
+		return 0, 0, false
+	}
+
+	// Find start of paragraph (search backwards for empty line or start of text)
+	startLine = line
+	for startLine > 0 && strings.TrimSpace(lines[startLine-1]) != "" {
+		startLine--
+	}
+
+	// Find end of paragraph (search forwards for empty line or end of text)
+	endLine = line
+	for endLine < len(lines)-1 && strings.TrimSpace(lines[endLine+1]) != "" {
+		endLine++
+	}
+
+	// revert the line numbers if we are in backward direction
+	if l.direction == DirectionBackward {
+		startLine = startLine - (len(lines) - 1) + l.height - 1
+		endLine = endLine - (len(lines) - 1) + l.height - 1
+	}
+	if l.offset > 0 {
+		if l.direction == DirectionBackward {
+			startLine += l.offset
+			endLine += l.offset
+		} else {
+			startLine -= l.offset
+			endLine -= l.offset
+		}
+	}
+	return startLine, endLine, true
+}
+
+// SelectWord selects the word at the given position.
+func (l *list[T]) SelectWord(col, line int) {
+	startCol, endCol := l.findWordBoundaries(col, line)
+	l.selectionStartCol = startCol
+	l.selectionStartLine = line
+	l.selectionEndCol = endCol
+	l.selectionEndLine = line
+	l.selectionActive = false // Not actively selecting, just selected
+}
+
+// SelectParagraph selects the paragraph at the given position.
+func (l *list[T]) SelectParagraph(col, line int) {
+	startLine, endLine, found := l.findParagraphBoundaries(line)
+	if !found {
+		return
+	}
+	l.selectionStartCol = 0
+	l.selectionStartLine = startLine
+	l.selectionEndCol = l.width - 1
+	l.selectionEndLine = endLine
+	l.selectionActive = false // Not actively selecting, just selected
+}
+
+// GetSelectedText returns the currently selected text.
+func (l *list[T]) GetSelectedText(paddingLeft int) string {
+	return ""
+	// if !l.hasSelection() {
+	// 	return ""
+	// }
+	//
+	// startLine := l.selectionStartLine
+	// endLine := l.selectionEndLine
+	// startCol := l.selectionStartCol
+	// endCol := l.selectionEndCol
+	//
+	// if l.direction == DirectionBackward {
+	// 	startLine = (lipgloss.Height(l.rendered) - 1) - startLine
+	// 	endLine = (lipgloss.Height(l.rendered) - 1) - endLine
+	// }
+	//
+	// if l.offset > 0 {
+	// 	if l.direction == DirectionBackward {
+	// 		startLine += l.offset
+	// 		endLine += l.offset
+	// 	} else {
+	// 		startLine -= l.offset
+	// 		endLine -= l.offset
+	// 	}
+	// }
+	//
+	// lines := strings.Split(l.rendered, "\n")
+	//
+	// if startLine < 0 || endLine < 0 || startLine >= len(lines) || endLine >= len(lines) {
+	// 	return ""
+	// }
+	//
+	// var result strings.Builder
+	// for i := range lines {
+	// 	lines[i] = ansi.Strip(lines[i])
+	// 	for _, icon := range styles.SelectionIgnoreIcons {
+	// 		lines[i] = strings.ReplaceAll(lines[i], icon, " ")
+	// 	}
+	//
+	// 	if i == startLine {
+	// 		if startCol < 0 || startCol >= len(lines[i]) {
+	// 			startCol = 0
+	// 		}
+	// 		if startCol < paddingLeft {
+	// 			startCol = paddingLeft
+	// 		}
+	// 		if i != endLine {
+	// 			endCol = len(lines[i])
+	// 		}
+	// 		result.WriteString(strings.TrimRightFunc(lines[i][startCol:endCol], unicode.IsSpace))
+	// 	} else if i > startLine && i < endLine {
+	// 		result.WriteString(strings.TrimRightFunc(lines[i][paddingLeft:], unicode.IsSpace))
+	// 	} else if i == endLine {
+	// 		if endCol < 0 || endCol >= len(lines[i]) {
+	// 			endCol = len(lines[i])
+	// 		}
+	// 		if endCol < paddingLeft {
+	// 			endCol = paddingLeft
+	// 		}
+	// 		result.WriteString(strings.TrimRightFunc(lines[i][paddingLeft:endCol], unicode.IsSpace))
+	// 	}
+	// }
+	//
+	// return result.String()
 }

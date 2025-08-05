@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -42,6 +44,8 @@ type MessageListCmp interface {
 
 	SetSession(session.Session) tea.Cmd
 	GoToBottom() tea.Cmd
+	GetSelectedText() string
+	CopySelectedText() tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -56,6 +60,12 @@ type messageListCmp struct {
 
 	lastUserMessageTime int64
 	defaultListKeyMap   list.KeyMap
+
+	// Click tracking for double/triple click detection
+	lastClickTime time.Time
+	lastClickX    int
+	lastClickY    int
+	clickCount    int
 }
 
 // New creates a new message list component with custom keybindings
@@ -87,23 +97,42 @@ func (m *messageListCmp) Init() tea.Cmd {
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			return m, nil // Ignore clicks outside the component
+		}
 		if msg.Button == tea.MouseLeft {
-			m.listCmp.StartSelection(msg.X, msg.Y-1)
+			return m, m.handleMouseClick(x, y)
 		}
 		return m, nil
 	case tea.MouseMotionMsg:
-		if msg.Button == tea.MouseLeft {
-			m.listCmp.EndSelection(msg.X, msg.Y-1)
-			if msg.Y <= 1 {
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			if y < 0 {
 				return m, m.listCmp.MoveUp(1)
-			} else if msg.Y >= m.height-1 {
+			}
+			if y >= m.height-1 {
 				return m, m.listCmp.MoveDown(1)
 			}
+			return m, nil // Ignore clicks outside the component
+		}
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.EndSelection(x, y)
 		}
 		return m, nil
 	case tea.MouseReleaseMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
 		if msg.Button == tea.MouseLeft {
-			m.listCmp.EndSelection(msg.X, msg.Y-1)
+			if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+				m.listCmp.SelectionStop()
+				return m, m.CopySelectedText()
+			}
+			m.listCmp.EndSelection(x, y)
+			m.listCmp.SelectionStop()
+			return m, m.CopySelectedText()
 		}
 		return m, nil
 	case pubsub.Event[permission.PermissionNotification]:
@@ -585,4 +614,70 @@ func (m *messageListCmp) Bindings() []key.Binding {
 
 func (m *messageListCmp) GoToBottom() tea.Cmd {
 	return m.listCmp.GoToBottom()
+}
+
+// handleMouseClick handles mouse click events and detects double/triple clicks.
+func (m *messageListCmp) handleMouseClick(x, y int) tea.Cmd {
+	const (
+		doubleClickThreshold = 500 * time.Millisecond
+		clickTolerance       = 2 // pixels
+	)
+
+	now := time.Now()
+
+	// Check if this is a potential multi-click
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(x-m.lastClickX) <= clickTolerance &&
+		abs(y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+
+	m.lastClickTime = now
+	m.lastClickX = x
+	m.lastClickY = y
+
+	switch m.clickCount {
+	case 1:
+		// Single click - start selection
+		m.listCmp.StartSelection(x, y)
+	case 2:
+		// Double click - select word
+		m.listCmp.SelectWord(x, y)
+	case 3:
+		// Triple click - select paragraph
+		m.listCmp.SelectParagraph(x, y)
+		m.clickCount = 0 // Reset after triple click
+	}
+
+	return nil
+}
+
+// GetSelectedText returns the currently selected text from the list component.
+func (m *messageListCmp) GetSelectedText() string {
+	return m.listCmp.GetSelectedText(3) // 3 padding for the left border/padding
+}
+
+// CopySelectedText copies the currently selected text to the clipboard.
+func (m *messageListCmp) CopySelectedText() tea.Cmd {
+	return nil
+	selectedText := m.GetSelectedText()
+	if selectedText == "" {
+		return util.ReportInfo("No text selected")
+	}
+
+	err := clipboard.WriteAll(selectedText)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to copy selected text to clipboard: %w", err))
+	}
+	return util.ReportInfo("Selected text copied to clipboard")
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

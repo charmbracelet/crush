@@ -16,24 +16,26 @@ const (
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
 
-	BorderThin string = "│"
+	BorderThin  string = "│"
+	BorderThick string = "▌"
 )
 
-var AllIcons = []string{
-	CheckIcon,
-	ErrorIcon,
-	WarningIcon,
-	InfoIcon,
-	HintIcon,
-	SpinnerIcon,
-	LoadingIcon,
-	DocumentIcon,
-	ModelIcon,
-
-	// Tool call icons
-	ToolPending,
-	ToolSuccess,
-	ToolError,
+var SelectionIgnoreIcons = []string{
+	// CheckIcon,
+	// ErrorIcon,
+	// WarningIcon,
+	// InfoIcon,
+	// HintIcon,
+	// SpinnerIcon,
+	// LoadingIcon,
+	// DocumentIcon,
+	// ModelIcon,
+	//
+	// // Tool call icons
+	// ToolPending,
+	// ToolSuccess,
+	// ToolError,
 
 	BorderThin,
+	BorderThick,
 }

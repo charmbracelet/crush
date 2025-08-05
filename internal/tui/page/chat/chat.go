@@ -172,30 +172,22 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft {
-			if p.isMouseOverChat(msg.X, msg.Y) {
-				u, cmd := p.chat.Update(msg)
-				p.chat = u.(chat.MessageListCmp)
-				return p, cmd
-			}
-		}
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
 		return p, nil
 	case tea.MouseMotionMsg:
 		if msg.Button == tea.MouseLeft {
-			if p.isMouseOverChat(msg.X, msg.Y) {
-				u, cmd := p.chat.Update(msg)
-				p.chat = u.(chat.MessageListCmp)
-				return p, cmd
-			}
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
 		if msg.Button == tea.MouseLeft {
-			if p.isMouseOverChat(msg.X, msg.Y) {
-				u, cmd := p.chat.Update(msg)
-				p.chat = u.(chat.MessageListCmp)
-				return p, cmd
-			}
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
 		}
 		return p, nil
 	case tea.WindowSizeMsg:

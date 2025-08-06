@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -122,14 +123,15 @@ func runTool(ctx context.Context, name, toolName string, input string) (tools.To
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}
 
-	output := ""
+	var outputs []string
 	for _, v := range result.Content {
 		if v, ok := v.(mcp.TextContent); ok {
-			output = v.Text
+			outputs = append(outputs, v.Text)
 		} else {
-			output = fmt.Sprintf("%v", v)
+			outputs = append(outputs, fmt.Sprintf("%v", v))
 		}
 	}
+	output := strings.Join(outputs, "\n")
 
 	return tools.NewTextResponse(output), nil
 }

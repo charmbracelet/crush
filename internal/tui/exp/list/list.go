@@ -415,8 +415,12 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 					continue
 				}
 
+				// Text selection styling, which is a Lip Gloss style. We must
+				// extract the values to use in a UV style, below.
+				ts := t.TextSelection
+
 				cell = cell.Clone()
-				cell.Style = cell.Style.Background(t.BgOverlay).Foreground(t.White)
+				cell.Style = cell.Style.Background(ts.GetBackground()).Foreground(ts.GetForeground())
 				scr.SetCell(x, y, cell)
 			}
 		}

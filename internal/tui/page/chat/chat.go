@@ -166,6 +166,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.keyboardEnhancements = msg
 		return p, nil
 	case tea.MouseWheelMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
 		if p.isMouseOverChat(msg.X, msg.Y) {
 			u, cmd := p.chat.Update(msg)
 			p.chat = u.(chat.MessageListCmp)
@@ -173,6 +176,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
 		if p.isMouseOverChat(msg.X, msg.Y) {
 			p.focusedPane = PanelTypeChat
 			p.chat.Focus()
@@ -186,6 +192,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.chat = u.(chat.MessageListCmp)
 		return p, cmd
 	case tea.MouseMotionMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
 		if msg.Button == tea.MouseLeft {
 			u, cmd := p.chat.Update(msg)
 			p.chat = u.(chat.MessageListCmp)
@@ -193,6 +202,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
 		if msg.Button == tea.MouseLeft {
 			u, cmd := p.chat.Update(msg)
 			p.chat = u.(chat.MessageListCmp)

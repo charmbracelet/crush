@@ -42,7 +42,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("s", "allow session"),
 		),
 		Deny: key.NewBinding(
-			key.WithKeys("d", "D", "ctrl+d"),
+			key.WithKeys("d", "D", "ctrl+d", "esc"),
 			key.WithHelp("d", "deny"),
 		),
 		Select: key.NewBinding(

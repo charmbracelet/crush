@@ -56,6 +56,7 @@ type List[T Item] interface {
 	SelectWord(col, line int)
 	SelectParagraph(col, line int)
 	GetSelectedText(paddingLeft int) string
+	HasSelection() bool
 }
 
 type direction int
@@ -286,30 +287,10 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	return l, cmd
 }
 
-// View implements List.
-func (l *list[T]) View() string {
-	if l.height <= 0 || l.width <= 0 {
-		return ""
-	}
+// selectionView renders the highlighted selection in the view and returns it
+// as a string. If textOnly is true, it won't render any styles.
+func (l *list[T]) selectionView(view string, textOnly bool) string {
 	t := styles.CurrentTheme()
-	view := l.rendered
-	lines := strings.Split(view, "\n")
-
-	start, end := l.viewPosition()
-	viewStart := max(0, start)
-	viewEnd := min(len(lines), end+1)
-	lines = lines[viewStart:viewEnd]
-	if l.resize {
-		return strings.Join(lines, "\n")
-	}
-	view = t.S().Base.
-		Height(l.height).
-		Width(l.width).
-		Render(strings.Join(lines, "\n"))
-
-	if !l.hasSelection() {
-		return view
-	}
 	area := uv.Rect(0, 0, l.width, l.height)
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
 	uv.NewStyledString(view).Draw(scr, area)
@@ -397,6 +378,8 @@ func (l *list[T]) View() string {
 		lineTextBounds[y] = bounds
 	}
 
+	var selectedText strings.Builder
+
 	// Second pass: apply selection highlighting
 	for y := range scr.Height() {
 		selBounds := lineSelections[y]
@@ -406,6 +389,11 @@ func (l *list[T]) View() string {
 
 		textBounds := lineTextBounds[y]
 		if textBounds.start < 0 {
+			if textOnly {
+				// We don't want to get rid of all empty lines in text-only mode
+				selectedText.WriteByte('\n')
+			}
+
 			continue // No text on this line
 		}
 
@@ -421,14 +409,61 @@ func (l *list[T]) View() string {
 
 			cellStr := cell.String()
 			if len(cellStr) > 0 && !specialChars[cellStr] {
+				if textOnly {
+					// Collect selected text without styles
+					selectedText.WriteString(cell.String())
+					continue
+				}
+
+				// Text selection styling, which is a Lip Gloss style. We must
+				// extract the values to use in a UV style, below.
+				ts := t.TextSelection
+
 				cell = cell.Clone()
-				cell.Style = cell.Style.Background(t.BgOverlay).Foreground(t.White)
+				cell.Style = cell.Style.Background(ts.GetBackground()).Foreground(ts.GetForeground())
 				scr.SetCell(x, y, cell)
 			}
 		}
+
+		if textOnly {
+			// Make sure we add a newline after each line of selected text
+			selectedText.WriteByte('\n')
+		}
+	}
+
+	if textOnly {
+		return strings.TrimSpace(selectedText.String())
 	}
 
 	return scr.Render()
+}
+
+// View implements List.
+func (l *list[T]) View() string {
+	if l.height <= 0 || l.width <= 0 {
+		return ""
+	}
+	t := styles.CurrentTheme()
+	view := l.rendered
+	lines := strings.Split(view, "\n")
+
+	start, end := l.viewPosition()
+	viewStart := max(0, start)
+	viewEnd := min(len(lines), end+1)
+	lines = lines[viewStart:viewEnd]
+	if l.resize {
+		return strings.Join(lines, "\n")
+	}
+	view = t.S().Base.
+		Height(l.height).
+		Width(l.width).
+		Render(strings.Join(lines, "\n"))
+
+	if !l.hasSelection() {
+		return view
+	}
+
+	return l.selectionView(view, false)
 }
 
 func (l *list[T]) viewPosition() (int, int) {
@@ -1374,69 +1409,16 @@ func (l *list[T]) SelectParagraph(col, line int) {
 	l.selectionActive = false // Not actively selecting, just selected
 }
 
+// HasSelection returns whether there is an active selection.
+func (l *list[T]) HasSelection() bool {
+	return l.hasSelection()
+}
+
 // GetSelectedText returns the currently selected text.
 func (l *list[T]) GetSelectedText(paddingLeft int) string {
-	return ""
-	// if !l.hasSelection() {
-	// 	return ""
-	// }
-	//
-	// startLine := l.selectionStartLine
-	// endLine := l.selectionEndLine
-	// startCol := l.selectionStartCol
-	// endCol := l.selectionEndCol
-	//
-	// if l.direction == DirectionBackward {
-	// 	startLine = (lipgloss.Height(l.rendered) - 1) - startLine
-	// 	endLine = (lipgloss.Height(l.rendered) - 1) - endLine
-	// }
-	//
-	// if l.offset > 0 {
-	// 	if l.direction == DirectionBackward {
-	// 		startLine += l.offset
-	// 		endLine += l.offset
-	// 	} else {
-	// 		startLine -= l.offset
-	// 		endLine -= l.offset
-	// 	}
-	// }
-	//
-	// lines := strings.Split(l.rendered, "\n")
-	//
-	// if startLine < 0 || endLine < 0 || startLine >= len(lines) || endLine >= len(lines) {
-	// 	return ""
-	// }
-	//
-	// var result strings.Builder
-	// for i := range lines {
-	// 	lines[i] = ansi.Strip(lines[i])
-	// 	for _, icon := range styles.SelectionIgnoreIcons {
-	// 		lines[i] = strings.ReplaceAll(lines[i], icon, " ")
-	// 	}
-	//
-	// 	if i == startLine {
-	// 		if startCol < 0 || startCol >= len(lines[i]) {
-	// 			startCol = 0
-	// 		}
-	// 		if startCol < paddingLeft {
-	// 			startCol = paddingLeft
-	// 		}
-	// 		if i != endLine {
-	// 			endCol = len(lines[i])
-	// 		}
-	// 		result.WriteString(strings.TrimRightFunc(lines[i][startCol:endCol], unicode.IsSpace))
-	// 	} else if i > startLine && i < endLine {
-	// 		result.WriteString(strings.TrimRightFunc(lines[i][paddingLeft:], unicode.IsSpace))
-	// 	} else if i == endLine {
-	// 		if endCol < 0 || endCol >= len(lines[i]) {
-	// 			endCol = len(lines[i])
-	// 		}
-	// 		if endCol < paddingLeft {
-	// 			endCol = paddingLeft
-	// 		}
-	// 		result.WriteString(strings.TrimRightFunc(lines[i][paddingLeft:endCol], unicode.IsSpace))
-	// 	}
-	// }
-	//
-	// return result.String()
+	if !l.hasSelection() {
+		return ""
+	}
+
+	return l.selectionView(l.View(), true)
 }

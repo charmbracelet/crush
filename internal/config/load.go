@@ -27,6 +27,24 @@ func LoadReader(fd io.Reader) (*Config, error) {
 		return nil, err
 	}
 
+	// First, validate the JSON structure for unknown fields
+	var rawConfig map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawConfig); err != nil {
+		return nil, err
+	}
+
+	// Validate providers configuration
+	if providersRaw, exists := rawConfig["providers"]; exists {
+		var providersMap map[string]json.RawMessage
+		if err := json.Unmarshal(providersRaw, &providersMap); err == nil {
+			for providerName, providerRaw := range providersMap {
+				result := validateProviderJSON(providerName, providerRaw)
+				logValidationWarnings(providerName, result)
+			}
+		}
+	}
+
+	// Now unmarshal into the actual config struct
 	var config Config
 	err = json.Unmarshal(data, &config)
 	if err != nil {

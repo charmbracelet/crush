@@ -134,26 +134,22 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			if p.supportsDiffView() {
-				p.diffYOffset += 1
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollDown()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			if p.supportsDiffView() {
-				p.diffYOffset = max(0, p.diffYOffset-1)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollUp()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
 			if p.supportsDiffView() {
-				p.diffXOffset = max(0, p.diffXOffset-5)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollLeft()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
 			if p.supportsDiffView() {
-				p.diffXOffset += 5
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollRight()
 				return p, nil
 			}
 		default:
@@ -162,9 +158,42 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.contentViewPort = viewPort
 			cmds = append(cmds, cmd)
 		}
+	case tea.MouseWheelMsg:
+		if p.supportsDiffView() {
+			switch msg.Button {
+			case tea.MouseWheelDown:
+				p.scrollDown()
+			case tea.MouseWheelUp:
+				p.scrollUp()
+			case tea.MouseWheelLeft:
+				p.scrollLeft()
+			case tea.MouseWheelRight:
+				p.scrollRight()
+			}
+		}
 	}
 
 	return p, tea.Batch(cmds...)
+}
+
+func (p *permissionDialogCmp) scrollDown() {
+	p.diffYOffset += 1
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollUp() {
+	p.diffYOffset = max(0, p.diffYOffset-1)
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollLeft() {
+	p.diffXOffset = max(0, p.diffXOffset-5)
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollRight() {
+	p.diffXOffset += 5
+	p.contentDirty = true
 }
 
 func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {

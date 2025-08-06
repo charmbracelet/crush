@@ -211,6 +211,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, cmd
 		}
 		return p, nil
+	case chat.SelectionCopyMsg:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
 	case tea.WindowSizeMsg:
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)

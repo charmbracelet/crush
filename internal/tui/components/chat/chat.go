@@ -29,6 +29,12 @@ type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
 
+type SelectionCopyMsg struct {
+	clickCount   int
+	endSelection bool
+	x, y         int
+}
+
 const (
 	NotFound = -1
 )
@@ -134,14 +140,34 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		x := msg.X - 1 // Adjust for padding
 		y := msg.Y - 1 // Adjust for padding
 		if msg.Button == tea.MouseLeft {
+			clickCount := m.clickCount
 			if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
-				m.listCmp.SelectionStop()
-			} else {
-				m.listCmp.EndSelection(x, y)
-				m.listCmp.SelectionStop()
+				return m, tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+					return SelectionCopyMsg{
+						clickCount:   clickCount,
+						endSelection: false,
+					}
+				})
 			}
+			return m, tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+				return SelectionCopyMsg{
+					clickCount:   clickCount,
+					endSelection: true,
+					x:            x,
+					y:            y,
+				}
+			})
 		}
 		return m, nil
+	case SelectionCopyMsg:
+		if msg.clickCount == m.clickCount && time.Since(m.lastClickTime) >= doubleClickThreshold {
+			// If the click count matches and within threshold, copy selected text
+			if msg.endSelection {
+				m.listCmp.EndSelection(msg.x, msg.y)
+			}
+			m.listCmp.SelectionStop()
+			return m, m.CopySelectedText(true)
+		}
 	case pubsub.Event[permission.PermissionNotification]:
 		return m, m.handlePermissionRequest(msg.Payload)
 	case SessionSelectedMsg:
@@ -621,13 +647,13 @@ func (m *messageListCmp) GoToBottom() tea.Cmd {
 	return m.listCmp.GoToBottom()
 }
 
+const (
+	doubleClickThreshold = 500 * time.Millisecond
+	clickTolerance       = 2 // pixels
+)
+
 // handleMouseClick handles mouse click events and detects double/triple clicks.
 func (m *messageListCmp) handleMouseClick(x, y int) tea.Cmd {
-	const (
-		doubleClickThreshold = 500 * time.Millisecond
-		clickTolerance       = 2 // pixels
-	)
-
 	now := time.Now()
 
 	// Check if this is a potential multi-click
@@ -664,6 +690,7 @@ func (m *messageListCmp) SelectionClear() tea.Cmd {
 	m.listCmp.SelectionClear()
 	m.previousSelected = ""
 	m.lastClickX, m.lastClickY = 0, 0
+	m.lastClickTime = time.Time{}
 	m.clickCount = 0
 	return nil
 }

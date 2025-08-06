@@ -67,6 +67,12 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// Message history
+	messageHistory  []string // History of sent messages
+	historyIndex    int      // Current position in history (-1 = no selection)
+	originalValue   string   // Store current draft when navigating history
+	inHistoryMode   bool     // Whether user is currently navigating history
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -153,6 +159,14 @@ func (m *editorCmp) send() tea.Cmd {
 		m.textarea.Reset()
 		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
 	}
+
+	// Store message in history before sending (if not empty)
+	if value != "" {
+		m.addToHistory(value)
+	}
+
+	// Exit history mode when sending
+	m.exitHistoryMode()
 
 	m.textarea.Reset()
 	attachments := m.attachments
@@ -308,9 +322,33 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {
 			m.deleteMode = false
+			// Also exit history mode on escape
+			if m.inHistoryMode {
+				m.exitHistoryMode()
+				// Restore original value if user had something typed
+				if m.originalValue != "" {
+					m.textarea.SetValue(m.originalValue)
+					m.textarea.MoveToEnd()
+				} else {
+					m.textarea.Reset()
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.PreviousMessage) {
+			m.navigateHistory(-1)
+			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.NextMessage) {
+			m.navigateHistory(1)
 			return m, nil
 		}
 		if key.Matches(msg, m.keyMap.Newline) {
+			// Exit history mode when user starts typing new content
+			if m.inHistoryMode {
+				m.exitHistoryMode()
+			}
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
@@ -333,6 +371,15 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
 		if ok {
+			// Exit history mode when user types anything that's not navigation
+			if m.inHistoryMode && !key.Matches(kp, m.keyMap.PreviousMessage) && !key.Matches(kp, m.keyMap.NextMessage) && !key.Matches(kp, DeleteKeyMaps.Escape) {
+				// Check if this is a regular typing key (not special commands)
+				isTypingKey := len(kp.String()) == 1 || kp.String() == "space" || kp.String() == "backspace" || kp.String() == "delete"
+				if isTypingKey {
+					m.exitHistoryMode()
+				}
+			}
+			
 			if kp.String() == "space" || m.textarea.Value() == "" {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
@@ -529,6 +576,86 @@ func (c *editorCmp) HasAttachments() bool {
 	return len(c.attachments) > 0
 }
 
+// addToHistory adds a message to the history, avoiding duplicates and managing size
+func (m *editorCmp) addToHistory(message string) {
+	// Don't add empty messages
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+
+	// Remove if already exists (move to end)
+	for i, existing := range m.messageHistory {
+		if existing == message {
+			m.messageHistory = append(m.messageHistory[:i], m.messageHistory[i+1:]...)
+			break
+		}
+	}
+
+	// Add to end
+	m.messageHistory = append(m.messageHistory, message)
+
+	// Limit history size to 50 messages
+	const maxHistorySize = 50
+	if len(m.messageHistory) > maxHistorySize {
+		m.messageHistory = m.messageHistory[len(m.messageHistory)-maxHistorySize:]
+	}
+}
+
+// navigateHistory moves through the message history
+func (m *editorCmp) navigateHistory(direction int) {
+	if len(m.messageHistory) == 0 {
+		return
+	}
+
+	// Enter history mode if not already in it
+	if !m.inHistoryMode {
+		m.originalValue = m.textarea.Value()
+		m.inHistoryMode = true
+		// Start from the end (most recent) for up, or at "new message" for down
+		if direction < 0 { // Up/Previous
+			m.historyIndex = len(m.messageHistory) - 1
+		} else { // Down/Next
+			m.historyIndex = len(m.messageHistory) // Start at "new message" position
+		}
+	} else {
+		// Navigate within history
+		newIndex := m.historyIndex + direction
+		
+		// Handle bounds: allow going one past the end to show empty message
+		if newIndex < 0 {
+			return // Don't go before the first message
+		}
+		if newIndex > len(m.messageHistory) {
+			return // Don't go past empty message
+		}
+		
+		m.historyIndex = newIndex
+	}
+
+	// Load the message from history or show empty for new message
+	if m.historyIndex >= 0 && m.historyIndex < len(m.messageHistory) {
+		message := m.messageHistory[m.historyIndex]
+		m.textarea.SetValue(message)
+		m.textarea.MoveToEnd()
+	} else if m.historyIndex == len(m.messageHistory) {
+		// This is the "new message" state - show original value or empty
+		if m.originalValue != "" {
+			m.textarea.SetValue(m.originalValue)
+		} else {
+			m.textarea.SetValue("")
+		}
+		m.textarea.MoveToEnd()
+	}
+}
+
+// exitHistoryMode returns to normal editing mode
+func (m *editorCmp) exitHistoryMode() {
+	m.inHistoryMode = false
+	m.historyIndex = -1
+	m.originalValue = ""
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
@@ -550,9 +677,12 @@ func New(app *app.App) Editor {
 
 	e := &editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:           app,
+		textarea:      ta,
+		keyMap:        DefaultEditorKeyMap(),
+		messageHistory: make([]string, 0),
+		historyIndex:  -1,
+		inHistoryMode: false,
 	}
 
 	e.randomizePlaceholders()

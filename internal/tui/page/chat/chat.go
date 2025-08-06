@@ -917,6 +917,10 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("G", "end"),
 					),
 				},
+				[]key.Binding{
+					messages.CopyKey,
+					messages.ClearSelectionKey,
+				},
 			)
 		case PanelTypeEditor:
 			newLineBinding := key.NewBinding(

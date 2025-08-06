@@ -28,6 +28,9 @@ import (
 // CopyKey is the key binding for copying message content to the clipboard.
 var CopyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
 
+// ClearSelectionKey is the key binding for clearing the current selection in the chat interface.
+var ClearSelectionKey = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear selection"))
+
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
 type MessageCmp interface {

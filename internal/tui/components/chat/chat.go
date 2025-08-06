@@ -96,8 +96,13 @@ func (m *messageListCmp) Init() tea.Cmd {
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if key.Matches(msg, messages.CopyKey) && m.listCmp.HasSelection() {
-			return m, m.CopySelectedText(true)
+		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
+			switch {
+			case key.Matches(msg, messages.CopyKey):
+				return m, m.CopySelectedText(true)
+			case key.Matches(msg, messages.ClearSelectionKey):
+				return m, m.SelectionClear()
+			}
 		}
 	case tea.MouseClickMsg:
 		x := msg.X - 1 // Adjust for padding

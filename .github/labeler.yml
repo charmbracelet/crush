@@ -2,6 +2,8 @@
   - "/^ci: /i"
 "area: diff":
   - "/diff/i"
+"area: docs":
+  - "/(docs|documentation|readme)/i"
 "area: images":
   - "/image/i"
 "area: lsp":

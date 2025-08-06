@@ -57,7 +57,63 @@ nix-channel --update
 nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
 ```
 
+### NixOS & Home Manager Module Usage via NUR
+
+Crush provides NixOS and Home Manager modules via NUR.  
+You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nur.url = "github:nix-community/NUR";
+  };
+
+  outputs = { self, nixpkgs, nur, ... }: {
+    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        nur.modules.nixos.default
+        nur.repos.charmbracelet.modules.crush
+        {
+          programs.crush = {
+            enable = true;
+            settings = {
+              providers = {
+                openai = {
+                  id = "openai";
+                  name = "OpenAI";
+                  base_url = "https://api.openai.com/v1";
+                  type = "openai";
+                  api_key = "sk-fake123456789abcdef...";
+                  models = [
+                    {
+                      id = "gpt-4";
+                      name = "GPT-4";
+                    }
+                  ];
+                };
+              };
+              lsp = {
+                go = { command = "gopls"; enabled = true; };
+                nix = { command = "nil"; enabled = true; };
+              };
+              options = {
+                context_paths = [ "/etc/nixos/configuration.nix" ];
+                tui = { compact_mode = true; };
+                debug = false;
+              };
+            };
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
 </details>
+
 
 <details>
 <summary><strong>Debian/Ubuntu</strong></summary>

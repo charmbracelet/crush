@@ -5,6 +5,10 @@
   "$defs": {
     "Config": {
       "properties": {
+        "$schema": {
+          "type": "string",
+          "format": "uri"
+        },
         "models": {
           "additionalProperties": {
             "$ref": "#/$defs/SelectedModel"

@@ -68,7 +68,7 @@ func RenderMCPList(opts RenderOptions) []string {
 			case agent.MCPStateConnected:
 				icon = t.ItemOnlineIcon
 				if state.ToolCount > 0 {
-					extraContent = t.S().Subtle.Render(fmt.Sprintf("(%d tools)", state.ToolCount))
+					extraContent = t.S().Subtle.Render(fmt.Sprintf("%d tools", state.ToolCount))
 				}
 			case agent.MCPStateError:
 				icon = t.ItemErrorIcon

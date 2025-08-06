@@ -281,6 +281,7 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
         }
       ]
     }
+  }
 }
 ```
 

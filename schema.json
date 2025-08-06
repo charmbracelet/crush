@@ -62,6 +62,16 @@
         },
         "options": {
           "description": "LSP server-specific configuration options"
+        },
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "File extensions this LSP should handle",
+          "examples": [
+            [".wxss", ".wxml"]
+          ]
         }
       },
       "additionalProperties": false,

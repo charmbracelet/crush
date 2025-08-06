@@ -188,6 +188,99 @@ like you would. LSPs can be added manually like so:
 }
 ```
 
+#### Custom Language Servers
+
+You can configure custom LSP servers for special file types using the `extensions` field. This is perfect for non-standard file extensions like `.wxss`, `.wxml`, or any custom file type.
+
+#### Basic Custom File Type Configuration
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "wxss-lsp": {
+      "command": "vscode-css-language-server",
+      "args": ["--stdio"],
+      "extensions": [".wxss"]
+    },
+    "wxml-lsp": {
+      "command": "vscode-html-language-server",
+      "args": ["--stdio"],
+      "extensions": [".wxml"]
+    }
+  }
+}
+```
+
+#### Advanced Multi-Extension Configuration
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "miniprogram-lsp": {
+      "command": "vscode-css-language-server",
+      "args": ["--stdio"],
+      "extensions": [".wxss", ".wxml", ".wxs"]
+    },
+    "vtsls": {
+      "command": "vtsls",
+      "args": ["--stdio"],
+      "extensions": [".js", ".jsx", ".ts", ".tsx"]
+    }
+  }
+}
+```
+
+#### Common Custom File Type Examples
+
+**WeChat Mini Program Development:**
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "wxss-css": {
+      "command": "vscode-css-language-server",
+      "args": ["--stdio"],
+      "extensions": [".wxss"]
+    },
+    "wxml-html": {
+      "command": "vscode-html-language-server",
+      "args": ["--stdio"],
+      "extensions": [".wxml"]
+    }
+  }
+}
+```
+
+**Vue.js Development:**
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "vue-lsp": {
+      "command": "vue-language-server",
+      "args": ["--stdio"],
+      "extensions": [".vue"]
+    }
+  }
+}
+```
+
+**Custom Template Languages:**
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "handlebars": {
+      "command": "handlebars-language-server",
+      "args": ["--stdio"],
+      "extensions": [".hbs", ".handlebars"]
+    }
+  }
+}
+```
+
 ### MCPs
 
 Crush also supports Model Context Protocol (MCP) servers through three

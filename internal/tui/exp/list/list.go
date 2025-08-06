@@ -1294,7 +1294,7 @@ func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
 		lines[i] = ansi.Strip(l)
 	}
 
-	if l.direction == DirectionBackward {
+	if l.direction == DirectionBackward && len(lines) > l.height {
 		line = ((len(lines) - 1) - l.height) + line + 1
 	}
 
@@ -1336,7 +1336,7 @@ func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, fou
 			lines[i] = strings.ReplaceAll(lines[i], icon, " ")
 		}
 	}
-	if l.direction == DirectionBackward {
+	if l.direction == DirectionBackward && len(lines) > l.height {
 		line = (len(lines) - 1) - l.height + line + 1
 	}
 
@@ -1370,7 +1370,7 @@ func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, fou
 	}
 
 	// revert the line numbers if we are in backward direction
-	if l.direction == DirectionBackward {
+	if l.direction == DirectionBackward && len(lines) > l.height {
 		startLine = startLine - (len(lines) - 1) + l.height - 1
 		endLine = endLine - (len(lines) - 1) + l.height - 1
 	}

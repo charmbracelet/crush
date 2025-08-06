@@ -159,7 +159,7 @@ As an additional note, Crush also stores ephemeral data, such as application sta
 
 ```bash
 # Unix
-$HOME/.local/shared/crush/crush.json
+$HOME/.local/share/crush/crush.json
 
 # Windows
 %LOCALAPPDATA%\crush\crush.json

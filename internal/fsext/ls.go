@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/csync"
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-// CommonIgnorePatterns contains commonly ignored files and directories
-var CommonIgnorePatterns = []string{
+// commonIgnorePatterns contains commonly ignored files and directories
+var commonIgnorePatterns = ignore.CompileIgnoreLines(
 	// Version control
 	".git",
 	".svn",
@@ -68,62 +69,74 @@ var CommonIgnorePatterns = []string{
 
 	// Crush
 	".crush",
-}
+)
 
-type DirectoryLister struct {
-	ignores  *ignore.GitIgnore
+type directoryLister struct {
+	ignores  *csync.Map[string, ignore.IgnoreParser]
 	rootPath string
 }
 
-func NewDirectoryLister(rootPath string) *DirectoryLister {
-	dl := &DirectoryLister{
+func NewDirectoryLister(rootPath string) *directoryLister {
+	return &directoryLister{
 		rootPath: rootPath,
+		ignores:  csync.NewMap[string, ignore.IgnoreParser](),
 	}
-
-	dl.ignores = ignore.CompileIgnoreLines(append(CommonIgnorePatterns, strings.Split(parseIgnores(rootPath), "\n")...)...)
-
-	return dl
 }
 
-func parseIgnores(path string) string {
-	var b bytes.Buffer
-	for _, ign := range []string{".crushignore", ".gitignore"} {
-		p := filepath.Join(path, ign)
-		if _, err := os.Stat(p); err == nil {
-			f, err := os.Open(p)
-			if err != nil {
-				_ = f.Close()
-				slog.Error("Failed to open ignore file", "path", p, "error", err)
-				continue
-			}
-			if _, err := io.Copy(&b, f); err != nil {
-				slog.Error("Failed to read ignore file", "path", p, "error", err)
-			}
-			_ = f.Close()
-		}
-	}
-	return b.String()
-}
-
-func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
+func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
 	relPath, err := filepath.Rel(dl.rootPath, path)
 	if err != nil {
 		relPath = path
 	}
 
-	if dl.ignores.MatchesPath(relPath) {
-		return true
-	}
-
 	base := filepath.Base(path)
-
 	for _, pattern := range ignorePatterns {
 		matched, err := filepath.Match(pattern, base)
 		if err == nil && matched {
+			slog.Info("ignoring path", "path", path)
 			return true
 		}
 	}
-	return false
+
+	if commonIgnorePatterns.MatchesPath(relPath) || dl.getIgnore(path).MatchesPath(relPath) {
+		slog.Info("ignoring path", "path", path)
+		return true
+	}
+
+	parent := filepath.Dir(path)
+	for {
+		if dl.getIgnore(parent).MatchesPath(path) {
+			slog.Info("ignoring path", "path", path, "parent", parent)
+			return true
+		}
+		if parent == "/" || parent == "." { // TODO: windows
+			return false
+		}
+		parent = filepath.Dir(parent)
+	}
+}
+
+func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
+	return dl.ignores.GetOrSet(path, func() ignore.IgnoreParser {
+		var b bytes.Buffer
+		for _, ign := range []string{".crushignore", ".gitignore"} {
+			p := filepath.Join(path, ign)
+			if _, err := os.Stat(p); err == nil {
+				slog.Info("loading ignore file", "path", p)
+				f, err := os.Open(p)
+				if err != nil {
+					_ = f.Close()
+					slog.Error("Failed to open ignore file", "path", p, "error", err)
+					continue
+				}
+				if _, err := io.Copy(&b, f); err != nil {
+					slog.Error("Failed to read ignore file", "path", p, "error", err)
+				}
+				_ = f.Close()
+			}
+		}
+		return ignore.CompileIgnoreLines(strings.Split(b.String(), "\n")...)
+	})
 }
 
 // ListDirectory lists files and directories in the specified path,

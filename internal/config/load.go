@@ -1,16 +1,19 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -538,13 +541,14 @@ func GlobalConfigData() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
 }
 
-func HomeDir() string {
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = os.Getenv("USERPROFILE") // For Windows compatibility
+var HomeDir = sync.OnceValue(func() string {
+	u, err := user.Current()
+	if err == nil {
+		return u.HomeDir
 	}
-	if homeDir == "" {
-		homeDir = os.Getenv("HOMEPATH") // Fallback for some environments
-	}
-	return homeDir
-}
+	return cmp.Or(
+		os.Getenv("HOME"),
+		os.Getenv("USERPROFILE"),
+		os.Getenv("HOMEPATH"),
+	)
+})

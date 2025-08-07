@@ -74,8 +74,8 @@ github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMU
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
 github.com/charlievieth/fastwalk v1.0.11 h1:5sLT/q9+d9xMdpKExawLppqvXFZCVKf6JHnr2u/ufj8=
 github.com/charlievieth/fastwalk v1.0.11/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
-github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5 h1:GTcMIfDQJKyNKS+xVt7GkNIwz+tBuQtIuiP50WpzNgs=
-github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250716191546-1e2ffbbcf5c5/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250807144536-86f332629539 h1:ptsaiaVl07xdCCosnjs04J7qTymdV0GkQ42qf404dC0=
+github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250807144536-86f332629539/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250805190305-70e94a2e0b2d h1:1C2whi5rgs+APtsQDE4riA+W5neYaMNY+Y+5o6J/rDU=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250805190305-70e94a2e0b2d/go.mod h1:XIQ1qQfRph6Z5o2EikCydjumo0oDInQySRHuPATzbZc=
 github.com/charmbracelet/catwalk v0.4.6 h1:Y0JDq5V4agK8oO3lKC/hhInrYXePGwZPNo8I1Lk08jc=

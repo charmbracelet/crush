@@ -39,6 +39,9 @@ nix run github:numtide/nix-ai-tools#crush
 # Scoop
 scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
 scoop install crush
+
+# Conda-forge
+pixi global install crush
 ```
 
 <details>

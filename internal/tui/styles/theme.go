@@ -74,6 +74,9 @@ type Theme struct {
 	RedLight color.Color
 	Cherry   color.Color
 
+	// Text selection.
+	TextSelection lipgloss.Style
+
 	// LSP and MCP status indicators.
 	ItemOfflineIcon lipgloss.Style
 	ItemBusyIcon    lipgloss.Style

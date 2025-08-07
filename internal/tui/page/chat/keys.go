@@ -2,6 +2,7 @@ package chat
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type KeyMap struct {
@@ -22,8 +23,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+f"),
 			key.WithHelp("ctrl+f", "add attachment"),
 		),
-		Cancel: key.NewBinding(
-			key.WithKeys("esc"),
+		Cancel: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 		Tab: key.NewBinding(

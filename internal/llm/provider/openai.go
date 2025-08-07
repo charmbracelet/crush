@@ -270,6 +270,11 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
+		slog.Debug("Making OpenAI API request", 
+			"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
+			"model", params.Model,
+			"attempt", attempts)
+		
 		openaiResponse, err := o.client.Chat.Completions.New(
 			ctx,
 			params,
@@ -333,6 +338,12 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			if len(params.Tools) == 0 {
 				params.Tools = nil
 			}
+			
+			slog.Debug("Making OpenAI streaming API request", 
+				"api_key", log.MaskAPIKey(o.providerOptions.apiKey),
+				"model", params.Model,
+				"attempt", attempts)
+			
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,

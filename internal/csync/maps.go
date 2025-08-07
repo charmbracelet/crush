@@ -56,6 +56,18 @@ func (m *Map[K, V]) Len() int {
 	return len(m.inner)
 }
 
+// GetOrSet gets and returns the key if it exists, otherwise, it executes the
+// given function, set its return value for the given key, and returns it.
+func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
+	got, ok := m.Get(key)
+	if ok {
+		return got
+	}
+	value := fn()
+	m.Set(key, value)
+	return value
+}
+
 // Take gets an item and then deletes it.
 func (m *Map[K, V]) Take(key K) (V, bool) {
 	m.mu.Lock()

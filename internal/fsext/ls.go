@@ -1,135 +1,184 @@
 package fsext
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-// CommonIgnorePatterns contains commonly ignored files and directories
-var CommonIgnorePatterns = []string{
-	// Version control
-	".git",
-	".svn",
-	".hg",
-	".bzr",
+// commonIgnorePatterns contains commonly ignored files and directories
+var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
+	return ignore.CompileIgnoreLines(
+		// Version control
+		".git",
+		".svn",
+		".hg",
+		".bzr",
 
-	// IDE and editor files
-	".vscode",
-	".idea",
-	"*.swp",
-	"*.swo",
-	"*~",
-	".DS_Store",
-	"Thumbs.db",
+		// IDE and editor files
+		".vscode",
+		".idea",
+		"*.swp",
+		"*.swo",
+		"*~",
+		".DS_Store",
+		"Thumbs.db",
 
-	// Build artifacts and dependencies
-	"node_modules",
-	"target",
-	"build",
-	"dist",
-	"out",
-	"bin",
-	"obj",
-	"*.o",
-	"*.so",
-	"*.dylib",
-	"*.dll",
-	"*.exe",
+		// Build artifacts and dependencies
+		"node_modules",
+		"target",
+		"build",
+		"dist",
+		"out",
+		"bin",
+		"obj",
+		"*.o",
+		"*.so",
+		"*.dylib",
+		"*.dll",
+		"*.exe",
 
-	// Logs and temporary files
-	"*.log",
-	"*.tmp",
-	"*.temp",
-	".cache",
-	".tmp",
+		// Logs and temporary files
+		"*.log",
+		"*.tmp",
+		"*.temp",
+		".cache",
+		".tmp",
 
-	// Language-specific
-	"__pycache__",
-	"*.pyc",
-	"*.pyo",
-	".pytest_cache",
-	"vendor",
-	"Cargo.lock",
-	"package-lock.json",
-	"yarn.lock",
-	"pnpm-lock.yaml",
+		// Language-specific
+		"__pycache__",
+		"*.pyc",
+		"*.pyo",
+		".pytest_cache",
+		"vendor",
+		"Cargo.lock",
+		"package-lock.json",
+		"yarn.lock",
+		"pnpm-lock.yaml",
 
-	// OS generated files
-	".Trash",
-	".Spotlight-V100",
-	".fseventsd",
+		// OS generated files
+		".Trash",
+		".Spotlight-V100",
+		".fseventsd",
 
-	// Crush
-	".crush",
+		// Crush
+		".crush",
+	)
+})
+
+var homeIgnore = sync.OnceValue(func() ignore.IgnoreParser {
+	home := config.HomeDir()
+	var lines []string
+	for _, name := range []string{
+		filepath.Join(home, ".gitignore"),
+		filepath.Join(home, ".config", "git", "ignore"),
+		filepath.Join(home, ".config", "crush", "ignore"),
+	} {
+		if bts, err := os.ReadFile(name); err == nil {
+			lines = append(lines, strings.Split(string(bts), "\n")...)
+		}
+	}
+	return ignore.CompileIgnoreLines(lines...)
+})
+
+type directoryLister struct {
+	ignores  *csync.Map[string, ignore.IgnoreParser]
+	rootPath string
 }
 
-type DirectoryLister struct {
-	gitignore    *ignore.GitIgnore
-	crushignore  *ignore.GitIgnore
-	commonIgnore *ignore.GitIgnore
-	rootPath     string
-}
-
-func NewDirectoryLister(rootPath string) *DirectoryLister {
-	dl := &DirectoryLister{
+func NewDirectoryLister(rootPath string) *directoryLister {
+	dl := &directoryLister{
 		rootPath: rootPath,
+		ignores:  csync.NewMap[string, ignore.IgnoreParser](),
 	}
-
-	// Load gitignore if it exists
-	gitignorePath := filepath.Join(rootPath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); err == nil {
-		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
-			dl.gitignore = gi
-		}
-	}
-
-	// Load crushignore if it exists
-	crushignorePath := filepath.Join(rootPath, ".crushignore")
-	if _, err := os.Stat(crushignorePath); err == nil {
-		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
-			dl.crushignore = ci
-		}
-	}
-
-	// Create common ignore patterns
-	dl.commonIgnore = ignore.CompileIgnoreLines(CommonIgnorePatterns...)
-
+	dl.getIgnore(rootPath)
 	return dl
 }
 
-func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
+// git checks, in order:
+// - ./.gitignore, ../.gitignore, etc, until repo root
+// ~/.config/git/ignore
+// ~/.gitignore
+//
+// This will do the following:
+// - the given ignorePatterns
+// - [commonIgnorePatterns]
+// - ./.gitignore, ../.gitignore, etc, until dl.rootPath
+// - ./.crushignore, ../.crushignore, etc, until dl.rootPath
+// ~/.config/git/ignore
+// ~/.gitignore
+// ~/.config/crush/ignore
+func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
+	if len(ignorePatterns) > 0 {
+		base := filepath.Base(path)
+		for _, pattern := range ignorePatterns {
+			if matched, err := filepath.Match(pattern, base); err == nil && matched {
+				return true
+			}
+		}
+	}
+
 	relPath, err := filepath.Rel(dl.rootPath, path)
 	if err != nil {
 		relPath = path
 	}
 
-	// Check common ignore patterns
-	if dl.commonIgnore.MatchesPath(relPath) {
+	if commonIgnorePatterns().MatchesPath(relPath) {
+		slog.Debug("ingoring common pattern", "path", relPath)
 		return true
 	}
 
-	// Check gitignore patterns if available
-	if dl.gitignore != nil && dl.gitignore.MatchesPath(relPath) {
+	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
+		slog.Debug("ingoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
 		return true
 	}
 
-	// Check crushignore patterns if available
-	if dl.crushignore != nil && dl.crushignore.MatchesPath(relPath) {
+	if dl.checkParentIgnores(relPath) {
 		return true
 	}
 
-	base := filepath.Base(path)
+	if homeIgnore().MatchesPath(relPath) {
+		slog.Debug("ingoring home dir pattern", "path", relPath)
+		return true
+	}
 
-	for _, pattern := range ignorePatterns {
-		matched, err := filepath.Match(pattern, base)
-		if err == nil && matched {
+	return false
+}
+
+func (dl *directoryLister) checkParentIgnores(path string) bool {
+	parent := filepath.Dir(filepath.Dir(path))
+	for parent != dl.rootPath && parent != "." && path != "." {
+		if dl.getIgnore(parent).MatchesPath(path) {
+			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
 			return true
 		}
+		parent = filepath.Dir(parent)
 	}
 	return false
+}
+
+func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
+	return dl.ignores.GetOrSet(path, func() ignore.IgnoreParser {
+		var lines []string
+		for _, ign := range []string{".crushignore", ".gitignore"} {
+			name := filepath.Join(path, ign)
+			if content, err := os.ReadFile(name); err == nil {
+				lines = append(lines, strings.Split(string(content), "\n")...)
+			}
+		}
+		if len(lines) == 0 {
+			// Return a no-op parser to avoid nil checks
+			return ignore.CompileIgnoreLines()
+		}
+		return ignore.CompileIgnoreLines(lines...)
+	})
 }
 
 // ListDirectory lists files and directories in the specified path,
@@ -144,6 +193,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortDirsFirst,
 	}
+
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip files we don't have permission to access

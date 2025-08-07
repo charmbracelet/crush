@@ -54,6 +54,16 @@ func TestMap_Set(t *testing.T) {
 	require.Equal(t, 1, m.Len())
 }
 
+func TestMap_GetOrSet(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+
+	require.Equal(t, 42, m.GetOrSet("key1", func() int { return 42 }))
+	require.Equal(t, 42, m.GetOrSet("key1", func() int { return 99999 }))
+	require.Equal(t, 1, m.Len())
+}
+
 func TestMap_Get(t *testing.T) {
 	t.Parallel()
 

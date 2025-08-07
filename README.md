@@ -10,6 +10,32 @@
 
 <p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Nix (NUR)](#nix-nur)
+  - [Debian/Ubuntu](#debianubuntu)
+  - [Fedora/RHEL](#fedorarhel)
+  - [Go Install](#installation)
+- [Quick Start](#quick-start)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+  - [LSPs](#lsps)
+  - [MCPs](#mcps)
+  - [Ignoring Files](#ignoring-files)
+  - [Allowing Tools](#allowing-tools)
+  - [Local Models](#local-models)
+  - [Custom Providers](#custom-providers)
+    - [OpenAI-Compatible APIs](#openai-compatible-apis)
+    - [Anthropic-Compatible APIs](#anthropic-compatible-apis)
+  - [Amazon Bedrock](#amazon-bedrock)
+  - [Vertex AI Platform](#vertex-ai-platform)
+- [A Note on Claude Max and GitHub Copilot](#a-note-on-claude-max-and-github-copilot)
+- [Logging](#logging)
+- [Whatcha think?](#whatcha-think)
+- [License](#license)
+
 ## Features
 
 - **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
@@ -104,6 +130,56 @@ go install github.com/charmbracelet/crush@latest
 > sniped when first using the application. If the symptoms persist, join the
 > [Discord][discord] and nerd snipe the rest of us.
 
+After installation you run the program simply with:
+
+```bash
+crush
+```
+
+If that does not work, ensure your package manager’s bin directory is on your PATH (e.g. `echo $PATH`).
+
+## Quick Start
+
+If you just want to get going fast:
+
+1. Install Crush (see [Installation](#installation)).
+2. Export an API key for a provider you use, e.g. for OpenAI:
+   ```bash
+   export OPENAI_API_KEY=sk-...
+   ```
+3. Start Crush:
+   ```bash
+   crush
+   ```
+4. Pick a model when prompted (or accept the default).
+5. Start typing natural language instructions; reference files by name to give context.
+6. Use model switching (prompt will guide you) to compare answers without losing history.
+7. Quit anytime with standard terminal interrupt (`Ctrl+C`) or the built‑in exit command (if provided in the UI flow).
+
+Optional niceties (do later):
+
+- Create a `crush.json` in your project root for custom LSP or provider config.
+- Add additional providers (Anthropic, Groq, OpenRouter, etc.) by exporting their keys.
+- Add local models via Ollama or LM Studio (see [Local Models](#local-models)).
+
+Minimal example `crush.json` that enables an LSP and a local Ollama model:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": { "go": { "command": "gopls" } },
+  "providers": {
+    "ollama": {
+      "type": "openai",
+      "base_url": "http://localhost:11434/v1/",
+      "models": [{ "id": "qwen3:7b", "name": "Qwen 3 7B" }]
+    }
+  }
+}
+```
+
+Now re-run `crush` and select the model.
+
 ## Getting Started
 
 The quickest way to get started is to grab an API key for your preferred
@@ -150,8 +226,8 @@ Configuration itself is stored as a JSON object:
 
 ```json
 {
-   "this-setting": {"this": "that"},
-   "that-setting": ["ceci", "cela"]
+  "this-setting": { "this": "that" },
+  "that-setting": ["ceci", "cela"]
 }
 ```
 
@@ -380,9 +456,9 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
-* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
 
 ### Vertex AI Platform
 
@@ -426,7 +502,7 @@ accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
 Terms of Service.
 
 We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us, 
+providers. If you’re a provider interested in working with us,
 [reach out](mailto:vt100@charm.sh).
 
 ## Logging

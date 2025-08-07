@@ -264,12 +264,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg:
-		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == permissions.PermissionsDialogID {
+		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
 			a.dialog = u.(dialogs.DialogCmp)
 			cmds = append(cmds, dialogCmd)
-		}
-		if !a.dialog.HasDialogs() {
+		} else {
 			updated, pageCmd := a.pages[a.currentPage].Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			cmds = append(cmds, pageCmd)

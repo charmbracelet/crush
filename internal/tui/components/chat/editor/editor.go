@@ -228,7 +228,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		path := strings.ReplaceAll(string(msg), "\\ ", " ")
 		// try to get an image
-		path, err := filepath.Abs(path)
+		path, err := filepath.Abs(strings.TrimSpace(path))
 		if err != nil {
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd

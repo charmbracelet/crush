@@ -1,0 +1,51 @@
+# NOTE(@andreynering): We should have a single entry per label, because if we
+# have multiple the action would only apply the label if ALL of them match.
+
+"area: ci":
+  - "/^ci: /i"
+"area: diff":
+  - "/diff/i"
+"area: docs":
+  - "/(docs|documentation|readme)/i"
+"area: images":
+  - "/image/i"
+"area: lsp":
+  - "/lsp/i"
+"area: mcp":
+  - "/mcp/i"
+"area: mouse":
+  - "/(mouse|scroll)/i"
+"area: permissions":
+  - "/permission/i"
+"area: session":
+  - "/session/i"
+"area: themes":
+  - "/theme/i"
+"area: tools":
+  - "/tool/i"
+"os: linux":
+  - "/linux/i"
+"os: macos":
+  - "/(macos|osx)/i"
+"os: windows":
+  - "/windows/i"
+"provider: anthropic claude":
+  - "/(anthropic|claude)/i"
+"provider: aws bedrock":
+  - "/(aws|bedrock)/i"
+"provider: google gemini":
+  - "/gemini/i"
+"provider: google vertex":
+  - "/vertex/i"
+"provider: grok":
+  - "/grok/i"
+"provider: kimi":
+  - "/kimi/i"
+"provider: ollama":
+  - "/llama/i"
+"provider: openai chatgpt":
+  - "/(openai|gpt)/i"
+"provider: openrouter":
+  - "/openrouter/i"
+"provider: qwen":
+  - "/qwen/i"

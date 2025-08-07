@@ -2,9 +2,7 @@ package fsext
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,54 +10,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/log"
 
 	ignore "github.com/sabhiram/go-gitignore"
 )
-
-var rgPath string
-
-func init() {
-	var err error
-	rgPath, err = exec.LookPath("rg")
-	if err != nil {
-		if log.Initialized() {
-			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
-		}
-	}
-}
-
-func GetRgCmd(globPattern string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	rgArgs := []string{
-		"--files",
-		"-L",
-		"--null",
-	}
-	if globPattern != "" {
-		if !filepath.IsAbs(globPattern) && !strings.HasPrefix(globPattern, "/") {
-			globPattern = "/" + globPattern
-		}
-		rgArgs = append(rgArgs, "--glob", globPattern)
-	}
-	return exec.Command(rgPath, rgArgs...)
-}
-
-func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern}
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, path)
-
-	return exec.Command(rgPath, args...)
-}
 
 type FileInfo struct {
 	Path    string
@@ -88,8 +41,6 @@ func SkipHidden(path string) bool {
 		"obj":              true,
 		"out":              true,
 		"coverage":         true,
-		"tmp":              true,
-		"temp":             true,
 		"logs":             true,
 		"generated":        true,
 		"bower_components": true,
@@ -107,8 +58,9 @@ func SkipHidden(path string) bool {
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
 type FastGlobWalker struct {
-	gitignore *ignore.GitIgnore
-	rootPath  string
+	gitignore   *ignore.GitIgnore
+	crushignore *ignore.GitIgnore
+	rootPath    string
 }
 
 func NewFastGlobWalker(searchPath string) *FastGlobWalker {
@@ -124,17 +76,36 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 		}
 	}
 
+	// Load crushignore if it exists
+	crushignorePath := filepath.Join(searchPath, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
+			walker.crushignore = ci
+		}
+	}
+
 	return walker
 }
 
-func (w *FastGlobWalker) shouldSkip(path string) bool {
+// ShouldSkip checks if a path should be skipped based on gitignore, crushignore, and hidden file rules
+func (w *FastGlobWalker) ShouldSkip(path string) bool {
 	if SkipHidden(path) {
 		return true
 	}
 
+	relPath, err := filepath.Rel(w.rootPath, path)
+	if err != nil {
+		return false
+	}
+
 	if w.gitignore != nil {
-		relPath, err := filepath.Rel(w.rootPath, path)
-		if err == nil && w.gitignore.MatchesPath(relPath) {
+		if w.gitignore.MatchesPath(relPath) {
+			return true
+		}
+	}
+
+	if w.crushignore != nil {
+		if w.crushignore.MatchesPath(relPath) {
 			return true
 		}
 	}
@@ -157,13 +128,13 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		}
 
 		if d.IsDir() {
-			if walker.shouldSkip(path) {
+			if walker.ShouldSkip(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if walker.shouldSkip(path) {
+		if walker.ShouldSkip(path) {
 			return nil
 		}
 
@@ -241,4 +212,24 @@ func DirTrim(pwd string, lim int) string {
 	}
 	out = filepath.Join("~", out)
 	return out
+}
+
+// PathOrPrefix returns the prefix if the path starts with it, or falls back to
+// the path otherwise.
+func PathOrPrefix(path, prefix string) string {
+	if HasPrefix(path, prefix) {
+		return prefix
+	}
+	return path
+}
+
+// HasPrefix checks if the given path starts with the specified prefix.
+// Uses filepath.Rel to determine if path is within prefix.
+func HasPrefix(path, prefix string) bool {
+	rel, err := filepath.Rel(prefix, path)
+	if err != nil {
+		return false
+	}
+	// If path is within prefix, Rel will not return a path starting with ".."
+	return !strings.HasPrefix(rel, "..")
 }

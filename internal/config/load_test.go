@@ -264,9 +264,8 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	cfg := &Config{}
 	cfg.setDefaults("/tmp")
 	env := env.NewFromMap(map[string]string{
-		"GOOGLE_GENAI_USE_VERTEXAI": "true",
-		"GOOGLE_CLOUD_PROJECT":      "test-project",
-		"GOOGLE_CLOUD_LOCATION":     "us-central1",
+		"VERTEXAI_PROJECT":  "test-project",
+		"VERTEXAI_LOCATION": "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
 	err := cfg.configureProviders(env, resolver, knownProviders)

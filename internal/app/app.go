@@ -207,6 +207,8 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func() {
 		cancel()
 		app.serviceEventsWG.Wait()
@@ -256,6 +258,7 @@ func (app *App) InitCoderAgent() error {
 	}
 	var err error
 	app.CoderAgent, err = agent.NewAgent(
+		app.globalCtx,
 		coderAgentCfg,
 		app.Permissions,
 		app.Sessions,
@@ -267,6 +270,10 @@ func (app *App) InitCoderAgent() error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+
+	// Add MCP client cleanup to shutdown process
+	app.cleanupFuncs = append(app.cleanupFuncs, agent.CloseMCPClients)
+
 	setupSubscriber(app.eventsCtx, app.serviceEventsWG, "coderAgent", app.CoderAgent.Subscribe, app.events)
 	return nil
 }

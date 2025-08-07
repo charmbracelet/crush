@@ -68,6 +68,7 @@ var CommonIgnorePatterns = []string{
 
 type DirectoryLister struct {
 	gitignore    *ignore.GitIgnore
+	crushignore  *ignore.GitIgnore
 	commonIgnore *ignore.GitIgnore
 	rootPath     string
 }
@@ -82,6 +83,14 @@ func NewDirectoryLister(rootPath string) *DirectoryLister {
 	if _, err := os.Stat(gitignorePath); err == nil {
 		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
 			dl.gitignore = gi
+		}
+	}
+
+	// Load crushignore if it exists
+	crushignorePath := filepath.Join(rootPath, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
+			dl.crushignore = ci
 		}
 	}
 
@@ -104,6 +113,11 @@ func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 
 	// Check gitignore patterns if available
 	if dl.gitignore != nil && dl.gitignore.MatchesPath(relPath) {
+		return true
+	}
+
+	// Check crushignore patterns if available
+	if dl.crushignore != nil && dl.crushignore.MatchesPath(relPath) {
 		return true
 	}
 

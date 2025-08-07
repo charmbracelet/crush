@@ -114,7 +114,7 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		searchPath = g.workingDir
 	}
 
-	files, truncated, err := globFiles(params.Pattern, searchPath, 100)
+	files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error finding files: %w", err)
 	}
@@ -138,8 +138,8 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	), nil
 }
 
-func globFiles(pattern, searchPath string, limit int) ([]string, bool, error) {
-	cmdRg := fsext.GetRgCmd(pattern)
+func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
+	cmdRg := getRgCmd(ctx, pattern)
 	if cmdRg != nil {
 		cmdRg.Dir = searchPath
 		matches, err := runRipgrep(cmdRg, searchPath, limit)

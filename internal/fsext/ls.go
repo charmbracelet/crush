@@ -1,8 +1,12 @@
 package fsext
 
 import (
+	"bytes"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charlievieth/fastwalk"
 	ignore "github.com/sabhiram/go-gitignore"
@@ -67,10 +71,8 @@ var CommonIgnorePatterns = []string{
 }
 
 type DirectoryLister struct {
-	gitignore    *ignore.GitIgnore
-	crushignore  *ignore.GitIgnore
-	commonIgnore *ignore.GitIgnore
-	rootPath     string
+	ignores  *ignore.GitIgnore
+	rootPath string
 }
 
 func NewDirectoryLister(rootPath string) *DirectoryLister {
@@ -78,26 +80,29 @@ func NewDirectoryLister(rootPath string) *DirectoryLister {
 		rootPath: rootPath,
 	}
 
-	// Load gitignore if it exists
-	gitignorePath := filepath.Join(rootPath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); err == nil {
-		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
-			dl.gitignore = gi
-		}
-	}
-
-	// Load crushignore if it exists
-	crushignorePath := filepath.Join(rootPath, ".crushignore")
-	if _, err := os.Stat(crushignorePath); err == nil {
-		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
-			dl.crushignore = ci
-		}
-	}
-
-	// Create common ignore patterns
-	dl.commonIgnore = ignore.CompileIgnoreLines(CommonIgnorePatterns...)
+	dl.ignores = ignore.CompileIgnoreLines(append(CommonIgnorePatterns, strings.Split(parseIgnores(rootPath), "\n")...)...)
 
 	return dl
+}
+
+func parseIgnores(path string) string {
+	var b bytes.Buffer
+	for _, ign := range []string{".crushignore", ".gitignore"} {
+		p := filepath.Join(path, ign)
+		if _, err := os.Stat(p); err == nil {
+			f, err := os.Open(p)
+			if err != nil {
+				_ = f.Close()
+				slog.Error("Failed to open ignore file", "path", p, "error", err)
+				continue
+			}
+			if _, err := io.Copy(&b, f); err != nil {
+				slog.Error("Failed to read ignore file", "path", p, "error", err)
+			}
+			_ = f.Close()
+		}
+	}
+	return b.String()
 }
 
 func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
@@ -106,18 +111,7 @@ func (dl *DirectoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		relPath = path
 	}
 
-	// Check common ignore patterns
-	if dl.commonIgnore.MatchesPath(relPath) {
-		return true
-	}
-
-	// Check gitignore patterns if available
-	if dl.gitignore != nil && dl.gitignore.MatchesPath(relPath) {
-		return true
-	}
-
-	// Check crushignore patterns if available
-	if dl.crushignore != nil && dl.crushignore.MatchesPath(relPath) {
+	if dl.ignores.MatchesPath(relPath) {
 		return true
 	}
 
@@ -144,6 +138,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortDirsFirst,
 	}
+
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip files we don't have permission to access

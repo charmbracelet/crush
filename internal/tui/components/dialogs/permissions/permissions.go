@@ -64,6 +64,8 @@ type permissionDialogCmp struct {
 	positionRow int // Row position for dialog
 	positionCol int // Column position for dialog
 
+	finalDialogHeight int
+
 	keyMap KeyMap
 }
 
@@ -159,7 +161,7 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case tea.MouseWheelMsg:
-		if p.supportsDiffView() {
+		if p.supportsDiffView() && p.isMouseOverDialog(msg.Mouse().X, msg.Mouse().Y) {
 			switch msg.Button {
 			case tea.MouseWheelDown:
 				p.scrollDown()
@@ -194,6 +196,21 @@ func (p *permissionDialogCmp) scrollLeft() {
 func (p *permissionDialogCmp) scrollRight() {
 	p.diffXOffset += 5
 	p.contentDirty = true
+}
+
+// isMouseOverDialog checks if the given mouse coordinates are within the dialog bounds.
+// Returns true if the mouse is over the dialog area, false otherwise.
+func (p *permissionDialogCmp) isMouseOverDialog(x, y int) bool {
+	if p.permission.ID == "" {
+		return false
+	}
+	var (
+		dialogX      = p.positionCol
+		dialogY      = p.positionRow
+		dialogWidth  = p.width
+		dialogHeight = p.finalDialogHeight
+	)
+	return x >= dialogX && x < dialogX+dialogWidth && y >= dialogY && y < dialogY+dialogHeight
 }
 
 func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
@@ -683,7 +700,7 @@ func (p *permissionDialogCmp) render() string {
 	}
 	content := lipgloss.JoinVertical(lipgloss.Top, strs...)
 
-	return baseStyle.
+	dialog := baseStyle.
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
@@ -691,6 +708,8 @@ func (p *permissionDialogCmp) render() string {
 		Render(
 			content,
 		)
+	p.finalDialogHeight = lipgloss.Height(dialog)
+	return dialog
 }
 
 func (p *permissionDialogCmp) View() string {

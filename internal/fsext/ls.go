@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/config"
@@ -13,62 +14,79 @@ import (
 )
 
 // commonIgnorePatterns contains commonly ignored files and directories
-var commonIgnorePatterns = ignore.CompileIgnoreLines(
-	// Version control
-	".git",
-	".svn",
-	".hg",
-	".bzr",
+var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
+	return ignore.CompileIgnoreLines(
+		// Version control
+		".git",
+		".svn",
+		".hg",
+		".bzr",
 
-	// IDE and editor files
-	".vscode",
-	".idea",
-	"*.swp",
-	"*.swo",
-	"*~",
-	".DS_Store",
-	"Thumbs.db",
+		// IDE and editor files
+		".vscode",
+		".idea",
+		"*.swp",
+		"*.swo",
+		"*~",
+		".DS_Store",
+		"Thumbs.db",
 
-	// Build artifacts and dependencies
-	"node_modules",
-	"target",
-	"build",
-	"dist",
-	"out",
-	"bin",
-	"obj",
-	"*.o",
-	"*.so",
-	"*.dylib",
-	"*.dll",
-	"*.exe",
+		// Build artifacts and dependencies
+		"node_modules",
+		"target",
+		"build",
+		"dist",
+		"out",
+		"bin",
+		"obj",
+		"*.o",
+		"*.so",
+		"*.dylib",
+		"*.dll",
+		"*.exe",
 
-	// Logs and temporary files
-	"*.log",
-	"*.tmp",
-	"*.temp",
-	".cache",
-	".tmp",
+		// Logs and temporary files
+		"*.log",
+		"*.tmp",
+		"*.temp",
+		".cache",
+		".tmp",
 
-	// Language-specific
-	"__pycache__",
-	"*.pyc",
-	"*.pyo",
-	".pytest_cache",
-	"vendor",
-	"Cargo.lock",
-	"package-lock.json",
-	"yarn.lock",
-	"pnpm-lock.yaml",
+		// Language-specific
+		"__pycache__",
+		"*.pyc",
+		"*.pyo",
+		".pytest_cache",
+		"vendor",
+		"Cargo.lock",
+		"package-lock.json",
+		"yarn.lock",
+		"pnpm-lock.yaml",
 
-	// OS generated files
-	".Trash",
-	".Spotlight-V100",
-	".fseventsd",
+		// OS generated files
+		".Trash",
+		".Spotlight-V100",
+		".fseventsd",
 
-	// Crush
-	".crush",
-)
+		// Crush
+		".crush",
+	)
+})
+
+var homeIgnore = sync.OnceValue(func() ignore.IgnoreParser {
+	home := config.HomeDir()
+	var lines []string
+	for _, name := range []string{
+		filepath.Join(home, ".gitignore"),
+		filepath.Join(home, ".config", "git", "ignore"),
+		filepath.Join(home, ".config", "crush", "ignore"),
+	} {
+		if bts, err := os.ReadFile(name); err == nil {
+			lines = append(lines, strings.Split(string(bts), "\n")...)
+		}
+	}
+	return ignore.CompileIgnoreLines(lines...)
+})
 
 type directoryLister struct {
 	ignores  *csync.Map[string, ignore.IgnoreParser]
@@ -81,20 +99,6 @@ func NewDirectoryLister(rootPath string) *directoryLister {
 		ignores:  csync.NewMap[string, ignore.IgnoreParser](),
 	}
 	dl.getIgnore(rootPath)
-	dl.ignores.GetOrSet("~", func() ignore.IgnoreParser {
-		home := config.HomeDir()
-		var lines []string
-		for _, name := range []string{
-			filepath.Join(home, ".gitignore"),
-			filepath.Join(home, ".config", "git", "ignore"),
-			filepath.Join(home, ".config", "crush", "ignore"),
-		} {
-			if bts, err := os.ReadFile(name); err == nil {
-				lines = append(lines, strings.Split(string(bts), "\n")...)
-			}
-		}
-		return ignore.CompileIgnoreLines(lines...)
-	})
 	return dl
 }
 
@@ -126,7 +130,7 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		relPath = path
 	}
 
-	if commonIgnorePatterns.MatchesPath(relPath) {
+	if commonIgnorePatterns().MatchesPath(relPath) {
 		slog.Debug("ingoring common pattern", "path", relPath)
 		return true
 	}
@@ -140,7 +144,7 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		return true
 	}
 
-	if dl.getIgnore("~").MatchesPath(relPath) {
+	if homeIgnore().MatchesPath(relPath) {
 		slog.Debug("ingoring home dir pattern", "path", relPath)
 		return true
 	}

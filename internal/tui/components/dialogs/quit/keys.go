@@ -2,6 +2,7 @@ package quit
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 // KeyMap defines the keyboard bindings for the quit dialog.
@@ -36,8 +37,7 @@ func DefaultKeymap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "switch options"),
 		),
-		Close: key.NewBinding(
-			key.WithKeys("esc"),
+		Close: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 	}

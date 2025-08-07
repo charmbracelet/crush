@@ -1,8 +1,0 @@
-{
-  "$schema": "https://charm.land/crush.json",
-  "lsp": {
-    "Go": {
-      "command": "gopls"
-    }
-  }
-}

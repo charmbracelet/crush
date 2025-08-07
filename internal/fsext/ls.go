@@ -1,14 +1,13 @@
 package fsext
 
 import (
-	"bytes"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	ignore "github.com/sabhiram/go-gitignore"
 )
@@ -77,65 +76,104 @@ type directoryLister struct {
 }
 
 func NewDirectoryLister(rootPath string) *directoryLister {
-	return &directoryLister{
+	dl := &directoryLister{
 		rootPath: rootPath,
 		ignores:  csync.NewMap[string, ignore.IgnoreParser](),
 	}
+	dl.getIgnore(rootPath)
+	dl.ignores.GetOrSet("~", func() ignore.IgnoreParser {
+		home := config.HomeDir()
+		var lines []string
+		for _, name := range []string{
+			filepath.Join(home, ".gitignore"),
+			filepath.Join(home, ".config", "git", "ignore"),
+			filepath.Join(home, ".config", "crush", "ignore"),
+		} {
+			if bts, err := os.ReadFile(name); err == nil {
+				lines = append(lines, strings.Split(string(bts), "\n")...)
+			}
+		}
+		return ignore.CompileIgnoreLines(lines...)
+	})
+	return dl
 }
 
+// git checks, in order:
+// - ./.gitignore, ../.gitignore, etc, until repo root
+// ~/.config/git/ignore
+// ~/.gitignore
+//
+// This will do the following:
+// - the given ignorePatterns
+// - [commonIgnorePatterns]
+// - ./.gitignore, ../.gitignore, etc, until dl.rootPath
+// - ./.crushignore, ../.crushignore, etc, until dl.rootPath
+// ~/.config/git/ignore
+// ~/.gitignore
+// ~/.config/crush/ignore
 func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
+	if len(ignorePatterns) > 0 {
+		base := filepath.Base(path)
+		for _, pattern := range ignorePatterns {
+			if matched, err := filepath.Match(pattern, base); err == nil && matched {
+				return true
+			}
+		}
+	}
+
 	relPath, err := filepath.Rel(dl.rootPath, path)
 	if err != nil {
 		relPath = path
 	}
 
-	base := filepath.Base(path)
-	for _, pattern := range ignorePatterns {
-		matched, err := filepath.Match(pattern, base)
-		if err == nil && matched {
-			slog.Info("ignoring path", "path", path)
-			return true
-		}
-	}
-
-	if commonIgnorePatterns.MatchesPath(relPath) || dl.getIgnore(path).MatchesPath(relPath) {
-		slog.Info("ignoring path", "path", path)
+	if commonIgnorePatterns.MatchesPath(relPath) {
+		slog.Debug("ingoring common pattern", "path", relPath)
 		return true
 	}
 
-	parent := filepath.Dir(path)
-	for {
+	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
+		slog.Debug("ingoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
+		return true
+	}
+
+	if dl.checkParentIgnores(relPath) {
+		return true
+	}
+
+	if dl.getIgnore("~").MatchesPath(relPath) {
+		slog.Debug("ingoring home dir pattern", "path", relPath)
+		return true
+	}
+
+	return false
+}
+
+func (dl *directoryLister) checkParentIgnores(path string) bool {
+	parent := filepath.Dir(filepath.Dir(path))
+	for parent != dl.rootPath && parent != "." && path != "." {
 		if dl.getIgnore(parent).MatchesPath(path) {
-			slog.Info("ignoring path", "path", path, "parent", parent)
+			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
 			return true
-		}
-		if parent == "/" || parent == "." { // TODO: windows
-			return false
 		}
 		parent = filepath.Dir(parent)
 	}
+	return false
 }
 
 func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 	return dl.ignores.GetOrSet(path, func() ignore.IgnoreParser {
-		var b bytes.Buffer
+		var lines []string
 		for _, ign := range []string{".crushignore", ".gitignore"} {
-			p := filepath.Join(path, ign)
-			if _, err := os.Stat(p); err == nil {
-				slog.Info("loading ignore file", "path", p)
-				f, err := os.Open(p)
-				if err != nil {
-					_ = f.Close()
-					slog.Error("Failed to open ignore file", "path", p, "error", err)
-					continue
-				}
-				if _, err := io.Copy(&b, f); err != nil {
-					slog.Error("Failed to read ignore file", "path", p, "error", err)
-				}
-				_ = f.Close()
+			name := filepath.Join(path, ign)
+			if content, err := os.ReadFile(name); err == nil {
+				lines = append(lines, strings.Split(string(content), "\n")...)
 			}
 		}
-		return ignore.CompileIgnoreLines(strings.Split(b.String(), "\n")...)
+		if len(lines) == 0 {
+			// Return a no-op parser to avoid nil checks
+			return ignore.CompileIgnoreLines()
+		}
+		return ignore.CompileIgnoreLines(lines...)
 	})
 }
 

@@ -56,6 +56,9 @@ func NewCharmtoneTheme() *Theme {
 		Cherry:   charmtone.Cherry,
 	}
 
+	// Text selection.
+	t.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
+
 	// LSP and MCP status.
 	t.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
 	t.ItemBusyIcon = t.ItemOfflineIcon.Foreground(charmtone.Citron)

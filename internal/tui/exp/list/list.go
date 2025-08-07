@@ -1306,6 +1306,10 @@ func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
 		}
 	}
 
+	if line < 0 || line >= len(lines) {
+		return 0, 0
+	}
+
 	currentLine := lines[line]
 	gr := uniseg.NewGraphemes(currentLine)
 	startCol = -1
@@ -1340,10 +1344,6 @@ func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, fou
 		line = (len(lines) - 1) - l.height + line + 1
 	}
 
-	if strings.TrimSpace(lines[line]) == "" {
-		return 0, 0, false
-	}
-
 	if l.offset > 0 {
 		if l.direction == DirectionBackward {
 			line -= l.offset
@@ -1354,6 +1354,10 @@ func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, fou
 
 	// Ensure line is within bounds
 	if line < 0 || line >= len(lines) {
+		return 0, 0, false
+	}
+
+	if strings.TrimSpace(lines[line]) == "" {
 		return 0, 0, false
 	}
 

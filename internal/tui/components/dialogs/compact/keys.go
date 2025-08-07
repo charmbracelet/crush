@@ -2,6 +2,7 @@ package compact
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 // KeyMap defines the key bindings for the compact dialog.
@@ -32,8 +33,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("n"),
 			key.WithHelp("n", "no"),
 		),
-		Close: key.NewBinding(
-			key.WithKeys("esc"),
+		Close: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 	}

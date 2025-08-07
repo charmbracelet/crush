@@ -2,6 +2,7 @@ package completions
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type KeyMap struct {
@@ -27,8 +28,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("enter", "tab", "ctrl+y"),
 			key.WithHelp("enter", "select"),
 		),
-		Cancel: key.NewBinding(
-			key.WithKeys("esc"),
+		Cancel: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 		DownInsert: key.NewBinding(

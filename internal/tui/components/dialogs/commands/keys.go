@@ -2,6 +2,7 @@ package commands
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type CommandsDialogKeyMap struct {
@@ -30,8 +31,7 @@ func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "switch selection"),
 		),
-		Close: key.NewBinding(
-			key.WithKeys("esc"),
+		Close: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 	}

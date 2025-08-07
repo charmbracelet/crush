@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -647,8 +648,7 @@ func (p *chatPage) Bindings() []key.Binding {
 	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
 		if p.isCanceling {
-			cancelBinding = key.NewBinding(
-				key.WithKeys("esc"),
+			cancelBinding = keys.Escape(
 				key.WithHelp("esc", "press again to cancel"),
 			)
 		}
@@ -716,8 +716,7 @@ func (p *chatPage) Help() help.KeyMap {
 		} else {
 			shortList = append(shortList,
 				// Go back
-				key.NewBinding(
-					key.WithKeys("esc"),
+				keys.Escape(
 					key.WithHelp("esc", "back"),
 				),
 			)
@@ -751,8 +750,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithKeys("tab", "enter"),
 					key.WithHelp("tab/enter", "complete"),
 				),
-				key.NewBinding(
-					key.WithKeys("esc"),
+				keys.Escape(
 					key.WithHelp("esc", "cancel"),
 				),
 				key.NewBinding(
@@ -766,13 +764,11 @@ func (p *chatPage) Help() help.KeyMap {
 			return core.NewSimpleHelp(shortList, fullList)
 		}
 		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
-			cancelBinding := key.NewBinding(
-				key.WithKeys("esc"),
+			cancelBinding := keys.Escape(
 				key.WithHelp("esc", "cancel"),
 			)
 			if p.isCanceling {
-				cancelBinding = key.NewBinding(
-					key.WithKeys("esc"),
+				cancelBinding = keys.Escape(
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
@@ -916,8 +912,7 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithKeys("ctrl+r", "r"),
 						key.WithHelp("ctrl+r+r", "delete all attachments"),
 					),
-					key.NewBinding(
-						key.WithKeys("esc"),
+					keys.Escape(
 						key.WithHelp("esc", "cancel delete mode"),
 					),
 				})

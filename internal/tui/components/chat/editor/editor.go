@@ -558,9 +558,9 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 	t := styles.CurrentTheme()
 	if info.LineNumber == 0 {
 		if info.Focused {
-			return t.S().Base.Background(t.Citron).Foreground(t.FgSubtle).Render(" ! ") + " "
+			return t.S().Base.Background(t.Citron).Foreground(t.FgSubtle).Bold(true).Render(" ! ") + " "
 		} else {
-			return t.S().Base.Background(t.FgMuted).Foreground(t.BgBase).Render(" ! ") + " "
+			return t.S().Base.Background(t.FgMuted).Foreground(t.BgBase).Bold(true).Render(" ! ") + " "
 		}
 	}
 	if info.Focused {

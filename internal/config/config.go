@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -378,6 +379,30 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
+// SetProjectConfigField saves a config field to the project's crush.json file
+func (c *Config) SetProjectConfigField(key string, value any) error {
+	projectConfigPath := filepath.Join(c.workingDir, "crush.json")
+
+	// read the data
+	data, err := os.ReadFile(projectConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			data = []byte("{}")
+		} else {
+			return fmt.Errorf("failed to read project config file: %w", err)
+		}
+	}
+
+	newValue, err := sjson.Set(string(data), key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set project config field %s: %w", key, err)
+	}
+	if err := os.WriteFile(projectConfigPath, []byte(newValue), 0o644); err != nil {
+		return fmt.Errorf("failed to write project config file: %w", err)
+	}
+	return nil
+}
+
 func (c *Config) AddAllowedTool(tool string) error {
 	// Initialize permissions if nil
 	if c.Permissions == nil {
@@ -396,8 +421,8 @@ func (c *Config) AddAllowedTool(tool string) error {
 	// Add to the list
 	c.Permissions.AllowedTools = append(c.Permissions.AllowedTools, tool)
 
-	// Save to config file
-	return c.SetConfigField("permissions.allowed_tools", c.Permissions.AllowedTools)
+	// Save to project config file (crush.json in working directory)
+	return c.SetProjectConfigField("permissions.allowed_tools", c.Permissions.AllowedTools)
 }
 
 func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {

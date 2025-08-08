@@ -264,7 +264,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 func TestPermissionService_GrantPermanently(t *testing.T) {
 	mockSaver := &mockConfigSaver{}
 	mockSaver.On("AddAllowedTool", "bash:execute").Return(nil)
-	
+
 	service := NewPermissionServiceWithConfigSaver("/tmp", false, []string{}, mockSaver)
 
 	req := CreatePermissionRequest{
@@ -295,7 +295,7 @@ func TestPermissionService_GrantPermanently(t *testing.T) {
 	wg.Wait()
 
 	assert.NoError(t, err, "GrantPermanently should not return error")
-	
+
 	// Verify config saver was called
 	mockSaver.AssertExpectations(t)
 

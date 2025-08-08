@@ -236,18 +236,18 @@ func CloseMCPClients() {
 func ResetMCPClients() {
 	MCPResetMutex.Lock()
 	defer MCPResetMutex.Unlock()
-	
+
 	// Close existing clients
 	for c := range mcpClients.Seq() {
 		_ = c.Close()
 	}
-	
+
 	// Clear clients map
 	mcpClients = csync.NewMap[string, *client.Client]()
-	
+
 	// Clear states map to remove any orphaned states
 	mcpStates = csync.NewMap[string, MCPClientInfo]()
-	
+
 	// Reset the sync.Once to allow reinitialization
 	mcpToolsOnce = sync.Once{}
 	mcpTools = nil
@@ -272,7 +272,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 	for name := range cfg.MCP {
 		currentStates[name] = true
 	}
-	
+
 	// Remove states for MCPs that are no longer configured
 	for stateName := range mcpStates.Seq2() {
 		if !currentStates[stateName] {

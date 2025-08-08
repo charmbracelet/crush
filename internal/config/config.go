@@ -117,10 +117,10 @@ type MCPConfig struct {
 }
 
 type LSPConfig struct {
-	Enabled  bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is enabled,default=true"`
-	Command  string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
-	Args     []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
-	Options  any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
+	Enabled bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is enabled,default=true"`
+	Command string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Args    []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
+	Options any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
 }
 
 type TUIOptions struct {
@@ -362,17 +362,17 @@ func (c *Config) SetConfigField(key string, value any) error {
 	// Determine which config file to use
 	// Priority: local .crush.json > local crush.json > global data config
 	configFile := c.dataConfigDir // default to global data config
-	
+
 	// Check for local config files
 	localDotConfig := filepath.Join(c.workingDir, fmt.Sprintf(".%s.json", appName))
 	localConfig := filepath.Join(c.workingDir, fmt.Sprintf("%s.json", appName))
-	
+
 	if _, err := os.Stat(localDotConfig); err == nil {
 		configFile = localDotConfig
 	} else if _, err := os.Stat(localConfig); err == nil {
 		configFile = localConfig
 	}
-	
+
 	// read the data
 	data, err := os.ReadFile(configFile)
 	if err != nil {

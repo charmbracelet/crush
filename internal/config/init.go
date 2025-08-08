@@ -39,13 +39,13 @@ func Reload() error {
 	if cfg == nil {
 		return fmt.Errorf("config not initialized")
 	}
-	
+
 	// Reload the config using the same working directory and debug settings
 	newCfg, err := Load(cfg.WorkingDir(), cfg.Options.Debug)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
 	}
-	
+
 	instance.Store(newCfg)
 	return nil
 }

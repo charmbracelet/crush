@@ -17,10 +17,11 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
+const ToolsDialogID dialogs.DialogID = "tools"
+
 const (
-	ToolsDialogID dialogs.DialogID = "tools"
-	dialogWidth   = 80
-	dialogHeight  = 30
+	dialogWidth  = 80
+	dialogHeight = 30
 )
 
 // ToolsDialog interface for the tools management dialog
@@ -30,10 +31,10 @@ type ToolsDialog interface {
 
 // ToolItem represents a tool (MCP or LSP) in the list
 type ToolItem struct {
-	Name     string
-	Type     string // "MCP" or "LSP"
-	Enabled  bool
-	State    string // For status display
+	Name    string
+	Type    string // "MCP" or "LSP"
+	Enabled bool
+	State   string // For status display
 }
 
 // ToolsUpdatedMsg is sent when tools configuration changes
@@ -48,10 +49,10 @@ type toolsDialogCmp struct {
 	wWidth  int
 	wHeight int
 
-	items       []ToolItem
-	cursor      int
+	items        []ToolItem
+	cursor       int
 	scrollOffset int
-	viewHeight  int
+	viewHeight   int
 
 	app    *app.App
 	keyMap KeyMap
@@ -87,8 +88,7 @@ func (d *toolsDialogCmp) loadTools() {
 		if mcpInfo, exists := mcpStates[mcp.Name]; exists {
 			state = mcpInfo.State.String()
 		}
-		
-		
+
 		d.items = append(d.items, ToolItem{
 			Name:    mcp.Name,
 			Type:    "MCP",
@@ -146,10 +146,11 @@ func (d *toolsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.cursor < len(d.items) {
 				item := &d.items[d.cursor]
 				item.Enabled = !item.Enabled
-				
+
 				// Update configuration
 				cfg := config.Get()
-				if item.Type == "MCP" {
+				switch item.Type {
+				case "MCP":
 					if mcp, exists := cfg.MCP[item.Name]; exists {
 						mcp.Disabled = !item.Enabled
 						cfg.MCP[item.Name] = mcp
@@ -158,7 +159,7 @@ func (d *toolsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return d, util.ReportError(err)
 						}
 					}
-				} else if item.Type == "LSP" {
+				case "LSP":
 					if lsp, exists := cfg.LSP[item.Name]; exists {
 						lsp.Enabled = item.Enabled
 						cfg.LSP[item.Name] = lsp
@@ -199,9 +200,10 @@ func (d *toolsDialogCmp) sendUpdateMsg() tea.Cmd {
 	lsps := make(map[string]bool)
 
 	for _, item := range d.items {
-		if item.Type == "MCP" {
+		switch item.Type {
+		case "MCP":
 			mcps[item.Name] = item.Enabled
-		} else if item.Type == "LSP" {
+		case "LSP":
 			lsps[item.Name] = item.Enabled
 		}
 	}
@@ -218,10 +220,10 @@ func (d *toolsDialogCmp) View() string {
 	}
 
 	t := styles.CurrentTheme()
-	
+
 	// Title
 	title := t.S().Title.Render("Tools Management")
-	
+
 	// Build list view
 	var listView strings.Builder
 	visibleEnd := d.scrollOffset + d.viewHeight
@@ -231,19 +233,19 @@ func (d *toolsDialogCmp) View() string {
 
 	for i := d.scrollOffset; i < visibleEnd; i++ {
 		item := d.items[i]
-		
+
 		// Checkbox
 		checkbox := "[ ]"
 		if item.Enabled {
 			checkbox = "[✓]"
 		}
-		
+
 		// Type badge
 		typeBadge := t.S().Base.Background(t.Border).Padding(0, 1).Render(item.Type)
 		if item.Type == "MCP" {
 			typeBadge = t.S().Base.Background(t.Primary).Foreground(t.BgBase).Padding(0, 1).Render(item.Type)
 		}
-		
+
 		// State indicator
 		stateStr := ""
 		if item.Enabled {
@@ -258,29 +260,29 @@ func (d *toolsDialogCmp) View() string {
 				stateStr = t.S().Muted.Render(" ● " + item.State)
 			}
 		}
-		
+
 		// Build line
 		line := fmt.Sprintf("%s %s %s%s", checkbox, typeBadge, item.Name, stateStr)
-		
+
 		// Apply cursor highlighting
 		if i == d.cursor {
 			line = t.S().Base.Background(t.Primary).Foreground(t.BgBase).Render(line)
 		} else {
 			line = t.S().Base.Render(line)
 		}
-		
+
 		listView.WriteString(line + "\n")
 	}
-	
+
 	// Scroll indicator
 	scrollInfo := ""
 	if len(d.items) > d.viewHeight {
 		scrollInfo = fmt.Sprintf(" (%d/%d)", d.cursor+1, len(d.items))
 	}
-	
+
 	// Help
 	helpView := d.help.View(d.keyMap)
-	
+
 	// Assemble dialog
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -288,25 +290,25 @@ func (d *toolsDialogCmp) View() string {
 		"",
 		listView.String(),
 	)
-	
+
 	if scrollInfo != "" {
 		content += t.S().Muted.Render(scrollInfo)
 	}
-	
+
 	content = lipgloss.JoinVertical(
 		lipgloss.Left,
 		content,
 		"",
 		helpView,
 	)
-	
+
 	// Apply dialog style
 	dialogStyle := t.S().Base.
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Width(d.width).
 		Height(d.height)
-	
+
 	return dialogStyle.Render(content)
 }
 

@@ -45,6 +45,7 @@ type PermissionRequest struct {
 type Service interface {
 	pubsub.Suscriber[PermissionRequest]
 	GrantPersistent(permission PermissionRequest)
+	GrantPermanently(permission PermissionRequest) error
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
 	Request(opts CreatePermissionRequest) bool
@@ -64,10 +65,16 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
 	allowedTools          []string
+	configSaver           ConfigSaver
 
 	// used to make sure we only process one request at a time
 	requestMu     sync.Mutex
 	activeRequest *PermissionRequest
+}
+
+// ConfigSaver interface for saving permanent permissions
+type ConfigSaver interface {
+	AddAllowedTool(tool string) error
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -87,6 +94,38 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
+}
+
+func (s *permissionService) GrantPermanently(permission PermissionRequest) error {
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+		Granted:    true,
+	})
+	respCh, ok := s.pendingRequests.Get(permission.ID)
+	if ok {
+		respCh <- true
+	}
+
+	// Save to session permissions as well
+	s.sessionPermissionsMu.Lock()
+	s.sessionPermissions = append(s.sessionPermissions, permission)
+	s.sessionPermissionsMu.Unlock()
+
+	// Save permanently to config file
+	if s.configSaver != nil {
+		commandKey := permission.ToolName + ":" + permission.Action
+		err := s.configSaver.AddAllowedTool(commandKey)
+		if err != nil {
+			return err
+		}
+		// Also add to current allowedTools for immediate effect
+		s.allowedTools = append(s.allowedTools, commandKey)
+	}
+
+	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
+		s.activeRequest = nil
+	}
+	return nil
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
@@ -219,6 +258,20 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
 		allowedTools:        allowedTools,
+		pendingRequests:     csync.NewMap[string, chan bool](),
+	}
+}
+
+func NewPermissionServiceWithConfigSaver(workingDir string, skip bool, allowedTools []string, configSaver ConfigSaver) Service {
+	return &permissionService{
+		Broker:              pubsub.NewBroker[PermissionRequest](),
+		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		workingDir:          workingDir,
+		sessionPermissions:  make([]PermissionRequest, 0),
+		autoApproveSessions: make(map[string]bool),
+		skip:                skip,
+		allowedTools:        allowedTools,
+		configSaver:         configSaver,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 }

@@ -378,6 +378,28 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
+func (c *Config) AddAllowedTool(tool string) error {
+	// Initialize permissions if nil
+	if c.Permissions == nil {
+		c.Permissions = &Permissions{
+			AllowedTools: []string{},
+		}
+	}
+
+	// Check if tool is already in the list
+	for _, t := range c.Permissions.AllowedTools {
+		if t == tool {
+			return nil // Already exists
+		}
+	}
+
+	// Add to the list
+	c.Permissions.AllowedTools = append(c.Permissions.AllowedTools, tool)
+
+	// Save to config file
+	return c.SetConfigField("permissions.allowed_tools", c.Permissions.AllowedTools)
+}
+
 func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	// First save to the config file
 	err := c.SetConfigField("providers."+providerID+".api_key", apiKey)

@@ -221,6 +221,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Grant(msg.Permission)
 		case permissions.PermissionAllowForSession:
 			a.app.Permissions.GrantPersistent(msg.Permission)
+		case permissions.PermissionAllowPermanently:
+			err := a.app.Permissions.GrantPermanently(msg.Permission)
+			if err != nil {
+				// Log the error, but still grant for the session as fallback
+				a.app.Permissions.GrantPersistent(msg.Permission)
+			}
 		case permissions.PermissionDeny:
 			a.app.Permissions.Deny(msg.Permission)
 		}

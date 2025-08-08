@@ -130,6 +130,11 @@ func NewAgent(
 		provider.WithModel(agentCfg.Model),
 		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID, config.Get().Options.ContextPaths...)),
 	}
+	
+	// Add disable streaming option if set via command-line flag
+	if cfg.Options.DisableStreaming {
+		opts = append(opts, provider.WithDisableStreaming(true))
+	}
 	agentProvider, err := provider.NewProvider(*providerCfg, opts...)
 	if err != nil {
 		return nil, err
@@ -155,6 +160,11 @@ func NewAgent(
 		provider.WithModel(config.SelectedModelTypeSmall),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
 	}
+	
+	// Add disable streaming option if set via command-line flag
+	if cfg.Options.DisableStreaming {
+		titleOpts = append(titleOpts, provider.WithDisableStreaming(true))
+	}
 	titleProvider, err := provider.NewProvider(*smallModelProviderCfg, titleOpts...)
 	if err != nil {
 		return nil, err
@@ -163,6 +173,11 @@ func NewAgent(
 	summarizeOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SelectedModelTypeLarge),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, providerCfg.ID)),
+	}
+	
+	// Add disable streaming option if set via command-line flag
+	if cfg.Options.DisableStreaming {
+		summarizeOpts = append(summarizeOpts, provider.WithDisableStreaming(true))
 	}
 	summarizeProvider, err := provider.NewProvider(*providerCfg, summarizeOpts...)
 	if err != nil {

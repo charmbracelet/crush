@@ -21,6 +21,7 @@ import (
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
+	rootCmd.PersistentFlags().BoolP("no-stream", "n", false, "Disable streaming for models (useful for models that require org verification)")
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
@@ -95,6 +96,7 @@ func Execute() {
 func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	noStream, _ := cmd.Flags().GetBool("no-stream")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -111,6 +113,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		cfg.Permissions = &config.Permissions{}
 	}
 	cfg.Permissions.SkipRequests = yolo
+	cfg.Options.DisableStreaming = noStream
 
 	// Connect to DB; this will also run migrations.
 	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)

@@ -179,15 +179,6 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 	s.sessionPermissionsMu.RUnlock()
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
-
 	s.activeRequest = &permission
 
 	respCh := make(chan bool, 1)

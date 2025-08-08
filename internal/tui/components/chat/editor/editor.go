@@ -263,6 +263,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Attachment: attachment,
 		})
 
+	case commands.ToggleYoloModeMsg:
+		m.setEditorPrompt()
+		return m, nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -368,6 +371,14 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *editorCmp) setEditorPrompt() {
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.SetPromptFunc(4, yoloPromptFunc)
+		return
+	}
+	m.textarea.SetPromptFunc(4, normalPromptFunc)
+}
+
 func (m *editorCmp) completionsPosition() (int, int) {
 	cur := m.textarea.Cursor()
 	if cur == nil {
@@ -415,6 +426,9 @@ func (m *editorCmp) View() string {
 		m.textarea.Placeholder = m.workingPlaceholder
 	} else {
 		m.textarea.Placeholder = m.readyPlaceholder
+	}
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.Placeholder = "Yolo mode!"
 	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
@@ -529,31 +543,47 @@ func (c *editorCmp) HasAttachments() bool {
 	return len(c.attachments) > 0
 }
 
+func normalPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		return "  > "
+	}
+	if info.Focused {
+		return t.S().Base.Foreground(t.GreenDark).Render("::: ")
+	}
+	return t.S().Muted.Render("::: ")
+}
+
+func yoloPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.S().Base.Background(t.Citron).Foreground(t.FgSubtle).Render(" ! ") + " "
+		} else {
+			return t.S().Base.Background(t.FgMuted).Foreground(t.BgBase).Render(" ! ") + " "
+		}
+	}
+	if info.Focused {
+		return t.S().Base.Foreground(t.Accent).Render("::: ")
+	}
+	return t.S().Muted.Render("::: ")
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "  > "
-		}
-		if info.Focused {
-			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
-		} else {
-			return t.S().Muted.Render("::: ")
-		}
-	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.Focus()
-
 	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
 	}
+	e.setEditorPrompt()
 
 	e.randomizePlaceholders()
 	e.textarea.Placeholder = e.readyPlaceholder

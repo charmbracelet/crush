@@ -62,6 +62,7 @@ type Theme struct {
 
 	// Yellows
 	Yellow color.Color
+	Citron color.Color
 
 	// Greens
 	Green      color.Color

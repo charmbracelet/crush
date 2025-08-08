@@ -615,14 +615,15 @@ type OpenFileInfo struct {
 
 // HandlesFile checks if this LSP client handles the given file based on its
 // extension.
-func (c *Client) HandlesFile(filepath string) bool {
+func (c *Client) HandlesFile(path string) bool {
 	// If no file types are specified, handle all files (backward compatibility)
 	if len(c.fileTypes) == 0 {
 		return true
 	}
 
+	name := strings.ToLower(filepath.Base(path))
 	for _, ext := range c.fileTypes {
-		if strings.HasSuffix(filepath, ext) {
+		if strings.HasSuffix(name, strings.ToLower(ext)) {
 			return true
 		}
 	}

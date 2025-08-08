@@ -109,7 +109,6 @@ func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.M
 func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	messages = p.cleanMessages(messages)
 	
-	// If streaming is disabled, use the non-streaming send method and convert to events
 	if p.options.disableStreaming {
 		eventChan := make(chan ProviderEvent, 2)
 		go func() {
@@ -121,16 +120,10 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 				return
 			}
 			
-			// Send content if present as a single delta
 			if response.Content != "" {
 				eventChan <- ProviderEvent{Type: EventContentDelta, Content: response.Content}
 			}
 			
-			// Note: Tool calls are already included in the response object
-			// We don't need to send them as separate events since they'll be
-			// handled by the EventComplete event
-			
-			// Send complete event with the full response
 			eventChan <- ProviderEvent{
 				Type:     EventComplete,
 				Response: response,

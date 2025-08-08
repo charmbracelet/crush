@@ -131,7 +131,6 @@ func NewAgent(
 		provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID, config.Get().Options.ContextPaths...)),
 	}
 	
-	// Add disable streaming option if set via command-line flag
 	if cfg.Options.DisableStreaming {
 		opts = append(opts, provider.WithDisableStreaming(true))
 	}
@@ -161,7 +160,6 @@ func NewAgent(
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
 	}
 	
-	// Add disable streaming option if set via command-line flag
 	if cfg.Options.DisableStreaming {
 		titleOpts = append(titleOpts, provider.WithDisableStreaming(true))
 	}
@@ -175,7 +173,6 @@ func NewAgent(
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, providerCfg.ID)),
 	}
 	
-	// Add disable streaming option if set via command-line flag
 	if cfg.Options.DisableStreaming {
 		summarizeOpts = append(summarizeOpts, provider.WithDisableStreaming(true))
 	}

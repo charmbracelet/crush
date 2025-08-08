@@ -476,6 +476,7 @@ func (l *list[T]) viewPosition() (int, int) {
 		start = max(0, renderedLines-l.offset-l.height+1)
 		end = max(0, renderedLines-l.offset)
 	}
+	start = min(start, end)
 	return start, end
 }
 

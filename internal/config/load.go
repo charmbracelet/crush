@@ -39,7 +39,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 }
 
 // Load loads the configuration from the default paths.
-func Load(workingDir string, debug bool) (*Config, error) {
+func Load(workingDir, crushDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
@@ -54,7 +54,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	cfg.dataConfigDir = GlobalConfigData()
 
-	cfg.setDefaults(workingDir)
+	cfg.setDefaults(workingDir, crushDir)
 
 	if debug {
 		cfg.Options.Debug = true
@@ -301,7 +301,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	return nil
 }
 
-func (c *Config) setDefaults(workingDir string) {
+func (c *Config) setDefaults(workingDir, crushDir string) {
 	c.workingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
@@ -313,7 +313,11 @@ func (c *Config) setDefaults(workingDir string) {
 		c.Options.ContextPaths = []string{}
 	}
 	if c.Options.DataDirectory == "" {
-		c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		if crushDir != "" {
+			c.Options.DataDirectory = crushDir
+		} else {
+			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		}
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()

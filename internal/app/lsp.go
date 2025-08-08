@@ -13,13 +13,17 @@ import (
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
 	for name, clientConfig := range app.config.LSP {
-		go app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+		// Initialize if enabled (when field is not set, it defaults to false due to Go zero value)
+		// So we need to check if it's explicitly enabled
+		if clientConfig.Enabled {
+			go app.CreateAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+		}
 	}
 	slog.Info("LSP clients initialization started in background")
 }
 
-// createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
-func (app *App) createAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
+// CreateAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
+func (app *App) CreateAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
 	slog.Info("Creating LSP client", "name", name, "command", command, "args", args)
 
 	// Update state to starting
@@ -123,6 +127,6 @@ func (app *App) restartLSPClient(ctx context.Context, name string) {
 	}
 
 	// Create a new client using the shared function.
-	app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+	app.CreateAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
 	slog.Info("Successfully restarted LSP client", "client", name)
 }

@@ -79,7 +79,7 @@ func lspInformation() string {
 	cfg := config.Get()
 	hasLSP := false
 	for _, v := range cfg.LSP {
-		if !v.Disabled {
+		if v.Enabled {
 			hasLSP = true
 			break
 		}

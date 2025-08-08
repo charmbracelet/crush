@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -25,9 +26,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/tools"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -252,6 +255,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
 		return p, cmd
+	case tools.ToolsUpdatedMsg:
+		// Handle tools enable/disable updates
+		return p, p.handleToolsUpdate(msg)
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -375,6 +381,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.Details):
 			p.toggleDetails()
 			return p, nil
+		case key.Matches(msg, p.keyMap.Tools):
+			return p, p.openToolsDialog()
 		}
 
 		switch p.focusedPane {
@@ -862,6 +870,12 @@ func (p *chatPage) Help() help.KeyMap {
 				key.WithHelp("ctrl+s", "sessions"),
 			),
 		)
+		globalBindings = append(globalBindings,
+			key.NewBinding(
+				key.WithKeys("ctrl+t"),
+				key.WithHelp("ctrl+t", "tools"),
+			),
+		)
 		if p.session.ID != "" {
 			globalBindings = append(globalBindings,
 				key.NewBinding(
@@ -872,6 +886,11 @@ func (p *chatPage) Help() help.KeyMap {
 		shortList = append(shortList,
 			// Commands
 			commandsBinding,
+			// Tools
+			key.NewBinding(
+				key.WithKeys("ctrl+t"),
+				key.WithHelp("ctrl+t", "tools"),
+			),
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1022,4 +1041,73 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 
 	// Check if mouse coordinates are within chat bounds
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
+}
+
+func (p *chatPage) openToolsDialog() tea.Cmd {
+	toolsDialog := tools.NewToolsDialog(p.app)
+	return util.CmdHandler(dialogs.OpenDialogMsg{
+		Model: toolsDialog,
+	})
+}
+
+func (p *chatPage) handleToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
+	cfg := config.Get()
+	ctx := context.Background()
+	
+	// Handle LSP updates
+	for name, enabled := range msg.LSPs {
+		if enabled {
+			// Start LSP if not already running
+			if _, exists := p.app.LSPClients[name]; !exists {
+				if lspCfg, ok := cfg.LSP[name]; ok {
+					go p.app.CreateAndStartLSPClient(ctx, name, lspCfg.Command, lspCfg.Args...)
+				}
+			}
+		} else {
+			// Stop LSP if running
+			if client, exists := p.app.LSPClients[name]; exists && client != nil {
+				go func(c *lsp.Client, n string) {
+					shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
+					_ = c.Shutdown(shutdownCtx)
+					delete(p.app.LSPClients, n)
+				}(client, name)
+			}
+		}
+	}
+	
+	// For MCPs, we need to reinitialize the agent to reload MCP tools
+	if p.app.CoderAgent != nil {
+		// Check if any MCP state changed
+		mcpChanged := false
+		for name, enabled := range msg.MCPs {
+			if mcpCfg, exists := cfg.MCP[name]; exists {
+				if mcpCfg.Disabled == enabled {
+					mcpChanged = true
+					break
+				}
+			}
+		}
+		
+		if mcpChanged {
+			// Reinitialize the coder agent to reload MCP tools
+			return func() tea.Msg {
+				if err := p.app.InitCoderAgent(); err != nil {
+					return util.InfoMsg{
+						Type: util.InfoTypeError,
+						Msg:  "Failed to reload MCP tools: " + err.Error(),
+					}
+				}
+				return util.InfoMsg{
+					Type: util.InfoTypeInfo,
+					Msg:  "Tools configuration updated successfully",
+				}
+			}
+		}
+	}
+	
+	return util.CmdHandler(util.InfoMsg{
+		Type: util.InfoTypeInfo,
+		Msg:  "Tools configuration updated",
+	})
 }

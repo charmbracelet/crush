@@ -72,11 +72,12 @@ type MCPClientInfo struct {
 }
 
 var (
-	mcpToolsOnce sync.Once
-	mcpTools     []tools.BaseTool
-	mcpClients   = csync.NewMap[string, *client.Client]()
-	mcpStates    = csync.NewMap[string, MCPClientInfo]()
-	mcpBroker    = pubsub.NewBroker[MCPEvent]()
+	mcpToolsOnce  sync.Once
+	mcpTools      []tools.BaseTool
+	mcpClients    = csync.NewMap[string, *client.Client]()
+	mcpStates     = csync.NewMap[string, MCPClientInfo]()
+	mcpBroker     = pubsub.NewBroker[MCPEvent]()
+	MCPResetMutex sync.Mutex // Global mutex to protect MCP reset operations - exported for agent.go
 )
 
 type McpTool struct {
@@ -233,6 +234,9 @@ func CloseMCPClients() {
 // ResetMCPClients closes existing MCP clients and resets the sync.Once to allow reinitialization.
 // This is used when MCP configuration changes during runtime.
 func ResetMCPClients() {
+	MCPResetMutex.Lock()
+	defer MCPResetMutex.Unlock()
+	
 	// Close existing clients
 	for c := range mcpClients.Seq() {
 		_ = c.Close()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -47,7 +48,7 @@ type (
 	ChatFocusedMsg struct {
 		Focused bool
 	}
-	CancelTimerExpiredMsg    struct{}
+	CancelTimerExpiredMsg   struct{}
 	ToolsDebounceExpiredMsg struct{}
 )
 
@@ -128,6 +129,7 @@ type chatPage struct {
 	agentReinitializing bool
 	debounceTimer       *time.Timer
 	pendingToolsUpdate  *tools.ToolsUpdatedMsg
+	reinitMutex         sync.Mutex
 }
 
 func New(app *app.App) ChatPage {
@@ -1074,27 +1076,27 @@ func (p *chatPage) openToolsDialog() tea.Cmd {
 
 func (p *chatPage) handleToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
 	slog.Info("handleToolsUpdate called - setting up debounce", "mcps", msg.MCPs, "lsps", msg.LSPs)
-	
+
 	// Store the pending update
 	p.pendingToolsUpdate = &msg
-	
+
 	// Start/restart debounce timer
 	return toolsDebounceCmd()
 }
 
 func (p *chatPage) processToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
 	ctx := context.Background()
-	
+
 	slog.Info("processToolsUpdate called", "mcps", msg.MCPs, "lsps", msg.LSPs)
-	
+
 	// Reload config first to get the latest changes from disk
 	if err := config.Reload(); err != nil {
 		slog.Error("Config reload failed during tools update", "error", err)
 		return util.ReportError(fmt.Errorf("failed to reload config: %w", err))
 	}
-	
+
 	cfg := config.Get()
-	
+
 	// Handle LSP updates
 	for name, enabled := range msg.LSPs {
 		if enabled {
@@ -1116,31 +1118,35 @@ func (p *chatPage) processToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
 			}
 		}
 	}
-	
+
 	// For MCPs, we need to reinitialize the agent to reload MCP tools
 	// Since handleToolsUpdate is only called when tools are modified, always reinitialize MCPs
 	mcpChanged := len(msg.MCPs) > 0
 	slog.Info("MCP change detection - will reinitialize", "mcpChanged", mcpChanged, "mcpCount", len(msg.MCPs), "hasCoderAgent", p.app.CoderAgent != nil)
-	
+
 	if mcpChanged && p.app.CoderAgent != nil {
-		// Prevent concurrent reinitializations
+		// Use mutex to prevent concurrent reinitializations completely
+		p.reinitMutex.Lock()
+		defer p.reinitMutex.Unlock()
+
+		// Double-check after acquiring lock
 		if p.agentReinitializing {
 			slog.Info("Agent reinitialization already in progress, skipping")
 			return nil
 		}
-		
+
 		p.agentReinitializing = true
-		
+
 		// Reset MCP clients to allow reinitialization
 		slog.Info("Resetting MCP clients and reinitializing agent")
 		agent.ResetMCPClients()
-		
+
 		// Reinitialize the coder agent to reload MCP tools
 		return func() tea.Msg {
 			defer func() {
 				p.agentReinitializing = false
 			}()
-			
+
 			slog.Info("Starting agent reinitialization")
 			if err := p.app.InitCoderAgent(); err != nil {
 				slog.Error("Agent reinitialization failed", "error", err)
@@ -1156,7 +1162,7 @@ func (p *chatPage) processToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
 			}
 		}
 	}
-	
+
 	return util.CmdHandler(util.InfoMsg{
 		Type: util.InfoTypeInfo,
 		Msg:  "Tools configuration updated",

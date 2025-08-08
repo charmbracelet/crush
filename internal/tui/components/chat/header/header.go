@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -50,6 +51,9 @@ func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.session = msg.Payload
 			}
 		}
+	case pubsub.Event[agent.MCPEvent]:
+		// Force header to refresh when MCP state changes
+		return p, nil
 	}
 	return p, nil
 }

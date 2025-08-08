@@ -87,6 +87,8 @@ func (d *toolsDialogCmp) loadTools() {
 		if mcpInfo, exists := mcpStates[mcp.Name]; exists {
 			state = mcpInfo.State.String()
 		}
+		
+		
 		d.items = append(d.items, ToolItem{
 			Name:    mcp.Name,
 			Type:    "MCP",

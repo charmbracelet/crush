@@ -230,6 +230,25 @@ func CloseMCPClients() {
 	mcpBroker.Shutdown()
 }
 
+// ResetMCPClients closes existing MCP clients and resets the sync.Once to allow reinitialization.
+// This is used when MCP configuration changes during runtime.
+func ResetMCPClients() {
+	// Close existing clients
+	for c := range mcpClients.Seq() {
+		_ = c.Close()
+	}
+	
+	// Clear clients map
+	mcpClients = csync.NewMap[string, *client.Client]()
+	
+	// Clear states map to remove any orphaned states
+	mcpStates = csync.NewMap[string, MCPClientInfo]()
+	
+	// Reset the sync.Once to allow reinitialization
+	mcpToolsOnce = sync.Once{}
+	mcpTools = nil
+}
+
 var mcpInitRequest = mcp.InitializeRequest{
 	Params: mcp.InitializeParams{
 		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
@@ -244,8 +263,23 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
 
+	// Clean up old MCP states that are no longer in configuration
+	currentStates := make(map[string]bool)
+	for name := range cfg.MCP {
+		currentStates[name] = true
+	}
+	
+	// Remove states for MCPs that are no longer configured
+	for stateName := range mcpStates.Seq2() {
+		if !currentStates[stateName] {
+			slog.Debug("Removing orphaned MCP state", "name", stateName)
+			mcpStates.Del(stateName)
+		}
+	}
+
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
+		slog.Debug("Processing MCP from config", "name", name, "disabled", m.Disabled, "command", m.Command)
 		if m.Disabled {
 			updateMCPState(name, MCPStateDisabled, nil, nil, 0)
 			slog.Debug("skipping disabled mcp", "name", name)

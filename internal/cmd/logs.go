@@ -45,7 +45,7 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		logsFile := filepath.Join(cfg.WorkingDir(), cfg.Options.DataDirectory, "logs", "crush.log")
+		logsFile := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
 		_, err = os.Stat(logsFile)
 		if os.IsNotExist(err) {
 			log.Warn("Looks like you are not in a crush project. No logs found.")

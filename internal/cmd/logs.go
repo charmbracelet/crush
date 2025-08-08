@@ -28,6 +28,11 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("failed to get current working directory: %v", err)
 		}
 
+		dataDir, err := cmd.Flags().GetString("data-dir")
+		if err != nil {
+			return fmt.Errorf("failed to get data directory: %v", err)
+		}
+
 		follow, err := cmd.Flags().GetBool("follow")
 		if err != nil {
 			return fmt.Errorf("failed to get follow flag: %v", err)
@@ -41,7 +46,7 @@ var logsCmd = &cobra.Command{
 		log.SetLevel(log.DebugLevel)
 		log.SetOutput(os.Stdout)
 
-		cfg, err := config.Load(cwd, false)
+		cfg, err := config.Load(cwd, dataDir, false)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}

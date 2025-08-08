@@ -55,7 +55,7 @@ type editorCmp struct {
 	x, y               int
 	app                *app.App
 	session            session.Session
-	textarea           textarea.Model
+	textarea           *textarea.Model
 	attachments        []message.Attachment
 	deleteMode         bool
 	readyPlaceholder   string
@@ -228,7 +228,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		path := strings.ReplaceAll(string(msg), "\\ ", " ")
 		// try to get an image
-		path, err := filepath.Abs(path)
+		path, err := filepath.Abs(strings.TrimSpace(path))
 		if err != nil {
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd
@@ -473,7 +473,7 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 }
 
 func (m *editorCmp) startCompletions() tea.Msg {
-	files, _, _ := fsext.ListDirectory(".", []string{}, 0)
+	files, _, _ := fsext.ListDirectory(".", nil, 0)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")

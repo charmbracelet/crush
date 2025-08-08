@@ -1,16 +1,19 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -90,8 +93,38 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	return cfg, nil
 }
 
+func PushPopCrushEnv() func() {
+	found := []string{}
+	for _, ev := range os.Environ() {
+		if strings.HasPrefix(ev, "CRUSH_") {
+			pair := strings.SplitN(ev, "=", 2)
+			if len(pair) != 2 {
+				continue
+			}
+			found = append(found, strings.TrimPrefix(pair[0], "CRUSH_"))
+		}
+	}
+	backups := make(map[string]string)
+	for _, ev := range found {
+		backups[ev] = os.Getenv(ev)
+	}
+
+	for _, ev := range found {
+		os.Setenv(ev, os.Getenv("CRUSH_"+ev))
+	}
+
+	restore := func() {
+		for k, v := range backups {
+			os.Setenv(k, v)
+		}
+	}
+	return restore
+}
+
 func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
+	restore := PushPopCrushEnv()
+	defer restore()
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -492,7 +525,6 @@ func hasAWSCredentials(env env.Env) bool {
 		env.Get("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
 		return true
 	}
-
 	return false
 }
 
@@ -538,13 +570,14 @@ func GlobalConfigData() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
 }
 
-func HomeDir() string {
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = os.Getenv("USERPROFILE") // For Windows compatibility
+var HomeDir = sync.OnceValue(func() string {
+	u, err := user.Current()
+	if err == nil {
+		return u.HomeDir
 	}
-	if homeDir == "" {
-		homeDir = os.Getenv("HOMEPATH") // Fallback for some environments
-	}
-	return homeDir
-}
+	return cmp.Or(
+		os.Getenv("HOME"),
+		os.Getenv("USERPROFILE"),
+		os.Getenv("HOMEPATH"),
+	)
+})

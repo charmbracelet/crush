@@ -41,7 +41,7 @@ func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
 		now := time.Now()
 		// trackpad is sending too many requests
-		if now.Sub(lastMouseEvent) < 5*time.Millisecond {
+		if now.Sub(lastMouseEvent) < 15*time.Millisecond {
 			return nil
 		}
 		lastMouseEvent = now
@@ -266,7 +266,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg:
-		if !a.dialog.HasDialogs() {
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		} else {
 			updated, pageCmd := a.pages[a.currentPage].Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			cmds = append(cmds, pageCmd)

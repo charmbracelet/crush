@@ -20,7 +20,6 @@ import (
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
-	defaultLogLevel      = "info"
 )
 
 var defaultContextPaths = []string{
@@ -245,6 +244,8 @@ type Agent struct {
 
 // Config holds the configuration for crush.
 type Config struct {
+	Schema string `json:"$schema,omitempty"`
+
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 

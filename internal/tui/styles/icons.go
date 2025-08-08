@@ -15,4 +15,27 @@ const (
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
+
+	BorderThin  string = "│"
+	BorderThick string = "▌"
 )
+
+var SelectionIgnoreIcons = []string{
+	// CheckIcon,
+	// ErrorIcon,
+	// WarningIcon,
+	// InfoIcon,
+	// HintIcon,
+	// SpinnerIcon,
+	// LoadingIcon,
+	// DocumentIcon,
+	// ModelIcon,
+	//
+	// // Tool call icons
+	// ToolPending,
+	// ToolSuccess,
+	// ToolError,
+
+	BorderThin,
+	BorderThick,
+}

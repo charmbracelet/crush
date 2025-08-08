@@ -5,6 +5,9 @@
   "$defs": {
     "Config": {
       "properties": {
+        "$schema": {
+          "type": "string"
+        },
         "models": {
           "additionalProperties": {
             "$ref": "#/$defs/SelectedModel"

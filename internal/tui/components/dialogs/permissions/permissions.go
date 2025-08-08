@@ -751,8 +751,8 @@ type Options struct {
 	DiffMode string // split or unified, empty means use defaultDiffSplitMode
 }
 
-// diffMode returns internal representation of diff mode switch
-func (o Options) diffMode() *bool {
+// isSplitMode returns internal representation of diff mode switch
+func (o Options) isSplitMode() *bool {
 	var split bool
 
 	switch o.DiffMode {

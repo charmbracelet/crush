@@ -387,6 +387,10 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 				return
 			}
 
+			if !w.client.HandlesFile(event.Name) {
+				continue // client doesn't handle this filetype
+			}
+
 			uri := string(protocol.URIFromPath(event.Name))
 
 			// Add new directories to the watcher
@@ -687,16 +691,6 @@ func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, chan
 
 // notifyFileEvent sends a didChangeWatchedFiles notification for a file event
 func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) error {
-	// Check if this LSP client handles this file type
-	filePath, err := protocol.DocumentURI(uri).Path()
-	if err != nil {
-		return fmt.Errorf("error converting URI to path: %w", err)
-	}
-
-	if !w.client.HandlesFile(filePath) {
-		return nil // Skip files this LSP doesn't handle
-	}
-
 	cfg := config.Get()
 	if cfg.Options.DebugLSP {
 		slog.Debug("Notifying file event",

@@ -29,6 +29,8 @@
   - "/(macos|osx)/i"
 "os: windows":
   - "/windows/i"
+"panic / crash":
+  - "/(panic|crash|segfault)/i"
 "provider: anthropic claude":
   - "/(anthropic|claude)/i"
 "provider: aws bedrock":

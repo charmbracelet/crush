@@ -29,6 +29,9 @@ type Client struct {
 	// Client name for identification
 	name string
 
+	// File types this LSP server handles (e.g., .go, .rs, .py)
+	fileTypes []string
+
 	// Diagnostic change callback
 	onDiagnosticsChanged func(name string, count int)
 
@@ -59,8 +62,9 @@ type Client struct {
 	serverState atomic.Value
 }
 
-func NewClient(ctx context.Context, name, command string, args ...string) (*Client, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
+// NewClient creates a new LSP client.
+func NewClient(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
+	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
 	// Copy env
 	cmd.Env = os.Environ()
 
@@ -82,6 +86,7 @@ func NewClient(ctx context.Context, name, command string, args ...string) (*Clie
 	client := &Client{
 		Cmd:                   cmd,
 		name:                  name,
+		fileTypes:             config.FileTypes,
 		stdin:                 stdin,
 		stdout:                bufio.NewReader(stdout),
 		stderr:                stderr,
@@ -608,7 +613,27 @@ type OpenFileInfo struct {
 	URI     protocol.DocumentURI
 }
 
+// HandlesFile checks if this LSP client handles the given file based on its
+// extension.
+func (c *Client) HandlesFile(filepath string) bool {
+	// If no file types are specified, handle all files (backward compatibility)
+	if len(c.fileTypes) == 0 {
+		return true
+	}
+
+	for _, ext := range c.fileTypes {
+		if strings.HasSuffix(filepath, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
+	if !c.HandlesFile(filepath) {
+		return nil
+	}
+
 	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()

@@ -431,8 +431,11 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 					// Just send the notification if needed
 					info, err := os.Stat(event.Name)
 					if err != nil {
-						slog.Error("Error getting file info", "path", event.Name, "error", err)
-						return
+						if !os.IsNotExist(err) {
+							// Only log if it's not a "file not found" error
+							slog.Debug("Error getting file info", "path", event.Name, "error", err)
+						}
+						continue
 					}
 					if !info.IsDir() && watchKind&protocol.WatchCreate != 0 {
 						w.debounceHandleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Created))
@@ -684,6 +687,16 @@ func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, chan
 
 // notifyFileEvent sends a didChangeWatchedFiles notification for a file event
 func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) error {
+	// Check if this LSP client handles this file type
+	filePath, err := protocol.DocumentURI(uri).Path()
+	if err != nil {
+		return fmt.Errorf("error converting URI to path: %w", err)
+	}
+
+	if !w.client.HandlesFile(filePath) {
+		return nil // Skip files this LSP doesn't handle
+	}
+
 	cfg := config.Get()
 	if cfg.Options.DebugLSP {
 		slog.Debug("Notifying file event",
@@ -801,6 +814,7 @@ func shouldExcludeDir(dirPath string) bool {
 func shouldExcludeFile(filePath string) bool {
 	fileName := filepath.Base(filePath)
 	cfg := config.Get()
+
 	// Skip dot files
 	if strings.HasPrefix(fileName, ".") {
 		return true
@@ -812,12 +826,6 @@ func shouldExcludeFile(filePath string) bool {
 		return true
 	}
 
-	// Skip temporary files
-	if strings.HasSuffix(filePath, "~") {
-		return true
-	}
-
-	// Check file size
 	info, err := os.Stat(filePath)
 	if err != nil {
 		// If we can't stat the file, skip it

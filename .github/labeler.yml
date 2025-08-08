@@ -1,7 +1,12 @@
+# NOTE(@andreynering): We should have a single entry per label, because if we
+# have multiple the action would only apply the label if ALL of them match.
+
 "area: ci":
   - "/^ci: /i"
 "area: diff":
   - "/diff/i"
+"area: docs":
+  - "/(docs|documentation|readme)/i"
 "area: images":
   - "/image/i"
 "area: lsp":
@@ -24,6 +29,8 @@
   - "/(macos|osx)/i"
 "os: windows":
   - "/windows/i"
+"panic / crash":
+  - "/(panic|crash|segfault)/i"
 "provider: anthropic claude":
   - "/(anthropic|claude)/i"
 "provider: aws bedrock":

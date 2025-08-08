@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -28,6 +29,12 @@ type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
 
+type SelectionCopyMsg struct {
+	clickCount   int
+	endSelection bool
+	x, y         int
+}
+
 const (
 	NotFound = -1
 )
@@ -42,6 +49,8 @@ type MessageListCmp interface {
 
 	SetSession(session.Session) tea.Cmd
 	GoToBottom() tea.Cmd
+	GetSelectedText() string
+	CopySelectedText(bool) tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -56,6 +65,12 @@ type messageListCmp struct {
 
 	lastUserMessageTime int64
 	defaultListKeyMap   list.KeyMap
+
+	// Click tracking for double/triple click detection
+	lastClickTime time.Time
+	lastClickX    int
+	lastClickY    int
+	clickCount    int
 }
 
 // New creates a new message list component with custom keybindings
@@ -86,6 +101,73 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
+			switch {
+			case key.Matches(msg, messages.CopyKey):
+				return m, m.CopySelectedText(true)
+			case key.Matches(msg, messages.ClearSelectionKey):
+				return m, m.SelectionClear()
+			}
+		}
+	case tea.MouseClickMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			return m, nil // Ignore clicks outside the component
+		}
+		if msg.Button == tea.MouseLeft {
+			return m, m.handleMouseClick(x, y)
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			if y < 0 {
+				return m, m.listCmp.MoveUp(1)
+			}
+			if y >= m.height-1 {
+				return m, m.listCmp.MoveDown(1)
+			}
+			return m, nil // Ignore clicks outside the component
+		}
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.EndSelection(x, y)
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if msg.Button == tea.MouseLeft {
+			clickCount := m.clickCount
+			if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+				return m, tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+					return SelectionCopyMsg{
+						clickCount:   clickCount,
+						endSelection: false,
+					}
+				})
+			}
+			return m, tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+				return SelectionCopyMsg{
+					clickCount:   clickCount,
+					endSelection: true,
+					x:            x,
+					y:            y,
+				}
+			})
+		}
+		return m, nil
+	case SelectionCopyMsg:
+		if msg.clickCount == m.clickCount && time.Since(m.lastClickTime) >= doubleClickThreshold {
+			// If the click count matches and within threshold, copy selected text
+			if msg.endSelection {
+				m.listCmp.EndSelection(msg.x, msg.y)
+			}
+			m.listCmp.SelectionStop()
+			return m, m.CopySelectedText(true)
+		}
 	case pubsub.Event[permission.PermissionNotification]:
 		return m, m.handlePermissionRequest(msg.Payload)
 	case SessionSelectedMsg:
@@ -106,13 +188,11 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := m.listCmp.Update(msg)
 		m.listCmp = u.(list.List[list.Item])
 		return m, cmd
-	default:
-		var cmds []tea.Cmd
-		u, cmd := m.listCmp.Update(msg)
-		m.listCmp = u.(list.List[list.Item])
-		cmds = append(cmds, cmd)
-		return m, tea.Batch(cmds...)
 	}
+
+	u, cmd := m.listCmp.Update(msg)
+	m.listCmp = u.(list.List[list.Item])
+	return m, cmd
 }
 
 // View renders the message list or an initial screen if empty.
@@ -565,4 +645,98 @@ func (m *messageListCmp) Bindings() []key.Binding {
 
 func (m *messageListCmp) GoToBottom() tea.Cmd {
 	return m.listCmp.GoToBottom()
+}
+
+const (
+	doubleClickThreshold = 500 * time.Millisecond
+	clickTolerance       = 2 // pixels
+)
+
+// handleMouseClick handles mouse click events and detects double/triple clicks.
+func (m *messageListCmp) handleMouseClick(x, y int) tea.Cmd {
+	now := time.Now()
+
+	// Check if this is a potential multi-click
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(x-m.lastClickX) <= clickTolerance &&
+		abs(y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+
+	m.lastClickTime = now
+	m.lastClickX = x
+	m.lastClickY = y
+
+	switch m.clickCount {
+	case 1:
+		// Single click - start selection
+		m.listCmp.StartSelection(x, y)
+	case 2:
+		// Double click - select word
+		m.listCmp.SelectWord(x, y)
+	case 3:
+		// Triple click - select paragraph
+		m.listCmp.SelectParagraph(x, y)
+		m.clickCount = 0 // Reset after triple click
+	}
+
+	return nil
+}
+
+// SelectionClear clears the current selection in the list component.
+func (m *messageListCmp) SelectionClear() tea.Cmd {
+	m.listCmp.SelectionClear()
+	m.previousSelected = ""
+	m.lastClickX, m.lastClickY = 0, 0
+	m.lastClickTime = time.Time{}
+	m.clickCount = 0
+	return nil
+}
+
+// HasSelection checks if there is a selection in the list component.
+func (m *messageListCmp) HasSelection() bool {
+	return m.listCmp.HasSelection()
+}
+
+// GetSelectedText returns the currently selected text from the list component.
+func (m *messageListCmp) GetSelectedText() string {
+	return m.listCmp.GetSelectedText(3) // 3 padding for the left border/padding
+}
+
+// CopySelectedText copies the currently selected text to the clipboard. When
+// clear is true, it clears the selection after copying.
+func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
+	if !m.listCmp.HasSelection() {
+		return nil
+	}
+
+	selectedText := m.GetSelectedText()
+	if selectedText == "" {
+		return util.ReportInfo("No text selected")
+	}
+
+	if clear {
+		defer func() { m.SelectionClear() }()
+	}
+
+	return tea.Sequence(
+		// We use both OSC 52 and native clipboard for compatibility with different
+		// terminal emulators and environments.
+		tea.SetClipboard(selectedText),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(selectedText)
+			return nil
+		},
+		util.ReportInfo("Selected text copied to clipboard"),
+	)
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

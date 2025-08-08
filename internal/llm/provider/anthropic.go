@@ -253,9 +253,6 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 	if a.providerOptions.systemPromptPrefix != "" {
 		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
 			Text: a.providerOptions.systemPromptPrefix,
-			CacheControl: anthropic.CacheControlEphemeralParam{
-				Type: "ephemeral",
-			},
 		})
 	}
 

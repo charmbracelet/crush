@@ -5,9 +5,9 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
-func NewCrushTheme() *Theme {
+func NewCharmtoneTheme() *Theme {
 	t := &Theme{
-		Name:   "crush",
+		Name:   "charmtone",
 		IsDark: true,
 
 		Primary:   charmtone.Charple,
@@ -55,6 +55,9 @@ func NewCrushTheme() *Theme {
 		RedLight: charmtone.Salmon,
 		Cherry:   charmtone.Cherry,
 	}
+
+	// Text selection.
+	t.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
 
 	// LSP and MCP status.
 	t.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")

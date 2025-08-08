@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/keymap"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -270,7 +271,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_session",
 			Title:       "Switch Session",
 			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
+			Shortcut:    keymap.GetGlobalSessionsKey(),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchSessionsMsg{})
 			},
@@ -365,7 +366,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "toggle_help",
 			Title:       "Toggle Help",
-			Shortcut:    "ctrl+g",
+			Shortcut:    keymap.GetGlobalHelpKey(),
 			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(ToggleHelpMsg{})
@@ -385,7 +386,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "quit",
 			Title:       "Quit",
 			Description: "Quit",
-			Shortcut:    "ctrl+c",
+			Shortcut:    keymap.GetGlobalQuitKey(),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(QuitMsg{})
 			},

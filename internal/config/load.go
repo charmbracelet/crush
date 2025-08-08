@@ -337,41 +337,35 @@ func (c *Config) setDefaults(workingDir string) {
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 }
 
+var defaultLSPFileTypes = map[string][]string{
+	"gopls":                      {".go", ".mod", ".sum", ".work"},
+	"typescript-language-server": {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
+	"vtsls":                      {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
+	"bash-language-server":       {".sh", ".bash", ".zsh", ".ksh"},
+	"rust-analyzer":              {".rs"},
+	"pyright":                    {".py", ".pyi"},
+	"pylsp":                      {".py", ".pyi"},
+	"clangd":                     {".c", ".cpp", ".cc", ".cxx", ".h", ".hpp"},
+	"jdtls":                      {".java"},
+	"vscode-html-languageserver": {".html", ".htm"},
+	"vscode-css-languageserver":  {".css", ".scss", ".sass", ".less"},
+	"vscode-json-languageserver": {".json", ".jsonc"},
+	"yaml-language-server":       {".yaml", ".yml"},
+	"lua-language-server":        {".lua"},
+	"solargraph":                 {".rb"},
+	"elixir-ls":                  {".ex", ".exs"},
+	"zls":                        {".zig"},
+}
+
 // applyDefaultLSPFileTypes sets default file types for known LSP servers
 func applyDefaultLSPFileTypes(lspConfigs map[string]LSPConfig) {
-	defaultFileTypes := map[string][]string{
-		"gopls":                      {".go", ".mod", ".sum", ".work"},
-		"typescript-language-server": {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
-		"vtsls":                      {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
-		"bash-language-server":       {".sh", ".bash", ".zsh", ".ksh"},
-		"rust-analyzer":              {".rs"},
-		"pyright":                    {".py", ".pyi"},
-		"pylsp":                      {".py", ".pyi"},
-		"clangd":                     {".c", ".cpp", ".cc", ".cxx", ".h", ".hpp"},
-		"jdtls":                      {".java"},
-		"vscode-html-languageserver": {".html", ".htm"},
-		"vscode-css-languageserver":  {".css", ".scss", ".sass", ".less"},
-		"vscode-json-languageserver": {".json", ".jsonc"},
-		"yaml-language-server":       {".yaml", ".yml"},
-		"lua-language-server":        {".lua"},
-		"solargraph":                 {".rb"},
-		"elixir-ls":                  {".ex", ".exs"},
-		"zls":                        {".zig"},
-	}
-
 	for name, config := range lspConfigs {
-		// Only apply defaults if file types are not already specified
 		if len(config.FileTypes) != 0 {
 			continue
 		}
-		// Check if the command matches any known LSP server
-		for knownCmd, fileTypes := range defaultFileTypes {
-			if strings.Contains(config.Command, knownCmd) || strings.EqualFold(name, knownCmd) {
-				config.FileTypes = fileTypes
-				lspConfigs[name] = config
-				break
-			}
-		}
+		bin := strings.ToLower(filepath.Base(config.Command))
+		config.FileTypes = defaultLSPFileTypes[bin]
+		lspConfigs[name] = config
 	}
 }
 

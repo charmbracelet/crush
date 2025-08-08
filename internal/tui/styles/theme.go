@@ -84,6 +84,12 @@ type Theme struct {
 	ItemErrorIcon   lipgloss.Style
 	ItemOnlineIcon  lipgloss.Style
 
+	// Editor: Yolo Mode
+	YoloIconFocused lipgloss.Style
+	YoloIconBlurred lipgloss.Style
+	YoloDotsFocused lipgloss.Style
+	YoloDotsBlurred lipgloss.Style
+
 	styles *Styles
 }
 

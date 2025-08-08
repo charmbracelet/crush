@@ -391,8 +391,8 @@
         "diff_mode": {
           "type": "string",
           "enum": [
-            "split",
-            "unified"
+            "unified",
+            "split"
           ],
           "description": "Diff mode for the TUI interface"
         }

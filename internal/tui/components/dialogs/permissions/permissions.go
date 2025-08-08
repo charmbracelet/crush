@@ -80,7 +80,7 @@ func NewPermissionDialogCmp(permission permission.PermissionRequest, opts *Optio
 		contentViewPort: contentViewport,
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
-		diffSplitMode:   opts.diffMode(),
+		diffSplitMode:   opts.isSplitMode(),
 		keyMap:          DefaultKeyMap(),
 		contentDirty:    true, // Mark as dirty initially
 	}

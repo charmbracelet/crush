@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -765,7 +766,12 @@ func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnos
 
 // GetDiagnostics returns all diagnostics for all files
 func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
-	return c.diagnostics
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
+
+	diagnostics := make(map[protocol.DocumentURI][]protocol.Diagnostic, len(c.diagnostics))
+	maps.Copy(diagnostics, c.diagnostics)
+	return diagnostics
 }
 
 // OpenFileOnDemand opens a file only if it's not already open

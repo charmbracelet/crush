@@ -769,9 +769,7 @@ func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic
 	c.diagnosticsMu.RLock()
 	defer c.diagnosticsMu.RUnlock()
 
-	diagnostics := make(map[protocol.DocumentURI][]protocol.Diagnostic, len(c.diagnostics))
-	maps.Copy(diagnostics, c.diagnostics)
-	return diagnostics
+	return maps.Clone(c.diagnostics)
 }
 
 // OpenFileOnDemand opens a file only if it's not already open

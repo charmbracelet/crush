@@ -20,6 +20,7 @@ import (
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
+	rootCmd.PersistentFlags().StringP("state-dir", "s", "", "Custom crush state directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
@@ -43,6 +44,9 @@ crush -d
 
 # Run with debug logging in a specific directory
 crush -d -c /path/to/project
+
+# Run with custom state directory
+crush -s /path/to/custom/.crush
 
 # Print version
 crush -v
@@ -95,6 +99,7 @@ func Execute() {
 func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	stateDir, _ := cmd.Flags().GetString("state-dir")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -102,7 +107,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, debug)
+	cfg, err := config.Init(cwd, stateDir, debug)
 	if err != nil {
 		return nil, err
 	}

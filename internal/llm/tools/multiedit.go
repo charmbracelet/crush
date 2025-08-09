@@ -432,14 +432,34 @@ func (m *multiEditTool) applyEditToContent(content string, edit MultiEditOperati
 	var newContent string
 	var replacementCount int
 
+	// CRLF-aware matching: if the content uses Windows CRLF line endings and the provided
+	// old_string/new_string use LF, retry the match with LF converted to CRLF.
+	hasCRLF := strings.Contains(content, "\r\n")
+
 	if edit.ReplaceAll {
 		newContent = strings.ReplaceAll(content, edit.OldString, edit.NewString)
 		replacementCount = strings.Count(content, edit.OldString)
+		if replacementCount == 0 && hasCRLF && strings.Contains(edit.OldString, "\n") && !strings.Contains(edit.OldString, "\r\n") {
+			oldCRLF := strings.ReplaceAll(edit.OldString, "\n", "\r\n")
+			newCRLF := strings.ReplaceAll(edit.NewString, "\n", "\r\n")
+			replacementCount = strings.Count(content, oldCRLF)
+			if replacementCount > 0 {
+				newContent = strings.ReplaceAll(content, oldCRLF, newCRLF)
+			}
+		}
 		if replacementCount == 0 {
 			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}
 	} else {
 		index := strings.Index(content, edit.OldString)
+		if index == -1 && hasCRLF && strings.Contains(edit.OldString, "\n") && !strings.Contains(edit.OldString, "\r\n") {
+			oldCRLF := strings.ReplaceAll(edit.OldString, "\n", "\r\n")
+			edit.NewString = strings.ReplaceAll(edit.NewString, "\n", "\r\n")
+			index = strings.Index(content, oldCRLF)
+			if index != -1 {
+				edit.OldString = oldCRLF
+			}
+		}
 		if index == -1 {
 			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}

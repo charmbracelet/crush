@@ -304,14 +304,32 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	var newContent string
 	var deletionCount int
 
+	// CRLF-aware matching: if the file uses Windows CRLF line endings and the provided
+	// old_string use LF, retry the match with LF converted to CRLF.
+	hasCRLF := strings.Contains(oldContent, "\r\n")
+
 	if replaceAll {
 		newContent = strings.ReplaceAll(oldContent, oldString, "")
 		deletionCount = strings.Count(oldContent, oldString)
+		if deletionCount == 0 && hasCRLF && strings.Contains(oldString, "\n") && !strings.Contains(oldString, "\r\n") {
+			oldCRLF := strings.ReplaceAll(oldString, "\n", "\r\n")
+			deletionCount = strings.Count(oldContent, oldCRLF)
+			if deletionCount > 0 {
+				newContent = strings.ReplaceAll(oldContent, oldCRLF, "")
+			}
+		}
 		if deletionCount == 0 {
 			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
 		}
 	} else {
 		index := strings.Index(oldContent, oldString)
+		if index == -1 && hasCRLF && strings.Contains(oldString, "\n") && !strings.Contains(oldString, "\r\n") {
+			oldCRLF := strings.ReplaceAll(oldString, "\n", "\r\n")
+			index = strings.Index(oldContent, oldCRLF)
+			if index != -1 {
+				oldString = oldCRLF
+			}
+		}
 		if index == -1 {
 			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
 		}
@@ -433,14 +451,36 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	var newContent string
 	var replacementCount int
 
+	// CRLF-aware matching: if the file uses Windows CRLF line endings and the provided
+	// old_string/new_string use LF, retry the match with LF converted to CRLF.
+	hasCRLF := strings.Contains(oldContent, "\r\n")
+
 	if replaceAll {
 		newContent = strings.ReplaceAll(oldContent, oldString, newString)
 		replacementCount = strings.Count(oldContent, oldString)
+		if replacementCount == 0 && hasCRLF && strings.Contains(oldString, "\n") && !strings.Contains(oldString, "\r\n") {
+			// Retry with CRLF-normalized old/new strings
+			oldCRLF := strings.ReplaceAll(oldString, "\n", "\r\n")
+			newCRLF := strings.ReplaceAll(newString, "\n", "\r\n")
+			replacementCount = strings.Count(oldContent, oldCRLF)
+			if replacementCount > 0 {
+				newContent = strings.ReplaceAll(oldContent, oldCRLF, newCRLF)
+			}
+		}
 		if replacementCount == 0 {
 			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
 		}
 	} else {
 		index := strings.Index(oldContent, oldString)
+		if index == -1 && hasCRLF && strings.Contains(oldString, "\n") && !strings.Contains(oldString, "\r\n") {
+			// Retry with CRLF-normalized old/new strings
+			oldCRLF := strings.ReplaceAll(oldString, "\n", "\r\n")
+			newString = strings.ReplaceAll(newString, "\n", "\r\n")
+			index = strings.Index(oldContent, oldCRLF)
+			if index != -1 {
+				oldString = oldCRLF
+			}
+		}
 		if index == -1 {
 			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
 		}

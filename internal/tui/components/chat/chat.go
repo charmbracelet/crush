@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type SendMsg struct {
@@ -198,13 +199,29 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.
+	listView := t.S().Base.
 		Padding(1, 1, 0, 1).
 		Width(m.width).
 		Height(m.height).
 		Render(
 			m.listCmp.View(),
 		)
+
+	if m.app.CoderAgent != nil && m.app.CoderAgent.QueuedPrompts(m.session.ID) > 0 {
+		queue := m.app.CoderAgent.QueuedPrompts(m.session.ID)
+		queuePill := queuePill(queue, t)
+		layers := []*lipgloss.Layer{
+			lipgloss.NewLayer(listView),
+			lipgloss.NewLayer(
+				queuePill,
+			).X(4).Y(m.height - 3),
+		}
+		canvas := lipgloss.NewCanvas(
+			layers...,
+		)
+		return canvas.Render()
+	}
+	return listView
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {

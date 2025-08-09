@@ -30,6 +30,13 @@ type BashResponseMetadata struct {
 type bashTool struct {
 	permissions permission.Service
 	workingDir  string
+	config      ConfigProvider
+}
+
+// ConfigProvider interface for accessing config options
+type ConfigProvider interface {
+	GetDisableCoAuthor() bool
+	GetAllowCommitOverride() bool
 }
 
 const (
@@ -114,9 +121,56 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription() string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
-	return fmt.Sprintf(`Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+func bashDescription(cfg ConfigProvider) string {
+bannedCommandsStr := strings.Join(bannedCommands, ", ")
+
+// Configure commit message footer based on settings
+var commitEnding, commitExample string
+if cfg != nil && cfg.GetDisableCoAuthor() {
+commitEnding = ":"
+commitExample = ""
+} else {
+commitEnding = " ending with:\n💘 Generated with Crush\nCo-Authored-By: Crush <crush@charm.land>"
+commitExample = "\n\n 💘 Generated with Crush\n Co-Authored-By: 💘 Crush <crush@charm.land>"
+}
+	
+	// Configure commit analysis section based on override setting
+	var commitAnalysisInstructions string
+	if cfg != nil && cfg.GetAllowCommitOverride() {
+		commitAnalysisInstructions = `3. Analyze all staged changes (both previously staged and newly added) and follow any provided commit message instructions. Wrap your analysis process in <commit_analysis> tags:
+
+<commit_analysis>
+- List the files that have been changed or added
+- Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.)
+- Brainstorm the purpose or motivation behind these changes
+- Do not use tools to explore code, beyond what is available in the git context
+- Assess the impact of these changes on the overall project
+- Check for any sensitive information that shouldn't be committed
+- Follow any specific commit message instructions that have been provided, or draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
+- Ensure your language is clear, concise, and to the point
+- Ensure the message accurately reflects the changes and their purpose (i.e. "add" means a wholly new feature, "update" means an enhancement to an existing feature, "fix" means a bug fix, etc.)
+- Ensure the message is not generic (avoid words like "Update" or "Fix" without context)
+- Review the draft message to ensure it accurately reflects the changes and their purpose
+</commit_analysis>`
+	} else {
+		commitAnalysisInstructions = `3. Analyze all staged changes (both previously staged and newly added) and draft a commit message. Wrap your analysis process in <commit_analysis> tags:
+
+<commit_analysis>
+- List the files that have been changed or added
+- Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.)
+- Brainstorm the purpose or motivation behind these changes
+- Do not use tools to explore code, beyond what is available in the git context
+- Assess the impact of these changes on the overall project
+- Check for any sensitive information that shouldn't be committed
+- Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
+- Ensure your language is clear, concise, and to the point
+- Ensure the message accurately reflects the changes and their purpose (i.e. "add" means a wholly new feature, "update" means an enhancement to an existing feature, "fix" means a bug fix, etc.)
+- Ensure the message is not generic (avoid words like "Update" or "Fix" without context)
+- Review the draft message to ensure it accurately reflects the changes and their purpose
+</commit_analysis>`
+	}
+
+	baseDescription := `Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
 CROSS-PLATFORM SHELL SUPPORT:
 * This tool uses a shell interpreter (mvdan/sh) that mimics the Bash language,
@@ -174,33 +228,14 @@ When the user asks you to create a new git commit, follow these steps carefully:
 
 2. Use the git context at the start of this conversation to determine which files are relevant to your commit. Add relevant untracked files to the staging area. Do not commit files that were already modified at the start of this conversation, if they are not relevant to your commit.
 
-3. Analyze all staged changes (both previously staged and newly added) and draft a commit message. Wrap your analysis process in <commit_analysis> tags:
+%s
 
-<commit_analysis>
-- List the files that have been changed or added
-- Summarize the nature of the changes (eg. new feature, enhancement to an existing feature, bug fix, refactoring, test, docs, etc.)
-- Brainstorm the purpose or motivation behind these changes
-- Do not use tools to explore code, beyond what is available in the git context
-- Assess the impact of these changes on the overall project
-- Check for any sensitive information that shouldn't be committed
-- Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what"
-- Ensure your language is clear, concise, and to the point
-- Ensure the message accurately reflects the changes and their purpose (i.e. "add" means a wholly new feature, "update" means an enhancement to an existing feature, "fix" means a bug fix, etc.)
-- Ensure the message is not generic (avoid words like "Update" or "Fix" without context)
-- Review the draft message to ensure it accurately reflects the changes and their purpose
-</commit_analysis>
-
-4. Create the commit with a message ending with:
-💘 Generated with Crush
-Co-Authored-By: Crush <crush@charm.land>
+4. Create the commit with a message%s
 
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
 <example>
 git commit -m "$(cat <<'EOF'
- Commit message here.
-
- 💘 Generated with Crush
- Co-Authored-By: 💘 Crush <crush@charm.land>
+ Commit message here.%s
  EOF
  )"
 </example>
@@ -269,7 +304,9 @@ EOF
 
 Important:
 - Return an empty response - the user will see the gh output directly
-- Never update git config`, bannedCommandsStr, MaxOutputLength)
+- Never update git config`
+
+	return fmt.Sprintf(baseDescription, bannedCommandsStr, MaxOutputLength, commitAnalysisInstructions, commitEnding, commitExample)
 }
 
 func blockFuncs() []shell.BlockFunc {
@@ -303,7 +340,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permission permission.Service, workingDir string) BaseTool {
+func NewBashTool(permission permission.Service, workingDir string, config ConfigProvider) BaseTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
 	persistentShell.SetBlockFuncs(blockFuncs())
@@ -311,6 +348,7 @@ func NewBashTool(permission permission.Service, workingDir string) BaseTool {
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
+		config:      config,
 	}
 }
 
@@ -321,7 +359,7 @@ func (b *bashTool) Name() string {
 func (b *bashTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        BashToolName,
-		Description: bashDescription(),
+		Description: bashDescription(b.config),
 		Parameters: map[string]any{
 			"command": map[string]any{
 				"type":        "string",

@@ -47,6 +47,8 @@ require (
 	mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8
 )
 
+require github.com/stretchr/objx v0.5.2 // indirect
+
 require (
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.13.0 // indirect

@@ -11,6 +11,7 @@ type KeyMap struct {
 	Select,
 	Allow,
 	AllowSession,
+	AllowPermanently,
 	Deny,
 	ToggleDiffMode,
 	ScrollDown,
@@ -40,6 +41,10 @@ func DefaultKeyMap() KeyMap {
 		AllowSession: key.NewBinding(
 			key.WithKeys("s", "S", "ctrl+s"),
 			key.WithHelp("s", "allow session"),
+		),
+		AllowPermanently: key.NewBinding(
+			key.WithKeys("p", "P", "ctrl+p"),
+			key.WithHelp("p", "allow permanently"),
 		),
 		Deny: key.NewBinding(
 			key.WithKeys("d", "D", "ctrl+d", "esc"),
@@ -81,6 +86,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Select,
 		k.Allow,
 		k.AllowSession,
+		k.AllowPermanently,
 		k.Deny,
 		k.ToggleDiffMode,
 		k.ScrollDown,

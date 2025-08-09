@@ -30,6 +30,10 @@ brew install charmbracelet/tap/crush
 # NPM
 npm install -g @charmland/crush
 
+# aqua or mise
+aqua generate -i charmbracelet/crush
+mise use -g aqua:charmbracelet/crush
+
 # Arch Linux (btw)
 yay -S crush-bin
 

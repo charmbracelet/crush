@@ -54,5 +54,6 @@ crush run -q "Generate a README for this project"
 }
 
 func init() {
+	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 }

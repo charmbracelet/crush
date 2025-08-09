@@ -398,6 +398,28 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Models):
+		// if the app is not configured show no models
+		if !a.isConfigured {
+			return nil
+		}
+		if a.dialog.ActiveDialogID() == models.ModelsDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() != commands.CommandsDialogID {
+			return nil
+		}
+		var cmdsModels []tea.Cmd
+		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
+			// If the commands dialog is open, close it first
+			cmdsModels = append(cmdsModels, util.CmdHandler(dialogs.CloseDialogMsg{}))
+		}
+		cmdsModels = append(cmdsModels,
+			util.CmdHandler(dialogs.OpenDialogMsg{
+				Model: models.NewModelDialogCmp(),
+			}),
+		)
+		return tea.Sequence(cmdsModels...)
 	case key.Matches(msg, a.keyMap.Suspend):
 		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")

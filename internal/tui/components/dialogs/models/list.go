@@ -162,7 +162,9 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				name = string(configProvider.ID)
 			}
 			section := list.NewItemSection(name)
-			section.SetInfo(configured)
+			if providerConfig.APIKey != "" {
+				section.SetInfo(configured)
+			}
 			group := list.Group[list.CompletionItem[ModelOption]]{
 				Section: section,
 			}
@@ -205,8 +207,10 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
-			section.SetInfo(configured)
+		if pc, ok := cfg.Providers.Get(string(provider.ID)); ok {
+			if pc.APIKey != "" {
+				section.SetInfo(configured)
+			}
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,

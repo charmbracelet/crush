@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -106,6 +107,9 @@ func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.session = msg.Payload
 			}
 		}
+	case pubsub.Event[agent.MCPEvent]:
+		// Force sidebar to refresh when MCP state changes
+		return m, nil
 	}
 	return m, nil
 }

@@ -252,6 +252,8 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent() error {
+	// Get the latest config in case it was reloaded
+	app.config = config.Get()
 	coderAgentCfg := app.config.Agents["coder"]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")

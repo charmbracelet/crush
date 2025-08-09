@@ -33,6 +33,23 @@ func Get() *Config {
 	return cfg
 }
 
+// Reload reloads the configuration from disk
+func Reload() error {
+	cfg := instance.Load()
+	if cfg == nil {
+		return fmt.Errorf("config not initialized")
+	}
+
+	// Reload the config using the same working directory and debug settings
+	newCfg, err := Load(cfg.WorkingDir(), cfg.Options.Debug)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	instance.Store(newCfg)
+	return nil
+}
+
 func ProjectNeedsInitialization() (bool, error) {
 	cfg := Get()
 	if cfg == nil {

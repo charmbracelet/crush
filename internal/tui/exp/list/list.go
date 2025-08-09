@@ -790,15 +790,28 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// render iterator renders items starting from the specific index and limits hight if limitHeight != -1
+// renderFragment holds updated rendered view fragments
+type renderFragment struct {
+	view string
+	gap  int
+}
+
+// renderIterator renders items starting from the specific index and limits height if limitHeight != -1
 // returns the last index and the rendered content so far
 // we pass the rendered content around and don't use l.rendered to prevent jumping of the content
 func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string) (string, int) {
+	var fragments []renderFragment
+
 	currentContentHeight := lipgloss.Height(rendered) - 1
 	itemsLen := l.items.Len()
+	finalIndex := itemsLen
+
+	// first pass: accumulate all fragments to render until the height limit is
+	// reached
 	for i := startInx; i < itemsLen; i++ {
-		if currentContentHeight >= l.height && limitHeight {
-			return rendered, i
+		if limitHeight && currentContentHeight >= l.height {
+			finalIndex = i
+			break
 		}
 		// cool way to go through the list in both directions
 		inx := i
@@ -811,6 +824,7 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 		if !ok {
 			continue
 		}
+
 		var rItem renderedItem
 		if cache, ok := l.renderedItems.Get(item.ID()); ok {
 			rItem = cache
@@ -820,19 +834,42 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 			rItem.end = currentContentHeight + rItem.height - 1
 			l.renderedItems.Set(item.ID(), rItem)
 		}
+
 		gap := l.gap + 1
 		if inx == itemsLen-1 {
 			gap = 0
 		}
 
-		if l.direction == DirectionForward {
-			rendered += rItem.view + strings.Repeat("\n", gap)
-		} else {
-			rendered = rItem.view + strings.Repeat("\n", gap) + rendered
-		}
+		fragments = append(fragments, renderFragment{view: rItem.view, gap: gap})
+
 		currentContentHeight = rItem.end + 1 + l.gap
 	}
-	return rendered, itemsLen
+
+	// second pass: build rendered string efficiently
+	var b strings.Builder
+	if l.direction == DirectionForward {
+		b.WriteString(rendered)
+		for _, f := range fragments {
+			b.WriteString(f.view)
+			for range f.gap {
+				b.WriteByte('\n')
+			}
+		}
+
+		return b.String(), finalIndex
+	}
+
+	// iterate backwards as fragments are in reversed order
+	for i := len(fragments) - 1; i >= 0; i-- {
+		f := fragments[i]
+		b.WriteString(f.view)
+		for range f.gap {
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString(rendered)
+
+	return b.String(), finalIndex
 }
 
 func (l *list[T]) renderItem(item Item) renderedItem {

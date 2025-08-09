@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -74,8 +75,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
 	),
-	Escape: key.NewBinding(
-		key.WithKeys("esc"),
+	Escape: keys.Escape(
 		key.WithHelp("esc", "cancel delete mode"),
 	),
 	DeleteAllAttachments: key.NewBinding(

@@ -27,6 +27,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/joho/godotenv v1.5.1
+	github.com/localit-io/tiktoken-go v0.1.0
 	github.com/mark3labs/mcp-go v0.37.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.25.0

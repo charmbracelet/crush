@@ -110,7 +110,7 @@ const listSessions = `-- name: ListSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id
 FROM sessions
 WHERE parent_session_id is NULL
-ORDER BY created_at DESC
+ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
@@ -154,7 +154,8 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
-    cost = ?
+    cost = ?,
+    updated_at = ?
 WHERE id = ?
 RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id
 `
@@ -165,6 +166,7 @@ type UpdateSessionParams struct {
 	CompletionTokens int64          `json:"completion_tokens"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Cost             float64        `json:"cost"`
+	UpdatedAt        int64          `json:"updated_at"`
 	ID               string         `json:"id"`
 }
 
@@ -175,6 +177,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.CompletionTokens,
 		arg.SummaryMessageID,
 		arg.Cost,
+		arg.UpdatedAt,
 		arg.ID,
 	)
 	var i Session

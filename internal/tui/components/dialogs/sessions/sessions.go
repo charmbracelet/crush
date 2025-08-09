@@ -1,6 +1,9 @@
 package sessions
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -24,29 +27,31 @@ type SessionDialog interface {
 type SessionsList = list.FilterableList[list.CompletionItem[session.Session]]
 
 type sessionDialogCmp struct {
-	selectedInx       int
 	wWidth            int
 	wHeight           int
 	width             int
 	selectedSessionID string
-	keyMap            KeyMap
+	keyMap            SessionsListKeyMap
+	sessions          session.Service
 	sessionsList      SessionsList
 	help              help.Model
 }
 
 // NewSessionDialogCmp creates a new session switching dialog
-func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionDialog {
+func NewSessionDialogCmp(sessions session.Service, selectedID string) SessionDialog {
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
-	keyMap := DefaultKeyMap()
+	keyMap := SessionsKeyMap()
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	items := make([]list.CompletionItem[session.Session], len(sessions))
-	if len(sessions) > 0 {
-		for i, session := range sessions {
+	availableSessions, _ := sessions.List(context.Background())
+
+	items := make([]list.CompletionItem[session.Session], len(availableSessions))
+	if len(availableSessions) > 0 {
+		for i, session := range availableSessions {
 			items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
 		}
 	}
@@ -65,7 +70,8 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	help.Styles = t.S().Help
 	s := &sessionDialogCmp{
 		selectedSessionID: selectedID,
-		keyMap:            DefaultKeyMap(),
+		keyMap:            SessionsKeyMap(),
+		sessions:          sessions,
 		sessionsList:      sessionsList,
 		help:              help,
 	}
@@ -106,6 +112,45 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					),
 				)
 			}
+		case key.Matches(msg, s.keyMap.Rename):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem == nil {
+				return s, nil
+			}
+			selected := *selectedItem
+			return s, tea.Sequence(
+				util.CmdHandler(dialogs.CloseDialogMsg{}),
+				util.CmdHandler(dialogs.OpenDialogMsg{
+					Model: NewSessionRenameDialogCmp(s.sessions, selected.Value()),
+				}),
+			)
+		case key.Matches(msg, s.keyMap.Delete):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem != nil {
+				selected := *selectedItem
+				err := s.sessions.Delete(context.Background(), selected.ID())
+				if err != nil {
+					return s, util.ReportError(fmt.Errorf("cannot delete session: %w", err))
+				}
+				s.sessionsList.DeleteItem(selected.ID())
+				// close dialog on last item deletion
+				if len(s.sessionsList.Items()) == 0 {
+					return s, util.CmdHandler(dialogs.CloseDialogMsg{})
+				}
+			}
+			u, cmd := s.sessionsList.Update(msg)
+			s.sessionsList = u.(SessionsList)
+			return s, cmd
+		case key.Matches(msg, s.keyMap.DeleteAll):
+			ctx := context.Background()
+			for _, item := range s.sessionsList.Items() {
+				err := s.sessions.Delete(ctx, item.ID())
+				if err != nil {
+					return s, util.ReportError(fmt.Errorf("cannot delete session: %w", err))
+				}
+				s.sessions.Delete(ctx, item.ID())
+			}
+			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:

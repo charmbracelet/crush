@@ -32,11 +32,20 @@ func CoderPrompt(p string, contextFiles ...string) string {
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
-	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
-	if contextContent != "" {
-		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
+	// Check if context should be included automatically (opt-in via environment variable)
+	includeContext, _ := strconv.ParseBool(os.Getenv("CRUSH_INCLUDE_CONTEXT"))
+	
+	if includeContext && len(contextFiles) > 0 {
+		contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
+		if contextContent != "" {
+			return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
+		}
 	}
-	return basePrompt
+	
+	// Add information about the context tool availability
+	contextToolInfo := "\n\n# Context Tool Available\nIf you need access to project-specific context files (like CLAUDE.md, .cursorrules, etc.), use the `context` tool to load them on-demand. This optimizes token usage by only loading context when actually needed."
+	
+	return basePrompt + contextToolInfo
 }
 
 //go:embed anthropic.md

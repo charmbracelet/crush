@@ -178,6 +178,7 @@ func NewAgent(
 		cwd := cfg.WorkingDir()
 		allTools := []tools.BaseTool{
 			tools.NewBashTool(permissions, cwd),
+			tools.NewContextTool(permissions, cwd),
 			tools.NewDownloadTool(permissions, cwd),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
 			tools.NewMultiEditTool(lspClients, permissions, history, cwd),

@@ -57,6 +57,14 @@ func NewAPIKeyInput() *APIKeyInput {
 	}
 }
 
+func (a *APIKeyInput) SetValue(value string) {
+	a.input.SetValue(value)
+}
+
+func (a *APIKeyInput) SetTitle(title string) {
+	a.title = title
+}
+
 func (a *APIKeyInput) SetProviderName(name string) {
 	a.providerName = name
 	a.updateStatePresentation()

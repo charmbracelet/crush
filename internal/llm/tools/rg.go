@@ -42,8 +42,8 @@ func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cm
 	if name == "" {
 		return nil
 	}
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern}
+	// Use JSON output to avoid platform-specific path parsing issues (e.g., Windows drive letters)
+	args := []string{"--json", "-n", "-H", pattern}
 	if include != "" {
 		args = append(args, "--glob", include)
 	}

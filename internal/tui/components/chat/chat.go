@@ -27,6 +27,10 @@ type SendMsg struct {
 
 type SessionSelectedMsg = session.Session
 
+type SessionDeleteMsg struct {
+	ID string
+}
+
 type SessionClearedMsg struct{}
 
 type SelectionCopyMsg struct {

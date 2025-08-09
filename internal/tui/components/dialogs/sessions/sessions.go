@@ -47,7 +47,11 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	items := make([]list.CompletionItem[session.Session], len(sessions))
 	if len(sessions) > 0 {
 		for i, session := range sessions {
-			items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
+			var title string = session.Title
+			if session.ID == selectedID {
+				title = t.S().Base.Foreground(t.Secondary).Render(title)
+			}
+			items[i] = list.NewCompletionItem(title, session, list.WithCompletionID(session.ID))
 		}
 	}
 
@@ -105,6 +109,24 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						chat.SessionSelectedMsg(selected.Value()),
 					),
 				)
+			}
+		case key.Matches(msg, s.keyMap.Delete):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem != nil {
+				selected := *selectedItem
+				if selected.Value().ID == s.selectedSessionID {
+					return s, nil
+				}
+				s.sessionsList.DeleteItem(selected.Value().ID)
+
+				var cmds []tea.Cmd
+				cmds = append(cmds, util.CmdHandler(chat.SessionDeleteMsg{ID: selected.Value().ID}))
+
+				if len(s.sessionsList.Items()) == 0 {
+					cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
+				}
+
+				return s, tea.Sequence(cmds...)
 			}
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})

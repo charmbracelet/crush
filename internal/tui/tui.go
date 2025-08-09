@@ -150,6 +150,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.selectedSessionID = msg.ID
 	case cmpChat.SessionClearedMsg:
 		a.selectedSessionID = ""
+	case cmpChat.SessionDeleteMsg:
+		cmds = append(cmds, func() tea.Msg {
+			a.app.Sessions.Delete(context.Background(), msg.ID)
+			return nil
+		})
 	// Commands
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {

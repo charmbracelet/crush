@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/watcher"
@@ -13,20 +14,20 @@ import (
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
 	for name, clientConfig := range app.config.LSP {
-		go app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+		go app.createAndStartLSPClient(ctx, name, clientConfig)
 	}
 	slog.Info("LSP clients initialization started in background")
 }
 
 // createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
-func (app *App) createAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
-	slog.Info("Creating LSP client", "name", name, "command", command, "args", args)
+func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
+	slog.Info("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
 	// Update state to starting
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
-	lspClient, err := lsp.NewClient(ctx, name, command, args...)
+	lspClient, err := lsp.NewClient(ctx, name, config)
 	if err != nil {
 		slog.Error("Failed to create LSP client for", name, err)
 		updateLSPState(name, lsp.StateError, err, nil, 0)
@@ -123,6 +124,6 @@ func (app *App) restartLSPClient(ctx context.Context, name string) {
 	}
 
 	// Create a new client using the shared function.
-	app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+	app.createAndStartLSPClient(ctx, name, clientConfig)
 	slog.Info("Successfully restarted LSP client", "client", name)
 }

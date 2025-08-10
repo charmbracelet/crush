@@ -62,6 +62,7 @@ type Theme struct {
 
 	// Yellows
 	Yellow color.Color
+	Citron color.Color
 
 	// Greens
 	Green      color.Color
@@ -82,6 +83,12 @@ type Theme struct {
 	ItemBusyIcon    lipgloss.Style
 	ItemErrorIcon   lipgloss.Style
 	ItemOnlineIcon  lipgloss.Style
+
+	// Editor: Yolo Mode
+	YoloIconFocused lipgloss.Style
+	YoloIconBlurred lipgloss.Style
+	YoloDotsFocused lipgloss.Style
+	YoloDotsBlurred lipgloss.Style
 
 	styles *Styles
 }

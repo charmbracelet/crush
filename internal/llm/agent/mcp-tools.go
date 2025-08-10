@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,16 +124,16 @@ func runTool(ctx context.Context, name, toolName string, input string) (tools.To
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}
 
-	output := ""
+	var output strings.Builder
 	for _, v := range result.Content {
 		if v, ok := v.(mcp.TextContent); ok {
-			output = v.Text
+			output.WriteString(v.Text)
 		} else {
-			output = fmt.Sprintf("%v", v)
+			_, _ = fmt.Fprintf(&output, "%v: ", v)
 		}
 	}
 
-	return tools.NewTextResponse(output), nil
+	return tools.NewTextResponse(output.String()), nil
 }
 
 func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
@@ -312,6 +313,8 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				}
 			}()
 
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
 			c, err := createMcpClient(m)
 			if err != nil {
 				updateMCPState(name, MCPStateError, err, nil, 0)

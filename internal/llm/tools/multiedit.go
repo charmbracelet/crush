@@ -335,7 +335,7 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 		return ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent := string(content)
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 	currentContent := oldContent
 
 	// Apply all edits sequentially
@@ -375,6 +375,10 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	})
 	if !p {
 		return ToolResponse{}, permission.ErrorPermissionDenied
+	}
+
+	if isCrlf {
+		currentContent, _ = fsext.ToWindowsLineEndings(currentContent)
 	}
 
 	// Write the updated content

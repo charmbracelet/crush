@@ -69,13 +69,18 @@ type permissionDialogCmp struct {
 	keyMap KeyMap
 }
 
-func NewPermissionDialogCmp(permission permission.PermissionRequest) PermissionDialogCmp {
+func NewPermissionDialogCmp(permission permission.PermissionRequest, opts *Options) PermissionDialogCmp {
+	if opts == nil {
+		opts = &Options{}
+	}
+
 	// Create viewport for content
 	contentViewport := viewport.New()
 	return &permissionDialogCmp{
 		contentViewPort: contentViewport,
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
+		diffSplitMode:   opts.isSplitMode(),
 		keyMap:          DefaultKeyMap(),
 		contentDirty:    true, // Mark as dirty initially
 	}
@@ -643,9 +648,8 @@ func (p *permissionDialogCmp) generateDefaultContent() string {
 func (p *permissionDialogCmp) useDiffSplitMode() bool {
 	if p.diffSplitMode != nil {
 		return *p.diffSplitMode
-	} else {
-		return p.defaultDiffSplitMode
 	}
+	return p.defaultDiffSplitMode
 }
 
 func (p *permissionDialogCmp) styleViewport() string {
@@ -788,4 +792,25 @@ func (p *permissionDialogCmp) ID() dialogs.DialogID {
 // Position implements PermissionDialogCmp.
 func (p *permissionDialogCmp) Position() (int, int) {
 	return p.positionRow, p.positionCol
+}
+
+// Options for create a new permission dialog
+type Options struct {
+	DiffMode string // split or unified, empty means use defaultDiffSplitMode
+}
+
+// isSplitMode returns internal representation of diff mode switch
+func (o Options) isSplitMode() *bool {
+	var split bool
+
+	switch o.DiffMode {
+	case "split":
+		split = true
+	case "unified":
+		split = false
+	default:
+		return nil
+	}
+
+	return &split
 }

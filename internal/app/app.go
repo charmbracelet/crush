@@ -106,7 +106,7 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive handles the execution flow when a prompt is provided via
 // CLI flag.
-func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool, sessionID string) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -128,22 +128,35 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 	defer stopSpinner()
 
-	const maxPromptLengthForTitle = 100
-	titlePrefix := "Non-interactive: "
-	var titleSuffix string
+	var sess session.Session
+	var err error
 
-	if len(prompt) > maxPromptLengthForTitle {
-		titleSuffix = prompt[:maxPromptLengthForTitle] + "..."
+	if sessionID != "" {
+		// Use existing session
+		sess, err = app.Sessions.Get(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to get existing session %s: %w", sessionID, err)
+		}
+		slog.Info("Using existing session for non-interactive run", "session_id", sess.ID)
 	} else {
-		titleSuffix = prompt
-	}
-	title := titlePrefix + titleSuffix
+		// Create new session
+		const maxPromptLengthForTitle = 100
+		titlePrefix := "Non-interactive: "
+		var titleSuffix string
 
-	sess, err := app.Sessions.Create(ctx, title)
-	if err != nil {
-		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		if len(prompt) > maxPromptLengthForTitle {
+			titleSuffix = prompt[:maxPromptLengthForTitle] + "..."
+		} else {
+			titleSuffix = prompt
+		}
+		title := titlePrefix + titleSuffix
+
+		sess, err = app.Sessions.Create(ctx, title)
+		if err != nil {
+			return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		}
+		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
-	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive session
 	app.Permissions.AutoApproveSession(sess.ID)

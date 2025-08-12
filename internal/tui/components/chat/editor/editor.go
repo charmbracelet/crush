@@ -481,9 +481,7 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 
 func (m *editorCmp) startCompletions() tea.Msg {
 	files, _, _ := fsext.ListDirectory(".", nil, 0)
-	slices.SortFunc(files, func(a, b string) int {
-		return strings.Compare(a, b)
-	})
+	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")

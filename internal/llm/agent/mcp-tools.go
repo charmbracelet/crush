@@ -283,11 +283,14 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				slog.Error("error creating mcp client", "error", err, "name", name)
 				return
 			}
-			if err := c.Start(ctx); err != nil {
-				updateMCPState(name, MCPStateError, err, nil, 0)
-				slog.Error("error starting mcp client", "error", err, "name", name)
-				_ = c.Close()
-				return
+			// Only call Start() for non-stdio clients, as stdio clients auto-start
+			if m.Type != config.MCPStdio {
+				if err := c.Start(ctx); err != nil {
+					updateMCPState(name, MCPStateError, err, nil, 0)
+					slog.Error("error starting mcp client", "error", err, "name", name)
+					_ = c.Close()
+					return
+				}
 			}
 			if _, err := c.Initialize(ctx, mcpInitRequest); err != nil {
 				updateMCPState(name, MCPStateError, err, nil, 0)

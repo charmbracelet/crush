@@ -60,6 +60,8 @@ type Service interface {
 	IsBusy() bool
 	Summarize(ctx context.Context, sessionID string) error
 	UpdateModel() error
+	QueuedPrompts(sessionID string) int
+	ClearQueue(sessionID string)
 }
 
 type agent struct {
@@ -79,6 +81,8 @@ type agent struct {
 	summarizeProviderID string
 
 	activeRequests *csync.Map[string, context.CancelFunc]
+
+	promptQueue *csync.Map[string, []string]
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
@@ -228,6 +232,7 @@ func NewAgent(
 		summarizeProviderID: string(providerCfg.ID),
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               csync.NewLazySlice(toolFn),
+		promptQueue:         csync.NewMap[string, []string](),
 	}, nil
 }
 
@@ -247,6 +252,11 @@ func (a *agent) Cancel(sessionID string) {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
+
+	if a.QueuedPrompts(sessionID) > 0 {
+		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		a.promptQueue.Del(sessionID)
+	}
 }
 
 func (a *agent) IsBusy() bool {
@@ -263,6 +273,14 @@ func (a *agent) IsBusy() bool {
 func (a *agent) IsSessionBusy(sessionID string) bool {
 	_, busy := a.activeRequests.Get(sessionID)
 	return busy
+}
+
+func (a *agent) QueuedPrompts(sessionID string) int {
+	l, ok := a.promptQueue.Get(sessionID)
+	if !ok {
+		return 0
+	}
+	return len(l)
 }
 
 func (a *agent) generateTitle(ctx context.Context, sessionID string, content string) error {
@@ -327,7 +345,13 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	}
 	events := make(chan AgentEvent)
 	if a.IsSessionBusy(sessionID) {
-		return nil, ErrSessionBusy
+		existing, ok := a.promptQueue.Get(sessionID)
+		if !ok {
+			existing = []string{}
+		}
+		existing = append(existing, content)
+		a.promptQueue.Set(sessionID, existing)
+		return nil, nil
 	}
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -422,7 +446,36 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
 			// We are not done, we need to respond with the tool response
 			msgHistory = append(msgHistory, agentMessage, *toolResults)
+			// If there are queued prompts, process the next one
+			nextPrompt, ok := a.promptQueue.Take(sessionID)
+			if ok {
+				for _, prompt := range nextPrompt {
+					// Create a new user message for the queued prompt
+					userMsg, err := a.createUserMessage(ctx, sessionID, prompt, nil)
+					if err != nil {
+						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
+					}
+					// Append the new user message to the conversation history
+					msgHistory = append(msgHistory, userMsg)
+				}
+			}
+
 			continue
+		} else if agentMessage.FinishReason() == message.FinishReasonEndTurn {
+			queuePrompts, ok := a.promptQueue.Take(sessionID)
+			if ok {
+				for _, prompt := range queuePrompts {
+					if prompt == "" {
+						continue
+					}
+					userMsg, err := a.createUserMessage(ctx, sessionID, prompt, nil)
+					if err != nil {
+						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
+					}
+					msgHistory = append(msgHistory, userMsg)
+				}
+				continue
+			}
 		}
 		if agentMessage.FinishReason() == "" {
 			// Kujtim: could not track down where this is happening but this means its cancelled
@@ -850,6 +903,13 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	}()
 
 	return nil
+}
+
+func (a *agent) ClearQueue(sessionID string) {
+	if a.QueuedPrompts(sessionID) > 0 {
+		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		a.promptQueue.Del(sessionID)
+	}
 }
 
 func (a *agent) CancelAll() {

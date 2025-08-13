@@ -43,6 +43,7 @@ before:
 builds:
   - env:
       - CGO_ENABLED=0
+      - GOEXPERIMENT=greenteagc
     goos:
       - linux
       - darwin

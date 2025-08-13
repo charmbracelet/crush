@@ -1,6 +1,6 @@
 module github.com/charmbracelet/crush
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0

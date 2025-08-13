@@ -2,6 +2,9 @@
 
 version: "3"
 
+env:
+  GOEXPERIMENT: greenteagc
+
 tasks:
   lint:
     desc: Run base linters
@@ -29,6 +32,11 @@ tasks:
       CRUSH_PROFILE: true
     cmds:
       - go run .
+
+  install:
+    desc: Install the application
+    cmds:
+      - go install -v .
 
   profile:cpu:
     desc: 10s CPU profile

@@ -13,7 +13,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.12
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250807144536-86f332629539
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250813191918-4ea1703d4181
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250813201422-d4d69f63338d
 	github.com/charmbracelet/catwalk v0.4.6
 	github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018

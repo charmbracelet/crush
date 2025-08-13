@@ -5,6 +5,9 @@
   "$defs": {
     "Config": {
       "properties": {
+        "$schema": {
+          "type": "string"
+        },
         "models": {
           "additionalProperties": {
             "$ref": "#/$defs/SelectedModel"
@@ -414,6 +417,14 @@
           "type": "boolean",
           "description": "Enable compact mode for the TUI interface",
           "default": false
+        },
+        "diff_mode": {
+          "type": "string",
+          "enum": [
+            "unified",
+            "split"
+          ],
+          "description": "Diff mode for the TUI interface"
         }
       },
       "additionalProperties": false,

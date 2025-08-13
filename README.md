@@ -37,9 +37,20 @@ yay -S crush-bin
 nix run github:numtide/nix-ai-tools#crush
 ```
 
+Windows users:
+
+```bash
+# Winget
+winget install charmbracelet.crush
+
+# Scoop
+scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
+scoop install crush
+```
+
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
-    
+
 Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
 
 You can also try out Crush via `nix-shell`:
@@ -138,17 +149,27 @@ Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, configuration can be added either local to the project itself,
 or globally, with the following priority:
 
-1. `./.crush.json`
-2. `./crush.json`
-3. `$HOME/.config/crush/crush.json`
+1. `.crush.json`
+2. `crush.json`
+3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
 
 Configuration itself is stored as a JSON object:
 
 ```json
 {
-   "this-setting": { }
-   "that-setting": { }
+   "this-setting": {"this": "that"},
+   "that-setting": ["ceci", "cela"]
 }
+```
+
+As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
+
+```bash
+# Unix
+$HOME/.local/share/crush/crush.json
+
+# Windows
+%LOCALAPPDATA%\crush\crush.json
 ```
 
 ### LSPs
@@ -221,10 +242,10 @@ control but don't want Crush to consider when providing context.
 The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
-### Whitelisting Tools
+### Allowing Tools
 
 By default, Crush will ask you for permission before running tool calls. If
-you'd like, you can whitelist tools to be executed without prompting you for
+you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
 ```json
@@ -244,6 +265,54 @@ permissions. Use this with care.
 
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
+
+### Local Models
+
+Local models can also be configured via OpenAI-compatible API. Here are two common examples:
+
+#### Ollama
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen3:30b",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}
+```
+
+#### LM Studio
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:1234/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen/qwen3-30b-a3b-2507",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}
+```
 
 ### Custom Providers
 
@@ -313,6 +382,59 @@ Custom Anthropic-compatible providers follow this format:
   }
 }
 ```
+
+### Amazon Bedrock
+
+Crush currently supports running Anthropic models through Bedrock, with caching disabled.
+
+* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+
+### Vertex AI Platform
+
+Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
+
+```bash
+gcloud auth application-default login
+```
+
+To add specific models to the configuration, configure as such:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "vertexai": {
+      "models": [
+        {
+          "id": "claude-sonnet-4@20250514",
+          "name": "VertexAI Sonnet 4",
+          "cost_per_1m_in": 3,
+          "cost_per_1m_out": 15,
+          "cost_per_1m_in_cached": 3.75,
+          "cost_per_1m_out_cached": 0.3,
+          "context_window": 200000,
+          "default_max_tokens": 50000,
+          "can_reason": true,
+          "supports_attachments": true
+        }
+      ]
+    }
+  }
+}
+```
+
+## A Note on Claude Max and GitHub Copilot
+
+Crush only supports model providers through official, compliant APIs. We do not
+support or endorse any methods that rely on personal Claude Max and GitHub Copilot
+accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
+Terms of Service.
+
+We’re committed to building sustainable, trusted integrations with model
+providers. If you’re a provider interested in working with us, 
+[reach out](mailto:vt100@charm.sh).
 
 ## Logging
 

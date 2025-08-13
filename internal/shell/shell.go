@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -221,7 +222,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.blockHandler(), s.coreUtilsHandler()),
+		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)

@@ -21,7 +21,6 @@ import (
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
-	defaultLogLevel      = "info"
 )
 
 var defaultContextPaths = []string{
@@ -125,7 +124,8 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
 }
 
@@ -285,6 +285,8 @@ type Agent struct {
 
 // Config holds the configuration for crush.
 type Config struct {
+	Schema string `json:"$schema,omitempty"`
+
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 

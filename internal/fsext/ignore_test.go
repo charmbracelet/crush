@@ -25,20 +25,8 @@ func TestCrushIgnore(t *testing.T) {
 	// Create a .crushignore file that ignores .log files
 	require.NoError(t, os.WriteFile(".crushignore", []byte("*.log\n"), 0o644))
 
-	// Test DirectoryLister
-	t.Run("DirectoryLister respects .crushignore", func(t *testing.T) {
-		dl := NewDirectoryLister(tempDir)
-
-		// Test that .log files are ignored
-		require.True(t, dl.gitignore == nil, "gitignore should be nil")
-		require.NotNil(t, dl.crushignore, "crushignore should not be nil")
-	})
-
-	// Test FastGlobWalker
-	t.Run("FastGlobWalker respects .crushignore", func(t *testing.T) {
-		walker := NewFastGlobWalker(tempDir)
-
-		require.True(t, walker.gitignore == nil, "gitignore should be nil")
-		require.NotNil(t, walker.crushignore, "crushignore should not be nil")
-	})
+	dl := NewDirectoryLister(tempDir)
+	require.True(t, dl.shouldIgnore("test2.log", nil), ".log files should be ignored")
+	require.False(t, dl.shouldIgnore("test1.txt", nil), ".txt files should not be ignored")
+	require.True(t, dl.shouldIgnore("test3.tmp", nil), ".tmp files should be ignored by common patterns")
 }

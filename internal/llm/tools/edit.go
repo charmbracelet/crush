@@ -99,6 +99,7 @@ WINDOWS NOTES:
 - File paths should use forward slashes (/) for cross-platform compatibility
 - On Windows, absolute paths start with drive letters (C:/) but forward slashes work throughout
 - File permissions are handled automatically by the Go runtime
+- Always assumes \n for line endings. The tool will handle \r\n conversion automatically if needed.
 
 Remember: when making multiple file edits in a row to the same file, you should prefer to send all edits in a single message with multiple calls to this tool, rather than multiple messages with a single call each.`
 )
@@ -299,7 +300,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		return ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent := string(content)
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
 	var newContent string
 	var deletionCount int
@@ -354,6 +355,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	)
 	if !p {
 		return ToolResponse{}, permission.ErrorPermissionDenied
+	}
+
+	if isCrlf {
+		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
 
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)
@@ -428,7 +433,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		return ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent := string(content)
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
 	var newContent string
 	var replacementCount int
@@ -485,6 +490,10 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	)
 	if !p {
 		return ToolResponse{}, permission.ErrorPermissionDenied
+	}
+
+	if isCrlf {
+		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
 
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)

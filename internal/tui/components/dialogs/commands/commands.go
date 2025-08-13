@@ -70,6 +70,7 @@ type (
 	ToggleCompactModeMsg  struct{}
 	ToggleThinkingMsg     struct{}
 	OpenExternalEditorMsg struct{}
+	ToggleYoloModeMsg     struct{}
 	CompactMsg            struct {
 		SessionID string
 	}
@@ -120,7 +121,10 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
-		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
+		return c, tea.Batch(
+			c.SetCommandType(c.commandType),
+			c.commandList.SetSize(c.listWidth(), c.listHeight()),
+		)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Select):
@@ -319,7 +323,6 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			})
 		}
 	}
-
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
 	if c.wWidth > 120 && c.sessionID != "" {
 		commands = append(commands, Command{
@@ -361,6 +364,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "toggle_yolo",
+			Title:       "Toggle Yolo Mode",
+			Description: "Toggle yolo mode",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ToggleYoloModeMsg{})
+			},
+		},
 		{
 			ID:          "toggle_help",
 			Title:       "Toggle Help",

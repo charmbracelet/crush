@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/editor"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/header"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/sidebar"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -166,12 +167,55 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.keyboardEnhancements = msg
 		return p, nil
 	case tea.MouseWheelMsg:
-		if p.isMouseOverChat(msg.Mouse().X, msg.Mouse().Y) {
+		if p.compact {
+			msg.Y -= 1
+		}
+		if p.isMouseOverChat(msg.X, msg.Y) {
 			u, cmd := p.chat.Update(msg)
 			p.chat = u.(chat.MessageListCmp)
 			return p, cmd
 		}
 		return p, nil
+	case tea.MouseClickMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
+		if p.isMouseOverChat(msg.X, msg.Y) {
+			p.focusedPane = PanelTypeChat
+			p.chat.Focus()
+			p.editor.Blur()
+		} else {
+			p.focusedPane = PanelTypeEditor
+			p.editor.Focus()
+			p.chat.Blur()
+		}
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
+	case tea.MouseMotionMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
+		if msg.Button == tea.MouseLeft {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
+	case tea.MouseReleaseMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
+		if msg.Button == tea.MouseLeft {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
+	case chat.SelectionCopyMsg:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
 	case tea.WindowSizeMsg:
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
@@ -257,7 +301,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return p, tea.Batch(cmds...)
-
+	case commands.ToggleYoloModeMsg:
+		// update the editor style
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
 		u, cmd := p.sidebar.Update(msg)
 		p.sidebar = u.(sidebar.Sidebar)
@@ -606,6 +654,10 @@ func (p *chatPage) cancel() tea.Cmd {
 		return nil
 	}
 
+	if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+		p.app.CoderAgent.ClearQueue(p.session.ID)
+		return nil
+	}
 	p.isCanceling = true
 	return cancelTimerCmd()
 }
@@ -772,6 +824,12 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
+			if p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "clear queue"),
+				)
+			}
 			shortList = append(shortList, cancelBinding)
 			fullList = append(fullList,
 				[]key.Binding{
@@ -817,10 +875,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithKeys("up", "down"),
 					key.WithHelp("↑↓", "scroll"),
 				),
-				key.NewBinding(
-					key.WithKeys("c", "y"),
-					key.WithHelp("c/y", "copy"),
-				),
+				messages.CopyKey,
 			)
 			fullList = append(fullList,
 				[]key.Binding{
@@ -858,6 +913,10 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithKeys("G", "end"),
 						key.WithHelp("G", "end"),
 					),
+				},
+				[]key.Binding{
+					messages.CopyKey,
+					messages.ClearSelectionKey,
 				},
 			)
 		case PanelTypeEditor:

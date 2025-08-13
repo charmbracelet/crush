@@ -25,7 +25,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
-var copyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
+// CopyKey is the key binding for copying message content to the clipboard.
+var CopyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
+
+// ClearSelectionKey is the key binding for clearing the current selection in the chat interface.
+var ClearSelectionKey = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear selection"))
 
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
@@ -99,12 +103,15 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.KeyPressMsg:
-		if key.Matches(msg, copyKey) {
-			err := clipboard.WriteAll(m.message.Content().Text)
-			if err != nil {
-				return m, util.ReportError(fmt.Errorf("failed to copy message content to clipboard: %w", err))
-			}
-			return m, util.ReportInfo("Message copied to clipboard")
+		if key.Matches(msg, CopyKey) {
+			return m, tea.Sequence(
+				tea.SetClipboard(m.message.Content().Text),
+				func() tea.Msg {
+					_ = clipboard.WriteAll(m.message.Content().Text)
+					return nil
+				},
+				util.ReportInfo("Message copied to clipboard"),
+			)
 		}
 	}
 	return m, nil
@@ -274,11 +281,13 @@ func (m *messageCmp) renderThinkingContent() string {
 	if reasoningContent.StartedAt > 0 {
 		duration := m.message.ThinkingDuration()
 		if reasoningContent.FinishedAt > 0 {
+			if duration.String() == "0s" {
+				return ""
+			}
 			m.anim.SetLabel("")
 			opts := core.StatusOpts{
 				Title:       "Thought for",
 				Description: duration.String(),
-				NoIcon:      true,
 			}
 			return t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {

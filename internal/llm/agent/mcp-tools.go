@@ -123,16 +123,15 @@ func runTool(ctx context.Context, name, toolName string, input string) (tools.To
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}
 
-	var output strings.Builder
+	output := make([]string, 0, len(result.Content))
 	for _, v := range result.Content {
 		if v, ok := v.(mcp.TextContent); ok {
-			output.WriteString(v.Text)
+			output = append(output, v.Text)
 		} else {
-			_, _ = fmt.Fprintf(&output, "%v: ", v)
+			output = append(output, fmt.Sprintf("%v", v))
 		}
 	}
-
-	return tools.NewTextResponse(output.String()), nil
+	return tools.NewTextResponse(strings.Join(output, "\n")), nil
 }
 
 func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {

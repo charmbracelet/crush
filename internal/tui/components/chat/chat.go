@@ -224,7 +224,7 @@ func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
 	height := m.height
 	if m.promptQueue > 0 {
-		height -= 3
+		height -= 4 // pill height and padding
 	}
 	view := []string{
 		t.S().Base.
@@ -237,7 +237,7 @@ func (m *messageListCmp) View() string {
 	}
 	if m.app.CoderAgent != nil && m.promptQueue > 0 {
 		queuePill := queuePill(m.promptQueue, t)
-		view = append(view, t.S().Base.PaddingLeft(4).Render(queuePill))
+		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
 	}
 	return strings.Join(view, "\n")
 }
@@ -657,10 +657,11 @@ func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	m.height = height
 	if m.promptQueue > 0 {
-		queueHeight := 3
-		return m.listCmp.SetSize(width-2, height-(1+queueHeight))
+		queueHeight := 3 + 1 // 1 for padding top
+		lHight := max(0, height-(1+queueHeight))
+		return m.listCmp.SetSize(width-2, lHight)
 	}
-	return m.listCmp.SetSize(width-2, height-1) // for padding
+	return m.listCmp.SetSize(width-2, max(0, height-1)) // for padding
 }
 
 // Blur implements MessageListCmp.

@@ -44,16 +44,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.37.0
 	mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8
-)
-
-require (
-	github.com/ncruces/go-strftime v0.1.9 // indirect
-	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	modernc.org/libc v1.65.0 // indirect
-	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.10.0 // indirect
 )
 
 require (

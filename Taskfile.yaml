@@ -13,6 +13,13 @@ tasks:
     cmds:
       - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
 
+  build:
+    desc: Run build
+    cmds:
+      - go build .
+    generates:
+      - crush
+
   test:
     desc: Run tests
     cmds:
@@ -50,3 +57,5 @@ tasks:
     cmds:
       - go run main.go schema > schema.json
       - echo "Generated schema.json"
+    generates:
+      - schema.json

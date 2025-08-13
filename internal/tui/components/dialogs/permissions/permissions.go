@@ -23,9 +23,10 @@ type PermissionAction string
 
 // Permission responses
 const (
-	PermissionAllow           PermissionAction = "allow"
-	PermissionAllowForSession PermissionAction = "allow_session"
-	PermissionDeny            PermissionAction = "deny"
+	PermissionAllow            PermissionAction = "allow"
+	PermissionAllowForSession  PermissionAction = "allow_session"
+	PermissionAllowPermanently PermissionAction = "allow_permanently"
+	PermissionDeny             PermissionAction = "deny"
 
 	PermissionsDialogID dialogs.DialogID = "permissions"
 )
@@ -49,7 +50,7 @@ type permissionDialogCmp struct {
 	height          int
 	permission      permission.PermissionRequest
 	contentViewPort viewport.Model
-	selectedOption  int // 0: Allow, 1: Allow for session, 2: Deny
+	selectedOption  int // 0: Allow, 1: Allow for session, 2: Allow permanently, 3: Deny
 
 	// Diff view state
 	defaultDiffSplitMode bool  // true for split, false for unified
@@ -107,10 +108,10 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % 4
 			return p, nil
 		case key.Matches(msg, p.keyMap.Left):
-			p.selectedOption = (p.selectedOption + 2) % 3
+			p.selectedOption = (p.selectedOption + 3) % 4
 		case key.Matches(msg, p.keyMap.Select):
 			return p, p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -122,6 +123,11 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllowForSession, Permission: p.permission}),
+			)
+		case key.Matches(msg, p.keyMap.AllowPermanently):
+			return p, tea.Batch(
+				util.CmdHandler(dialogs.CloseDialogMsg{}),
+				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllowPermanently, Permission: p.permission}),
 			)
 		case key.Matches(msg, p.keyMap.Deny):
 			return p, tea.Batch(
@@ -227,6 +233,8 @@ func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
 	case 1:
 		action = PermissionAllowForSession
 	case 2:
+		action = PermissionAllowPermanently
+	case 3:
 		action = PermissionDeny
 	}
 
@@ -252,9 +260,14 @@ func (p *permissionDialogCmp) renderButtons() string {
 			Selected:       p.selectedOption == 1,
 		},
 		{
+			Text:           "Allow Permanently",
+			UnderlineIndex: 6, // "P" in "Permanently"
+			Selected:       p.selectedOption == 2,
+		},
+		{
 			Text:           "Deny",
 			UnderlineIndex: 0, // "D"
-			Selected:       p.selectedOption == 2,
+			Selected:       p.selectedOption == 3,
 		},
 	}
 

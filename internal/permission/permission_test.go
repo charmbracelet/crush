@@ -5,7 +5,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
+
+// Mock ConfigSaver for testing
+type mockConfigSaver struct {
+	mock.Mock
+}
+
+func (m *mockConfigSaver) AddAllowedTool(tool string) error {
+	args := m.Called(tool)
+	return args.Error(0)
+}
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
 	tests := []struct {
@@ -248,4 +259,47 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		result := service.Request(secondReq)
 		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
 	})
+}
+
+func TestPermissionService_GrantPermanently(t *testing.T) {
+	mockSaver := &mockConfigSaver{}
+	mockSaver.On("AddAllowedTool", "bash:execute").Return(nil)
+
+	service := NewPermissionServiceWithConfigSaver("/tmp", false, []string{}, mockSaver)
+
+	req := CreatePermissionRequest{
+		SessionID:   "test-session",
+		ToolCallID:  "tool-call-1",
+		ToolName:    "bash",
+		Description: "Execute bash command",
+		Action:      "execute",
+		Params:      map[string]string{"command": "ls"},
+		Path:        "/tmp",
+	}
+
+	events := service.Subscribe(t.Context())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		service.Request(req)
+	}()
+
+	// Get the permission request
+	event := <-events
+	permissionReq := event.Payload
+
+	// Grant permanently
+	err := service.GrantPermanently(permissionReq)
+	wg.Wait()
+
+	assert.NoError(t, err, "GrantPermanently should not return error")
+
+	// Verify config saver was called
+	mockSaver.AssertExpectations(t)
+
+	// Test that subsequent requests are auto-approved
+	result := service.Request(req)
+	assert.True(t, result, "Subsequent request should be auto-approved")
 }

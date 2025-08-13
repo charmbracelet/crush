@@ -22,9 +22,13 @@ echo "What is this code doing?" | crush run
 
 # Run with quiet mode (no spinner)
 crush run -q "Generate a README for this project"
+
+# Run in an existing session
+crush run -s session-123 "Continue the previous conversation"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		sessionID, _ := cmd.Flags().GetString("session-id")
 
 		app, err := setupApp(cmd)
 		if err != nil {
@@ -49,10 +53,11 @@ crush run -q "Generate a README for this project"
 		}
 
 		// Run non-interactive flow using the App method
-		return app.RunNonInteractive(cmd.Context(), prompt, quiet)
+		return app.RunNonInteractive(cmd.Context(), prompt, quiet, sessionID)
 	},
 }
 
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	runCmd.Flags().StringP("session-id", "s", "", "Use an existing session ID instead of creating a new one")
 }

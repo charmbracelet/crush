@@ -276,7 +276,7 @@ func printTree(tree []*TreeNode, rootPath string) string {
 
 	result.WriteString("- ")
 	result.WriteString(rootPath)
-	if rootPath[len(rootPath)-1] != '/' {
+	if len(rootPath) > 0 && rootPath[len(rootPath)-1] != '/' {
 		result.WriteByte(filepath.Separator)
 	}
 	result.WriteByte('\n')

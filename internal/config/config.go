@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -116,10 +117,10 @@ type MCPConfig struct {
 }
 
 type LSPConfig struct {
-	Disabled bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command  string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
-	Args     []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
-	Options  any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
+	Enabled bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is enabled,default=true"`
+	Command string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Args    []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
+	Options any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
 }
 
 type TUIOptions struct {
@@ -359,8 +360,22 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 }
 
 func (c *Config) SetConfigField(key string, value any) error {
+	// Determine which config file to use
+	// Priority: local .crush.json > local crush.json > global data config
+	configFile := c.dataConfigDir // default to global data config
+
+	// Check for local config files
+	localDotConfig := filepath.Join(c.workingDir, fmt.Sprintf(".%s.json", appName))
+	localConfig := filepath.Join(c.workingDir, fmt.Sprintf("%s.json", appName))
+
+	if _, err := os.Stat(localDotConfig); err == nil {
+		configFile = localDotConfig
+	} else if _, err := os.Stat(localConfig); err == nil {
+		configFile = localConfig
+	}
+
 	// read the data
-	data, err := os.ReadFile(c.dataConfigDir)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			data = []byte("{}")
@@ -373,7 +388,7 @@ func (c *Config) SetConfigField(key string, value any) error {
 	if err != nil {
 		return fmt.Errorf("failed to set config field %s: %w", key, err)
 	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
+	if err := os.WriteFile(configFile, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	return nil

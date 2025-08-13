@@ -60,7 +60,7 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 		icon := t.ItemOfflineIcon
 		description := l.LSP.Command
 
-		if l.LSP.Disabled {
+		if !l.LSP.Enabled {
 			description = t.S().Subtle.Render("disabled")
 		} else if state, exists := lspStates[l.Name]; exists {
 			switch state.State {

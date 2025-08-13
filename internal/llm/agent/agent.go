@@ -194,9 +194,14 @@ func NewAgent(
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 
-		mcpToolsOnce.Do(func() {
-			mcpTools = doGetMCPTools(ctx, permissions, cfg)
-		})
+		// Protect access to mcpToolsOnce to prevent deadlock during resets
+		func() {
+			MCPResetMutex.Lock()
+			defer MCPResetMutex.Unlock()
+			mcpToolsOnce.Do(func() {
+				mcpTools = doGetMCPTools(ctx, permissions, cfg)
+			})
+		}()
 		allTools = append(allTools, mcpTools...)
 
 		if len(lspClients) > 0 {

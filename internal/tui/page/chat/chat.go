@@ -2,6 +2,9 @@ package chat
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -11,6 +14,8 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -25,9 +30,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/tools"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -41,7 +48,8 @@ type (
 	ChatFocusedMsg struct {
 		Focused bool
 	}
-	CancelTimerExpiredMsg struct{}
+	CancelTimerExpiredMsg   struct{}
+	ToolsDebounceExpiredMsg struct{}
 )
 
 type PanelType string
@@ -83,6 +91,13 @@ func cancelTimerCmd() tea.Cmd {
 	})
 }
 
+// toolsDebounceCmd creates a command that expires after a debounce period
+func toolsDebounceCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return ToolsDebounceExpiredMsg{}
+	})
+}
+
 type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int
@@ -106,11 +121,15 @@ type chatPage struct {
 	splash  splash.Splash
 
 	// Simple state flags
-	showingDetails   bool
-	isCanceling      bool
-	splashFullScreen bool
-	isOnboarding     bool
-	isProjectInit    bool
+	showingDetails      bool
+	isCanceling         bool
+	splashFullScreen    bool
+	isOnboarding        bool
+	isProjectInit       bool
+	agentReinitializing bool
+	debounceTimer       *time.Timer
+	pendingToolsUpdate  *tools.ToolsUpdatedMsg
+	reinitMutex         sync.Mutex
 }
 
 func New(app *app.App) ChatPage {
@@ -252,6 +271,17 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
 		return p, cmd
+	case tools.ToolsUpdatedMsg:
+		// Handle tools enable/disable updates with debouncing
+		return p, p.handleToolsUpdate(msg)
+	case ToolsDebounceExpiredMsg:
+		// Process the pending tools update after debounce period
+		if p.pendingToolsUpdate != nil {
+			cmd := p.processToolsUpdate(*p.pendingToolsUpdate)
+			p.pendingToolsUpdate = nil
+			return p, cmd
+		}
+		return p, nil
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -379,6 +409,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.Details):
 			p.toggleDetails()
 			return p, nil
+		case key.Matches(msg, p.keyMap.Tools):
+			return p, p.openToolsDialog()
 		}
 
 		switch p.focusedPane {
@@ -876,6 +908,12 @@ func (p *chatPage) Help() help.KeyMap {
 				key.WithHelp("ctrl+s", "sessions"),
 			),
 		)
+		globalBindings = append(globalBindings,
+			key.NewBinding(
+				key.WithKeys("ctrl+t"),
+				key.WithHelp("ctrl+t", "tools"),
+			),
+		)
 		if p.session.ID != "" {
 			globalBindings = append(globalBindings,
 				key.NewBinding(
@@ -886,6 +924,11 @@ func (p *chatPage) Help() help.KeyMap {
 		shortList = append(shortList,
 			// Commands
 			commandsBinding,
+			// Tools
+			key.NewBinding(
+				key.WithKeys("ctrl+t"),
+				key.WithHelp("ctrl+t", "tools"),
+			),
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1036,4 +1079,106 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 
 	// Check if mouse coordinates are within chat bounds
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
+}
+
+func (p *chatPage) openToolsDialog() tea.Cmd {
+	toolsDialog := tools.NewToolsDialog(p.app)
+	return util.CmdHandler(dialogs.OpenDialogMsg{
+		Model: toolsDialog,
+	})
+}
+
+func (p *chatPage) handleToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
+	slog.Info("handleToolsUpdate called - setting up debounce", "mcps", msg.MCPs, "lsps", msg.LSPs)
+
+	// Store the pending update
+	p.pendingToolsUpdate = &msg
+
+	// Start/restart debounce timer
+	return toolsDebounceCmd()
+}
+
+func (p *chatPage) processToolsUpdate(msg tools.ToolsUpdatedMsg) tea.Cmd {
+	ctx := context.Background()
+
+	slog.Info("processToolsUpdate called", "mcps", msg.MCPs, "lsps", msg.LSPs)
+
+	// Reload config first to get the latest changes from disk
+	if err := config.Reload(); err != nil {
+		slog.Error("Config reload failed during tools update", "error", err)
+		return util.ReportError(fmt.Errorf("failed to reload config: %w", err))
+	}
+
+	cfg := config.Get()
+
+	// Handle LSP updates
+	for name, enabled := range msg.LSPs {
+		if enabled {
+			// Start LSP if not already running
+			if _, exists := p.app.LSPClients[name]; !exists {
+				if lspCfg, ok := cfg.LSP[name]; ok {
+					go p.app.CreateAndStartLSPClient(ctx, name, lspCfg.Command, lspCfg.Args...)
+				}
+			}
+		} else {
+			// Stop LSP if running
+			if client, exists := p.app.LSPClients[name]; exists && client != nil {
+				go func(c *lsp.Client, n string) {
+					shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
+					_ = c.Shutdown(shutdownCtx)
+					delete(p.app.LSPClients, n)
+				}(client, name)
+			}
+		}
+	}
+
+	// For MCPs, we need to reinitialize the agent to reload MCP tools
+	// Since handleToolsUpdate is only called when tools are modified, always reinitialize MCPs
+	mcpChanged := len(msg.MCPs) > 0
+	slog.Info("MCP change detection - will reinitialize", "mcpChanged", mcpChanged, "mcpCount", len(msg.MCPs), "hasCoderAgent", p.app.CoderAgent != nil)
+
+	if mcpChanged && p.app.CoderAgent != nil {
+		// Use mutex to prevent concurrent reinitializations completely
+		p.reinitMutex.Lock()
+		defer p.reinitMutex.Unlock()
+
+		// Double-check after acquiring lock
+		if p.agentReinitializing {
+			slog.Info("Agent reinitialization already in progress, skipping")
+			return nil
+		}
+
+		p.agentReinitializing = true
+
+		// Reset MCP clients to allow reinitialization
+		slog.Info("Resetting MCP clients and reinitializing agent")
+		agent.ResetMCPClients()
+
+		// Reinitialize the coder agent to reload MCP tools
+		return func() tea.Msg {
+			defer func() {
+				p.agentReinitializing = false
+			}()
+
+			slog.Info("Starting agent reinitialization")
+			if err := p.app.InitCoderAgent(); err != nil {
+				slog.Error("Agent reinitialization failed", "error", err)
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  "Failed to reload MCP tools: " + err.Error(),
+				}
+			}
+			slog.Info("Agent reinitialization completed successfully")
+			return util.InfoMsg{
+				Type: util.InfoTypeInfo,
+				Msg:  "MCP tools reloaded successfully",
+			}
+		}
+	}
+
+	return util.CmdHandler(util.InfoMsg{
+		Type: util.InfoTypeInfo,
+		Msg:  "Tools configuration updated",
+	})
 }

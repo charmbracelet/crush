@@ -8,47 +8,16 @@ import (
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/stretchr/testify/require"
-	_ "modernc.org/sqlite"
 )
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-
-	conn, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-
-	// Create tables schema
-	_, err = conn.Exec(`
-		CREATE TABLE sessions (
-			id TEXT PRIMARY KEY,
-			parent_session_id TEXT,
-			title TEXT NOT NULL,
-			message_count INTEGER NOT NULL DEFAULT 0,
-			prompt_tokens INTEGER NOT NULL DEFAULT 0,
-			completion_tokens INTEGER NOT NULL DEFAULT 0,
-			cost REAL NOT NULL DEFAULT 0.0,
-			updated_at INTEGER NOT NULL,
-			created_at INTEGER NOT NULL,
-			summary_message_id TEXT
-		);
-		
-		CREATE TABLE todos (
-			id TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL,
-				content TEXT NOT NULL,
-			status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed')),
-			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL,
-			FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
-		);
-	`)
-	require.NoError(t, err)
-
-	// Insert test session
-	_, err = conn.Exec("INSERT INTO sessions (id, title, created_at, updated_at) VALUES ('test-session', 'Test Session', 1000, 1000)")
-	require.NoError(t, err)
-
-	return conn
+	
+	return db.SetupTestDBWithData(t, func(conn *sql.DB) {
+		// Insert test session
+		err := db.CreateTestSession(conn, "test-session", "Test Session")
+		require.NoError(t, err)
+	})
 }
 
 func TestTodoService_Create(t *testing.T) {

@@ -2,13 +2,12 @@
 INSERT INTO todos (
     id,
     session_id,
-    project_path,
     content,
     status,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?
 ) RETURNING *;
 
 -- name: GetTodo :one
@@ -20,19 +19,9 @@ SELECT * FROM todos
 WHERE session_id = ?
 ORDER BY created_at ASC;
 
--- name: ListTodosBySessionAndProject :many
-SELECT * FROM todos
-WHERE session_id = ? AND project_path = ?
-ORDER BY created_at ASC;
-
 -- name: ListTodosBySessionAndStatus :many
 SELECT * FROM todos
 WHERE session_id = ? AND status = ?
-ORDER BY created_at ASC;
-
--- name: ListTodosBySessionProjectAndStatus :many
-SELECT * FROM todos
-WHERE session_id = ? AND project_path = ? AND status = ?
 ORDER BY created_at ASC;
 
 -- name: UpdateTodo :one

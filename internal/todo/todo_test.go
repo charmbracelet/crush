@@ -35,8 +35,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE todos (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
-			project_path TEXT NOT NULL,
-			content TEXT NOT NULL,
+				content TEXT NOT NULL,
 			status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed')),
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
@@ -61,16 +60,14 @@ func TestTodoService_Create(t *testing.T) {
 	service := NewService(db.New(conn))
 
 	todo, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Test TODO item",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Test TODO item",
+		Status:    StatusPending,
 	})
 
 	require.NoError(t, err)
 	require.NotEmpty(t, todo.ID)
 	require.Equal(t, "test-session", todo.SessionID)
-	require.Equal(t, "/test/project", todo.ProjectPath)
 	require.Equal(t, "Test TODO item", todo.Content)
 	require.Equal(t, StatusPending, todo.Status)
 	require.NotZero(t, todo.CreatedAt)
@@ -86,10 +83,9 @@ func TestTodoService_Get(t *testing.T) {
 	service := NewService(db.New(conn))
 
 	created, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Test TODO item",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Test TODO item",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
@@ -108,26 +104,23 @@ func TestTodoService_List(t *testing.T) {
 
 	// Create test TODOs
 	todo1, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "TODO 1",
-		Status:      StatusPending,
-	})
-	require.NoError(t, err)
-
-	todo2, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "TODO 2",
-		Status:      StatusInProgress,
+		SessionID: "test-session",
+		Content:   "TODO 1",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
 	_, err = service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/other/project",
-		Content:     "TODO 3",
-		Status:      StatusCompleted,
+		SessionID: "test-session",
+		Content:   "TODO 2",
+		Status:    StatusInProgress,
+	})
+	require.NoError(t, err)
+
+	_, err = service.Create(context.Background(), CreateTodoParams{
+		SessionID: "test-session",
+		Content:   "TODO 3",
+		Status:    StatusCompleted,
 	})
 	require.NoError(t, err)
 
@@ -137,14 +130,6 @@ func TestTodoService_List(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, todos, 3)
-
-	// Test filtering by project path
-	todos, err = service.List(context.Background(), ListTodosParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-	})
-	require.NoError(t, err)
-	require.Len(t, todos, 2)
 
 	// Test filtering by status
 	status := StatusPending
@@ -156,16 +141,6 @@ func TestTodoService_List(t *testing.T) {
 	require.Len(t, todos, 1)
 	require.Equal(t, todo1.ID, todos[0].ID)
 
-	// Test filtering by project path and status
-	status = StatusInProgress
-	todos, err = service.List(context.Background(), ListTodosParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Status:      &status,
-	})
-	require.NoError(t, err)
-	require.Len(t, todos, 1)
-	require.Equal(t, todo2.ID, todos[0].ID)
 }
 
 func TestTodoService_Update(t *testing.T) {
@@ -177,10 +152,9 @@ func TestTodoService_Update(t *testing.T) {
 	service := NewService(db.New(conn))
 
 	created, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Original content",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Original content",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
@@ -207,10 +181,9 @@ func TestTodoService_UpdateStatus(t *testing.T) {
 	service := NewService(db.New(conn))
 
 	created, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Test content",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Test content",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
@@ -234,10 +207,9 @@ func TestTodoService_Delete(t *testing.T) {
 	service := NewService(db.New(conn))
 
 	created, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Test content",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Test content",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
@@ -260,26 +232,23 @@ func TestTodoService_CountBySessionAndStatus(t *testing.T) {
 
 	// Create TODOs with different statuses
 	_, err := service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Pending TODO 1",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Pending TODO 1",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
 	_, err = service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "Pending TODO 2",
-		Status:      StatusPending,
+		SessionID: "test-session",
+		Content:   "Pending TODO 2",
+		Status:    StatusPending,
 	})
 	require.NoError(t, err)
 
 	_, err = service.Create(context.Background(), CreateTodoParams{
-		SessionID:   "test-session",
-		ProjectPath: "/test/project",
-		Content:     "In Progress TODO",
-		Status:      StatusInProgress,
+		SessionID: "test-session",
+		Content:   "In Progress TODO",
+		Status:    StatusInProgress,
 	})
 	require.NoError(t, err)
 

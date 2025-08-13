@@ -30,31 +30,28 @@ const createTodo = `-- name: CreateTodo :one
 INSERT INTO todos (
     id,
     session_id,
-    project_path,
     content,
     status,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?
-) RETURNING id, session_id, project_path, content, status, created_at, updated_at
+    ?, ?, ?, ?, ?, ?
+) RETURNING id, session_id, content, status, created_at, updated_at
 `
 
 type CreateTodoParams struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ProjectPath string `json:"project_path"`
-	Content     string `json:"content"`
-	Status      string `json:"status"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Content   string `json:"content"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 func (q *Queries) CreateTodo(ctx context.Context, arg CreateTodoParams) (Todo, error) {
 	row := q.queryRow(ctx, q.createTodoStmt, createTodo,
 		arg.ID,
 		arg.SessionID,
-		arg.ProjectPath,
 		arg.Content,
 		arg.Status,
 		arg.CreatedAt,
@@ -64,7 +61,6 @@ func (q *Queries) CreateTodo(ctx context.Context, arg CreateTodoParams) (Todo, e
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.ProjectPath,
 		&i.Content,
 		&i.Status,
 		&i.CreatedAt,
@@ -94,7 +90,7 @@ func (q *Queries) DeleteTodosBySession(ctx context.Context, sessionID string) er
 }
 
 const getTodo = `-- name: GetTodo :one
-SELECT id, session_id, project_path, content, status, created_at, updated_at FROM todos
+SELECT id, session_id, content, status, created_at, updated_at FROM todos
 WHERE id = ?
 `
 
@@ -104,7 +100,6 @@ func (q *Queries) GetTodo(ctx context.Context, id string) (Todo, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.ProjectPath,
 		&i.Content,
 		&i.Status,
 		&i.CreatedAt,
@@ -114,7 +109,7 @@ func (q *Queries) GetTodo(ctx context.Context, id string) (Todo, error) {
 }
 
 const listTodosBySession = `-- name: ListTodosBySession :many
-SELECT id, session_id, project_path, content, status, created_at, updated_at FROM todos
+SELECT id, session_id, content, status, created_at, updated_at FROM todos
 WHERE session_id = ?
 ORDER BY created_at ASC
 `
@@ -131,49 +126,6 @@ func (q *Queries) ListTodosBySession(ctx context.Context, sessionID string) ([]T
 		if err := rows.Scan(
 			&i.ID,
 			&i.SessionID,
-			&i.ProjectPath,
-			&i.Content,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTodosBySessionAndProject = `-- name: ListTodosBySessionAndProject :many
-SELECT id, session_id, project_path, content, status, created_at, updated_at FROM todos
-WHERE session_id = ? AND project_path = ?
-ORDER BY created_at ASC
-`
-
-type ListTodosBySessionAndProjectParams struct {
-	SessionID   string `json:"session_id"`
-	ProjectPath string `json:"project_path"`
-}
-
-func (q *Queries) ListTodosBySessionAndProject(ctx context.Context, arg ListTodosBySessionAndProjectParams) ([]Todo, error) {
-	rows, err := q.query(ctx, q.listTodosBySessionAndProjectStmt, listTodosBySessionAndProject, arg.SessionID, arg.ProjectPath)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Todo{}
-	for rows.Next() {
-		var i Todo
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.ProjectPath,
 			&i.Content,
 			&i.Status,
 			&i.CreatedAt,
@@ -193,7 +145,7 @@ func (q *Queries) ListTodosBySessionAndProject(ctx context.Context, arg ListTodo
 }
 
 const listTodosBySessionAndStatus = `-- name: ListTodosBySessionAndStatus :many
-SELECT id, session_id, project_path, content, status, created_at, updated_at FROM todos
+SELECT id, session_id, content, status, created_at, updated_at FROM todos
 WHERE session_id = ? AND status = ?
 ORDER BY created_at ASC
 `
@@ -215,50 +167,6 @@ func (q *Queries) ListTodosBySessionAndStatus(ctx context.Context, arg ListTodos
 		if err := rows.Scan(
 			&i.ID,
 			&i.SessionID,
-			&i.ProjectPath,
-			&i.Content,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTodosBySessionProjectAndStatus = `-- name: ListTodosBySessionProjectAndStatus :many
-SELECT id, session_id, project_path, content, status, created_at, updated_at FROM todos
-WHERE session_id = ? AND project_path = ? AND status = ?
-ORDER BY created_at ASC
-`
-
-type ListTodosBySessionProjectAndStatusParams struct {
-	SessionID   string `json:"session_id"`
-	ProjectPath string `json:"project_path"`
-	Status      string `json:"status"`
-}
-
-func (q *Queries) ListTodosBySessionProjectAndStatus(ctx context.Context, arg ListTodosBySessionProjectAndStatusParams) ([]Todo, error) {
-	rows, err := q.query(ctx, q.listTodosBySessionProjectAndStatusStmt, listTodosBySessionProjectAndStatus, arg.SessionID, arg.ProjectPath, arg.Status)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Todo{}
-	for rows.Next() {
-		var i Todo
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.ProjectPath,
 			&i.Content,
 			&i.Status,
 			&i.CreatedAt,
@@ -281,7 +189,7 @@ const updateTodo = `-- name: UpdateTodo :one
 UPDATE todos
 SET content = ?, status = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, session_id, project_path, content, status, created_at, updated_at
+RETURNING id, session_id, content, status, created_at, updated_at
 `
 
 type UpdateTodoParams struct {
@@ -302,7 +210,6 @@ func (q *Queries) UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, e
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.ProjectPath,
 		&i.Content,
 		&i.Status,
 		&i.CreatedAt,
@@ -315,7 +222,7 @@ const updateTodoStatus = `-- name: UpdateTodoStatus :one
 UPDATE todos
 SET status = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, session_id, project_path, content, status, created_at, updated_at
+RETURNING id, session_id, content, status, created_at, updated_at
 `
 
 type UpdateTodoStatusParams struct {
@@ -330,7 +237,6 @@ func (q *Queries) UpdateTodoStatus(ctx context.Context, arg UpdateTodoStatusPara
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
-		&i.ProjectPath,
 		&i.Content,
 		&i.Status,
 		&i.CreatedAt,

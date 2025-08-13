@@ -17,20 +17,18 @@ const (
 )
 
 type Todo struct {
-	ID          string
-	SessionID   string
-	ProjectPath string
-	Content     string
-	Status      Status
-	CreatedAt   int64
-	UpdatedAt   int64
+	ID        string
+	SessionID string
+	Content   string
+	Status    Status
+	CreatedAt int64
+	UpdatedAt int64
 }
 
 type CreateTodoParams struct {
-	SessionID   string
-	ProjectPath string
-	Content     string
-	Status      Status
+	SessionID string
+	Content   string
+	Status    Status
 }
 
 type UpdateTodoParams struct {
@@ -39,9 +37,8 @@ type UpdateTodoParams struct {
 }
 
 type ListTodosParams struct {
-	SessionID   string
-	ProjectPath string
-	Status      *Status // optional filter
+	SessionID string
+	Status    *Status // optional filter
 }
 
 type Service interface {
@@ -66,13 +63,12 @@ func NewService(q db.Querier) Service {
 func (s *service) Create(ctx context.Context, params CreateTodoParams) (Todo, error) {
 	now := time.Now().UnixMilli()
 	dbTodo, err := s.q.CreateTodo(ctx, db.CreateTodoParams{
-		ID:          uuid.New().String(),
-		SessionID:   params.SessionID,
-		ProjectPath: params.ProjectPath,
-		Content:     params.Content,
-		Status:      string(params.Status),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:        uuid.New().String(),
+		SessionID: params.SessionID,
+		Content:   params.Content,
+		Status:    string(params.Status),
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 	if err != nil {
 		return Todo{}, err
@@ -93,27 +89,12 @@ func (s *service) List(ctx context.Context, params ListTodosParams) ([]Todo, err
 	var err error
 
 	if params.Status == nil {
-		if params.ProjectPath != "" {
-			dbTodos, err = s.q.ListTodosBySessionAndProject(ctx, db.ListTodosBySessionAndProjectParams{
-				SessionID:   params.SessionID,
-				ProjectPath: params.ProjectPath,
-			})
-		} else {
-			dbTodos, err = s.q.ListTodosBySession(ctx, params.SessionID)
-		}
+		dbTodos, err = s.q.ListTodosBySession(ctx, params.SessionID)
 	} else {
-		if params.ProjectPath != "" {
-			dbTodos, err = s.q.ListTodosBySessionProjectAndStatus(ctx, db.ListTodosBySessionProjectAndStatusParams{
-				SessionID:   params.SessionID,
-				ProjectPath: params.ProjectPath,
-				Status:      string(*params.Status),
-			})
-		} else {
-			dbTodos, err = s.q.ListTodosBySessionAndStatus(ctx, db.ListTodosBySessionAndStatusParams{
-				SessionID: params.SessionID,
-				Status:    string(*params.Status),
-			})
-		}
+		dbTodos, err = s.q.ListTodosBySessionAndStatus(ctx, db.ListTodosBySessionAndStatusParams{
+			SessionID: params.SessionID,
+			Status:    string(*params.Status),
+		})
 	}
 
 	if err != nil {
@@ -171,12 +152,11 @@ func (s *service) CountBySessionAndStatus(ctx context.Context, sessionID string,
 
 func (s *service) fromDBItem(dbTodo db.Todo) Todo {
 	return Todo{
-		ID:          dbTodo.ID,
-		SessionID:   dbTodo.SessionID,
-		ProjectPath: dbTodo.ProjectPath,
-		Content:     dbTodo.Content,
-		Status:      Status(dbTodo.Status),
-		CreatedAt:   dbTodo.CreatedAt,
-		UpdatedAt:   dbTodo.UpdatedAt,
+		ID:        dbTodo.ID,
+		SessionID: dbTodo.SessionID,
+		Content:   dbTodo.Content,
+		Status:    Status(dbTodo.Status),
+		CreatedAt: dbTodo.CreatedAt,
+		UpdatedAt: dbTodo.UpdatedAt,
 	}
 }

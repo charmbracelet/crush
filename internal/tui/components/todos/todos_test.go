@@ -15,13 +15,12 @@ type mockTodoService struct {
 
 func (m *mockTodoService) Create(ctx context.Context, params todo.CreateTodoParams) (todo.Todo, error) {
 	newTodo := todo.Todo{
-		ID:          "test-id",
-		SessionID:   params.SessionID,
-		ProjectPath: params.ProjectPath,
-		Content:     params.Content,
-		Status:      params.Status,
-		CreatedAt:   1234567890,
-		UpdatedAt:   1234567890,
+		ID:        "test-id",
+		SessionID: params.SessionID,
+		Content:   params.Content,
+		Status:    params.Status,
+		CreatedAt: 1234567890,
+		UpdatedAt: 1234567890,
 	}
 	m.todos = append(m.todos, newTodo)
 	return newTodo, nil
@@ -103,9 +102,6 @@ func (m *mockTodoService) CountBySessionAndStatus(ctx context.Context, sessionID
 func TestRenderTodoBlock(t *testing.T) {
 	t.Parallel()
 
-	// Set up a temporary directory for the test
-	tempDir := t.TempDir()
-
 	mockService := &mockTodoService{
 		todos: []todo.Todo{
 			{
@@ -134,7 +130,6 @@ func TestRenderTodoBlock(t *testing.T) {
 		MaxItems:    10,
 		ShowSection: true,
 		SectionName: "TODOs",
-		ProjectPath: tempDir,
 	}, false)
 
 	require.NotEmpty(t, result)

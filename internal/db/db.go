@@ -96,14 +96,8 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listTodosBySessionStmt, err = db.PrepareContext(ctx, listTodosBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListTodosBySession: %w", err)
 	}
-	if q.listTodosBySessionAndProjectStmt, err = db.PrepareContext(ctx, listTodosBySessionAndProject); err != nil {
-		return nil, fmt.Errorf("error preparing query ListTodosBySessionAndProject: %w", err)
-	}
 	if q.listTodosBySessionAndStatusStmt, err = db.PrepareContext(ctx, listTodosBySessionAndStatus); err != nil {
 		return nil, fmt.Errorf("error preparing query ListTodosBySessionAndStatus: %w", err)
-	}
-	if q.listTodosBySessionProjectAndStatusStmt, err = db.PrepareContext(ctx, listTodosBySessionProjectAndStatus); err != nil {
-		return nil, fmt.Errorf("error preparing query ListTodosBySessionProjectAndStatus: %w", err)
 	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
@@ -242,19 +236,9 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listTodosBySessionStmt: %w", cerr)
 		}
 	}
-	if q.listTodosBySessionAndProjectStmt != nil {
-		if cerr := q.listTodosBySessionAndProjectStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listTodosBySessionAndProjectStmt: %w", cerr)
-		}
-	}
 	if q.listTodosBySessionAndStatusStmt != nil {
 		if cerr := q.listTodosBySessionAndStatusStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listTodosBySessionAndStatusStmt: %w", cerr)
-		}
-	}
-	if q.listTodosBySessionProjectAndStatusStmt != nil {
-		if cerr := q.listTodosBySessionProjectAndStatusStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listTodosBySessionProjectAndStatusStmt: %w", cerr)
 		}
 	}
 	if q.updateMessageStmt != nil {
@@ -314,75 +298,71 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                                     DBTX
-	tx                                     *sql.Tx
-	countTodosBySessionAndStatusStmt       *sql.Stmt
-	createFileStmt                         *sql.Stmt
-	createMessageStmt                      *sql.Stmt
-	createSessionStmt                      *sql.Stmt
-	createTodoStmt                         *sql.Stmt
-	deleteFileStmt                         *sql.Stmt
-	deleteMessageStmt                      *sql.Stmt
-	deleteSessionStmt                      *sql.Stmt
-	deleteSessionFilesStmt                 *sql.Stmt
-	deleteSessionMessagesStmt              *sql.Stmt
-	deleteTodoStmt                         *sql.Stmt
-	deleteTodosBySessionStmt               *sql.Stmt
-	getFileStmt                            *sql.Stmt
-	getFileByPathAndSessionStmt            *sql.Stmt
-	getMessageStmt                         *sql.Stmt
-	getSessionByIDStmt                     *sql.Stmt
-	getTodoStmt                            *sql.Stmt
-	listFilesByPathStmt                    *sql.Stmt
-	listFilesBySessionStmt                 *sql.Stmt
-	listLatestSessionFilesStmt             *sql.Stmt
-	listMessagesBySessionStmt              *sql.Stmt
-	listNewFilesStmt                       *sql.Stmt
-	listSessionsStmt                       *sql.Stmt
-	listTodosBySessionStmt                 *sql.Stmt
-	listTodosBySessionAndProjectStmt       *sql.Stmt
-	listTodosBySessionAndStatusStmt        *sql.Stmt
-	listTodosBySessionProjectAndStatusStmt *sql.Stmt
-	updateMessageStmt                      *sql.Stmt
-	updateSessionStmt                      *sql.Stmt
-	updateTodoStmt                         *sql.Stmt
-	updateTodoStatusStmt                   *sql.Stmt
+	db                               DBTX
+	tx                               *sql.Tx
+	countTodosBySessionAndStatusStmt *sql.Stmt
+	createFileStmt                   *sql.Stmt
+	createMessageStmt                *sql.Stmt
+	createSessionStmt                *sql.Stmt
+	createTodoStmt                   *sql.Stmt
+	deleteFileStmt                   *sql.Stmt
+	deleteMessageStmt                *sql.Stmt
+	deleteSessionStmt                *sql.Stmt
+	deleteSessionFilesStmt           *sql.Stmt
+	deleteSessionMessagesStmt        *sql.Stmt
+	deleteTodoStmt                   *sql.Stmt
+	deleteTodosBySessionStmt         *sql.Stmt
+	getFileStmt                      *sql.Stmt
+	getFileByPathAndSessionStmt      *sql.Stmt
+	getMessageStmt                   *sql.Stmt
+	getSessionByIDStmt               *sql.Stmt
+	getTodoStmt                      *sql.Stmt
+	listFilesByPathStmt              *sql.Stmt
+	listFilesBySessionStmt           *sql.Stmt
+	listLatestSessionFilesStmt       *sql.Stmt
+	listMessagesBySessionStmt        *sql.Stmt
+	listNewFilesStmt                 *sql.Stmt
+	listSessionsStmt                 *sql.Stmt
+	listTodosBySessionStmt           *sql.Stmt
+	listTodosBySessionAndStatusStmt  *sql.Stmt
+	updateMessageStmt                *sql.Stmt
+	updateSessionStmt                *sql.Stmt
+	updateTodoStmt                   *sql.Stmt
+	updateTodoStatusStmt             *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                                     tx,
-		tx:                                     tx,
-		countTodosBySessionAndStatusStmt:       q.countTodosBySessionAndStatusStmt,
-		createFileStmt:                         q.createFileStmt,
-		createMessageStmt:                      q.createMessageStmt,
-		createSessionStmt:                      q.createSessionStmt,
-		createTodoStmt:                         q.createTodoStmt,
-		deleteFileStmt:                         q.deleteFileStmt,
-		deleteMessageStmt:                      q.deleteMessageStmt,
-		deleteSessionStmt:                      q.deleteSessionStmt,
-		deleteSessionFilesStmt:                 q.deleteSessionFilesStmt,
-		deleteSessionMessagesStmt:              q.deleteSessionMessagesStmt,
-		deleteTodoStmt:                         q.deleteTodoStmt,
-		deleteTodosBySessionStmt:               q.deleteTodosBySessionStmt,
-		getFileStmt:                            q.getFileStmt,
-		getFileByPathAndSessionStmt:            q.getFileByPathAndSessionStmt,
-		getMessageStmt:                         q.getMessageStmt,
-		getSessionByIDStmt:                     q.getSessionByIDStmt,
-		getTodoStmt:                            q.getTodoStmt,
-		listFilesByPathStmt:                    q.listFilesByPathStmt,
-		listFilesBySessionStmt:                 q.listFilesBySessionStmt,
-		listLatestSessionFilesStmt:             q.listLatestSessionFilesStmt,
-		listMessagesBySessionStmt:              q.listMessagesBySessionStmt,
-		listNewFilesStmt:                       q.listNewFilesStmt,
-		listSessionsStmt:                       q.listSessionsStmt,
-		listTodosBySessionStmt:                 q.listTodosBySessionStmt,
-		listTodosBySessionAndProjectStmt:       q.listTodosBySessionAndProjectStmt,
-		listTodosBySessionAndStatusStmt:        q.listTodosBySessionAndStatusStmt,
-		listTodosBySessionProjectAndStatusStmt: q.listTodosBySessionProjectAndStatusStmt,
-		updateMessageStmt:                      q.updateMessageStmt,
-		updateSessionStmt:                      q.updateSessionStmt,
-		updateTodoStmt:                         q.updateTodoStmt,
-		updateTodoStatusStmt:                   q.updateTodoStatusStmt,
+		db:                               tx,
+		tx:                               tx,
+		countTodosBySessionAndStatusStmt: q.countTodosBySessionAndStatusStmt,
+		createFileStmt:                   q.createFileStmt,
+		createMessageStmt:                q.createMessageStmt,
+		createSessionStmt:                q.createSessionStmt,
+		createTodoStmt:                   q.createTodoStmt,
+		deleteFileStmt:                   q.deleteFileStmt,
+		deleteMessageStmt:                q.deleteMessageStmt,
+		deleteSessionStmt:                q.deleteSessionStmt,
+		deleteSessionFilesStmt:           q.deleteSessionFilesStmt,
+		deleteSessionMessagesStmt:        q.deleteSessionMessagesStmt,
+		deleteTodoStmt:                   q.deleteTodoStmt,
+		deleteTodosBySessionStmt:         q.deleteTodosBySessionStmt,
+		getFileStmt:                      q.getFileStmt,
+		getFileByPathAndSessionStmt:      q.getFileByPathAndSessionStmt,
+		getMessageStmt:                   q.getMessageStmt,
+		getSessionByIDStmt:               q.getSessionByIDStmt,
+		getTodoStmt:                      q.getTodoStmt,
+		listFilesByPathStmt:              q.listFilesByPathStmt,
+		listFilesBySessionStmt:           q.listFilesBySessionStmt,
+		listLatestSessionFilesStmt:       q.listLatestSessionFilesStmt,
+		listMessagesBySessionStmt:        q.listMessagesBySessionStmt,
+		listNewFilesStmt:                 q.listNewFilesStmt,
+		listSessionsStmt:                 q.listSessionsStmt,
+		listTodosBySessionStmt:           q.listTodosBySessionStmt,
+		listTodosBySessionAndStatusStmt:  q.listTodosBySessionAndStatusStmt,
+		updateMessageStmt:                q.updateMessageStmt,
+		updateSessionStmt:                q.updateSessionStmt,
+		updateTodoStmt:                   q.updateTodoStmt,
+		updateTodoStatusStmt:             q.updateTodoStatusStmt,
 	}
 }

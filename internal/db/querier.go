@@ -33,9 +33,7 @@ type Querier interface {
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListTodosBySession(ctx context.Context, sessionID string) ([]Todo, error)
-	ListTodosBySessionAndProject(ctx context.Context, arg ListTodosBySessionAndProjectParams) ([]Todo, error)
 	ListTodosBySessionAndStatus(ctx context.Context, arg ListTodosBySessionAndStatusParams) ([]Todo, error)
-	ListTodosBySessionProjectAndStatus(ctx context.Context, arg ListTodosBySessionProjectAndStatusParams) ([]Todo, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateTodo(ctx context.Context, arg UpdateTodoParams) (Todo, error)

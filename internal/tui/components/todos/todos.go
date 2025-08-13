@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/todo"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -16,7 +15,6 @@ type RenderOptions struct {
 	MaxItems    int
 	ShowSection bool
 	SectionName string
-	ProjectPath string // Add project path to options
 }
 
 func RenderTodoBlock(todoService todo.Service, sessionID string, options RenderOptions, compact bool) string {
@@ -25,14 +23,9 @@ func RenderTodoBlock(todoService todo.Service, sessionID string, options RenderO
 	}
 
 	ctx := context.Background()
-	projectPath := options.ProjectPath
-	if projectPath == "" {
-		projectPath = config.Get().WorkingDir()
-	}
 
 	todos, err := todoService.List(ctx, todo.ListTodosParams{
-		SessionID:   sessionID,
-		ProjectPath: projectPath,
+		SessionID: sessionID,
 	})
 	if err != nil || len(todos) == 0 {
 		return ""

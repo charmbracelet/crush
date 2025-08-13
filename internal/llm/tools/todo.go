@@ -122,13 +122,11 @@ TIPS:
 // TodoWriteTool handles creating and updating TODOs
 type todoWriteTool struct {
 	todoService todo.Service
-	workingDir  string
 }
 
 // TodoListTool handles listing TODOs
 type todoListTool struct {
 	todoService todo.Service
-	workingDir  string
 }
 
 // TodoDeleteTool handles deleting TODOs
@@ -136,17 +134,15 @@ type todoDeleteTool struct {
 	todoService todo.Service
 }
 
-func NewTodoWriteTool(todoService todo.Service, workingDir string) BaseTool {
+func NewTodoWriteTool(todoService todo.Service) BaseTool {
 	return &todoWriteTool{
 		todoService: todoService,
-		workingDir:  workingDir,
 	}
 }
 
-func NewTodoListTool(todoService todo.Service, workingDir string) BaseTool {
+func NewTodoListTool(todoService todo.Service) BaseTool {
 	return &todoListTool{
 		todoService: todoService,
-		workingDir:  workingDir,
 	}
 }
 
@@ -226,10 +222,9 @@ func (t *todoWriteTool) Run(ctx context.Context, call ToolCall) (ToolResponse, e
 		if todoItem.ID == "" {
 			// Create new TODO
 			createdTodo, err := t.todoService.Create(ctx, todo.CreateTodoParams{
-				SessionID:   sessionID,
-				ProjectPath: t.workingDir,
-				Content:     todoItem.Content,
-				Status:      status,
+				SessionID: sessionID,
+				Content:   todoItem.Content,
+				Status:    status,
 			})
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to create TODO: %s", err))
@@ -299,8 +294,7 @@ func (t *todoListTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 	}
 
 	listParams := todo.ListTodosParams{
-		SessionID:   sessionID,
-		ProjectPath: t.workingDir,
+		SessionID: sessionID,
 	}
 
 	if params.FilterStatus != "" {

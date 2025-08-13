@@ -504,7 +504,6 @@ func (m *sidebarCmp) todosBlock() string {
 		MaxItems:    maxTodos,
 		ShowSection: true,
 		SectionName: core.Section("TODOs", m.getMaxWidth()),
-		ProjectPath: config.Get().WorkingDir(),
 	}, true)
 }
 
@@ -526,7 +525,6 @@ func (m *sidebarCmp) todosBlockCompact(maxWidth int) string {
 		MaxItems:    maxItems,
 		ShowSection: true,
 		SectionName: "TODOs",
-		ProjectPath: config.Get().WorkingDir(),
 	}, true)
 }
 

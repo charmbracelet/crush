@@ -42,25 +42,25 @@ func (h *header) Init() tea.Cmd {
 	return nil
 }
 
-func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (h *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
-			if p.session.ID == msg.Payload.ID {
-				p.session = msg.Payload
+			if h.session.ID == msg.Payload.ID {
+				h.session = msg.Payload
 			}
 		}
 	}
-	return p, nil
+	return h, nil
 }
 
-func (p *header) View() string {
-	if p.session.ID == "" {
+func (h *header) View() string {
+	if h.session.ID == "" {
 		return ""
 	}
 
 	t := styles.CurrentTheme()
-	details := p.details()
+	details := h.details()
 	parts := []string{
 		t.S().Base.Foreground(t.Secondary).Render("Charm™"),
 		" ",
@@ -68,7 +68,7 @@ func (p *header) View() string {
 		" ",
 	}
 
-	remainingWidth := p.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
+	remainingWidth := h.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
 	if remainingWidth > 0 {
 		char := "╱"
 		lines := strings.Repeat(char, remainingWidth)

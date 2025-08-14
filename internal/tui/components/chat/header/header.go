@@ -139,6 +139,7 @@ func (h *header) details(availWidth int) string {
 	const dirTrimLimit = 4
 	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), dirTrimLimit)
 	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
+	cwd = s.Muted.Render(cwd)
 
 	return cwd + metadata
 }

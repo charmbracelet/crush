@@ -80,15 +80,15 @@ func (h *header) View() string {
 	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minDiags
 	details := h.details(availDetailWidth)
 
-	availWidth := h.width -
+	remainingWidth := h.width -
 		lipgloss.Width(b.String()) -
 		lipgloss.Width(details) -
 		leftPadding -
 		rightPadding
 
-	if availWidth > 0 {
+	if remainingWidth > 0 {
 		b.WriteString(t.S().Base.Foreground(t.Primary).Render(
-			strings.Repeat(diag, max(minDiags, availWidth)),
+			strings.Repeat(diag, max(minDiags, remainingWidth)),
 		))
 		b.WriteString(gap)
 	}

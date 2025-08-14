@@ -273,7 +273,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, pageCmd)
 		return a, tea.Batch(cmds...)
-	// Key Press Messages
+
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 

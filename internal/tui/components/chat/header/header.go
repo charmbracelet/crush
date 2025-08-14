@@ -55,6 +55,8 @@ func (h *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (h *header) View() string {
+	const gap = " "
+
 	if h.session.ID == "" {
 		return ""
 	}
@@ -63,16 +65,16 @@ func (h *header) View() string {
 	details := h.details()
 	parts := []string{
 		t.S().Base.Foreground(t.Secondary).Render("Charm™"),
-		" ",
+		gap,
 		styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary),
-		" ",
+		gap,
 	}
 
 	remainingWidth := h.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
 	if remainingWidth > 0 {
 		const char = "╱"
 		lines := strings.Repeat(char, remainingWidth)
-		parts = append(parts, t.S().Base.Foreground(t.Primary).Render(lines), " ")
+		parts = append(parts, t.S().Base.Foreground(t.Primary).Render(lines), gap)
 	}
 
 	parts = append(parts, details)

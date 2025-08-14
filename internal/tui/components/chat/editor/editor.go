@@ -138,13 +138,6 @@ func (m *editorCmp) Init() tea.Cmd {
 }
 
 func (m *editorCmp) send() tea.Cmd {
-	if m.app.CoderAgent == nil {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
-	}
-	if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
-		return util.ReportWarn("Agent is working, please wait...")
-	}
-
 	value := m.textarea.Value()
 	value = strings.TrimSpace(value)
 
@@ -488,6 +481,7 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 
 func (m *editorCmp) startCompletions() tea.Msg {
 	files, _, _ := fsext.ListDirectory(".", nil, 0)
+	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")

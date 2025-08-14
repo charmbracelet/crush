@@ -21,13 +21,7 @@ func TestLazySlice_Seq(t *testing.T) {
 			time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
 			return data
 		})
-
-		var result []string
-		for v := range s.Seq() {
-			result = append(result, v)
-		}
-
-		require.Equal(t, data, result)
+		require.Equal(t, data, slices.Collect(s.Seq()))
 	})
 }
 
@@ -46,30 +40,17 @@ func TestLazySlice_SeqWaitsForLoading(t *testing.T) {
 		})
 
 		require.False(t, loaded.Load(), "should not be loaded immediately")
-
-		var result []string
-		for v := range s.Seq() {
-			result = append(result, v)
-		}
-
+		require.Equal(t, data, slices.Collect(s.Seq()))
 		require.True(t, loaded.Load(), "should be loaded after Seq")
-		require.Equal(t, data, result)
 	})
 }
 
 func TestLazySlice_EmptySlice(t *testing.T) {
 	t.Parallel()
-
 	s := NewLazySlice(func() []string {
 		return []string{}
 	})
-
-	var result []string
-	for v := range s.Seq() {
-		result = append(result, v)
-	}
-
-	require.Empty(t, result)
+	require.Empty(t, slices.Collect(s.Seq()))
 }
 
 func TestLazySlice_EarlyBreak(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -13,43 +14,47 @@ import (
 func TestLazySlice_Seq(t *testing.T) {
 	t.Parallel()
 
-	data := []string{"a", "b", "c"}
-	s := NewLazySlice(func() []string {
-		// TODO: use synctest when new Go is out.
-		time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
-		return data
+	synctest.Test(t, func(t *testing.T) {
+		t.Helper()
+		data := []string{"a", "b", "c"}
+		s := NewLazySlice(func() []string {
+			time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
+			return data
+		})
+
+		var result []string
+		for v := range s.Seq() {
+			result = append(result, v)
+		}
+
+		require.Equal(t, data, result)
 	})
-
-	var result []string
-	for v := range s.Seq() {
-		result = append(result, v)
-	}
-
-	require.Equal(t, data, result)
 }
 
 func TestLazySlice_SeqWaitsForLoading(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		t.Helper()
 
-	var loaded atomic.Bool
-	data := []string{"x", "y", "z"}
+		var loaded atomic.Bool
+		data := []string{"x", "y", "z"}
 
-	s := NewLazySlice(func() []string {
-		// TODO: use synctest when new Go is out.
-		time.Sleep(100 * time.Millisecond)
-		loaded.Store(true)
-		return data
+		s := NewLazySlice(func() []string {
+			time.Sleep(100 * time.Millisecond)
+			loaded.Store(true)
+			return data
+		})
+
+		require.False(t, loaded.Load(), "should not be loaded immediately")
+
+		var result []string
+		for v := range s.Seq() {
+			result = append(result, v)
+		}
+
+		require.True(t, loaded.Load(), "should be loaded after Seq")
+		require.Equal(t, data, result)
 	})
-
-	require.False(t, loaded.Load(), "should not be loaded immediately")
-
-	var result []string
-	for v := range s.Seq() {
-		result = append(result, v)
-	}
-
-	require.True(t, loaded.Load(), "should be loaded after Seq")
-	require.Equal(t, data, result)
 }
 
 func TestLazySlice_EmptySlice(t *testing.T) {
@@ -70,22 +75,24 @@ func TestLazySlice_EmptySlice(t *testing.T) {
 func TestLazySlice_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
-	data := []string{"a", "b", "c", "d", "e"}
-	s := NewLazySlice(func() []string {
-		// TODO: use synctest when new Go is out.
-		time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
-		return data
-	})
+	synctest.Test(t, func(t *testing.T) {
+		t.Helper()
+		data := []string{"a", "b", "c", "d", "e"}
+		s := NewLazySlice(func() []string {
+			time.Sleep(10 * time.Millisecond) // Small delay to ensure loading happens
+			return data
+		})
 
-	var result []string
-	for v := range s.Seq() {
-		result = append(result, v)
-		if len(result) == 2 {
-			break
+		var result []string
+		for v := range s.Seq() {
+			result = append(result, v)
+			if len(result) == 2 {
+				break
+			}
 		}
-	}
 
-	require.Equal(t, []string{"a", "b"}, result)
+		require.Equal(t, []string{"a", "b"}, result)
+	})
 }
 
 func TestSlice(t *testing.T) {

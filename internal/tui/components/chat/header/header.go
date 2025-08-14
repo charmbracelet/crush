@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type Header interface {
@@ -62,7 +63,7 @@ func (h *header) View() string {
 	const (
 		gap          = " "
 		diag         = "╱"
-		minDiags     = 1
+		minDiags     = 3
 		leftPadding  = 1
 		rightPadding = 1
 	)
@@ -76,7 +77,7 @@ func (h *header) View() string {
 	b.WriteString(styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary))
 	b.WriteString(gap)
 
-	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String())
+	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minDiags
 	details := h.details(availDetailWidth)
 
 	availWidth := h.width -
@@ -100,10 +101,7 @@ func (h *header) View() string {
 func (h *header) details(availWidth int) string {
 	s := styles.CurrentTheme().S()
 
-	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), 4)
-	parts := []string{
-		s.Muted.Render(cwd),
-	}
+	var parts []string
 
 	errorCount := 0
 	for _, l := range h.lspClients {
@@ -133,7 +131,16 @@ func (h *header) details(availWidth int) string {
 		parts = append(parts, s.Muted.Render(keystroke)+s.Subtle.Render(" open "))
 	}
 
-	return strings.Join(parts, s.Subtle.Render(" • "))
+	dot := s.Subtle.Render(" • ")
+	metadata := strings.Join(parts, dot)
+	metadata = dot + metadata
+
+	// Truncate cwd if necessary, and insert it at the beginning.
+	const dirTrimLimit = 4
+	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), dirTrimLimit)
+	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
+
+	return cwd + metadata
 }
 
 func (h *header) SetDetailsOpen(open bool) {

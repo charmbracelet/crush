@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,8 +67,9 @@ type Client struct {
 // NewClient creates a new LSP client.
 func NewClient(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
+
 	// Copy env
-	cmd.Env = os.Environ()
+	cmd.Env = slices.Concat(os.Environ(), config.Env)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

@@ -63,6 +63,13 @@
           "type": "array",
           "description": "Arguments to pass to the LSP server command"
         },
+        "env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Environment variables to set to the LSP server command"
+        },
         "options": {
           "description": "LSP server-specific configuration options"
         },

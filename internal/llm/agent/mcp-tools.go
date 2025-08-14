@@ -115,13 +115,12 @@ func runTool(ctx context.Context, name, toolName string, input string) (tools.To
 	if err != nil {
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}
-	request := mcp.CallToolRequest{
+	result, err := c.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      toolName,
 			Arguments: args,
 		},
-	}
-	result, err := c.CallTool(ctx, request)
+	})
 	if err != nil {
 		return tools.NewTextErrorResponse(err.Error()), nil
 	}

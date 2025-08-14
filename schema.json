@@ -70,12 +70,16 @@
           "items": {
             "type": "string",
             "examples": [
-              ".go",
-              ".mod"
+              "go",
+              "mod",
+              "rs",
+              "c",
+              "js",
+              "ts"
             ]
           },
           "type": "array",
-          "description": "File extensions this LSP server handles (e.g. .go .rs .py)"
+          "description": "File types this LSP server handles"
         }
       },
       "additionalProperties": false,

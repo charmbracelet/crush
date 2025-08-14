@@ -153,7 +153,6 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 
 			if len(blocks) == 0 {
-				slog.Warn("There is a message without content, investigate, this should not happen")
 				continue
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
@@ -333,7 +332,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			// Prepare messages on each attempt in case max_tokens was adjusted
 			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 
-			var opts []option.RequestOption
+			opts := []option.RequestOption{option.WithRequestTimeout(time.Minute)}
 			if a.isThinkingEnabled() {
 				opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 			}

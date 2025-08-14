@@ -166,7 +166,6 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				}
 			}
 			if !hasContent {
-				slog.Warn("There is a message without content, investigate, this should not happen")
 				continue
 			}
 
@@ -338,6 +337,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
+				option.WithRequestTimeout(time.Minute),
 			)
 
 			acc := openai.ChatCompletionAccumulator{}

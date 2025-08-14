@@ -42,7 +42,7 @@ func TestListDirectory(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		err := os.WriteFile(filePath, []byte(content), 0644)
+		err := os.WriteFile(filePath, []byte(content), 0o644)
 		require.NoError(t, err)
 	}
 

@@ -313,9 +313,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
-			if len(value) > 0 && value[len(value)-1] == '\\' {
-				// If the last character is a backslash, remove it and add a newline
-				m.textarea.SetValue(value[:len(value)-1])
+			if strings.HasSuffix(value, "\\") {
+				// If the last character is a backslash, remove it and add a newline.
+				m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
 			} else {
 				// Otherwise, send the message
 				return m, m.send()

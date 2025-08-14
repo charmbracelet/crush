@@ -78,8 +78,8 @@ github.com/charlievieth/fastwalk v1.0.12 h1:pwfxe1LajixViQqo7EFLXU2+mQxb6OaO0CeN
 github.com/charlievieth/fastwalk v1.0.12/go.mod h1:yGy1zbxog41ZVMcKA/i8ojXLFsuayX5VvwhQVoj9PBI=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250807144536-86f332629539 h1:ptsaiaVl07xdCCosnjs04J7qTymdV0GkQ42qf404dC0=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250807144536-86f332629539/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250813213544-5cc219db8892 h1:lqoYD2DrKhSdC9xCr59JMXtbbdR5/AZ6xfd/G8eOQJM=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250813213544-5cc219db8892/go.mod h1:TUpoECaG4/3CwFx5lTlXNpR87Yo7gOwGqucnHGfAm20=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta1 h1:yaxFt97mvofGY7bYZn8U/aSVoamXGE3O4AEvWhshUDI=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta1/go.mod h1:qbcZLI5z8R49v9xBdU5V5Dh5D2uccx8wSwBqxQyErqc=
 github.com/charmbracelet/catwalk v0.4.10 h1:P/Stl9/ONXPTgBQ822l40HrdV/7NUU549p+CqWDOE18=
 github.com/charmbracelet/catwalk v0.4.10/go.mod h1:WnKgNPmQHuMyk7GtwAQwl+ezHusfH40IvzML2qwUGwc=
 github.com/charmbracelet/colorprofile v0.3.2 h1:9J27WdztfJQVAQKX2WOlSSRB+5gaKqqITmrvb1uTIiI=
@@ -104,6 +104,8 @@ github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a h1:FsHE
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a/go.mod h1:wDlXFlCrmJ8J+swcL/MnGUuYnqgQdW9rhSD61oNMb6U=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef h1:v7qwsZ2OxzlwvpKwz8dtZXp7fIJlcDEUOyFBNE4fz4Q=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef/go.mod h1:vI5nDVMWi6veaYH+0Fmvpbe/+cv/iJfMntdh+N0+Tms=
+github.com/charmbracelet/x/input v0.3.4 h1:Mujmnv/4DaitU0p+kIsrlfZl/UlmeLKw1wAP3e1fMN0=
+github.com/charmbracelet/x/input v0.3.4/go.mod h1:JI8RcvdZWQIhn09VzeK3hdp4lTz7+yhiEdpEQtZN+2c=
 github.com/charmbracelet/x/term v0.2.1 h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=
 github.com/charmbracelet/x/term v0.2.1/go.mod h1:oQ4enTYFV7QN4m0i9mzHrViD7TQKvNEEkHUMCmsxdUg=
 github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=

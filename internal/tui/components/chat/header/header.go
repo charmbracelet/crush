@@ -60,13 +60,14 @@ func (h *header) View() string {
 	}
 
 	const (
-		gap      = " "
-		diag     = "╱"
-		minDiags = "1"
+		gap          = " "
+		diag         = "╱"
+		minDiags     = 1
+		leftPadding  = 1
+		rightPadding = 1
 	)
 
 	t := styles.CurrentTheme()
-	details := h.details()
 
 	var b strings.Builder
 
@@ -75,16 +76,24 @@ func (h *header) View() string {
 	b.WriteString(styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary))
 	b.WriteString(gap)
 
-	remainingWidth := h.width - lipgloss.Width(b.String()) - lipgloss.Width(details) - 2
-	if remainingWidth > 0 {
-		lines := strings.Repeat(diag, remainingWidth)
-		b.WriteString(t.S().Base.Foreground(t.Primary).Render(lines))
+	details := h.details()
+
+	availWidth := h.width -
+		lipgloss.Width(b.String()) -
+		lipgloss.Width(details) -
+		leftPadding -
+		rightPadding
+
+	if availWidth > 0 {
+		b.WriteString(t.S().Base.Foreground(t.Primary).Render(
+			strings.Repeat(diag, max(minDiags, availWidth)),
+		))
 		b.WriteString(gap)
 	}
 
 	b.WriteString(details)
 
-	return t.S().Base.Padding(0, 1).Render(b.String())
+	return t.S().Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String())
 }
 
 func (h *header) details() string {

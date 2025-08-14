@@ -4,11 +4,26 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 )
 
 func DetectLanguageID(uri string) protocol.LanguageKind {
 	ext := strings.ToLower(filepath.Ext(uri))
+
+	// Check custom LSP configurations first
+	cfg := config.Get()
+	if cfg != nil {
+		for lspName, lspConfig := range cfg.LSP {
+			for _, customExt := range lspConfig.Extensions {
+				if ext == strings.ToLower(customExt) {
+					// Use the LSP configuration key as language ID
+					return protocol.LanguageKind(lspName)
+				}
+			}
+		}
+	}
+
 	switch ext {
 	case ".abap":
 		return protocol.LangABAP

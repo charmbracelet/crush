@@ -146,7 +146,7 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 	m := config.Get().MCP[name]
 	state, _ := mcpStates.Get(name)
 
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second) // TODO: configurable timeout
+	pingCtx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
 	defer cancel()
 	err := c.Ping(pingCtx)
 	if err == nil {
@@ -300,8 +300,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				}
 			}()
 
-			timeout := time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
-			ctx, cancel := context.WithTimeout(ctx, timeout)
+			ctx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
 			defer cancel()
 			c, err := createAndInitializeClient(ctx, name, m)
 			if err != nil {
@@ -376,3 +375,7 @@ type mcpLogger struct{}
 
 func (l mcpLogger) Errorf(format string, v ...any) { slog.Error(fmt.Sprintf(format, v...)) }
 func (l mcpLogger) Infof(format string, v ...any)  { slog.Info(fmt.Sprintf(format, v...)) }
+
+func mcpTimeout(m config.MCPConfig) time.Duration {
+	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+}

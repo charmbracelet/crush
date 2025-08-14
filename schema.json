@@ -65,6 +65,17 @@
         },
         "options": {
           "description": "LSP server-specific configuration options"
+        },
+        "filetypes": {
+          "items": {
+            "type": "string",
+            "examples": [
+              ".go",
+              ".mod"
+            ]
+          },
+          "type": "array",
+          "description": "File extensions this LSP server handles (e.g. .go .rs .py)"
         }
       },
       "additionalProperties": false,

@@ -38,8 +38,7 @@ func TestListDirectory(t *testing.T) {
 	for filePath, content := range testFiles {
 		dir := filepath.Dir(filePath)
 		if dir != "." {
-			err := os.MkdirAll(dir, 0755)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(dir, 0o755))
 		}
 
 		err := os.WriteFile(filePath, []byte(content), 0o644)

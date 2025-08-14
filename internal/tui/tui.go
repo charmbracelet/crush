@@ -215,9 +215,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// forward to page
-		updated, cmd := item.Update(msg)
+		updated, itemCmd := item.Update(msg)
 		a.pages[a.currentPage] = updated.(util.Model)
-		return a, cmd
+		return a, itemCmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{

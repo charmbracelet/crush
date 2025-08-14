@@ -121,7 +121,7 @@ type LSPConfig struct {
 	Command   string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
 	Args      []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
 	Options   any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
-	FileTypes []string `json:"filetypes,omitempty" jsonschema:"description=File extensions this LSP server handles (e.g. .go .rs .py),example=.go,example=.mod"`
+	FileTypes []string `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
 }
 
 type TUIOptions struct {

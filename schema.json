@@ -65,6 +65,21 @@
         },
         "options": {
           "description": "LSP server-specific configuration options"
+        },
+        "filetypes": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go",
+              "mod",
+              "rs",
+              "c",
+              "js",
+              "ts"
+            ]
+          },
+          "type": "array",
+          "description": "File types this LSP server handles"
         }
       },
       "additionalProperties": false,
@@ -124,6 +139,16 @@
           "type": "boolean",
           "description": "Whether this MCP server is disabled",
           "default": false
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for MCP server connections",
+          "default": 15,
+          "examples": [
+            30,
+            60,
+            120
+          ]
         },
         "headers": {
           "additionalProperties": {

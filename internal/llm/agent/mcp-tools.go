@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -299,7 +300,8 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				}
 			}()
 
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			timeout := time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			c, err := createAndInitializeClient(ctx, name, m)
 			if err != nil {

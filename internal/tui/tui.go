@@ -174,6 +174,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	case commands.ToggleYoloModeMsg:
+		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
@@ -213,7 +215,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: permissions.NewPermissionDialogCmp(msg.Payload),
+			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{
+				DiffMode: config.Get().Options.TUI.DiffMode,
+			}),
 		})
 	case permissions.PermissionResponseMsg:
 		switch msg.Action {

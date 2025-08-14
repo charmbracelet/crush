@@ -35,6 +35,13 @@ yay -S crush-bin
 
 # Nix
 nix run github:numtide/nix-ai-tools#crush
+```
+
+Windows users:
+
+```bash
+# Winget
+winget install charmbracelet.crush
 
 # Scoop
 scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git

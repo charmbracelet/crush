@@ -70,7 +70,7 @@ func (h *header) View() string {
 
 	remainingWidth := h.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
 	if remainingWidth > 0 {
-		char := "╱"
+		const char = "╱"
 		lines := strings.Repeat(char, remainingWidth)
 		parts = append(parts, t.S().Base.Foreground(t.Primary).Render(lines), " ")
 	}

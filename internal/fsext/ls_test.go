@@ -52,7 +52,7 @@ func TestListDirectory(t *testing.T) {
 
 	fileSet := make(map[string]bool)
 	for _, file := range files {
-		fileSet[file] = true
+		fileSet[filepath.ToSlash(file)] = true
 	}
 
 	assert.True(t, fileSet["./regular.txt"])

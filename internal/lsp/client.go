@@ -623,11 +623,17 @@ func (c *Client) HandlesFile(path string) bool {
 	}
 
 	name := strings.ToLower(filepath.Base(path))
-	for _, ext := range c.fileTypes {
-		if strings.HasSuffix(name, strings.ToLower(ext)) {
+	for _, filetpe := range c.fileTypes {
+		suffix := strings.ToLower(filetpe)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) {
+			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetpe)
 			return true
 		}
 	}
+	slog.Debug("doesn't handle file", "name", c.name, "file", name)
 	return false
 }
 

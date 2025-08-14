@@ -70,7 +70,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 			}
 			history = append(history, &genai.Content{
 				Parts: parts,
-				Role:  "user",
+				Role:  genai.RoleUser,
 			})
 		case message.Assistant:
 			var assistantParts []*genai.Part
@@ -93,7 +93,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 
 			if len(assistantParts) > 0 {
 				history = append(history, &genai.Content{
-					Role:  "model",
+					Role:  genai.RoleModel,
 					Parts: assistantParts,
 				})
 			}
@@ -127,7 +127,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 							},
 						},
 					},
-					Role: "function",
+					Role: genai.RoleModel,
 				})
 			}
 		}

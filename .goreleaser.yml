@@ -50,6 +50,7 @@ builds:
       - freebsd
       - openbsd
       - netbsd
+      - android
     goarch:
       - amd64
       - arm64
@@ -57,6 +58,13 @@ builds:
       - arm
     goarm:
       - "7"
+    ignore:
+      - goos: android
+        goarch: amd64
+      - goos: android
+        goarch: arm
+      - goos: android
+        goarch: "386"
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
 
@@ -184,6 +192,7 @@ nfpms:
       - deb
       - rpm
       - archlinux
+      - termux.deb
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash

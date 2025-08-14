@@ -55,37 +55,36 @@ func (h *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (h *header) View() string {
-	const gap = " "
-
 	if h.session.ID == "" {
 		return ""
 	}
 
+	const (
+		gap      = " "
+		diag     = "╱"
+		minDiags = "1"
+	)
+
 	t := styles.CurrentTheme()
 	details := h.details()
-	parts := []string{
-		t.S().Base.Foreground(t.Secondary).Render("Charm™"),
-		gap,
-		styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary),
-		gap,
-	}
 
-	remainingWidth := h.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
+	var b strings.Builder
+
+	b.WriteString(t.S().Base.Foreground(t.Secondary).Render("Charm™"))
+	b.WriteString(gap)
+	b.WriteString(styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary))
+	b.WriteString(gap)
+
+	remainingWidth := h.width - lipgloss.Width(b.String()) - lipgloss.Width(details) - 2
 	if remainingWidth > 0 {
-		const char = "╱"
-		lines := strings.Repeat(char, remainingWidth)
-		parts = append(parts, t.S().Base.Foreground(t.Primary).Render(lines), gap)
+		lines := strings.Repeat(diag, remainingWidth)
+		b.WriteString(t.S().Base.Foreground(t.Primary).Render(lines))
+		b.WriteString(gap)
 	}
 
-	parts = append(parts, details)
+	b.WriteString(details)
 
-	content := t.S().Base.Padding(0, 1).Render(
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			parts...,
-		),
-	)
-	return content
+	return t.S().Base.Padding(0, 1).Render(b.String())
 }
 
 func (h *header) details() string {

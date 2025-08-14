@@ -88,8 +88,8 @@ github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674 h1:+Cz+VfxD5D
 github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674/go.mod h1:9gCUAHmVx5BwSafeyNr3GI0GgvlB1WYjL21SkPp1jyU=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018 h1:PU4Zvpagsk5sgaDxn5W4sxHuLp9QRMBZB3bFSk40A4w=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018/go.mod h1:Z/GLmp9fzaqX4ze3nXG7StgWez5uBM5XtlLHK8V/qSk=
-github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0 h1:sWRGoSw/JsO2S4t2+fmmEkRbkOxphI0AxZkQPQVKWbs=
-github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0/go.mod h1:XIuqKpZTUXtVyeyiN1k9Tc/U7EzfaDnVc34feFHfBws=
+github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1 h1:SOylT6+BQzPHEjn15TIzawBPVD0QmhKXbcb3jY0ZIKU=
+github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1/go.mod h1:tRlx/Hu0lo/j9viunCN2H+Ze6JrmdjQlXUQvvArgaOc=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
 github.com/charmbracelet/ultraviolet v0.0.0-20250813213450-50737e162af5 h1:7FlxuSTw5paY5Km8AK1WwfSVjAIOW4UiZI6Okva83pY=

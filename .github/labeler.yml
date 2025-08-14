@@ -23,6 +23,8 @@
   - "/theme/i"
 "area: tools":
   - "/tool/i"
+"os: android":
+  - "/(android|termux)/i"
 "os: linux":
   - "/linux/i"
 "os: macos":

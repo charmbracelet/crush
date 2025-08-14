@@ -76,7 +76,8 @@ func (h *header) View() string {
 	b.WriteString(styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary))
 	b.WriteString(gap)
 
-	details := h.details()
+	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String())
+	details := h.details(availDetailWidth)
 
 	availWidth := h.width -
 		lipgloss.Width(b.String()) -
@@ -96,11 +97,12 @@ func (h *header) View() string {
 	return t.S().Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String())
 }
 
-func (h *header) details() string {
-	t := styles.CurrentTheme()
+func (h *header) details(availWidth int) string {
+	s := styles.CurrentTheme().S()
+
 	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), 4)
 	parts := []string{
-		t.S().Muted.Render(cwd),
+		s.Muted.Render(cwd),
 	}
 
 	errorCount := 0
@@ -115,22 +117,23 @@ func (h *header) details() string {
 	}
 
 	if errorCount > 0 {
-		parts = append(parts, t.S().Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
+		parts = append(parts, s.Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
 	}
 
 	agentCfg := config.Get().Agents["coder"]
 	model := config.Get().GetModelByType(agentCfg.Model)
 	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
-	formattedPercentage := t.S().Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedPercentage := s.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)
 
+	const keystroke = "ctrl+d"
 	if h.detailsOpen {
-		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" close"))
+		parts = append(parts, s.Muted.Render(keystroke)+s.Subtle.Render(" close"))
 	} else {
-		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" open "))
+		parts = append(parts, s.Muted.Render(keystroke)+s.Subtle.Render(" open "))
 	}
-	dot := t.S().Subtle.Render(" • ")
-	return strings.Join(parts, dot)
+
+	return strings.Join(parts, s.Subtle.Render(" • "))
 }
 
 func (h *header) SetDetailsOpen(open bool) {

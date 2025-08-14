@@ -450,7 +450,12 @@ func (l *list[T]) View() string {
 	start, end := l.viewPosition()
 	viewStart := max(0, start)
 	viewEnd := min(len(lines), end+1)
+
+	if viewStart > viewEnd {
+		viewStart = viewEnd
+	}
 	lines = lines[viewStart:viewEnd]
+
 	if l.resize {
 		return strings.Join(lines, "\n")
 	}

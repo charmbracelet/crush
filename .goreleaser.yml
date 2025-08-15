@@ -94,6 +94,9 @@ checksum:
 aur_sources:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush.git"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     makedepends:
       - go
       - git
@@ -134,6 +137,9 @@ aur_sources:
 aurs:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush-bin.git"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     provides:
       - crush
     conflicts:
@@ -168,6 +174,9 @@ brews:
       owner: charmbracelet
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     goarm: 7
     extra_install: |-
       bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
@@ -180,6 +189,9 @@ scoops:
       owner: charmbracelet
       name: scoop-bucket
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
 
 npms:
   - name: "@charmland/crush"
@@ -236,6 +248,9 @@ nix:
       owner: "charmbracelet"
       name: nur
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     license: fsl11Mit
     extra_install: |-
       installManPage ./manpages/crush.1.gz
@@ -244,6 +259,9 @@ nix:
 winget:
   - publisher: charmbracelet
     copyright: Charmbracelet, Inc
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     repository:
       owner: "charmbracelet"
       name: winget-pkgs

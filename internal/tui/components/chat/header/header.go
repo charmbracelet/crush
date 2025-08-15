@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type Header interface {
@@ -42,56 +43,65 @@ func (h *header) Init() tea.Cmd {
 	return nil
 }
 
-func (p *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (h *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
-			if p.session.ID == msg.Payload.ID {
-				p.session = msg.Payload
+			if h.session.ID == msg.Payload.ID {
+				h.session = msg.Payload
 			}
 		}
 	}
-	return p, nil
+	return h, nil
 }
 
-func (p *header) View() string {
-	if p.session.ID == "" {
+func (h *header) View() string {
+	if h.session.ID == "" {
 		return ""
 	}
 
-	t := styles.CurrentTheme()
-	details := p.details()
-	parts := []string{
-		t.S().Base.Foreground(t.Secondary).Render("Charm™"),
-		" ",
-		styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary),
-		" ",
-	}
-
-	remainingWidth := p.width - lipgloss.Width(strings.Join(parts, "")) - lipgloss.Width(details) - 2
-	if remainingWidth > 0 {
-		char := "╱"
-		lines := strings.Repeat(char, remainingWidth)
-		parts = append(parts, t.S().Base.Foreground(t.Primary).Render(lines), " ")
-	}
-
-	parts = append(parts, details)
-
-	content := t.S().Base.Padding(0, 1).Render(
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			parts...,
-		),
+	const (
+		gap          = " "
+		diag         = "╱"
+		minDiags     = 3
+		leftPadding  = 1
+		rightPadding = 1
 	)
-	return content
+
+	t := styles.CurrentTheme()
+
+	var b strings.Builder
+
+	b.WriteString(t.S().Base.Foreground(t.Secondary).Render("Charm™"))
+	b.WriteString(gap)
+	b.WriteString(styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary))
+	b.WriteString(gap)
+
+	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minDiags
+	details := h.details(availDetailWidth)
+
+	remainingWidth := h.width -
+		lipgloss.Width(b.String()) -
+		lipgloss.Width(details) -
+		leftPadding -
+		rightPadding
+
+	if remainingWidth > 0 {
+		b.WriteString(t.S().Base.Foreground(t.Primary).Render(
+			strings.Repeat(diag, max(minDiags, remainingWidth)),
+		))
+		b.WriteString(gap)
+	}
+
+	b.WriteString(details)
+
+	return t.S().Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String())
 }
 
-func (h *header) details() string {
-	t := styles.CurrentTheme()
-	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), 4)
-	parts := []string{
-		t.S().Muted.Render(cwd),
-	}
+func (h *header) details(availWidth int) string {
+	s := styles.CurrentTheme().S()
+
+	var parts []string
 
 	errorCount := 0
 	for _, l := range h.lspClients {
@@ -105,22 +115,33 @@ func (h *header) details() string {
 	}
 
 	if errorCount > 0 {
-		parts = append(parts, t.S().Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
+		parts = append(parts, s.Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
 	}
 
 	agentCfg := config.Get().Agents["coder"]
 	model := config.Get().GetModelByType(agentCfg.Model)
 	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
-	formattedPercentage := t.S().Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedPercentage := s.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)
 
+	const keystroke = "ctrl+d"
 	if h.detailsOpen {
-		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" close"))
+		parts = append(parts, s.Muted.Render(keystroke)+s.Subtle.Render(" close"))
 	} else {
-		parts = append(parts, t.S().Muted.Render("ctrl+d")+t.S().Subtle.Render(" open "))
+		parts = append(parts, s.Muted.Render(keystroke)+s.Subtle.Render(" open "))
 	}
-	dot := t.S().Subtle.Render(" • ")
-	return strings.Join(parts, dot)
+
+	dot := s.Subtle.Render(" • ")
+	metadata := strings.Join(parts, dot)
+	metadata = dot + metadata
+
+	// Truncate cwd if necessary, and insert it at the beginning.
+	const dirTrimLimit = 4
+	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), dirTrimLimit)
+	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
+	cwd = s.Muted.Render(cwd)
+
+	return cwd + metadata
 }
 
 func (h *header) SetDetailsOpen(open bool) {

@@ -35,6 +35,13 @@ yay -S crush-bin
 
 # Nix
 nix run github:numtide/nix-ai-tools#crush
+```
+
+Windows users:
+
+```bash
+# Winget
+winget install charmbracelet.crush
 
 # Scoop
 scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
@@ -159,7 +166,7 @@ As an additional note, Crush also stores ephemeral data, such as application sta
 
 ```bash
 # Unix
-$HOME/.local/shared/crush/crush.json
+$HOME/.local/share/crush/crush.json
 
 # Windows
 %LOCALAPPDATA%\crush\crush.json
@@ -281,6 +288,7 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
         }
       ]
     }
+  }
 }
 ```
 
@@ -416,6 +424,17 @@ To add specific models to the configuration, configure as such:
   }
 }
 ```
+
+## A Note on Claude Max and GitHub Copilot
+
+Crush only supports model providers through official, compliant APIs. We do not
+support or endorse any methods that rely on personal Claude Max and GitHub Copilot
+accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
+Terms of Service.
+
+We’re committed to building sustainable, trusted integrations with model
+providers. If you’re a provider interested in working with us, 
+[reach out](mailto:vt100@charm.sh).
 
 ## Logging
 

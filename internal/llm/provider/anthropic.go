@@ -153,7 +153,6 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 
 			if len(blocks) == 0 {
-				slog.Warn("There is a message without content, investigate, this should not happen")
 				continue
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))

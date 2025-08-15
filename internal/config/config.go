@@ -20,7 +20,6 @@ import (
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
-	defaultLogLevel      = "info"
 )
 
 var defaultContextPaths = []string{
@@ -111,20 +110,23 @@ type MCPConfig struct {
 	Type     MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
 	URL      string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
 	Disabled bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
+	Timeout  int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 
 type LSPConfig struct {
-	Disabled bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command  string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
-	Args     []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
-	Options  any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
+	Disabled  bool     `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
+	Command   string   `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Args      []string `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
+	Options   any      `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
+	FileTypes []string `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
 }
 
 type TUIOptions struct {
-	CompactMode bool `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
 }
 
@@ -244,6 +246,8 @@ type Agent struct {
 
 // Config holds the configuration for crush.
 type Config struct {
+	Schema string `json:"$schema,omitempty"`
+
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 

@@ -44,6 +44,7 @@ before:
 builds:
   - env:
       - CGO_ENABLED=0
+      - GOEXPERIMENT=greenteagc
     goos:
       - linux
       - darwin
@@ -51,6 +52,7 @@ builds:
       - freebsd
       - openbsd
       - netbsd
+      - android
     goarch:
       - amd64
       - arm64
@@ -58,6 +60,13 @@ builds:
       - arm
     goarm:
       - "7"
+    ignore:
+      - goos: android
+        goarch: amd64
+      - goos: android
+        goarch: arm
+      - goos: android
+        goarch: "386"
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
 
@@ -86,6 +95,9 @@ checksum:
 aur_sources:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush.git"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     makedepends:
       - go
       - git
@@ -126,6 +138,9 @@ aur_sources:
 aurs:
   - private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/crush-bin.git"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     provides:
       - crush
     conflicts:
@@ -160,6 +175,9 @@ brews:
       owner: charmbracelet
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     goarm: 7
     extra_install: |-
       bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
@@ -172,6 +190,9 @@ scoops:
       owner: charmbracelet
       name: scoop-bucket
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
 
 npms:
   - name: "@charmland/crush"
@@ -185,6 +206,7 @@ nfpms:
       - deb
       - rpm
       - archlinux
+      - termux.deb
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash
@@ -227,6 +249,9 @@ nix:
       owner: "charmbracelet"
       name: nur
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     license: fsl11Mit
     extra_install: |-
       installManPage ./manpages/crush.1.gz
@@ -238,6 +263,9 @@ winget:
     publisher_url: https://charm.land
     release_notes_url: "https://github.com/charmbracelet/crush/releases/tag/{{.Tag}}"
     license_url: https://github.com/charmbracelet/crush/blob/main/LICENSE.md
+    commit_author:
+      name: "Charm"
+      email: "charmcli@users.noreply.github.com"
     repository:
       owner: "charmbracelet"
       name: winget-pkgs

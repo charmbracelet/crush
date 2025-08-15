@@ -41,7 +41,7 @@ func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
 		now := time.Now()
 		// trackpad is sending too many requests
-		if now.Sub(lastMouseEvent) < 5*time.Millisecond {
+		if now.Sub(lastMouseEvent) < 15*time.Millisecond {
 			return nil
 		}
 		lastMouseEvent = now
@@ -174,6 +174,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	case commands.ToggleYoloModeMsg:
+		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
@@ -207,13 +209,20 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	// Permissions
 	case pubsub.Event[permission.PermissionNotification]:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+
 		// forward to page
-		updated, cmd := a.pages[a.currentPage].Update(msg)
+		updated, itemCmd := item.Update(msg)
 		a.pages[a.currentPage] = updated.(util.Model)
-		return a, cmd
+		return a, itemCmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: permissions.NewPermissionDialogCmp(msg.Payload),
+			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{
+				DiffMode: config.Get().Options.TUI.DiffMode,
+			}),
 		})
 	case permissions.PermissionResponseMsg:
 		switch msg.Action {
@@ -254,18 +263,32 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, tea.Batch(cmds...)
 	case splash.OnboardingCompleteMsg:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+
 		a.isConfigured = config.HasInitialDataConfig()
-		updated, pageCmd := a.pages[a.currentPage].Update(msg)
+		updated, pageCmd := item.Update(msg)
 		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, pageCmd)
 		return a, tea.Batch(cmds...)
-	// Key Press Messages
+
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg:
-		if !a.dialog.HasDialogs() {
-			updated, pageCmd := a.pages[a.currentPage].Update(msg)
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		} else {
+			item, ok := a.pages[a.currentPage]
+			if !ok {
+				return a, nil
+			}
+
+			updated, pageCmd := item.Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			cmds = append(cmds, pageCmd)
 		}
@@ -276,7 +299,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dialog = u.(dialogs.DialogCmp)
 			cmds = append(cmds, dialogCmd)
 		} else {
-			updated, pageCmd := a.pages[a.currentPage].Update(msg)
+			item, ok := a.pages[a.currentPage]
+			if !ok {
+				return a, nil
+			}
+
+			updated, pageCmd := item.Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			cmds = append(cmds, pageCmd)
 		}
@@ -284,8 +312,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	s, _ := a.status.Update(msg)
 	a.status = s.(status.StatusCmp)
-	updated, cmd := a.pages[a.currentPage].Update(msg)
+
+	item, ok := a.pages[a.currentPage]
+	if !ok {
+		return a, nil
+	}
+	updated, cmd := item.Update(msg)
 	a.pages[a.currentPage] = updated.(util.Model)
+
 	if a.dialog.HasDialogs() {
 		u, dialogCmd := a.dialog.Update(msg)
 		a.dialog = u.(dialogs.DialogCmp)
@@ -403,7 +437,12 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			a.dialog = u.(dialogs.DialogCmp)
 			return dialogCmd
 		} else {
-			updated, cmd := a.pages[a.currentPage].Update(msg)
+			item, ok := a.pages[a.currentPage]
+			if !ok {
+				return nil
+			}
+
+			updated, cmd := item.Update(msg)
 			a.pages[a.currentPage] = updated.(util.Model)
 			return cmd
 		}

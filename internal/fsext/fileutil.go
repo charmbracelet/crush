@@ -233,3 +233,19 @@ func HasPrefix(path, prefix string) bool {
 	// If path is within prefix, Rel will not return a path starting with ".."
 	return !strings.HasPrefix(rel, "..")
 }
+
+// ToUnixLineEndings converts Windows line endings (CRLF) to Unix line endings (LF).
+func ToUnixLineEndings(content string) (string, bool) {
+	if strings.Contains(content, "\r\n") {
+		return strings.ReplaceAll(content, "\r\n", "\n"), true
+	}
+	return content, false
+}
+
+// ToWindowsLineEndings converts Unix line endings (LF) to Windows line endings (CRLF).
+func ToWindowsLineEndings(content string) (string, bool) {
+	if !strings.Contains(content, "\r\n") {
+		return strings.ReplaceAll(content, "\n", "\r\n"), true
+	}
+	return content, false
+}

@@ -3,6 +3,7 @@ package files
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -91,7 +92,9 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 		extraContent := strings.Join(statusParts, " ")
 		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
 		filePath := file.FilePath
-		filePath = strings.TrimPrefix(filePath, cwd)
+		if rel, err := filepath.Rel(cwd, filePath); err == nil {
+			filePath = rel
+		}
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
 		filePath = ansi.Truncate(filePath, opts.MaxWidth-lipgloss.Width(extraContent)-2, "…")
 

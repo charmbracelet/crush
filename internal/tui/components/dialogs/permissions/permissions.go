@@ -64,16 +64,23 @@ type permissionDialogCmp struct {
 	positionRow int // Row position for dialog
 	positionCol int // Column position for dialog
 
+	finalDialogHeight int
+
 	keyMap KeyMap
 }
 
-func NewPermissionDialogCmp(permission permission.PermissionRequest) PermissionDialogCmp {
+func NewPermissionDialogCmp(permission permission.PermissionRequest, opts *Options) PermissionDialogCmp {
+	if opts == nil {
+		opts = &Options{}
+	}
+
 	// Create viewport for content
 	contentViewport := viewport.New()
 	return &permissionDialogCmp{
 		contentViewPort: contentViewport,
 		selectedOption:  0, // Default to "Allow"
 		permission:      permission,
+		diffSplitMode:   opts.isSplitMode(),
 		keyMap:          DefaultKeyMap(),
 		contentDirty:    true, // Mark as dirty initially
 	}
@@ -134,26 +141,22 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			if p.supportsDiffView() {
-				p.diffYOffset += 1
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollDown()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			if p.supportsDiffView() {
-				p.diffYOffset = max(0, p.diffYOffset-1)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollUp()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
 			if p.supportsDiffView() {
-				p.diffXOffset = max(0, p.diffXOffset-5)
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollLeft()
 				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
 			if p.supportsDiffView() {
-				p.diffXOffset += 5
-				p.contentDirty = true // Mark content as dirty when scrolling
+				p.scrollRight()
 				return p, nil
 			}
 		default:
@@ -162,9 +165,57 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.contentViewPort = viewPort
 			cmds = append(cmds, cmd)
 		}
+	case tea.MouseWheelMsg:
+		if p.supportsDiffView() && p.isMouseOverDialog(msg.Mouse().X, msg.Mouse().Y) {
+			switch msg.Button {
+			case tea.MouseWheelDown:
+				p.scrollDown()
+			case tea.MouseWheelUp:
+				p.scrollUp()
+			case tea.MouseWheelLeft:
+				p.scrollLeft()
+			case tea.MouseWheelRight:
+				p.scrollRight()
+			}
+		}
 	}
 
 	return p, tea.Batch(cmds...)
+}
+
+func (p *permissionDialogCmp) scrollDown() {
+	p.diffYOffset += 1
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollUp() {
+	p.diffYOffset = max(0, p.diffYOffset-1)
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollLeft() {
+	p.diffXOffset = max(0, p.diffXOffset-5)
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) scrollRight() {
+	p.diffXOffset += 5
+	p.contentDirty = true
+}
+
+// isMouseOverDialog checks if the given mouse coordinates are within the dialog bounds.
+// Returns true if the mouse is over the dialog area, false otherwise.
+func (p *permissionDialogCmp) isMouseOverDialog(x, y int) bool {
+	if p.permission.ID == "" {
+		return false
+	}
+	var (
+		dialogX      = p.positionCol
+		dialogY      = p.positionRow
+		dialogWidth  = p.width
+		dialogHeight = p.finalDialogHeight
+	)
+	return x >= dialogX && x < dialogX+dialogWidth && y >= dialogY && y < dialogY+dialogHeight
 }
 
 func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
@@ -597,9 +648,8 @@ func (p *permissionDialogCmp) generateDefaultContent() string {
 func (p *permissionDialogCmp) useDiffSplitMode() bool {
 	if p.diffSplitMode != nil {
 		return *p.diffSplitMode
-	} else {
-		return p.defaultDiffSplitMode
 	}
+	return p.defaultDiffSplitMode
 }
 
 func (p *permissionDialogCmp) styleViewport() string {
@@ -654,7 +704,7 @@ func (p *permissionDialogCmp) render() string {
 	}
 	content := lipgloss.JoinVertical(lipgloss.Top, strs...)
 
-	return baseStyle.
+	dialog := baseStyle.
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
@@ -662,6 +712,8 @@ func (p *permissionDialogCmp) render() string {
 		Render(
 			content,
 		)
+	p.finalDialogHeight = lipgloss.Height(dialog)
+	return dialog
 }
 
 func (p *permissionDialogCmp) View() string {
@@ -740,4 +792,25 @@ func (p *permissionDialogCmp) ID() dialogs.DialogID {
 // Position implements PermissionDialogCmp.
 func (p *permissionDialogCmp) Position() (int, int) {
 	return p.positionRow, p.positionCol
+}
+
+// Options for create a new permission dialog
+type Options struct {
+	DiffMode string // split or unified, empty means use defaultDiffSplitMode
+}
+
+// isSplitMode returns internal representation of diff mode switch
+func (o Options) isSplitMode() *bool {
+	var split bool
+
+	switch o.DiffMode {
+	case "split":
+		split = true
+	case "unified":
+		split = false
+	default:
+		return nil
+	}
+
+	return &split
 }

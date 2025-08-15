@@ -45,6 +45,7 @@ func NewCharmtoneTheme() *Theme {
 		Blue:      charmtone.Malibu,
 
 		Yellow: charmtone.Mustard,
+		Citron: charmtone.Citron,
 
 		Green:      charmtone.Julep,
 		GreenDark:  charmtone.Guac,
@@ -56,11 +57,19 @@ func NewCharmtoneTheme() *Theme {
 		Cherry:   charmtone.Cherry,
 	}
 
+	// Text selection.
+	t.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
+
 	// LSP and MCP status.
 	t.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
 	t.ItemBusyIcon = t.ItemOfflineIcon.Foreground(charmtone.Citron)
 	t.ItemErrorIcon = t.ItemOfflineIcon.Foreground(charmtone.Coral)
 	t.ItemOnlineIcon = t.ItemOfflineIcon.Foreground(charmtone.Guac)
+
+	t.YoloIconFocused = lipgloss.NewStyle().Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" ! ")
+	t.YoloIconBlurred = t.YoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	t.YoloDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Zest).SetString(":::")
+	t.YoloDotsBlurred = t.YoloDotsFocused.Foreground(charmtone.Squid)
 
 	return t
 }

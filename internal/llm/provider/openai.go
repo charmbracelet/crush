@@ -166,7 +166,6 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				}
 			}
 			if !hasContent {
-				slog.Warn("There is a message without content, investigate, this should not happen")
 				continue
 			}
 
@@ -255,6 +254,8 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 			params.ReasoningEffort = shared.ReasoningEffortMedium
 		case "high":
 			params.ReasoningEffort = shared.ReasoningEffortHigh
+		case "minimal":
+			params.ReasoningEffort = shared.ReasoningEffort("minimal")
 		default:
 			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
 		}

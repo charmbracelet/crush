@@ -372,6 +372,11 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 	}
+	if a.dialog.HasDialogs() {
+		u, dialogCmd := a.dialog.Update(msg)
+		a.dialog = u.(dialogs.DialogCmp)
+		return dialogCmd
+	}
 	switch {
 	// help
 	case key.Matches(msg, a.keyMap.Help):
@@ -432,20 +437,14 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return tea.Suspend
 	default:
-		if a.dialog.HasDialogs() {
-			u, dialogCmd := a.dialog.Update(msg)
-			a.dialog = u.(dialogs.DialogCmp)
-			return dialogCmd
-		} else {
-			item, ok := a.pages[a.currentPage]
-			if !ok {
-				return nil
-			}
-
-			updated, cmd := item.Update(msg)
-			a.pages[a.currentPage] = updated.(util.Model)
-			return cmd
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return nil
 		}
+
+		updated, cmd := item.Update(msg)
+		a.pages[a.currentPage] = updated.(util.Model)
+		return cmd
 	}
 }
 

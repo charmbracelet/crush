@@ -79,7 +79,7 @@ func NewModelDialogCmp() ModelDialog {
 	listKeyMap.UpOneItem = keyMap.Previous
 
 	t := styles.CurrentTheme()
-	modelList := NewModelListComponent(listKeyMap, "Choose a model for large, complex tasks", true)
+	modelList := NewModelListComponent(listKeyMap, largeModelInputPlaceholder, true)
 	apiKeyInput := NewAPIKeyInput()
 	apiKeyInput.SetShowTitle(false)
 	help := help.New()

@@ -125,18 +125,24 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		}
 	}
 
+	// Don't apply gitignore rules to the root directory itself
+	// In gitignore semantics, patterns don't apply to the repo root
+	if path == dl.rootPath {
+		return false
+	}
+
 	relPath, err := filepath.Rel(dl.rootPath, path)
 	if err != nil {
 		relPath = path
 	}
 
 	if commonIgnorePatterns().MatchesPath(relPath) {
-		slog.Debug("ingoring common pattern", "path", relPath)
+		slog.Debug("ignoring common pattern", "path", relPath)
 		return true
 	}
 
 	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
-		slog.Debug("ingoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
+		slog.Debug("ignoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
 		return true
 	}
 
@@ -145,7 +151,7 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 	}
 
 	if homeIgnore().MatchesPath(relPath) {
-		slog.Debug("ingoring home dir pattern", "path", relPath)
+		slog.Debug("ignoring home dir pattern", "path", relPath)
 		return true
 	}
 

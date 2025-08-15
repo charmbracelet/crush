@@ -13,6 +13,7 @@ metadata:
   license: "FSL-1.1-MIT"
   homepage: "https://charm.sh/crush"
   description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
+  full_description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
   maintainers:
     - "kujtimiihoxha <kujtim@charm.sh>"
     - "caarlos0 <carlos@charm.sh>" # for aur
@@ -259,6 +260,9 @@ nix:
 winget:
   - publisher: charmbracelet
     copyright: Charmbracelet, Inc
+    publisher_url: https://charm.land
+    release_notes_url: "https://github.com/charmbracelet/crush/releases/tag/{{.Tag}}"
+    license_url: https://github.com/charmbracelet/crush/blob/main/LICENSE.md
     commit_author:
       name: "Charm"
       email: "charmcli@users.noreply.github.com"

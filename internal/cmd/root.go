@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -112,6 +113,10 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 	cfg.Permissions.SkipRequests = yolo
 
+	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+		return nil, err
+	}
+
 	// Connect to DB; this will also run migrations.
 	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
 	if err != nil {
@@ -159,4 +164,19 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("failed to get current working directory: %v", err)
 	}
 	return cwd, nil
+}
+
+func createDotCrushDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
+	}
+
+	gitIgnorePath := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
+			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
+		}
+	}
+
+	return nil
 }

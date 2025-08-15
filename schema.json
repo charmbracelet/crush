@@ -64,10 +64,10 @@
           "description": "Arguments to pass to the LSP server command"
         },
         "env": {
-          "items": {
+          "additionalProperties": {
             "type": "string"
           },
-          "type": "array",
+          "type": "object",
           "description": "Environment variables to set to the LSP server command"
         },
         "options": {

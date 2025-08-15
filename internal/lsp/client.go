@@ -69,7 +69,7 @@ func NewClient(ctx context.Context, name string, config config.LSPConfig) (*Clie
 	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
 
 	// Copy env
-	cmd.Env = slices.Concat(os.Environ(), config.Env)
+	cmd.Env = slices.Concat(os.Environ(), config.ResolvedEnv())
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

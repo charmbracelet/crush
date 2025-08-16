@@ -311,3 +311,19 @@ func (f *filterableList[T]) SetInputWidth(w int) {
 func (f *filterableList[T]) SetInputPlaceholder(ph string) {
 	f.placeholder = ph
 }
+
+func (f *filterableList[T]) DeleteItem(id string) tea.Cmd {
+	cmd := f.list.DeleteItem(id)
+	items := f.items
+
+	var filtered []T
+	for _, item := range items {
+		if item.ID() != id {
+			filtered = append(filtered, item)
+		}
+	}
+
+	f.items = filtered
+
+	return cmd
+}

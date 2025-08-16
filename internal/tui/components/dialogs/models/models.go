@@ -100,11 +100,14 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 
 func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
+case tea.WindowSizeMsg:
 		m.wWidth = msg.Width
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
 		m.help.Width = m.width - 2
+		// keep help context in sync with API key mode
+		m.keyMap.isAPIKeyHelp = m.needsAPIKey
+		m.keyMap.isAPIKeyValid = m.isAPIKeyValid
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)
@@ -112,6 +115,28 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, m.keyMap.EditAPIKey):
+			// Open API key dialog for the selected provider, prefilled if available
+			selectedItem := m.modelList.SelectedModel()
+			var modelType config.SelectedModelType
+			if m.modelList.GetModelType() == LargeModelType {
+				modelType = config.SelectedModelTypeLarge
+			} else {
+				modelType = config.SelectedModelTypeSmall
+			}
+			m.needsAPIKey = true
+			m.selectedModel = selectedItem
+			m.selectedModelType = modelType
+			m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+			m.apiKeyInput.SetTitle("API Key Configuration")
+			m.keyMap.isAPIKeyHelp = true
+			m.keyMap.isAPIKeyValid = false
+			if provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok {
+				if apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey); apiKey != "" {
+					m.apiKeyInput.SetValue(apiKey)
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {
 				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
@@ -144,46 +169,50 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						if err == nil {
 							m.isAPIKeyValid = true
-							return APIKeyStateChangeMsg{
-								State: APIKeyInputStateVerified,
-							}
+							return APIKeyStateChangeMsg{State: APIKeyInputStateVerified}
 						}
-						return APIKeyStateChangeMsg{
-							State: APIKeyInputStateError,
-						}
+						return APIKeyStateChangeMsg{State: APIKeyInputStateError}
 					},
 				)
 			}
-			// Normal model selection
+			// Always open API key input when selecting a model, prefill if available
 			selectedItem := m.modelList.SelectedModel()
-
 			var modelType config.SelectedModelType
 			if m.modelList.GetModelType() == LargeModelType {
 				modelType = config.SelectedModelTypeLarge
 			} else {
 				modelType = config.SelectedModelTypeSmall
 			}
-
-			// Check if provider is configured
-			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
-				return m, tea.Sequence(
-					util.CmdHandler(dialogs.CloseDialogMsg{}),
-					util.CmdHandler(ModelSelectedMsg{
-						Model: config.SelectedModel{
-							Model:    selectedItem.Model.ID,
-							Provider: string(selectedItem.Provider.ID),
-						},
-						ModelType: modelType,
-					}),
-				)
-			} else {
-				// Provider not configured, show API key input
-				m.needsAPIKey = true
-				m.selectedModel = selectedItem
-				m.selectedModelType = modelType
-				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
-				return m, nil
+			m.needsAPIKey = true
+			m.selectedModel = selectedItem
+			m.selectedModelType = modelType
+			m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+			m.apiKeyInput.SetTitle("API Key Configuration")
+			m.keyMap.isAPIKeyHelp = true
+			m.keyMap.isAPIKeyValid = false
+			if provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok {
+				if apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey); apiKey != "" {
+					m.apiKeyInput.SetValue(apiKey)
+				}
 			}
+			return m, nil
+		case key.Matches(msg, m.keyMap.DeleteAPIKey):
+			if m.needsAPIKey && m.selectedModel != nil {
+				providerID := string(m.selectedModel.Provider.ID)
+				// Clear from config and UI
+				if err := config.Get().SetProviderAPIKey(providerID, ""); err != nil {
+					return m, util.ReportError(fmt.Errorf("failed to delete API key: %w", err))
+				}
+				m.apiKeyInput.Reset()
+				m.isAPIKeyValid = false
+				m.apiKeyValue = ""
+				m.keyMap.isAPIKeyHelp = true
+				m.keyMap.isAPIKeyValid = false
+				// Refresh model list so "Configured" labels update immediately
+				refresh := m.modelList.SetModelType(m.modelList.GetModelType())
+				return m, tea.Batch(util.ReportInfo("API key deleted"), refresh)
+			}
+			return m, nil
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.needsAPIKey {
 				u, cmd := m.apiKeyInput.Update(msg)
@@ -208,15 +237,20 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.isAPIKeyValid = false
 				m.apiKeyValue = ""
 				m.apiKeyInput.Reset()
+				m.apiKeyInput.SetTitle("API Key")
+				m.keyMap.isAPIKeyHelp = false
+				m.keyMap.isAPIKeyValid = false
 				return m, nil
 			}
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
-		default:
-			if m.needsAPIKey {
-				u, cmd := m.apiKeyInput.Update(msg)
-				m.apiKeyInput = u.(*APIKeyInput)
-				return m, cmd
-			} else {
+default:
+				if m.needsAPIKey {
+					m.keyMap.isAPIKeyHelp = true
+					m.keyMap.isAPIKeyValid = m.isAPIKeyValid
+					u, cmd := m.apiKeyInput.Update(msg)
+					m.apiKeyInput = u.(*APIKeyInput)
+					return m, cmd
+				} else {
 				u, cmd := m.modelList.Update(msg)
 				m.modelList = u
 				return m, cmd

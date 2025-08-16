@@ -200,3 +200,11 @@ func (a *APIKeyInput) Reset() {
 	a.input.Focus()
 	a.updateStatePresentation()
 }
+
+func (a *APIKeyInput) SetTitle(title string) {
+	a.title = title
+}
+
+func (a *APIKeyInput) SetValue(value string) {
+	a.input.SetValue(value)
+}

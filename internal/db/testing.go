@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"testing"
 
+	_ "github.com/ncruces/go-sqlite3/driver"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
-	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
 // SetupTestDB creates an in-memory SQLite database with all migrations applied.

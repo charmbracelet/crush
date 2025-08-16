@@ -12,7 +12,7 @@ import (
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	
+
 	return db.SetupTestDBWithData(t, func(conn *sql.DB) {
 		// Insert test session
 		err := db.CreateTestSession(conn, "test-session", "Test Session")
@@ -109,7 +109,6 @@ func TestTodoService_List(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, todos, 1)
 	require.Equal(t, todo1.ID, todos[0].ID)
-
 }
 
 func TestTodoService_Update(t *testing.T) {

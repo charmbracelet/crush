@@ -366,7 +366,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	sessionID, messageID := GetContextValues(ctx)
 	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
+		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for executing shell command")
 	}
 	if !isSafeReadOnly {
 		p := b.permissions.Request(

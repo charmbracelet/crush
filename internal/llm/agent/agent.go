@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/todo"
 )
 
 // Common errors
@@ -99,6 +100,7 @@ func NewAgent(
 	messages message.Service,
 	history history.Service,
 	lspClients map[string]*lsp.Client,
+	todoService todo.Service,
 ) (Service, error) {
 	cfg := config.Get()
 
@@ -108,7 +110,7 @@ func NewAgent(
 		if taskAgentCfg.ID == "" {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
-		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
+		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients, todoService)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create task agent: %w", err)
 		}
@@ -190,6 +192,9 @@ func NewAgent(
 			tools.NewGrepTool(cwd),
 			tools.NewLsTool(permissions, cwd),
 			tools.NewSourcegraphTool(),
+			tools.NewTodoWriteTool(todoService),
+			tools.NewTodoListTool(todoService),
+			tools.NewTodoDeleteTool(todoService),
 			tools.NewViewTool(lspClients, permissions, cwd),
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}

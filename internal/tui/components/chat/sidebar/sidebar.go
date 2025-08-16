@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/todo"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -24,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
 	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
 	"github.com/charmbracelet/crush/internal/tui/components/mcp"
+	"github.com/charmbracelet/crush/internal/tui/components/todos"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -44,6 +46,7 @@ const (
 	DefaultMaxFilesShown = 10
 	DefaultMaxLSPsShown  = 8
 	DefaultMaxMCPsShown  = 8
+	DefaultMaxTodosShown = 8
 	MinItemsPerSection   = 2 // Minimum items to show per section
 )
 
@@ -72,13 +75,15 @@ type sidebarCmp struct {
 	lspClients    map[string]*lsp.Client
 	compactMode   bool
 	history       history.Service
+	todoService   todo.Service
 	files         *csync.Map[string, SessionFile]
 }
 
-func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
+func New(history history.Service, todoService todo.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
 	return &sidebarCmp{
 		lspClients:  lspClients,
 		history:     history,
+		todoService: todoService,
 		compactMode: compact,
 		files:       csync.NewMap[string, SessionFile](),
 	}
@@ -161,6 +166,7 @@ func (m *sidebarCmp) View() string {
 		// Vertical layout (default)
 		if m.session.ID != "" {
 			parts = append(parts, "", m.filesBlock())
+			parts = append(parts, "", m.todosBlock())
 		}
 		parts = append(parts,
 			"",
@@ -318,7 +324,7 @@ func (m *sidebarCmp) calculateAvailableHeight() int {
 
 	usedHeight += 2 // Model info
 
-	usedHeight += 6 // 3 sections × 2 lines each (header + empty line)
+	usedHeight += 8 // 4 sections × 2 lines each (header + empty line)
 
 	// Base padding
 	usedHeight += 2 // Top and bottom padding
@@ -327,59 +333,67 @@ func (m *sidebarCmp) calculateAvailableHeight() int {
 }
 
 // getDynamicLimits calculates how many items to show in each section based on available height
-func (m *sidebarCmp) getDynamicLimits() (maxFiles, maxLSPs, maxMCPs int) {
+func (m *sidebarCmp) getDynamicLimits() (maxFiles, maxTodos, maxLSPs, maxMCPs int) {
 	availableHeight := m.calculateAvailableHeight()
 
 	// If we have very little space, use minimum values
 	if availableHeight < 10 {
-		return MinItemsPerSection, MinItemsPerSection, MinItemsPerSection
+		return MinItemsPerSection, MinItemsPerSection, MinItemsPerSection, MinItemsPerSection
 	}
 
-	// Distribute available height among the three sections
-	// Give priority to files, then LSPs, then MCPs
-	totalSections := 3
+	// Distribute available height among the four sections
+	// Give priority to files, then todos, then LSPs, then MCPs
+	totalSections := 4
 	heightPerSection := availableHeight / totalSections
 
 	// Calculate limits for each section, ensuring minimums
 	maxFiles = max(MinItemsPerSection, min(DefaultMaxFilesShown, heightPerSection))
+	maxTodos = max(MinItemsPerSection, min(DefaultMaxTodosShown, heightPerSection))
 	maxLSPs = max(MinItemsPerSection, min(DefaultMaxLSPsShown, heightPerSection))
 	maxMCPs = max(MinItemsPerSection, min(DefaultMaxMCPsShown, heightPerSection))
 
-	// If we have extra space, give it to files first
-	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs)
+	// If we have extra space, give it to files first, then todos
+	remainingHeight := availableHeight - (maxFiles + maxTodos + maxLSPs + maxMCPs)
 	if remainingHeight > 0 {
 		extraForFiles := min(remainingHeight, DefaultMaxFilesShown-maxFiles)
 		maxFiles += extraForFiles
 		remainingHeight -= extraForFiles
 
 		if remainingHeight > 0 {
-			extraForLSPs := min(remainingHeight, DefaultMaxLSPsShown-maxLSPs)
-			maxLSPs += extraForLSPs
-			remainingHeight -= extraForLSPs
+			extraForTodos := min(remainingHeight, DefaultMaxTodosShown-maxTodos)
+			maxTodos += extraForTodos
+			remainingHeight -= extraForTodos
 
 			if remainingHeight > 0 {
-				maxMCPs += min(remainingHeight, DefaultMaxMCPsShown-maxMCPs)
+				extraForLSPs := min(remainingHeight, DefaultMaxLSPsShown-maxLSPs)
+				maxLSPs += extraForLSPs
+				remainingHeight -= extraForLSPs
+
+				if remainingHeight > 0 {
+					maxMCPs += min(remainingHeight, DefaultMaxMCPsShown-maxMCPs)
+				}
 			}
 		}
 	}
 
-	return maxFiles, maxLSPs, maxMCPs
+	return maxFiles, maxTodos, maxLSPs, maxMCPs
 }
 
-// renderSectionsHorizontal renders the files, LSPs, and MCPs sections horizontally
+// renderSectionsHorizontal renders the files, todos, LSPs, and MCPs sections horizontally
 func (m *sidebarCmp) renderSectionsHorizontal() string {
 	// Calculate available width for each section
-	totalWidth := m.width - 4 // Account for padding and spacing
-	sectionWidth := min(50, totalWidth/3)
+	totalWidth := m.width - 6 // Account for padding and spacing
+	sectionWidth := min(40, totalWidth/4)
 
 	// Get the sections content with limited height
-	var filesContent, lspContent, mcpContent string
+	var filesContent, todosContent, lspContent, mcpContent string
 
 	filesContent = m.filesBlockCompact(sectionWidth)
+	todosContent = m.todosBlockCompact(sectionWidth)
 	lspContent = m.lspBlockCompact(sectionWidth)
 	mcpContent = m.mcpBlockCompact(sectionWidth)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
+	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", todosContent, " ", lspContent, " ", mcpContent)
 }
 
 // filesBlockCompact renders the files block with limited width and height for horizontal layout
@@ -466,7 +480,7 @@ func (m *sidebarCmp) filesBlock() string {
 	}
 
 	// Limit the number of files shown
-	maxFiles, _, _ := m.getDynamicLimits()
+	maxFiles, _, _, _ := m.getDynamicLimits()
 	maxFiles = min(len(fileSlice), maxFiles)
 
 	return files.RenderFileBlock(fileSlice, files.RenderOptions{
@@ -477,9 +491,46 @@ func (m *sidebarCmp) filesBlock() string {
 	}, true)
 }
 
+func (m *sidebarCmp) todosBlock() string {
+	if m.session.ID == "" {
+		return ""
+	}
+
+	// Limit the number of todos shown
+	_, maxTodos, _, _ := m.getDynamicLimits()
+
+	return todos.RenderTodoBlock(m.todoService, m.session.ID, todos.RenderOptions{
+		MaxWidth:    m.getMaxWidth(),
+		MaxItems:    maxTodos,
+		ShowSection: true,
+		SectionName: core.Section("TODOs", m.getMaxWidth()),
+	}, true)
+}
+
+// todosBlockCompact renders the todos block with limited width and height for horizontal layout
+func (m *sidebarCmp) todosBlockCompact(maxWidth int) string {
+	if m.session.ID == "" {
+		return ""
+	}
+
+	// Limit items for horizontal layout
+	maxItems := 5
+	availableHeight := m.height - 8
+	if availableHeight > 0 {
+		maxItems = min(maxItems, availableHeight)
+	}
+
+	return todos.RenderTodoBlock(m.todoService, m.session.ID, todos.RenderOptions{
+		MaxWidth:    maxWidth,
+		MaxItems:    maxItems,
+		ShowSection: true,
+		SectionName: "TODOs",
+	}, true)
+}
+
 func (m *sidebarCmp) lspBlock() string {
 	// Limit the number of LSPs shown
-	_, maxLSPs, _ := m.getDynamicLimits()
+	_, _, maxLSPs, _ := m.getDynamicLimits()
 	lspConfigs := config.Get().LSP.Sorted()
 	maxLSPs = min(len(lspConfigs), maxLSPs)
 
@@ -493,7 +544,7 @@ func (m *sidebarCmp) lspBlock() string {
 
 func (m *sidebarCmp) mcpBlock() string {
 	// Limit the number of MCPs shown
-	_, _, maxMCPs := m.getDynamicLimits()
+	_, _, _, maxMCPs := m.getDynamicLimits()
 	mcps := config.Get().MCP.Sorted()
 	maxMCPs = min(len(mcps), maxMCPs)
 

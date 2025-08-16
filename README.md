@@ -182,7 +182,10 @@ like you would. LSPs can be added manually like so:
   "$schema": "https://charm.land/crush.json",
   "lsp": {
     "go": {
-      "command": "gopls"
+      "command": "gopls",
+      "env": {
+        "GOTOOLCHAIN": "go1.24.5"
+      }
     },
     "typescript": {
       "command": "typescript-language-server",
@@ -433,7 +436,7 @@ accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
 Terms of Service.
 
 We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us, 
+providers. If you’re a provider interested in working with us,
 [reach out](mailto:vt100@charm.sh).
 
 ## Logging

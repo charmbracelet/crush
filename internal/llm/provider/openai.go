@@ -337,7 +337,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
-				option.WithRequestTimeout(time.Minute),
 			)
 
 			acc := openai.ChatCompletionAccumulator{}

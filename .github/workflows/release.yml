@@ -32,3 +32,4 @@ jobs:
       macos_notary_issuer_id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
       macos_notary_key_id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
       macos_notary_key: ${{ secrets.MACOS_NOTARY_KEY }}
+      go_version: "1.25"

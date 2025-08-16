@@ -332,7 +332,7 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			// Prepare messages on each attempt in case max_tokens was adjusted
 			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 
-			opts := []option.RequestOption{option.WithRequestTimeout(time.Minute)}
+			var opts []option.RequestOption
 			if a.isThinkingEnabled() {
 				opts = append(opts, option.WithHeaderAdd("anthropic-beta", "interleaved-thinking-2025-05-14"))
 			}

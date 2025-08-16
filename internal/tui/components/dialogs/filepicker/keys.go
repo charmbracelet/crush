@@ -2,6 +2,7 @@ package filepicker
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 // KeyMap defines keyboard bindings for dialog management.
@@ -37,8 +38,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("left/h", "move backward"),
 		),
 
-		Close: key.NewBinding(
-			key.WithKeys("esc"),
+		Close: keys.Escape(
 			key.WithHelp("esc", "close/exit"),
 		),
 	}

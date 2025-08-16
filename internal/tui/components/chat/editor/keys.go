@@ -2,6 +2,7 @@ package editor
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type EditorKeyMap struct {
@@ -60,8 +61,7 @@ var AttachmentsKeyMaps = DeleteAttachmentKeyMaps{
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
 	),
-	Escape: key.NewBinding(
-		key.WithKeys("esc"),
+	Escape: keys.Escape(
 		key.WithHelp("esc", "cancel delete mode"),
 	),
 	DeleteAllAttachments: key.NewBinding(

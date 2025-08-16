@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type KeyMap struct {
@@ -25,8 +26,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
 		),
-		Close: key.NewBinding(
-			key.WithKeys("esc"),
+		Close: keys.Escape(
 			key.WithHelp("esc", "cancel"),
 		),
 	}

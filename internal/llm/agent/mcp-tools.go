@@ -248,6 +248,41 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 	})
 }
 
+// RestartMCP restarts a specific MCP client by name
+func RestartMCP(ctx context.Context, name string) error {
+	// Get the configuration for this MCP
+	cfg := config.Get()
+	mcpConfig, exists := cfg.MCP[name]
+	if !exists {
+		return fmt.Errorf("MCP '%s' not found in configuration", name)
+	}
+
+	// Close existing client if it exists
+	if client, exists := mcpClients.Get(name); exists {
+		_ = client.Close()
+		mcpClients.Del(name)
+	}
+
+	// Set state to starting
+	updateMCPState(name, MCPStateStarting, nil, nil, 0)
+
+	// Create and initialize new client
+	client, err := createAndInitializeClient(ctx, name, mcpConfig)
+	if err != nil {
+		return fmt.Errorf("failed to restart MCP '%s': %w", name, err)
+	}
+
+	// Store the new client
+	mcpClients.Set(name, client)
+
+	// Get tools and update state
+	tools := getTools(ctx, name, nil, client, cfg.WorkingDir())
+	updateMCPState(name, MCPStateConnected, nil, client, len(tools))
+
+	slog.Info("Successfully restarted MCP", "name", name, "tool_count", len(tools))
+	return nil
+}
+
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
 func CloseMCPClients() {
 	for c := range mcpClients.Seq() {

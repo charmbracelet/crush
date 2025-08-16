@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -96,6 +97,36 @@ func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceW
 
 	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
 	slog.Info("Workspace watcher stopped", "client", name)
+}
+
+// RestartLSPClient restarts a specific LSP client by name
+func (app *App) RestartLSPClient(ctx context.Context, name string) error {
+	// Get the original configuration
+	clientConfig, exists := app.config.LSP[name]
+	if !exists {
+		return fmt.Errorf("LSP client '%s' not found in configuration", name)
+	}
+
+	// Clean up the old client if it exists
+	app.clientsMutex.Lock()
+	oldClient, exists := app.LSPClients[name]
+	if exists {
+		// Remove from map before potentially slow shutdown
+		delete(app.LSPClients, name)
+	}
+	app.clientsMutex.Unlock()
+
+	if exists && oldClient != nil {
+		// Try to shut down client gracefully, but don't block on errors
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = oldClient.Shutdown(shutdownCtx)
+		cancel()
+	}
+
+	// Create a new client using the shared function
+	app.createAndStartLSPClient(ctx, name, clientConfig)
+	slog.Info("Successfully restarted LSP client", "client", name)
+	return nil
 }
 
 // restartLSPClient attempts to restart a crashed or failed LSP client.

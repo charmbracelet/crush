@@ -223,9 +223,7 @@ func setupSubscriber[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
 ) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -248,7 +246,7 @@ func setupSubscriber[T any](
 				return
 			}
 		}
-	}()
+	})
 }
 
 func (app *App) InitCoderAgent() error {
@@ -265,6 +263,7 @@ func (app *App) InitCoderAgent() error {
 		app.Messages,
 		app.History,
 		app.LSPClients,
+		app, // Pass app as LSPRestarter
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

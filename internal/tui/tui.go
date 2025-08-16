@@ -35,6 +35,8 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
+const tmuxEnvVar = "TMUX"
+
 var lastMouseEvent time.Time
 
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
@@ -476,7 +478,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 func (a *appModel) View() tea.View {
 	var view tea.View
 	t := styles.CurrentTheme()
-	if os.Getenv("TMUX") == "" {
+	if _, exists := os.LookupEnv(tmuxEnvVar); !exists {
 		view.BackgroundColor = t.BgBase
 	}
 	if a.wWidth < 25 || a.wHeight < 15 {

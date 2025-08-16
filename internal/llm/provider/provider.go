@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/llm/tokenizer"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -103,16 +104,34 @@ func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []m
 
 func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {
 	messages = p.cleanMessages(messages)
+	if err := p.preflight(messages, tools); err != nil {
+		return nil, err
+	}
 	return p.client.send(ctx, messages, tools)
 }
 
 func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	messages = p.cleanMessages(messages)
+	if err := p.preflight(messages, tools); err != nil {
+		ch := make(chan ProviderEvent, 1)
+		ch <- ProviderEvent{Type: EventError, Error: err}
+		close(ch)
+		return ch
+	}
 	return p.client.stream(ctx, messages, tools)
 }
 
 func (p *baseProvider[C]) Model() catwalk.Model {
 	return p.client.Model()
+}
+
+func (p *baseProvider[C]) preflight(messages []message.Message, tools []tools.BaseTool) error {
+	model := p.options.model(p.options.modelType)
+	inputTokens, _ := tokenizer.CountTokens(model, p.options.systemPromptPrefix, p.options.systemMessage, messages, tools)
+	if int64(inputTokens) > model.ContextWindow-p.options.maxTokens {
+		return fmt.Errorf("prompt exceeds context window: input_tokens=%d, max_output_tokens=%d, context_window=%d", inputTokens, p.options.maxTokens, model.ContextWindow)
+	}
+	return nil
 }
 
 func WithModel(model config.SelectedModelType) ProviderClientOption {

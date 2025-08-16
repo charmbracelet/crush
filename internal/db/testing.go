@@ -66,7 +66,7 @@ func SetupTestDBWithData(t *testing.T, setupFunc func(*sql.DB)) *sql.DB {
 // CreateTestSession creates a basic test session in the database.
 // This is a helper for tests that need session data.
 func CreateTestSession(conn *sql.DB, sessionID, title string) error {
-	_, err := conn.Exec(`
+	_, err := conn.ExecContext(context.Background(), `
 		INSERT INTO sessions (id, title, message_count, prompt_tokens, completion_tokens, cost, created_at, updated_at) 
 		VALUES (?, ?, 0, 0, 0, 0.0, ?, ?)
 	`, sessionID, title, 1000, 1000)

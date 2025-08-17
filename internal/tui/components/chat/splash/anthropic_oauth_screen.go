@@ -1,10 +1,7 @@
 package splash
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -15,10 +12,9 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/lacymorrow/lash/internal/auth"
 	"github.com/lacymorrow/lash/internal/config"
+	"github.com/lacymorrow/lash/internal/tui/components/common"
 	dialogmodels "github.com/lacymorrow/lash/internal/tui/components/dialogs/models"
 	"github.com/lacymorrow/lash/internal/tui/styles"
 	"github.com/lacymorrow/lash/internal/tui/util"
@@ -36,9 +32,7 @@ type oauthSuccessMsg struct {
 type oauthErrorMsg struct{ err string }
 
 type anthropicOAuthScreen struct {
-	provider  catwalk.Provider
-	model     catwalk.Model
-	modelType config.SelectedModelType
+	handler *common.AnthropicOAuthHandler
 
 	url      string
 	verifier string
@@ -66,9 +60,11 @@ func newAnthropicOAuthScreen(option *dialogmodels.ModelOption, modelType config.
 	ti.Focus()
 
 	return &anthropicOAuthScreen{
-		provider:  option.Provider,
-		model:     option.Model,
-		modelType: modelType,
+		handler: &common.AnthropicOAuthHandler{
+			ProviderID: string(option.Provider.ID),
+			ModelID:    option.Model.ID,
+			ModelType:  modelType,
+		},
 		codeInput: ti,
 		keyOpen:   key.NewBinding(key.WithKeys("o")),
 		keyCopy:   key.NewBinding(key.WithKeys("c", "y")),
@@ -79,9 +75,9 @@ func newAnthropicOAuthScreen(option *dialogmodels.ModelOption, modelType config.
 func (s *anthropicOAuthScreen) Init() tea.Cmd {
 	return tea.Sequence(
 		func() tea.Msg {
-			url, verifier, err := auth.AuthorizeURL("max")
+			url, verifier, err := s.handler.StartOAuth()
 			if err != nil {
-				return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("failed to start OAuth: %v", err)}
+				return util.InfoMsg{Type: util.InfoTypeError, Msg: err.Error()}
 			}
 			s.url = url
 			s.verifier = verifier
@@ -154,156 +150,40 @@ func (s *anthropicOAuthScreen) openBrowserCmd() tea.Cmd {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		_ = cmd.Start()
-		return util.InfoMsg{Type: util.InfoTypeInfo, Msg: "Opened browser for Claude Max sign-in"}
+		return util.InfoMsg{Type: util.InfoTypeInfo, Msg: s.handler.GetBrowserMessage()}
 	}
 }
 
 func (s *anthropicOAuthScreen) exchangeCmd(code string) tea.Cmd {
-	// Use the provider ID from the selected option (anthropic-max for OAuth)
-	providerID := string(s.provider.ID)
-	modelID := s.model.ID
-	modelType := s.modelType
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = ctx
-		info, err := auth.ExchangeCode(code, s.verifier)
+		err := s.handler.ExchangeCode(code, s.verifier)
 		if err != nil {
-			return oauthErrorMsg{err: fmt.Sprintf("OAuth exchange failed: %v", err)}
+			return oauthErrorMsg{err: err.Error()}
 		}
-		if err := auth.Set("anthropic", info); err != nil {
-			return oauthErrorMsg{err: fmt.Sprintf("failed to persist OAuth tokens: %v", err)}
-		}
-		// Attempt to create a real API key using the OAuth access token.
-		accessToken := info.Access
-		apiKey := ""
-		{
-			req, _ := http.NewRequest("POST", "https://api.anthropic.com/api/oauth/claude_cli/create_api_key", strings.NewReader(""))
-			req.Header.Set("Authorization", "Bearer "+accessToken)
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("Accept", "application/json, text/plain, */*")
-			httpClient := &http.Client{Timeout: 30 * time.Second}
-			resp, err := httpClient.Do(req)
-			if err == nil && resp != nil {
-				defer resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					var out struct {
-						RawKey string `json:"raw_key"`
-					}
-					if derr := json.NewDecoder(resp.Body).Decode(&out); derr == nil && out.RawKey != "" {
-						apiKey = out.RawKey
-					}
-				}
-			}
-		}
-
-		// Configure provider with API key if created; otherwise fall back to Bearer token
-		finalAPIValue := ""
-		if apiKey != "" {
-			finalAPIValue = apiKey
-		} else {
-			finalAPIValue = accessToken
-			if !strings.HasPrefix(finalAPIValue, "Bearer ") {
-				finalAPIValue = "Bearer " + finalAPIValue
-			}
-		}
-		cfg := config.Get()
-		pc, ok := cfg.Providers.Get(providerID)
-		if !ok {
-			// For anthropic-max, copy from the base anthropic provider
-			if providerID == "anthropic-max" {
-				known, _ := config.Providers()
-				for _, kp := range known {
-					if string(kp.ID) == string(catwalk.InferenceProviderAnthropic) {
-						pc = config.ProviderConfig{
-							ID:           providerID,
-							Name:         "Anthropic",  // Use "Anthropic" to avoid any API issues with "Anthropic Max"
-							BaseURL:      kp.APIEndpoint,
-							Type:         kp.Type,
-							ExtraHeaders: map[string]string{},
-							Models:       kp.Models,
-						}
-						break
-					}
-				}
-			} else {
-				// Seed from known providers so models are populated for agent/provider initialization
-				known, _ := config.Providers()
-				for _, kp := range known {
-					if string(kp.ID) == providerID {
-						pc = config.ProviderConfig{
-							ID:           providerID,
-							Name:         kp.Name,
-							BaseURL:      kp.APIEndpoint,
-							Type:         kp.Type,
-							ExtraHeaders: map[string]string{},
-							Models:       kp.Models,
-						}
-						break
-					}
-				}
-			}
-			if pc.ID == "" {
-				pc = config.ProviderConfig{ID: providerID, Name: "Anthropic", Type: catwalk.TypeAnthropic, BaseURL: config.DefaultAnthropicBaseURL, ExtraHeaders: map[string]string{}}
-			}
-		} else if len(pc.Models) == 0 {
-			// For anthropic-max, copy models from the base anthropic provider
-			searchID := providerID
-			if providerID == "anthropic-max" {
-				searchID = string(catwalk.InferenceProviderAnthropic)
-			}
-			// Backfill models if provider exists but models are empty
-			known, _ := config.Providers()
-			for _, kp := range known {
-				if string(kp.ID) == searchID {
-					pc.Models = kp.Models
-					if pc.BaseURL == "" {
-						pc.BaseURL = kp.APIEndpoint
-					}
-					if pc.Type == "" {
-						pc.Type = kp.Type
-					}
-					break
-				}
-			}
-		}
-		if pc.ExtraHeaders == nil {
-			pc.ExtraHeaders = map[string]string{}
-		}
-		pc.APIKey = finalAPIValue
-		pc.Disable = false
-		pc.ExtraHeaders[config.HeaderAnthropicVersion] = config.DefaultAnthropicAPIVer
-		cfg.Providers.Set(providerID, pc)
-		_ = cfg.SetConfigField("providers."+providerID, pc)
-
-		// Ensure the selected model references the real provider (not synthetic 'anthropic-max')
-		// so downstream components can resolve provider config correctly.
-		return oauthSuccessMsg{providerID: providerID, modelID: modelID, modelType: modelType}
+		return util.InfoMsg{Type: util.InfoTypeInfo, Msg: "Authentication successful"}
 	}
 }
 
 func (s *anthropicOAuthScreen) View() string {
 	t := styles.CurrentTheme()
-	title := t.S().Base.Foreground(t.Primary).Bold(true).Render("Sign in to Claude Max")
-	maxW := s.width - 4
-	if maxW < 20 {
-		maxW = 20
-	}
-	urlText := s.url
-	if urlText != "" {
-		urlText = wrapUnbroken(urlText, maxW)
-	}
+	title := t.S().Base.Foreground(t.Primary).Render(s.handler.GetTitleText())
+
 	body := []string{
-		t.S().Base.Render("1. A browser window was opened to Claude. Sign in and approve."),
+		t.S().Base.Render("1. A browser window was opened. Sign in and approve."),
 		t.S().Base.Render("2. Press 'o' to open link, 'c/y' to copy link."),
-		t.S().Muted.Render(urlText),
+		t.S().Muted.Render(s.url),
 		t.S().Base.Render("3. Copy the code shown (it looks like code#state)."),
 		t.S().Base.Render("4. Paste below and press Enter."),
+		"",
+		t.S().Muted.Render("If the browser didn't open: press 'o' to open again."),
 	}
+
 	input := s.codeInput.View()
+
 	if s.status != "" {
 		body = append(body, "", t.S().Base.Render(s.status))
 	}
+
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
@@ -312,29 +192,7 @@ func (s *anthropicOAuthScreen) View() string {
 		"",
 		input,
 	)
+
+	// Note: Width is managed by parent
 	return content
-}
-
-func (s *anthropicOAuthScreen) Cursor() *tea.Cursor {
-	return s.codeInput.Cursor()
-}
-
-// wrapUnbroken inserts newlines into very long, space-less text (like URLs)
-// so that it can wrap within the available pane width.
-func wrapUnbroken(text string, width int) string {
-	if width <= 0 || len(text) <= width {
-		return text
-	}
-	var b strings.Builder
-	for i := 0; i < len(text); i += width {
-		end := i + width
-		if end > len(text) {
-			end = len(text)
-		}
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(text[i:end])
-	}
-	return b.String()
 }

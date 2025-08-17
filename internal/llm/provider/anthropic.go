@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,44 @@ import (
 
 // Pre-compiled regex for parsing context limit errors.
 var contextLimitRegex = regexp.MustCompile(`input length and ` + "`max_tokens`" + ` exceed context limit: (\d+) \+ (\d+) > (\d+)`)
+
+// oauthRoundTripper modifies requests to use OAuth instead of API key
+type oauthRoundTripper struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (t *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone the request
+	newReq := req.Clone(req.Context())
+	
+	// Create new headers map to bypass Go's canonicalization
+	newHeaders := make(http.Header)
+	
+	// Copy only essential headers
+	if v := newReq.Header.Get("Accept"); v != "" {
+		newHeaders["Accept"] = []string{v}
+	}
+	if v := newReq.Header.Get("Content-Type"); v != "" {
+		newHeaders["Content-Type"] = []string{v}
+	}
+	
+	// Set OAuth headers using exact case - matching OpenCode exactly
+	newHeaders["authorization"] = []string{"Bearer " + t.token}
+	newHeaders["anthropic-beta"] = []string{"oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"}
+	newHeaders["anthropic-version"] = []string{"2023-06-01"}
+	newHeaders["User-Agent"] = []string{"Claude-Code-Max/1.0"}
+	
+	// Replace headers
+	newReq.Header = newHeaders
+	
+	// Debug: log the final headers
+	slog.Info("OAuth request sending", 
+		"url", newReq.URL.String(),
+		"headers", newReq.Header)
+	
+	return t.base.RoundTrip(newReq)
+}
 
 type anthropicClient struct {
 	providerOptions   providerClientOptions
@@ -68,27 +107,104 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 
 	isBearerToken := strings.HasPrefix(opts.apiKey, config.BearerPrefix)
 
+	// Track if we're using OAuth
+	var oauthTransport *oauthRoundTripper
+	
+	slog.Debug("Anthropic client creation",
+		"has_api_key", opts.apiKey != "",
+		"has_bearer_auth", hasBearerAuth,
+		"is_bearer_token", isBearerToken,
+		"api_key_prefix", func() string {
+			if len(opts.apiKey) > 20 {
+				return opts.apiKey[:20] + "..."
+			}
+			return opts.apiKey
+		}())
+	
 	if opts.apiKey != "" && !hasBearerAuth {
 		if isBearerToken {
-			slog.Info("Using OAuth Bearer token for Anthropic", "token_prefix", opts.apiKey[:min(20, len(opts.apiKey))]+"...")
-			// Pass empty API key to prevent SDK from setting X-Api-Key header
+			slog.Info("Using Claude Code OAuth with custom transport", 
+				"token_prefix", opts.apiKey[:min(20, len(opts.apiKey))]+"...",
+				"provider_id", opts.config.ID)
+			
+			// Extract the token (remove Bearer prefix if present)
+			token := opts.apiKey
+			if strings.HasPrefix(token, config.BearerPrefix) {
+				token = strings.TrimPrefix(token, config.BearerPrefix)
+			}
+			
+			// Create OAuth transport
+			oauthTransport = &oauthRoundTripper{
+				base:  http.DefaultTransport,
+				token: token,
+			}
+			
+			// Set empty API key for OAuth (matching OpenCode)
 			anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(""))
-			anthropicClientOptions = append(anthropicClientOptions, option.WithHeader(config.HeaderAuthorization, opts.apiKey))
-			// Add OAuth beta headers for Claude Code compatibility
-			anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"))
+			
+			// Use custom base URL if provided, otherwise use default Anthropic API
+			if opts.baseURL != "" {
+				anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(opts.baseURL))
+			}
 		} else {
 			// Use standard X-Api-Key header
 			anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(opts.apiKey))
 		}
 	} else if hasBearerAuth {
-		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
-		// Pass empty API key to prevent SDK from setting X-Api-Key header
+		slog.Debug("Authorization header provided in extra headers, using Claude Code OAuth")
+		
+		// Extract the authorization header value
+		authHeader := ""
+		for key, value := range opts.extraHeaders {
+			if strings.ToLower(key) == "authorization" {
+				authHeader = value
+				break
+			}
+		}
+		
+		// Extract the token (remove Bearer prefix if present)
+		token := authHeader
+		if strings.HasPrefix(token, "Bearer ") {
+			token = strings.TrimPrefix(token, "Bearer ")
+		}
+		
+		// Create OAuth transport
+		oauthTransport = &oauthRoundTripper{
+			base:  http.DefaultTransport,
+			token: token,
+		}
+		
+		// Set empty API key for OAuth (matching OpenCode)
 		anthropicClientOptions = append(anthropicClientOptions, option.WithAPIKey(""))
-		// Add OAuth beta headers for Claude Code compatibility
-		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"))
+		
+		// Use custom base URL if provided, otherwise use default Anthropic API
+		if opts.baseURL != "" {
+			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(opts.baseURL))
+		}
+	} else {
+		// Use the configured base URL if provided (non-OAuth case)
+		if opts.baseURL != "" {
+			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(opts.baseURL))
+		}
 	}
 
-	if config.Get().Options.Debug {
+	// Configure HTTP client with OAuth transport if needed
+	if oauthTransport != nil {
+		if config.Get().Options.Debug {
+			// Wrap OAuth transport with debug logging
+			debugClient := log.NewHTTPClient()
+			oauthTransport.base = debugClient.Transport
+			debugClient.Transport = oauthTransport
+			anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(debugClient))
+		} else {
+			// Use OAuth transport directly
+			httpClient := &http.Client{
+				Transport: oauthTransport,
+			}
+			anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
+		}
+	} else if config.Get().Options.Debug {
+		// Use debug client without OAuth
 		httpClient := log.NewHTTPClient()
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
 	}
@@ -102,6 +218,10 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 		anthropicClientOptions = append(anthropicClientOptions, vertex.WithGoogleAuth(context.Background(), location, project))
 	}
 	for key, header := range opts.extraHeaders {
+		// Skip authorization header if we're using OAuth
+		if oauthTransport != nil && strings.EqualFold(key, "authorization") {
+			continue
+		}
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(key, header))
 	}
 	for key, value := range opts.extraBody {
@@ -259,6 +379,15 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 
 	systemBlocks := []anthropic.TextBlockParam{}
 
+	// Add Claude Code spoofing for OAuth authenticated requests
+	isOAuth := strings.HasPrefix(a.providerOptions.apiKey, config.BearerPrefix)
+	if isOAuth && strings.Contains(model.ID, "claude-") {
+		// Prepend Claude Code identity when using OAuth (matching OpenCode)
+		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+			Text: "You are Claude Code, Anthropic's official CLI for Claude.",
+		})
+	}
+
 	// Add custom system prompt prefix if configured
 	if a.providerOptions.systemPromptPrefix != "" {
 		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
@@ -292,13 +421,9 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		// Prepare messages on each attempt in case max_tokens was adjusted
 		preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 
-		var opts []option.RequestOption
-		// Always include all beta headers for OAuth/Claude Code compatibility
-		opts = append(opts, option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"))
 		anthropicResponse, err := a.client.Messages.New(
 			ctx,
 			preparedMessages,
-			opts...,
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
@@ -343,14 +468,9 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 			// Prepare messages on each attempt in case max_tokens was adjusted
 			preparedMessages := a.preparedMessages(a.convertMessages(messages), a.convertTools(tools))
 
-			var opts []option.RequestOption
-			// Always include all beta headers for OAuth/Claude Code compatibility
-			opts = append(opts, option.WithHeaderAdd("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"))
-
 			anthropicStream := a.client.Messages.NewStreaming(
 				ctx,
 				preparedMessages,
-				opts...,
 			)
 			accumulatedMessage := anthropic.Message{}
 
@@ -486,19 +606,24 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return false, 0, err
 	}
 
-	if attempts > maxRetries {
-		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
-	}
-
+	// Handle 401 first (token refresh) before checking retry limits
 	if apiErr.StatusCode == 401 {
-		// Try refresh via OAuth first
-		if token, terr := auth.AccessToken("anthropic"); terr == nil && token != "" {
-			if !strings.HasPrefix(token, config.BearerPrefix) {
-				token = config.BearerPrefix + token
+		// Check if we're using OAuth (Bearer token)
+		if strings.HasPrefix(a.providerOptions.apiKey, config.BearerPrefix) {
+			// Try refresh via OAuth - always use "anthropic" as the auth provider ID
+			// (both anthropic and anthropic-max store OAuth tokens under "anthropic")
+			slog.Info("OAuth token expired, refreshing", "provider_id", a.providerOptions.config.ID)
+			if token, terr := auth.AccessToken("anthropic"); terr == nil && token != "" {
+				if !strings.HasPrefix(token, config.BearerPrefix) {
+					token = config.BearerPrefix + token
+				}
+				slog.Info("OAuth token refreshed successfully")
+				a.providerOptions.apiKey = token
+				// Recreate the client with new token
+				a.client = createAnthropicClient(a.providerOptions, a.tp)
+				return true, 0, nil
 			}
-			a.providerOptions.apiKey = token
-			a.client = createAnthropicClient(a.providerOptions, a.tp)
-			return true, 0, nil
+			slog.Error("Failed to refresh OAuth token")
 		}
 		// Fallback to resolving configured API key (might be env)
 		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
@@ -507,6 +632,11 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 		a.client = createAnthropicClient(a.providerOptions, a.tp)
 		return true, 0, nil
+	}
+
+	// Check retry limits after 401 handling
+	if attempts > maxRetries {
+		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
 	// Handle context limit exceeded error (400 Bad Request)

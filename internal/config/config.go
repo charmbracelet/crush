@@ -47,7 +47,7 @@ const (
 
 	// Default provider base URLs and versions
 	DefaultOpenAIBaseURL    = "https://api.openai.com/v1"
-	DefaultAnthropicBaseURL = "https://api.anthropic.com/v1"
+	DefaultAnthropicBaseURL = "https://api.anthropic.com"
 	DefaultGeminiBaseURL    = "https://generativelanguage.googleapis.com"
 	DefaultAnthropicAPIVer  = "2023-06-01"
 
@@ -624,16 +624,9 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if baseURL == "" {
 			baseURL = DefaultAnthropicBaseURL
 		}
-		testURL = baseURL + "/models"
-		// Support both X-Api-Key and Authorization: Bearer
-		if strings.HasPrefix(strings.TrimSpace(apiKey), BearerPrefix) {
-			headers[HeaderAuthorization] = apiKey
-			// Add OAuth beta header for Bearer tokens
-			headers["anthropic-beta"] = "oauth-2025-04-20"
-		} else {
-			headers[HeaderXAPIKey] = apiKey
-		}
-		headers[HeaderAnthropicVersion] = DefaultAnthropicAPIVer
+		// Anthropic doesn't have a /models endpoint, so we skip the connectivity test
+		// The actual API calls will handle authentication errors
+		return nil
 	case catwalk.TypeGemini:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {

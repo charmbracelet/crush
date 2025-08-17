@@ -159,11 +159,6 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p.scrollRight()
 				return p, nil
 			}
-		default:
-			// Pass other keys to viewport
-			viewPort, cmd := p.contentViewPort.Update(msg)
-			p.contentViewPort = viewPort
-			cmds = append(cmds, cmd)
 		}
 	case tea.MouseWheelMsg:
 		if p.supportsDiffView() && p.isMouseOverDialog(msg.Mouse().X, msg.Mouse().Y) {
@@ -179,6 +174,11 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+
+	// Pass other keys to viewport
+	viewPort, cmd := p.contentViewPort.Update(msg)
+	p.contentViewPort = viewPort
+	cmds = append(cmds, cmd)
 
 	return p, tea.Batch(cmds...)
 }

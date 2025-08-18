@@ -16,9 +16,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/slicesext"
 	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -171,25 +173,36 @@ func CommandsBlocker(cmds []string) BlockFunc {
 	}
 }
 
-// ArgumentsBlocker creates a BlockFunc that blocks specific subcommands
-func ArgumentsBlocker(blockedSubCommands [][]string) BlockFunc {
-	return func(args []string) bool {
-		for _, blocked := range blockedSubCommands {
-			if len(args) >= len(blocked) {
-				match := true
-				for i, part := range blocked {
-					if args[i] != part {
-						match = false
-						break
-					}
-				}
-				if match {
-					return true
-				}
-			}
+// ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
+func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
+	return func(parts []string) bool {
+		if len(parts) == 0 || parts[0] != cmd {
+			return false
 		}
-		return false
+
+		argParts, flagParts := splitArgsFlags(parts[1:])
+		if len(argParts) < len(args) || len(flagParts) < len(flags) {
+			return false
+		}
+
+		argsMatch := slices.Equal(argParts[:len(args)], args)
+		flagsMatch := slicesext.IsSubset(flags, flagParts)
+
+		return argsMatch && flagsMatch
 	}
+}
+
+func splitArgsFlags(parts []string) (args []string, flags []string) {
+	args = make([]string, 0, len(parts))
+	flags = make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.HasPrefix(part, "-") {
+			flags = append(flags, part)
+		} else {
+			args = append(args, part)
+		}
+	}
+	return
 }
 
 func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {

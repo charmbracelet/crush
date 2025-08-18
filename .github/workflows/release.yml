@@ -15,6 +15,7 @@ jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
     with:
+      go_version: "1.25"
       macos_sign_entitlements: "./.github/entitlements.plist"
     secrets:
       docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -32,4 +33,3 @@ jobs:
       macos_notary_issuer_id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
       macos_notary_key_id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
       macos_notary_key: ${{ secrets.MACOS_NOTARY_KEY }}
-      go_version: "1.25"

@@ -281,7 +281,6 @@ func blockFuncs() []shell.BlockFunc {
 			{"apt", "install"},
 			{"apt-get", "install"},
 			{"dnf", "install"},
-			{"emerge"},
 			{"pacman", "-S"},
 			{"pkg", "install"},
 			{"yum", "install"},

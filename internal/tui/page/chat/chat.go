@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -649,7 +650,9 @@ func (p *chatPage) changeFocus() {
 func (p *chatPage) cancel() tea.Cmd {
 	if p.isCanceling {
 		p.isCanceling = false
-		p.app.CoderAgent.Cancel(p.session.ID)
+		if p.app.CoderAgent != nil {
+			p.app.CoderAgent.Cancel(p.session.ID)
+		}
 		return nil
 	}
 
@@ -686,6 +689,9 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		}
 		session = newSession
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
+	}
+	if p.app.CoderAgent == nil {
+		return util.ReportError(fmt.Errorf("coder agent is not initialized - please check your configuration"))
 	}
 	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
 	if err != nil {
@@ -832,7 +838,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
-			if p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
 				cancelBinding = key.NewBinding(
 					key.WithKeys("esc"),
 					key.WithHelp("esc", "clear queue"),

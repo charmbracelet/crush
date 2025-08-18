@@ -156,9 +156,9 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 }
 
 // CommandsBlocker creates a BlockFunc that blocks exact command matches
-func CommandsBlocker(bannedCommands []string) BlockFunc {
+func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{})
-	for _, cmd := range bannedCommands {
+	for _, cmd := range cmds {
 		bannedSet[cmd] = struct{}{}
 	}
 

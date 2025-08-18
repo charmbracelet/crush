@@ -53,3 +53,5 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"security":
+  - "/(security|vulnerability|exploit)/i"

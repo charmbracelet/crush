@@ -231,6 +231,24 @@ func TestArgumentsBlocker(t *testing.T) {
 			input:       []string{"pacman", "-Q", "package"},
 			shouldBlock: false,
 		},
+
+		// `go test -exec`
+		{
+			name:        "go test exec",
+			cmd:         "go",
+			args:        []string{"test"},
+			flags:       []string{"-exec"},
+			input:       []string{"go", "test", "-exec", "bash -c 'echo hello'"},
+			shouldBlock: true,
+		},
+		{
+			name:        "go test exec",
+			cmd:         "go",
+			args:        []string{"test"},
+			flags:       []string{"-exec"},
+			input:       []string{"go", "test", `-exec="bash -c 'echo hello'"`},
+			shouldBlock: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -328,6 +346,24 @@ func TestSplitArgsFlags(t *testing.T) {
 			input:     []string{"-S", "package"},
 			wantArgs:  []string{"package"},
 			wantFlags: []string{"-S"},
+		},
+		{
+			name:      "flag with equals sign",
+			input:     []string{"-exec=bash", "package"},
+			wantArgs:  []string{"package"},
+			wantFlags: []string{"-exec"},
+		},
+		{
+			name:      "long flag with equals sign",
+			input:     []string{"--config=/path/to/config", "run"},
+			wantArgs:  []string{"run"},
+			wantFlags: []string{"--config"},
+		},
+		{
+			name:      "flag with complex value",
+			input:     []string{`-exec="bash -c 'echo hello'"`, "test"},
+			wantArgs:  []string{"test"},
+			wantFlags: []string{"-exec"},
 		},
 	}
 

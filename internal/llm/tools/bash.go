@@ -298,6 +298,9 @@ func blockFuncs() []shell.BlockFunc {
 		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
 		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
 		shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
+
+		// `go test -exec` can run arbitrary commands
+		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 	}
 }
 

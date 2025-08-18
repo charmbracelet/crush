@@ -197,7 +197,12 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 	flags = make([]string, 0, len(parts))
 	for _, part := range parts {
 		if strings.HasPrefix(part, "-") {
-			flags = append(flags, part)
+			// Extract flag name before '=' if present
+			flag := part
+			if idx := strings.IndexByte(part, '='); idx != -1 {
+				flag = part[:idx]
+			}
+			flags = append(flags, flag)
 		} else {
 			args = append(args, part)
 		}

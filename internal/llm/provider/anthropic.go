@@ -178,7 +178,7 @@ func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolU
 			Description: anthropic.String(info.Description),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: info.Parameters,
-				// TODO: figure out how we can tell claude the required fields?
+				Required:   info.Required,
 			},
 		}
 

@@ -28,6 +28,13 @@ tasks:
     env:
       GOEXPERIMENT: null
 
+  build:
+    desc: Run build
+    cmds:
+      - go build .
+    generates:
+      - crush
+
   test:
     desc: Run tests
     cmds:
@@ -70,3 +77,5 @@ tasks:
     cmds:
       - go run main.go schema > schema.json
       - echo "Generated schema.json"
+    generates:
+      - schema.json

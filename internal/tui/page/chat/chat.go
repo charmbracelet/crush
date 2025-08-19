@@ -697,7 +697,7 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
 	}
 	if p.app.CoderAgent == nil {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized - please check your configuration"))
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
 	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
 	if err != nil {

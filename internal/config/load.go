@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/log"
 )
 
@@ -310,7 +311,11 @@ func (c *Config) setDefaults(workingDir string) {
 		c.Options.ContextPaths = []string{}
 	}
 	if c.Options.DataDirectory == "" {
-		c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+			c.Options.DataDirectory = path
+		} else {
+			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		}
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()

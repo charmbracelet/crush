@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -47,6 +48,11 @@ type Editor interface {
 
 type FileCompletionItem struct {
 	Path string // The file path
+}
+
+type CommandCompletionItem struct {
+	Command     string // The command name (without /)
+	Description string // Description of the command
 }
 
 type editorCmp struct {
@@ -138,32 +144,179 @@ func (m *editorCmp) Init() tea.Cmd {
 }
 
 func (m *editorCmp) send() tea.Cmd {
-	value := m.textarea.Value()
-	value = strings.TrimSpace(value)
+	value := strings.TrimSpace(m.textarea.Value())
 
-	switch value {
-	case "exit", "quit":
-		m.textarea.Reset()
-		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
-	}
-
+	// Reset textarea immediately for better UX
 	m.textarea.Reset()
 	attachments := m.attachments
-
 	m.attachments = nil
-	if value == "" {
+
+	if value == "" && len(attachments) == 0 {
 		return nil
 	}
 
-	// Change the placeholder when sending a new message.
+	// Command Router: handle different prefixes
+	switch {
+	case strings.HasPrefix(value, "/"):
+		return m.handleQuickCommand(value)
+
+	case strings.HasPrefix(value, "#"):
+		return m.handleFileReference(value, attachments)
+
+	// Prefixes '>', 'f:', and '~' are handled by the AI via prompts
+	// so they follow the normal sending flow
+	default:
+		// Handle legacy plain commands for backward compatibility
+		switch value {
+		case "exit", "quit":
+			return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+		}
+
+		// Change the placeholder when sending a new message
+		m.randomizePlaceholders()
+
+		return tea.Batch(
+			util.CmdHandler(chat.SendMsg{
+				Text:        value,
+				Attachments: attachments,
+			}),
+		)
+	}
+}
+
+// handleQuickCommand processes commands starting with '/' prefix
+func (m *editorCmp) handleQuickCommand(command string) tea.Cmd {
+	cmd := strings.TrimSpace(strings.TrimPrefix(command, "/"))
+
+	// Change the placeholder when sending a new message
 	m.randomizePlaceholders()
 
-	return tea.Batch(
-		util.CmdHandler(chat.SendMsg{
-			Text:        value,
-			Attachments: attachments,
-		}),
-	)
+	switch cmd {
+	case "new":
+		return util.CmdHandler(commands.NewSessionsMsg{})
+	case "switch":
+		return util.CmdHandler(commands.SwitchSessionsMsg{})
+	case "model":
+		return util.CmdHandler(commands.SwitchModelMsg{})
+	case "compact", "summarize":
+		if m.session.ID == "" {
+			return util.ReportWarn("No active session to compact")
+		}
+		return util.CmdHandler(commands.CompactMsg{SessionID: m.session.ID})
+	case "thinking":
+		return util.CmdHandler(commands.ToggleThinkingMsg{})
+	case "sidebar":
+		return util.CmdHandler(commands.ToggleCompactModeMsg{})
+	case "files", "file":
+		return util.CmdHandler(commands.OpenFilePickerMsg{})
+	case "editor":
+		return util.CmdHandler(commands.OpenExternalEditorMsg{})
+	case "yolo":
+		return util.CmdHandler(commands.ToggleYoloModeMsg{})
+	case "help":
+		return util.CmdHandler(commands.ToggleHelpMsg{})
+	case "init":
+		return util.CmdHandler(chat.SendMsg{
+			Text: prompt.Initialize(),
+		})
+	case "exit", "quit":
+		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+	default:
+		return util.ReportWarn(fmt.Sprintf("Unknown command: /%s", cmd))
+	}
+}
+
+// handleFileReference processes file references starting with '#' prefix
+func (m *editorCmp) handleFileReference(ref string, attachments []message.Attachment) tea.Cmd {
+	fileRef := strings.TrimSpace(strings.TrimPrefix(ref, "#"))
+	if fileRef == "" {
+		return util.ReportWarn("Empty file reference")
+	}
+
+	// Parse file path and optional line number
+	var filePath string
+	var lineNum int
+	if colonIndex := strings.LastIndex(fileRef, ":"); colonIndex != -1 {
+		filePath = fileRef[:colonIndex]
+		if lineStr := fileRef[colonIndex+1:]; lineStr != "" {
+			if num := parseInt(lineStr); num > 0 {
+				lineNum = num
+			}
+		}
+	} else {
+		filePath = fileRef
+	}
+
+	// Make path absolute if relative
+	if !filepath.IsAbs(filePath) {
+		absPath, err := filepath.Abs(filePath)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("invalid file path: %s", filePath))
+		}
+		filePath = absPath
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return util.ReportError(fmt.Errorf("file not found: %s", filePath))
+	}
+
+	// Read file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to read file %s: %v", filePath, err))
+	}
+
+	// Prepare the message text with file content
+	fileName := filepath.Base(filePath)
+	var messageText string
+
+	if lineNum > 0 {
+		// Show content around the specific line
+		lines := strings.Split(string(content), "\n")
+		if lineNum > len(lines) {
+			return util.ReportError(fmt.Errorf("line %d not found in file %s (file has %d lines)", lineNum, fileName, len(lines)))
+		}
+
+		// Show context around the line (±5 lines)
+		start := max(0, lineNum-6)
+		end := min(len(lines), lineNum+4)
+		contextLines := lines[start:end]
+
+		messageText = fmt.Sprintf("Here's the content around line %d in %s:\n\n```\n", lineNum, fileName)
+		for i, line := range contextLines {
+			actualLineNum := start + i + 1
+			prefix := "  "
+			if actualLineNum == lineNum {
+				prefix = "→ "
+			}
+			messageText += fmt.Sprintf("%s%d: %s\n", prefix, actualLineNum, line)
+		}
+		messageText += "```"
+	} else {
+		// Show the entire file content
+		messageText = fmt.Sprintf("Here's the content of %s:\n\n```\n%s\n```", fileName, string(content))
+	}
+
+	// Change the placeholder when sending a new message
+	m.randomizePlaceholders()
+
+	return util.CmdHandler(chat.SendMsg{
+		Text:        messageText,
+		Attachments: attachments,
+	})
+}
+
+// parseInt safely parses a string to int, returns 0 if invalid
+func parseInt(s string) int {
+	var result int
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		result = result*10 + int(r-'0')
+	}
+	return result
 }
 
 func (m *editorCmp) repositionCompletions() tea.Msg {
@@ -193,21 +346,31 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.isCompletionsOpen {
 			return m, nil
 		}
+		word := m.textarea.Word()
+		value := m.textarea.Value()
+		var insertText string
+
 		if item, ok := msg.Value.(FileCompletionItem); ok {
-			word := m.textarea.Word()
-			// If the selected item is a file, insert its path into the textarea
-			value := m.textarea.Value()
-			value = value[:m.completionsStartIndex] + // Remove the current query
-				item.Path + // Insert the file path
-				value[m.completionsStartIndex+len(word):] // Append the rest of the value
-			// XXX: This will always move the cursor to the end of the textarea.
-			m.textarea.SetValue(value)
-			m.textarea.MoveToEnd()
-			if !msg.Insert {
-				m.isCompletionsOpen = false
-				m.currentQuery = ""
-				m.completionsStartIndex = 0
-			}
+			// Insert file path for file completions
+			insertText = item.Path
+		} else if item, ok := msg.Value.(CommandCompletionItem); ok {
+			// Insert command name with / prefix for command completions
+			insertText = "/" + item.Command
+		} else {
+			return m, nil
+		}
+
+		// Insert the selected item into the textarea
+		value = value[:m.completionsStartIndex] + // Remove the current query
+			insertText + // Insert the selected item
+			value[m.completionsStartIndex+len(word):] // Append the rest of the value
+		// XXX: This will always move the cursor to the end of the textarea.
+		m.textarea.SetValue(value)
+		m.textarea.MoveToEnd()
+		if !msg.Insert {
+			m.isCompletionsOpen = false
+			m.currentQuery = ""
+			m.completionsStartIndex = 0
 		}
 
 	case commands.OpenExternalEditorMsg:
@@ -265,6 +428,13 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		// Completions
 		case msg.String() == "/" && !m.isCompletionsOpen &&
+			// only show if beginning of prompt, or if previous char is a space or newline:
+			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
+			m.isCompletionsOpen = true
+			m.currentQuery = ""
+			m.completionsStartIndex = curIdx
+			cmds = append(cmds, m.startCommandCompletions)
+		case msg.String() == "#" && !m.isCompletionsOpen &&
 			// only show if beginning of prompt, or if previous char is a space or newline:
 			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
 			m.isCompletionsOpen = true
@@ -336,7 +506,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 			} else {
 				word := m.textarea.Word()
-				if strings.HasPrefix(word, "/") {
+				if strings.HasPrefix(word, "/") || strings.HasPrefix(word, "#") {
 					// XXX: wont' work if editing in the middle of the field.
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
@@ -396,6 +566,9 @@ var readyPlaceholders = [...]string{
 	"Ready...",
 	"Ready?",
 	"Ready for instructions",
+	"Try /help for commands",
+	"Use #file.txt to reference files",
+	"Type /new to start fresh",
 }
 
 var workingPlaceholders = [...]string{
@@ -489,6 +662,47 @@ func (m *editorCmp) startCompletions() tea.Msg {
 			Title: file,
 			Value: FileCompletionItem{
 				Path: file,
+			},
+		})
+	}
+
+	x, y := m.completionsPosition()
+	return completions.OpenCompletionsMsg{
+		Completions: completionItems,
+		X:           x,
+		Y:           y,
+	}
+}
+
+func (m *editorCmp) startCommandCompletions() tea.Msg {
+	commandItems := []struct {
+		command     string
+		description string
+	}{
+		{"new", "Start a new session"},
+		{"switch", "Switch to a different session"},
+		{"model", "Switch to a different model"},
+		{"compact", "Summarize the current session"},
+		{"summarize", "Summarize the current session"},
+		{"thinking", "Toggle thinking mode"},
+		{"sidebar", "Toggle sidebar visibility"},
+		{"files", "Open file picker"},
+		{"file", "Open file picker"},
+		{"editor", "Open external editor"},
+		{"yolo", "Toggle yolo mode"},
+		{"help", "Toggle help"},
+		{"init", "Initialize project (create/update CRUSH.md)"},
+		{"exit", "Exit the application"},
+		{"quit", "Exit the application"},
+	}
+
+	completionItems := make([]completions.Completion, 0, len(commandItems))
+	for _, item := range commandItems {
+		completionItems = append(completionItems, completions.Completion{
+			Title: fmt.Sprintf("/%s - %s", item.command, item.description),
+			Value: CommandCompletionItem{
+				Command:     item.command,
+				Description: item.description,
 			},
 		})
 	}

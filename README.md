@@ -137,11 +137,48 @@ That said, you can also set environment variables for preferred providers.
 
 ### By the Way
 
-Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?
+Is there a provider you'd like to see in Crush? Is there an existing model that needs an update?
 
-Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), an community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
+Crush's default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), an community-supported, open source repository of Crush-compatible models, and you're welcome to contribute.
 
 <a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
+
+## Quick Command Syntax
+
+Crush supports a standardized command syntax to improve user experience and reduce the learning curve:
+
+### Quick Commands (/)
+Use `/` prefix for instant access to common actions:
+- `/new` - Start a new session
+- `/switch` - Switch to a different session  
+- `/model` - Switch to a different model
+- `/compact` - Summarize the current session
+- `/files` - Open file picker
+- `/editor` - Open external editor
+- `/help` - Toggle help
+- `/exit` - Exit the application
+
+### File References (#)
+Use `#` prefix to reference files directly in your prompts:
+- `#src/main.go` - Include entire file content
+- `#src/main.go:42` - Show content around line 42
+- Type `#` to get file completions
+
+### Shell Commands (>)
+Use `>` prefix for direct shell execution:
+- `>npm run dev` - Run development server
+- `>git status` - Check git status
+- `>ls -la` - List files
+
+### File Search (f:)
+Use `f:` prefix to search for files:
+- `f:*.json` - Find all JSON files
+- `f:config` - Find files matching "config"
+
+### Project Root Paths (~)
+Use `~` prefix for project root-relative paths:
+- `~docs/README.md` - Reference from project root
+- `~src/components/` - Reference directory from root
 
 ## Configuration
 

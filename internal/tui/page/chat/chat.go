@@ -177,6 +177,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
+		if p.isOnboarding {
+			return p, nil
+		}
 		if p.compact {
 			msg.Y -= 1
 		}
@@ -203,6 +206,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
+		if p.isOnboarding {
+			return p, nil
+		}
 		if p.compact {
 			msg.Y -= 1
 		}

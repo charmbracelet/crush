@@ -8,6 +8,8 @@ import (
 
 // SearchParent searches for a target file or directory starting from dir
 // and walking up the directory tree until found or root or home is reached.
+// It also checks the ownership of directories to ensure that the search does
+// not cross ownership boundaries.
 // Returns the full path to the target if found, empty string and false otherwise.
 // The search includes the starting directory itself.
 func SearchParent(dir, target string) (string, bool) {
@@ -24,10 +26,22 @@ func SearchParent(dir, target string) (string, bool) {
 	}
 
 	previousParent := absDir
+	previousOwner, err := Owner(previousParent)
+	if err != nil {
+		return "", false
+	}
 
 	for {
 		parent := filepath.Dir(previousParent)
 		if parent == previousParent || parent == HomeDir() {
+			return "", false
+		}
+
+		parentOwner, err := Owner(parent)
+		if err != nil {
+			return "", false
+		}
+		if parentOwner != previousOwner {
 			return "", false
 		}
 
@@ -39,5 +53,6 @@ func SearchParent(dir, target string) (string, bool) {
 		}
 
 		previousParent = parent
+		previousOwner = parentOwner
 	}
 }

@@ -20,7 +20,8 @@ func CoderPrompt(p string, contextFiles ...string) string {
 	basePrompt = string(anthropicCoderPrompt)
 	switch p {
 	case string(catwalk.InferenceProviderOpenAI):
-		basePrompt = string(openaiCoderPrompt)
+		// seems to behave better
+		basePrompt = string(coderV2Prompt)
 	case string(catwalk.InferenceProviderGemini):
 		basePrompt = string(geminiCoderPrompt)
 	}

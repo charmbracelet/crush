@@ -3,7 +3,6 @@ package splash
 import (
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +17,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
+	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
+	"github.com/charmbracelet/crush/internal/tui/components/mcp"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -101,27 +102,6 @@ func New() Splash {
 
 func (s *splashCmp) SetOnboarding(onboarding bool) {
 	s.isOnboarding = onboarding
-	if onboarding {
-		providers, err := config.Providers()
-		if err != nil {
-			return
-		}
-		filteredProviders := []catwalk.Provider{}
-		simpleProviders := []string{
-			"anthropic",
-			"openai",
-			"gemini",
-			"xai",
-			"groq",
-			"openrouter",
-		}
-		for _, p := range providers {
-			if slices.Contains(simpleProviders, string(p.ID)) {
-				filteredProviders = append(filteredProviders, p)
-			}
-		}
-		s.modelList.SetProviders(filteredProviders)
-	}
 }
 
 func (s *splashCmp) SetProjectInit(needsInit bool) {
@@ -655,7 +635,7 @@ func (s *splashCmp) Bindings() []key.Binding {
 }
 
 func (s *splashCmp) getMaxInfoWidth() int {
-	return min(s.width-2, 40) // 2 for left padding
+	return min(s.width-2, 90) // 2 for left padding
 }
 
 func (s *splashCmp) cwd() string {
@@ -670,29 +650,10 @@ func (s *splashCmp) cwd() string {
 }
 
 func LSPList(maxWidth int) []string {
-	t := styles.CurrentTheme()
-	lspList := []string{}
-	lsp := config.Get().LSP.Sorted()
-	if len(lsp) == 0 {
-		return []string{t.S().Base.Foreground(t.Border).Render("None")}
-	}
-	for _, l := range lsp {
-		iconColor := t.Success
-		if l.LSP.Disabled {
-			iconColor = t.FgMuted
-		}
-		lspList = append(lspList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.LSP.Command,
-				},
-				maxWidth,
-			),
-		)
-	}
-	return lspList
+	return lspcomponent.RenderLSPList(nil, lspcomponent.RenderOptions{
+		MaxWidth:    maxWidth,
+		ShowSection: false,
+	})
 }
 
 func (s *splashCmp) lspBlock() string {
@@ -709,29 +670,10 @@ func (s *splashCmp) lspBlock() string {
 }
 
 func MCPList(maxWidth int) []string {
-	t := styles.CurrentTheme()
-	mcpList := []string{}
-	mcps := config.Get().MCP.Sorted()
-	if len(mcps) == 0 {
-		return []string{t.S().Base.Foreground(t.Border).Render("None")}
-	}
-	for _, l := range mcps {
-		iconColor := t.Success
-		if l.MCP.Disabled {
-			iconColor = t.FgMuted
-		}
-		mcpList = append(mcpList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.MCP.Command,
-				},
-				maxWidth,
-			),
-		)
-	}
-	return mcpList
+	return mcp.RenderMCPList(mcp.RenderOptions{
+		MaxWidth:    maxWidth,
+		ShowSection: false,
+	})
 }
 
 func (s *splashCmp) mcpBlock() string {

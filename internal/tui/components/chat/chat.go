@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -28,6 +30,12 @@ type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
 
+type SelectionCopyMsg struct {
+	clickCount   int
+	endSelection bool
+	x, y         int
+}
+
 const (
 	NotFound = -1
 )
@@ -42,6 +50,8 @@ type MessageListCmp interface {
 
 	SetSession(session.Session) tea.Cmd
 	GoToBottom() tea.Cmd
+	GetSelectedText() string
+	CopySelectedText(bool) tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -56,6 +66,13 @@ type messageListCmp struct {
 
 	lastUserMessageTime int64
 	defaultListKeyMap   list.KeyMap
+
+	// Click tracking for double/triple click detection
+	lastClickTime time.Time
+	lastClickX    int
+	lastClickY    int
+	clickCount    int
+	promptQueue   int
 }
 
 // New creates a new message list component with custom keybindings
@@ -85,46 +102,144 @@ func (m *messageListCmp) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if m.session.ID != "" && m.app.CoderAgent != nil {
+		queueSize := m.app.CoderAgent.QueuedPrompts(m.session.ID)
+		if queueSize != m.promptQueue {
+			m.promptQueue = queueSize
+			cmds = append(cmds, m.SetSize(m.width, m.height))
+		}
+	}
 	switch msg := msg.(type) {
-	case pubsub.Event[permission.PermissionNotification]:
-		return m, m.handlePermissionRequest(msg.Payload)
-	case SessionSelectedMsg:
-		if msg.ID != m.session.ID {
-			cmd := m.SetSession(msg)
-			return m, cmd
+	case tea.KeyPressMsg:
+		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
+			switch {
+			case key.Matches(msg, messages.CopyKey):
+				cmds = append(cmds, m.CopySelectedText(true))
+				return m, tea.Batch(cmds...)
+			case key.Matches(msg, messages.ClearSelectionKey):
+				cmds = append(cmds, m.SelectionClear())
+				return m, tea.Batch(cmds...)
+			}
+		}
+	case tea.MouseClickMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			return m, nil // Ignore clicks outside the component
+		}
+		if msg.Button == tea.MouseLeft {
+			cmds = append(cmds, m.handleMouseClick(x, y))
+			return m, tea.Batch(cmds...)
+		}
+		return m, tea.Batch(cmds...)
+	case tea.MouseMotionMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+			if y < 0 {
+				cmds = append(cmds, m.listCmp.MoveUp(1))
+				return m, tea.Batch(cmds...)
+			}
+			if y >= m.height-1 {
+				cmds = append(cmds, m.listCmp.MoveDown(1))
+				return m, tea.Batch(cmds...)
+			}
+			return m, nil // Ignore clicks outside the component
+		}
+		if msg.Button == tea.MouseLeft {
+			m.listCmp.EndSelection(x, y)
+		}
+		return m, tea.Batch(cmds...)
+	case tea.MouseReleaseMsg:
+		x := msg.X - 1 // Adjust for padding
+		y := msg.Y - 1 // Adjust for padding
+		if msg.Button == tea.MouseLeft {
+			clickCount := m.clickCount
+			if x < 0 || y < 0 || x >= m.width-2 || y >= m.height-1 {
+				tick := tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+					return SelectionCopyMsg{
+						clickCount:   clickCount,
+						endSelection: false,
+					}
+				})
+
+				cmds = append(cmds, tick)
+				return m, tea.Batch(cmds...)
+			}
+			tick := tea.Tick(doubleClickThreshold, func(time.Time) tea.Msg {
+				return SelectionCopyMsg{
+					clickCount:   clickCount,
+					endSelection: true,
+					x:            x,
+					y:            y,
+				}
+			})
+			cmds = append(cmds, tick)
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
+	case SelectionCopyMsg:
+		if msg.clickCount == m.clickCount && time.Since(m.lastClickTime) >= doubleClickThreshold {
+			// If the click count matches and within threshold, copy selected text
+			if msg.endSelection {
+				m.listCmp.EndSelection(msg.x, msg.y)
+			}
+			m.listCmp.SelectionStop()
+			cmds = append(cmds, m.CopySelectedText(true))
+			return m, tea.Batch(cmds...)
+		}
+	case pubsub.Event[permission.PermissionNotification]:
+		cmds = append(cmds, m.handlePermissionRequest(msg.Payload))
+		return m, tea.Batch(cmds...)
+	case SessionSelectedMsg:
+		if msg.ID != m.session.ID {
+			cmds = append(cmds, m.SetSession(msg))
+		}
+		return m, tea.Batch(cmds...)
 	case SessionClearedMsg:
 		m.session = session.Session{}
-		return m, m.listCmp.SetItems([]list.Item{})
+		cmds = append(cmds, m.listCmp.SetItems([]list.Item{}))
+		return m, tea.Batch(cmds...)
 
 	case pubsub.Event[message.Message]:
-		cmd := m.handleMessageEvent(msg)
-		return m, cmd
+		cmds = append(cmds, m.handleMessageEvent(msg))
+		return m, tea.Batch(cmds...)
 
 	case tea.MouseWheelMsg:
-		u, cmd := m.listCmp.Update(msg)
-		m.listCmp = u.(list.List[list.Item])
-		return m, cmd
-	default:
-		var cmds []tea.Cmd
 		u, cmd := m.listCmp.Update(msg)
 		m.listCmp = u.(list.List[list.Item])
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 	}
+
+	u, cmd := m.listCmp.Update(msg)
+	m.listCmp = u.(list.List[list.Item])
+	cmds = append(cmds, cmd)
+	return m, tea.Batch(cmds...)
 }
 
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.
-		Padding(1, 1, 0, 1).
-		Width(m.width).
-		Height(m.height).
-		Render(
-			m.listCmp.View(),
-		)
+	height := m.height
+	if m.promptQueue > 0 {
+		height -= 4 // pill height and padding
+	}
+	view := []string{
+		t.S().Base.
+			Padding(1, 1, 0, 1).
+			Width(m.width).
+			Height(height).
+			Render(
+				m.listCmp.View(),
+			),
+	}
+	if m.app.CoderAgent != nil && m.promptQueue > 0 {
+		queuePill := queuePill(m.promptQueue, t)
+		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
+	}
+	return strings.Join(view, "\n")
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
@@ -541,7 +656,12 @@ func (m *messageListCmp) GetSize() (int, int) {
 func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	return m.listCmp.SetSize(width-2, height-1) // for padding
+	if m.promptQueue > 0 {
+		queueHeight := 3 + 1 // 1 for padding top
+		lHight := max(0, height-(1+queueHeight))
+		return m.listCmp.SetSize(width-2, lHight)
+	}
+	return m.listCmp.SetSize(width-2, max(0, height-1)) // for padding
 }
 
 // Blur implements MessageListCmp.
@@ -565,4 +685,98 @@ func (m *messageListCmp) Bindings() []key.Binding {
 
 func (m *messageListCmp) GoToBottom() tea.Cmd {
 	return m.listCmp.GoToBottom()
+}
+
+const (
+	doubleClickThreshold = 500 * time.Millisecond
+	clickTolerance       = 2 // pixels
+)
+
+// handleMouseClick handles mouse click events and detects double/triple clicks.
+func (m *messageListCmp) handleMouseClick(x, y int) tea.Cmd {
+	now := time.Now()
+
+	// Check if this is a potential multi-click
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(x-m.lastClickX) <= clickTolerance &&
+		abs(y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+
+	m.lastClickTime = now
+	m.lastClickX = x
+	m.lastClickY = y
+
+	switch m.clickCount {
+	case 1:
+		// Single click - start selection
+		m.listCmp.StartSelection(x, y)
+	case 2:
+		// Double click - select word
+		m.listCmp.SelectWord(x, y)
+	case 3:
+		// Triple click - select paragraph
+		m.listCmp.SelectParagraph(x, y)
+		m.clickCount = 0 // Reset after triple click
+	}
+
+	return nil
+}
+
+// SelectionClear clears the current selection in the list component.
+func (m *messageListCmp) SelectionClear() tea.Cmd {
+	m.listCmp.SelectionClear()
+	m.previousSelected = ""
+	m.lastClickX, m.lastClickY = 0, 0
+	m.lastClickTime = time.Time{}
+	m.clickCount = 0
+	return nil
+}
+
+// HasSelection checks if there is a selection in the list component.
+func (m *messageListCmp) HasSelection() bool {
+	return m.listCmp.HasSelection()
+}
+
+// GetSelectedText returns the currently selected text from the list component.
+func (m *messageListCmp) GetSelectedText() string {
+	return m.listCmp.GetSelectedText(3) // 3 padding for the left border/padding
+}
+
+// CopySelectedText copies the currently selected text to the clipboard. When
+// clear is true, it clears the selection after copying.
+func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
+	if !m.listCmp.HasSelection() {
+		return nil
+	}
+
+	selectedText := m.GetSelectedText()
+	if selectedText == "" {
+		return util.ReportInfo("No text selected")
+	}
+
+	if clear {
+		defer func() { m.SelectionClear() }()
+	}
+
+	return tea.Sequence(
+		// We use both OSC 52 and native clipboard for compatibility with different
+		// terminal emulators and environments.
+		tea.SetClipboard(selectedText),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(selectedText)
+			return nil
+		},
+		util.ReportInfo("Selected text copied to clipboard"),
+	)
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -20,6 +21,7 @@ import (
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
+	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
@@ -43,6 +45,9 @@ crush -d
 
 # Run with debug logging in a specific directory
 crush -d -c /path/to/project
+
+# Run with custom data directory
+crush -D /path/to/custom/.crush
 
 # Print version
 crush -v
@@ -95,6 +100,7 @@ func Execute() {
 func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -102,7 +108,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, debug)
+	cfg, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +117,10 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		cfg.Permissions = &config.Permissions{}
 	}
 	cfg.Permissions.SkipRequests = yolo
+
+	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+		return nil, err
+	}
 
 	// Connect to DB; this will also run migrations.
 	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
@@ -159,4 +169,19 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("failed to get current working directory: %v", err)
 	}
 	return cwd, nil
+}
+
+func createDotCrushDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
+	}
+
+	gitIgnorePath := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
+			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
+		}
+	}
+
+	return nil
 }

@@ -259,5 +259,6 @@ func (f *filterableGroupList[T]) SetInputWidth(w int) {
 }
 
 func (f *filterableGroupList[T]) SetInputPlaceholder(ph string) {
+	f.input.Placeholder = ph
 	f.placeholder = ph
 }

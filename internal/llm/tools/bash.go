@@ -275,31 +275,32 @@ Important:
 func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
 		shell.CommandsBlocker(bannedCommands),
-		shell.ArgumentsBlocker([][]string{
-			// System package managers
-			{"apk", "add"},
-			{"apt", "install"},
-			{"apt-get", "install"},
-			{"dnf", "install"},
-			{"emerge"},
-			{"pacman", "-S"},
-			{"pkg", "install"},
-			{"yum", "install"},
-			{"zypper", "install"},
 
-			// Language-specific package managers
-			{"brew", "install"},
-			{"cargo", "install"},
-			{"gem", "install"},
-			{"go", "install"},
-			{"npm", "install", "-g"},
-			{"npm", "install", "--global"},
-			{"pip", "install", "--user"},
-			{"pip3", "install", "--user"},
-			{"pnpm", "add", "-g"},
-			{"pnpm", "add", "--global"},
-			{"yarn", "global", "add"},
-		}),
+		// System package managers
+		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
+		shell.ArgumentsBlocker("apt", []string{"install"}, nil),
+		shell.ArgumentsBlocker("apt-get", []string{"install"}, nil),
+		shell.ArgumentsBlocker("dnf", []string{"install"}, nil),
+		shell.ArgumentsBlocker("pacman", nil, []string{"-S"}),
+		shell.ArgumentsBlocker("pkg", []string{"install"}, nil),
+		shell.ArgumentsBlocker("yum", []string{"install"}, nil),
+		shell.ArgumentsBlocker("zypper", []string{"install"}, nil),
+
+		// Language-specific package managers
+		shell.ArgumentsBlocker("brew", []string{"install"}, nil),
+		shell.ArgumentsBlocker("cargo", []string{"install"}, nil),
+		shell.ArgumentsBlocker("gem", []string{"install"}, nil),
+		shell.ArgumentsBlocker("go", []string{"install"}, nil),
+		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}),
+		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}),
+		shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}),
+		shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}),
+		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
+		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
+		shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
+
+		// `go test -exec` can run arbitrary commands
+		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 	}
 }
 
@@ -366,7 +367,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	sessionID, messageID := GetContextValues(ctx)
 	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
+		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for executing shell command")
 	}
 	if !isSafeReadOnly {
 		p := b.permissions.Request(

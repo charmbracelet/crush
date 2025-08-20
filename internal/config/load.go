@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/log"
 )
 
@@ -36,7 +37,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 }
 
 // Load loads the configuration from the default paths.
-func Load(workingDir string, debug bool) (*Config, error) {
+func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
@@ -51,7 +52,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	cfg.dataConfigDir = GlobalConfigData()
 
-	cfg.setDefaults(workingDir)
+	cfg.setDefaults(workingDir, dataDir)
 
 	if debug {
 		cfg.Options.Debug = true
@@ -90,8 +91,38 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	return cfg, nil
 }
 
+func PushPopCrushEnv() func() {
+	found := []string{}
+	for _, ev := range os.Environ() {
+		if strings.HasPrefix(ev, "CRUSH_") {
+			pair := strings.SplitN(ev, "=", 2)
+			if len(pair) != 2 {
+				continue
+			}
+			found = append(found, strings.TrimPrefix(pair[0], "CRUSH_"))
+		}
+	}
+	backups := make(map[string]string)
+	for _, ev := range found {
+		backups[ev] = os.Getenv(ev)
+	}
+
+	for _, ev := range found {
+		os.Setenv(ev, os.Getenv("CRUSH_"+ev))
+	}
+
+	restore := func() {
+		for k, v := range backups {
+			os.Setenv(k, v)
+		}
+	}
+	return restore
+}
+
 func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
+	restore := PushPopCrushEnv()
+	defer restore()
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -268,7 +299,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	return nil
 }
 
-func (c *Config) setDefaults(workingDir string) {
+func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.workingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
@@ -279,8 +310,14 @@ func (c *Config) setDefaults(workingDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
-	if c.Options.DataDirectory == "" {
-		c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+	if dataDir != "" {
+		c.Options.DataDirectory = dataDir
+	} else if c.Options.DataDirectory == "" {
+		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+			c.Options.DataDirectory = path
+		} else {
+			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		}
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
@@ -295,10 +332,45 @@ func (c *Config) setDefaults(workingDir string) {
 		c.LSP = make(map[string]LSPConfig)
 	}
 
+	// Apply default file types for known LSP servers if not specified
+	applyDefaultLSPFileTypes(c.LSP)
+
 	// Add the default context paths if they are not already present
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
+}
+
+var defaultLSPFileTypes = map[string][]string{
+	"gopls":                      {"go", "mod", "sum", "work"},
+	"typescript-language-server": {"ts", "tsx", "js", "jsx", "mjs", "cjs"},
+	"vtsls":                      {"ts", "tsx", "js", "jsx", "mjs", "cjs"},
+	"bash-language-server":       {"sh", "bash", "zsh", "ksh"},
+	"rust-analyzer":              {"rs"},
+	"pyright":                    {"py", "pyi"},
+	"pylsp":                      {"py", "pyi"},
+	"clangd":                     {"c", "cpp", "cc", "cxx", "h", "hpp"},
+	"jdtls":                      {"java"},
+	"vscode-html-languageserver": {"html", "htm"},
+	"vscode-css-languageserver":  {"css", "scss", "sass", "less"},
+	"vscode-json-languageserver": {"json", "jsonc"},
+	"yaml-language-server":       {"yaml", "yml"},
+	"lua-language-server":        {"lua"},
+	"solargraph":                 {"rb"},
+	"elixir-ls":                  {"ex", "exs"},
+	"zls":                        {"zig"},
+}
+
+// applyDefaultLSPFileTypes sets default file types for known LSP servers
+func applyDefaultLSPFileTypes(lspConfigs map[string]LSPConfig) {
+	for name, config := range lspConfigs {
+		if len(config.FileTypes) != 0 {
+			continue
+		}
+		bin := strings.ToLower(filepath.Base(config.Command))
+		config.FileTypes = defaultLSPFileTypes[bin]
+		lspConfigs[name] = config
+	}
 }
 
 func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
@@ -492,7 +564,6 @@ func hasAWSCredentials(env env.Env) bool {
 		env.Get("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
 		return true
 	}
-
 	return false
 }
 
@@ -536,15 +607,4 @@ func GlobalConfigData() string {
 	}
 
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
-}
-
-func HomeDir() string {
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = os.Getenv("USERPROFILE") // For Windows compatibility
-	}
-	if homeDir == "" {
-		homeDir = os.Getenv("HOMEPATH") // Fallback for some environments
-	}
-	return homeDir
 }

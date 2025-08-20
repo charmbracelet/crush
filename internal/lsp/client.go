@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +27,15 @@ type Client struct {
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	stderr io.ReadCloser
+
+	// Client name for identification
+	name string
+
+	// File types this LSP server handles (e.g., .go, .rs, .py)
+	fileTypes []string
+
+	// Diagnostic change callback
+	onDiagnosticsChanged func(name string, count int)
 
 	// Request ID counter
 	nextID atomic.Int32
@@ -53,10 +64,12 @@ type Client struct {
 	serverState atomic.Value
 }
 
-func NewClient(ctx context.Context, command string, args ...string) (*Client, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
+// NewClient creates a new LSP client.
+func NewClient(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
+	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
+
 	// Copy env
-	cmd.Env = os.Environ()
+	cmd.Env = slices.Concat(os.Environ(), config.ResolvedEnv())
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -75,6 +88,8 @@ func NewClient(ctx context.Context, command string, args ...string) (*Client, er
 
 	client := &Client{
 		Cmd:                   cmd,
+		name:                  name,
+		fileTypes:             config.FileTypes,
 		stdin:                 stdin,
 		stdout:                bufio.NewReader(stdout),
 		stderr:                stderr,
@@ -282,6 +297,16 @@ func (c *Client) GetServerState() ServerState {
 // SetServerState sets the current state of the LSP server
 func (c *Client) SetServerState(state ServerState) {
 	c.serverState.Store(state)
+}
+
+// GetName returns the name of the LSP client
+func (c *Client) GetName() string {
+	return c.name
+}
+
+// SetDiagnosticsCallback sets the callback function for diagnostic changes
+func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
+	c.onDiagnosticsChanged = callback
 }
 
 // WaitForServerReady waits for the server to be ready by polling the server
@@ -591,7 +616,34 @@ type OpenFileInfo struct {
 	URI     protocol.DocumentURI
 }
 
+// HandlesFile checks if this LSP client handles the given file based on its
+// extension.
+func (c *Client) HandlesFile(path string) bool {
+	// If no file types are specified, handle all files (backward compatibility)
+	if len(c.fileTypes) == 0 {
+		return true
+	}
+
+	name := strings.ToLower(filepath.Base(path))
+	for _, filetpe := range c.fileTypes {
+		suffix := strings.ToLower(filetpe)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) {
+			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetpe)
+			return true
+		}
+	}
+	slog.Debug("doesn't handle file", "name", c.name, "file", name)
+	return false
+}
+
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
+	if !c.HandlesFile(filepath) {
+		return nil
+	}
+
 	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()
@@ -748,7 +800,10 @@ func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnos
 
 // GetDiagnostics returns all diagnostics for all files
 func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
-	return c.diagnostics
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
+
+	return maps.Clone(c.diagnostics)
 }
 
 // OpenFileOnDemand opens a file only if it's not already open

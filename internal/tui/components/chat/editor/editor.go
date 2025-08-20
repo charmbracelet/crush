@@ -55,7 +55,7 @@ type editorCmp struct {
 	x, y               int
 	app                *app.App
 	session            session.Session
-	textarea           textarea.Model
+	textarea           *textarea.Model
 	attachments        []message.Attachment
 	deleteMode         bool
 	readyPlaceholder   string
@@ -138,13 +138,6 @@ func (m *editorCmp) Init() tea.Cmd {
 }
 
 func (m *editorCmp) send() tea.Cmd {
-	if m.app.CoderAgent == nil {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
-	}
-	if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
-		return util.ReportWarn("Agent is working, please wait...")
-	}
-
 	value := m.textarea.Value()
 	value = strings.TrimSpace(value)
 
@@ -228,7 +221,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		path := strings.ReplaceAll(string(msg), "\\ ", " ")
 		// try to get an image
-		path, err := filepath.Abs(path)
+		path, err := filepath.Abs(strings.TrimSpace(path))
 		if err != nil {
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd
@@ -263,6 +256,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Attachment: attachment,
 		})
 
+	case commands.ToggleYoloModeMsg:
+		m.setEditorPrompt()
+		return m, nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -317,9 +313,9 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
-			if len(value) > 0 && value[len(value)-1] == '\\' {
-				// If the last character is a backslash, remove it and add a newline
-				m.textarea.SetValue(value[:len(value)-1])
+			if strings.HasSuffix(value, "\\") {
+				// If the last character is a backslash, remove it and add a newline.
+				m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
 			} else {
 				// Otherwise, send the message
 				return m, m.send()
@@ -366,6 +362,14 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *editorCmp) setEditorPrompt() {
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.SetPromptFunc(4, yoloPromptFunc)
+		return
+	}
+	m.textarea.SetPromptFunc(4, normalPromptFunc)
 }
 
 func (m *editorCmp) completionsPosition() (int, int) {
@@ -415,6 +419,9 @@ func (m *editorCmp) View() string {
 		m.textarea.Placeholder = m.workingPlaceholder
 	} else {
 		m.textarea.Placeholder = m.readyPlaceholder
+	}
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.Placeholder = "Yolo mode!"
 	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
@@ -473,7 +480,8 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 }
 
 func (m *editorCmp) startCompletions() tea.Msg {
-	files, _, _ := fsext.ListDirectory(".", []string{}, 0)
+	files, _, _ := fsext.ListDirectory(".", nil, 0)
+	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
@@ -529,31 +537,47 @@ func (c *editorCmp) HasAttachments() bool {
 	return len(c.attachments) > 0
 }
 
+func normalPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		return "  > "
+	}
+	if info.Focused {
+		return t.S().Base.Foreground(t.GreenDark).Render("::: ")
+	}
+	return t.S().Muted.Render("::: ")
+}
+
+func yoloPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return fmt.Sprintf("%s ", t.YoloIconFocused)
+		} else {
+			return fmt.Sprintf("%s ", t.YoloIconBlurred)
+		}
+	}
+	if info.Focused {
+		return fmt.Sprintf("%s ", t.YoloDotsFocused)
+	}
+	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "  > "
-		}
-		if info.Focused {
-			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
-		} else {
-			return t.S().Muted.Render("::: ")
-		}
-	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.Focus()
-
 	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
 	}
+	e.setEditorPrompt()
 
 	e.randomizePlaceholders()
 	e.textarea.Placeholder = e.readyPlaceholder

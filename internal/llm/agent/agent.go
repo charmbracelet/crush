@@ -60,6 +60,8 @@ type Service interface {
 	IsBusy() bool
 	Summarize(ctx context.Context, sessionID string) error
 	UpdateModel() error
+	QueuedPrompts(sessionID string) int
+	ClearQueue(sessionID string)
 }
 
 type agent struct {
@@ -79,6 +81,8 @@ type agent struct {
 	summarizeProviderID string
 
 	activeRequests *csync.Map[string, context.CancelFunc]
+
+	promptQueue *csync.Map[string, []string]
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
@@ -159,11 +163,12 @@ func NewAgent(
 	if err != nil {
 		return nil, err
 	}
+
 	summarizeOpts := []provider.ProviderClientOption{
-		provider.WithModel(config.SelectedModelTypeSmall),
-		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
+		provider.WithModel(config.SelectedModelTypeLarge),
+		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, providerCfg.ID)),
 	}
-	summarizeProvider, err := provider.NewProvider(*smallModelProviderCfg, summarizeOpts...)
+	summarizeProvider, err := provider.NewProvider(*providerCfg, summarizeOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +194,9 @@ func NewAgent(
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 
-		mcpTools := GetMCPTools(ctx, permissions, cfg)
+		mcpToolsOnce.Do(func() {
+			mcpTools = doGetMCPTools(ctx, permissions, cfg)
+		})
 		allTools = append(allTools, mcpTools...)
 
 		if len(lspClients) > 0 {
@@ -222,9 +229,10 @@ func NewAgent(
 		sessions:            sessions,
 		titleProvider:       titleProvider,
 		summarizeProvider:   summarizeProvider,
-		summarizeProviderID: string(smallModelProviderCfg.ID),
+		summarizeProviderID: string(providerCfg.ID),
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               csync.NewLazySlice(toolFn),
+		promptQueue:         csync.NewMap[string, []string](),
 	}, nil
 }
 
@@ -244,6 +252,11 @@ func (a *agent) Cancel(sessionID string) {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
+
+	if a.QueuedPrompts(sessionID) > 0 {
+		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		a.promptQueue.Del(sessionID)
+	}
 }
 
 func (a *agent) IsBusy() bool {
@@ -260,6 +273,14 @@ func (a *agent) IsBusy() bool {
 func (a *agent) IsSessionBusy(sessionID string) bool {
 	_, busy := a.activeRequests.Get(sessionID)
 	return busy
+}
+
+func (a *agent) QueuedPrompts(sessionID string) int {
+	l, ok := a.promptQueue.Get(sessionID)
+	if !ok {
+		return 0
+	}
+	return len(l)
 }
 
 func (a *agent) generateTitle(ctx context.Context, sessionID string, content string) error {
@@ -324,7 +345,13 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	}
 	events := make(chan AgentEvent)
 	if a.IsSessionBusy(sessionID) {
-		return nil, ErrSessionBusy
+		existing, ok := a.promptQueue.Get(sessionID)
+		if !ok {
+			existing = []string{}
+		}
+		existing = append(existing, content)
+		a.promptQueue.Set(sessionID, existing)
+		return nil, nil
 	}
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -419,7 +446,36 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
 			// We are not done, we need to respond with the tool response
 			msgHistory = append(msgHistory, agentMessage, *toolResults)
+			// If there are queued prompts, process the next one
+			nextPrompt, ok := a.promptQueue.Take(sessionID)
+			if ok {
+				for _, prompt := range nextPrompt {
+					// Create a new user message for the queued prompt
+					userMsg, err := a.createUserMessage(ctx, sessionID, prompt, nil)
+					if err != nil {
+						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
+					}
+					// Append the new user message to the conversation history
+					msgHistory = append(msgHistory, userMsg)
+				}
+			}
+
 			continue
+		} else if agentMessage.FinishReason() == message.FinishReasonEndTurn {
+			queuePrompts, ok := a.promptQueue.Take(sessionID)
+			if ok {
+				for _, prompt := range queuePrompts {
+					if prompt == "" {
+						continue
+					}
+					userMsg, err := a.createUserMessage(ctx, sessionID, prompt, nil)
+					if err != nil {
+						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
+					}
+					msgHistory = append(msgHistory, userMsg)
+				}
+				continue
+			}
 		}
 		if agentMessage.FinishReason() == "" {
 			// Kujtim: could not track down where this is happening but this means its cancelled
@@ -446,8 +502,8 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
-	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
 
+	// Create the assistant message first so the spinner shows immediately
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
@@ -457,6 +513,9 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	if err != nil {
 		return assistantMsg, nil, fmt.Errorf("failed to create assistant message: %w", err)
 	}
+
+	// Now collect tools (which may block on MCP initialization)
+	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
 
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
@@ -846,6 +905,13 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (a *agent) ClearQueue(sessionID string) {
+	if a.QueuedPrompts(sessionID) > 0 {
+		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		a.promptQueue.Del(sessionID)
+	}
+}
+
 func (a *agent) CancelAll() {
 	if !a.IsBusy() {
 		return
@@ -902,54 +968,59 @@ func (a *agent) UpdateModel() error {
 		a.providerID = string(currentProviderCfg.ID)
 	}
 
-	// Check if small model provider has changed (affects title and summarize providers)
+	// Check if providers have changed for title (small) and summarize (large)
 	smallModelCfg := cfg.Models[config.SelectedModelTypeSmall]
 	var smallModelProviderCfg config.ProviderConfig
-
 	for p := range cfg.Providers.Seq() {
 		if p.ID == smallModelCfg.Provider {
 			smallModelProviderCfg = p
 			break
 		}
 	}
-
 	if smallModelProviderCfg.ID == "" {
 		return fmt.Errorf("provider %s not found in config", smallModelCfg.Provider)
 	}
 
-	// Check if summarize provider has changed
-	if string(smallModelProviderCfg.ID) != a.summarizeProviderID {
-		smallModel := cfg.GetModelByType(config.SelectedModelTypeSmall)
-		if smallModel == nil {
-			return fmt.Errorf("model %s not found in provider %s", smallModelCfg.Model, smallModelProviderCfg.ID)
+	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+	var largeModelProviderCfg config.ProviderConfig
+	for p := range cfg.Providers.Seq() {
+		if p.ID == largeModelCfg.Provider {
+			largeModelProviderCfg = p
+			break
 		}
+	}
+	if largeModelProviderCfg.ID == "" {
+		return fmt.Errorf("provider %s not found in config", largeModelCfg.Provider)
+	}
 
-		// Recreate title provider
-		titleOpts := []provider.ProviderClientOption{
-			provider.WithModel(config.SelectedModelTypeSmall),
-			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-			// We want the title to be short, so we limit the max tokens
-			provider.WithMaxTokens(40),
-		}
-		newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
-		if err != nil {
-			return fmt.Errorf("failed to create new title provider: %w", err)
-		}
+	// Recreate title provider
+	titleOpts := []provider.ProviderClientOption{
+		provider.WithModel(config.SelectedModelTypeSmall),
+		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
+		provider.WithMaxTokens(40),
+	}
+	newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to create new title provider: %w", err)
+	}
+	a.titleProvider = newTitleProvider
 
-		// Recreate summarize provider
+	// Recreate summarize provider if provider changed (now large model)
+	if string(largeModelProviderCfg.ID) != a.summarizeProviderID {
+		largeModel := cfg.GetModelByType(config.SelectedModelTypeLarge)
+		if largeModel == nil {
+			return fmt.Errorf("model %s not found in provider %s", largeModelCfg.Model, largeModelProviderCfg.ID)
+		}
 		summarizeOpts := []provider.ProviderClientOption{
-			provider.WithModel(config.SelectedModelTypeSmall),
-			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, smallModelProviderCfg.ID)),
+			provider.WithModel(config.SelectedModelTypeLarge),
+			provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptSummarizer, largeModelProviderCfg.ID)),
 		}
-		newSummarizeProvider, err := provider.NewProvider(smallModelProviderCfg, summarizeOpts...)
+		newSummarizeProvider, err := provider.NewProvider(largeModelProviderCfg, summarizeOpts...)
 		if err != nil {
 			return fmt.Errorf("failed to create new summarize provider: %w", err)
 		}
-
-		// Update the providers and provider ID
-		a.titleProvider = newTitleProvider
 		a.summarizeProvider = newSummarizeProvider
-		a.summarizeProviderID = string(smallModelProviderCfg.ID)
+		a.summarizeProviderID = string(largeModelProviderCfg.ID)
 	}
 
 	return nil

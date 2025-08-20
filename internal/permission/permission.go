@@ -49,6 +49,8 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(opts CreatePermissionRequest) bool
 	AutoApproveSession(sessionID string)
+	SetSkipRequests(skip bool)
+	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -208,6 +210,14 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
 	return s.notificationBroker.Subscribe(ctx)
+}
+
+func (s *permissionService) SetSkipRequests(skip bool) {
+	s.skip = skip
+}
+
+func (s *permissionService) SkipRequests() bool {
+	return s.skip
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

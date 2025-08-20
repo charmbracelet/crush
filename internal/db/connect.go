@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -17,9 +16,6 @@ import (
 func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
-	}
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 	dbPath := filepath.Join(dataDir, "crush.db")
 	// Open the SQLite database

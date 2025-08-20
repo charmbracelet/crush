@@ -52,21 +52,6 @@ var safeCommands = []string{
 	"git show",
 	"git status",
 	"git tag",
-
-	// Go
-	"go build",
-	"go clean",
-	"go doc",
-	"go env",
-	"go fmt",
-	"go help",
-	"go install",
-	"go list",
-	"go mod",
-	"go run",
-	"go test",
-	"go version",
-	"go vet",
 }
 
 func init() {

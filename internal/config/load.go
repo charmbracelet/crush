@@ -310,16 +310,14 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
-	if c.Options.DataDirectory == "" {
+	if dataDir != "" {
+		c.Options.DataDirectory = dataDir
+	} else if c.Options.DataDirectory == "" {
 		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 		}
-	}
-	// explicit dataDir flag always takes precedence
-	if dataDir != "" {
-		c.Options.DataDirectory = dataDir
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()

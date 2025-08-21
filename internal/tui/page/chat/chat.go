@@ -387,40 +387,24 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.toggleDetails()
 			return p, nil
 		}
-
-		switch p.focusedPane {
-		case PanelTypeChat:
-			u, cmd := p.chat.Update(msg)
-			p.chat = u.(chat.MessageListCmp)
-			cmds = append(cmds, cmd)
-		case PanelTypeEditor:
-			u, cmd := p.editor.Update(msg)
-			p.editor = u.(editor.Editor)
-			cmds = append(cmds, cmd)
-		case PanelTypeSplash:
-			u, cmd := p.splash.Update(msg)
-			p.splash = u.(splash.Splash)
-			cmds = append(cmds, cmd)
-		}
-	case tea.PasteMsg:
-		switch p.focusedPane {
-		case PanelTypeEditor:
-			u, cmd := p.editor.Update(msg)
-			p.editor = u.(editor.Editor)
-			cmds = append(cmds, cmd)
-			return p, tea.Batch(cmds...)
-		case PanelTypeChat:
-			u, cmd := p.chat.Update(msg)
-			p.chat = u.(chat.MessageListCmp)
-			cmds = append(cmds, cmd)
-			return p, tea.Batch(cmds...)
-		case PanelTypeSplash:
-			u, cmd := p.splash.Update(msg)
-			p.splash = u.(splash.Splash)
-			cmds = append(cmds, cmd)
-			return p, tea.Batch(cmds...)
-		}
 	}
+
+	// Delegate other messages to the focused pane model
+	switch p.focusedPane {
+	case PanelTypeEditor:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		cmds = append(cmds, cmd)
+	case PanelTypeChat:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		cmds = append(cmds, cmd)
+	case PanelTypeSplash:
+		u, cmd := p.splash.Update(msg)
+		p.splash = u.(splash.Splash)
+		cmds = append(cmds, cmd)
+	}
+
 	return p, tea.Batch(cmds...)
 }
 

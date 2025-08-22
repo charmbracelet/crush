@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	MaxAttachmentSize  = int64(5 * 1024 * 1024) // 5MB
-	FilePickerID       = "filepicker"
-	fileSelectionHight = 10
+	MaxAttachmentSize   = int64(5 * 1024 * 1024) // 5MB
+	FilePickerID        = "filepicker"
+	fileSelectionHeight = 10
 )
 
 type FilePickedMsg struct {
@@ -68,7 +68,7 @@ func NewFilePickerCmp(workingDir string) FilePicker {
 	fp.AutoHeight = false
 	fp.Styles = t.S().FilePicker
 	fp.Cursor = ""
-	fp.SetHeight(fileSelectionHight)
+	fp.SetHeight(fileSelectionHeight)
 
 	image := image.New(1, 1, "")
 

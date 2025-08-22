@@ -358,7 +358,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		)
 	case config.MCPHttp:
 		if strings.TrimSpace(m.URL) == "" {
-			return nil, fmt.Errorf("mcp http config requires a non-empty 'command' field")
+			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
 		return client.NewStreamableHttpClient(
 			m.URL,
@@ -367,7 +367,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		)
 	case config.MCPSse:
 		if strings.TrimSpace(m.URL) == "" {
-			return nil, fmt.Errorf("mcp sse config requires a non-empty 'command' field")
+			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
 		return client.NewSSEMCPClient(
 			m.URL,

@@ -347,6 +347,9 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 	switch m.Type {
 	case config.MCPStdio:
+		if strings.TrimSpace(m.Command) == "" {
+			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
+		}
 		return client.NewStdioMCPClientWithOptions(
 			m.Command,
 			m.ResolvedEnv(),
@@ -354,12 +357,18 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 			transport.WithCommandLogger(mcpLogger{}),
 		)
 	case config.MCPHttp:
+		if strings.TrimSpace(m.URL) == "" {
+			return nil, fmt.Errorf("mcp http config requires a non-empty 'command' field")
+		}
 		return client.NewStreamableHttpClient(
 			m.URL,
 			transport.WithHTTPHeaders(m.ResolvedHeaders()),
 			transport.WithHTTPLogger(mcpLogger{}),
 		)
 	case config.MCPSse:
+		if strings.TrimSpace(m.URL) == "" {
+			return nil, fmt.Errorf("mcp sse config requires a non-empty 'command' field")
+		}
 		return client.NewSSEMCPClient(
 			m.URL,
 			client.WithHeaders(m.ResolvedHeaders()),

@@ -169,6 +169,9 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 }
 
 func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolUnionParam {
+	if len(tools) == 0 {
+		return nil
+	}
 	anthropicTools := make([]anthropic.ToolUnionParam, len(tools))
 
 	for i, tool := range tools {

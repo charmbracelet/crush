@@ -105,6 +105,10 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 	// Track tool calls that need results
 	pendingToolCalls := make(map[string]bool)
 
+	// When we merge a following Tool message into an injected placeholder
+	// we need to skip processing that Tool message later in the loop.
+	skipIndex := -1
+
 	for i, msg := range messages {
 		cache := false
 		if i > len(messages)-3 {
@@ -162,17 +166,38 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 
-			// If we have pending tool calls and the next message isn't a tool result,
-			// inject empty tool results to satisfy the API requirement
+			// If we have pending tool calls, ensure the very next message provides
+			// tool_result blocks for ALL of them. If not, merge placeholders for any
+			// missing tool_use IDs into a single synthetic user message immediately
+			// after the assistant's tool_use, as required by the API.
 			if len(pendingToolCalls) > 0 {
-				// Check if next message is a tool result
-				hasToolResult := false
 				if i+1 < len(messages) && messages[i+1].Role == message.Tool {
-					hasToolResult = true
-				}
-
-				if !hasToolResult {
-					// Create placeholder tool results for orphaned tool calls
+					// Next message is a Tool result message. Collect provided IDs.
+					next := messages[i+1]
+					provided := make(map[string]bool)
+					merged := make([]anthropic.ContentBlockParamUnion, 0, len(next.ToolResults()))
+					for _, tr := range next.ToolResults() {
+						merged = append(merged, anthropic.NewToolResultBlock(tr.ToolCallID, tr.Content, tr.IsError))
+						provided[tr.ToolCallID] = true
+						delete(pendingToolCalls, tr.ToolCallID)
+					}
+					// Add placeholders for any missing tool_use IDs.
+					for id := range pendingToolCalls {
+						slog.Warn("Adding missing placeholder tool_result for tool_use immediately after assistant response", "tool_call_id", id)
+						merged = append(merged, anthropic.NewToolResultBlock(
+							id,
+							"Tool execution was interrupted. Please retry if needed.",
+							true,
+						))
+					}
+					if len(merged) > 0 {
+						anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(merged...))
+					}
+					// Clear pending and mark to skip processing of the next Tool message (already merged)
+					pendingToolCalls = make(map[string]bool)
+					skipIndex = i + 1
+				} else {
+					// No following Tool message; inject placeholders for all pending.
 					var results []anthropic.ContentBlockParamUnion
 					for toolCallID := range pendingToolCalls {
 						slog.Warn("Creating placeholder tool result for orphaned tool call", "tool_call_id", toolCallID)
@@ -191,6 +216,11 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 
 		case message.Tool:
+			// If we've already merged this Tool message into a prior assistant's
+			// placeholder injection, skip it to avoid duplicate tool_result blocks.
+			if i == skipIndex {
+				continue
+			}
 			results := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults()))
 			for i, toolResult := range msg.ToolResults() {
 				results[i] = anthropic.NewToolResultBlock(toolResult.ToolCallID, toolResult.Content, toolResult.IsError)
@@ -522,6 +552,12 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return true, 0, nil
 	}
 
+	// Prepare a safe error message string; anthropic.Error.Error() may panic if Response is nil.
+	errMsg := ""
+	if apiErr.Response != nil {
+		errMsg = apiErr.Error()
+	}
+
 	// Handle 400 Bad Request errors
 	if apiErr.StatusCode == 400 {
 		// Check for context limit error
@@ -532,20 +568,23 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 
 		// Check for tool_use/tool_result mismatch error
-		if strings.Contains(apiErr.Error(), "tool_use") && strings.Contains(apiErr.Error(), "tool_result") {
-			slog.Warn("Tool use/result mismatch error, this should have been handled in convertMessages", "error", apiErr.Error())
+		if strings.Contains(errMsg, "tool_use") && strings.Contains(errMsg, "tool_result") {
+			slog.Warn("Tool use/result mismatch error, this should have been handled in convertMessages", "error", errMsg)
 			// Don't retry this error as it's a structural issue with the message history
 			return false, 0, fmt.Errorf("conversation history error: %w. Please start a new conversation or clear the chat history", apiErr)
 		}
 	}
 
-	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
+	isOverloaded := strings.Contains(errMsg, "overloaded") || strings.Contains(errMsg, "rate limit exceeded")
 	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 
 	retryMs := 0
-	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
+	var retryAfterValues []string
+	if apiErr.Response != nil {
+		retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+	}
 
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)
@@ -561,6 +600,9 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 // handleContextLimitError parses context limit error and returns adjusted max_tokens
 func (a *anthropicClient) handleContextLimitError(apiErr *anthropic.Error) (int, bool) {
 	// Parse error message like: "input length and max_tokens exceed context limit: 154978 + 50000 > 200000"
+	if apiErr.Response == nil {
+		return 0, false
+	}
 	errorMsg := apiErr.Error()
 
 	matches := contextLimitRegex.FindStringSubmatch(errorMsg)

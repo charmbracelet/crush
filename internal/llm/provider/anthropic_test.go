@@ -214,6 +214,58 @@ func TestAnthropicClient_ConvertMessages_HandlesOrphanedToolCalls(t *testing.T) 
 		require.True(t, toolIDs["tool_2"], "Missing placeholder for tool_2")
 	})
 
+	// When a Tool message follows but only covers some (not all) tool_use IDs,
+	// we must merge the real tool_result(s) with placeholder error results for
+	// the missing tool_use IDs into a single user message immediately after the
+	// assistant response, and skip processing the original Tool message to avoid
+	// duplicate tool_result blocks.
+	t.Run("partial tool_result coverage is merged and next Tool is skipped", func(t *testing.T) {
+		t.Parallel()
+		messages := []message.Message{
+			{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.ToolCall{ID: "tool_a", Name: "t1", Input: `{"x":1}`, Finished: true},
+					message.ToolCall{ID: "tool_b", Name: "t2", Input: `{"y":2}`, Finished: true},
+				},
+			},
+			{
+				Role: message.Tool,
+				Parts: []message.ContentPart{
+					// Only one real tool_result is supplied by the next Tool message
+					message.ToolResult{ToolCallID: "tool_a", Content: "ok", IsError: false},
+				},
+			},
+			{
+				Role:  message.User,
+				Parts: []message.ContentPart{message.TextContent{Text: "Continue"}},
+			},
+		}
+
+		anthropicMessages := client.convertMessages(messages)
+
+		// Expect: assistant, merged user tool_results (real + placeholder), user
+		require.Len(t, anthropicMessages, 3)
+		merged := anthropicMessages[1]
+		// Should contain 2 entries: one real, one placeholder for missing tool_b
+		require.Len(t, merged.Content, 2)
+
+		var hasReal, hasPlaceholder bool
+		for _, cb := range merged.Content {
+			require.NotNil(t, cb.OfToolResult)
+			if cb.OfToolResult.ToolUseID == "tool_a" {
+				require.False(t, cb.OfToolResult.IsError.Value)
+				hasReal = true
+			}
+			if cb.OfToolResult.ToolUseID == "tool_b" {
+				require.True(t, cb.OfToolResult.IsError.Value)
+				hasPlaceholder = true
+			}
+		}
+		require.True(t, hasReal, "expected real tool_result for tool_a")
+		require.True(t, hasPlaceholder, "expected placeholder tool_result for tool_b")
+	})
+
 	t.Run("canceled message with empty content", func(t *testing.T) {
 		t.Parallel()
 		messages := []message.Message{
@@ -471,6 +523,7 @@ func TestAnthropicClient_HandleContextLimitError(t *testing.T) {
 	}
 }
 
+//nolint:tparallel // subtests intentionally not parallel; they mutate global config.Get().Models and would race.
 func TestAnthropicClient_PreparedMessages_WithThinking(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -505,7 +558,7 @@ func TestAnthropicClient_PreparedMessages_WithThinking(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			// not parallel; mutates global config
 			// Set up config for test
 			cfg := config.Get()
 			if cfg.Models == nil {
@@ -547,9 +600,4 @@ func TestAnthropicClient_PreparedMessages_WithThinking(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestAnthropicClient_SendRetry(t *testing.T) {
-	// Skip this test as it requires a more complex setup
-	t.Skip("Skipping send retry test - requires mock SDK client")
 }

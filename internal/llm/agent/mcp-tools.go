@@ -98,10 +98,14 @@ func (b *McpTool) Info() tools.ToolInfo {
 	if required == nil {
 		required = make([]string, 0)
 	}
+	parameters := b.tool.InputSchema.Properties
+	if parameters == nil {
+		parameters = make(map[string]any)
+	}
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
-		Parameters:  b.tool.InputSchema.Properties,
+		Parameters:  parameters,
 		Required:    required,
 	}
 }

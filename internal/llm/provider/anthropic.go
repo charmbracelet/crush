@@ -102,6 +102,9 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 }
 
 func (a *anthropicClient) convertMessages(messages []message.Message) (anthropicMessages []anthropic.MessageParam) {
+	// Track tool calls that need results
+	pendingToolCalls := make(map[string]bool)
+
 	for i, msg := range messages {
 		cache := false
 		if i > len(messages)-3 {
@@ -143,6 +146,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 				blocks = append(blocks, content)
 			}
 
+			// Track tool calls in this message
 			for _, toolCall := range msg.ToolCalls() {
 				var inputMap map[string]any
 				err := json.Unmarshal([]byte(toolCall.Input), &inputMap)
@@ -150,6 +154,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 					continue
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(toolCall.ID, inputMap, toolCall.Name))
+				pendingToolCalls[toolCall.ID] = true
 			}
 
 			if len(blocks) == 0 {
@@ -157,10 +162,40 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 
+			// If we have pending tool calls and the next message isn't a tool result,
+			// inject empty tool results to satisfy the API requirement
+			if len(pendingToolCalls) > 0 {
+				// Check if next message is a tool result
+				hasToolResult := false
+				if i+1 < len(messages) && messages[i+1].Role == message.Tool {
+					hasToolResult = true
+				}
+
+				if !hasToolResult {
+					// Create placeholder tool results for orphaned tool calls
+					var results []anthropic.ContentBlockParamUnion
+					for toolCallID := range pendingToolCalls {
+						slog.Warn("Creating placeholder tool result for orphaned tool call", "tool_call_id", toolCallID)
+						results = append(results, anthropic.NewToolResultBlock(
+							toolCallID,
+							"Tool execution was interrupted. Please retry if needed.",
+							true, // Mark as error
+						))
+					}
+					if len(results) > 0 {
+						anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(results...))
+					}
+					// Clear pending tool calls
+					pendingToolCalls = make(map[string]bool)
+				}
+			}
+
 		case message.Tool:
 			results := make([]anthropic.ContentBlockParamUnion, len(msg.ToolResults()))
 			for i, toolResult := range msg.ToolResults() {
 				results[i] = anthropic.NewToolResultBlock(toolResult.ToolCallID, toolResult.Content, toolResult.IsError)
+				// Clear from pending
+				delete(pendingToolCalls, toolResult.ToolCallID)
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(results...))
 		}
@@ -304,7 +339,8 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 					continue
 				}
 			}
-			return nil, retryErr
+			// If we're not retrying, return the original error
+			return nil, err
 		}
 
 		content := ""
@@ -458,10 +494,8 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 					continue
 				}
 			}
-			if ctx.Err() != nil {
-				eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
-			}
-
+			// If we're not retrying, send the error
+			eventChan <- ProviderEvent{Type: EventError, Error: err}
 			close(eventChan)
 			return
 		}
@@ -488,12 +522,20 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return true, 0, nil
 	}
 
-	// Handle context limit exceeded error (400 Bad Request)
+	// Handle 400 Bad Request errors
 	if apiErr.StatusCode == 400 {
+		// Check for context limit error
 		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
 			a.adjustedMaxTokens = adjusted
 			slog.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
 			return true, 0, nil
+		}
+
+		// Check for tool_use/tool_result mismatch error
+		if strings.Contains(apiErr.Error(), "tool_use") && strings.Contains(apiErr.Error(), "tool_result") {
+			slog.Warn("Tool use/result mismatch error, this should have been handled in convertMessages", "error", apiErr.Error())
+			// Don't retry this error as it's a structural issue with the message history
+			return false, 0, fmt.Errorf("conversation history error: %w. Please start a new conversation or clear the chat history", apiErr)
 		}
 	}
 

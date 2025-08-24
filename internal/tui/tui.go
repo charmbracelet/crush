@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
+
+const tmuxEnvVar = "TMUX"
 
 var lastMouseEvent time.Time
 
@@ -475,7 +478,9 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 func (a *appModel) View() tea.View {
 	var view tea.View
 	t := styles.CurrentTheme()
-	view.BackgroundColor = t.BgBase
+	if _, exists := os.LookupEnv(tmuxEnvVar); !exists {
+		view.BackgroundColor = t.BgBase
+	}
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Layer = lipgloss.NewCanvas(
 			lipgloss.NewLayer(

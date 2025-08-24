@@ -32,7 +32,7 @@ WHERE id = ? LIMIT 1;
 SELECT *
 FROM sessions
 WHERE parent_session_id is NULL
-ORDER BY created_at DESC;
+ORDER BY updated_at DESC;
 
 -- name: UpdateSession :one
 UPDATE sessions
@@ -41,7 +41,8 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
-    cost = ?
+    cost = ?,
+    updated_at = ?
 WHERE id = ?
 RETURNING *;
 

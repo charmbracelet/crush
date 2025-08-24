@@ -13,8 +13,10 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/llm/conversation"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
+	"github.com/charmbracelet/crush/internal/llm/title"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -77,6 +79,7 @@ type agent struct {
 	providerID string
 
 	titleProvider       provider.Provider
+	titleGenerator      title.Generator
 	summarizeProvider   provider.Provider
 	summarizeProviderID string
 
@@ -163,6 +166,7 @@ func NewAgent(
 	if err != nil {
 		return nil, err
 	}
+	titleGenerator := title.NewGenerator(titleProvider)
 
 	summarizeOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SelectedModelTypeLarge),
@@ -228,6 +232,7 @@ func NewAgent(
 		messages:            messages,
 		sessions:            sessions,
 		titleProvider:       titleProvider,
+		titleGenerator:      titleGenerator,
 		summarizeProvider:   summarizeProvider,
 		summarizeProviderID: string(providerCfg.ID),
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
@@ -283,53 +288,32 @@ func (a *agent) QueuedPrompts(sessionID string) int {
 	return len(l)
 }
 
-func (a *agent) generateTitle(ctx context.Context, sessionID string, content string) error {
-	if content == "" {
-		return nil
+func (a *agent) generateTitle(ctx context.Context, session session.Session, conv conversation.Conversation) {
+	if conv.Len() > 1 {
+		return
 	}
-	if a.titleProvider == nil {
-		return nil
-	}
-	session, err := a.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	parts := []message.ContentPart{message.TextContent{
-		Text: fmt.Sprintf("Generate a concise title for the following content:\n\n%s", content),
-	}}
 
-	// Use streaming approach like summarization
-	response := a.titleProvider.StreamResponse(
-		ctx,
-		[]message.Message{
-			{
-				Role:  message.User,
-				Parts: parts,
-			},
-		},
-		nil,
-	)
+	go func() {
+		defer log.RecoverPanic("agent.Run", func() {
+			slog.Error("panic while generating title")
+		})
 
-	var finalResponse *provider.ProviderResponse
-	for r := range response {
-		if r.Error != nil {
-			return r.Error
+		title, err := a.titleGenerator.Generate(ctx, conv)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			slog.Error("failed to generate title", "error", err)
+			return
 		}
-		finalResponse = r.Response
-	}
 
-	if finalResponse == nil {
-		return fmt.Errorf("no response received from title provider")
-	}
+		if title == "" {
+			return
+		}
 
-	title := strings.TrimSpace(strings.ReplaceAll(finalResponse.Content, "\n", " "))
-	if title == "" {
-		return nil
-	}
-
-	session.Title = title
-	_, err = a.sessions.Save(ctx, session)
-	return err
+		session.Title = title
+		_, err = a.sessions.Save(ctx, session)
+		if err != nil {
+			slog.Error("failed to save session", "error", err)
+		}
+	}()
 }
 
 func (a *agent) err(err error) AgentEvent {
@@ -382,46 +366,24 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 
 func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
 	cfg := config.Get()
-	// List existing messages; if none, start title generation asynchronously.
-	msgs, err := a.messages.List(ctx, sessionID)
-	if err != nil {
-		return a.err(fmt.Errorf("failed to list messages: %w", err))
-	}
-	if len(msgs) == 0 {
-		go func() {
-			defer log.RecoverPanic("agent.Run", func() {
-				slog.Error("panic while generating title")
-			})
-			titleErr := a.generateTitle(context.Background(), sessionID, content)
-			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
-				slog.Error("failed to generate title", "error", titleErr)
-			}
-		}()
-	}
 	session, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to get session: %w", err))
 	}
-	if session.SummaryMessageID != "" {
-		summaryMsgInex := -1
-		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgInex = i
-				break
-			}
-		}
-		if summaryMsgInex != -1 {
-			msgs = msgs[summaryMsgInex:]
-			msgs[0].Role = message.User
-		}
+
+	conv, err := conversation.LoadFromSession(ctx, session, a.messages)
+	if err != nil {
+		return a.err(fmt.Errorf("failed to list messages: %w", err))
 	}
 
 	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
 	}
+
 	// Append the new user message to the conversation history.
-	msgHistory := append(msgs, userMsg)
+	conv.Add(userMsg)
+	a.generateTitle(context.Background(), session, conv)
 
 	for {
 		// Check for cancellation before each iteration
@@ -431,7 +393,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		default:
 			// Continue processing
 		}
-		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
+		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, conv)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
@@ -445,7 +407,8 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}
 		if (agentMessage.FinishReason() == message.FinishReasonToolUse) && toolResults != nil {
 			// We are not done, we need to respond with the tool response
-			msgHistory = append(msgHistory, agentMessage, *toolResults)
+			conv.Add(agentMessage)
+			conv.Add(*toolResults)
 			// If there are queued prompts, process the next one
 			nextPrompt, ok := a.promptQueue.Take(sessionID)
 			if ok {
@@ -456,10 +419,9 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
 					}
 					// Append the new user message to the conversation history
-					msgHistory = append(msgHistory, userMsg)
+					conv.Add(userMsg)
 				}
 			}
-
 			continue
 		} else if agentMessage.FinishReason() == message.FinishReasonEndTurn {
 			queuePrompts, ok := a.promptQueue.Take(sessionID)
@@ -472,7 +434,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 					if err != nil {
 						return a.err(fmt.Errorf("failed to create user message for queued prompt: %w", err))
 					}
-					msgHistory = append(msgHistory, userMsg)
+					conv.Add(userMsg)
 				}
 				continue
 			}
@@ -500,9 +462,8 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 	})
 }
 
-func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
+func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, conv conversation.Conversation) (message.Message, *message.Message, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
-
 	// Create the assistant message first so the spinner shows immediately
 	assistantMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
@@ -515,7 +476,7 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	}
 
 	// Now collect tools (which may block on MCP initialization)
-	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
+	eventChan := a.provider.StreamResponse(ctx, conv.Messages(), slices.Collect(a.tools.Seq()))
 
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
@@ -1003,7 +964,7 @@ func (a *agent) UpdateModel() error {
 	if err != nil {
 		return fmt.Errorf("failed to create new title provider: %w", err)
 	}
-	a.titleProvider = newTitleProvider
+	a.titleGenerator = title.NewGenerator(newTitleProvider)
 
 	// Recreate summarize provider if provider changed (now large model)
 	if string(largeModelProviderCfg.ID) != a.summarizeProviderID {

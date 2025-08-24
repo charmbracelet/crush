@@ -29,13 +29,14 @@ type sessionDialogCmp struct {
 	wHeight           int
 	width             int
 	selectedSessionID string
+	currentSessionID  string // Add this to track current session
 	keyMap            KeyMap
 	sessionsList      SessionsList
 	help              help.Model
 }
 
 // NewSessionDialogCmp creates a new session switching dialog
-func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionDialog {
+func NewSessionDialogCmp(sessions []session.Session, selectedID string, currentSessionID string) SessionDialog {
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultKeyMap()
@@ -65,6 +66,7 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	help.Styles = t.S().Help
 	s := &sessionDialogCmp{
 		selectedSessionID: selectedID,
+		currentSessionID:  currentSessionID, // Add current session ID
 		keyMap:            DefaultKeyMap(),
 		sessionsList:      sessionsList,
 		help:              help,
@@ -105,6 +107,17 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						chat.SessionSelectedMsg(selected.Value()),
 					),
 				)
+			}
+		case key.Matches(msg, s.keyMap.Delete):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem != nil {
+				selected := *selectedItem
+				// Don't allow deleting current session
+				if selected.Value().ID != s.currentSessionID {
+					return s, util.CmdHandler(dialogs.OpenDialogMsg{
+						Model: NewConfirmDeleteDialog(selected.Value(), SessionsDialogID),
+					})
+				}
 			}
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})

@@ -70,7 +70,10 @@ type (
 	ToggleThinkingMsg     struct{}
 	OpenExternalEditorMsg struct{}
 	ToggleYoloModeMsg     struct{}
-	CompactMsg            struct {
+	DeleteSessionMsg      struct { // Add this new message type
+		SessionID string
+	}
+	CompactMsg struct {
 		SessionID string
 	}
 )
@@ -294,6 +297,18 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Summarize the current session and create a new one with the summary",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(CompactMsg{
+					SessionID: c.sessionID,
+				})
+			},
+		})
+
+		// Add delete session command
+		commands = append(commands, Command{
+			ID:          "delete_session",
+			Title:       "Delete Session",
+			Description: "Delete the current session",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(DeleteSessionMsg{
 					SessionID: c.sessionID,
 				})
 			},

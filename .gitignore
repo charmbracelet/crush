@@ -49,13 +49,3 @@ Thumbs.db
 manpages/
 completions/
 !internal/tui/components/completions/
-
-# Ignore Go build cache
-bin/
-build/
-
-# Ignore personal notes
-*.md
-!README.md
-!docs/*.md
-

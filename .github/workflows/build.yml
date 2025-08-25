@@ -23,6 +23,8 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - run: |
+          echo "Logging in..."
+          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | gh auth login --with-token
           echo "Approving..."
           gh pr review --approve "$PR_URL"
           echo "Merging..."

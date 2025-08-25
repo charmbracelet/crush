@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/catwalk/pkg/embedded"
 )
 
 type ProviderClient interface {
@@ -74,21 +75,27 @@ func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 	return providers, nil
 }
 
-func Providers() ([]catwalk.Provider, error) {
-	catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
-	client := catwalk.NewWithURL(catwalkURL)
-	path := providerCacheFileData()
-	return loadProvidersOnce(client, path)
-}
-
-func loadProvidersOnce(client ProviderClient, path string) ([]catwalk.Provider, error) {
-	var err error
+func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
-		providerList, err = loadProviders(client, path)
+		if cfg.Options.DisableCatwalk {
+			slog.Warn("Catwalk is disabled, using embedded providers, which might be outdated")
+			providerList = embedded.GetAll()
+			return
+		}
+
+		catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
+		client := catwalk.NewWithURL(catwalkURL)
+		path := providerCacheFileData()
+
+		providers, err := loadProviders(client, path)
+		if err != nil {
+			slog.Error("Unable to load providers from Catwalk. Falling back to embedded providers, which might be outdated.", "error", err)
+			providerList = embedded.GetAll()
+			return
+		}
+
+		providerList = providers
 	})
-	if err != nil {
-		return nil, err
-	}
 	return providerList, nil
 }
 

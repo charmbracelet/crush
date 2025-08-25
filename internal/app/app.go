@@ -154,7 +154,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 
 	messageEvents := app.Messages.Subscribe(ctx)
-	readBts := 0
+	messageReadBytes := make(map[string]int)
 
 	for {
 		select {
@@ -170,11 +170,14 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 			}
 
 			msgContent := result.Message.Content().String()
+			readBts := messageReadBytes[result.Message.ID]
+
 			if len(msgContent) < readBts {
 				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
 				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
 			}
 			fmt.Println(msgContent[readBts:])
+			messageReadBytes[result.Message.ID] = len(msgContent)
 
 			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 			return nil
@@ -183,9 +186,18 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 			msg := event.Payload
 			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
 				stopSpinner()
-				part := msg.Content().String()[readBts:]
+
+				content := msg.Content().String()
+				readBytes := messageReadBytes[msg.ID]
+
+				if len(content) < readBytes {
+					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+				}
+
+				part := content[readBytes:]
 				fmt.Print(part)
-				readBts += len(part)
+				messageReadBytes[msg.ID] = len(content)
 			}
 
 		case <-ctx.Done():

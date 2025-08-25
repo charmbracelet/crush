@@ -2,6 +2,7 @@ package splash
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/tui/keys"
 )
 
 type KeyMap struct {
@@ -45,8 +46,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("left", "right"),
 			key.WithHelp("←/→", "switch"),
 		),
-		Back: key.NewBinding(
-			key.WithKeys("esc"),
+		Back: keys.Escape(
 			key.WithHelp("esc", "back"),
 		),
 	}

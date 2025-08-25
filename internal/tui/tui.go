@@ -165,6 +165,18 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: models.NewModelDialogCmp(),
 			},
 		)
+	case commands.RestartMCPMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: dialogs.NewMCPRestartDialog(),
+			},
+		)
+	case commands.RestartLSPMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: dialogs.NewLSPRestartDialog(),
+			},
+		)
 	// Compact
 	case commands.CompactMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
@@ -180,6 +192,23 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
+	// Restart handlers
+	case dialogs.RestartMCPMsg:
+		// Restart the specific MCP
+		ctx := context.Background()
+		err := agent.RestartMCP(ctx, msg.Name)
+		if err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to restart MCP '%s': %w", msg.Name, err))
+		}
+		return a, util.ReportInfo(fmt.Sprintf("Successfully restarted MCP '%s'", msg.Name))
+	case dialogs.RestartLSPMsg:
+		// Restart the specific LSP
+		ctx := context.Background()
+		err := a.app.RestartLSPClient(ctx, msg.Name)
+		if err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to restart LSP '%s': %w", msg.Name, err))
+		}
+		return a, util.ReportInfo(fmt.Sprintf("Successfully restarted LSP '%s'", msg.Name))
 	// Model Switch
 	case models.ModelSelectedMsg:
 		if a.app.CoderAgent.IsBusy() {

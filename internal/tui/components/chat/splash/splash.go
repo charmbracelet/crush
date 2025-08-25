@@ -458,6 +458,7 @@ func (s *splashCmp) View() string {
 		initText := lipgloss.JoinVertical(
 			lipgloss.Left,
 			titleStyle.Render("Would you like to initialize this project?"),
+			shortcutStyle.Render(s.cwd()),
 			"",
 			bodyStyle.Render("When I initialize your codebase I examine the project and put the"),
 			bodyStyle.Render("result into a CRUSH.md file which serves as general context."),
@@ -545,7 +546,7 @@ func (s *splashCmp) infoSection() string {
 	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
-			s.cwd(),
+			s.cwdPart(),
 			"",
 			s.currentModelBlock(),
 			"",
@@ -638,15 +639,19 @@ func (s *splashCmp) getMaxInfoWidth() int {
 	return min(s.width-2, 90) // 2 for left padding
 }
 
+func (s *splashCmp) cwdPart() string {
+	t := styles.CurrentTheme()
+	maxWidth := s.getMaxInfoWidth()
+	return t.S().Muted.Width(maxWidth).Render(s.cwd())
+}
+
 func (s *splashCmp) cwd() string {
 	cwd := config.Get().WorkingDir()
-	t := styles.CurrentTheme()
 	homeDir, err := os.UserHomeDir()
 	if err == nil && cwd != homeDir {
 		cwd = strings.ReplaceAll(cwd, homeDir, "~")
 	}
-	maxWidth := s.getMaxInfoWidth()
-	return t.S().Muted.Width(maxWidth).Render(cwd)
+	return cwd
 }
 
 func LSPList(maxWidth int) []string {

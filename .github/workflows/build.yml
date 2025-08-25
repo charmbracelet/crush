@@ -11,7 +11,7 @@ jobs:
       gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
 
   dependabot:
-    needs: [build]
+    needs: [build, lint]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

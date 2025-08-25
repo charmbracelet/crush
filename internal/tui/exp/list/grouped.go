@@ -42,7 +42,8 @@ func NewGroupedList[T Item](groups []Group[T], opts ...ListOption) GroupedList[T
 		},
 		items:         csync.NewSlice[Item](),
 		indexMap:      csync.NewMap[string, int](),
-		renderedItems: csync.NewMap[string, renderedItem](),
+		viewCache:     csync.NewMap[string, string](),
+		itemPositions: nil,
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)

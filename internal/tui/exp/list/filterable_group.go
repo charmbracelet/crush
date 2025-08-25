@@ -191,7 +191,6 @@ func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 		}
 	}
 
-	f.selectedItem = ""
 	if query == "" {
 		return f.groupedList.SetGroups(f.groups)
 	}

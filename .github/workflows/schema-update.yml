@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          token: ${{ secrets.CRUSH_CLA_BOT }}
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

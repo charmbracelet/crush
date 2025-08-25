@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -416,6 +418,13 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}
 	}
 
+	// Inject CRUSH.md if needed (first message or after compaction)
+	msgs, err = a.injectCrushMdIfNeeded(ctx, sessionID, msgs)
+	if err != nil {
+		slog.Error("failed to inject CRUSH.md", "error", err)
+		// Continue without CRUSH.md injection
+	}
+
 	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
@@ -489,6 +498,46 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			Done:    true,
 		}
 	}
+}
+
+// injectCrushMdIfNeeded checks if CRUSH.md exists and if we need to inject it as a system message
+// This happens on first message or after context compaction
+func (a *agent) injectCrushMdIfNeeded(ctx context.Context, sessionID string, msgs []message.Message) ([]message.Message, error) {
+	// Check if we need to inject CRUSH.md
+	// Inject if: no messages OR first message after summary (context compaction)
+	needsInjection := len(msgs) == 0
+	
+	// Also check if we just have a summary message (after compaction)
+	if !needsInjection && len(msgs) > 0 {
+		session, err := a.sessions.Get(ctx, sessionID)
+		if err == nil && session.SummaryMessageID != "" {
+			// Check if we're at the summary message position
+			if msgs[0].ID == session.SummaryMessageID {
+				needsInjection = true
+			}
+		}
+	}
+	
+	if needsInjection {
+		// Check for CRUSH.md in the working directory
+		cfg := config.Get()
+		crushPath := filepath.Join(cfg.WorkingDir(), "CRUSH.md")
+		if crushContent, err := os.ReadFile(crushPath); err == nil {
+			// Create a system message with CRUSH.md contents
+			systemMsg, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
+				Role:  message.System,
+				Parts: []message.ContentPart{message.TextContent{Text: string(crushContent)}},
+			})
+			if err != nil {
+				return msgs, fmt.Errorf("failed to create CRUSH.md system message: %w", err)
+			}
+			slog.Info("Injected CRUSH.md as system message", "path", crushPath)
+			// Prepend the system message
+			msgs = append([]message.Message{systemMsg}, msgs...)
+		}
+	}
+	
+	return msgs, nil
 }
 
 func (a *agent) createUserMessage(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) (message.Message, error) {

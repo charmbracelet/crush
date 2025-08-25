@@ -210,7 +210,7 @@ nfpms:
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/etc/bash_completion.d/crush'
+        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files/usr{{ end }}/etc/bash_completion.d/crush'
       - src: ./completions/crush.fish
         dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/fish/vendor_completions.d/crush.fish'
       - src: ./completions/crush.zsh

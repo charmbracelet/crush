@@ -188,9 +188,12 @@ func (c *Client) handleMessages() {
 
 // Call makes a request and waits for the response
 func (c *Client) Call(ctx context.Context, method string, params any, result any) error {
-	cfg := config.Get()
+	if !c.IsMethodSupported(method) {
+		return fmt.Errorf("method not supported by server: %s", method)
+	}
 	id := c.nextID.Add(1)
 
+	cfg := config.Get()
 	if cfg.Options.DebugLSP {
 		slog.Debug("Making call", "method", method, "id", id)
 	}
@@ -253,6 +256,12 @@ func (c *Client) Call(ctx context.Context, method string, params any, result any
 // Notify sends a notification (a request without an ID that doesn't expect a response)
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	cfg := config.Get()
+	if !c.IsMethodSupported(method) {
+		if cfg.Options.DebugLSP {
+			slog.Debug("Skipping notification: method not supported by server", "method", method)
+		}
+		return nil
+	}
 	if cfg.Options.DebugLSP {
 		slog.Debug("Sending notification", "method", method)
 	}

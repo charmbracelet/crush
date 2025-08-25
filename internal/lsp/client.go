@@ -66,7 +66,7 @@ type Client struct {
 
 // NewClient creates a new LSP client.
 func NewClient(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
-	cmd := exec.CommandContext(ctx, config.Command, config.Args...)
+	cmd := exec.CommandContext(ctx, config.ResolvedCommand(), config.Args...)
 
 	// Copy env
 	cmd.Env = slices.Concat(os.Environ(), config.ResolvedEnv())

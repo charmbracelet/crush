@@ -3,7 +3,6 @@ package sidebar
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -609,11 +609,5 @@ func (m *sidebarCmp) SetCompactMode(compact bool) {
 func cwd() string {
 	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
-	// Replace home directory with ~, unless we're at the top level of the
-	// home directory).
-	homeDir, err := os.UserHomeDir()
-	if err == nil && cwd != homeDir {
-		cwd = strings.ReplaceAll(cwd, homeDir, "~")
-	}
-	return t.S().Muted.Render(cwd)
+	return t.S().Muted.Render(home.Short(cwd))
 }

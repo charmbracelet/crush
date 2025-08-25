@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/home"
 )
 
 type PromptID string
@@ -44,18 +45,7 @@ func getContextFromPaths(workingDir string, contextPaths []string) string {
 
 // expandPath expands ~ and environment variables in file paths
 func expandPath(path string) string {
-	// Handle tilde expansion
-	if strings.HasPrefix(path, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			path = filepath.Join(homeDir, path[2:])
-		}
-	} else if path == "~" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			path = homeDir
-		}
-	}
+	path = home.Long(path)
 
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {

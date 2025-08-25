@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/charmbracelet/crush/internal/home"
 )
 
 // SearchParent searches for a target file or directory starting from dir
@@ -33,7 +35,7 @@ func SearchParent(dir, target string) (string, bool) {
 
 	for {
 		parent := filepath.Dir(previousParent)
-		if parent == previousParent || parent == HomeDir() {
+		if parent == previousParent || parent == home.Dir() {
 			return "", false
 		}
 

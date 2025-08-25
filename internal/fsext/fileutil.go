@@ -10,6 +10,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/home"
 
 	ignore "github.com/sabhiram/go-gitignore"
 )
@@ -182,12 +183,7 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 }
 
 func PrettyPath(path string) string {
-	// replace home directory with ~
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		path = strings.ReplaceAll(path, homeDir, "~")
-	}
-	return path
+	return home.Short(path)
 }
 
 func DirTrim(pwd string, lim int) string {

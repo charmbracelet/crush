@@ -9,6 +9,7 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/home"
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
@@ -73,7 +74,7 @@ var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
 })
 
 var homeIgnore = sync.OnceValue(func() ignore.IgnoreParser {
-	home := HomeDir()
+	home := home.Dir()
 	var lines []string
 	for _, name := range []string{
 		filepath.Join(home, ".gitignore"),

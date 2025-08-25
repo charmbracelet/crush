@@ -2,7 +2,6 @@ package splash
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -641,12 +641,8 @@ func (s *splashCmp) getMaxInfoWidth() int {
 func (s *splashCmp) cwd() string {
 	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
-	homeDir, err := os.UserHomeDir()
-	if err == nil && cwd != homeDir {
-		cwd = strings.ReplaceAll(cwd, homeDir, "~")
-	}
 	maxWidth := s.getMaxInfoWidth()
-	return t.S().Muted.Width(maxWidth).Render(cwd)
+	return t.S().Muted.Width(maxWidth).Render(home.Short(cwd))
 }
 
 func LSPList(maxWidth int) []string {

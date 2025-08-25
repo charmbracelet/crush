@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -59,7 +60,7 @@ func NewFilePickerCmp(workingDir string) FilePicker {
 		if cwd, err := os.Getwd(); err == nil {
 			fp.CurrentDirectory = cwd
 		} else {
-			fp.CurrentDirectory, _ = os.UserHomeDir()
+			fp.CurrentDirectory = home.Dir()
 		}
 	}
 
@@ -105,8 +106,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, m.filePicker.KeyMap.Back) {
 			// make sure we don't go back if we are at the home directory
-			homeDir, _ := os.UserHomeDir()
-			if m.filePicker.CurrentDirectory == homeDir {
+			if m.filePicker.CurrentDirectory == home.Dir() {
 				return m, nil
 			}
 		}

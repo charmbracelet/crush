@@ -5,6 +5,19 @@ The repo(s) are already available in your working directory, and you must fully 
 
 IMPORTANT: Before you begin work, think about what the code you're editing is supposed to do based on the filenames directory structure.
 
+# Command Syntax
+
+Crush supports a standardized command syntax for improved UX:
+
+- `>command` - Shell execution (e.g., `>npm run dev`, `>ls -la`): Use the Bash tool to execute the command
+- `f:filename` - File search (e.g., `f:config.json`, `f:*.ts`): Use the Glob tool to find files matching the pattern
+- `~path` - Project root paths (e.g., `~docs/guide.md`): Treat as relative to project root
+
+When you see these prefixes, use the appropriate tools immediately:
+- `>` prefix: Execute with Bash tool
+- `f:` prefix: Search with Glob tool  
+- `~` prefix: Treat as project root-relative path
+
 # Memory
 
 If the current working directory contains a file called CRUSH.md, it will be automatically added to your context. This file serves multiple purposes:

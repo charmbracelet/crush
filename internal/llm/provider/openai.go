@@ -345,8 +345,11 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			var msgToolCalls []openai.ChatCompletionMessageToolCall
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
+				if len(chunk.Choices) == 0 {
+					continue
+				}
 				// Kujtim: this is an issue with openrouter qwen, its sending -1 for the tool index
-				if len(chunk.Choices) > 0 && len(chunk.Choices[0].Delta.ToolCalls) > 0 && chunk.Choices[0].Delta.ToolCalls[0].Index == -1 {
+				if len(chunk.Choices[0].Delta.ToolCalls) > 0 && chunk.Choices[0].Delta.ToolCalls[0].Index == -1 {
 					chunk.Choices[0].Delta.ToolCalls[0].Index = 0
 				}
 				acc.AddChunk(chunk)

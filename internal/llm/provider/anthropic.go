@@ -80,7 +80,10 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 	}
 
 	if opts.baseURL != "" {
-		anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(opts.baseURL))
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil {
+			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(resolvedBaseURL))
+		}
 	}
 
 	if config.Get().Options.Debug {

@@ -14,8 +14,8 @@ type EditorKeyMap struct {
 func DefaultEditorKeyMap() EditorKeyMap {
 	return EditorKeyMap{
 		AddFile: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "add file"),
+			key.WithKeys("#"),
+			key.WithHelp("#", "reference file"),
 		),
 		SendMessage: key.NewBinding(
 			key.WithKeys("enter"),

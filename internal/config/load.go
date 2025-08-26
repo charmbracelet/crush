@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,13 +42,8 @@ func LoadReader(fd io.Reader) (*Config, error) {
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
-	// uses default config paths
-	configPaths := []string{
-		globalConfig(),
-		GlobalConfigData(),
-		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
-		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
-	}
+	configPaths := lookupConfigs(workingDir)
+
 	cfg, err := loadFromConfigPaths(configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
@@ -512,6 +508,42 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil
+}
+
+// lookupConfigs searches config files recursively from CWD up to FS root
+func lookupConfigs(cwd string) []string {
+	configNames := []string{appName + ".json", "." + appName + ".json"}
+
+	var foundConfigs []string
+
+	for {
+		for _, fname := range configNames {
+			fpath := filepath.Join(cwd, fname)
+			_, err := os.Stat(fpath)
+			if !errors.Is(err, os.ErrNotExist) {
+				foundConfigs = append(foundConfigs, fpath)
+			}
+		}
+
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			// we have reached FS root
+			break
+		}
+
+		cwd = parent
+	}
+
+	// reverse order so last config has more priority
+	slices.Reverse(foundConfigs)
+
+	// prepend default config paths
+	configPaths := []string{
+		globalConfig(),
+		GlobalConfigData(),
+	}
+
+	return append(configPaths, foundConfigs...)
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {

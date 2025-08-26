@@ -44,7 +44,7 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	}
 	if opts.baseURL != "" {
 		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
-		if err == nil {
+		if err == nil && resolvedBaseURL != "" {
 			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
 		}
 	}

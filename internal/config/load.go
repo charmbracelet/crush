@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -312,7 +311,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
@@ -512,36 +511,22 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 
 // lookupConfigs searches config files recursively from CWD up to FS root
 func lookupConfigs(cwd string) []string {
-	configNames := []string{appName + ".json", "." + appName + ".json"}
-
-	var foundConfigs []string
-
-	for {
-		for _, fname := range configNames {
-			fpath := filepath.Join(cwd, fname)
-			_, err := os.Stat(fpath)
-			if !errors.Is(err, os.ErrNotExist) {
-				foundConfigs = append(foundConfigs, fpath)
-			}
-		}
-
-		parent := filepath.Dir(cwd)
-		if parent == cwd {
-			// we have reached FS root
-			break
-		}
-
-		cwd = parent
-	}
-
-	// reverse order so last config has more priority
-	slices.Reverse(foundConfigs)
-
 	// prepend default config paths
 	configPaths := []string{
 		globalConfig(),
 		GlobalConfigData(),
 	}
+
+	configNames := []string{appName + ".json", "." + appName + ".json"}
+
+	foundConfigs, err := fsext.Lookup(cwd, configNames...)
+	if err != nil {
+		// returns at least default configs
+		return configPaths
+	}
+
+	// reverse order so last config has more priority
+	slices.Reverse(foundConfigs)
 
 	return append(configPaths, foundConfigs...)
 }

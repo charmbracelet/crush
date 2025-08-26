@@ -15,8 +15,12 @@
   - "/mcp/i"
 "area: mouse":
   - "/(mouse|scroll)/i"
+"area: onboarding":
+  - "/(onboarding)/i"
 "area: permissions":
   - "/permission/i"
+"area: releasing":
+  - "/(release|releasing|aur|brew|nix|npm|scoop|termux|winget)/i"
 "area: session":
   - "/session/i"
 "area: themes":
@@ -26,11 +30,11 @@
 "os: android":
   - "/(android|termux)/i"
 "os: linux":
-  - "/linux/i"
+  - "/(linux|arch|fedora|debian|ubuntu)/i"
 "os: macos":
-  - "/(macos|osx)/i"
+  - "/(macos|osx|darwin)/i"
 "os: windows":
-  - "/windows/i"
+  - "/(windows|win10|win11|win32|wsl|scoop|winget)/i"
 "panic / crash":
   - "/(panic|crash|segfault)/i"
 "provider: anthropic claude":
@@ -53,3 +57,5 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"security":
+  - "/(security|vulnerability|exploit)/i"

@@ -1,23 +1,21 @@
 package config
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/log"
 )
 
@@ -39,7 +37,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 }
 
 // Load loads the configuration from the default paths.
-func Load(workingDir string, debug bool) (*Config, error) {
+func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
 		globalConfig(),
@@ -54,7 +52,7 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	cfg.dataConfigDir = GlobalConfigData()
 
-	cfg.setDefaults(workingDir)
+	cfg.setDefaults(workingDir, dataDir)
 
 	if debug {
 		cfg.Options.Debug = true
@@ -301,7 +299,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	return nil
 }
 
-func (c *Config) setDefaults(workingDir string) {
+func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.workingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
@@ -312,8 +310,14 @@ func (c *Config) setDefaults(workingDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
-	if c.Options.DataDirectory == "" {
-		c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+	if dataDir != "" {
+		c.Options.DataDirectory = dataDir
+	} else if c.Options.DataDirectory == "" {
+		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+			c.Options.DataDirectory = path
+		} else {
+			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
+		}
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
@@ -604,15 +608,3 @@ func GlobalConfigData() string {
 
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
 }
-
-var HomeDir = sync.OnceValue(func() string {
-	u, err := user.Current()
-	if err == nil {
-		return u.HomeDir
-	}
-	return cmp.Or(
-		os.Getenv("HOME"),
-		os.Getenv("USERPROFILE"),
-		os.Getenv("HOMEPATH"),
-	)
-})

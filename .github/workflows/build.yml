@@ -11,7 +11,7 @@ jobs:
       gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
 
   dependabot:
-    needs: [build]
+    needs: [build, lint]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -23,10 +23,12 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - run: |
+          echo "Logging in..."
+          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | gh auth login --with-token
           echo "Approving..."
           gh pr review --approve "$PR_URL"
           echo "Merging..."
           gh pr merge --squash --auto "$PR_URL"
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}

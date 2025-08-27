@@ -46,7 +46,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("←/→", "switch"),
 		),
 		Back: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "back"),
 		),
 	}

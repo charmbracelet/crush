@@ -17,7 +17,10 @@ func TestLookupClosest(t *testing.T) {
 	oldWd, _ := os.Getwd()
 	err := os.Chdir(tempDir)
 	require.NoError(t, err)
-	defer os.Chdir(oldWd)
+
+	t.Cleanup(func() {
+		os.Chdir(oldWd)
+	})
 
 	t.Run("target found in starting directory", func(t *testing.T) {
 		t.Parallel()
@@ -158,7 +161,10 @@ func TestLookupClosestWithOwnership(t *testing.T) {
 	oldWd, _ := os.Getwd()
 	err := os.Chdir(tempDir)
 	require.NoError(t, err)
-	defer os.Chdir(oldWd)
+
+	t.Cleanup(func() {
+		os.Chdir(oldWd)
+	})
 
 	t.Run("search respects same ownership", func(t *testing.T) {
 		t.Parallel()
@@ -190,7 +196,10 @@ func TestLookup(t *testing.T) {
 	oldWd, _ := os.Getwd()
 	err := os.Chdir(tempDir)
 	require.NoError(t, err)
-	defer os.Chdir(oldWd)
+
+	t.Cleanup(func() {
+		os.Chdir(oldWd)
+	})
 
 	t.Run("no targets returns empty slice", func(t *testing.T) {
 		t.Parallel()
@@ -381,7 +390,10 @@ func TestLookup(t *testing.T) {
 		oldWd, _ := os.Getwd()
 		err := os.Chdir(testDir)
 		require.NoError(t, err)
-		defer os.Chdir(oldWd)
+
+		t.Cleanup(func() {
+			os.Chdir(oldWd)
+		})
 
 		// Create target files in current directory
 		err = os.WriteFile("target1.txt", []byte("test1"), 0o644)

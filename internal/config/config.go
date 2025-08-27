@@ -143,6 +143,7 @@ type Options struct {
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
 	DataDirectory        string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisableCatwalk       bool        `json:"disable_catwalk,omitempty" jsonschema:"description=Skip HTTP request to update providers automatically,default=false"`
 }
 
 type MCPs map[string]MCPConfig

@@ -49,7 +49,8 @@ func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldRe
 func (m *ModelListComponent) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if len(m.providers) == 0 {
-		providers, err := config.Providers()
+		cfg := config.Get()
+		providers, err := config.Providers(cfg)
 		filteredProviders := []catwalk.Provider{}
 		for _, p := range providers {
 			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
@@ -119,7 +120,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 
 	// First, add any configured providers that are not in the known providers list
 	// These should appear at the top of the list
-	knownProviders, err := config.Providers()
+	knownProviders, err := config.Providers(cfg)
 	if err != nil {
 		return util.ReportError(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,7 +106,7 @@ func TestLookupClosest(t *testing.T) {
 		t.Parallel()
 		// This test is limited as we can't easily create files above home directory
 		// but we can test the behavior by searching from home directory itself
-		homeDir := HomeDir()
+		homeDir := home.Dir()
 
 		// Search for a file that doesn't exist from home directory
 		foundPath, found := LookupClosest(homeDir, "nonexistent_file_12345.txt")

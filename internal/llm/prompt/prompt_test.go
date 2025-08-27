@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,7 +25,7 @@ func TestExpandPath(t *testing.T) {
 			name:  "tilde expansion",
 			input: "~/documents",
 			expected: func() string {
-				return filepath.Join(home.Dir(), "documents")
+				return home.Dir() + "/documents"
 			},
 		},
 		{

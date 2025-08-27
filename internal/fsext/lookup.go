@@ -43,7 +43,6 @@ func Lookup(dir string, targets ...string) ([]string, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}

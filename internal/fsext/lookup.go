@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/charmbracelet/crush/internal/home"
 )
 
 // Lookup searches for a target files or directories starting from dir
@@ -70,7 +72,7 @@ func LookupClosest(dir, target string) (string, bool) {
 			return fmt.Errorf("error probing file %s: %w", fpath, err)
 		}
 
-		if cwd == HomeDir() {
+		if cwd == home.Dir() {
 			return filepath.SkipAll
 		}
 

@@ -10,8 +10,6 @@ import (
 )
 
 func TestLookupClosest(t *testing.T) {
-	t.Parallel()
-
 	tempDir := t.TempDir()
 
 	// Change to temp directory
@@ -24,7 +22,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("target found in starting directory", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create target file in current directory
@@ -38,7 +35,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("target found in parent directory", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create subdirectory
@@ -57,7 +53,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("target found in grandparent directory", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create nested subdirectories
@@ -80,7 +75,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("target not found", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		foundPath, found := LookupClosest(testDir, "nonexistent.txt")
@@ -89,7 +83,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("target directory found", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create target directory in current directory
@@ -103,7 +96,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("stops at home directory", func(t *testing.T) {
-		t.Parallel()
 		// This test is limited as we can't easily create files above home directory
 		// but we can test the behavior by searching from home directory itself
 		homeDir := home.Dir()
@@ -115,7 +107,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("invalid starting directory", func(t *testing.T) {
-		t.Parallel()
 
 		foundPath, found := LookupClosest("/invalid/path/that/does/not/exist", "target.txt")
 		require.False(t, found)
@@ -123,7 +114,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("relative path handling", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Change to test directory
@@ -150,8 +140,6 @@ func TestLookupClosest(t *testing.T) {
 }
 
 func TestLookupClosestWithOwnership(t *testing.T) {
-	t.Parallel()
-
 	// Note: Testing ownership boundaries is difficult in a cross-platform way
 	// without creating complex directory structures with different owners.
 	// This test focuses on the basic functionality when ownership checks pass.
@@ -168,7 +156,6 @@ func TestLookupClosestWithOwnership(t *testing.T) {
 	})
 
 	t.Run("search respects same ownership", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create subdirectory structure
@@ -189,8 +176,6 @@ func TestLookupClosestWithOwnership(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	t.Parallel()
-
 	tempDir := t.TempDir()
 
 	// Change to temp directory
@@ -203,7 +188,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("no targets returns empty slice", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		found, err := Lookup(testDir)
@@ -212,7 +196,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("single target found in starting directory", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create target file in current directory
@@ -227,7 +210,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("multiple targets found in starting directory", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create multiple target files in current directory
@@ -251,7 +233,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("targets found in parent directories", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create subdirectory
@@ -275,7 +256,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("targets found across multiple directory levels", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create nested subdirectories
@@ -308,7 +288,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("some targets not found", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create only some target files
@@ -329,7 +308,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("no targets found", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		found, err := Lookup(testDir, "nonexistent1.txt", "nonexistent2.txt", "nonexistent3.txt")
@@ -338,7 +316,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("target directories found", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create target directories
@@ -357,7 +334,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("mixed files and directories", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Create target files and directories
@@ -376,7 +352,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("invalid starting directory", func(t *testing.T) {
-		t.Parallel()
 
 		found, err := Lookup("/invalid/path/that/does/not/exist", "target.txt")
 		require.Error(t, err)
@@ -384,7 +359,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("relative path handling", func(t *testing.T) {
-		t.Parallel()
 		testDir := t.TempDir()
 
 		// Change to test directory

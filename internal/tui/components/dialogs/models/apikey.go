@@ -2,13 +2,12 @@ package models
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 )
@@ -145,7 +144,7 @@ func (a *APIKeyInput) View() string {
 	inputView := a.input.View()
 
 	dataPath := config.GlobalConfigData()
-	dataPath = strings.Replace(dataPath, fsext.HomeDir(), "~", 1)
+	dataPath = home.Short(dataPath)
 	helpText := styles.CurrentTheme().S().Muted.
 		Render(fmt.Sprintf("This will be written to the global configuration: %s", dataPath))
 

@@ -107,7 +107,6 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("invalid starting directory", func(t *testing.T) {
-
 		foundPath, found := LookupClosest("/invalid/path/that/does/not/exist", "target.txt")
 		require.False(t, found)
 		require.Empty(t, foundPath)
@@ -352,7 +351,6 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("invalid starting directory", func(t *testing.T) {
-
 		found, err := Lookup("/invalid/path/that/does/not/exist", "target.txt")
 		require.Error(t, err)
 		require.Empty(t, found)

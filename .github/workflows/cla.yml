@@ -24,7 +24,7 @@ jobs:
           github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
-          GITHUB_TOKEN: ${{ secrets.CRUSH_CLA_BOT }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: ".github/cla-signatures.json"
           path-to-document: "https://github.com/charmbracelet/crush/blob/main/CLA.md"

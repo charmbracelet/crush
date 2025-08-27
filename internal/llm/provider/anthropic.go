@@ -79,6 +79,13 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 		slog.Debug("Skipping X-Api-Key header because Authorization header is provided")
 	}
 
+	if opts.baseURL != "" {
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil && resolvedBaseURL != "" {
+			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(resolvedBaseURL))
+		}
+	}
+
 	if config.Get().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))

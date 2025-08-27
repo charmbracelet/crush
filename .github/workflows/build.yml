@@ -9,24 +9,3 @@ jobs:
       go-version-file: ./go.mod
     secrets:
       gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
-
-  dependabot:
-    needs: [build]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    if: ${{ github.actor == 'dependabot[bot]' && github.event_name == 'pull_request'}}
-    steps:
-      - id: metadata
-        uses: dependabot/fetch-metadata@v2
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - run: |
-          echo "Approving..."
-          gh pr review --approve "$PR_URL"
-          echo "Merging..."
-          gh pr merge --squash --auto "$PR_URL"
-        env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

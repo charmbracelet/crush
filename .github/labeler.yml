@@ -30,7 +30,7 @@
 "os: android":
   - "/(android|termux)/i"
 "os: linux":
-  - "/(linux|arch|fedora|debian|ubuntu)/i"
+  - "/(linux|fedora|debian|ubuntu)/i"
 "os: macos":
   - "/(macos|osx|darwin)/i"
 "os: windows":

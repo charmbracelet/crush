@@ -374,7 +374,10 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		a.activeRequests.Del(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
-		events <- result
+		select {
+		case events <- result:
+		case <-genCtx.Done():
+		}
 		close(events)
 	}()
 	return events, nil

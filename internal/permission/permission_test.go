@@ -154,12 +154,10 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		events := service.Subscribe(t.Context())
 		var result1 bool
 		var wg sync.WaitGroup
-		wg.Add(1)
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			result1 = service.Request(req)
-		}()
+		})
 
 		var permissionReq PermissionRequest
 		event := <-events
@@ -170,12 +168,10 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.True(t, result1, "First request should be granted")
 
 		var result2 bool
-		wg.Add(1)
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			result2 = service.Request(req)
-		}()
+		})
 
 		event = <-events
 		permissionReq = event.Payload

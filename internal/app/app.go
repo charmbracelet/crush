@@ -235,9 +235,7 @@ func setupSubscriber[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
 ) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -260,7 +258,7 @@ func setupSubscriber[T any](
 				return
 			}
 		}
-	}()
+	})
 }
 
 func (app *App) InitCoderAgent() error {

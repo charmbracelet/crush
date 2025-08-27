@@ -62,6 +62,11 @@ type Client struct {
 
 	// Server state
 	serverState atomic.Value
+
+	// Server capabilities as returned by initialize
+	caps    protocol.ServerCapabilities
+	capsMu  sync.RWMutex
+	capsSet atomic.Bool
 }
 
 // NewClient creates a new LSP client.
@@ -143,7 +148,7 @@ func (c *Client) RegisterServerRequestHandler(method string, handler ServerReque
 }
 
 func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
-	initParams := &protocol.InitializeParams{
+	initParams := protocol.ParamInitialize{
 		WorkspaceFoldersInitializeParams: protocol.WorkspaceFoldersInitializeParams{
 			WorkspaceFolders: []protocol.WorkspaceFolder{
 				{
@@ -220,12 +225,14 @@ func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (
 		},
 	}
 
-	var result protocol.InitializeResult
-	if err := c.Call(ctx, "initialize", initParams, &result); err != nil {
+	result, err := c.Initialize(ctx, initParams)
+	if err != nil {
 		return nil, fmt.Errorf("initialize failed: %w", err)
 	}
 
-	if err := c.Notify(ctx, "initialized", struct{}{}); err != nil {
+	c.setCapabilities(result.Capabilities)
+
+	if err := c.Initialized(ctx, protocol.InitializedParams{}); err != nil {
 		return nil, fmt.Errorf("initialized notification failed: %w", err)
 	}
 
@@ -234,14 +241,9 @@ func (c *Client) InitializeLSPClient(ctx context.Context, workspaceDir string) (
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
-	c.RegisterNotificationHandler("textDocument/publishDiagnostics",
-		func(params json.RawMessage) { HandleDiagnostics(c, params) })
-
-	// Notify the LSP server
-	err := c.Initialized(ctx, protocol.InitializedParams{})
-	if err != nil {
-		return nil, fmt.Errorf("initialization failed: %w", err)
-	}
+	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(params json.RawMessage) {
+		HandleDiagnostics(c, params)
+	})
 
 	return &result, nil
 }
@@ -329,16 +331,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
-	// Determine server type for specialized initialization
-	serverType := c.detectServerType()
-
-	// For TypeScript-like servers, we need to open some key files first
-	if serverType == ServerTypeTypeScript {
-		if cfg.Options.DebugLSP {
-			slog.Debug("TypeScript-like server detected, opening key configuration files")
-		}
-		c.openKeyConfigFiles(ctx)
-	}
+	c.openKeyConfigFiles(ctx)
 
 	for {
 		select {
@@ -347,21 +340,19 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			return fmt.Errorf("timeout waiting for LSP server to be ready")
 		case <-ticker.C:
 			// Try a ping method appropriate for this server type
-			err := c.pingServerByType(ctx, serverType)
-			if err == nil {
-				// Server responded successfully
-				c.SetServerState(StateReady)
+			if err := c.ping(ctx); err != nil {
 				if cfg.Options.DebugLSP {
-					slog.Debug("LSP server is ready")
+					slog.Debug("LSP server not ready yet", "error", err, "server", c.name)
 				}
-				return nil
-			} else {
-				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
+				continue
 			}
 
+			// Server responded successfully
+			c.SetServerState(StateReady)
 			if cfg.Options.DebugLSP {
-				slog.Debug("LSP server not ready yet", "error", err, "serverType", serverType)
+				slog.Debug("LSP server is ready")
 			}
+			return nil
 		}
 	}
 }
@@ -443,86 +434,13 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 	}
 }
 
-// pingServerByType sends a ping request appropriate for the server type
-func (c *Client) pingServerByType(ctx context.Context, serverType ServerType) error {
-	switch serverType {
-	case ServerTypeTypeScript:
-		// For TypeScript, try a document symbol request on an open file
-		return c.pingTypeScriptServer(ctx)
-	case ServerTypeGo:
-		// For Go, workspace/symbol works well
-		return c.pingWithWorkspaceSymbol(ctx)
-	case ServerTypeRust:
-		// For Rust, workspace/symbol works well
-		return c.pingWithWorkspaceSymbol(ctx)
-	default:
-		// Default ping method
-		return c.pingWithWorkspaceSymbol(ctx)
-	}
-}
-
-// pingTypeScriptServer tries to ping a TypeScript server with appropriate methods
-func (c *Client) pingTypeScriptServer(ctx context.Context) error {
-	// First try workspace/symbol which works for many servers
-	if err := c.pingWithWorkspaceSymbol(ctx); err == nil {
+// ping sends a ping request...
+func (c *Client) ping(ctx context.Context) error {
+	if _, err := c.Symbol(ctx, protocol.WorkspaceSymbolParams{}); err == nil {
 		return nil
 	}
-
-	// If that fails, try to find an open file and request document symbols
-	c.openFilesMu.RLock()
-	defer c.openFilesMu.RUnlock()
-
-	// If we have any open files, try to get document symbols for one
-	for uri := range c.openFiles {
-		filePath, err := protocol.DocumentURI(uri).Path()
-		if err != nil {
-			slog.Error("Failed to convert URI to path for TypeScript symbol collection", "uri", uri, "error", err)
-			continue
-		}
-
-		if strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".js") ||
-			strings.HasSuffix(filePath, ".tsx") || strings.HasSuffix(filePath, ".jsx") {
-			var symbols []protocol.DocumentSymbol
-			err := c.Call(ctx, "textDocument/documentSymbol", protocol.DocumentSymbolParams{
-				TextDocument: protocol.TextDocumentIdentifier{
-					URI: protocol.DocumentURI(uri),
-				},
-			}, &symbols)
-			if err == nil {
-				return nil
-			}
-		}
-	}
-
-	// If we have no open TypeScript files, try to find and open one
-	workDir := config.Get().WorkingDir()
-	err := filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories and non-TypeScript files
-		if d.IsDir() {
-			return nil
-		}
-
-		ext := filepath.Ext(path)
-		if ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx" {
-			// Found a TypeScript file, try to open it
-			if err := c.OpenFile(ctx, path); err == nil {
-				// Successfully opened, stop walking
-				return filepath.SkipAll
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
-		slog.Debug("Error walking directory for TypeScript files", "error", err)
-	}
-
-	// Final fallback - just try a generic capability
-	return c.pingWithServerCapabilities(ctx)
+	// This is a very lightweight request that should work for most servers
+	return c.Notify(ctx, "$/cancelRequest", protocol.CancelParams{ID: "1"})
 }
 
 // openTypeScriptFiles finds and opens TypeScript files to help initialize the server
@@ -597,20 +515,6 @@ func shouldSkipDir(path string) bool {
 	return skipDirs[dirName]
 }
 
-// pingWithWorkspaceSymbol tries a workspace/symbol request
-func (c *Client) pingWithWorkspaceSymbol(ctx context.Context) error {
-	var result []protocol.SymbolInformation
-	return c.Call(ctx, "workspace/symbol", protocol.WorkspaceSymbolParams{
-		Query: "",
-	}, &result)
-}
-
-// pingWithServerCapabilities tries to get server capabilities
-func (c *Client) pingWithServerCapabilities(ctx context.Context) error {
-	// This is a very lightweight request that should work for most servers
-	return c.Notify(ctx, "$/cancelRequest", struct{ ID int }{ID: -1})
-}
-
 type OpenFileInfo struct {
 	Version int32
 	URI     protocol.DocumentURI
@@ -668,7 +572,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 		},
 	}
 
-	if err := c.Notify(ctx, "textDocument/didOpen", params); err != nil {
+	if err := c.DidOpen(ctx, params); err != nil {
 		return err
 	}
 
@@ -718,7 +622,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.Notify(ctx, "textDocument/didChange", params)
+	return c.DidChange(ctx, params)
 }
 
 func (c *Client) CloseFile(ctx context.Context, filepath string) error {
@@ -741,7 +645,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	if cfg.Options.DebugLSP {
 		slog.Debug("Closing file", "file", filepath)
 	}
-	if err := c.Notify(ctx, "textDocument/didClose", params); err != nil {
+	if err := c.DidClose(ctx, params); err != nil {
 		return err
 	}
 

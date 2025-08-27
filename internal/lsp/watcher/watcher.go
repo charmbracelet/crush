@@ -623,18 +623,11 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 	if basePath == "" {
 		return false
 	}
-	// For relative patterns
-	if basePath, err = protocol.DocumentURI(basePath).Path(); err != nil {
-		// XXX: Do we want to return here, or send the error up the stack?
-		slog.Error("Error converting base path to URI", "basePath", basePath, "error", err)
-	}
-
-	basePath = filepath.ToSlash(basePath)
 
 	// Make path relative to basePath for matching
 	relPath, err := filepath.Rel(basePath, path)
 	if err != nil {
-		slog.Error("Error getting relative path", "path", path, "basePath", basePath, "error", err)
+		slog.Error("Error getting relative path", "path", path, "basePath", basePath, "error", err, "server", w.name)
 		return false
 	}
 	relPath = filepath.ToSlash(relPath)

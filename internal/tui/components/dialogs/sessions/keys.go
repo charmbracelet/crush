@@ -26,7 +26,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("↑", "previous item"),
 		),
 		Close: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "cancel"),
 		),
 	}

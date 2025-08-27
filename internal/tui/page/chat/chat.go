@@ -716,7 +716,7 @@ func (p *chatPage) Bindings() []key.Binding {
 		cancelBinding := p.keyMap.Cancel
 		if p.isCanceling {
 			cancelBinding = key.NewBinding(
-				key.WithKeys("esc"),
+				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "press again to cancel"),
 			)
 		}
@@ -785,7 +785,7 @@ func (p *chatPage) Help() help.KeyMap {
 			shortList = append(shortList,
 				// Go back
 				key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "back"),
 				),
 			)
@@ -820,7 +820,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("tab/enter", "complete"),
 				),
 				key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "cancel"),
 				),
 				key.NewBinding(
@@ -835,18 +835,18 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 			cancelBinding := key.NewBinding(
-				key.WithKeys("esc"),
+				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "cancel"),
 			)
 			if p.isCanceling {
 				cancelBinding = key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
 			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
 				cancelBinding = key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "clear queue"),
 				)
 			}
@@ -992,7 +992,7 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("ctrl+r+r", "delete all attachments"),
 					),
 					key.NewBinding(
-						key.WithKeys("esc"),
+						key.WithKeys("esc", "alt+esc"),
 						key.WithHelp("esc", "cancel delete mode"),
 					),
 				})

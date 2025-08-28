@@ -23,6 +23,8 @@
   - "/(release|releasing|aur|brew|nix|npm|scoop|termux|winget)/i"
 "area: session":
   - "/session/i"
+"area: shell":
+  - "/shell/i"
 "area: themes":
   - "/theme/i"
 "area: tools":

@@ -47,8 +47,6 @@
   - "/gemini/i"
 "provider: google vertex":
   - "/vertex/i"
-"provider: grok":
-  - "/grok/i"
 "provider: kimi":
   - "/kimi/i"
 "provider: ollama":
@@ -59,5 +57,7 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"provider: xai grok":
+  - "/(xai|x\\.ai|grok)/i"
 "security":
   - "/(security|vulnerability|exploit)/i"

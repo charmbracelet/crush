@@ -683,14 +683,14 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStart:
 		assistantMsg.FinishThinking()
-		slog.Info("Tool call started", "toolCall", event.ToolCall)
+		slog.Info("Tool call started", "agent", a.agentCfg.ID, "toolCall", event.ToolCall)
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseDelta:
 		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStop:
-		slog.Info("Finished tool call", "toolCall", event.ToolCall)
+		slog.Info("Finished tool call", "agent", a.agentCfg.ID, "toolCall", event.ToolCall)
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventError:

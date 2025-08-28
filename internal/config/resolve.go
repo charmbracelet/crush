@@ -27,7 +27,7 @@ func NewShellVariableResolver(env env.Env) VariableResolver {
 	return &shellVariableResolver{
 		env: env,
 		shell: shell.NewShell(
-			&shell.Options{
+			shell.Options{
 				Env: env.Env(),
 			},
 		),

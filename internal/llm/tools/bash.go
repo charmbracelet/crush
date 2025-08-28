@@ -390,7 +390,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		defer cancel()
 	}
 
-	sh := shell.NewShell(&shell.Options{
+	sh := shell.NewShell(shell.Options{
 		WorkingDir: params.WorkingDir,
 		BlockFuncs: blockFuncs(),
 	})

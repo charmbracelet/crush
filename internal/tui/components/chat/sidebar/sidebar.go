@@ -382,6 +382,42 @@ func (m *sidebarCmp) renderSectionsHorizontal() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
 }
 
+// renderModelInfo renders model information for an agent including reasoning settings
+func (s *sidebarCmp) renderModelInfo(agentName string, agentCfg config.Agent, cfg *config.Config, t *styles.Theme) []string {
+	selectedModel := cfg.Models[agentCfg.Model]
+	model := cfg.GetModelByType(agentCfg.Model)
+	modelProvider := cfg.GetProviderForModel(agentCfg.Model)
+
+	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+	modelName := t.S().Text.Render(model.Name)
+	agentLabel := t.S().Muted.Render(fmt.Sprintf("%s:", agentName))
+	modelInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
+	parts := []string{modelInfo}
+
+	if !model.CanReason {
+		return parts
+	}
+
+	reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+	switch modelProvider.Type {
+	case catwalk.TypeOpenAI:
+		reasoningEffort := model.DefaultReasoningEffort
+		if selectedModel.ReasoningEffort != "" {
+			reasoningEffort = selectedModel.ReasoningEffort
+		}
+		formatter := cases.Title(language.English, cases.NoLower)
+		parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+	case catwalk.TypeAnthropic:
+		formatter := cases.Title(language.English, cases.NoLower)
+		if selectedModel.Think {
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+		} else {
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+		}
+	}
+	return parts
+}
+
 // filesBlockCompact renders the files block with limited width and height for horizontal layout
 func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
 	// Convert map to slice and handle type conversion
@@ -551,44 +587,10 @@ func (s *sidebarCmp) currentModelBlock() string {
 	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
 	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
 
-	// Helper function to render model info
-	renderModelInfo := func(agentName string, agentCfg config.Agent) []string {
-		selectedModel := cfg.Models[agentCfg.Model]
-		model := cfg.GetModelByType(agentCfg.Model)
-		modelProvider := cfg.GetProviderForModel(agentCfg.Model)
-
-		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-		modelName := t.S().Text.Render(model.Name)
-		agentLabel := t.S().Muted.Render(fmt.Sprintf("%s:", agentName))
-		modelInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
-		parts := []string{modelInfo}
-
-		if model.CanReason {
-			reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
-			switch modelProvider.Type {
-			case catwalk.TypeOpenAI:
-				reasoningEffort := model.DefaultReasoningEffort
-				if selectedModel.ReasoningEffort != "" {
-					reasoningEffort = selectedModel.ReasoningEffort
-				}
-				formatter := cases.Title(language.English, cases.NoLower)
-				parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
-			case catwalk.TypeAnthropic:
-				formatter := cases.Title(language.English, cases.NoLower)
-				if selectedModel.Think {
-					parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
-				} else {
-					parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
-				}
-			}
-		}
-		return parts
-	}
-
 	// Always show both agents
 	allParts := []string{}
-	allParts = append(allParts, renderModelInfo("Coder", coderAgent)...)
-	allParts = append(allParts, renderModelInfo("Task", taskAgent)...)
+	allParts = append(allParts, s.renderModelInfo("Coder", coderAgent, cfg, t)...)
+	allParts = append(allParts, s.renderModelInfo("Task", taskAgent, cfg, t)...)
 
 	// Add session info (tokens and cost) with "Usage:" label
 	if s.session.ID != "" {

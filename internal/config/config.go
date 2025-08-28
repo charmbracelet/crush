@@ -444,7 +444,7 @@ func (c *Config) SetupAgents() {
 			ID:           AgentIDTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge, // default to large for backward compatibility
+			Model:        SelectedModelTypeSmall, // default to small model for efficiency
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: []string{
 				"glob",

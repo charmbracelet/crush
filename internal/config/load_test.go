@@ -1205,7 +1205,7 @@ func TestAgentConfiguration(t *testing.T) {
 
 		taskAgent, exists := cfg.GetAgent(AgentIDTask)
 		require.True(t, exists)
-		require.Equal(t, SelectedModelTypeLarge, taskAgent.Model)
+		require.Equal(t, SelectedModelTypeSmall, taskAgent.Model)
 		require.Equal(t, AgentIDTask, taskAgent.ID)
 		require.Equal(t, "Task", taskAgent.Name)
 	})
@@ -1253,6 +1253,6 @@ func TestAgentConfiguration(t *testing.T) {
 
 		taskAgent, exists := cfg.GetAgent(AgentIDTask)
 		require.True(t, exists)
-		require.Equal(t, SelectedModelTypeLarge, taskAgent.Model) // default for task agent
+		require.Equal(t, SelectedModelTypeSmall, taskAgent.Model) // default for task agent
 	})
 }

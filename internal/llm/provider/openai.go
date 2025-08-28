@@ -125,33 +125,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				Role: "assistant",
 			}
 
-			hasContent := false
-			if msg.Content().String() != "" {
-				hasContent = true
-				textBlock := openai.ChatCompletionContentPartTextParam{Text: msg.Content().String()}
-				if cache && !o.providerOptions.disableCache && isAnthropicModel {
-					textBlock.SetExtraFields(map[string]any{
-						"cache_control": map[string]string{
-							"type": "ephemeral",
-						},
-					})
-				}
-				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
-					OfArrayOfContentParts: []openai.ChatCompletionAssistantMessageParamContentArrayOfContentPartUnion{
-						{
-							OfText: &textBlock,
-						},
-					},
-				}
-				if !isAnthropicModel {
-					assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
-						OfString: param.NewOpt(msg.Content().String()),
-					}
-				}
-			}
-
 			if len(msg.ToolCalls()) > 0 {
-				hasContent = true
 				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
 				for i, call := range msg.ToolCalls() {
 					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
@@ -164,10 +138,19 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 					}
 				}
 			}
-			if !hasContent {
-				continue
+			if msg.Content().String() != "" {
+				assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
+					OfString: param.NewOpt(msg.Content().Text),
+				}
 			}
 
+			if cache && !o.providerOptions.disableCache && isAnthropicModel {
+				assistantMsg.SetExtraFields(map[string]any{
+					"cache_control": map[string]string{
+						"type": "ephemeral",
+					},
+				})
+			}
 			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
 				OfAssistant: &assistantMsg,
 			})

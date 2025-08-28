@@ -125,16 +125,25 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 				Role: "assistant",
 			}
 
+			// Only include finished tool calls; interrupted tool calls must not be resent.
 			if len(msg.ToolCalls()) > 0 {
-				assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(msg.ToolCalls()))
-				for i, call := range msg.ToolCalls() {
-					assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
-						ID:   call.ID,
-						Type: "function",
-						Function: openai.ChatCompletionMessageToolCallFunctionParam{
-							Name:      call.Name,
-							Arguments: call.Input,
-						},
+				finished := make([]message.ToolCall, 0, len(msg.ToolCalls()))
+				for _, call := range msg.ToolCalls() {
+					if call.Finished {
+						finished = append(finished, call)
+					}
+				}
+				if len(finished) > 0 {
+					assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(finished))
+					for i, call := range finished {
+						assistantMsg.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
+							ID:   call.ID,
+							Type: "function",
+							Function: openai.ChatCompletionMessageToolCallFunctionParam{
+								Name:      call.Name,
+								Arguments: call.Input,
+							},
+						}
 					}
 				}
 			}
@@ -151,6 +160,11 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 					},
 				})
 			}
+			// Skip empty assistant messages (no content and no finished tool calls)
+			if msg.Content().String() == "" && len(assistantMsg.ToolCalls) == 0 {
+				continue
+			}
+
 			openaiMessages = append(openaiMessages, openai.ChatCompletionMessageParamUnion{
 				OfAssistant: &assistantMsg,
 			})

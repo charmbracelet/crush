@@ -325,6 +325,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			currentContent := ""
 			toolCalls := make([]message.ToolCall, 0)
 			msgToolCalls := make(map[int64]openai.ChatCompletionMessageToolCall)
+			toolMap := make(map[string]openai.ChatCompletionMessageToolCall)
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
 				// Kujtim: this is an issue with openrouter qwen, its sending -1 for the tool index
@@ -332,7 +333,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 					chunk.Choices[0].Delta.ToolCalls[0].Index = 0
 				}
 				acc.AddChunk(chunk)
-				for _, choice := range chunk.Choices {
+				for i, choice := range chunk.Choices {
 					reasoning, ok := choice.Delta.JSON.ExtraFields["reasoning"]
 					if ok && reasoning.Raw() != "" {
 						reasoningStr := ""
@@ -361,6 +362,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 									if tool.ID == toolCall.ID {
 										existingToolCall.Function.Arguments += toolCall.Function.Arguments
 										msgToolCalls[toolCall.Index] = existingToolCall
+										toolMap[existingToolCall.ID] = existingToolCall
 										found = true
 									}
 								}
@@ -370,6 +372,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 							} else {
 								existingToolCall.Function.Arguments += toolCall.Function.Arguments
 								msgToolCalls[toolCall.Index] = existingToolCall
+								toolMap[existingToolCall.ID] = existingToolCall
 							}
 						} else {
 							newToolCall = true
@@ -394,7 +397,14 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 									Arguments: toolCall.Function.Arguments,
 								},
 							}
+							toolMap[toolCall.ID] = msgToolCalls[toolCall.Index]
+
 						}
+						toolCalls := []openai.ChatCompletionMessageToolCall{}
+						for _, tc := range toolMap {
+							toolCalls = append(toolCalls, tc)
+						}
+						acc.Choices[i].Message.ToolCalls = toolCalls
 					}
 				}
 			}

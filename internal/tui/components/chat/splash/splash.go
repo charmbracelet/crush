@@ -696,29 +696,43 @@ func (s *splashCmp) currentModelBlock() string {
 	t := styles.CurrentTheme()
 	var parts []string
 
+	// Add section header
+	section := t.S().Subtle.Render("Agents")
+	parts = append(parts, section, "")
+
+	maxWidth := s.getMaxInfoWidth()
+
 	// Show Coder agent
 	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
 	coderModel := cfg.GetModelByType(coderAgent.Model)
 	if coderModel != nil {
-		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-		modelName := t.S().Text.Render(coderModel.Name)
-		agentLabel := t.S().Base.Foreground(t.FgSubtle).Render("Coder:")
-		coderInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
-		parts = append(parts, coderInfo)
+		coderLine := core.Status(
+			core.StatusOpts{
+				Icon:        styles.ModelIcon,
+				Title:       "Coder",
+				Description: t.S().Text.Render(coderModel.Name),
+			},
+			maxWidth,
+		)
+		parts = append(parts, coderLine)
 	}
 
 	// Show Task agent
 	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
 	taskModel := cfg.GetModelByType(taskAgent.Model)
 	if taskModel != nil {
-		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-		modelName := t.S().Text.Render(taskModel.Name)
-		agentLabel := t.S().Base.Foreground(t.FgSubtle).Render("Task:")
-		taskInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
-		parts = append(parts, taskInfo)
+		taskLine := core.Status(
+			core.StatusOpts{
+				Icon:        styles.ModelIcon,
+				Title:       "Task",
+				Description: t.S().Text.Render(taskModel.Name),
+			},
+			maxWidth,
+		)
+		parts = append(parts, taskLine)
 	}
 
-	if len(parts) == 0 {
+	if len(parts) <= 2 { // Only header and empty line
 		return ""
 	}
 

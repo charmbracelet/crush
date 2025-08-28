@@ -398,7 +398,6 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 								},
 							}
 							toolMap[toolCall.ID] = msgToolCalls[toolCall.Index]
-
 						}
 						toolCalls := []openai.ChatCompletionMessageToolCall{}
 						for _, tc := range toolMap {

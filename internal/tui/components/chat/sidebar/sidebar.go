@@ -146,19 +146,27 @@ func (m *sidebarCmp) View() string {
 			"",
 		)
 	}
-	parts = append(parts,
-		m.currentModelBlock(),
-	)
 
 	// Check if we should use horizontal layout for sections
 	if m.compactMode && m.width > m.height {
 		// Horizontal layout for compact mode when width > height
+		// Agents and usage blocks are rendered within renderSectionsHorizontal()
 		sectionsContent := m.renderSectionsHorizontal()
 		if sectionsContent != "" {
-			parts = append(parts, "", sectionsContent)
+			parts = append(parts, sectionsContent)
 		}
 	} else {
-		// Vertical layout (default)
+		// Vertical layout (default) - render agents and usage blocks here
+		parts = append(parts,
+			m.agentsBlock(),
+		)
+
+		// Add usage block if we have a session
+		if m.session.ID != "" {
+			parts = append(parts, "", m.usageBlock())
+		}
+
+		// Add other sections
 		if m.session.ID != "" {
 			parts = append(parts, "", m.filesBlock())
 		}
@@ -366,20 +374,33 @@ func (m *sidebarCmp) getDynamicLimits() (maxFiles, maxLSPs, maxMCPs int) {
 	return maxFiles, maxLSPs, maxMCPs
 }
 
-// renderSectionsHorizontal renders the files, LSPs, and MCPs sections horizontally
+// renderSectionsHorizontal renders the sections in a two-row layout for compact mode
 func (m *sidebarCmp) renderSectionsHorizontal() string {
-	// Calculate available width for each section
+	// First row: Agents and Session (Context) side by side
 	totalWidth := m.width - 4 // Account for padding and spacing
+	firstRowWidth := totalWidth / 2
+
+	agentsContent := m.agentsBlockCompact(firstRowWidth)
+	var sessionContent string
+	if m.session.ID != "" {
+		sessionContent = m.usageBlockCompact(firstRowWidth)
+	}
+
+	firstRow := lipgloss.JoinHorizontal(lipgloss.Top, agentsContent, " ", sessionContent)
+
+	// Second row: Files, LSPs, and MCPs side by side
 	sectionWidth := min(50, totalWidth/3)
 
-	// Get the sections content with limited height
 	var filesContent, lspContent, mcpContent string
-
-	filesContent = m.filesBlockCompact(sectionWidth)
+	if m.session.ID != "" {
+		filesContent = m.filesBlockCompact(sectionWidth)
+	}
 	lspContent = m.lspBlockCompact(sectionWidth)
 	mcpContent = m.mcpBlockCompact(sectionWidth)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
+	secondRow := lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
+
+	return lipgloss.JoinVertical(lipgloss.Left, firstRow, "", secondRow)
 }
 
 // renderModelInfo renders model information for an agent including reasoning settings
@@ -388,17 +409,23 @@ func (s *sidebarCmp) renderModelInfo(agentName string, agentCfg config.Agent, cf
 	model := cfg.GetModelByType(agentCfg.Model)
 	modelProvider := cfg.GetProviderForModel(agentCfg.Model)
 
-	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
-	agentLabel := t.S().Muted.Render(fmt.Sprintf("%s:", agentName))
-	modelInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
-	parts := []string{modelInfo}
+	// Main agent line without reasoning info to give model name full space
+	statusLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.ModelIcon,
+			Title:       agentName,
+			Description: t.S().Text.Render(model.Name), // Keep model name bright
+		},
+		s.getMaxWidth(),
+	)
 
+	// Return early if model can't reason
 	if !model.CanReason {
-		return parts
+		return []string{statusLine}
 	}
 
-	reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+	// Add reasoning info on a separate indented line
+	var reasoningInfo string
 	switch modelProvider.Type {
 	case catwalk.TypeOpenAI:
 		reasoningEffort := model.DefaultReasoningEffort
@@ -406,16 +433,131 @@ func (s *sidebarCmp) renderModelInfo(agentName string, agentCfg config.Agent, cf
 			reasoningEffort = selectedModel.ReasoningEffort
 		}
 		formatter := cases.Title(language.English, cases.NoLower)
-		parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+		reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
 	case catwalk.TypeAnthropic:
 		formatter := cases.Title(language.English, cases.NoLower)
 		if selectedModel.Think {
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+			reasoningInfo = formatter.String("Thinking on")
 		} else {
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+			reasoningInfo = formatter.String("Thinking off")
 		}
 	}
-	return parts
+
+	if reasoningInfo != "" {
+		// Indent the reasoning info relative to the agent name
+		indentedReasoningInfo := "  " + t.S().Subtle.Render(reasoningInfo)
+		return []string{statusLine, indentedReasoningInfo}
+	}
+
+	return []string{statusLine}
+}
+
+// agentsBlockCompact renders the agents block with limited width for horizontal layout
+func (m *sidebarCmp) agentsBlockCompact(maxWidth int) string {
+	cfg := config.Get()
+	t := styles.CurrentTheme()
+
+	// Get both agent configurations
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
+
+	// Build agent content with compact rendering
+	agentParts := []string{}
+
+	// For compact mode, show agents more concisely
+	coderModel := cfg.GetModelByType(coderAgent.Model)
+	taskModel := cfg.GetModelByType(taskAgent.Model)
+
+	coderLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.ModelIcon,
+			Title:       "Coder",
+			Description: t.S().Text.Render(coderModel.Name),
+		},
+		maxWidth,
+	)
+
+	taskLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.ModelIcon,
+			Title:       "Task",
+			Description: t.S().Text.Render(taskModel.Name),
+		},
+		maxWidth,
+	)
+
+	agentParts = append(agentParts, coderLine, taskLine)
+	agentContent := lipgloss.JoinVertical(lipgloss.Left, agentParts...)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		t.S().Subtle.Render(core.Section("Agents", maxWidth)),
+		"", // Add blank line after section header
+		agentContent,
+	)
+}
+
+// usageBlockCompact renders the usage block with limited width for horizontal layout
+func (m *sidebarCmp) usageBlockCompact(maxWidth int) string {
+	cfg := config.Get()
+	t := styles.CurrentTheme()
+
+	// Get coder agent for context window calculation (primary model)
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	coderModel := cfg.GetModelByType(coderAgent.Model)
+
+	// Calculate context usage
+	totalTokens := m.session.CompletionTokens + m.session.PromptTokens
+	percentage := int(float64(totalTokens) / float64(coderModel.ContextWindow) * 100)
+
+	// Format tokens
+	var formattedTokens string
+	switch {
+	case totalTokens >= 1000000:
+		formattedTokens = fmt.Sprintf("%.1fM", float64(totalTokens)/1000000)
+	case totalTokens >= 1000:
+		formattedTokens = fmt.Sprintf("%.1fK", float64(totalTokens)/1000)
+	default:
+		formattedTokens = fmt.Sprintf("%d", totalTokens)
+	}
+
+	// Remove .0 suffix if present
+	if strings.HasSuffix(formattedTokens, ".0K") {
+		formattedTokens = strings.Replace(formattedTokens, ".0K", "K", 1)
+	}
+	if strings.HasSuffix(formattedTokens, ".0M") {
+		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
+	}
+
+	contextInfo := fmt.Sprintf("%d%% (%s)", percentage, formattedTokens)
+	costInfo := fmt.Sprintf("$%.2f", m.session.Cost)
+
+	// Create two status lines
+	contextLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.ContextIcon,
+			Title:       "Context",
+			Description: contextInfo,
+		},
+		maxWidth,
+	)
+
+	costLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.CostIcon,
+			Title:       "Cost",
+			Description: costInfo,
+		},
+		maxWidth,
+	)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		t.S().Subtle.Render(core.Section("Session", maxWidth)),
+		"", // Add blank line after section header
+		contextLine,
+		costLine,
+	)
 }
 
 // filesBlockCompact renders the files block with limited width and height for horizontal layout
@@ -541,17 +683,50 @@ func (m *sidebarCmp) mcpBlock() string {
 	}, true)
 }
 
-func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
+func (s *sidebarCmp) agentsBlock() string {
+	cfg := config.Get()
 	t := styles.CurrentTheme()
-	// Format tokens in human-readable format (e.g., 110K, 1.2M)
+
+	// Get both agent configurations
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
+
+	// Build agent content
+	agentParts := []string{}
+	agentParts = append(agentParts, s.renderModelInfo("Coder", coderAgent, cfg, t)...)
+	agentParts = append(agentParts, s.renderModelInfo("Task", taskAgent, cfg, t)...)
+
+	agentContent := lipgloss.JoinVertical(lipgloss.Left, agentParts...)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		t.S().Subtle.Render(core.Section("Agents", s.getMaxWidth())),
+		"", // Add blank line after section header
+		agentContent,
+	)
+}
+
+func (s *sidebarCmp) usageBlock() string {
+	cfg := config.Get()
+	t := styles.CurrentTheme()
+
+	// Get coder agent for context window calculation (primary model)
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	coderModel := cfg.GetModelByType(coderAgent.Model)
+
+	// Calculate context usage
+	totalTokens := s.session.CompletionTokens + s.session.PromptTokens
+	percentage := int(float64(totalTokens) / float64(coderModel.ContextWindow) * 100)
+
+	// Format tokens
 	var formattedTokens string
 	switch {
-	case tokens >= 1_000_000:
-		formattedTokens = fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
-	case tokens >= 1_000:
-		formattedTokens = fmt.Sprintf("%.1fK", float64(tokens)/1_000)
+	case totalTokens >= 1000000:
+		formattedTokens = fmt.Sprintf("%.1fM", float64(totalTokens)/1000000)
+	case totalTokens >= 1000:
+		formattedTokens = fmt.Sprintf("%.1fK", float64(totalTokens)/1000)
 	default:
-		formattedTokens = fmt.Sprintf("%d", tokens)
+		formattedTokens = fmt.Sprintf("%d", totalTokens)
 	}
 
 	// Remove .0 suffix if present
@@ -562,52 +737,34 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
 	}
 
-	percentage := (float64(tokens) / float64(contextWindow)) * 100
+	contextInfo := fmt.Sprintf("%d%% (%s)", percentage, formattedTokens)
+	costInfo := fmt.Sprintf("$%.2f", s.session.Cost)
 
-	baseStyle := t.S().Base
+	// Create two status lines
+	contextLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.ContextIcon,
+			Title:       "Context",
+			Description: contextInfo,
+		},
+		s.getMaxWidth(),
+	)
 
-	formattedCost := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("$%.2f", cost))
-
-	formattedTokens = baseStyle.Foreground(t.FgSubtle).Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := baseStyle.Foreground(t.FgMuted).Render(fmt.Sprintf("%d%%", int(percentage)))
-	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
-	if percentage > 80 {
-		// add the warning icon
-		formattedTokens = fmt.Sprintf("%s %s", styles.WarningIcon, formattedTokens)
-	}
-
-	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
-}
-
-func (s *sidebarCmp) currentModelBlock() string {
-	cfg := config.Get()
-	t := styles.CurrentTheme()
-
-	// Get both agent configurations
-	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
-	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
-
-	// Always show both agents
-	allParts := []string{}
-	allParts = append(allParts, s.renderModelInfo("Coder", coderAgent, cfg, t)...)
-	allParts = append(allParts, s.renderModelInfo("Task", taskAgent, cfg, t)...)
-
-	// Add session info (tokens and cost) with "Usage:" label
-	if s.session.ID != "" {
-		// Use the coder agent's model for context window calculation (primary model)
-		coderModel := cfg.GetModelByType(coderAgent.Model)
-		usageLabel := t.S().Muted.Render("Usage:")
-		usageInfo := formatTokensAndCost(
-			s.session.CompletionTokens+s.session.PromptTokens,
-			coderModel.ContextWindow,
-			s.session.Cost,
-		)
-		allParts = append(allParts, fmt.Sprintf("%s %s", usageLabel, usageInfo))
-	}
+	costLine := core.Status(
+		core.StatusOpts{
+			Icon:        styles.CostIcon,
+			Title:       "Cost",
+			Description: costInfo,
+		},
+		s.getMaxWidth(),
+	)
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		allParts...,
+		t.S().Subtle.Render(core.Section("Session", s.getMaxWidth())),
+		"", // Add blank line after section header
+		contextLine,
+		costLine,
 	)
 }
 

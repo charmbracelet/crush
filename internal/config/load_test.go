@@ -1184,3 +1184,75 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+func TestAgentConfiguration(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default agent models", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &Config{
+			Options: &Options{},
+		}
+		cfg.SetupAgents()
+
+		// Test default models
+		coderAgent, exists := cfg.GetAgent(AgentIDCoder)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeLarge, coderAgent.Model)
+		require.Equal(t, AgentIDCoder, coderAgent.ID)
+		require.Equal(t, "Coder", coderAgent.Name)
+
+		taskAgent, exists := cfg.GetAgent(AgentIDTask)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeLarge, taskAgent.Model)
+		require.Equal(t, AgentIDTask, taskAgent.ID)
+		require.Equal(t, "Task", taskAgent.Name)
+	})
+
+	t.Run("configured agent models", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &Config{
+			Options: &Options{},
+			Agents: map[string]AgentConfig{
+				AgentIDCoder: {Model: SelectedModelTypeSmall},
+				AgentIDTask:  {Model: SelectedModelTypeLarge},
+			},
+		}
+		cfg.SetupAgents()
+
+		// Test overridden models
+		coderAgent, exists := cfg.GetAgent(AgentIDCoder)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeSmall, coderAgent.Model)
+		require.Equal(t, AgentIDCoder, coderAgent.ID)
+
+		taskAgent, exists := cfg.GetAgent(AgentIDTask)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeLarge, taskAgent.Model)
+		require.Equal(t, AgentIDTask, taskAgent.ID)
+	})
+
+	t.Run("partial agent configuration", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &Config{
+			Options: &Options{},
+			Agents: map[string]AgentConfig{
+				AgentIDCoder: {Model: SelectedModelTypeSmall},
+				// task agent not configured, should use default
+			},
+		}
+		cfg.SetupAgents()
+
+		// Test mixed configuration
+		coderAgent, exists := cfg.GetAgent(AgentIDCoder)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeSmall, coderAgent.Model)
+
+		taskAgent, exists := cfg.GetAgent(AgentIDTask)
+		require.True(t, exists)
+		require.Equal(t, SelectedModelTypeLarge, taskAgent.Model) // default for task agent
+	})
+}

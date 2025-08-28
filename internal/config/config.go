@@ -48,6 +48,12 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
+// Builtin agent IDs
+const (
+	AgentIDCoder = "coder"
+	AgentIDTask  = "task"
+)
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -235,6 +241,12 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
+// AgentConfig holds the configurable properties for an agent
+type AgentConfig struct {
+	// The model type to use for this agent
+	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -253,10 +265,12 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
+	// Agent model configurations - only model selection is configurable
+	Agents map[string]AgentConfig `json:"agents,omitempty" jsonschema:"description=Agent model configurations for builtin agents,example={\"coder\":{\"model\":\"large\"},\"task\":{\"model\":\"small\"}}"`
+
 	// Internal
-	workingDir string `json:"-"`
-	// TODO: most likely remove this concept when I come back to it
-	Agents map[string]Agent `json:"-"`
+	workingDir string           `json:"-"`
+	agents     map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
 	dataConfigDir  string             `json:"-"`
@@ -416,20 +430,21 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 }
 
 func (c *Config) SetupAgents() {
-	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
+	// Create builtin agents with hardcoded properties
+	builtinAgents := map[string]Agent{
+		AgentIDCoder: {
+			ID:           AgentIDCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
+			Model:        SelectedModelTypeLarge, // default
 			ContextPaths: c.Options.ContextPaths,
 			// All tools allowed
 		},
-		"task": {
-			ID:           "task",
+		AgentIDTask: {
+			ID:           AgentIDTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
+			Model:        SelectedModelTypeLarge, // default to large for backward compatibility
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: []string{
 				"glob",
@@ -443,7 +458,22 @@ func (c *Config) SetupAgents() {
 			AllowedLSP: []string{},
 		},
 	}
-	c.Agents = agents
+
+	// Override model settings from config if present
+	for agentID, agentConfig := range c.Agents {
+		if builtinAgent, exists := builtinAgents[agentID]; exists {
+			builtinAgent.Model = agentConfig.Model
+			builtinAgents[agentID] = builtinAgent
+		}
+	}
+
+	c.agents = builtinAgents
+}
+
+// GetAgent returns the agent configuration for the given agent ID
+func (c *Config) GetAgent(agentID string) (Agent, bool) {
+	agent, exists := c.agents[agentID]
+	return agent, exists
 }
 
 func (c *Config) Resolver() VariableResolver {

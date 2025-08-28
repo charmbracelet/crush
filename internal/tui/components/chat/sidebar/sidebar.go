@@ -545,53 +545,67 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 
 func (s *sidebarCmp) currentModelBlock() string {
 	cfg := config.Get()
-	agentCfg := cfg.Agents["coder"]
-
-	selectedModel := cfg.Models[agentCfg.Model]
-
-	model := config.Get().GetModelByType(agentCfg.Model)
-	modelProvider := config.Get().GetProviderForModel(agentCfg.Model)
-
 	t := styles.CurrentTheme()
 
-	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
-	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
-	parts := []string{
-		modelInfo,
-	}
-	if model.CanReason {
-		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
-		switch modelProvider.Type {
-		case catwalk.TypeOpenAI:
-			reasoningEffort := model.DefaultReasoningEffort
-			if selectedModel.ReasoningEffort != "" {
-				reasoningEffort = selectedModel.ReasoningEffort
-			}
-			formatter := cases.Title(language.English, cases.NoLower)
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
-		case catwalk.TypeAnthropic:
-			formatter := cases.Title(language.English, cases.NoLower)
-			if selectedModel.Think {
-				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
-			} else {
-				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+	// Get both agent configurations
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
+
+	// Helper function to render model info
+	renderModelInfo := func(agentName string, agentCfg config.Agent) []string {
+		selectedModel := cfg.Models[agentCfg.Model]
+		model := cfg.GetModelByType(agentCfg.Model)
+		modelProvider := cfg.GetProviderForModel(agentCfg.Model)
+
+		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+		modelName := t.S().Text.Render(model.Name)
+		agentLabel := t.S().Muted.Render(fmt.Sprintf("%s:", agentName))
+		modelInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
+		parts := []string{modelInfo}
+
+		if model.CanReason {
+			reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+			switch modelProvider.Type {
+			case catwalk.TypeOpenAI:
+				reasoningEffort := model.DefaultReasoningEffort
+				if selectedModel.ReasoningEffort != "" {
+					reasoningEffort = selectedModel.ReasoningEffort
+				}
+				formatter := cases.Title(language.English, cases.NoLower)
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+			case catwalk.TypeAnthropic:
+				formatter := cases.Title(language.English, cases.NoLower)
+				if selectedModel.Think {
+					parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+				} else {
+					parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+				}
 			}
 		}
+		return parts
 	}
+
+	// Always show both agents
+	allParts := []string{}
+	allParts = append(allParts, renderModelInfo("Coder", coderAgent)...)
+	allParts = append(allParts, renderModelInfo("Task", taskAgent)...)
+
+	// Add session info (tokens and cost) with "Usage:" label
 	if s.session.ID != "" {
-		parts = append(
-			parts,
-			"  "+formatTokensAndCost(
-				s.session.CompletionTokens+s.session.PromptTokens,
-				model.ContextWindow,
-				s.session.Cost,
-			),
+		// Use the coder agent's model for context window calculation (primary model)
+		coderModel := cfg.GetModelByType(coderAgent.Model)
+		usageLabel := t.S().Muted.Render("Usage:")
+		usageInfo := formatTokensAndCost(
+			s.session.CompletionTokens+s.session.PromptTokens,
+			coderModel.ContextWindow,
+			s.session.Cost,
 		)
+		allParts = append(allParts, fmt.Sprintf("%s %s", usageLabel, usageInfo))
 	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		parts...,
+		allParts...,
 	)
 }
 

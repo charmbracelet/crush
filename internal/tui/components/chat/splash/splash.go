@@ -693,17 +693,33 @@ func (s *splashCmp) mcpBlock() string {
 
 func (s *splashCmp) currentModelBlock() string {
 	cfg := config.Get()
-	agentCfg := cfg.Agents["coder"]
-	model := config.Get().GetModelByType(agentCfg.Model)
-	if model == nil {
-		return ""
-	}
 	t := styles.CurrentTheme()
-	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
-	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
-	parts := []string{
-		modelInfo,
+	var parts []string
+
+	// Show Coder agent
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	coderModel := cfg.GetModelByType(coderAgent.Model)
+	if coderModel != nil {
+		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+		modelName := t.S().Text.Render(coderModel.Name)
+		agentLabel := t.S().Base.Foreground(t.FgSubtle).Render("Coder:")
+		coderInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
+		parts = append(parts, coderInfo)
+	}
+
+	// Show Task agent
+	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
+	taskModel := cfg.GetModelByType(taskAgent.Model)
+	if taskModel != nil {
+		modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+		modelName := t.S().Text.Render(taskModel.Name)
+		agentLabel := t.S().Base.Foreground(t.FgSubtle).Render("Task:")
+		taskInfo := fmt.Sprintf("%s %s %s", agentLabel, modelIcon, modelName)
+		parts = append(parts, taskInfo)
+	}
+
+	if len(parts) == 0 {
+		return ""
 	}
 
 	return lipgloss.JoinVertical(

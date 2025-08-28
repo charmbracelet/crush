@@ -86,8 +86,8 @@ type agent struct {
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
-	"coder": prompt.PromptCoder,
-	"task":  prompt.PromptTask,
+	config.AgentIDCoder: prompt.PromptCoder,
+	config.AgentIDTask:  prompt.PromptTask,
 }
 
 func NewAgent(
@@ -103,9 +103,9 @@ func NewAgent(
 	cfg := config.Get()
 
 	var agentTool tools.BaseTool
-	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
+	if agentCfg.ID == config.AgentIDCoder {
+		taskAgentCfg, exists := config.Get().GetAgent(config.AgentIDTask)
+		if !exists {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
 		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)

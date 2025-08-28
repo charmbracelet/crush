@@ -302,7 +302,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 
 	// Only show thinking toggle for Anthropic models that can reason
 	cfg := config.Get()
-	if agentCfg, ok := cfg.Agents["coder"]; ok {
+	if agentCfg, ok := cfg.GetAgent(config.AgentIDCoder); ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil &&
@@ -334,7 +334,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 	if c.sessionID != "" {
-		agentCfg := config.Get().Agents["coder"]
+		agentCfg, _ := config.Get().GetAgent(config.AgentIDCoder)
 		model := config.Get().GetModelByType(agentCfg.Model)
 		if model.SupportsImages {
 			commands = append(commands, Command{

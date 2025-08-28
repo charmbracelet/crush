@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -395,5 +396,88 @@ func TestLookup(t *testing.T) {
 
 		require.Contains(t, foundEvalSymlinks, expectedPath1)
 		require.Contains(t, foundEvalSymlinks, expectedPath2)
+	})
+}
+
+func TestProbeEnt(t *testing.T) {
+	t.Run("existing file with correct owner", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create test file
+		testFile := filepath.Join(tempDir, "test.txt")
+		err := os.WriteFile(testFile, []byte("test"), 0o644)
+		require.NoError(t, err)
+
+		// Get owner of temp directory
+		owner, err := Owner(tempDir)
+		require.NoError(t, err)
+
+		// Test probeEnt with correct owner
+		err = probeEnt(testFile, owner)
+		require.NoError(t, err)
+	})
+
+	t.Run("existing directory with correct owner", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create test directory
+		testDir := filepath.Join(tempDir, "testdir")
+		err := os.Mkdir(testDir, 0o755)
+		require.NoError(t, err)
+
+		// Get owner of temp directory
+		owner, err := Owner(tempDir)
+		require.NoError(t, err)
+
+		// Test probeEnt with correct owner
+		err = probeEnt(testDir, owner)
+		require.NoError(t, err)
+	})
+
+	t.Run("nonexistent file", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		nonexistentFile := filepath.Join(tempDir, "nonexistent.txt")
+		owner, err := Owner(tempDir)
+		require.NoError(t, err)
+
+		err = probeEnt(nonexistentFile, owner)
+		require.Error(t, err)
+		require.True(t, errors.Is(err, os.ErrNotExist))
+	})
+
+	t.Run("nonexistent file in nonexistent directory", func(t *testing.T) {
+		nonexistentFile := "/this/directory/does/not/exists/nonexistent.txt"
+
+		err := probeEnt(nonexistentFile, -1)
+		require.Error(t, err)
+		require.True(t, errors.Is(err, os.ErrNotExist))
+	})
+
+	t.Run("ownership bypass with -1", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create test file
+		testFile := filepath.Join(tempDir, "test.txt")
+		err := os.WriteFile(testFile, []byte("test"), 0o644)
+		require.NoError(t, err)
+
+		// Test probeEnt with -1 (bypass ownership check)
+		err = probeEnt(testFile, -1)
+		require.NoError(t, err)
+	})
+
+	t.Run("ownership mismatch returns permission error", func(t *testing.T) {
+		tempDir := t.TempDir()
+
+		// Create test file
+		testFile := filepath.Join(tempDir, "test.txt")
+		err := os.WriteFile(testFile, []byte("test"), 0o644)
+		require.NoError(t, err)
+
+		// Test probeEnt with different owner (use 9999 which is unlikely to be the actual owner)
+		err = probeEnt(testFile, 9999)
+		require.Error(t, err)
+		require.True(t, errors.Is(err, os.ErrPermission))
 	})
 }

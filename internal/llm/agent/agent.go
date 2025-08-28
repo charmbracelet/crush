@@ -22,7 +22,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // Common errors
@@ -833,8 +832,6 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
-		shell := shell.GetPersistentShell(config.Get().WorkingDir())
-		summary += "\n\n**Current working directory of the persistent shell**\n\n" + shell.GetWorkingDir()
 		event = AgentEvent{
 			Type:     AgentEventTypeSummarize,
 			Progress: "Creating new session...",

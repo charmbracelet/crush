@@ -355,7 +355,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		return client.NewStdioMCPClientWithOptions(
-			m.Command,
+			m.ResolvedCommand(),
 			m.ResolvedEnv(),
 			m.Args,
 			transport.WithCommandLogger(mcpLogger{}),

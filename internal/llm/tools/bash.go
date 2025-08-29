@@ -370,10 +370,11 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for executing shell command")
 	}
 	if !isSafeReadOnly {
+		shell := shell.GetPersistentShell(b.workingDir)
 		p := b.permissions.Request(
 			permission.CreatePermissionRequest{
 				SessionID:   sessionID,
-				Path:        b.workingDir,
+				Path:        shell.GetWorkingDir(),
 				ToolCallID:  call.ID,
 				ToolName:    BashToolName,
 				Action:      "execute",

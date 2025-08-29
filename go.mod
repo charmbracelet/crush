@@ -76,7 +76,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20250813213450-50737e162af5
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20250611152503-f53cdd7e01ef
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect

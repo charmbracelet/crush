@@ -364,7 +364,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			agentCfg := config.Get().Agents["coder"]
+			agentCfg, _ := config.Get().GetAgent(config.AgentIDCoder)
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
@@ -523,7 +523,7 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 func (p *chatPage) toggleThinking() tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg, _ := cfg.GetAgent(config.AgentIDCoder)
 		currentModel := cfg.Models[agentCfg.Model]
 
 		// Toggle the thinking mode

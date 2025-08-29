@@ -332,6 +332,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
 	}
+	if c.Agents == nil {
+		c.Agents = make(map[string]AgentConfig)
+	}
 
 	// Apply default file types for known LSP servers if not specified
 	applyDefaultLSPFileTypes(c.LSP)

@@ -86,8 +86,8 @@ type agent struct {
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
-	"coder": prompt.PromptCoder,
-	"task":  prompt.PromptTask,
+	config.AgentIDCoder: prompt.PromptCoder,
+	config.AgentIDTask:  prompt.PromptTask,
 }
 
 func NewAgent(
@@ -103,9 +103,9 @@ func NewAgent(
 	cfg := config.Get()
 
 	var agentTool tools.BaseTool
-	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
+	if agentCfg.ID == config.AgentIDCoder {
+		taskAgentCfg, exists := config.Get().GetAgent(config.AgentIDTask)
+		if !exists {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
 		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
@@ -683,14 +683,14 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStart:
 		assistantMsg.FinishThinking()
-		slog.Info("Tool call started", "toolCall", event.ToolCall)
+		slog.Info("Tool call started", "agent", a.agentCfg.ID, "toolCall", event.ToolCall)
 		assistantMsg.AddToolCall(*event.ToolCall)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseDelta:
 		assistantMsg.AppendToolCallInput(event.ToolCall.ID, event.ToolCall.Input)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventToolUseStop:
-		slog.Info("Finished tool call", "toolCall", event.ToolCall)
+		slog.Info("Finished tool call", "agent", a.agentCfg.ID, "toolCall", event.ToolCall)
 		assistantMsg.FinishToolCall(event.ToolCall.ID)
 		return a.messages.Update(ctx, *assistantMsg)
 	case provider.EventError:

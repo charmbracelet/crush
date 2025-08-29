@@ -693,17 +693,47 @@ func (s *splashCmp) mcpBlock() string {
 
 func (s *splashCmp) currentModelBlock() string {
 	cfg := config.Get()
-	agentCfg := cfg.Agents["coder"]
-	model := config.Get().GetModelByType(agentCfg.Model)
-	if model == nil {
-		return ""
-	}
 	t := styles.CurrentTheme()
-	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
-	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
-	parts := []string{
-		modelInfo,
+	var parts []string
+
+	// Add section header
+	section := t.S().Subtle.Render("Agents")
+	parts = append(parts, section, "")
+
+	maxWidth := s.getMaxInfoWidth()
+
+	// Show Coder agent
+	coderAgent, _ := cfg.GetAgent(config.AgentIDCoder)
+	coderModel := cfg.GetModelByType(coderAgent.Model)
+	if coderModel != nil {
+		coderLine := core.Status(
+			core.StatusOpts{
+				Icon:        styles.ModelIcon,
+				Title:       "Coder",
+				Description: t.S().Text.Render(coderModel.Name),
+			},
+			maxWidth,
+		)
+		parts = append(parts, coderLine)
+	}
+
+	// Show Task agent
+	taskAgent, _ := cfg.GetAgent(config.AgentIDTask)
+	taskModel := cfg.GetModelByType(taskAgent.Model)
+	if taskModel != nil {
+		taskLine := core.Status(
+			core.StatusOpts{
+				Icon:        styles.ModelIcon,
+				Title:       "Task",
+				Description: t.S().Text.Render(taskModel.Name),
+			},
+			maxWidth,
+		)
+		parts = append(parts, taskLine)
+	}
+
+	if len(parts) <= 2 { // Only header and empty line
+		return ""
 	}
 
 	return lipgloss.JoinVertical(

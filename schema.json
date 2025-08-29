@@ -3,6 +3,24 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "AgentConfig": {
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": [
+            "large",
+            "small"
+          ],
+          "description": "The model type to use for this agent",
+          "default": "large"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model"
+      ]
+    },
     "Config": {
       "properties": {
         "$schema": {
@@ -37,6 +55,13 @@
         "permissions": {
           "$ref": "#/$defs/Permissions",
           "description": "Permission settings for tool usage"
+        },
+        "agents": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentConfig"
+          },
+          "type": "object",
+          "description": "Agent model configurations for builtin agents"
         }
       },
       "additionalProperties": false,

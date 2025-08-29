@@ -13,11 +13,11 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.12
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250813213544-5cc219db8892
-	github.com/charmbracelet/catwalk v0.4.12
-	github.com/charmbracelet/fang v0.3.1-0.20250711140230-d5ebb8c1d674
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta1
+	github.com/charmbracelet/catwalk v0.5.3
+	github.com/charmbracelet/fang v0.4.0
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250721205738-ea66aa652ee0
+	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
@@ -40,12 +40,14 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8
 )
+
+require github.com/charmbracelet/x/input v0.3.4 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
@@ -146,7 +148,7 @@ require (
 	golang.org/x/text v0.28.0
 	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/api v0.211.0 // indirect
-	google.golang.org/genai v1.21.0
+	google.golang.org/genai v1.22.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/grpc v1.71.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect

@@ -90,6 +90,11 @@ var agentPromptMap = map[string]prompt.PromptID{
 	"task":  prompt.PromptTask,
 }
 
+// LSPRestarter interface for restarting LSP clients
+type LSPRestarter interface {
+	RestartLSPClient(ctx context.Context, name string) error
+}
+
 func NewAgent(
 	ctx context.Context,
 	agentCfg config.Agent,
@@ -99,6 +104,7 @@ func NewAgent(
 	messages message.Service,
 	history history.Service,
 	lspClients map[string]*lsp.Client,
+	lspRestarter LSPRestarter, // Add LSP restarter interface
 ) (Service, error) {
 	cfg := config.Get()
 
@@ -108,7 +114,7 @@ func NewAgent(
 		if taskAgentCfg.ID == "" {
 			return nil, fmt.Errorf("task agent not found in config")
 		}
-		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
+		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients, lspRestarter)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create task agent: %w", err)
 		}
@@ -202,6 +208,16 @@ func NewAgent(
 		if len(lspClients) > 0 {
 			allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
 		}
+
+		// Add restart tools
+		allTools = append(allTools, NewMCPRestartTool(permissions, cwd))
+		if lspRestarter != nil {
+			allTools = append(allTools, NewLSPRestartTool(lspRestarter, permissions, cwd))
+		}
+
+		// Add list tools
+		allTools = append(allTools, tools.NewListMCPsTool(permissions, cwd))
+		allTools = append(allTools, tools.NewListLSPsTool(permissions, cwd))
 
 		if agentTool != nil {
 			allTools = append(allTools, agentTool)

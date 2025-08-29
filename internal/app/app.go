@@ -275,6 +275,7 @@ func (app *App) InitCoderAgent() error {
 		app.Messages,
 		app.History,
 		app.LSPClients,
+		app, // Pass app as LSPRestarter
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

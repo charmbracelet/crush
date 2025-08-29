@@ -1,13 +1,3 @@
-// Package shell provides cross-platform shell execution capabilities.
-//
-// This package offers two main types:
-// - Shell: A general-purpose shell executor for one-off or managed commands
-// - PersistentShell: A singleton shell that maintains state across the application
-//
-// WINDOWS COMPATIBILITY:
-// This implementation provides both POSIX shell emulation (mvdan.cc/sh/v3),
-// even on Windows. Some caution has to be taken: commands should have forward
-// slashes (/) as path separators to work, even on Windows.
 package shell
 
 import (
@@ -15,10 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/crush/internal/slicesext"
 	"mvdan.cc/sh/moreinterp/coreutils"
@@ -27,25 +17,6 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// ShellType represents the type of shell to use
-type ShellType int
-
-const (
-	ShellTypePOSIX ShellType = iota
-	ShellTypeCmd
-	ShellTypePowerShell
-)
-
-// Logger interface for optional logging
-type Logger interface {
-	InfoPersist(msg string, keysAndValues ...any)
-}
-
-// noopLogger is a logger that does nothing
-type noopLogger struct{}
-
-func (noopLogger) InfoPersist(msg string, keysAndValues ...any) {}
-
 // BlockFunc is a function that determines if a command should be blocked
 type BlockFunc func(args []string) bool
 
@@ -53,8 +24,6 @@ type BlockFunc func(args []string) bool
 type Shell struct {
 	env        []string
 	cwd        string
-	mu         sync.Mutex
-	logger     Logger
 	blockFuncs []BlockFunc
 }
 
@@ -62,99 +31,52 @@ type Shell struct {
 type Options struct {
 	WorkingDir string
 	Env        []string
-	Logger     Logger
 	BlockFuncs []BlockFunc
 }
 
 // NewShell creates a new shell instance with the given options
-func NewShell(opts *Options) *Shell {
-	if opts == nil {
-		opts = &Options{}
-	}
-
-	cwd := opts.WorkingDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-
-	env := opts.Env
-	if env == nil {
-		env = os.Environ()
-	}
-
-	logger := opts.Logger
-	if logger == nil {
-		logger = noopLogger{}
-	}
-
-	return &Shell{
-		cwd:        cwd,
-		env:        env,
-		logger:     logger,
+func NewShell(opts Options) *Shell {
+	sh := &Shell{
+		cwd:        opts.WorkingDir,
+		env:        opts.Env,
 		blockFuncs: opts.BlockFuncs,
 	}
+	if sh.cwd == "" {
+		sh.cwd, _ = os.Getwd()
+	}
+	if sh.env == nil {
+		sh.env = os.Environ()
+	}
+	return sh
 }
 
 // Exec executes a command in the shell
 func (s *Shell) Exec(ctx context.Context, command string) (string, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.execPOSIX(ctx, command)
-}
-
-// GetWorkingDir returns the current working directory
-func (s *Shell) GetWorkingDir() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cwd
-}
-
-// SetWorkingDir sets the working directory
-func (s *Shell) SetWorkingDir(dir string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Verify the directory exists
-	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("directory does not exist: %w", err)
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return "", "", fmt.Errorf("could not parse command: %w", err)
 	}
 
-	s.cwd = dir
-	return nil
-}
-
-// GetEnv returns a copy of the environment variables
-func (s *Shell) GetEnv() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	env := make([]string, len(s.env))
-	copy(env, s.env)
-	return env
-}
-
-// SetEnv sets an environment variable
-func (s *Shell) SetEnv(key, value string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Update or add the environment variable
-	keyPrefix := key + "="
-	for i, env := range s.env {
-		if strings.HasPrefix(env, keyPrefix) {
-			s.env[i] = keyPrefix + value
-			return
-		}
+	var stdout, stderr bytes.Buffer
+	runner, err := interp.New(
+		interp.StdIO(nil, &stdout, &stderr),
+		interp.Interactive(false),
+		interp.Env(expand.ListEnviron(s.env...)),
+		interp.Dir(s.cwd),
+		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("could not run command: %w", err)
 	}
-	s.env = append(s.env, keyPrefix+value)
-}
 
-// SetBlockFuncs sets the command block functions for the shell
-func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.blockFuncs = blockFuncs
+	err = runner.Run(ctx, line)
+	s.cwd = runner.Dir
+	s.env = []string{}
+	for name, vr := range runner.Vars {
+		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
+	}
+	slog.Info("POSIX command finished", "command", command, "err", err)
+	return stdout.String(), stderr.String(), err
 }
 
 // CommandsBlocker creates a BlockFunc that blocks exact command matches
@@ -226,35 +148,6 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 			return next(ctx, args)
 		}
 	}
-}
-
-// execPOSIX executes commands using POSIX shell emulation (cross-platform)
-func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, error) {
-	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil {
-		return "", "", fmt.Errorf("could not parse command: %w", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	runner, err := interp.New(
-		interp.StdIO(nil, &stdout, &stderr),
-		interp.Interactive(false),
-		interp.Env(expand.ListEnviron(s.env...)),
-		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
-	)
-	if err != nil {
-		return "", "", fmt.Errorf("could not run command: %w", err)
-	}
-
-	err = runner.Run(ctx, line)
-	s.cwd = runner.Dir
-	s.env = []string{}
-	for name, vr := range runner.Vars {
-		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
-	}
-	s.logger.InfoPersist("POSIX command finished", "command", command, "err", err)
-	return stdout.String(), stderr.String(), err
 }
 
 // IsInterrupt checks if an error is due to interruption

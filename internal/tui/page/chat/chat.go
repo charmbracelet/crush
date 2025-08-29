@@ -119,7 +119,7 @@ func New(app *app.App) ChatPage {
 		app:         app,
 		keyMap:      DefaultKeyMap(),
 		header:      header.New(app.LSPClients),
-		sidebar:     sidebar.New(app.History, app.LSPClients, false),
+		sidebar:     sidebar.New(app.History, app.Todos, app.LSPClients, false),
 		chat:        chat.New(app),
 		editor:      editor.New(app),
 		splash:      splash.New(),

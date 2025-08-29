@@ -41,7 +41,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// uses default config paths
 	configPaths := []string{
-		globalConfig(),
+		GlobalConfig(),
 		GlobalConfigData(),
 		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
 		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
@@ -568,7 +568,8 @@ func hasAWSCredentials(env env.Env) bool {
 	return false
 }
 
-func globalConfig() string {
+// GlobalConfig returns the path to the global configuration file.
+func GlobalConfig() string {
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome != "" {
 		return filepath.Join(xdgConfigHome, appName, fmt.Sprintf("%s.json", appName))

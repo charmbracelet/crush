@@ -419,6 +419,29 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}
 	}
 
+	// clean messages
+	// if there is a tool call that has no tool response here we need to mark it as cancelled this could have happened by a crash or something similar
+	resultsMap := make(map[string]bool, 0) // toolCallId=>true
+	for _, msg := range msgs {
+		if msg.Role == message.Tool {
+			results := msg.ToolResults()
+			for _, result := range results {
+				resultsMap[result.ToolCallID] = true
+			}
+		}
+	}
+	for _, msg := range msgs {
+		if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
+			for _, tc := range msg.ToolCalls() {
+				if _, ok := resultsMap[tc.ID]; !ok {
+					a.finishMessage(context.Background(), &msg, message.FinishReasonCanceled, "Request cancelled", "")
+					goto next
+				}
+			}
+		next:
+		}
+	}
+
 	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))

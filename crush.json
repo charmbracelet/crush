@@ -1,8 +1,144 @@
 {
   "$schema": "https://charm.land/crush.json",
   "lsp": {
-    "Go": {
+    "go": {
       "command": "gopls"
+    },
+    "gomod": {
+      "command": "gopls"
+    },
+    "gotmpl": {
+      "command": "gopls"
+    },
+    "gowork": {
+      "command": "gopls"
+    },
+    "bash": {
+      "command": "bash-language-server",
+      "args": [
+        "start"
+      ]
+    },
+    "yaml": {
+      "command": "yaml-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "javascript": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "jsx": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "tsx": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "gts": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "gjs": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "json": {
+      "command": "vscode-json-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "docker-compose": {
+      "command": "docker-compose-langserver",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "dockerfile": {
+      "command": "docker-langserver",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "markdown": {
+      "command": "marksman"
+    },
+    "python": {
+      "command": "pyright-langserver",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "css": {
+      "command": "vscode-css-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "scss": {
+      "command": "vscode-css-language-server",
+      "args": [
+        "--stdio"
+      ]
+    },
+    "toml": {
+      "command": "taplo",
+      "args": [
+        "lsp",
+        "stdio"
+      ]
+    },
+    "tfvars": {
+      "command": "terraform-ls",
+      "args": [
+        "serve"
+      ]
+    },
+    "hcl": {
+      "command": "terraform-ls",
+      "args": [
+        "serve"
+      ]
+    },
+    "terraform": {
+      "command": "terraform-ls",
+      "args": [
+        "serve"
+      ]
+    },
+    "html": {
+      "command": "superhtml",
+      "args": [
+        "lsp"
+      ]
+    },
+    "opencl": {
+      "command": "clangd"
+    },
+    "c": {
+      "command": "clangd"
+    },
+    "cpp": {
+      "command": "clangd"
     }
   }
 }

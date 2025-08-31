@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/openai/openai-go"
@@ -30,6 +32,19 @@ func newAzureClient(opts providerClientOptions) AzureClient {
 	}
 
 	reqOpts = append(reqOpts, azure.WithAPIKey(opts.apiKey))
+
+	// Parity with OpenAI: apply extra headers and extra body
+	for key, value := range opts.extraHeaders {
+		reqOpts = append(reqOpts, option.WithHeader(key, value))
+	}
+	for k, v := range opts.extraBody {
+		// ignore verbosity from extra_body to avoid split-brain configuration
+		if strings.EqualFold(k, "verbosity") {
+			continue
+		}
+		reqOpts = append(reqOpts, option.WithJSONSet(k, v))
+	}
+
 	base := &openaiClient{
 		providerOptions: opts,
 		client:          openai.NewClient(reqOpts...),

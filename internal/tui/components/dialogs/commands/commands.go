@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -132,6 +133,10 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return c, nil // No item selected, do nothing
 			}
 			command := (*selectedItem).Value()
+			// Keep dialog open for cycling commands to allow rapid toggling
+			if command.ID == "cycle_reasoning_effort" || command.ID == "cycle_verbosity" {
+				return c, command.Handler(command)
+			}
 			return c, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				command.Handler(command),
@@ -212,6 +217,12 @@ func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
 		commands = c.userCommands
 	}
 
+	// Preserve current selection across refreshes
+	selectedID := ""
+	if sel := c.commandList.SelectedItem(); sel != nil {
+		selectedID = (*sel).ID()
+	}
+
 	commandItems := []list.CompletionItem[Command]{}
 	for _, cmd := range commands {
 		opts := []list.CompletionItemOption{
@@ -225,7 +236,12 @@ func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
 		}
 		commandItems = append(commandItems, list.NewCompletionItem(cmd.Title, cmd, opts...))
 	}
-	return c.commandList.SetItems(commandItems)
+	setCmd := c.commandList.SetItems(commandItems)
+	if selectedID != "" {
+		selCmd := c.commandList.SetSelected(selectedID)
+		return tea.Batch(setCmd, selCmd)
+	}
+	return setCmd
 }
 
 func (c *commandDialogCmp) listHeight() int {
@@ -322,6 +338,82 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			})
 		}
 	}
+
+	// OpenAI/Azure: Cycle Reasoning Effort and Verbosity (only for can_reason models)
+	if agentCfg, ok := cfg.Agents["coder"]; ok {
+		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+		model := cfg.GetModelByType(agentCfg.Model)
+		if providerCfg != nil && model != nil &&
+			(model.CanReason && (providerCfg.Type == catwalk.TypeOpenAI || providerCfg.Type == catwalk.TypeAzure)) {
+
+			// Persist SelectedModel and refresh the command list; keep dialog open
+			updateModel := func(updater func(s config.SelectedModel) config.SelectedModel) tea.Cmd {
+				sm := cfg.Models[agentCfg.Model]
+				sm = updater(sm)
+				_ = cfg.UpdatePreferredModel(agentCfg.Model, sm)
+				// Refresh to update "Current: ..." labels without closing the dialog
+				return c.SetCommandType(c.commandType)
+			}
+
+			cycleEffort := func(cur string) string {
+				order := []string{"minimal", "low", "medium", "high", ""} // "" means off (use default)
+				idx := 0
+				for i, v := range order {
+					if v == cur {
+						idx = i
+						break
+					}
+				}
+				return order[(idx+1)%len(order)]
+			}
+			cycleVerb := func(cur string) string {
+				order := []string{"low", "medium", "high", ""} // "" means off (use default)
+				idx := 0
+				for i, v := range order {
+					if v == cur {
+						idx = i
+						break
+					}
+				}
+				return order[(idx+1)%len(order)]
+			}
+
+			curEff := cfg.Models[agentCfg.Model].ReasoningEffort
+			curEffTitle := curEff
+			if curEffTitle == "" {
+				curEffTitle = "off"
+			}
+			commands = append(commands, Command{
+				ID:          "cycle_reasoning_effort",
+				Title:       "Cycle Reasoning Effort (Current: " + strings.Title(curEffTitle) + ")",
+				Description: "Cycle reasoning effort: minimal → low → medium → high → off",
+				Handler: func(cmd Command) tea.Cmd {
+					return updateModel(func(s config.SelectedModel) config.SelectedModel {
+						s.ReasoningEffort = cycleEffort(s.ReasoningEffort)
+						return s
+					})
+				},
+			})
+
+			curVerb := cfg.Models[agentCfg.Model].Verbosity
+			curVerbTitle := curVerb
+			if curVerbTitle == "" {
+				curVerbTitle = "off"
+			}
+			commands = append(commands, Command{
+				ID:          "cycle_verbosity",
+				Title:       "Cycle Verbosity (Current: " + strings.Title(curVerbTitle) + ")",
+				Description: "Cycle verbosity: low → medium → high → off",
+				Handler: func(cmd Command) tea.Cmd {
+					return updateModel(func(s config.SelectedModel) config.SelectedModel {
+						s.Verbosity = cycleVerb(s.Verbosity)
+						return s
+					})
+				},
+			})
+		}
+	}
+
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
 	if c.wWidth > 120 && c.sessionID != "" {
 		commands = append(commands, Command{

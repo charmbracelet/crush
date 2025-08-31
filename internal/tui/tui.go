@@ -196,18 +196,26 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.app.CoderAgent.IsBusy() {
 			return a, util.ReportWarn("Agent is busy, please wait...")
 		}
-		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
+
+		// Reset on switch: use model defaults deterministically
+		modelToSet := msg.Model
+		modelToSet.ReasoningEffort = ""
+		modelToSet.Verbosity = ""
+		modelToSet.Think = false
+		modelToSet.MaxTokens = 0
+
+		config.Get().UpdatePreferredModel(msg.ModelType, modelToSet)
 
 		// Update the agent with the new model/provider configuration
 		if err := a.app.UpdateAgentModel(); err != nil {
-			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.Model, err))
+			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", modelToSet.Model, err))
 		}
 
 		modelTypeName := "large"
 		if msg.ModelType == config.SelectedModelTypeSmall {
 			modelTypeName = "small"
 		}
-		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
+		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, modelToSet.Model))
 
 	// File Picker
 	case commands.OpenFilePickerMsg:

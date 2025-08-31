@@ -58,6 +58,10 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	}
 
 	for extraKey, extraValue := range opts.extraBody {
+		// ignore verbosity from extra_body to avoid split-brain configuration
+		if strings.EqualFold(extraKey, "verbosity") {
+			continue
+		}
 		openaiClientOptions = append(openaiClientOptions, option.WithJSONSet(extraKey, extraValue))
 	}
 
@@ -225,6 +229,9 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	}
 
 	reasoningEffort := modelConfig.ReasoningEffort
+	if reasoningEffort == "" && model.CanReason {
+		reasoningEffort = model.DefaultReasoningEffort
+	}
 
 	params := openai.ChatCompletionNewParams{
 		Model:    openai.ChatModel(model.ID),
@@ -243,17 +250,19 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	}
 	if model.CanReason {
 		params.MaxCompletionTokens = openai.Int(maxTokens)
-		switch reasoningEffort {
-		case "low":
-			params.ReasoningEffort = shared.ReasoningEffortLow
-		case "medium":
-			params.ReasoningEffort = shared.ReasoningEffortMedium
-		case "high":
-			params.ReasoningEffort = shared.ReasoningEffortHigh
-		case "minimal":
-			params.ReasoningEffort = shared.ReasoningEffort("minimal")
-		default:
-			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
+		if reasoningEffort != "" {
+			switch reasoningEffort {
+			case "low":
+				params.ReasoningEffort = shared.ReasoningEffortLow
+			case "medium":
+				params.ReasoningEffort = shared.ReasoningEffortMedium
+			case "high":
+				params.ReasoningEffort = shared.ReasoningEffortHigh
+			case "minimal":
+				params.ReasoningEffort = shared.ReasoningEffort("minimal")
+			default:
+				params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
+			}
 		}
 	} else {
 		params.MaxTokens = openai.Int(maxTokens)
@@ -267,9 +276,30 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
+		// Optional per-call request options (e.g., verbosity)
+		cfg := config.Get()
+		modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+		if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+			modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+		}
+		var reqOpts []option.RequestOption
+		// Bind verbosity to can_reason and apply default fallback from provider model_overrides
+		if m := o.Model(); m.CanReason {
+			v := modelConfig.Verbosity
+			if v == "" {
+				if dv, ok := o.providerOptions.config.DefaultVerbosityByModel[m.ID]; ok {
+					v = dv
+				}
+			}
+			if v != "" {
+				reqOpts = append(reqOpts, option.WithJSONSet("verbosity", v))
+			}
+		}
+
 		openaiResponse, err := o.client.Chat.Completions.New(
 			ctx,
 			params,
+			reqOpts...,
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
@@ -330,9 +360,30 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			if len(params.Tools) == 0 {
 				params.Tools = nil
 			}
+			// Optional per-call request options (e.g., verbosity)
+			cfg := config.Get()
+			modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+			if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+				modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+			}
+			var reqOpts []option.RequestOption
+			// Bind verbosity to can_reason and apply default fallback from provider model_overrides
+			if m := o.Model(); m.CanReason {
+				v := modelConfig.Verbosity
+				if v == "" {
+					if dv, ok := o.providerOptions.config.DefaultVerbosityByModel[m.ID]; ok {
+						v = dv
+					}
+				}
+				if v != "" {
+					reqOpts = append(reqOpts, option.WithJSONSet("verbosity", v))
+				}
+			}
+
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
+				reqOpts...,
 			)
 
 			acc := openai.ChatCompletionAccumulator{}

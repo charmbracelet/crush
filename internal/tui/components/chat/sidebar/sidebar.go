@@ -563,7 +563,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
 		switch modelProvider.Type {
-		case catwalk.TypeOpenAI:
+		case catwalk.TypeOpenAI, catwalk.TypeAzure:
 			reasoningEffort := model.DefaultReasoningEffort
 			if selectedModel.ReasoningEffort != "" {
 				reasoningEffort = selectedModel.ReasoningEffort
@@ -577,6 +577,20 @@ func (s *sidebarCmp) currentModelBlock() string {
 			} else {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
 			}
+		}
+	}
+	// Show Verbosity only for reasoning-capable models; use SelectedModel override or provider model default
+	if model.CanReason {
+		v := selectedModel.Verbosity
+		if v == "" && modelProvider != nil {
+			if dv, ok := modelProvider.DefaultVerbosityByModel[model.ID]; ok {
+				v = dv
+			}
+		}
+		if v != "" {
+			infoStyle := t.S().Subtle.PaddingLeft(2)
+			formatter := cases.Title(language.English, cases.NoLower)
+			parts = append(parts, infoStyle.Render(formatter.String(fmt.Sprintf("Verbosity %s", v))))
 		}
 	}
 	if s.session.ID != "" {

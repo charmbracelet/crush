@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -59,6 +60,9 @@ type SelectedModel struct {
 	// Only used by models that use the openai provider and need this set.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
 
+	// Optional verbosity level for models that support it.
+	Verbosity string `json:"verbosity,omitempty" jsonschema:"description=Verbosity level for models that support it,enum=low,enum=medium,enum=high"`
+
 	// Overrides the default model configuration.
 	MaxTokens int64 `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
 
@@ -87,6 +91,9 @@ type ProviderConfig struct {
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
 	// Extra body
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
+
+	// Internal: default verbosity per model ID (built from providers.*.models[].default_verbosity)
+	DefaultVerbosityByModel map[string]string `json:"-"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
@@ -517,4 +524,61 @@ func resolveEnvs(envs map[string]string) []string {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
 	return res
+}
+
+// UnmarshalJSON implements custom unmarshaling to capture providers.*.models[].default_verbosity
+// while still decoding models into []catwalk.Model.
+func (p *ProviderConfig) UnmarshalJSON(data []byte) error {
+	type rawProvider struct {
+		ID                 string            `json:"id"`
+		Name               string            `json:"name"`
+		BaseURL            string            `json:"base_url"`
+		Type               catwalk.Type      `json:"type"`
+		APIKey             string            `json:"api_key"`
+		Disable            bool              `json:"disable"`
+		SystemPromptPrefix string            `json:"system_prompt_prefix"`
+		ExtraHeaders       map[string]string `json:"extra_headers"`
+		ExtraBody          map[string]any    `json:"extra_body"`
+		Models             json.RawMessage   `json:"models"`
+	}
+	var r rawProvider
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+
+	// Assign simple fields
+	p.ID = r.ID
+	p.Name = r.Name
+	p.BaseURL = r.BaseURL
+	p.Type = r.Type
+	p.APIKey = r.APIKey
+	p.Disable = r.Disable
+	p.SystemPromptPrefix = r.SystemPromptPrefix
+	p.ExtraHeaders = r.ExtraHeaders
+	p.ExtraBody = r.ExtraBody
+
+	// Parse models normally
+	if len(r.Models) > 0 {
+		var models []catwalk.Model
+		if err := json.Unmarshal(r.Models, &models); err == nil {
+			p.Models = models
+
+			// Extract default_verbosity from raw model entries
+			var rawModels []map[string]any
+			if err := json.Unmarshal(r.Models, &rawModels); err == nil {
+				if p.DefaultVerbosityByModel == nil {
+					p.DefaultVerbosityByModel = make(map[string]string, len(rawModels))
+				}
+				for i, m := range models {
+					if i >= len(rawModels) {
+						continue
+					}
+					if dv, ok := rawModels[i]["default_verbosity"].(string); ok && dv != "" {
+						p.DefaultVerbosityByModel[m.ID] = dv
+					}
+				}
+			}
+		}
+	}
+	return nil
 }

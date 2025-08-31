@@ -212,6 +212,14 @@
         "default_reasoning_effort": {
           "type": "string"
         },
+        "default_verbosity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
         "supports_attachments": {
           "type": "boolean"
         }
@@ -391,6 +399,15 @@
             "high"
           ],
           "description": "Reasoning effort level for OpenAI models that support it"
+        },
+        "verbosity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Verbosity level for models that support it"
         },
         "max_tokens": {
           "type": "integer",

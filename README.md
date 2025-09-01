@@ -439,6 +439,93 @@ We’re committed to building sustainable, trusted integrations with model
 providers. If you’re a provider interested in working with us,
 [reach out](mailto:vt100@charm.sh).
 
+## Commands and Shortcuts
+
+### CLI Commands
+
+Crush provides several CLI commands and options:
+
+```bash
+# Interactive mode (default)
+crush
+
+# Run a single prompt non-interactively
+crush run "your prompt here"
+
+# Run with options
+crush -d                    # Enable debug logging
+crush -c /path/to/project   # Run in specific directory
+crush -y                    # Auto-accept all permissions (use with care!)
+crush run -q "prompt"       # Run quietly (no spinner)
+
+# View logs
+crush logs                  # Show last 1000 lines
+crush logs --tail 500       # Show last 500 lines
+crush logs --follow         # Follow logs in real time
+```
+
+### Interactive Mode Keyboard Shortcuts
+
+#### Global Navigation
+- **Ctrl+C** - Quit application
+- **Ctrl+G** - Toggle help/more options
+- **Ctrl+P** - Open commands dialog
+- **Ctrl+S** - Open sessions dialog
+- **Ctrl+Z** - Suspend application
+- **Tab** - Change focus between panels
+- **Esc** - Cancel current operation
+
+#### Chat and Editor
+- **Ctrl+N** - New session
+- **Ctrl+F** - Add file attachment
+- **Ctrl+D** - Toggle details view
+- **Ctrl+O** - Open external editor
+- **Enter** - Send message
+- **Shift+Enter** / **Ctrl+J** - Insert newline
+- **/** - Quick file picker
+- **Ctrl+R** - Attachment delete mode
+  - **Ctrl+R + {number}** - Delete attachment at index
+  - **Ctrl+R + R** - Delete all attachments
+
+#### Navigation in Lists/Chat
+- **↑/↓** - Scroll up/down
+- **Page Up/B** - Page up
+- **Page Down/Space/F** - Page down
+- **U** - Half page up
+- **D** - Half page down
+- **G/Home** - Go to beginning
+- **Shift+G/End** - Go to end
+
+#### Dialog Navigation
+- **Enter/Ctrl+Y** - Accept/execute
+- **↑/Ctrl+P** - Previous item
+- **↓/Ctrl+N** - Next item
+- **Tab** - Switch between options
+- **Esc** - Cancel/close
+
+### System Commands (Ctrl+P)
+
+Access these commands via the commands dialog:
+
+- **New Session** (Ctrl+N) - Start a new chat session
+- **Switch Session** (Ctrl+S) - Switch between sessions
+- **Summarize Session** - Summarize and start fresh
+- **Switch Model** - Change AI model
+- **Toggle Thinking Mode** - Enable reasoning mode
+- **Open File Picker** (Ctrl+F) - Attach files
+- **Open External Editor** (Ctrl+O) - Compose in editor
+- **Toggle Sidebar** - Switch layout modes
+- **Initialize Project** - Create CRUSH.md memory file
+- **Quit** (Ctrl+C) - Exit application
+
+### Custom Commands
+
+Create custom commands by placing Markdown files in:
+- **Global**: `~/.config/crush/commands/` or `~/.crush/commands/`
+- **Project**: `.crush/commands/`
+
+Commands support variables using `$VARIABLE_NAME` syntax and are accessible through the commands dialog.
+
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of

@@ -44,7 +44,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	mvdan.cc/sh/v3 v3.12.1-0.20250726150758-e256f53bade8
+	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
 )
 
 require (
@@ -152,5 +152,5 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	mvdan.cc/sh/moreinterp v0.0.0-20250807215248-5a1a658912aa
+	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )

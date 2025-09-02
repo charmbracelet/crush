@@ -116,12 +116,7 @@ var bannedCommands = []string{
 }
 
 //go:embed bash.md
-var desc []byte
-
-func bashDescription() string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
-	return fmt.Sprintf(string(desc), bannedCommandsStr, MaxOutputLength)
-}
+var bashDescriptio []byte
 
 func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
@@ -155,6 +150,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// NewBashTool returns a new bash tool instance.
 func NewBashTool(permission permission.Service, workingDir string) BaseTool {
 	return &bashTool{
 		permissions: permission,
@@ -167,9 +163,11 @@ func (b *bashTool) Name() string {
 }
 
 func (b *bashTool) Info() ToolInfo {
+	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+	desc := fmt.Sprintf(string(bashDescriptio), bannedCommandsStr, MaxOutputLength)
 	return ToolInfo{
 		Name:        BashToolName,
-		Description: bashDescription(),
+		Description: desc,
 		Parameters: map[string]any{
 			"working_dir": map[string]any{
 				"type":        "string",

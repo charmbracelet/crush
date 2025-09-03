@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -58,6 +59,8 @@ type SelectedModel struct {
 
 	// Only used by models that use the openai provider and need this set.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
+	// Optional verbosity level for models that support it.
+	Verbosity string `json:"verbosity,omitempty" jsonschema:"description=Verbosity level for models that support it,enum=low,enum=medium,enum=high"`
 
 	// Overrides the default model configuration.
 	MaxTokens int64 `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
@@ -93,6 +96,8 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+	// Internal: default verbosity per model id
+	DefaultVerbosityByModel map[string]string `json:"-"`
 }
 
 type MCPType string
@@ -517,4 +522,34 @@ func resolveEnvs(envs map[string]string) []string {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
 	return res
+}
+
+// UnmarshalJSON parses ProviderConfig and extracts default_verbosity from models[] into DefaultVerbosityByModel.
+func (p *ProviderConfig) UnmarshalJSON(data []byte) error {
+	type Alias ProviderConfig
+	var a Alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*p = ProviderConfig(a)
+	// Parse per-model default_verbosity from raw JSON
+	var raw struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(data, &raw); err == nil {
+		m := make(map[string]string)
+		for _, mo := range raw.Models {
+			id, _ := mo["id"].(string)
+			if id == "" {
+				continue
+			}
+			if dv, ok := mo["default_verbosity"].(string); ok && dv != "" {
+				m[id] = dv
+			}
+		}
+		if len(m) > 0 {
+			p.DefaultVerbosityByModel = m
+		}
+	}
+	return nil
 }

@@ -131,7 +131,7 @@ That said, you can also set environment variables for preferred providers.
 | `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
 | `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
 | `AWS_REGION`               | AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
+| `AZURE_OPENAI_API_ENDPOINT`    | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
 

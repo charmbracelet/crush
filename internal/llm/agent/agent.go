@@ -181,7 +181,7 @@ func NewAgent(
 
 		cwd := cfg.WorkingDir()
 		allTools := []tools.BaseTool{
-			tools.NewBashTool(permissions, cwd),
+			tools.NewBashTool(permissions, cwd, cfg),
 			tools.NewDownloadTool(permissions, cwd),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
 			tools.NewMultiEditTool(lspClients, permissions, history, cwd),
@@ -438,7 +438,9 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
-				a.messages.Update(context.Background(), agentMessage)
+				if updateErr := a.messages.Update(context.Background(), agentMessage); updateErr != nil {
+					return a.err(fmt.Errorf("failed to update cancelled message: %w", updateErr))
+				}
 				return a.err(ErrRequestCancelled)
 			}
 			return a.err(fmt.Errorf("failed to process events: %w", err))

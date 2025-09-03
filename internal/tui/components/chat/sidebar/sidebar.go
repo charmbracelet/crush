@@ -543,6 +543,12 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 
+func formatRequestCount(count int64) string {
+	t := styles.CurrentTheme()
+	requestCount := t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("%d requests", count))
+	return requestCount
+}
+
 func (s *sidebarCmp) currentModelBlock() string {
 	cfg := config.Get()
 	agentCfg := cfg.Agents["coder"]
@@ -587,6 +593,10 @@ func (s *sidebarCmp) currentModelBlock() string {
 				model.ContextWindow,
 				s.session.Cost,
 			),
+		)
+		parts = append(
+			parts,
+			"  "+formatRequestCount(s.session.MessageCount),
 		)
 	}
 	return lipgloss.JoinVertical(

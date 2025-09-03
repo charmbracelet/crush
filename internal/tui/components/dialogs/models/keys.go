@@ -6,6 +6,8 @@ import (
 
 type KeyMap struct {
 	Select,
+	EditAPIKey,
+	DeleteAPIKey,
 	Next,
 	Previous,
 	Tab,
@@ -20,6 +22,14 @@ func DefaultKeyMap() KeyMap {
 		Select: key.NewBinding(
 			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
+		),
+		EditAPIKey: key.NewBinding(
+			key.WithKeys("ctrl+enter"),
+			key.WithHelp("ctrl+enter", "edit api key"),
+		),
+		DeleteAPIKey: key.NewBinding(
+			key.WithKeys("ctrl+d", "delete", "del"),
+			key.WithHelp("ctrl+d/delete", "delete api key"),
 		),
 		Next: key.NewBinding(
 			key.WithKeys("down", "ctrl+n"),
@@ -44,6 +54,8 @@ func DefaultKeyMap() KeyMap {
 func (k KeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Select,
+		k.EditAPIKey,
+		k.DeleteAPIKey,
 		k.Next,
 		k.Previous,
 		k.Tab,
@@ -64,16 +76,16 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
+	// When inside API key dialog and not yet validated, show delete and close
 	if k.isAPIKeyHelp && !k.isAPIKeyValid {
-		return []key.Binding{
-			k.Close,
-		}
-	} else if k.isAPIKeyValid {
-		return []key.Binding{
-			k.Select,
-		}
+		return []key.Binding{k.DeleteAPIKey, k.Close}
 	}
-	return []key.Binding{
+	// When validated, just allow confirm
+	if k.isAPIKeyValid {
+		return []key.Binding{k.Select}
+	}
+	// Default help when browsing models
+	help := []key.Binding{
 		key.NewBinding(
 			key.WithKeys("down", "up"),
 			key.WithHelp("↑↓", "choose"),
@@ -82,4 +94,10 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Select,
 		k.Close,
 	}
+	if !k.isAPIKeyHelp {
+		help = append(help, k.EditAPIKey)
+	} else {
+		help = append(help, k.DeleteAPIKey)
+	}
+	return help
 }

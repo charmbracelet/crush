@@ -475,7 +475,11 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			}
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			} else if model.CanReason {
+				large.ReasoningEffort = model.DefaultReasoningEffort
 			}
+			// carry over verbosity if explicitly set (empty => per-call fallback to provider model default)
+			large.Verbosity = largeModelSelected.Verbosity
 			large.Think = largeModelSelected.Think
 		}
 	}
@@ -502,7 +506,13 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
-			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			if smallModelSelected.ReasoningEffort != "" {
+				small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			} else if model.CanReason {
+				small.ReasoningEffort = model.DefaultReasoningEffort
+			}
+			// carry over verbosity if explicitly set (empty => per-call fallback to provider model default)
+			small.Verbosity = smallModelSelected.Verbosity
 			small.Think = smallModelSelected.Think
 		}
 	}

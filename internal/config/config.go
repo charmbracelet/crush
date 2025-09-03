@@ -543,8 +543,20 @@ func (p *ProviderConfig) UnmarshalJSON(data []byte) error {
 			if id == "" {
 				continue
 			}
-			if dv, ok := mo["default_verbosity"].(string); ok && dv != "" {
+			// Prefer explicit per-model verbosity override, fallback to default_verbosity
+			if vv, ok := mo["verbosity"].(string); ok && vv != "" {
+				m[id] = vv
+			} else if dv, ok := mo["default_verbosity"].(string); ok && dv != "" {
 				m[id] = dv
+			}
+			// Allow overriding default reasoning effort with reasoning_effort
+			if re, ok := mo["reasoning_effort"].(string); ok && re != "" {
+				for j := range p.Models {
+					if p.Models[j].ID == id {
+						p.Models[j].DefaultReasoningEffort = re
+						break
+					}
+				}
 			}
 		}
 		if len(m) > 0 {

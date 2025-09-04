@@ -15,13 +15,13 @@ func TestGlobalWatcher(t *testing.T) {
 	t.Parallel()
 
 	// Test that we can get the global watcher instance
-	gw1 := GetGlobalWatcher()
+	gw1 := getGlobalWatcher()
 	if gw1 == nil {
 		t.Fatal("Expected global watcher instance, got nil")
 	}
 
 	// Test that subsequent calls return the same instance (singleton)
-	gw2 := GetGlobalWatcher()
+	gw2 := getGlobalWatcher()
 	if gw1 != gw2 {
 		t.Fatal("Expected same global watcher instance, got different instances")
 	}
@@ -31,23 +31,19 @@ func TestGlobalWatcher(t *testing.T) {
 		name: "test-watcher",
 	}
 
-	gw1.RegisterWorkspaceWatcher("test", mockWatcher)
+	gw1.register("test", mockWatcher)
 
 	// Check that it was registered
-	gw1.watchersMu.RLock()
-	registered := gw1.workspaceWatchers["test"]
-	gw1.watchersMu.RUnlock()
+	registered, _ := gw1.watchers.Get("test")
 
 	if registered != mockWatcher {
 		t.Fatal("Expected workspace watcher to be registered")
 	}
 
 	// Test unregistration
-	gw1.UnregisterWorkspaceWatcher("test")
+	gw1.unregister("test")
 
-	gw1.watchersMu.RLock()
-	unregistered := gw1.workspaceWatchers["test"]
-	gw1.watchersMu.RUnlock()
+	unregistered, _ := gw1.watchers.Get("test")
 
 	if unregistered != nil {
 		t.Fatal("Expected workspace watcher to be unregistered")
@@ -71,27 +67,27 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &GlobalWatcher{
-		watcher:           watcher,
-		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		debounceTime:      300 * time.Millisecond,
-		debounceMap:       csync.NewMap[string, *time.Timer](),
-		ctx:               ctx,
-		cancel:            cancel,
+	gw := &globalWatcher{
+		watcher:      watcher,
+		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		debounceTime: 300 * time.Millisecond,
+		debounceMap:  csync.NewMap[string, *time.Timer](),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	// Test that watching the same workspace multiple times is safe (idempotent)
-	err1 := gw.WatchWorkspace(tempDir)
+	err1 := gw.watch(tempDir)
 	if err1 != nil {
 		t.Fatalf("First WatchWorkspace call failed: %v", err1)
 	}
 
-	err2 := gw.WatchWorkspace(tempDir)
+	err2 := gw.watch(tempDir)
 	if err2 != nil {
 		t.Fatalf("Second WatchWorkspace call failed: %v", err2)
 	}
 
-	err3 := gw.WatchWorkspace(tempDir)
+	err3 := gw.watch(tempDir)
 	if err3 != nil {
 		t.Fatalf("Third WatchWorkspace call failed: %v", err3)
 	}
@@ -131,17 +127,17 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &GlobalWatcher{
-		watcher:           watcher,
-		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		debounceTime:      300 * time.Millisecond,
-		debounceMap:       csync.NewMap[string, *time.Timer](),
-		ctx:               ctx,
-		cancel:            cancel,
+	gw := &globalWatcher{
+		watcher:      watcher,
+		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		debounceTime: 300 * time.Millisecond,
+		debounceMap:  csync.NewMap[string, *time.Timer](),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	// Watch the workspace
-	err = gw.WatchWorkspace(tempDir)
+	err = gw.watch(tempDir)
 	if err != nil {
 		t.Fatalf("WatchWorkspace failed: %v", err)
 	}
@@ -252,17 +248,17 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &GlobalWatcher{
-		watcher:           watcher,
-		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		debounceTime:      300 * time.Millisecond,
-		debounceMap:       csync.NewMap[string, *time.Timer](),
-		ctx:               ctx,
-		cancel:            cancel,
+	gw := &globalWatcher{
+		watcher:      watcher,
+		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		debounceTime: 300 * time.Millisecond,
+		debounceMap:  csync.NewMap[string, *time.Timer](),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	// Watch the workspace
-	err = gw.WatchWorkspace(tempDir)
+	err = gw.watch(tempDir)
 	if err != nil {
 		t.Fatalf("WatchWorkspace failed: %v", err)
 	}
@@ -298,16 +294,16 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	defer cancel()
 
 	// Create a temporary global watcher for testing
-	gw := &GlobalWatcher{
-		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		debounceTime:      300 * time.Millisecond,
-		debounceMap:       csync.NewMap[string, *time.Timer](),
-		ctx:               ctx,
-		cancel:            cancel,
+	gw := &globalWatcher{
+		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		debounceTime: 300 * time.Millisecond,
+		debounceMap:  csync.NewMap[string, *time.Timer](),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 
 	// Test shutdown doesn't panic
-	gw.Shutdown()
+	gw.shutdown()
 
 	// Verify context was cancelled
 	select {

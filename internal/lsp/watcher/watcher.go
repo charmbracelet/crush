@@ -28,13 +28,6 @@ type WorkspaceWatcher struct {
 	registrations *csync.Slice[protocol.FileSystemWatcher]
 }
 
-func init() {
-	// Ensure the watcher is initialized with a reasonable file limit
-	if _, err := Ulimit(); err != nil {
-		slog.Error("Error setting file limit", "error", err)
-	}
-}
-
 // NewWorkspaceWatcher creates a new workspace watcher
 func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
@@ -44,8 +37,8 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	}
 }
 
-// AddRegistrations adds file watchers to track
-func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
+// register adds file watchers to track
+func (w *WorkspaceWatcher) register(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
 	cfg := config.Get()
 
 	w.registrations.Append(watchers...)
@@ -229,23 +222,23 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 	return filesOpened
 }
 
-// WatchWorkspace sets up file watching for a workspace using the global watcher
-func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath string) {
+// Watch sets up file watching for a workspace using the global watcher
+func (w *WorkspaceWatcher) Watch(ctx context.Context, workspacePath string) {
 	w.workspacePath = workspacePath
 
 	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", w.name)
 
 	// Register this workspace watcher with the global watcher
-	GetGlobalWatcher().RegisterWorkspaceWatcher(w.name, w)
-	defer GetGlobalWatcher().UnregisterWorkspaceWatcher(w.name)
+	getGlobalWatcher().register(w.name, w)
+	defer getGlobalWatcher().unregister(w.name)
 
 	// Register handler for file watcher registrations from the server
 	lsp.RegisterFileWatchHandler(func(id string, watchers []protocol.FileSystemWatcher) {
-		w.AddRegistrations(ctx, id, watchers)
+		w.register(ctx, id, watchers)
 	})
 
 	// Add workspace to the global watcher (will be deduplicated automatically)
-	if err := GetGlobalWatcher().WatchWorkspace(workspacePath); err != nil {
+	if err := getGlobalWatcher().watch(workspacePath); err != nil {
 		slog.Error("Error adding workspace to global watcher", "path", workspacePath, "error", err)
 	}
 

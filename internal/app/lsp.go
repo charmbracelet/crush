@@ -94,7 +94,7 @@ func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceW
 		app.restartLSPClient(ctx, name)
 	})
 
-	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
+	workspaceWatcher.Watch(ctx, app.config.WorkingDir())
 	slog.Info("Workspace watcher stopped", "client", name)
 }
 

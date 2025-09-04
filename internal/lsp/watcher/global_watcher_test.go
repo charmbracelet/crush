@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -73,6 +74,9 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		workspaceRoots:    make(map[string]string),
+		debounceTime:      300 * time.Millisecond,
+		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -131,6 +135,9 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		workspaceRoots:    make(map[string]string),
+		debounceTime:      300 * time.Millisecond,
+		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -206,6 +213,86 @@ func TestFsnotifyDeduplication(t *testing.T) {
 	// This test verifies the fsnotify behavior we're relying on
 }
 
+func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory structure for testing
+	tempDir := t.TempDir()
+
+	// Create directories that should be ignored
+	nodeModules := filepath.Join(tempDir, "node_modules")
+	target := filepath.Join(tempDir, "target")
+	customIgnored := filepath.Join(tempDir, "custom_ignored")
+	normalDir := filepath.Join(tempDir, "src")
+
+	for _, dir := range []string{nodeModules, target, customIgnored, normalDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		}
+	}
+
+	// Create .gitignore file
+	gitignoreContent := "node_modules/\ntarget/\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte(gitignoreContent), 0o644); err != nil {
+		t.Fatalf("Failed to create .gitignore: %v", err)
+	}
+
+	// Create .crushignore file
+	crushignoreContent := "custom_ignored/\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644); err != nil {
+		t.Fatalf("Failed to create .crushignore: %v", err)
+	}
+
+	// Create a new global watcher instance for this test
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a real fsnotify watcher for testing
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("Failed to create fsnotify watcher: %v", err)
+	}
+	defer watcher.Close()
+
+	gw := &GlobalWatcher{
+		watcher:           watcher,
+		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		workspaceRoots:    make(map[string]string),
+		debounceTime:      300 * time.Millisecond,
+		debounceMap:       csync.NewMap[string, *time.Timer](),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+
+	// Watch the workspace
+	err = gw.WatchWorkspace(tempDir)
+	if err != nil {
+		t.Fatalf("WatchWorkspace failed: %v", err)
+	}
+
+	// Verify that ignored directories are properly ignored
+	if !gw.shouldIgnoreDirectory(nodeModules) {
+		t.Errorf("Expected node_modules to be ignored by .gitignore")
+	}
+
+	if !gw.shouldIgnoreDirectory(target) {
+		t.Errorf("Expected target to be ignored by .gitignore")
+	}
+
+	if !gw.shouldIgnoreDirectory(customIgnored) {
+		t.Errorf("Expected custom_ignored to be ignored by .crushignore")
+	}
+
+	// Verify that normal directories are not ignored
+	if gw.shouldIgnoreDirectory(normalDir) {
+		t.Errorf("Expected src directory to not be ignored")
+	}
+
+	if gw.shouldIgnoreDirectory(tempDir) {
+		t.Errorf("Expected workspace root to not be ignored")
+	}
+}
+
 func TestGlobalWatcherShutdown(t *testing.T) {
 	t.Parallel()
 
@@ -216,6 +303,9 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	// Create a temporary global watcher for testing
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		workspaceRoots:    make(map[string]string),
+		debounceTime:      300 * time.Millisecond,
+		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
 		cancel:            cancel,
 	}

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/fsnotify/fsnotify"
+	ignore "github.com/sabhiram/go-gitignore"
 )
 
 // GlobalWatcher manages a single fsnotify.Watcher instance shared across all LSP clients.
@@ -35,6 +37,10 @@ type GlobalWatcher struct {
 	workspaceWatchers map[string]*WorkspaceWatcher
 	watchersMu        sync.RWMutex
 
+	// Map of workspace paths to their root directories for ignore checking
+	workspaceRoots map[string]string
+	rootsMu        sync.RWMutex
+
 	// Debouncing for file events (shared across all clients)
 	debounceTime time.Duration
 	debounceMap  *csync.Map[string, *time.Timer]
@@ -47,38 +53,36 @@ type GlobalWatcher struct {
 	wg sync.WaitGroup
 }
 
-var (
-	globalWatcher *GlobalWatcher
-	globalOnce    sync.Once
-)
+var getGlobalWatcher = sync.OnceValue(func() *GlobalWatcher {
+	ctx, cancel := context.WithCancel(context.Background())
+	gw := &GlobalWatcher{
+		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		workspaceRoots:    make(map[string]string),
+		debounceTime:      300 * time.Millisecond,
+		debounceMap:       csync.NewMap[string, *time.Timer](),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+
+	// Initialize the fsnotify watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("Failed to create global file watcher", "error", err)
+		return gw
+	}
+
+	gw.watcher = watcher
+
+	// Start the event processing goroutine
+	gw.wg.Add(1)
+	go gw.processEvents()
+
+	return gw
+})
 
 // GetGlobalWatcher returns the singleton global watcher instance
 func GetGlobalWatcher() *GlobalWatcher {
-	globalOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		globalWatcher = &GlobalWatcher{
-			workspaceWatchers: make(map[string]*WorkspaceWatcher),
-			debounceTime:      300 * time.Millisecond,
-			debounceMap:       csync.NewMap[string, *time.Timer](),
-			ctx:               ctx,
-			cancel:            cancel,
-		}
-
-		// Initialize the fsnotify watcher
-		watcher, err := fsnotify.NewWatcher()
-		if err != nil {
-			slog.Error("Failed to create global file watcher", "error", err)
-			return
-		}
-
-		globalWatcher.watcher = watcher
-
-		// Start the event processing goroutine
-		globalWatcher.wg.Add(1)
-		go globalWatcher.processEvents()
-	})
-
-	return globalWatcher
+	return getGlobalWatcher()
 }
 
 // RegisterWorkspaceWatcher registers a workspace watcher with the global watcher
@@ -107,6 +111,11 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	cfg := config.Get()
 	slog.Debug("Adding workspace to global watcher", "path", workspacePath)
 
+	// Store the workspace root for hierarchical ignore checking
+	gw.rootsMu.Lock()
+	gw.workspaceRoots[workspacePath] = workspacePath
+	gw.rootsMu.Unlock()
+
 	// Walk the workspace and add only directories to the watcher
 	// fsnotify will automatically provide events for all files within these directories
 	// Multiple calls with the same directories are safe (fsnotify deduplicates)
@@ -120,10 +129,10 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 			return nil
 		}
 
-		// Skip excluded directories (except workspace root)
-		if path != workspacePath && shouldExcludeDir(path) {
-			if cfg.Options.DebugLSP {
-				slog.Debug("Skipping excluded directory", "path", path)
+		// Check if directory should be skipped based on hierarchical .gitignore/.crushignore
+		if gw.shouldIgnoreDirectory(path) {
+			if cfg != nil && cfg.Options.DebugLSP {
+				slog.Debug("Skipping ignored directory", "path", path)
 			}
 			return filepath.SkipDir
 		}
@@ -140,6 +149,93 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	}
 
 	return nil
+}
+
+// shouldIgnoreDirectory checks if a directory should be ignored based on hierarchical
+// .gitignore/.crushignore files. It checks for ignore files in each directory from
+// the target directory up to the workspace root.
+func (gw *GlobalWatcher) shouldIgnoreDirectory(dirPath string) bool {
+	gw.rootsMu.RLock()
+	defer gw.rootsMu.RUnlock()
+
+	// Check against all workspace roots to find the applicable one
+	for _, workspaceRoot := range gw.workspaceRoots {
+		if strings.HasPrefix(dirPath, workspaceRoot) {
+			return gw.isIgnoredInWorkspace(dirPath, workspaceRoot)
+		}
+	}
+
+	return false
+}
+
+// isIgnoredInWorkspace checks if a path is ignored by walking up the directory tree
+// from the target path to the workspace root, checking for .gitignore/.crushignore
+// files in each directory.
+func (gw *GlobalWatcher) isIgnoredInWorkspace(targetPath, workspaceRoot string) bool {
+	// Get relative path from workspace root
+	relPath, err := filepath.Rel(workspaceRoot, targetPath)
+	if err != nil {
+		return false
+	}
+
+	// Don't ignore the workspace root itself
+	if relPath == "." {
+		return false
+	}
+
+	// Check each directory from workspace root to target path for ignore files
+	currentPath := workspaceRoot
+	pathComponents := strings.Split(relPath, string(filepath.Separator))
+
+	for i, component := range pathComponents {
+		currentPath = filepath.Join(currentPath, component)
+
+		// Build the relative path from workspace root to current path
+		currentRelPath := strings.Join(pathComponents[:i+1], "/")
+
+		// Check ignore files in each parent directory
+		checkPath := workspaceRoot
+		for j := 0; j <= i; j++ {
+			if j > 0 {
+				checkPath = filepath.Join(checkPath, pathComponents[j-1])
+			}
+
+			// Check .gitignore in this directory
+			if gw.checkIgnoreFile(filepath.Join(checkPath, ".gitignore"), currentRelPath) {
+				return true
+			}
+
+			// Check .crushignore in this directory
+			if gw.checkIgnoreFile(filepath.Join(checkPath, ".crushignore"), currentRelPath) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// checkIgnoreFile checks if a path matches patterns in an ignore file
+func (gw *GlobalWatcher) checkIgnoreFile(ignoreFilePath, relPath string) bool {
+	content, err := os.ReadFile(ignoreFilePath)
+	if err != nil {
+		return false // File doesn't exist or can't be read
+	}
+
+	lines := strings.Split(string(content), "\n")
+	ignoreParser := ignore.CompileIgnoreLines(lines...)
+
+	// Check both with and without trailing slash for directories
+	if ignoreParser.MatchesPath(relPath) {
+		return true
+	}
+
+	// For directories, also check with trailing slash
+	if ignoreParser.MatchesPath(relPath + "/") {
+		return true
+	}
+
+	return false
 }
 
 // addDirectoryToWatcher adds a directory to the fsnotify watcher.
@@ -196,15 +292,17 @@ func (gw *GlobalWatcher) processEvents() {
 			// to ensure we get events for files created within them
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if !shouldExcludeDir(event.Name) {
+					if !gw.shouldIgnoreDirectory(event.Name) {
 						if err := gw.addDirectoryToWatcher(event.Name); err != nil {
 							slog.Error("Error adding new directory to watcher", "path", event.Name, "error", err)
 						}
+					} else if cfg != nil && cfg.Options.DebugLSP {
+						slog.Debug("Skipping ignored new directory", "path", event.Name)
 					}
 				}
 			}
 
-			if cfg.Options.DebugLSP {
+			if cfg != nil && cfg.Options.DebugLSP {
 				slog.Debug("Global watcher received event", "path", event.Name, "op", event.Op.String())
 			}
 
@@ -427,7 +525,8 @@ func (gw *GlobalWatcher) Shutdown() {
 
 // ShutdownGlobalWatcher shuts down the singleton global watcher
 func ShutdownGlobalWatcher() {
-	if globalWatcher != nil {
-		globalWatcher.Shutdown()
+	gw := getGlobalWatcher()
+	if gw != nil {
+		gw.Shutdown()
 	}
 }

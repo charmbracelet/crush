@@ -30,8 +30,7 @@ import (
 // - Better performance with large codebases
 // - fsnotify handles deduplication internally (no need to track watched dirs)
 type GlobalWatcher struct {
-	watcher   *fsnotify.Watcher
-	watcherMu sync.RWMutex
+	watcher *fsnotify.Watcher
 
 	// Map of workspace watchers by client name
 	workspaceWatchers map[string]*WorkspaceWatcher
@@ -231,17 +230,13 @@ func (gw *GlobalWatcher) checkIgnoreFile(ignoreFilePath, relPath string) bool {
 // addDirectoryToWatcher adds a directory to the fsnotify watcher.
 // fsnotify handles deduplication internally, so we don't need to track watched directories.
 func (gw *GlobalWatcher) addDirectoryToWatcher(dirPath string) error {
-	gw.watcherMu.RLock()
-	watcher := gw.watcher
-	gw.watcherMu.RUnlock()
-
-	if watcher == nil {
+	if gw.watcher == nil {
 		return fmt.Errorf("global watcher not initialized")
 	}
 
 	// Add directory to fsnotify watcher - fsnotify handles deduplication
 	// "A path can only be watched once; watching it more than once is a no-op"
-	err := watcher.Add(dirPath)
+	err := gw.watcher.Add(dirPath)
 	if err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
 	}
@@ -258,11 +253,7 @@ func (gw *GlobalWatcher) processEvents() {
 	defer gw.wg.Done()
 	cfg := config.Get()
 
-	gw.watcherMu.RLock()
-	watcher := gw.watcher
-	gw.watcherMu.RUnlock()
-
-	if watcher == nil {
+	if gw.watcher == nil {
 		slog.Error("Global watcher not initialized")
 		return
 	}
@@ -272,7 +263,7 @@ func (gw *GlobalWatcher) processEvents() {
 		case <-gw.ctx.Done():
 			return
 
-		case event, ok := <-watcher.Events:
+		case event, ok := <-gw.watcher.Events:
 			if !ok {
 				return
 			}
@@ -299,7 +290,7 @@ func (gw *GlobalWatcher) processEvents() {
 			// Process the event centrally
 			gw.handleFileEvent(event)
 
-		case err, ok := <-watcher.Errors:
+		case err, ok := <-gw.watcher.Errors:
 			if !ok {
 				return
 			}
@@ -389,8 +380,6 @@ func (gw *GlobalWatcher) handleFileEvent(event fsnotify.Event) {
 
 // openMatchingFileForClients opens a newly created file for all clients that handle it (only once per file)
 func (gw *GlobalWatcher) openMatchingFileForClients(path string) {
-	cfg := config.Get()
-
 	// Skip directories
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
@@ -408,46 +397,9 @@ func (gw *GlobalWatcher) openMatchingFileForClients(path string) {
 	gw.watchersMu.RUnlock()
 
 	// Open the file for each client that handles it and has matching patterns
-	for clientName, watcher := range watchers {
-		if !watcher.client.HandlesFile(path) {
-			continue
-		}
-
-		// Check if this path should be watched according to server registrations
-		if watched, _ := watcher.isPathWatched(path); !watched {
-			continue
-		}
-
-		serverName := watcher.name
-
-		// Check if the file is a high-priority file that should be opened immediately
-		if isHighPriorityFile(path, serverName) {
-			if cfg.Options.DebugLSP {
-				slog.Debug("Opening high-priority file", "path", path, "serverName", serverName)
-			}
-			if err := watcher.client.OpenFile(gw.ctx, path); err != nil && cfg.Options.DebugLSP {
-				slog.Error("Error opening high-priority file", "path", path, "error", err)
-			}
-			continue
-		}
-
-		// For non-high-priority files, use different strategies based on server type
-		if !shouldPreloadFiles(serverName) {
-			continue
-		}
-
-		// Check file size - for preloading we're more conservative
-		if info.Size() > (1 * 1024 * 1024) { // 1MB limit for preloaded files
-			if cfg.Options.DebugLSP {
-				slog.Debug("Skipping large file for preloading", "path", path, "size", info.Size())
-			}
-			continue
-		}
-
-		// File type is already validated by HandlesFile() check earlier,
-		// so we know this client handles this file type. Just open it.
-		if err := watcher.client.OpenFile(gw.ctx, path); err != nil && cfg.Options.DebugLSP {
-			slog.Error("Error opening file", "path", path, "error", err, "client", clientName)
+	for _, watcher := range watchers {
+		if watcher.client.HandlesFile(path) {
+			watcher.openMatchingFile(gw.ctx, path)
 		}
 	}
 }
@@ -502,12 +454,10 @@ func (gw *GlobalWatcher) Shutdown() {
 		gw.cancel()
 	}
 
-	gw.watcherMu.Lock()
 	if gw.watcher != nil {
 		gw.watcher.Close()
 		gw.watcher = nil
 	}
-	gw.watcherMu.Unlock()
 
 	gw.wg.Wait()
 	slog.Debug("Global watcher shutdown complete")

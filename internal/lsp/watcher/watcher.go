@@ -53,14 +53,12 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
 	cfg := config.Get()
 
-	slog.Debug("Adding file watcher registrations")
 	w.registrationMu.Lock()
 	defer w.registrationMu.Unlock()
 
 	// Add new watchers
 	w.registrations = append(w.registrations, watchers...)
 
-	// Print detailed registration information for debugging
 	if cfg.Options.DebugLSP {
 		slog.Debug("Adding file watcher registrations",
 			"id", id,
@@ -101,103 +99,16 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 		}
 	}
 
-	// Determine server type for specialized handling
-	serverName := w.name
-	slog.Debug("Server type detected", "serverName", serverName)
-
-	// Check if this server has sent file watchers
-	hasFileWatchers := len(watchers) > 0
-
-	// For servers that need file preloading, we'll use a smart approach
-	if shouldPreloadFiles(serverName) || !hasFileWatchers {
+	// For servers that need file preloading, open high-priority files only
+	if shouldPreloadFiles(w.name) {
 		go func() {
-			startTime := time.Now()
-			filesOpened := 0
-
-			// Determine max files to open based on server type
-			maxFilesToOpen := 50 // Default conservative limit
-
-			switch serverName {
-			case "typescript", "typescript-language-server", "tsserver", "vtsls":
-				// TypeScript servers benefit from seeing more files
-				maxFilesToOpen = 100
-			case "java", "jdtls":
-				// Java servers need to see many files for project model
-				maxFilesToOpen = 200
-			}
-
-			// First, open high-priority files
-			highPriorityFilesOpened := w.openHighPriorityFiles(ctx, serverName)
-			filesOpened += highPriorityFilesOpened
-
+			highPriorityFilesOpened := w.openHighPriorityFiles(ctx, w.name)
 			if cfg.Options.DebugLSP {
 				slog.Debug("Opened high-priority files",
 					"count", highPriorityFilesOpened,
-					"serverName", serverName)
-			}
-
-			// If we've already opened enough high-priority files, we might not need more
-			if filesOpened >= maxFilesToOpen {
-				if cfg.Options.DebugLSP {
-					slog.Debug("Reached file limit with high-priority files",
-						"filesOpened", filesOpened,
-						"maxFiles", maxFilesToOpen)
-				}
-				return
-			}
-
-			// For the remaining slots, walk the directory and open matching files
-			err := filepath.WalkDir(w.workspacePath, func(path string, d os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-
-				// Skip directories that should be excluded
-				if d.IsDir() {
-					if path != w.workspacePath && shouldExcludeDir(path) {
-						if cfg.Options.DebugLSP {
-							slog.Debug("Skipping excluded directory", "path", path)
-						}
-						return filepath.SkipDir
-					}
-				} else {
-					// Process files, but limit the total number
-					if filesOpened < maxFilesToOpen {
-						// Only process if it's not already open (high-priority files were opened earlier)
-						if !w.client.IsFileOpen(path) {
-							w.openMatchingFile(ctx, path)
-							filesOpened++
-
-							// Add a small delay after every 10 files to prevent overwhelming the server
-							if filesOpened%10 == 0 {
-								time.Sleep(50 * time.Millisecond)
-							}
-						}
-					} else {
-						// We've reached our limit, stop walking
-						return filepath.SkipAll
-					}
-				}
-
-				return nil
-			})
-
-			elapsedTime := time.Since(startTime)
-			if cfg.Options.DebugLSP {
-				slog.Debug("Limited workspace scan complete",
-					"filesOpened", filesOpened,
-					"maxFiles", maxFilesToOpen,
-					"elapsedTime", elapsedTime.Seconds(),
-					"workspacePath", w.workspacePath,
-				)
-			}
-
-			if err != nil && cfg.Options.DebugLSP {
-				slog.Debug("Error scanning workspace for files to open", "error", err)
+					"serverName", w.name)
 			}
 		}()
-	} else if cfg.Options.DebugLSP {
-		slog.Debug("Using on-demand file loading for server", "server", serverName)
 	}
 }
 
@@ -376,105 +287,14 @@ func (w *WorkspaceWatcher) isPathWatched(path string) (bool, protocol.WatchKind)
 	return false, 0
 }
 
-// matchesGlob handles advanced glob patterns including ** and alternatives
+// matchesGlob handles glob patterns using the doublestar library
 func matchesGlob(pattern, path string) bool {
-	// Handle file extension patterns with braces like *.{go,mod,sum}
-	if strings.Contains(pattern, "{") && strings.Contains(pattern, "}") {
-		// Extract extensions from pattern like "*.{go,mod,sum}"
-		parts := strings.SplitN(pattern, "{", 2)
-		if len(parts) == 2 {
-			prefix := parts[0]
-			extPart := strings.SplitN(parts[1], "}", 2)
-			if len(extPart) == 2 {
-				extensions := strings.Split(extPart[0], ",")
-				suffix := extPart[1]
-
-				// Check if the path matches any of the extensions
-				for _, ext := range extensions {
-					extPattern := prefix + ext + suffix
-					isMatch := matchesSimpleGlob(extPattern, path)
-					if isMatch {
-						return true
-					}
-				}
-				return false
-			}
-		}
-	}
-
-	return matchesSimpleGlob(pattern, path)
-}
-
-// matchesSimpleGlob handles glob patterns with ** wildcards
-func matchesSimpleGlob(pattern, path string) bool {
-	// Handle special case for **/*.ext pattern (common in LSP)
-	if after, ok := strings.CutPrefix(pattern, "**/"); ok {
-		rest := after
-
-		// If the rest is a simple file extension pattern like *.go
-		if strings.HasPrefix(rest, "*.") {
-			ext := strings.TrimPrefix(rest, "*")
-			isMatch := strings.HasSuffix(path, ext)
-			return isMatch
-		}
-
-		// Otherwise, try to check if the path ends with the rest part
-		isMatch := strings.HasSuffix(path, rest)
-
-		// If it matches directly, great!
-		if isMatch {
-			return true
-		}
-
-		// Otherwise, check if any path component matches
-		pathComponents := strings.Split(path, "/")
-		for i := range pathComponents {
-			subPath := strings.Join(pathComponents[i:], "/")
-			if strings.HasSuffix(subPath, rest) {
-				return true
-			}
-		}
-
-		return false
-	}
-
-	// Handle other ** wildcard pattern cases
-	if strings.Contains(pattern, "**") {
-		parts := strings.Split(pattern, "**")
-
-		// Validate the path starts with the first part
-		if !strings.HasPrefix(path, parts[0]) && parts[0] != "" {
-			return false
-		}
-
-		// For patterns like "**/*.go", just check the suffix
-		if len(parts) == 2 && parts[0] == "" {
-			isMatch := strings.HasSuffix(path, parts[1])
-			return isMatch
-		}
-
-		// For other patterns, handle middle part
-		remaining := strings.TrimPrefix(path, parts[0])
-		if len(parts) == 2 {
-			isMatch := strings.HasSuffix(remaining, parts[1])
-			return isMatch
-		}
-	}
-
-	// Handle simple * wildcard for file extension patterns (*.go, *.sum, etc)
-	if strings.HasPrefix(pattern, "*.") {
-		ext := strings.TrimPrefix(pattern, "*")
-		isMatch := strings.HasSuffix(path, ext)
-		return isMatch
-	}
-
-	// Fall back to simple matching for simpler patterns
-	matched, err := filepath.Match(pattern, path)
+	// Use doublestar for all glob matching - it handles ** and other complex patterns
+	matched, err := doublestar.Match(pattern, path)
 	if err != nil {
 		slog.Error("Error matching pattern", "pattern", pattern, "path", path, "error", err)
 		return false
 	}
-
 	return matched
 }
 
@@ -614,23 +434,6 @@ var (
 	// Maximum file size to open (5MB)
 	maxFileSize int64 = 5 * 1024 * 1024
 )
-
-// shouldExcludeDir returns true if the directory should be excluded from watching/opening
-func shouldExcludeDir(dirPath string) bool {
-	dirName := filepath.Base(dirPath)
-
-	// Skip dot directories
-	if strings.HasPrefix(dirName, ".") {
-		return true
-	}
-
-	// Skip common excluded directories
-	if excludedDirNames[dirName] {
-		return true
-	}
-
-	return false
-}
 
 // shouldExcludeFile returns true if the file should be excluded from opening
 func shouldExcludeFile(filePath string) bool {

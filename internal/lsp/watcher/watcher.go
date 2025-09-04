@@ -27,9 +27,6 @@ type WorkspaceWatcher struct {
 	// File watchers registered by the server
 	registrations  []protocol.FileSystemWatcher
 	registrationMu sync.RWMutex
-
-	// Reference to global watcher
-	globalWatcher *GlobalWatcher
 }
 
 func init() {
@@ -45,7 +42,6 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 		name:          name,
 		client:        client,
 		registrations: []protocol.FileSystemWatcher{},
-		globalWatcher: GetGlobalWatcher(),
 	}
 }
 
@@ -244,8 +240,8 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", w.name)
 
 	// Register this workspace watcher with the global watcher
-	w.globalWatcher.RegisterWorkspaceWatcher(w.name, w)
-	defer w.globalWatcher.UnregisterWorkspaceWatcher(w.name)
+	GetGlobalWatcher().RegisterWorkspaceWatcher(w.name, w)
+	defer GetGlobalWatcher().UnregisterWorkspaceWatcher(w.name)
 
 	// Register handler for file watcher registrations from the server
 	lsp.RegisterFileWatchHandler(func(id string, watchers []protocol.FileSystemWatcher) {
@@ -253,7 +249,7 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 	})
 
 	// Add workspace to the global watcher (will be deduplicated automatically)
-	if err := w.globalWatcher.WatchWorkspace(workspacePath); err != nil {
+	if err := GetGlobalWatcher().WatchWorkspace(workspacePath); err != nil {
 		slog.Error("Error adding workspace to global watcher", "path", workspacePath, "error", err)
 	}
 
@@ -379,21 +375,6 @@ func shouldPreloadFiles(serverName string) bool {
 // Common patterns for directories and files to exclude
 // TODO: make configurable
 var (
-	excludedDirNames = map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		"dist":         true,
-		"build":        true,
-		"out":          true,
-		"bin":          true,
-		".idea":        true,
-		".vscode":      true,
-		".cache":       true,
-		"coverage":     true,
-		"target":       true, // Rust build output
-		"vendor":       true, // Go vendor directory
-	}
-
 	excludedFileExtensions = map[string]bool{
 		".swp":   true,
 		".swo":   true,

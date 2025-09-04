@@ -149,9 +149,8 @@ func (gw *globalWatcher) shouldIgnoreDirectory(dirPath string) bool {
 	return false
 }
 
-// isIgnoredInWorkspace checks if a path is ignored by walking up the directory tree
-// from the target path to the workspace root, checking for .gitignore/.crushignore
-// files in each directory.
+// isIgnoredInWorkspace checks if a path is ignored by checking .gitignore/.crushignore
+// files in each directory from workspace root to the target path's parent.
 func (gw *globalWatcher) isIgnoredInWorkspace(targetPath, workspaceRoot string) bool {
 	// Get relative path from workspace root
 	relPath, err := filepath.Rel(workspaceRoot, targetPath)
@@ -164,32 +163,27 @@ func (gw *globalWatcher) isIgnoredInWorkspace(targetPath, workspaceRoot string) 
 		return false
 	}
 
-	// Check each directory from workspace root to target path for ignore files
-	currentPath := workspaceRoot
-	pathComponents := strings.Split(relPath, string(filepath.Separator))
+	// Check ignore files in each directory from workspace root to target
+	pathParts := strings.Split(relPath, string(filepath.Separator))
 
-	for i, component := range pathComponents {
-		currentPath = filepath.Join(currentPath, component)
+	for i := range pathParts {
+		// Build the directory path to check for ignore files
+		checkDir := workspaceRoot
+		if i > 0 {
+			checkDir = filepath.Join(workspaceRoot, filepath.Join(pathParts[:i]...))
+		}
 
-		// Build the relative path from workspace root to current path
-		currentRelPath := strings.Join(pathComponents[:i+1], "/")
+		// Build the relative path to test against ignore patterns
+		testPath := strings.Join(pathParts[:i+1], "/")
 
-		// Check ignore files in each parent directory
-		checkPath := workspaceRoot
-		for j := 0; j <= i; j++ {
-			if j > 0 {
-				checkPath = filepath.Join(checkPath, pathComponents[j-1])
-			}
+		// Check .gitignore in this directory
+		if gw.checkIgnoreFile(filepath.Join(checkDir, ".gitignore"), testPath) {
+			return true
+		}
 
-			// Check .gitignore in this directory
-			if gw.checkIgnoreFile(filepath.Join(checkPath, ".gitignore"), currentRelPath) {
-				return true
-			}
-
-			// Check .crushignore in this directory
-			if gw.checkIgnoreFile(filepath.Join(checkPath, ".crushignore"), currentRelPath) {
-				return true
-			}
+		// Check .crushignore in this directory
+		if gw.checkIgnoreFile(filepath.Join(checkDir, ".crushignore"), testPath) {
+			return true
 		}
 	}
 

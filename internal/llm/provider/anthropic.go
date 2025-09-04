@@ -510,22 +510,39 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		}
 	}
 
-	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
+	// Check for overloaded errors more robustly
+	// Use apiErr.Error() directly which works even when Response is nil
+	errorMsg := apiErr.Error()
+	isOverloaded := strings.Contains(errorMsg, "overloaded") || 
+		strings.Contains(errorMsg, "overloaded_error") ||
+		strings.Contains(errorMsg, "rate limit exceeded") ||
+		strings.Contains(errorMsg, "Overloaded")
+	
+	// Log for debugging
+	if isOverloaded {
+		slog.Warn("Detected overloaded error", "error", errorMsg, "status_code", apiErr.StatusCode, "attempts", attempts)
+	}
+
 	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 
-	retryMs := 0
-	retryAfterValues := apiErr.Response.Header.Values("Retry-After")
-
+	// Calculate retry delay with exponential backoff
 	backoffMs := 2000 * (1 << (attempts - 1))
 	jitterMs := int(float64(backoffMs) * 0.2)
-	retryMs = backoffMs + jitterMs
-	if len(retryAfterValues) > 0 {
-		if _, err := fmt.Sscanf(retryAfterValues[0], "%d", &retryMs); err == nil {
-			retryMs = retryMs * 1000
+	retryMs := backoffMs + jitterMs
+	
+	// Try to get Retry-After header if Response is not nil
+	if apiErr.Response != nil && apiErr.Response.Header != nil {
+		retryAfterValues := apiErr.Response.Header.Values("Retry-After")
+		if len(retryAfterValues) > 0 {
+			if parsedMs, err := fmt.Sscanf(retryAfterValues[0], "%d", &retryMs); err == nil {
+				retryMs = parsedMs * 1000
+			}
 		}
 	}
+	
+	slog.Info("Will retry Anthropic request", "delay_ms", retryMs, "attempt", attempts)
 	return true, int64(retryMs), nil
 }
 

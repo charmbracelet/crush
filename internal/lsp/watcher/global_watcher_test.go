@@ -53,7 +53,7 @@ func TestGlobalWatcher(t *testing.T) {
 	}
 }
 
-func TestGlobalWatcherWorkspaceDeduplication(t *testing.T) {
+func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	t.Parallel()
 
 	// Create a temporary directory for testing
@@ -63,14 +63,21 @@ func TestGlobalWatcherWorkspaceDeduplication(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create a real fsnotify watcher for testing
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("Failed to create fsnotify watcher: %v", err)
+	}
+	defer watcher.Close()
+
 	gw := &GlobalWatcher{
+		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
 
-	// Test that watching the same workspace twice doesn't duplicate
+	// Test that watching the same workspace multiple times is safe (idempotent)
 	err1 := gw.WatchWorkspace(tempDir)
 	if err1 != nil {
 		t.Fatalf("First WatchWorkspace call failed: %v", err1)
@@ -81,19 +88,13 @@ func TestGlobalWatcherWorkspaceDeduplication(t *testing.T) {
 		t.Fatalf("Second WatchWorkspace call failed: %v", err2)
 	}
 
-	// Check that the workspace is only tracked once
-	gw.workspacesMu.RLock()
-	count := 0
-	for path := range gw.workspacePaths {
-		if path == tempDir {
-			count++
-		}
+	err3 := gw.WatchWorkspace(tempDir)
+	if err3 != nil {
+		t.Fatalf("Third WatchWorkspace call failed: %v", err3)
 	}
-	gw.workspacesMu.RUnlock()
 
-	if count != 1 {
-		t.Fatalf("Expected workspace to be tracked exactly once, got %d times", count)
-	}
+	// All calls should succeed - fsnotify handles deduplication internally
+	// This test verifies that multiple WatchWorkspace calls are safe
 }
 
 func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
@@ -130,7 +131,6 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -216,7 +216,6 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	// Create a temporary global watcher for testing
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,
 	}

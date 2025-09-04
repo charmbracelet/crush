@@ -36,10 +36,6 @@ type GlobalWatcher struct {
 	workspaceWatchers map[string]*WorkspaceWatcher
 	watchersMu        sync.RWMutex
 
-	// Map of workspace paths being watched (for workspace-level deduplication)
-	workspacePaths map[string]bool
-	workspacesMu   sync.RWMutex
-
 	// Debouncing for file events (shared across all clients)
 	debounceTime time.Duration
 	debounceMap  *csync.Map[string, *time.Timer]
@@ -63,7 +59,6 @@ func GetGlobalWatcher() *GlobalWatcher {
 		ctx, cancel := context.WithCancel(context.Background())
 		globalWatcher = &GlobalWatcher{
 			workspaceWatchers: make(map[string]*WorkspaceWatcher),
-			workspacePaths:    make(map[string]bool),
 			debounceTime:      300 * time.Millisecond,
 			debounceMap:       csync.NewMap[string, *time.Timer](),
 			ctx:               ctx,
@@ -105,24 +100,17 @@ func (gw *GlobalWatcher) UnregisterWorkspaceWatcher(name string) {
 	slog.Debug("Unregistered workspace watcher", "name", name)
 }
 
-// WatchWorkspace adds a workspace to be watched, ensuring directories are only watched once
+// WatchWorkspace adds a workspace to be watched.
 // Note: We only watch directories, not individual files. fsnotify automatically provides
-// events for all files within watched directories.
+// events for all files within watched directories. Multiple calls with the same workspace
+// are safe since fsnotify handles directory deduplication internally.
 func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
-	gw.workspacesMu.Lock()
-	defer gw.workspacesMu.Unlock()
-
-	// Check if this workspace is already being watched
-	if gw.workspacePaths[workspacePath] {
-		slog.Debug("Workspace already being watched", "path", workspacePath)
-		return nil
-	}
-
 	cfg := config.Get()
 	slog.Debug("Adding workspace to global watcher", "path", workspacePath)
 
 	// Walk the workspace and add only directories to the watcher
 	// fsnotify will automatically provide events for all files within these directories
+	// Multiple calls with the same directories are safe (fsnotify deduplicates)
 	err := filepath.WalkDir(workspacePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -152,7 +140,6 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 		return fmt.Errorf("error walking workspace %s: %w", workspacePath, err)
 	}
 
-	gw.workspacePaths[workspacePath] = true
 	return nil
 }
 

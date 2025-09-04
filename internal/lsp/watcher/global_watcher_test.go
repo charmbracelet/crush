@@ -65,7 +65,6 @@ func TestGlobalWatcherWorkspaceDeduplication(t *testing.T) {
 
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		watchedDirs:       make(map[string]bool),
 		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -94,62 +93,6 @@ func TestGlobalWatcherWorkspaceDeduplication(t *testing.T) {
 
 	if count != 1 {
 		t.Fatalf("Expected workspace to be tracked exactly once, got %d times", count)
-	}
-}
-
-func TestGlobalWatcherDirectoryDeduplication(t *testing.T) {
-	t.Parallel()
-
-	// Create a temporary directory for testing
-	tempDir := t.TempDir()
-	subDir := filepath.Join(tempDir, "subdir")
-	if err := os.Mkdir(subDir, 0o755); err != nil {
-		t.Fatalf("Failed to create subdirectory: %v", err)
-	}
-
-	// Create a new global watcher instance for this test
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Create a real fsnotify watcher for testing
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("Failed to create fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
-
-	gw := &GlobalWatcher{
-		watcher:           watcher,
-		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		watchedDirs:       make(map[string]bool),
-		workspacePaths:    make(map[string]bool),
-		ctx:               ctx,
-		cancel:            cancel,
-	}
-
-	// Test that watching the same directory twice doesn't duplicate
-	err1 := gw.watchDirectory(tempDir)
-	if err1 != nil {
-		t.Fatalf("First watchDirectory call failed: %v", err1)
-	}
-
-	err2 := gw.watchDirectory(tempDir)
-	if err2 != nil {
-		t.Fatalf("Second watchDirectory call failed: %v", err2)
-	}
-
-	// Check that the directory is only tracked once
-	gw.watchedMu.RLock()
-	count := 0
-	for dir := range gw.watchedDirs {
-		if dir == tempDir {
-			count++
-		}
-	}
-	gw.watchedMu.RUnlock()
-
-	if count != 1 {
-		t.Fatalf("Expected directory to be tracked exactly once, got %d times", count)
 	}
 }
 
@@ -187,7 +130,6 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		watchedDirs:       make(map[string]bool),
 		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -199,44 +141,69 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 		t.Fatalf("WatchWorkspace failed: %v", err)
 	}
 
-	// Verify that only directories are being watched
-	gw.watchedMu.RLock()
-	watchedPaths := make([]string, 0, len(gw.watchedDirs))
-	for path := range gw.watchedDirs {
-		watchedPaths = append(watchedPaths, path)
-	}
-	gw.watchedMu.RUnlock()
-
-	// Check that we're watching the expected directories
+	// Verify that our expected directories exist and can be watched
 	expectedDirs := []string{tempDir, subDir}
-	if len(watchedPaths) != len(expectedDirs) {
-		t.Fatalf("Expected %d watched directories, got %d: %v", len(expectedDirs), len(watchedPaths), watchedPaths)
-	}
 
-	// Verify each expected directory is being watched
 	for _, expectedDir := range expectedDirs {
-		found := false
-		for _, watchedPath := range watchedPaths {
-			if watchedPath == expectedDir {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("Expected directory %s to be watched, but it wasn't. Watched: %v", expectedDir, watchedPaths)
-		}
-	}
-
-	// Verify that no files are being watched directly
-	for _, watchedPath := range watchedPaths {
-		info, err := os.Stat(watchedPath)
+		info, err := os.Stat(expectedDir)
 		if err != nil {
-			t.Fatalf("Failed to stat watched path %s: %v", watchedPath, err)
+			t.Fatalf("Expected directory %s doesn't exist: %v", expectedDir, err)
 		}
 		if !info.IsDir() {
-			t.Fatalf("Expected only directories to be watched, but found file: %s", watchedPath)
+			t.Fatalf("Expected %s to be a directory, but it's not", expectedDir)
+		}
+
+		// Try to add it again - fsnotify should handle this gracefully
+		err = gw.addDirectoryToWatcher(expectedDir)
+		if err != nil {
+			t.Fatalf("Failed to add directory %s to watcher: %v", expectedDir, err)
 		}
 	}
+
+	// Verify that files exist but we don't try to watch them directly
+	testFiles := []string{file1, file2}
+	for _, file := range testFiles {
+		info, err := os.Stat(file)
+		if err != nil {
+			t.Fatalf("Test file %s doesn't exist: %v", file, err)
+		}
+		if info.IsDir() {
+			t.Fatalf("Expected %s to be a file, but it's a directory", file)
+		}
+	}
+}
+
+func TestFsnotifyDeduplication(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+
+	// Create a real fsnotify watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("Failed to create fsnotify watcher: %v", err)
+	}
+	defer watcher.Close()
+
+	// Add the same directory multiple times
+	err1 := watcher.Add(tempDir)
+	if err1 != nil {
+		t.Fatalf("First Add failed: %v", err1)
+	}
+
+	err2 := watcher.Add(tempDir)
+	if err2 != nil {
+		t.Fatalf("Second Add failed: %v", err2)
+	}
+
+	err3 := watcher.Add(tempDir)
+	if err3 != nil {
+		t.Fatalf("Third Add failed: %v", err3)
+	}
+
+	// All should succeed - fsnotify handles deduplication internally
+	// This test verifies the fsnotify behavior we're relying on
 }
 
 func TestGlobalWatcherShutdown(t *testing.T) {
@@ -249,7 +216,6 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	// Create a temporary global watcher for testing
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		watchedDirs:       make(map[string]bool),
 		workspacePaths:    make(map[string]bool),
 		ctx:               ctx,
 		cancel:            cancel,

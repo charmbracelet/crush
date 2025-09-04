@@ -27,7 +27,7 @@ import (
 // - Significantly fewer file descriptors used
 // - Automatic coverage of new files created in watched directories
 // - Better performance with large codebases
-// - Simplified deduplication logic
+// - fsnotify handles deduplication internally (no need to track watched dirs)
 type GlobalWatcher struct {
 	watcher   *fsnotify.Watcher
 	watcherMu sync.RWMutex
@@ -36,11 +36,7 @@ type GlobalWatcher struct {
 	workspaceWatchers map[string]*WorkspaceWatcher
 	watchersMu        sync.RWMutex
 
-	// Watched directories to avoid duplicate watching
-	watchedDirs map[string]bool
-	watchedMu   sync.RWMutex
-
-	// Map of workspace paths being watched
+	// Map of workspace paths being watched (for workspace-level deduplication)
 	workspacePaths map[string]bool
 	workspacesMu   sync.RWMutex
 
@@ -67,7 +63,6 @@ func GetGlobalWatcher() *GlobalWatcher {
 		ctx, cancel := context.WithCancel(context.Background())
 		globalWatcher = &GlobalWatcher{
 			workspaceWatchers: make(map[string]*WorkspaceWatcher),
-			watchedDirs:       make(map[string]bool),
 			workspacePaths:    make(map[string]bool),
 			debounceTime:      300 * time.Millisecond,
 			debounceMap:       csync.NewMap[string, *time.Timer](),
@@ -146,8 +141,8 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 			return filepath.SkipDir
 		}
 
-		// Add directory to watcher (deduplicated automatically)
-		if err := gw.watchDirectory(path); err != nil {
+		// Add directory to watcher (fsnotify handles deduplication automatically)
+		if err := gw.addDirectoryToWatcher(path); err != nil {
 			slog.Error("Error watching directory", "path", path, "error", err)
 		}
 
@@ -161,18 +156,9 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	return nil
 }
 
-// watchDirectory adds a directory to the global watcher if not already watched
-// Note: We only watch directories, not individual files. fsnotify automatically provides
-// events for all files within watched directories, making this approach much more efficient.
-func (gw *GlobalWatcher) watchDirectory(dirPath string) error {
-	gw.watchedMu.Lock()
-	defer gw.watchedMu.Unlock()
-
-	// Check if already watched - this is our deduplication mechanism
-	if gw.watchedDirs[dirPath] {
-		return nil
-	}
-
+// addDirectoryToWatcher adds a directory to the fsnotify watcher.
+// fsnotify handles deduplication internally, so we don't need to track watched directories.
+func (gw *GlobalWatcher) addDirectoryToWatcher(dirPath string) error {
 	gw.watcherMu.RLock()
 	watcher := gw.watcher
 	gw.watcherMu.RUnlock()
@@ -181,13 +167,13 @@ func (gw *GlobalWatcher) watchDirectory(dirPath string) error {
 		return fmt.Errorf("global watcher not initialized")
 	}
 
-	// Add directory to fsnotify watcher - this will watch all files in the directory
+	// Add directory to fsnotify watcher - fsnotify handles deduplication
+	// "A path can only be watched once; watching it more than once is a no-op"
 	err := watcher.Add(dirPath)
 	if err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
 	}
 
-	gw.watchedDirs[dirPath] = true
 	slog.Debug("Added directory to global watcher", "path", dirPath)
 	return nil
 }
@@ -225,7 +211,7 @@ func (gw *GlobalWatcher) processEvents() {
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					if !shouldExcludeDir(event.Name) {
-						if err := gw.watchDirectory(event.Name); err != nil {
+						if err := gw.addDirectoryToWatcher(event.Name); err != nil {
 							slog.Error("Error adding new directory to watcher", "path", event.Name, "error", err)
 						}
 					}

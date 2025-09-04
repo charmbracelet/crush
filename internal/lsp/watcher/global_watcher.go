@@ -7,7 +7,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -357,30 +356,10 @@ func (gw *GlobalWatcher) openMatchingFileForClients(path string) {
 			continue
 		}
 
-		// Check file extension for common source files
-		ext := strings.ToLower(filepath.Ext(path))
-
-		// Only preload source files for the specific language
-		var shouldOpen bool
-		switch serverName {
-		case "typescript", "typescript-language-server", "tsserver", "vtsls":
-			shouldOpen = ext == ".ts" || ext == ".js" || ext == ".tsx" || ext == ".jsx"
-		case "gopls":
-			shouldOpen = ext == ".go"
-		case "rust-analyzer":
-			shouldOpen = ext == ".rs"
-		case "python", "pyright", "pylsp":
-			shouldOpen = ext == ".py"
-		case "clangd":
-			shouldOpen = ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".hpp"
-		case "java", "jdtls":
-			shouldOpen = ext == ".java"
-		}
-
-		if shouldOpen {
-			if err := watcher.client.OpenFile(gw.ctx, path); err != nil && cfg.Options.DebugLSP {
-				slog.Error("Error opening file", "path", path, "error", err, "client", clientName)
-			}
+		// File type is already validated by HandlesFile() check earlier,
+		// so we know this client handles this file type. Just open it.
+		if err := watcher.client.OpenFile(gw.ctx, path); err != nil && cfg.Options.DebugLSP {
+			slog.Error("Error opening file", "path", path, "error", err, "client", clientName)
 		}
 	}
 }

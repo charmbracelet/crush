@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
@@ -25,8 +25,7 @@ type WorkspaceWatcher struct {
 	workspacePath string
 
 	// File watchers registered by the server
-	registrations  []protocol.FileSystemWatcher
-	registrationMu sync.RWMutex
+	registrations *csync.Slice[protocol.FileSystemWatcher]
 }
 
 func init() {
@@ -41,7 +40,7 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
 		name:          name,
 		client:        client,
-		registrations: []protocol.FileSystemWatcher{},
+		registrations: csync.NewSlice[protocol.FileSystemWatcher](),
 	}
 }
 
@@ -49,17 +48,13 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
 	cfg := config.Get()
 
-	w.registrationMu.Lock()
-	defer w.registrationMu.Unlock()
-
-	// Add new watchers
-	w.registrations = append(w.registrations, watchers...)
+	w.registrations.Append(watchers...)
 
 	if cfg.Options.DebugLSP {
 		slog.Debug("Adding file watcher registrations",
 			"id", id,
 			"watchers", len(watchers),
-			"total", len(w.registrations),
+			"total", w.registrations.Len(),
 		)
 
 		for i, watcher := range watchers {
@@ -117,6 +112,7 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 	// Define patterns for high-priority files based on server type
 	var patterns []string
 
+	// TODO: move this to LSP config
 	switch serverName {
 	case "typescript", "typescript-language-server", "tsserver", "vtsls":
 		patterns = []string{
@@ -259,17 +255,14 @@ func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath str
 }
 
 // isPathWatched checks if a path should be watched based on server registrations
+// If no explicit registrations, watch everything
 func (w *WorkspaceWatcher) isPathWatched(path string) (bool, protocol.WatchKind) {
-	w.registrationMu.RLock()
-	defer w.registrationMu.RUnlock()
-
-	// If no explicit registrations, watch everything
-	if len(w.registrations) == 0 {
+	if w.registrations.Len() == 0 {
 		return true, protocol.WatchKind(protocol.WatchChange | protocol.WatchCreate | protocol.WatchDelete)
 	}
 
 	// Check each registration
-	for _, reg := range w.registrations {
+	for reg := range w.registrations.Seq() {
 		isMatch := w.matchesPattern(path, reg.GlobPattern)
 		if isMatch {
 			kind := protocol.WatchKind(protocol.WatchChange | protocol.WatchCreate | protocol.WatchDelete)

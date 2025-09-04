@@ -17,7 +17,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// GlobalWatcher manages a single fsnotify.Watcher instance shared across all LSP clients
+// GlobalWatcher manages a single fsnotify.Watcher instance shared across all LSP clients.
+//
+// IMPORTANT: This implementation only watches directories, not individual files.
+// The fsnotify library automatically provides events for all files within watched
+// directories, making this approach much more efficient than watching individual files.
+//
+// Key benefits of directory-only watching:
+// - Significantly fewer file descriptors used
+// - Automatic coverage of new files created in watched directories
+// - Better performance with large codebases
+// - Simplified deduplication logic
 type GlobalWatcher struct {
 	watcher   *fsnotify.Watcher
 	watcherMu sync.RWMutex
@@ -101,6 +111,8 @@ func (gw *GlobalWatcher) UnregisterWorkspaceWatcher(name string) {
 }
 
 // WatchWorkspace adds a workspace to be watched, ensuring directories are only watched once
+// Note: We only watch directories, not individual files. fsnotify automatically provides
+// events for all files within watched directories.
 func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	gw.workspacesMu.Lock()
 	defer gw.workspacesMu.Unlock()
@@ -114,27 +126,29 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	cfg := config.Get()
 	slog.Debug("Adding workspace to global watcher", "path", workspacePath)
 
-	// Walk the workspace and add directories to the watcher
+	// Walk the workspace and add only directories to the watcher
+	// fsnotify will automatically provide events for all files within these directories
 	err := filepath.WalkDir(workspacePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip excluded directories (except workspace root)
-		if d.IsDir() && path != workspacePath {
-			if shouldExcludeDir(path) {
-				if cfg.Options.DebugLSP {
-					slog.Debug("Skipping excluded directory", "path", path)
-				}
-				return filepath.SkipDir
-			}
+		// Only process directories - we don't watch individual files
+		if !d.IsDir() {
+			return nil
 		}
 
-		// Add directories to watcher
-		if d.IsDir() {
-			if err := gw.watchDirectory(path); err != nil {
-				slog.Error("Error watching path", "path", path, "error", err)
+		// Skip excluded directories (except workspace root)
+		if path != workspacePath && shouldExcludeDir(path) {
+			if cfg.Options.DebugLSP {
+				slog.Debug("Skipping excluded directory", "path", path)
 			}
+			return filepath.SkipDir
+		}
+
+		// Add directory to watcher (deduplicated automatically)
+		if err := gw.watchDirectory(path); err != nil {
+			slog.Error("Error watching directory", "path", path, "error", err)
 		}
 
 		return nil
@@ -147,12 +161,14 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	return nil
 }
 
-// watchDirectory adds a directory to the global watcher if not already watched (internal method)
+// watchDirectory adds a directory to the global watcher if not already watched
+// Note: We only watch directories, not individual files. fsnotify automatically provides
+// events for all files within watched directories, making this approach much more efficient.
 func (gw *GlobalWatcher) watchDirectory(dirPath string) error {
 	gw.watchedMu.Lock()
 	defer gw.watchedMu.Unlock()
 
-	// Check if already watched
+	// Check if already watched - this is our deduplication mechanism
 	if gw.watchedDirs[dirPath] {
 		return nil
 	}
@@ -165,6 +181,7 @@ func (gw *GlobalWatcher) watchDirectory(dirPath string) error {
 		return fmt.Errorf("global watcher not initialized")
 	}
 
+	// Add directory to fsnotify watcher - this will watch all files in the directory
 	err := watcher.Add(dirPath)
 	if err != nil {
 		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
@@ -175,7 +192,10 @@ func (gw *GlobalWatcher) watchDirectory(dirPath string) error {
 	return nil
 }
 
-// processEvents processes file system events and handles them centrally
+// processEvents processes file system events and handles them centrally.
+// Since we only watch directories, we automatically get events for all files
+// within those directories. When new directories are created, we add them
+// to the watcher to ensure complete coverage.
 func (gw *GlobalWatcher) processEvents() {
 	defer gw.wg.Done()
 	cfg := config.Get()
@@ -200,6 +220,8 @@ func (gw *GlobalWatcher) processEvents() {
 			}
 
 			// Handle directory creation globally (only once)
+			// When new directories are created, we need to add them to the watcher
+			// to ensure we get events for files created within them
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					if !shouldExcludeDir(event.Name) {

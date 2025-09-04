@@ -153,6 +153,92 @@ func TestGlobalWatcherDirectoryDeduplication(t *testing.T) {
 	}
 }
 
+func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory structure for testing
+	tempDir := t.TempDir()
+	subDir := filepath.Join(tempDir, "subdir")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatalf("Failed to create subdirectory: %v", err)
+	}
+
+	// Create some files
+	file1 := filepath.Join(tempDir, "file1.txt")
+	file2 := filepath.Join(subDir, "file2.txt")
+	if err := os.WriteFile(file1, []byte("content1"), 0o644); err != nil {
+		t.Fatalf("Failed to create file1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte("content2"), 0o644); err != nil {
+		t.Fatalf("Failed to create file2: %v", err)
+	}
+
+	// Create a new global watcher instance for this test
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a real fsnotify watcher for testing
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatalf("Failed to create fsnotify watcher: %v", err)
+	}
+	defer watcher.Close()
+
+	gw := &GlobalWatcher{
+		watcher:           watcher,
+		workspaceWatchers: make(map[string]*WorkspaceWatcher),
+		watchedDirs:       make(map[string]bool),
+		workspacePaths:    make(map[string]bool),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+
+	// Watch the workspace
+	err = gw.WatchWorkspace(tempDir)
+	if err != nil {
+		t.Fatalf("WatchWorkspace failed: %v", err)
+	}
+
+	// Verify that only directories are being watched
+	gw.watchedMu.RLock()
+	watchedPaths := make([]string, 0, len(gw.watchedDirs))
+	for path := range gw.watchedDirs {
+		watchedPaths = append(watchedPaths, path)
+	}
+	gw.watchedMu.RUnlock()
+
+	// Check that we're watching the expected directories
+	expectedDirs := []string{tempDir, subDir}
+	if len(watchedPaths) != len(expectedDirs) {
+		t.Fatalf("Expected %d watched directories, got %d: %v", len(expectedDirs), len(watchedPaths), watchedPaths)
+	}
+
+	// Verify each expected directory is being watched
+	for _, expectedDir := range expectedDirs {
+		found := false
+		for _, watchedPath := range watchedPaths {
+			if watchedPath == expectedDir {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("Expected directory %s to be watched, but it wasn't. Watched: %v", expectedDir, watchedPaths)
+		}
+	}
+
+	// Verify that no files are being watched directly
+	for _, watchedPath := range watchedPaths {
+		info, err := os.Stat(watchedPath)
+		if err != nil {
+			t.Fatalf("Failed to stat watched path %s: %v", watchedPath, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("Expected only directories to be watched, but found file: %s", watchedPath)
+		}
+	}
+}
+
 func TestGlobalWatcherShutdown(t *testing.T) {
 	t.Parallel()
 

@@ -53,7 +53,8 @@ type GlobalWatcher struct {
 	wg sync.WaitGroup
 }
 
-var getGlobalWatcher = sync.OnceValue(func() *GlobalWatcher {
+// GetGlobalWatcher returns the singleton global watcher instance
+var GetGlobalWatcher = sync.OnceValue(func() *GlobalWatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
@@ -79,11 +80,6 @@ var getGlobalWatcher = sync.OnceValue(func() *GlobalWatcher {
 
 	return gw
 })
-
-// GetGlobalWatcher returns the singleton global watcher instance
-func GetGlobalWatcher() *GlobalWatcher {
-	return getGlobalWatcher()
-}
 
 // RegisterWorkspaceWatcher registers a workspace watcher with the global watcher
 func (gw *GlobalWatcher) RegisterWorkspaceWatcher(name string, watcher *WorkspaceWatcher) {
@@ -525,8 +521,7 @@ func (gw *GlobalWatcher) Shutdown() {
 
 // ShutdownGlobalWatcher shuts down the singleton global watcher
 func ShutdownGlobalWatcher() {
-	gw := getGlobalWatcher()
-	if gw != nil {
+	if gw := GetGlobalWatcher(); gw != nil {
 		gw.Shutdown()
 	}
 }

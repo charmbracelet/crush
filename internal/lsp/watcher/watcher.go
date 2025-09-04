@@ -12,25 +12,24 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
-	"github.com/fsnotify/fsnotify"
 )
 
-// WorkspaceWatcher manages LSP file watching
+// WorkspaceWatcher manages LSP file watching for a specific client
+// It now delegates actual file watching to the GlobalWatcher
 type WorkspaceWatcher struct {
 	client        *lsp.Client
 	name          string
 	workspacePath string
 
-	debounceTime time.Duration
-	debounceMap  *csync.Map[string, *time.Timer]
-
 	// File watchers registered by the server
 	registrations  []protocol.FileSystemWatcher
 	registrationMu sync.RWMutex
+
+	// Reference to global watcher
+	globalWatcher *GlobalWatcher
 }
 
 func init() {
@@ -45,9 +44,8 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 	return &WorkspaceWatcher{
 		name:          name,
 		client:        client,
-		debounceTime:  300 * time.Millisecond,
-		debounceMap:   csync.NewMap[string, *time.Timer](),
 		registrations: []protocol.FileSystemWatcher{},
+		globalWatcher: GetGlobalWatcher(),
 	}
 }
 
@@ -149,7 +147,6 @@ func (w *WorkspaceWatcher) AddRegistrations(ctx context.Context, id string, watc
 			}
 
 			// For the remaining slots, walk the directory and open matching files
-
 			err := filepath.WalkDir(w.workspacePath, func(path string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
@@ -329,146 +326,29 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 	return filesOpened
 }
 
-// WatchWorkspace sets up file watching for a workspace
+// WatchWorkspace sets up file watching for a workspace using the global watcher
 func (w *WorkspaceWatcher) WatchWorkspace(ctx context.Context, workspacePath string) {
-	cfg := config.Get()
 	w.workspacePath = workspacePath
 
 	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", w.name)
+
+	// Register this workspace watcher with the global watcher
+	w.globalWatcher.RegisterWorkspaceWatcher(w.name, w)
+	defer w.globalWatcher.UnregisterWorkspaceWatcher(w.name)
 
 	// Register handler for file watcher registrations from the server
 	lsp.RegisterFileWatchHandler(func(id string, watchers []protocol.FileSystemWatcher) {
 		w.AddRegistrations(ctx, id, watchers)
 	})
 
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		slog.Error("Error creating watcher", "error", err)
-	}
-	defer watcher.Close()
-
-	// Watch the workspace recursively
-	err = filepath.WalkDir(workspacePath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip excluded directories (except workspace root)
-		if d.IsDir() && path != workspacePath {
-			if shouldExcludeDir(path) {
-				if cfg.Options.DebugLSP {
-					slog.Debug("Skipping excluded directory", "path", path)
-				}
-				return filepath.SkipDir
-			}
-		}
-
-		// Add directories to watcher
-		if d.IsDir() {
-			err = watcher.Add(path)
-			if err != nil {
-				slog.Error("Error watching path", "path", path, "error", err)
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
-		slog.Error("Error walking workspace", "error", err)
+	// Add workspace to the global watcher (will be deduplicated automatically)
+	if err := w.globalWatcher.WatchWorkspace(workspacePath); err != nil {
+		slog.Error("Error adding workspace to global watcher", "path", workspacePath, "error", err)
 	}
 
-	// Event loop
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-
-			if !w.client.HandlesFile(event.Name) {
-				continue // client doesn't handle this filetype
-			}
-
-			uri := string(protocol.URIFromPath(event.Name))
-
-			// Add new directories to the watcher
-			if event.Op&fsnotify.Create != 0 {
-				if info, err := os.Stat(event.Name); err == nil {
-					if info.IsDir() {
-						// Skip excluded directories
-						if !shouldExcludeDir(event.Name) {
-							if err := watcher.Add(event.Name); err != nil {
-								slog.Error("Error adding directory to watcher", "path", event.Name, "error", err)
-							}
-						}
-					} else {
-						// For newly created files
-						if !shouldExcludeFile(event.Name) {
-							w.openMatchingFile(ctx, event.Name)
-						}
-					}
-				}
-			}
-
-			// Debug logging
-			if cfg.Options.DebugLSP {
-				matched, kind := w.isPathWatched(event.Name)
-				slog.Debug("File event",
-					"path", event.Name,
-					"operation", event.Op.String(),
-					"watched", matched,
-					"kind", kind,
-				)
-			}
-
-			// Check if this path should be watched according to server registrations
-			if watched, watchKind := w.isPathWatched(event.Name); watched {
-				switch {
-				case event.Op&fsnotify.Write != 0:
-					if watchKind&protocol.WatchChange != 0 {
-						w.debounceHandleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Changed))
-					}
-				case event.Op&fsnotify.Create != 0:
-					// Already handled earlier in the event loop
-					// Just send the notification if needed
-					info, err := os.Stat(event.Name)
-					if err != nil {
-						if !os.IsNotExist(err) {
-							// Only log if it's not a "file not found" error
-							slog.Debug("Error getting file info", "path", event.Name, "error", err)
-						}
-						continue
-					}
-					if !info.IsDir() && watchKind&protocol.WatchCreate != 0 {
-						w.debounceHandleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Created))
-					}
-				case event.Op&fsnotify.Remove != 0:
-					if watchKind&protocol.WatchDelete != 0 {
-						w.handleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Deleted))
-					}
-				case event.Op&fsnotify.Rename != 0:
-					// For renames, first delete
-					if watchKind&protocol.WatchDelete != 0 {
-						w.handleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Deleted))
-					}
-
-					// Then check if the new file exists and create an event
-					if info, err := os.Stat(event.Name); err == nil && !info.IsDir() {
-						if watchKind&protocol.WatchCreate != 0 {
-							w.debounceHandleFileEvent(ctx, uri, protocol.FileChangeType(protocol.Created))
-						}
-					}
-				}
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			slog.Error("Error watching file", "error", err)
-		}
-	}
+	// Wait for context cancellation
+	<-ctx.Done()
+	slog.Debug("Workspace watcher stopped", "name", w.name)
 }
 
 // isPathWatched checks if a path should be watched based on server registrations
@@ -635,51 +515,6 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 	isMatch := matchesGlob(patternText, relPath)
 
 	return isMatch
-}
-
-// debounceHandleFileEvent handles file events with debouncing to reduce notifications
-func (w *WorkspaceWatcher) debounceHandleFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) {
-	// Create a unique key based on URI and change type
-	key := fmt.Sprintf("%s:%d", uri, changeType)
-
-	// Cancel existing timer if any
-	if timer, exists := w.debounceMap.Get(key); exists {
-		timer.Stop()
-	}
-
-	// Create new timer
-	w.debounceMap.Set(key, time.AfterFunc(w.debounceTime, func() {
-		w.handleFileEvent(ctx, uri, changeType)
-
-		// Cleanup timer after execution
-		w.debounceMap.Del(key)
-	}))
-}
-
-// handleFileEvent sends file change notifications
-func (w *WorkspaceWatcher) handleFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) {
-	// If the file is open and it's a change event, use didChange notification
-	filePath, err := protocol.DocumentURI(uri).Path()
-	if err != nil {
-		// XXX: Do we want to return here, or send the error up the stack?
-		slog.Error("Error converting URI to path", "uri", uri, "error", err)
-		return
-	}
-
-	if changeType == protocol.FileChangeType(protocol.Deleted) {
-		w.client.ClearDiagnosticsForURI(protocol.DocumentURI(uri))
-	} else if changeType == protocol.FileChangeType(protocol.Changed) && w.client.IsFileOpen(filePath) {
-		err := w.client.NotifyChange(ctx, filePath)
-		if err != nil {
-			slog.Error("Error notifying change", "error", err)
-		}
-		return
-	}
-
-	// Notify LSP server about the file event using didChangeWatchedFiles
-	if err := w.notifyFileEvent(ctx, uri, changeType); err != nil {
-		slog.Error("Error notifying LSP server about file event", "error", err)
-	}
 }
 
 // notifyFileEvent sends a didChangeWatchedFiles notification for a file event

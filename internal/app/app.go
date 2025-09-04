@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/watcher"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -346,6 +347,9 @@ func (app *App) Shutdown() {
 		}
 		cancel()
 	}
+
+	// Shutdown the global watcher
+	watcher.ShutdownGlobalWatcher()
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

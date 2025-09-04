@@ -37,9 +37,8 @@ type GlobalWatcher struct {
 	workspaceWatchers map[string]*WorkspaceWatcher
 	watchersMu        sync.RWMutex
 
-	// Map of workspace paths to their root directories for ignore checking
-	workspaceRoots map[string]string
-	rootsMu        sync.RWMutex
+	// Single workspace root directory for ignore checking
+	workspaceRoot string
 
 	// Debouncing for file events (shared across all clients)
 	debounceTime time.Duration
@@ -58,7 +57,6 @@ var GetGlobalWatcher = sync.OnceValue(func() *GlobalWatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspaceRoots:    make(map[string]string),
 		debounceTime:      300 * time.Millisecond,
 		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
@@ -108,9 +106,7 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 	slog.Debug("Adding workspace to global watcher", "path", workspacePath)
 
 	// Store the workspace root for hierarchical ignore checking
-	gw.rootsMu.Lock()
-	gw.workspaceRoots[workspacePath] = workspacePath
-	gw.rootsMu.Unlock()
+	gw.workspaceRoot = workspacePath
 
 	// Walk the workspace and add only directories to the watcher
 	// fsnotify will automatically provide events for all files within these directories
@@ -151,14 +147,12 @@ func (gw *GlobalWatcher) WatchWorkspace(workspacePath string) error {
 // .gitignore/.crushignore files. It checks for ignore files in each directory from
 // the target directory up to the workspace root.
 func (gw *GlobalWatcher) shouldIgnoreDirectory(dirPath string) bool {
-	gw.rootsMu.RLock()
-	defer gw.rootsMu.RUnlock()
+	if gw.workspaceRoot == "" {
+		return false
+	}
 
-	// Check against all workspace roots to find the applicable one
-	for _, workspaceRoot := range gw.workspaceRoots {
-		if strings.HasPrefix(dirPath, workspaceRoot) {
-			return gw.isIgnoredInWorkspace(dirPath, workspaceRoot)
-		}
+	if strings.HasPrefix(dirPath, gw.workspaceRoot) {
+		return gw.isIgnoredInWorkspace(dirPath, gw.workspaceRoot)
 	}
 
 	return false

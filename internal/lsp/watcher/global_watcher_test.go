@@ -74,7 +74,6 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspaceRoots:    make(map[string]string),
 		debounceTime:      300 * time.Millisecond,
 		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
@@ -135,7 +134,6 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspaceRoots:    make(map[string]string),
 		debounceTime:      300 * time.Millisecond,
 		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
@@ -257,7 +255,6 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 	gw := &GlobalWatcher{
 		watcher:           watcher,
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspaceRoots:    make(map[string]string),
 		debounceTime:      300 * time.Millisecond,
 		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,
@@ -303,7 +300,6 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	// Create a temporary global watcher for testing
 	gw := &GlobalWatcher{
 		workspaceWatchers: make(map[string]*WorkspaceWatcher),
-		workspaceRoots:    make(map[string]string),
 		debounceTime:      300 * time.Millisecond,
 		debounceMap:       csync.NewMap[string, *time.Timer](),
 		ctx:               ctx,

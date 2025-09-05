@@ -123,10 +123,3 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 	}
 	return content
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

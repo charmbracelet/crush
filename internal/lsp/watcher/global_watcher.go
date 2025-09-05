@@ -63,7 +63,7 @@ var getGlobalWatcher = sync.OnceValue(func() *globalWatcher {
 	// Initialize the fsnotify watcher
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		slog.Error("Failed to create global file watcher", "error", err)
+		slog.Error("lsp watcher: Failed to create global file watcher", "error", err)
 		return gw
 	}
 
@@ -79,13 +79,13 @@ var getGlobalWatcher = sync.OnceValue(func() *globalWatcher {
 // register registers a workspace watcher with the global watcher
 func (gw *globalWatcher) register(name string, watcher *WorkspaceWatcher) {
 	gw.watchers.Set(name, watcher)
-	slog.Debug("Registered workspace watcher", "name", name)
+	slog.Debug("lsp watcher: Registered workspace watcher", "name", name)
 }
 
 // unregister removes a workspace watcher from the global watcher
 func (gw *globalWatcher) unregister(name string) {
 	gw.watchers.Del(name)
-	slog.Debug("Unregistered workspace watcher", "name", name)
+	slog.Debug("lsp watcher: Unregistered workspace watcher", "name", name)
 }
 
 // watch adds a workspace to be watched.
@@ -94,7 +94,7 @@ func (gw *globalWatcher) unregister(name string) {
 // are safe since fsnotify handles directory deduplication internally.
 func (gw *globalWatcher) watch(workspacePath string) error {
 	cfg := config.Get()
-	slog.Debug("Adding workspace to global watcher", "path", workspacePath)
+	slog.Debug("lsp watcher: Adding workspace to global watcher", "path", workspacePath)
 
 	// Store the workspace root for hierarchical ignore checking
 	gw.workspaceRoot = workspacePath
@@ -115,20 +115,20 @@ func (gw *globalWatcher) watch(workspacePath string) error {
 		// Check if directory should be skipped based on hierarchical .gitignore/.crushignore
 		if gw.shouldIgnoreDirectory(path) {
 			if cfg != nil && cfg.Options.DebugLSP {
-				slog.Debug("Skipping ignored directory", "path", path)
+				slog.Debug("lsp watcher: Skipping ignored directory", "path", path)
 			}
 			return filepath.SkipDir
 		}
 
 		// Add directory to watcher (fsnotify handles deduplication automatically)
 		if err := gw.addDirectoryToWatcher(path); err != nil {
-			slog.Error("Error watching directory", "path", path, "error", err)
+			slog.Error("lsp watcher: Error watching directory", "path", path, "error", err)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("error walking workspace %s: %w", workspacePath, err)
+		return fmt.Errorf("lsp watcher: error walking workspace %s: %w", workspacePath, err)
 	}
 
 	return nil
@@ -217,17 +217,17 @@ func (gw *globalWatcher) checkIgnoreFile(ignoreFilePath, relPath string) bool {
 // fsnotify handles deduplication internally, so we don't need to track watched directories.
 func (gw *globalWatcher) addDirectoryToWatcher(dirPath string) error {
 	if gw.watcher == nil {
-		return fmt.Errorf("global watcher not initialized")
+		return fmt.Errorf("lsp watcher: global watcher not initialized")
 	}
 
 	// Add directory to fsnotify watcher - fsnotify handles deduplication
 	// "A path can only be watched once; watching it more than once is a no-op"
 	err := gw.watcher.Add(dirPath)
 	if err != nil {
-		return fmt.Errorf("failed to watch directory %s: %w", dirPath, err)
+		return fmt.Errorf("lsp watcher: failed to watch directory %s: %w", dirPath, err)
 	}
 
-	slog.Debug("Added directory to global watcher", "path", dirPath)
+	slog.Debug("lsp watcher: Added directory to global watcher", "path", dirPath)
 	return nil
 }
 
@@ -240,7 +240,7 @@ func (gw *globalWatcher) processEvents() {
 	cfg := config.Get()
 
 	if gw.watcher == nil {
-		slog.Error("Global watcher not initialized")
+		slog.Error("lsp watcher: Global watcher not initialized")
 		return
 	}
 
@@ -261,16 +261,16 @@ func (gw *globalWatcher) processEvents() {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					if !gw.shouldIgnoreDirectory(event.Name) {
 						if err := gw.addDirectoryToWatcher(event.Name); err != nil {
-							slog.Error("Error adding new directory to watcher", "path", event.Name, "error", err)
+							slog.Error("lsp watcher: Error adding new directory to watcher", "path", event.Name, "error", err)
 						}
 					} else if cfg != nil && cfg.Options.DebugLSP {
-						slog.Debug("Skipping ignored new directory", "path", event.Name)
+						slog.Debug("lsp watcher: Skipping ignored new directory", "path", event.Name)
 					}
 				}
 			}
 
 			if cfg != nil && cfg.Options.DebugLSP {
-				slog.Debug("Global watcher received event", "path", event.Name, "op", event.Op.String())
+				slog.Debug("lsp watcher: Global watcher received event", "path", event.Name, "op", event.Op.String())
 			}
 
 			// Process the event centrally
@@ -280,7 +280,7 @@ func (gw *globalWatcher) processEvents() {
 			if !ok {
 				return
 			}
-			slog.Error("Global watcher error", "error", err)
+			slog.Error("lsp watcher: Global watcher error", "error", err)
 		}
 	}
 }
@@ -308,7 +308,7 @@ func (gw *globalWatcher) handleFileEvent(event fsnotify.Event) {
 		// Debug logging per client
 		if cfg.Options.DebugLSP {
 			matched, kind := watcher.isPathWatched(event.Name)
-			slog.Debug("File event for client",
+			slog.Debug("lsp watcher: File event for client",
 				"path", event.Name,
 				"operation", event.Op.String(),
 				"watched", matched,
@@ -330,7 +330,7 @@ func (gw *globalWatcher) handleFileEvent(event fsnotify.Event) {
 				info, err := os.Stat(event.Name)
 				if err != nil {
 					if !os.IsNotExist(err) {
-						slog.Debug("Error getting file info", "path", event.Name, "error", err)
+						slog.Debug("lsp watcher: Error getting file info", "path", event.Name, "error", err)
 					}
 					continue
 				}
@@ -403,7 +403,7 @@ func (gw *globalWatcher) handleFileEventForClient(watcher *WorkspaceWatcher, uri
 	// If the file is open and it's a change event, use didChange notification
 	filePath, err := protocol.DocumentURI(uri).Path()
 	if err != nil {
-		slog.Error("Error converting URI to path", "uri", uri, "error", err)
+		slog.Error("lsp watcher: Error converting URI to path", "uri", uri, "error", err)
 		return
 	}
 
@@ -412,14 +412,14 @@ func (gw *globalWatcher) handleFileEventForClient(watcher *WorkspaceWatcher, uri
 	} else if changeType == protocol.FileChangeType(protocol.Changed) && watcher.client.IsFileOpen(filePath) {
 		err := watcher.client.NotifyChange(gw.ctx, filePath)
 		if err != nil {
-			slog.Error("Error notifying change", "error", err)
+			slog.Error("lsp watcher: Error notifying change", "error", err)
 		}
 		return
 	}
 
 	// Notify LSP server about the file event using didChangeWatchedFiles
 	if err := watcher.notifyFileEvent(gw.ctx, uri, changeType); err != nil {
-		slog.Error("Error notifying LSP server about file event", "error", err)
+		slog.Error("lsp watcher: Error notifying LSP server about file event", "error", err)
 	}
 }
 
@@ -435,7 +435,7 @@ func (gw *globalWatcher) shutdown() {
 	}
 
 	gw.wg.Wait()
-	slog.Debug("Global watcher shutdown complete")
+	slog.Debug("lsp watcher: Global watcher shutdown complete")
 }
 
 // ShutdownGlobalWatcher shuts down the singleton global watcher

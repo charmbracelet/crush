@@ -89,7 +89,7 @@ type ProviderConfig struct {
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
 
 	// Used to pass extra parameters to the provider.
-	ExtraParams map[string]string `json:"-"`
+	ExtraParams map[string]string `json:"extra_params,omitempty" jsonschema:"description=Additional parameters to pass to the provider"`
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
@@ -173,6 +174,46 @@ type LSP struct {
 	LSP  LSPConfig `json:"lsp"`
 }
 
+type KeyMap string
+
+type CommandName string
+
+const (
+	CommandQuit     CommandName = "quit"
+	CommandHelp     CommandName = "help"
+	CommandCommands CommandName = "commands"
+	CommandSessions CommandName = "sessions"
+	CommandSuspend  CommandName = "suspend"
+)
+
+type KeyMaps map[CommandName]KeyMap
+
+func (KeyMaps) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Type = "object"
+	schema.Properties = jsonschema.NewProperties()
+	schema.Properties.Set("quit", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for quit command",
+	})
+	schema.Properties.Set("help", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for help command",
+	})
+	schema.Properties.Set("commands", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for commands command",
+	})
+	schema.Properties.Set("sessions", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for sessions command",
+	})
+	schema.Properties.Set("suspend", &jsonschema.Schema{
+		Type:        "string",
+		Description: "Key binding for suspend command",
+	})
+	schema.AdditionalProperties = jsonschema.FalseSchema
+}
+
 func (l LSPs) Sorted() []LSP {
 	sorted := make([]LSP, 0, len(l))
 	for k, v := range l {
@@ -252,6 +293,8 @@ type Config struct {
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+
+	KeyMaps KeyMaps `json:"keymaps,omitempty" jsonschema:"description=Keymaps for the TUI"`
 
 	// Internal
 	workingDir string `json:"-"`

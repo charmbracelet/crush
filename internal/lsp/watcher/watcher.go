@@ -17,9 +17,9 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 )
 
-// WorkspaceWatcher manages LSP file watching for a specific client
+// Client manages LSP file watching for a specific client
 // It now delegates actual file watching to the GlobalWatcher
-type WorkspaceWatcher struct {
+type Client struct {
 	client        *lsp.Client
 	name          string
 	workspacePath string
@@ -28,9 +28,9 @@ type WorkspaceWatcher struct {
 	registrations *csync.Slice[protocol.FileSystemWatcher]
 }
 
-// NewWorkspaceWatcher creates a new workspace watcher
-func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
-	return &WorkspaceWatcher{
+// New creates a new workspace watcher for the given client.
+func New(name string, client *lsp.Client) *Client {
+	return &Client{
 		name:          name,
 		client:        client,
 		registrations: csync.NewSlice[protocol.FileSystemWatcher](),
@@ -38,7 +38,7 @@ func NewWorkspaceWatcher(name string, client *lsp.Client) *WorkspaceWatcher {
 }
 
 // register adds file watchers to track
-func (w *WorkspaceWatcher) register(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
+func (w *Client) register(ctx context.Context, id string, watchers []protocol.FileSystemWatcher) {
 	cfg := config.Get()
 
 	w.registrations.Append(watchers...)
@@ -98,7 +98,7 @@ func (w *WorkspaceWatcher) register(ctx context.Context, id string, watchers []p
 
 // openHighPriorityFiles opens important files for the server type
 // Returns the number of files opened
-func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName string) int {
+func (w *Client) openHighPriorityFiles(ctx context.Context, serverName string) int {
 	cfg := config.Get()
 	filesOpened := 0
 
@@ -223,24 +223,19 @@ func (w *WorkspaceWatcher) openHighPriorityFiles(ctx context.Context, serverName
 }
 
 // Watch sets up file watching for a workspace using the global watcher
-func (w *WorkspaceWatcher) Watch(ctx context.Context, workspacePath string) {
+func (w *Client) Watch(ctx context.Context, workspacePath string) {
 	w.workspacePath = workspacePath
 
 	slog.Debug("Starting workspace watcher", "workspacePath", workspacePath, "serverName", w.name)
 
 	// Register this workspace watcher with the global watcher
-	getGlobalWatcher().register(w.name, w)
-	defer getGlobalWatcher().unregister(w.name)
+	instance().register(w.name, w)
+	defer instance().unregister(w.name)
 
 	// Register handler for file watcher registrations from the server
 	lsp.RegisterFileWatchHandler(func(id string, watchers []protocol.FileSystemWatcher) {
 		w.register(ctx, id, watchers)
 	})
-
-	// Add workspace to the global watcher (will be deduplicated automatically)
-	if err := getGlobalWatcher().watch(workspacePath); err != nil {
-		slog.Error("Error adding workspace to global watcher", "path", workspacePath, "error", err)
-	}
 
 	// Wait for context cancellation
 	<-ctx.Done()
@@ -249,7 +244,7 @@ func (w *WorkspaceWatcher) Watch(ctx context.Context, workspacePath string) {
 
 // isPathWatched checks if a path should be watched based on server registrations
 // If no explicit registrations, watch everything
-func (w *WorkspaceWatcher) isPathWatched(path string) (bool, protocol.WatchKind) {
+func (w *Client) isPathWatched(path string) (bool, protocol.WatchKind) {
 	if w.registrations.Len() == 0 {
 		return true, protocol.WatchKind(protocol.WatchChange | protocol.WatchCreate | protocol.WatchDelete)
 	}
@@ -281,7 +276,7 @@ func matchesGlob(pattern, path string) bool {
 }
 
 // matchesPattern checks if a path matches the glob pattern
-func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPattern) bool {
+func (w *Client) matchesPattern(path string, pattern protocol.GlobPattern) bool {
 	patternInfo, err := pattern.AsPattern()
 	if err != nil {
 		slog.Error("Error parsing pattern", "pattern", pattern, "error", err)
@@ -320,7 +315,7 @@ func (w *WorkspaceWatcher) matchesPattern(path string, pattern protocol.GlobPatt
 }
 
 // notifyFileEvent sends a didChangeWatchedFiles notification for a file event
-func (w *WorkspaceWatcher) notifyFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) error {
+func (w *Client) notifyFileEvent(ctx context.Context, uri string, changeType protocol.FileChangeType) error {
 	cfg := config.Get()
 	if cfg.Options.DebugLSP {
 		slog.Debug("Notifying file event",
@@ -443,7 +438,7 @@ func shouldExcludeFile(filePath string) bool {
 }
 
 // openMatchingFile opens a file if it matches any of the registered patterns
-func (w *WorkspaceWatcher) openMatchingFile(ctx context.Context, path string) {
+func (w *Client) openMatchingFile(ctx context.Context, path string) {
 	cfg := config.Get()
 	// Skip directories
 	info, err := os.Stat(path)

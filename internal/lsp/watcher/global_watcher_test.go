@@ -15,19 +15,19 @@ func TestGlobalWatcher(t *testing.T) {
 	t.Parallel()
 
 	// Test that we can get the global watcher instance
-	gw1 := getGlobalWatcher()
+	gw1 := instance()
 	if gw1 == nil {
 		t.Fatal("Expected global watcher instance, got nil")
 	}
 
 	// Test that subsequent calls return the same instance (singleton)
-	gw2 := getGlobalWatcher()
+	gw2 := instance()
 	if gw1 != gw2 {
 		t.Fatal("Expected same global watcher instance, got different instances")
 	}
 
 	// Test registration and unregistration
-	mockWatcher := &WorkspaceWatcher{
+	mockWatcher := &Client{
 		name: "test-watcher",
 	}
 
@@ -67,9 +67,9 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &globalWatcher{
+	gw := &global{
 		watcher:      watcher,
-		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
@@ -77,19 +77,19 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	}
 
 	// Test that watching the same workspace multiple times is safe (idempotent)
-	err1 := gw.watch(tempDir)
+	err1 := gw.addDirectoryToWatcher(tempDir)
 	if err1 != nil {
-		t.Fatalf("First WatchWorkspace call failed: %v", err1)
+		t.Fatalf("First addDirectoryToWatcher call failed: %v", err1)
 	}
 
-	err2 := gw.watch(tempDir)
+	err2 := gw.addDirectoryToWatcher(tempDir)
 	if err2 != nil {
-		t.Fatalf("Second WatchWorkspace call failed: %v", err2)
+		t.Fatalf("Second addDirectoryToWatcher call failed: %v", err2)
 	}
 
-	err3 := gw.watch(tempDir)
+	err3 := gw.addDirectoryToWatcher(tempDir)
 	if err3 != nil {
-		t.Fatalf("Third WatchWorkspace call failed: %v", err3)
+		t.Fatalf("Third addDirectoryToWatcher call failed: %v", err3)
 	}
 
 	// All calls should succeed - fsnotify handles deduplication internally
@@ -127,9 +127,9 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &globalWatcher{
+	gw := &global{
 		watcher:      watcher,
-		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
@@ -137,9 +137,9 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	}
 
 	// Watch the workspace
-	err = gw.watch(tempDir)
+	err = gw.addDirectoryToWatcher(tempDir)
 	if err != nil {
-		t.Fatalf("WatchWorkspace failed: %v", err)
+		t.Fatalf("addDirectoryToWatcher failed: %v", err)
 	}
 
 	// Verify that our expected directories exist and can be watched
@@ -248,9 +248,9 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 	}
 	defer watcher.Close()
 
-	gw := &globalWatcher{
+	gw := &global{
 		watcher:      watcher,
-		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
@@ -258,30 +258,30 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 	}
 
 	// Watch the workspace
-	err = gw.watch(tempDir)
+	err = gw.addDirectoryToWatcher(tempDir)
 	if err != nil {
-		t.Fatalf("WatchWorkspace failed: %v", err)
+		t.Fatalf("addDirectoryToWatcher failed: %v", err)
 	}
 
 	// Verify that ignored directories are properly ignored
-	if !gw.shouldIgnoreDirectory(nodeModules) {
+	if !shouldIgnoreDirectory(tempDir, nodeModules) {
 		t.Errorf("Expected node_modules to be ignored by .gitignore")
 	}
 
-	if !gw.shouldIgnoreDirectory(target) {
+	if !shouldIgnoreDirectory(tempDir, target) {
 		t.Errorf("Expected target to be ignored by .gitignore")
 	}
 
-	if !gw.shouldIgnoreDirectory(customIgnored) {
+	if !shouldIgnoreDirectory(tempDir, customIgnored) {
 		t.Errorf("Expected custom_ignored to be ignored by .crushignore")
 	}
 
 	// Verify that normal directories are not ignored
-	if gw.shouldIgnoreDirectory(normalDir) {
+	if shouldIgnoreDirectory(tempDir, normalDir) {
 		t.Errorf("Expected src directory to not be ignored")
 	}
 
-	if gw.shouldIgnoreDirectory(tempDir) {
+	if shouldIgnoreDirectory(tempDir, tempDir) {
 		t.Errorf("Expected workspace root to not be ignored")
 	}
 }
@@ -294,8 +294,8 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 	defer cancel()
 
 	// Create a temporary global watcher for testing
-	gw := &globalWatcher{
-		watchers:     csync.NewMap[string, *WorkspaceWatcher](),
+	gw := &global{
+		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,

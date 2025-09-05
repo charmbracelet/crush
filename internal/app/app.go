@@ -86,6 +86,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	app.setupEvents()
 
+	// Start the global watcher
+	if err := watcher.Start(); err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
+
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
 
@@ -349,7 +354,7 @@ func (app *App) Shutdown() {
 	}
 
 	// Shutdown the global watcher
-	watcher.ShutdownGlobalWatcher()
+	watcher.Shutdown()
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

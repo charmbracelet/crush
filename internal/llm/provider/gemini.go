@@ -81,6 +81,9 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 
 			if len(msg.ToolCalls()) > 0 {
 				for _, call := range msg.ToolCalls() {
+					if !call.Finished {
+						continue
+					}
 					args, _ := parseJSONToMap(call.Input)
 					assistantParts = append(assistantParts, &genai.Part{
 						FunctionCall: &genai.FunctionCall{

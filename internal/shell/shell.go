@@ -20,7 +20,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/slicesext"
+	"github.com/charmbracelet/x/exp/slice"
 	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -186,7 +186,7 @@ func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 		}
 
 		argsMatch := slices.Equal(argParts[:len(args)], args)
-		flagsMatch := slicesext.IsSubset(flags, flagParts)
+		flagsMatch := slice.IsSubset(flags, flagParts)
 
 		return argsMatch && flagsMatch
 	}

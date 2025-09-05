@@ -151,6 +151,9 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			}
 
 			for _, toolCall := range msg.ToolCalls() {
+				if !toolCall.Finished {
+					continue
+				}
 				var inputMap map[string]any
 				err := json.Unmarshal([]byte(toolCall.Input), &inputMap)
 				if err != nil {

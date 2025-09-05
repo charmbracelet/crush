@@ -1,4 +1,4 @@
-name: Issue Labeler
+name: labeler
 
 on:
   issues:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       issue-number:
-        description: Issue Number
+        description: "Issue/PR #"
         required: true
         type: string
 

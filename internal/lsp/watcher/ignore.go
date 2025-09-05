@@ -16,6 +16,11 @@ func shouldIgnoreDirectory(workspaceRoot, dirPath string) bool {
 		return false
 	}
 
+	// Always ignore .git directories
+	if filepath.Base(dirPath) == ".git" {
+		return true
+	}
+
 	if strings.HasPrefix(dirPath, workspaceRoot) {
 		return isIgnoredInWorkspace(dirPath, workspaceRoot)
 	}

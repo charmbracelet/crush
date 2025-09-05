@@ -160,7 +160,7 @@ func (gw *global) addDirectoryToWatcher(dirPath string) error {
 		return fmt.Errorf("lsp watcher: failed to watch directory %s: %w", dirPath, err)
 	}
 
-	slog.Debug("lsp watcher: Added directory to global watcher", "path", dirPath)
+	slog.Debug("lsp watcher: watching directory", "path", dirPath)
 	return nil
 }
 

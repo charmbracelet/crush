@@ -70,6 +70,8 @@ type (
 	ToggleThinkingMsg     struct{}
 	OpenExternalEditorMsg struct{}
 	ToggleYoloModeMsg     struct{}
+	RestartMCPMsg         struct{}
+	RestartLSPMsg         struct{}
 	CompactMsg            struct {
 		SessionID string
 	}
@@ -363,6 +365,22 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "restart_mcp",
+			Title:       "Restart MCP",
+			Description: "Restart MCP servers",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(RestartMCPMsg{})
+			},
+		},
+		{
+			ID:          "restart_lsp",
+			Title:       "Restart LSP",
+			Description: "Restart LSP clients",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(RestartLSPMsg{})
+			},
+		},
 		{
 			ID:          "toggle_yolo",
 			Title:       "Toggle Yolo Mode",

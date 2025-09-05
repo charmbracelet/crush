@@ -71,7 +71,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	watchCtx, cancelFunc := context.WithCancel(ctx)
 
 	// Create the workspace watcher.
-	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient)
+	workspaceWatcher := watcher.New(name, lspClient)
 
 	// Store the cancel function to be called during cleanup.
 	app.watcherCancelFuncs.Append(cancelFunc)
@@ -87,14 +87,14 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 }
 
 // runWorkspaceWatcher executes the workspace watcher for an LSP client.
-func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.WorkspaceWatcher) {
+func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.Client) {
 	defer app.lspWatcherWG.Done()
 	defer log.RecoverPanic("LSP-"+name, func() {
 		// Try to restart the client.
 		app.restartLSPClient(ctx, name)
 	})
 
-	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
+	workspaceWatcher.Watch(ctx, app.config.WorkingDir())
 	slog.Info("Workspace watcher stopped", "client", name)
 }
 

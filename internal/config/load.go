@@ -368,7 +368,7 @@ func applyDefaultLSPFileTypes(lspConfigs map[string]LSPConfig) {
 		if len(config.FileTypes) != 0 {
 			continue
 		}
-		bin := strings.ToLower(filepath.Base(config.Command))
+		bin := strings.ToLower(filepath.Base(config.ResolvedCommand()))
 		config.FileTypes = defaultLSPFileTypes[bin]
 		lspConfigs[name] = config
 	}

@@ -66,9 +66,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	)
 
 	// Load known providers, this loads the config from catwalk
+	// If catwalk is unavailable, continue with empty known providers and rely on user config
 	providers, err := Providers()
-	if err != nil || len(providers) == 0 {
-		return nil, fmt.Errorf("failed to load providers: %w", err)
+	if err != nil {
+		slog.Warn("Failed to load providers from catwalk service, continuing with user-configured providers only", "error", err)
+		providers = []catwalk.Provider{}
 	}
 	cfg.knownProviders = providers
 
@@ -81,6 +83,10 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 
 	if !cfg.IsConfigured() {
+		if len(providers) == 0 {
+			// Both catwalk failed and no custom providers configured
+			return nil, fmt.Errorf("no providers available: catwalk service is unreachable and no custom providers configured")
+		}
 		slog.Warn("No providers configured")
 		return cfg, nil
 	}

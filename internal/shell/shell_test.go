@@ -11,7 +11,7 @@ import (
 
 // Benchmark to measure CPU efficiency
 func BenchmarkShellQuickCommands(b *testing.B) {
-	shell := NewShell(&Options{WorkingDir: b.TempDir()})
+	shell := NewShell(Options{WorkingDir: b.TempDir()})
 
 	b.ReportAllocs()
 
@@ -33,7 +33,7 @@ func TestTestTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	t.Cleanup(cancel)
 
-	shell := NewShell(&Options{WorkingDir: t.TempDir()})
+	shell := NewShell(Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(ctx, "sleep 10")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -50,7 +50,7 @@ func TestTestCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // immediately cancel the context
 
-	shell := NewShell(&Options{WorkingDir: t.TempDir()})
+	shell := NewShell(Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(ctx, "sleep 10")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -64,7 +64,7 @@ func TestTestCancel(t *testing.T) {
 }
 
 func TestRunCommandError(t *testing.T) {
-	shell := NewShell(&Options{WorkingDir: t.TempDir()})
+	shell := NewShell(Options{WorkingDir: t.TempDir()})
 	_, _, err := shell.Exec(t.Context(), "nopenopenope")
 	if status := ExitCode(err); status == 0 {
 		t.Fatalf("Expected non-zero exit status, got %d", status)
@@ -81,7 +81,7 @@ func TestRunContinuity(t *testing.T) {
 	tempDir1 := t.TempDir()
 	tempDir2 := t.TempDir()
 
-	shell := NewShell(&Options{WorkingDir: tempDir1})
+	shell := NewShell(Options{WorkingDir: tempDir1})
 	if _, _, err := shell.Exec(t.Context(), "export FOO=bar"); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRunContinuity(t *testing.T) {
 }
 
 func TestCrossPlatformExecution(t *testing.T) {
-	shell := NewShell(&Options{WorkingDir: "."})
+	shell := NewShell(Options{WorkingDir: "."})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

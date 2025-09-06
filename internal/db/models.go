@@ -42,3 +42,12 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 }
+
+type Todo struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Content   string `json:"content"`
+	Status    string `json:"status"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}

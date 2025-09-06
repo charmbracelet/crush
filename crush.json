@@ -1,5 +1,13 @@
 {
   "$schema": "https://charm.land/crush.json",
+  "agents": {
+    "coder": {
+      "model": "large"
+    },
+    "task": {
+      "model": "small"
+    }
+  },
   "lsp": {
     "Go": {
       "command": "gopls"

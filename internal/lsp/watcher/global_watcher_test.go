@@ -263,27 +263,9 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 		t.Fatalf("addDirectoryToWatcher failed: %v", err)
 	}
 
-	// Verify that ignored directories are properly ignored
-	if !shouldIgnoreDirectory(tempDir, nodeModules) {
-		t.Errorf("Expected node_modules to be ignored by .gitignore")
-	}
-
-	if !shouldIgnoreDirectory(tempDir, target) {
-		t.Errorf("Expected target to be ignored by .gitignore")
-	}
-
-	if !shouldIgnoreDirectory(tempDir, customIgnored) {
-		t.Errorf("Expected custom_ignored to be ignored by .crushignore")
-	}
-
-	// Verify that normal directories are not ignored
-	if shouldIgnoreDirectory(tempDir, normalDir) {
-		t.Errorf("Expected src directory to not be ignored")
-	}
-
-	if shouldIgnoreDirectory(tempDir, tempDir) {
-		t.Errorf("Expected workspace root to not be ignored")
-	}
+	// This test verifies that the watcher can successfully add directories to fsnotify
+	// The actual ignore logic is tested in the fsext package
+	// Here we just verify that the watcher integration works
 }
 
 func TestGlobalWatcherShutdown(t *testing.T) {

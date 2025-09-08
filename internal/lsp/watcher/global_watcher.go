@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/fsnotify/fsnotify"
 )
@@ -70,10 +70,6 @@ var instance = sync.OnceValue(func() *global {
 
 	gw.watcher = watcher
 
-	// Start the event processing goroutine
-	gw.wg.Add(1)
-	go gw.processEvents()
-
 	return gw
 })
 
@@ -111,25 +107,16 @@ func Start() error {
 	gw.root = root
 	gw.started.Store(true)
 
+	// Start the event processing goroutine now that we're initialized
+	gw.wg.Add(1)
+	go gw.processEvents()
+
 	// Walk the workspace and add only directories to the watcher
 	// fsnotify will automatically provide events for all files within these directories
 	// Multiple calls with the same directories are safe (fsnotify deduplicates)
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err := fsext.WalkDirectories(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
-		}
-
-		// Only process directories - we don't watch individual files
-		if !d.IsDir() {
-			return nil
-		}
-
-		// Check if directory should be skipped based on hierarchical .gitignore/.crushignore
-		if shouldIgnoreDirectory(root, path) {
-			if cfg != nil && cfg.Options.DebugLSP {
-				slog.Debug("lsp watcher: Skipping ignored directory", "path", path)
-			}
-			return filepath.SkipDir
 		}
 
 		// Add directory to watcher (fsnotify handles deduplication automatically)
@@ -192,7 +179,7 @@ func (gw *global) processEvents() {
 			// to ensure we get events for files created within them
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if !shouldIgnoreDirectory(gw.root, event.Name) {
+					if !fsext.ShouldExcludeFile(gw.root, event.Name) {
 						if err := gw.addDirectoryToWatcher(event.Name); err != nil {
 							slog.Error("lsp watcher: Error adding new directory to watcher", "path", event.Name, "error", err)
 						}
@@ -226,7 +213,7 @@ func (gw *global) handleFileEvent(event fsnotify.Event) {
 	// Handle file creation for all relevant clients (only once)
 	if event.Op&fsnotify.Create != 0 {
 		if info, err := os.Stat(event.Name); err == nil && !info.IsDir() {
-			if !shouldExcludeFile(event.Name) {
+			if !fsext.ShouldExcludeFile(gw.root, event.Name) {
 				gw.openMatchingFileForClients(event.Name)
 			}
 		}
@@ -300,7 +287,7 @@ func (gw *global) openMatchingFileForClients(path string) {
 	}
 
 	// Skip excluded files
-	if shouldExcludeFile(path) {
+	if fsext.ShouldExcludeFile(gw.root, path) {
 		return
 	}
 

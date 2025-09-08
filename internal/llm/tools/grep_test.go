@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -97,7 +96,7 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 
 	// Run grep
 	call := ToolCall{Input: string(paramsJSON)}
-	response, err := grepTool.Run(context.Background(), call)
+	response, err := grepTool.Run(t.Context(), call)
 	require.NoError(t, err)
 
 	// Check results - should only find file1.txt and file2.txt

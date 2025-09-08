@@ -141,8 +141,16 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		return true
 	}
 
-	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
-		slog.Debug("ignoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
+	parentDir := filepath.Dir(path)
+	ignoreParser := dl.getIgnore(parentDir)
+	if ignoreParser.MatchesPath(relPath) {
+		slog.Debug("ignoring dir pattern", "path", relPath, "dir", parentDir)
+		return true
+	}
+
+	// For directories, also check with trailing slash (gitignore convention)
+	if ignoreParser.MatchesPath(relPath + "/") {
+		slog.Debug("ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
 		return true
 	}
 

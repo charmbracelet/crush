@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
+<p align="center">你的新编程伙伴，现在就在你最爱的终端中。<br />你的工具、代码和工作流，都与您选择的 LLM 模型紧密相连。</p>
 
 <p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
 
@@ -66,7 +67,7 @@ nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet
 
 ### NixOS & Home Manager Module Usage via NUR
 
-Crush provides NixOS and Home Manager modules via NUR.  
+Crush provides NixOS and Home Manager modules via NUR.
 You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
 
 ```nix
@@ -121,7 +122,6 @@ You can use these modules directly in your flake by importing them from NUR. Sin
 
 </details>
 
-
 <details>
 <summary><strong>Debian/Ubuntu</strong></summary>
 
@@ -175,22 +175,22 @@ Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
 
-| Environment Variable       | Provider                                           |
-| -------------------------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Anthropic                                          |
-| `OPENAI_API_KEY`           | OpenAI                                             |
-| `OPENROUTER_API_KEY`       | OpenRouter                                         |
-| `CEREBRAS_API_KEY`         | Cerebras                                           |
-| `GEMINI_API_KEY`           | Google Gemini                                      |
-| `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`             | Groq                                               |
-| `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
-| `AWS_REGION`               | AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_API_ENDPOINT`| Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
+| Environment Variable        | Provider                                           |
+| --------------------------- | -------------------------------------------------- |
+| `ANTHROPIC_API_KEY`         | Anthropic                                          |
+| `OPENAI_API_KEY`            | OpenAI                                             |
+| `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `CEREBRAS_API_KEY`          | Cerebras                                           |
+| `GEMINI_API_KEY`            | Google Gemini                                      |
+| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
+| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
+| `GROQ_API_KEY`              | Groq                                               |
+| `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
+| `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
+| `AWS_REGION`                | AWS Bedrock (Claude)                               |
+| `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
+| `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
+| `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 
 ### By the Way
 

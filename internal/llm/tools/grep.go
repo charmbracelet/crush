@@ -365,6 +365,12 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
+		// Skip hidden files (starting with a dot) to match ripgrep's default behavior
+		base := filepath.Base(path)
+		if base != "." && strings.HasPrefix(base, ".") {
+			return nil
+		}
+
 		if includePattern != nil && !includePattern.MatchString(path) {
 			return nil
 		}

@@ -460,7 +460,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
 		}
-		if c.Name == "OpenRouter" {
+		if c.ID == "openrouter" {
 			testURL = baseURL + "/credits"
 		} else {
 			testURL = baseURL + "/models"

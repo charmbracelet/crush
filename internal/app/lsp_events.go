@@ -32,7 +32,7 @@ type LSPClientInfo struct {
 	Name            string
 	State           lsp.ServerState
 	Error           error
-	Client          *lsp.Client
+	Client          lsp.Client
 	DiagnosticCount int
 	ConnectedAt     time.Time
 }
@@ -58,7 +58,7 @@ func GetLSPState(name string) (LSPClientInfo, bool) {
 }
 
 // updateLSPState updates the state of an LSP client and publishes an event
-func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client, diagnosticCount int) {
+func updateLSPState(name string, state lsp.ServerState, err error, client lsp.Client, diagnosticCount int) {
 	info := LSPClientInfo{
 		Name:            name,
 		State:           state,

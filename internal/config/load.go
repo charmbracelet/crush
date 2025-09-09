@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
+	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -333,8 +334,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.LSP = make(map[string]LSPConfig)
 	}
 
-	// Apply default file types for known LSP servers if not specified
-	applyDefaultLSPFileTypes(c.LSP)
+	// Apply defaults to LSP configurations
+	c.applyLSPDefaults()
 
 	// Add the default context paths if they are not already present
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
@@ -342,35 +343,31 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 }
 
-var defaultLSPFileTypes = map[string][]string{
-	"gopls":                      {"go", "mod", "sum", "work"},
-	"typescript-language-server": {"ts", "tsx", "js", "jsx", "mjs", "cjs"},
-	"vtsls":                      {"ts", "tsx", "js", "jsx", "mjs", "cjs"},
-	"bash-language-server":       {"sh", "bash", "zsh", "ksh"},
-	"rust-analyzer":              {"rs"},
-	"pyright":                    {"py", "pyi"},
-	"pylsp":                      {"py", "pyi"},
-	"clangd":                     {"c", "cpp", "cc", "cxx", "h", "hpp"},
-	"jdtls":                      {"java"},
-	"vscode-html-languageserver": {"html", "htm"},
-	"vscode-css-languageserver":  {"css", "scss", "sass", "less"},
-	"vscode-json-languageserver": {"json", "jsonc"},
-	"yaml-language-server":       {"yaml", "yml"},
-	"lua-language-server":        {"lua"},
-	"solargraph":                 {"rb"},
-	"elixir-ls":                  {"ex", "exs"},
-	"zls":                        {"zig"},
-}
+// applyLSPDefaults applies default values from powernap to LSP configurations
+func (c *Config) applyLSPDefaults() {
+	// Get powernap's default configuration
+	configManager := powernapConfig.NewManager()
+	configManager.LoadDefaults()
 
-// applyDefaultLSPFileTypes sets default file types for known LSP servers
-func applyDefaultLSPFileTypes(lspConfigs map[string]LSPConfig) {
-	for name, config := range lspConfigs {
-		if len(config.FileTypes) != 0 {
-			continue
+	// Apply defaults to each LSP configuration
+	for name, lspConfig := range c.LSP {
+		// Try to get defaults from powernap based on command name
+		if defaultConfig, ok := configManager.GetServer(lspConfig.Command); ok {
+			if lspConfig.Options == nil && defaultConfig.Settings != nil {
+				lspConfig.Options = defaultConfig.Settings
+			}
+			if len(lspConfig.InitOptions) == 0 && len(defaultConfig.InitOptions) > 0 {
+				lspConfig.InitOptions = defaultConfig.InitOptions
+			}
+			if len(lspConfig.FileTypes) == 0 && len(defaultConfig.FileTypes) > 0 {
+				lspConfig.FileTypes = defaultConfig.FileTypes
+			}
+			if len(lspConfig.RootMarkers) == 0 && len(defaultConfig.RootMarkers) > 0 {
+				lspConfig.RootMarkers = defaultConfig.RootMarkers
+			}
+			// Update the config in the map
+			c.LSP[name] = lspConfig
 		}
-		bin := strings.ToLower(filepath.Base(config.Command))
-		config.FileTypes = defaultLSPFileTypes[bin]
-		lspConfigs[name] = config
 	}
 }
 

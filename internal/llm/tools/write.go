@@ -30,7 +30,7 @@ type WritePermissionsParams struct {
 }
 
 type writeTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  map[string]lsp.Client
 	permissions permission.Service
 	files       history.Service
 	workingDir  string
@@ -78,7 +78,7 @@ TIPS:
 - Always include descriptive comments when making changes to existing code`
 )
 
-func NewWriteTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewWriteTool(lspClients map[string]lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &writeTool{
 		lspClients:  lspClients,
 		permissions: permissions,

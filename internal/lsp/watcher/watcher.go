@@ -12,15 +12,14 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
-
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // Client manages LSP file watching for a specific client
 // It now delegates actual file watching to the GlobalWatcher
 type Client struct {
-	client        *lsp.Client
+	client        lsp.Client
 	name          string
 	workspacePath string
 
@@ -28,8 +27,15 @@ type Client struct {
 	registrations *csync.Slice[protocol.FileSystemWatcher]
 }
 
+func init() {
+	// Ensure the watcher is initialized with a reasonable file limit
+	if _, err := Ulimit(); err != nil {
+		slog.Error("Error setting file limit", "error", err)
+	}
+}
+
 // New creates a new workspace watcher for the given client.
-func New(name string, client *lsp.Client) *Client {
+func New(name string, client lsp.Client) *Client {
 	return &Client{
 		name:          name,
 		client:        client,

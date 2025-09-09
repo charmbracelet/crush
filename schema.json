@@ -44,7 +44,7 @@
     },
     "LSPConfig": {
       "properties": {
-        "enabled": {
+        "disabled": {
           "type": "boolean",
           "description": "Whether this LSP server is disabled",
           "default": false
@@ -70,9 +70,6 @@
           "type": "object",
           "description": "Environment variables to set to the LSP server command"
         },
-        "options": {
-          "description": "LSP server-specific configuration options"
-        },
         "filetypes": {
           "items": {
             "type": "string",
@@ -87,6 +84,37 @@
           },
           "type": "array",
           "description": "File types this LSP server handles"
+        },
+        "root_markers": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go.mod",
+              "package.json",
+              "Cargo.toml"
+            ]
+          },
+          "type": "array",
+          "description": "Files or directories that indicate the project root"
+        },
+        "settings": {
+          "description": "LSP server-specific settings passed during initialization"
+        },
+        "init_options": {
+          "description": "Initialization options passed to the LSP server during initialize request"
+        },
+        "enable_snippets": {
+          "type": "boolean",
+          "description": "Enable snippet support for this LSP server",
+          "default": true
+        },
+        "single_file_support": {
+          "type": "boolean",
+          "description": "Whether this LSP server supports single file mode without a project",
+          "default": true
+        },
+        "options": {
+          "description": "Deprecated: Use settings instead. LSP server-specific configuration options"
         }
       },
       "additionalProperties": false,

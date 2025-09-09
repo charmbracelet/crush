@@ -98,7 +98,7 @@ func NewAgent(
 	sessions session.Service,
 	messages message.Service,
 	history history.Service,
-	lspClients map[string]*lsp.Client,
+	lspClients map[string]lsp.Client,
 ) (Service, error) {
 	cfg := config.Get()
 

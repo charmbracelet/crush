@@ -4,116 +4,71 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/config"
-
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
-	"github.com/charmbracelet/crush/internal/lsp/util"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
-// Requests
+// ServerRequestHandler handles LSP server requests
+type ServerRequestHandler func(params json.RawMessage) (any, error)
 
+// HandleDiagnostics handles diagnostic notifications from the LSP server
+func HandleDiagnostics(client Client, params json.RawMessage) {
+	var diagParams protocol.PublishDiagnosticsParams
+	if err := json.Unmarshal(params, &diagParams); err != nil {
+		slog.Error("Error unmarshaling diagnostic params", "error", err)
+		return
+	}
+
+	// Convert to our internal format and update the client's diagnostic cache
+	uri := protocol.DocumentURI(diagParams.URI)
+	diagnostics := make([]protocol.Diagnostic, len(diagParams.Diagnostics))
+
+	for i, diag := range diagParams.Diagnostics {
+		diagnostics[i] = protocol.Diagnostic{
+			Range:    diag.Range,
+			Severity: diag.Severity,
+			Code:     diag.Code,
+			Source:   diag.Source,
+			Message:  diag.Message,
+		}
+	}
+
+	// Clear old diagnostics and set new ones
+	client.ClearDiagnosticsForURI(uri)
+	// Note: We can't directly set diagnostics on the interface,
+	// so we rely on the client's internal notification handler
+}
+
+// HandleServerMessage handles server messages
+func HandleServerMessage(params json.RawMessage) {
+	var msgParams protocol.ShowMessageParams
+	if err := json.Unmarshal(params, &msgParams); err != nil {
+		slog.Error("Error unmarshaling message params", "error", err)
+		return
+	}
+
+	switch msgParams.Type {
+	case protocol.Error:
+		slog.Error("LSP Server", "message", msgParams.Message)
+	case protocol.Warning:
+		slog.Warn("LSP Server", "message", msgParams.Message)
+	case protocol.Info:
+		slog.Info("LSP Server", "message", msgParams.Message)
+	case protocol.Log:
+		slog.Debug("LSP Server", "message", msgParams.Message)
+	}
+}
+
+// HandleWorkspaceConfiguration handles workspace configuration requests
 func HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
 	return []map[string]any{{}}, nil
 }
 
+// HandleRegisterCapability handles capability registration requests
 func HandleRegisterCapability(params json.RawMessage) (any, error) {
-	var registerParams protocol.RegistrationParams
-	if err := json.Unmarshal(params, &registerParams); err != nil {
-		slog.Error("Error unmarshaling registration params", "error", err)
-		return nil, err
-	}
-
-	for _, reg := range registerParams.Registrations {
-		switch reg.Method {
-		case "workspace/didChangeWatchedFiles":
-			// Parse the registration options
-			optionsJSON, err := json.Marshal(reg.RegisterOptions)
-			if err != nil {
-				slog.Error("Error marshaling registration options", "error", err)
-				continue
-			}
-
-			var options protocol.DidChangeWatchedFilesRegistrationOptions
-			if err := json.Unmarshal(optionsJSON, &options); err != nil {
-				slog.Error("Error unmarshaling registration options", "error", err)
-				continue
-			}
-
-			// Store the file watchers registrations
-			notifyFileWatchRegistration(reg.ID, options.Watchers)
-		}
-	}
-
 	return nil, nil
 }
 
+// HandleApplyEdit handles workspace edit requests
 func HandleApplyEdit(params json.RawMessage) (any, error) {
-	var edit protocol.ApplyWorkspaceEditParams
-	if err := json.Unmarshal(params, &edit); err != nil {
-		return nil, err
-	}
-
-	err := util.ApplyWorkspaceEdit(edit.Edit)
-	if err != nil {
-		slog.Error("Error applying workspace edit", "error", err)
-		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
-	}
-
-	return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
-}
-
-// FileWatchRegistrationHandler is a function that will be called when file watch registrations are received
-type FileWatchRegistrationHandler func(id string, watchers []protocol.FileSystemWatcher)
-
-// fileWatchHandler holds the current handler for file watch registrations
-var fileWatchHandler FileWatchRegistrationHandler
-
-// RegisterFileWatchHandler sets the handler for file watch registrations
-func RegisterFileWatchHandler(handler FileWatchRegistrationHandler) {
-	fileWatchHandler = handler
-}
-
-// notifyFileWatchRegistration notifies the handler about new file watch registrations
-func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatcher) {
-	if fileWatchHandler != nil {
-		fileWatchHandler(id, watchers)
-	}
-}
-
-// Notifications
-
-func HandleServerMessage(params json.RawMessage) {
-	cfg := config.Get()
-	var msg struct {
-		Type    int    `json:"type"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(params, &msg); err == nil {
-		if cfg.Options.DebugLSP {
-			slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
-		}
-	}
-}
-
-func HandleDiagnostics(client *Client, params json.RawMessage) {
-	var diagParams protocol.PublishDiagnosticsParams
-	if err := json.Unmarshal(params, &diagParams); err != nil {
-		slog.Error("Error unmarshaling diagnostics params", "error", err)
-		return
-	}
-
-	client.diagnosticsMu.Lock()
-	client.diagnostics[diagParams.URI] = diagParams.Diagnostics
-
-	// Calculate total diagnostic count
-	totalCount := 0
-	for _, diagnostics := range client.diagnostics {
-		totalCount += len(diagnostics)
-	}
-	client.diagnosticsMu.Unlock()
-
-	// Trigger callback if set
-	if client.onDiagnosticsChanged != nil {
-		client.onDiagnosticsChanged(client.name, totalCount)
-	}
+	return map[string]bool{"applied": false}, nil
 }

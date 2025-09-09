@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type DiagnosticsParams struct {
 	FilePath string `json:"file_path"`
 }
 type diagnosticsTool struct {
-	lspClients map[string]*lsp.Client
+	lspClients map[string]lsp.Client
 }
 
 const (
@@ -45,7 +45,7 @@ TIPS:
 `
 )
 
-func NewDiagnosticsTool(lspClients map[string]*lsp.Client) BaseTool {
+func NewDiagnosticsTool(lspClients map[string]lsp.Client) BaseTool {
 	return &diagnosticsTool{
 		lspClients,
 	}
@@ -91,7 +91,7 @@ func (b *diagnosticsTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	return NewTextResponse(output), nil
 }
 
-func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
+func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]lsp.Client) {
 	for _, client := range lsps {
 		err := client.OpenFile(ctx, filePath)
 		if err != nil {
@@ -100,7 +100,7 @@ func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]*ls
 	}
 }
 
-func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
+func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string]lsp.Client) {
 	if len(lsps) == 0 {
 		return
 	}
@@ -110,17 +110,29 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	for _, client := range lsps {
 		originalDiags := client.GetDiagnostics()
 
-		handler := func(params json.RawMessage) {
-			lsp.HandleDiagnostics(client, params)
+		handler := func(method string, params any) error {
+			// Convert params back to json.RawMessage for compatibility
+			var rawParams json.RawMessage
+			if raw, ok := params.(json.RawMessage); ok {
+				rawParams = raw
+			} else {
+				var err error
+				rawParams, err = json.Marshal(params)
+				if err != nil {
+					return err
+				}
+			}
+
+			lsp.HandleDiagnostics(client, rawParams)
 			var diagParams protocol.PublishDiagnosticsParams
-			if err := json.Unmarshal(params, &diagParams); err != nil {
-				return
+			if err := json.Unmarshal(rawParams, &diagParams); err != nil {
+				return err
 			}
 
 			path, err := diagParams.URI.Path()
 			if err != nil {
 				slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
-				return
+				return err
 			}
 
 			if path == filePath || hasDiagnosticsChanged(client.GetDiagnostics(), originalDiags) {
@@ -129,6 +141,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 				default:
 				}
 			}
+			return nil
 		}
 
 		client.RegisterNotificationHandler("textDocument/publishDiagnostics", handler)
@@ -163,7 +176,7 @@ func hasDiagnosticsChanged(current, original map[protocol.DocumentURI][]protocol
 	return false
 }
 
-func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
+func getDiagnostics(filePath string, lsps map[string]lsp.Client) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 

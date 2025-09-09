@@ -43,7 +43,7 @@ type MultiEditResponseMetadata struct {
 }
 
 type multiEditTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  map[string]lsp.Client
 	permissions permission.Service
 	files       history.Service
 	workingDir  string
@@ -95,7 +95,7 @@ If you want to create a new file, use:
 - Subsequent edits: normal edit operations on the created content`
 )
 
-func NewMultiEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewMultiEditTool(lspClients map[string]lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &multiEditTool{
 		lspClients:  lspClients,
 		permissions: permissions,

@@ -28,7 +28,7 @@ type ViewPermissionsParams struct {
 }
 
 type viewTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  map[string]lsp.Client
 	workingDir  string
 	permissions permission.Service
 }
@@ -81,7 +81,7 @@ TIPS:
 - When viewing large files, use the offset parameter to read specific sections`
 )
 
-func NewViewTool(lspClients map[string]*lsp.Client, permissions permission.Service, workingDir string) BaseTool {
+func NewViewTool(lspClients map[string]lsp.Client, permissions permission.Service, workingDir string) BaseTool {
 	return &viewTool{
 		lspClients:  lspClients,
 		workingDir:  workingDir,

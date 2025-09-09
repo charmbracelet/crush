@@ -168,10 +168,13 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 
 func (dl *directoryLister) checkParentIgnores(path string) bool {
 	parent := filepath.Dir(filepath.Dir(path))
-	for parent != dl.rootPath && parent != "." && path != "." {
+	for parent != "." && path != "." {
 		if dl.getIgnore(parent).MatchesPath(path) {
 			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
 			return true
+		}
+		if parent == dl.rootPath {
+			break
 		}
 		parent = filepath.Dir(parent)
 	}

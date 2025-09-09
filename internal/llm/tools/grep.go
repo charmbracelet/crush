@@ -279,11 +279,13 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
-	cmd.Args = append(
-		cmd.Args,
-		"--ignore-file", filepath.Join(path, ".gitignore"),
-		"--ignore-file", filepath.Join(path, ".crushignore"),
-	)
+	// Only add ignore files if they exist
+	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
+		ignorePath := filepath.Join(path, ignoreFile)
+		if _, err := os.Stat(ignorePath); err == nil {
+			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
+		}
+	}
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -357,10 +359,14 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 		}
 
 		if info.IsDir() {
-			return nil // Skip directories
+			// Check if directory should be skipped
+			if walker.ShouldSkip(path) {
+				return filepath.SkipDir
+			}
+			return nil // Continue into directory
 		}
 
-		// Use walker's shouldSkip method instead of just SkipHidden
+		// Use walker's shouldSkip method for files
 		if walker.ShouldSkip(path) {
 			return nil
 		}

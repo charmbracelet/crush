@@ -38,7 +38,6 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

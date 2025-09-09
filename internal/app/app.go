@@ -50,7 +50,7 @@ type App struct {
 
 	// global context and cleanup functions
 	globalCtx    context.Context
-	cleanupFuncs []func()
+	cleanupFuncs []func() error
 }
 
 // New initializes a new applcation instance.
@@ -87,6 +87,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
+
+	// cleanup database upon app shutdown
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
@@ -221,9 +224,10 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() {
+	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
+		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
@@ -297,10 +301,11 @@ func (app *App) Subscribe(program *tea.Program) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() {
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
+		return nil
 	})
 	defer app.tuiWG.Done()
 
@@ -350,7 +355,9 @@ func (app *App) Shutdown() {
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
-			cleanup()
+			if err := cleanup(); err != nil {
+				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+			}
 		}
 	}
 }

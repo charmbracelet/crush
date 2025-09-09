@@ -198,30 +198,57 @@ func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 
 	var newGroups []Group[T]
 	for _, g := range f.groups {
-		words := make([]string, len(g.Items))
-		for i, item := range g.Items {
-			words[i] = strings.ToLower(item.FilterValue())
+		// Check if group name matches the query
+		// Extract the group name from the section - we'll use the section's view content
+		// as a fallback since ItemSection doesn't implement FilterableItem
+		var groupName string
+		if section, ok := g.Section.(*itemSectionModel); ok {
+			groupName = strings.ToLower(section.title)
+		} else {
+			// Fallback to using the section's ID or view content
+			groupName = strings.ToLower(g.Section.ID())
 		}
+		groupMatches := fuzzy.Find(query, []string{groupName})
 
-		matches := fuzzy.Find(query, words)
-
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Score > matches[j].Score
-		})
-
-		var matchedItems []T
-		for _, match := range matches {
-			item := g.Items[match.Index]
-			if i, ok := any(item).(HasMatchIndexes); ok {
-				i.MatchIndexes(match.MatchedIndexes)
+		if len(groupMatches) > 0 && groupMatches[0].Score > 0 {
+			// If group name matches, include all items from this group
+			// Clear any existing match indexes for items since the group matched
+			for _, item := range g.Items {
+				if i, ok := any(item).(HasMatchIndexes); ok {
+					i.MatchIndexes(make([]int, 0))
+				}
 			}
-			matchedItems = append(matchedItems, item)
-		}
-		if len(matchedItems) > 0 {
 			newGroups = append(newGroups, Group[T]{
 				Section: g.Section,
-				Items:   matchedItems,
+				Items:   g.Items,
 			})
+		} else {
+			// Group name doesn't match, check individual items
+			words := make([]string, len(g.Items))
+			for i, item := range g.Items {
+				words[i] = strings.ToLower(item.FilterValue())
+			}
+
+			matches := fuzzy.Find(query, words)
+
+			sort.SliceStable(matches, func(i, j int) bool {
+				return matches[i].Score > matches[j].Score
+			})
+
+			var matchedItems []T
+			for _, match := range matches {
+				item := g.Items[match.Index]
+				if i, ok := any(item).(HasMatchIndexes); ok {
+					i.MatchIndexes(match.MatchedIndexes)
+				}
+				matchedItems = append(matchedItems, item)
+			}
+			if len(matchedItems) > 0 {
+				newGroups = append(newGroups, Group[T]{
+					Section: g.Section,
+					Items:   matchedItems,
+				})
+			}
 		}
 	}
 	cmds = append(cmds, f.groupedList.SetGroups(newGroups))

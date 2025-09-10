@@ -179,15 +179,9 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 		Capabilities: protocolCaps,
 	}
 
-	c.RegisterServerRequestHandler("workspace/applyEdit", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
-		return HandleApplyEdit(params)
-	})
-	c.RegisterServerRequestHandler("workspace/configuration", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
-		return HandleWorkspaceConfiguration(params)
-	})
-	c.RegisterServerRequestHandler("client/registerCapability", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
-		return HandleRegisterCapability(params)
-	})
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
+	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
+	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
 	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		HandleDiagnostics(c, params)

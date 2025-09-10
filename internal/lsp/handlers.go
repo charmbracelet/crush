@@ -11,12 +11,12 @@ import (
 )
 
 // HandleWorkspaceConfiguration handles workspace configuration requests
-func HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
+func HandleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	return []map[string]any{{}}, nil
 }
 
 // HandleRegisterCapability handles capability registration requests
-func HandleRegisterCapability(params json.RawMessage) (any, error) {
+func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
 	if err := json.Unmarshal(params, &registerParams); err != nil {
 		slog.Error("Error unmarshaling registration params", "error", err)
@@ -45,7 +45,7 @@ func HandleRegisterCapability(params json.RawMessage) (any, error) {
 }
 
 // HandleApplyEdit handles workspace edit requests
-func HandleApplyEdit(params json.RawMessage) (any, error) {
+func HandleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var edit protocol.ApplyWorkspaceEditParams
 	if err := json.Unmarshal(params, &edit); err != nil {
 		return nil, err

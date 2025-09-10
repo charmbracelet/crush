@@ -111,7 +111,6 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 		originalDiags := client.GetDiagnostics()
 
 		handler := func(_ context.Context, _ string, params json.RawMessage) {
-			// Convert params back to json.RawMessage for compatibility
 			lsp.HandleDiagnostics(client, params)
 			var diagParams protocol.PublishDiagnosticsParams
 			if err := json.Unmarshal(params, &diagParams); err != nil {

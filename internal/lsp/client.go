@@ -171,7 +171,6 @@ type ServerState int
 const (
 	StateStarting ServerState = iota
 	StateReady
-	StateShutdown
 	StateError
 	StateDisabled
 )

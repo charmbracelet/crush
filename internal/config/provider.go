@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,41 @@ func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
 		return nil, fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
 	return providers, nil
+}
+
+func UpdateProviders(pathOrUrl string) error {
+	var providers []catwalk.Provider
+	pathOrUrl = cmp.Or(pathOrUrl, os.Getenv("CATWALK_URL"), defaultCatwalkURL)
+
+	switch {
+	case pathOrUrl == "embedded":
+		providers = embedded.GetAll()
+	case strings.HasPrefix(pathOrUrl, "http://") || strings.HasPrefix(pathOrUrl, "https://"):
+		var err error
+		providers, err = catwalk.NewWithURL(pathOrUrl).GetProviders()
+		if err != nil {
+			return fmt.Errorf("failed to fetch providers from Catwalk: %w", err)
+		}
+	default:
+		content, err := os.ReadFile(pathOrUrl)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		if err := json.Unmarshal(content, &providers); err != nil {
+			return fmt.Errorf("failed to unmarshal provider data: %w", err)
+		}
+		if len(providers) == 0 {
+			return fmt.Errorf("no providers found in the provided source")
+		}
+	}
+
+	cachePath := providerCacheFileData()
+	if err := saveProvidersInCache(cachePath, providers); err != nil {
+		return fmt.Errorf("failed to save providers to cache: %w", err)
+	}
+
+	slog.Info("Providers updated successfully", "count", len(providers), "from", pathOrUrl, "to", cachePath)
+	return nil
 }
 
 func Providers(cfg *Config) ([]catwalk.Provider, error) {

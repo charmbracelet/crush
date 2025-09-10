@@ -397,7 +397,8 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 }
 
 func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
-	providers, err := config.Providers()
+	cfg := config.Get()
+	providers, err := config.Providers(cfg)
 	if err != nil {
 		return nil, err
 	}

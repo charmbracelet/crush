@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/transport"
 )
 
 type Client struct {
@@ -178,6 +179,20 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 		Capabilities: protocolCaps,
 	}
 
+	c.RegisterServerRequestHandler("workspace/applyEdit", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+		return HandleApplyEdit(params)
+	})
+	c.RegisterServerRequestHandler("workspace/configuration", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+		return HandleWorkspaceConfiguration(params)
+	})
+	c.RegisterServerRequestHandler("client/registerCapability", func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+		return HandleRegisterCapability(params)
+	})
+	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
+	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
+		HandleDiagnostics(c, params)
+	})
+
 	return result, nil
 }
 
@@ -201,6 +216,17 @@ func (c *Client) Close() error {
 
 	return c.client.Exit()
 }
+
+// ServerState represents the state of an LSP server
+type ServerState int
+
+const (
+	StateStarting ServerState = iota
+	StateReady
+	StateShutdown
+	StateError
+	StateDisabled
+)
 
 // GetServerState returns the current state of the LSP server
 func (c *Client) GetServerState() ServerState {
@@ -268,6 +294,13 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// OpenFileInfo contains information about an open file
+type OpenFileInfo struct {
+	URI     protocol.DocumentURI
+	Version int32
+	Content string
 }
 
 // HandlesFile checks if this LSP client handles the given file based on its extension.
@@ -511,14 +544,13 @@ func (c *Client) setCapabilities(caps protocol.ServerCapabilities) {
 }
 
 // RegisterNotificationHandler registers a notification handler.
-func (c *Client) RegisterNotificationHandler(method string, handler NotificationHandler) {
-	// Convert the handler to the powernap format
-	protoHandler := func(ctx context.Context, method string, params json.RawMessage) {
-		if err := handler(method, params); err != nil {
-			slog.Error("LSP: notification handler failed", "method", method, "error", err)
-		}
-	}
-	c.client.RegisterNotificationHandler(method, protoHandler)
+func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
+	c.client.RegisterNotificationHandler(method, handler)
+}
+
+// RegisterServerRequestHandler handles server requests.
+func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
+	c.client.RegisterHandler(method, handler)
 }
 
 // DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.

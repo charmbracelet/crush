@@ -110,18 +110,18 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	for _, client := range lsps {
 		originalDiags := client.GetDiagnostics()
 
-		handler := func(_ string, params json.RawMessage) error {
+		handler := func(_ context.Context, _ string, params json.RawMessage) {
 			// Convert params back to json.RawMessage for compatibility
 			lsp.HandleDiagnostics(client, params)
 			var diagParams protocol.PublishDiagnosticsParams
 			if err := json.Unmarshal(params, &diagParams); err != nil {
-				return err
+				return
 			}
 
 			path, err := diagParams.URI.Path()
 			if err != nil {
 				slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
-				return err
+				return
 			}
 
 			if path == filePath || hasDiagnosticsChanged(client.GetDiagnostics(), originalDiags) {
@@ -130,7 +130,6 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 				default:
 				}
 			}
-			return nil
 		}
 
 		client.RegisterNotificationHandler("textDocument/publishDiagnostics", handler)

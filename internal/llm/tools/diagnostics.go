@@ -17,7 +17,7 @@ type DiagnosticsParams struct {
 	FilePath string `json:"file_path"`
 }
 type diagnosticsTool struct {
-	lspClients map[string]lsp.Client
+	lspClients map[string]*lsp.Client
 }
 
 const (
@@ -45,7 +45,7 @@ TIPS:
 `
 )
 
-func NewDiagnosticsTool(lspClients map[string]lsp.Client) BaseTool {
+func NewDiagnosticsTool(lspClients map[string]*lsp.Client) BaseTool {
 	return &diagnosticsTool{
 		lspClients,
 	}
@@ -91,7 +91,7 @@ func (b *diagnosticsTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	return NewTextResponse(output), nil
 }
 
-func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]lsp.Client) {
+func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
 	for _, client := range lsps {
 		err := client.OpenFile(ctx, filePath)
 		if err != nil {
@@ -100,7 +100,7 @@ func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]lsp
 	}
 }
 
-func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string]lsp.Client) {
+func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
 	if len(lsps) == 0 {
 		return
 	}
@@ -176,7 +176,7 @@ func hasDiagnosticsChanged(current, original map[protocol.DocumentURI][]protocol
 	return false
 }
 
-func getDiagnostics(filePath string, lsps map[string]lsp.Client) string {
+func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 

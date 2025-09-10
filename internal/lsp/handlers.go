@@ -11,7 +11,7 @@ import (
 type ServerRequestHandler func(params json.RawMessage) (any, error)
 
 // HandleDiagnostics handles diagnostic notifications from the LSP server
-func HandleDiagnostics(client Client, params json.RawMessage) {
+func HandleDiagnostics(client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostic params", "error", err)

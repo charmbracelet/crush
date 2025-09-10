@@ -22,7 +22,7 @@ type RenderOptions struct {
 }
 
 // RenderLSPList renders a list of LSP status items with the given options.
-func RenderLSPList(lspClients map[string]lsp.Client, opts RenderOptions) []string {
+func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []string {
 	t := styles.CurrentTheme()
 	lspList := []string{}
 
@@ -134,7 +134,7 @@ func RenderLSPList(lspClients map[string]lsp.Client, opts RenderOptions) []strin
 }
 
 // RenderLSPBlock renders a complete LSP block with optional truncation indicator.
-func RenderLSPBlock(lspClients map[string]lsp.Client, opts RenderOptions, showTruncationIndicator bool) string {
+func RenderLSPBlock(lspClients map[string]*lsp.Client, opts RenderOptions, showTruncationIndicator bool) string {
 	t := styles.CurrentTheme()
 	lspList := RenderLSPList(lspClients, opts)
 

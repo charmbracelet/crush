@@ -20,7 +20,7 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
-type clientImpl struct {
+type Client struct {
 	client *powernap.Client
 	name   string
 
@@ -51,7 +51,7 @@ type clientImpl struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, config config.LSPConfig) (Client, error) {
+func New(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
 	// Convert working directory to file URI
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -86,7 +86,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (Client, err
 		return nil, fmt.Errorf("failed to create powernap client: %w", err)
 	}
 
-	client := &clientImpl{
+	client := &Client{
 		client:      powernapClient,
 		name:        name,
 		fileTypes:   config.FileTypes,
@@ -148,7 +148,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (Client, err
 }
 
 // Initialize initializes the LSP client and returns the server capabilities.
-func (c *clientImpl) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
+func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
 	if err := c.client.Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize powernap client: %w", err)
 	}
@@ -182,12 +182,12 @@ func (c *clientImpl) Initialize(ctx context.Context, workspaceDir string) (*prot
 }
 
 // Shutdown sends a shutdown request to the LSP server.
-func (c *clientImpl) Shutdown(ctx context.Context) error {
+func (c *Client) Shutdown(ctx context.Context) error {
 	return c.client.Shutdown(ctx)
 }
 
 // Close closes the LSP client.
-func (c *clientImpl) Close() error {
+func (c *Client) Close() error {
 	// Try to close all open files first
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -203,7 +203,7 @@ func (c *clientImpl) Close() error {
 }
 
 // GetServerState returns the current state of the LSP server
-func (c *clientImpl) GetServerState() ServerState {
+func (c *Client) GetServerState() ServerState {
 	if val := c.serverState.Load(); val != nil {
 		return val.(ServerState)
 	}
@@ -211,22 +211,22 @@ func (c *clientImpl) GetServerState() ServerState {
 }
 
 // SetServerState sets the current state of the LSP server
-func (c *clientImpl) SetServerState(state ServerState) {
+func (c *Client) SetServerState(state ServerState) {
 	c.serverState.Store(state)
 }
 
 // GetName returns the name of the LSP client
-func (c *clientImpl) GetName() string {
+func (c *Client) GetName() string {
 	return c.name
 }
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes
-func (c *clientImpl) SetDiagnosticsCallback(callback func(name string, count int)) {
+func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 	c.onDiagnosticsChanged = callback
 }
 
 // WaitForServerReady waits for the server to be ready
-func (c *clientImpl) WaitForServerReady(ctx context.Context) error {
+func (c *Client) WaitForServerReady(ctx context.Context) error {
 	cfg := config.Get()
 
 	// Set initial state
@@ -271,7 +271,7 @@ func (c *clientImpl) WaitForServerReady(ctx context.Context) error {
 }
 
 // HandlesFile checks if this LSP client handles the given file based on its extension.
-func (c *clientImpl) HandlesFile(path string) bool {
+func (c *Client) HandlesFile(path string) bool {
 	// If no file types are specified, handle all files (backward compatibility)
 	if len(c.fileTypes) == 0 {
 		return true
@@ -289,7 +289,7 @@ func (c *clientImpl) HandlesFile(path string) bool {
 }
 
 // matchesFileType checks if a filename matches a given file type pattern
-func (c *clientImpl) matchesFileType(filename, filetype string) bool {
+func (c *Client) matchesFileType(filename, filetype string) bool {
 	filetype = strings.ToLower(filetype)
 
 	// Handle special Go file types from powernap
@@ -311,7 +311,7 @@ func (c *clientImpl) matchesFileType(filename, filetype string) bool {
 }
 
 // OpenFile opens a file in the LSP server.
-func (c *clientImpl) OpenFile(ctx context.Context, filepath string) error {
+func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	if !c.HandlesFile(filepath) {
 		return nil
 	}
@@ -348,7 +348,7 @@ func (c *clientImpl) OpenFile(ctx context.Context, filepath string) error {
 }
 
 // NotifyChange notifies the server about a file change.
-func (c *clientImpl) NotifyChange(ctx context.Context, filepath string) error {
+func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 	uri := "file://" + filepath
 
 	content, err := os.ReadFile(filepath)
@@ -381,7 +381,7 @@ func (c *clientImpl) NotifyChange(ctx context.Context, filepath string) error {
 }
 
 // CloseFile closes a file in the LSP server.
-func (c *clientImpl) CloseFile(ctx context.Context, filepath string) error {
+func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	cfg := config.Get()
 	uri := "file://" + filepath
 
@@ -407,7 +407,7 @@ func (c *clientImpl) CloseFile(ctx context.Context, filepath string) error {
 }
 
 // IsFileOpen checks if a file is currently open.
-func (c *clientImpl) IsFileOpen(filepath string) bool {
+func (c *Client) IsFileOpen(filepath string) bool {
 	uri := "file://" + filepath
 	c.openFilesMu.RLock()
 	defer c.openFilesMu.RUnlock()
@@ -416,7 +416,7 @@ func (c *clientImpl) IsFileOpen(filepath string) bool {
 }
 
 // CloseAllFiles closes all currently open files.
-func (c *clientImpl) CloseAllFiles(ctx context.Context) {
+func (c *Client) CloseAllFiles(ctx context.Context) {
 	cfg := config.Get()
 	c.openFilesMu.Lock()
 	filesToClose := make([]string, 0, len(c.openFiles))
@@ -443,7 +443,7 @@ func (c *clientImpl) CloseAllFiles(ctx context.Context) {
 }
 
 // GetFileDiagnostics returns diagnostics for a specific file.
-func (c *clientImpl) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
+func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
 	c.diagnosticsMu.RLock()
 	defer c.diagnosticsMu.RUnlock()
 
@@ -451,7 +451,7 @@ func (c *clientImpl) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Dia
 }
 
 // GetDiagnostics returns all diagnostics for all files.
-func (c *clientImpl) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
+func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
 	c.diagnosticsMu.RLock()
 	defer c.diagnosticsMu.RUnlock()
 
@@ -463,7 +463,7 @@ func (c *clientImpl) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagno
 }
 
 // OpenFileOnDemand opens a file only if it's not already open.
-func (c *clientImpl) OpenFileOnDemand(ctx context.Context, filepath string) error {
+func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 	// Check if the file is already open
 	if c.IsFileOpen(filepath) {
 		return nil
@@ -474,7 +474,7 @@ func (c *clientImpl) OpenFileOnDemand(ctx context.Context, filepath string) erro
 }
 
 // GetDiagnosticsForFile ensures a file is open and returns its diagnostics.
-func (c *clientImpl) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]protocol.Diagnostic, error) {
+func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]protocol.Diagnostic, error) {
 	documentURI := protocol.URIFromPath(filepath)
 
 	// Make sure the file is open
@@ -496,14 +496,14 @@ func (c *clientImpl) GetDiagnosticsForFile(ctx context.Context, filepath string)
 }
 
 // ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache.
-func (c *clientImpl) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
+func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
 	c.diagnosticsMu.Lock()
 	defer c.diagnosticsMu.Unlock()
 	delete(c.diagnostics, uri)
 }
 
 // setCapabilities sets the server capabilities.
-func (c *clientImpl) setCapabilities(caps protocol.ServerCapabilities) {
+func (c *Client) setCapabilities(caps protocol.ServerCapabilities) {
 	c.capsMu.Lock()
 	defer c.capsMu.Unlock()
 	c.caps = caps
@@ -511,7 +511,7 @@ func (c *clientImpl) setCapabilities(caps protocol.ServerCapabilities) {
 }
 
 // RegisterNotificationHandler registers a notification handler.
-func (c *clientImpl) RegisterNotificationHandler(method string, handler NotificationHandler) {
+func (c *Client) RegisterNotificationHandler(method string, handler NotificationHandler) {
 	// Convert the handler to the powernap format
 	powernapHandler := func(ctx context.Context, methodName string, params json.RawMessage) {
 		// Convert params to interface{} for the handler
@@ -525,7 +525,7 @@ func (c *clientImpl) RegisterNotificationHandler(method string, handler Notifica
 }
 
 // DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.
-func (c *clientImpl) DidChangeWatchedFiles(ctx context.Context, params protocol.DidChangeWatchedFilesParams) error {
+func (c *Client) DidChangeWatchedFiles(ctx context.Context, params protocol.DidChangeWatchedFilesParams) error {
 	cfg := config.Get()
 	if cfg != nil && cfg.Options.DebugLSP {
 		slog.Debug("Sending file change notification to LSP server",
@@ -561,7 +561,7 @@ func (c *clientImpl) DidChangeWatchedFiles(ctx context.Context, params protocol.
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
-func (c *clientImpl) openKeyConfigFiles(ctx context.Context) {
+func (c *Client) openKeyConfigFiles(ctx context.Context) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return

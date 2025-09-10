@@ -28,11 +28,11 @@ type Header interface {
 type header struct {
 	width       int
 	session     session.Session
-	lspClients  map[string]lsp.Client
+	lspClients  map[string]*lsp.Client
 	detailsOpen bool
 }
 
-func New(lspClients map[string]lsp.Client) Header {
+func New(lspClients map[string]*lsp.Client) Header {
 	return &header{
 		lspClients: lspClients,
 		width:      0,

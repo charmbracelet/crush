@@ -34,7 +34,7 @@ type App struct {
 
 	CoderAgent agent.Service
 
-	LSPClients map[string]lsp.Client
+	LSPClients map[string]*lsp.Client
 
 	clientsMutex sync.RWMutex
 
@@ -70,7 +70,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		LSPClients:  make(map[string]lsp.Client),
+		LSPClients:  make(map[string]*lsp.Client),
 
 		globalCtx: ctx,
 
@@ -344,7 +344,7 @@ func (app *App) Shutdown() {
 
 	// Get all LSP clients.
 	app.clientsMutex.RLock()
-	clients := make(map[string]lsp.Client, len(app.LSPClients))
+	clients := make(map[string]*lsp.Client, len(app.LSPClients))
 	for k, v := range app.LSPClients {
 		clients[k] = v
 	}

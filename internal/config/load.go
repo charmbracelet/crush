@@ -350,24 +350,26 @@ func (c *Config) applyLSPDefaults() {
 	configManager.LoadDefaults()
 
 	// Apply defaults to each LSP configuration
-	for name, lspConfig := range c.LSP {
+	for name, cfg := range c.LSP {
 		// Try to get defaults from powernap based on command name
-		if defaultConfig, ok := configManager.GetServer(lspConfig.Command); ok {
-			if lspConfig.Options == nil && defaultConfig.Settings != nil {
-				lspConfig.Options = defaultConfig.Settings
-			}
-			if len(lspConfig.InitOptions) == 0 && len(defaultConfig.InitOptions) > 0 {
-				lspConfig.InitOptions = defaultConfig.InitOptions
-			}
-			if len(lspConfig.FileTypes) == 0 && len(defaultConfig.FileTypes) > 0 {
-				lspConfig.FileTypes = defaultConfig.FileTypes
-			}
-			if len(lspConfig.RootMarkers) == 0 && len(defaultConfig.RootMarkers) > 0 {
-				lspConfig.RootMarkers = defaultConfig.RootMarkers
-			}
-			// Update the config in the map
-			c.LSP[name] = lspConfig
+		base, ok := configManager.GetServer(cfg.Command)
+		if !ok {
+			continue
 		}
+		if cfg.Options == nil {
+			cfg.Options = base.Settings
+		}
+		if cfg.InitOptions == nil {
+			cfg.InitOptions = base.InitOptions
+		}
+		if len(cfg.FileTypes) == 0 {
+			cfg.FileTypes = base.FileTypes
+		}
+		if len(cfg.RootMarkers) == 0 {
+			cfg.RootMarkers = base.RootMarkers
+		}
+		// Update the config in the map
+		c.LSP[name] = cfg
 	}
 }
 

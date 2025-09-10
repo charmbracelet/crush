@@ -19,7 +19,7 @@ import (
 // Client manages LSP file watching for a specific client
 // It now delegates actual file watching to the GlobalWatcher
 type Client struct {
-	client        lsp.Client
+	client        *lsp.Client
 	name          string
 	workspacePath string
 
@@ -35,7 +35,7 @@ func init() {
 }
 
 // New creates a new workspace watcher for the given client.
-func New(name string, client lsp.Client) *Client {
+func New(name string, client *lsp.Client) *Client {
 	return &Client{
 		name:          name,
 		client:        client,

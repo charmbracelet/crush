@@ -99,52 +99,6 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 	// Initialize server state
 	client.serverState.Store(StateStarting)
 
-	// Register diagnostic handler
-	client.client.RegisterNotificationHandler("textDocument/publishDiagnostics", func(ctx context.Context, method string, params json.RawMessage) {
-		var diagParams protocol.PublishDiagnosticsParams
-		if err := json.Unmarshal(params, &diagParams); err != nil {
-			return
-		}
-
-		// Convert powernap diagnostics to protocol diagnostics
-		protocolDiags := make([]protocol.Diagnostic, len(diagParams.Diagnostics))
-		for i, diag := range diagParams.Diagnostics {
-			protocolDiags[i] = protocol.Diagnostic{
-				Range: protocol.Range{
-					Start: protocol.Position{
-						Line:      uint32(diag.Range.Start.Line),
-						Character: uint32(diag.Range.Start.Character),
-					},
-					End: protocol.Position{
-						Line:      uint32(diag.Range.End.Line),
-						Character: uint32(diag.Range.End.Character),
-					},
-				},
-				Severity: protocol.DiagnosticSeverity(diag.Severity),
-				Code:     diag.Code,
-				Source:   diag.Source,
-				Message:  diag.Message,
-			}
-		}
-
-		// Update diagnostic cache
-		client.diagnosticsMu.Lock()
-		uri := protocol.DocumentURI(diagParams.URI)
-		client.diagnostics[uri] = protocolDiags
-		client.diagnosticsMu.Unlock()
-
-		// Notify callback if set
-		if client.onDiagnosticsChanged != nil {
-			totalDiags := 0
-			client.diagnosticsMu.RLock()
-			for _, diags := range client.diagnostics {
-				totalDiags += len(diags)
-			}
-			client.diagnosticsMu.RUnlock()
-			client.onDiagnosticsChanged(client.name, totalDiags)
-		}
-	})
-
 	return client, nil
 }
 

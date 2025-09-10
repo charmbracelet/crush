@@ -97,24 +97,13 @@
           "type": "array",
           "description": "Files or directories that indicate the project root"
         },
-        "settings": {
-          "description": "LSP server-specific settings passed during initialization"
-        },
         "init_options": {
+          "type": "object",
           "description": "Initialization options passed to the LSP server during initialize request"
         },
-        "enable_snippets": {
-          "type": "boolean",
-          "description": "Enable snippet support for this LSP server",
-          "default": true
-        },
-        "single_file_support": {
-          "type": "boolean",
-          "description": "Whether this LSP server supports single file mode without a project",
-          "default": true
-        },
         "options": {
-          "description": "Deprecated: Use settings instead. LSP server-specific configuration options"
+          "type": "object",
+          "description": "LSP server-specific settings passed during initialization"
         }
       },
       "additionalProperties": false,

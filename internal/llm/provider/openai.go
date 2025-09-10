@@ -374,8 +374,9 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 								newID := uuid.NewString()
 								toolCallIDMap[toolCall.ID] = newID
 								toolCall.ID = newID
+							} else {
+								toolCall.ID = exID
 							}
-							toolCall.ID = exID
 						}
 						newToolCall := false
 						if existingToolCall, ok := msgToolCalls[toolCall.Index]; ok { // tool call exists

@@ -145,8 +145,8 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 // ShouldExcludeFile checks if a file should be excluded from processing
 // based on common patterns and ignore rules
 func ShouldExcludeFile(rootPath, filePath string) bool {
-	dl := NewDirectoryLister(rootPath)
-	return dl.shouldIgnore(filePath, nil)
+	return NewDirectoryLister(rootPath).
+		shouldIgnore(filePath, nil)
 }
 
 // WalkDirectories walks a directory tree and calls the provided function for each directory,

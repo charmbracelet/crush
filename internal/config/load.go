@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -66,9 +67,9 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	)
 
 	// Load known providers, this loads the config from catwalk
-	providers, err := Providers()
-	if err != nil || len(providers) == 0 {
-		return nil, fmt.Errorf("failed to load providers: %w", err)
+	providers, err := Providers(cfg)
+	if err != nil {
+		return nil, err
 	}
 	cfg.knownProviders = providers
 
@@ -76,7 +77,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
-	if err := cfg.configureProviders(env, valueResolver, providers); err != nil {
+	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
@@ -85,7 +86,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		return cfg, nil
 	}
 
-	if err := cfg.configureSelectedModels(providers); err != nil {
+	if err := cfg.configureSelectedModels(cfg.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
 	cfg.SetupAgents()
@@ -340,6 +341,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
+		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
+	}
 }
 
 var defaultLSPFileTypes = map[string][]string{

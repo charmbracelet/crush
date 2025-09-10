@@ -28,6 +28,13 @@ type Client struct {
 	registrations *csync.Slice[protocol.FileSystemWatcher]
 }
 
+func init() {
+	// Ensure the watcher is initialized with a reasonable file limit
+	if _, err := Ulimit(); err != nil {
+		slog.Error("Error setting file limit", "error", err)
+	}
+}
+
 // New creates a new workspace watcher for the given client.
 func New(name string, client *lsp.Client) *Client {
 	return &Client{

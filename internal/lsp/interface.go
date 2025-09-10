@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"encoding/json"
+
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -34,7 +36,7 @@ type OpenFileInfo struct {
 }
 
 // NotificationHandler is a function that handles LSP notifications
-type NotificationHandler func(method string, params any) error
+type NotificationHandler func(method string, params json.RawMessage) error
 
 // FileWatchHandler is a function that handles file watch registrations from the server
 type FileWatchHandler func(id string, watchers []protocol.FileSystemWatcher)

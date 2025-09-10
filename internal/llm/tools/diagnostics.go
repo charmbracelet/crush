@@ -110,22 +110,11 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	for _, client := range lsps {
 		originalDiags := client.GetDiagnostics()
 
-		handler := func(method string, params any) error {
+		handler := func(_ string, params json.RawMessage) error {
 			// Convert params back to json.RawMessage for compatibility
-			var rawParams json.RawMessage
-			if raw, ok := params.(json.RawMessage); ok {
-				rawParams = raw
-			} else {
-				var err error
-				rawParams, err = json.Marshal(params)
-				if err != nil {
-					return err
-				}
-			}
-
-			lsp.HandleDiagnostics(client, rawParams)
+			lsp.HandleDiagnostics(client, params)
 			var diagParams protocol.PublishDiagnosticsParams
-			if err := json.Unmarshal(rawParams, &diagParams); err != nil {
+			if err := json.Unmarshal(params, &diagParams); err != nil {
 				return err
 			}
 

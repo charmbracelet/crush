@@ -513,15 +513,12 @@ func (c *Client) setCapabilities(caps protocol.ServerCapabilities) {
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler NotificationHandler) {
 	// Convert the handler to the powernap format
-	powernapHandler := func(ctx context.Context, methodName string, params json.RawMessage) {
-		// Convert params to interface{} for the handler
-		var paramsInterface any
-		if err := json.Unmarshal(params, &paramsInterface); err != nil {
-			paramsInterface = params
+	protoHandler := func(ctx context.Context, method string, params json.RawMessage) {
+		if err := handler(method, params); err != nil {
+			slog.Error("LSP: notification handler failed", "method", method, "error", err)
 		}
-		handler(methodName, paramsInterface)
 	}
-	c.client.RegisterNotificationHandler(method, powernapHandler)
+	c.client.RegisterNotificationHandler(method, protoHandler)
 }
 
 // DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.

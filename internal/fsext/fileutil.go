@@ -11,8 +11,6 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/home"
-
-	ignore "github.com/sabhiram/go-gitignore"
 )
 
 type FileInfo struct {
@@ -58,60 +56,22 @@ func SkipHidden(path string) bool {
 }
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
+// It uses hierarchical ignore checking like git does, checking .gitignore/.crushignore
+// files in each directory from the root to the target path.
 type FastGlobWalker struct {
-	gitignore   *ignore.GitIgnore
-	crushignore *ignore.GitIgnore
-	rootPath    string
+	directoryLister *directoryLister
 }
 
 func NewFastGlobWalker(searchPath string) *FastGlobWalker {
-	walker := &FastGlobWalker{
-		rootPath: searchPath,
+	return &FastGlobWalker{
+		directoryLister: NewDirectoryLister(searchPath),
 	}
-
-	// Load gitignore if it exists
-	gitignorePath := filepath.Join(searchPath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); err == nil {
-		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
-			walker.gitignore = gi
-		}
-	}
-
-	// Load crushignore if it exists
-	crushignorePath := filepath.Join(searchPath, ".crushignore")
-	if _, err := os.Stat(crushignorePath); err == nil {
-		if ci, err := ignore.CompileIgnoreFile(crushignorePath); err == nil {
-			walker.crushignore = ci
-		}
-	}
-
-	return walker
 }
 
-// ShouldSkip checks if a path should be skipped based on gitignore, crushignore, and hidden file rules
+// ShouldSkip checks if a path should be skipped based on hierarchical gitignore,
+// crushignore, and hidden file rules
 func (w *FastGlobWalker) ShouldSkip(path string) bool {
-	if SkipHidden(path) {
-		return true
-	}
-
-	relPath, err := filepath.Rel(w.rootPath, path)
-	if err != nil {
-		return false
-	}
-
-	if w.gitignore != nil {
-		if w.gitignore.MatchesPath(relPath) {
-			return true
-		}
-	}
-
-	if w.crushignore != nil {
-		if w.crushignore.MatchesPath(relPath) {
-			return true
-		}
-	}
-
-	return false
+	return w.directoryLister.shouldIgnore(path, nil)
 }
 
 func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
@@ -180,6 +140,43 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		results[i] = m.Path
 	}
 	return results, truncated, nil
+}
+
+// ShouldExcludeFile checks if a file should be excluded from processing
+// based on common patterns and ignore rules
+func ShouldExcludeFile(rootPath, filePath string) bool {
+	return NewDirectoryLister(rootPath).
+		shouldIgnore(filePath, nil)
+}
+
+// WalkDirectories walks a directory tree and calls the provided function for each directory,
+// respecting hierarchical .gitignore/.crushignore files like git does.
+func WalkDirectories(rootPath string, fn func(path string, d os.DirEntry, err error) error) error {
+	dl := NewDirectoryLister(rootPath)
+
+	conf := fastwalk.Config{
+		Follow:  true,
+		ToSlash: fastwalk.DefaultToSlash(),
+		Sort:    fastwalk.SortDirsFirst,
+	}
+
+	return fastwalk.Walk(&conf, rootPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return fn(path, d, err)
+		}
+
+		// Only process directories
+		if !d.IsDir() {
+			return nil
+		}
+
+		// Check if directory should be ignored
+		if dl.shouldIgnore(path, nil) {
+			return filepath.SkipDir
+		}
+
+		return fn(path, d, err)
+	})
 }
 
 func PrettyPath(path string) string {

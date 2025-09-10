@@ -16,7 +16,7 @@ func BenchmarkShellQuickCommands(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, _, err := shell.Exec(context.Background(), "echo test")
+		_, _, err := shell.Exec(b.Context(), "echo test")
 		exitCode := ExitCode(err)
 		if err != nil || exitCode != 0 {
 			b.Fatalf("Command failed: %v, exit code: %d", err, exitCode)
@@ -100,7 +100,7 @@ func TestRunContinuity(t *testing.T) {
 
 func TestCrossPlatformExecution(t *testing.T) {
 	shell := NewShell(&Options{WorkingDir: "."})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	// Test a simple command that should work on all platforms

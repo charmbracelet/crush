@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -451,6 +452,19 @@ func TestConfig_IsConfigured(t *testing.T) {
 
 		require.False(t, cfg.IsConfigured())
 	})
+}
+
+func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+	}
+
+	cfg.SetupAgents()
+	coderAgent := cfg.Agents["coder"]
+	require.NotNil(t, coderAgent)
+	assert.Equal(t, []string{}, coderAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

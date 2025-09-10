@@ -143,6 +143,7 @@ type Options struct {
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
 	DataDirectory        string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisabledTools        []string    `json:"disabled_tools" jsonschema:"description=Tools to disable,default=false`
 }
 
 type MCPs map[string]MCPConfig
@@ -415,7 +416,62 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	return nil
 }
 
+func (c *Config) AllTools() []string {
+	return []string{}
+}
+
+func allToolNames() []string {
+	return []string{
+		"bash",
+		"download",
+		"edit",
+		"multiedit",
+		"fetch",
+		"glob",
+		"grep",
+		"ls",
+		"sourcegraph",
+		"view",
+		"write",
+	}
+}
+
+func resolveAllowedTools(allTools []string, disabledTools []string) []string {
+	if disabledTools == nil {
+		return allTools
+	}
+	var allowedTools []string
+	for _, tool := range allTools {
+		if !slices.Contains(disabledTools, tool) {
+			allowedTools = append(allowedTools, tool)
+		}
+	}
+	return allowedTools
+}
+
+func resolveReadOnlyTools(tools []string, allowedTools []string) []string {
+	var filteredTools []string
+	for _, tool := range tools {
+		if slices.Contains(allowedTools, tool) {
+			filteredTools = append(filteredTools, tool)
+		}
+	}
+	return filteredTools
+}
+
+func filterSlice(data []string, mask []string, include bool) []string {
+	filtered := []string{}
+	for _, s := range data {
+		if !slices.Contains(mask, s) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
+}
+
 func (c *Config) SetupAgents() {
+	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+
 	agents := map[string]Agent{
 		"coder": {
 			ID:           "coder",
@@ -424,6 +480,7 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			// All tools allowed
+			AllowedTools: allowedTools,
 		},
 		"task": {
 			ID:           "task",

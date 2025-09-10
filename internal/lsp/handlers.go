@@ -101,7 +101,6 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 	case protocol.Log:
 		slog.Debug("LSP Server", "message", msg.Message)
 	}
-	return
 }
 
 // HandleDiagnostics handles diagnostic notifications from the LSP server

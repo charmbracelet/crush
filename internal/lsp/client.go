@@ -59,7 +59,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	rootURI := "file://" + workDir
+	rootURI := string(protocol.URIFromPath(workDir))
 
 	// Create powernap client config
 	clientConfig := powernap.ClientConfig{
@@ -325,7 +325,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 		return nil
 	}
 
-	uri := "file://" + filepath
+	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()
 	if _, exists := c.openFiles[uri]; exists {
@@ -358,7 +358,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 
 // NotifyChange notifies the server about a file change.
 func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
-	uri := "file://" + filepath
+	uri := string(protocol.URIFromPath(filepath))
 
 	content, err := os.ReadFile(filepath)
 	if err != nil {
@@ -392,7 +392,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 // CloseFile closes a file in the LSP server.
 func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	cfg := config.Get()
-	uri := "file://" + filepath
+	uri := string(protocol.URIFromPath(filepath))
 
 	c.openFilesMu.Lock()
 	if _, exists := c.openFiles[uri]; !exists {
@@ -417,7 +417,7 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 
 // IsFileOpen checks if a file is currently open.
 func (c *Client) IsFileOpen(filepath string) bool {
-	uri := "file://" + filepath
+	uri := string(protocol.URIFromPath(filepath))
 	c.openFilesMu.RLock()
 	defer c.openFilesMu.RUnlock()
 	_, exists := c.openFiles[uri]
@@ -428,15 +428,19 @@ func (c *Client) IsFileOpen(filepath string) bool {
 func (c *Client) CloseAllFiles(ctx context.Context) {
 	cfg := config.Get()
 	c.openFilesMu.Lock()
+	defer c.openFilesMu.Unlock()
 	filesToClose := make([]string, 0, len(c.openFiles))
 
 	// First collect all URIs that need to be closed
 	for uri := range c.openFiles {
-		// Convert URI back to file path
-		filePath := strings.TrimPrefix(uri, "file://")
+		// Convert URI back to file path using proper URI handling
+		filePath, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Error("Failed to convert URI to path for file closing", "uri", uri, "error", err)
+			continue
+		}
 		filesToClose = append(filesToClose, filePath)
 	}
-	c.openFilesMu.Unlock()
 
 	// Then close them all
 	for _, filePath := range filesToClose {
@@ -455,7 +459,6 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
 	c.diagnosticsMu.RLock()
 	defer c.diagnosticsMu.RUnlock()
-
 	return c.diagnostics[uri]
 }
 

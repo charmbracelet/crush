@@ -306,35 +306,17 @@ func (c *Client) HandlesFile(path string) bool {
 
 	name := strings.ToLower(filepath.Base(path))
 	for _, filetype := range c.fileTypes {
-		if c.matchesFileType(name, filetype) {
+		suffix := strings.ToLower(filetype)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) {
 			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetype)
 			return true
 		}
 	}
 	slog.Debug("doesn't handle file", "name", c.name, "file", name)
 	return false
-}
-
-// matchesFileType checks if a filename matches a given file type pattern
-func (c *Client) matchesFileType(filename, filetype string) bool {
-	filetype = strings.ToLower(filetype)
-
-	// Handle special Go file types from powernap
-	switch filetype {
-	case "gomod":
-		return filename == "go.mod"
-	case "gowork":
-		return filename == "go.work"
-	case "gosum":
-		return filename == "go.sum"
-	default:
-		// Handle regular extensions
-		suffix := filetype
-		if !strings.HasPrefix(suffix, ".") {
-			suffix = "." + suffix
-		}
-		return strings.HasSuffix(filename, suffix)
-	}
 }
 
 // OpenFile opens a file in the LSP server.

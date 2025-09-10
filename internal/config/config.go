@@ -460,7 +460,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
 		}
-		testURL = baseURL + "/models"
+		if c.ID == "openrouter" {
+			testURL = baseURL + "/credits"
+		} else {
+			testURL = baseURL + "/models"
+		}
 		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -253,11 +254,15 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 }
 
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
-func CloseMCPClients() {
+func CloseMCPClients() error {
+	var errs []error
 	for c := range mcpClients.Seq() {
-		_ = c.Close()
+		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	mcpBroker.Shutdown()
+	return errors.Join(errs...)
 }
 
 var mcpInitRequest = mcp.InitializeRequest{

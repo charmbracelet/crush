@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -92,7 +91,7 @@ func TestCommandBlocking(t *testing.T) {
 				BlockFuncs: tt.blockFuncs,
 			})
 
-			_, _, err := shell.Exec(context.Background(), tt.command)
+			_, _, err := shell.Exec(t.Context(), tt.command)
 
 			if tt.shouldBlock {
 				if err == nil {

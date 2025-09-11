@@ -472,7 +472,6 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with executing coding tasks.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			// All tools allowed
 			AllowedTools: allowedTools,
 		},
 		"task": {

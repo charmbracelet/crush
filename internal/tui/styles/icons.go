@@ -10,6 +10,8 @@ const (
 	LoadingIcon  string = "⟳"
 	DocumentIcon string = "🖼"
 	ModelIcon    string = "◇"
+	ContextIcon  string = "🧠"
+	CostIcon     string = "💰"
 
 	// Tool call icons
 	ToolPending string = "●"

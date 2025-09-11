@@ -467,6 +467,22 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
 }
 
+func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{
+				"edit",
+				"download",
+			},
+		},
+	}
+
+	cfg.SetupAgents()
+	coderAgent := cfg.Agents["coder"]
+	require.NotNil(t, coderAgent)
+	assert.Equal(t, []string{"bash", "multiedit", "fetch", "glob", "grep", "ls", "sourcegraph", "view", "write"}, coderAgent.AllowedTools)
+}
+
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

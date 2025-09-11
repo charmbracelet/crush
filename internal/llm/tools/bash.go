@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -30,6 +31,7 @@ type BashResponseMetadata struct {
 type bashTool struct {
 	permissions permission.Service
 	workingDir  string
+	attribution *config.Attribution
 }
 
 const (
@@ -114,8 +116,53 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription() string {
+func (b *bashTool) bashDescription() string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+
+	// Build attribution text based on settings
+	var attributionStep, attributionExample, prAttribution string
+
+	// Default to true if attribution is nil (backward compatibility)
+	generatedWith := b.attribution == nil || b.attribution.GeneratedWith
+	coAuthoredBy := b.attribution == nil || b.attribution.CoAuthoredBy
+
+	// Build PR attribution
+	if generatedWith {
+		prAttribution = "💘 Generated with Crush"
+	}
+
+	if generatedWith || coAuthoredBy {
+		attributionParts := []string{}
+		if generatedWith {
+			attributionParts = append(attributionParts, "💘 Generated with Crush")
+		}
+		if coAuthoredBy {
+			attributionParts = append(attributionParts, "Co-Authored-By: Crush <crush@charm.land>")
+		}
+
+		if len(attributionParts) > 0 {
+			attributionStep = fmt.Sprintf("4. Create the commit with a message ending with:\n%s", strings.Join(attributionParts, "\n"))
+
+			attributionText := strings.Join(attributionParts, "\n ")
+			attributionExample = fmt.Sprintf(`<example>
+git commit -m "$(cat <<'EOF'
+ Commit message here.
+
+ %s
+ EOF
+)"</example>`, attributionText)
+		}
+	}
+
+	if attributionStep == "" {
+		attributionStep = "4. Create the commit with your commit message."
+		attributionExample = `<example>
+git commit -m "$(cat <<'EOF'
+ Commit message here.
+ EOF
+)"</example>`
+	}
+
 	return fmt.Sprintf(`Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
 CROSS-PLATFORM SHELL SUPPORT:
@@ -190,20 +237,10 @@ When the user asks you to create a new git commit, follow these steps carefully:
 - Review the draft message to ensure it accurately reflects the changes and their purpose
 </commit_analysis>
 
-4. Create the commit with a message ending with:
-💘 Generated with Crush
-Co-Authored-By: Crush <crush@charm.land>
+%s
 
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
-<example>
-git commit -m "$(cat <<'EOF'
- Commit message here.
-
- 💘 Generated with Crush
- Co-Authored-By: 💘 Crush <crush@charm.land>
- EOF
- )"
-</example>
+%s
 
 5. If the commit fails due to pre-commit hook changes, retry the commit ONCE to include these automated changes. If it fails again, it usually means a pre-commit hook is preventing the commit. If the commit succeeds but you notice that files were modified by the pre-commit hook, you MUST amend your commit to include them.
 
@@ -262,14 +299,14 @@ gh pr create --title "the pr title" --body "$(cat <<'EOF'
 ## Test plan
 [Checklist of TODOs for testing the pull request...]
 
-💘 Generated with Crush
+%s
 EOF
 )"
 </example>
 
 Important:
 - Return an empty response - the user will see the gh output directly
-- Never update git config`, bannedCommandsStr, MaxOutputLength)
+- Never update git config`, bannedCommandsStr, MaxOutputLength, attributionStep, attributionExample, prAttribution)
 }
 
 func blockFuncs() []shell.BlockFunc {
@@ -304,7 +341,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permission permission.Service, workingDir string) BaseTool {
+func NewBashTool(permission permission.Service, workingDir string, attribution *config.Attribution) BaseTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
 	persistentShell.SetBlockFuncs(blockFuncs())
@@ -312,6 +349,7 @@ func NewBashTool(permission permission.Service, workingDir string) BaseTool {
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
+		attribution: attribution,
 	}
 }
 
@@ -322,7 +360,7 @@ func (b *bashTool) Name() string {
 func (b *bashTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        BashToolName,
-		Description: bashDescription(),
+		Description: b.bashDescription(),
 		Parameters: map[string]any{
 			"command": map[string]any{
 				"type":        "string",

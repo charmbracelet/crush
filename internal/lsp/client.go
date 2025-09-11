@@ -277,8 +277,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(DetectLanguageID(uri)), 1, string(content))
-	if err != nil {
+	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(DetectLanguageID(uri)), 1, string(content)); err != nil {
 		return err
 	}
 
@@ -306,7 +305,6 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 
 	// Increment version
 	fileInfo.Version++
-	version := int(fileInfo.Version)
 
 	// Create change event
 	changes := []protocol.TextDocumentContentChangeEvent{
@@ -317,7 +315,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, version, changes)
+	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
 }
 
 // CloseFile closes a file in the LSP server.
@@ -368,12 +366,12 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// Then close them all
 	for _, filePath := range filesToClose {
 		err := c.CloseFile(ctx, filePath)
-		if err != nil && cfg != nil && cfg.Options.DebugLSP {
+		if err != nil && cfg.Options.DebugLSP {
 			slog.Warn("Error closing file", "file", filePath, "error", err)
 		}
 	}
 
-	if cfg != nil && cfg.Options.DebugLSP {
+	if cfg.Options.DebugLSP {
 		slog.Debug("Closed all files", "files", filesToClose)
 	}
 }
@@ -437,38 +435,7 @@ func (c *Client) RegisterServerRequestHandler(method string, handler transport.H
 
 // DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.
 func (c *Client) DidChangeWatchedFiles(ctx context.Context, params protocol.DidChangeWatchedFilesParams) error {
-	cfg := config.Get()
-	if cfg != nil && cfg.Options.DebugLSP {
-		slog.Debug("Sending file change notification to LSP server",
-			"client", c.name,
-			"changes", len(params.Changes))
-
-		for _, change := range params.Changes {
-			slog.Debug("File change notification details",
-				"uri", change.URI,
-				"type", change.Type,
-				"client", c.name)
-		}
-	}
-
-	// Convert protocol.FileEvent to powernap.FileEvent
-	changes := make([]protocol.FileEvent, len(params.Changes))
-	for i, change := range params.Changes {
-		changes[i] = protocol.FileEvent{
-			URI:  change.URI,
-			Type: change.Type,
-		}
-	}
-
-	// Use the new PowerNap method to send the notification
-	err := c.client.NotifyDidChangeWatchedFiles(ctx, changes)
-	if err != nil && cfg != nil && cfg.Options.DebugLSP {
-		slog.Error("Failed to send file change notification",
-			"client", c.name,
-			"error", err)
-	}
-
-	return err
+	return c.client.NotifyDidChangeWatchedFiles(ctx, params.Changes)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
@@ -498,7 +465,6 @@ func HasRootMarkers(dir string, rootMarkers []string) bool {
 	if len(rootMarkers) == 0 {
 		return true
 	}
-
 	for _, pattern := range rootMarkers {
 		// Use fsext.GlobWithDoubleStar to find matches
 		matches, _, err := fsext.GlobWithDoubleStar(pattern, dir, 1)

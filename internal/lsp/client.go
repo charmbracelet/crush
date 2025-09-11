@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,11 +41,6 @@ type Client struct {
 
 	// Server state
 	serverState atomic.Value
-
-	// Server capabilities as returned by initialize
-	caps    protocol.ServerCapabilities
-	capsMu  sync.RWMutex
-	capsSet atomic.Bool
 }
 
 // New creates a new LSP client using the powernap implementation.
@@ -121,8 +115,6 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 			return nil
 		}(),
 	}
-
-	c.setCapabilities(protocolCaps)
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocolCaps,
@@ -432,14 +424,6 @@ func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]
 // ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache.
 func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
 	c.diagnostics.Del(uri)
-}
-
-// setCapabilities sets the server capabilities.
-func (c *Client) setCapabilities(caps protocol.ServerCapabilities) {
-	c.capsMu.Lock()
-	defer c.capsMu.Unlock()
-	c.caps = caps
-	c.capsSet.Store(true)
 }
 
 // RegisterNotificationHandler registers a notification handler.

@@ -444,9 +444,10 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 	return filterSlice(allTools, disabledTools, false)
 }
 
-func resolveReadOnlyTools(tools []string, allowedTools []string) []string {
+func resolveReadOnlyTools(tools []string) []string {
+	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
-	return filterSlice(tools, allowedTools, true)
+	return filterSlice(tools, readOnlyTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -480,7 +481,7 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools([]string{"glob", "grep", "ls", "sourcegraph", "view"}, allowedTools),
+			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 			AllowedLSP: []string{},

@@ -464,7 +464,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent := cfg.Agents["coder"]
 	require.NotNil(t, coderAgent)
-	assert.Equal(t, []string{}, coderAgent.AllowedTools)
+	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

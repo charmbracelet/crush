@@ -47,7 +47,7 @@ func TestPowernapClient(t *testing.T) {
 	}
 
 	// Clean up - expect this to fail with echo command
-	if err := client.Close(); err != nil {
+	if err := client.Close(t.Context()); err != nil {
 		// Expected to fail with echo command
 		t.Logf("Close failed as expected with dummy command: %v", err)
 	}

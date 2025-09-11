@@ -232,9 +232,8 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 // OpenFileInfo contains information about an open file
 type OpenFileInfo struct {
-	URI     protocol.DocumentURI
 	Version int32
-	Content string
+	URI     protocol.DocumentURI
 }
 
 // HandlesFile checks if this LSP client handles the given file based on its extension.

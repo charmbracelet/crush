@@ -440,29 +440,21 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 	if disabledTools == nil {
 		return allTools
 	}
-	var allowedTools []string
-	for _, tool := range allTools {
-		if !slices.Contains(disabledTools, tool) {
-			allowedTools = append(allowedTools, tool)
-		}
-	}
-	return allowedTools
+	// filter out disabled tools (exclude mode)
+	return filterSlice(allTools, disabledTools, false)
 }
 
 func resolveReadOnlyTools(tools []string, allowedTools []string) []string {
-	var filteredTools []string
-	for _, tool := range tools {
-		if slices.Contains(allowedTools, tool) {
-			filteredTools = append(filteredTools, tool)
-		}
-	}
-	return filteredTools
+	// filter to only include tools that are in allowedtools (include mode)
+	return filterSlice(tools, allowedTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
 	filtered := []string{}
 	for _, s := range data {
-		if !slices.Contains(mask, s) {
+		// if include is true, we include items that ARE in the mask
+		// if include is false, we include items that are NOT in the mask
+		if include == slices.Contains(mask, s) {
 			filtered = append(filtered, s)
 		}
 	}
@@ -488,13 +480,7 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: []string{
-				"glob",
-				"grep",
-				"ls",
-				"sourcegraph",
-				"view",
-			},
+			AllowedTools: resolveReadOnlyTools([]string{"glob", "grep", "ls", "sourcegraph", "view"}, allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 			AllowedLSP: []string{},

@@ -143,7 +143,7 @@ type Options struct {
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
 	DataDirectory        string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
-	DisabledTools        []string    `json:"disabled_tools" jsonschema:"description=Tools to disable,default=false"`
+	DisabledTools        []string    `json:"disabled_tools" jsonschema:"description=Tools to disable"`
 }
 
 type MCPs map[string]MCPConfig

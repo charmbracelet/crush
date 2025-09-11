@@ -57,7 +57,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	if err != nil {
 		slog.Error("Initialize failed", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, lspClient, 0)
-		lspClient.Close()
+		lspClient.Close(ctx)
 		return
 	}
 

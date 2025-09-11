@@ -8,13 +8,13 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -35,12 +35,10 @@ type Client struct {
 	onDiagnosticsChanged func(name string, count int)
 
 	// Diagnostic cache
-	diagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
-	diagnosticsMu sync.RWMutex
+	diagnostics *csync.Map[protocol.DocumentURI, []protocol.Diagnostic]
 
 	// Files are currently opened by the LSP
-	openFiles   map[string]*OpenFileInfo
-	openFilesMu sync.RWMutex
+	openFiles *csync.Map[string, *OpenFileInfo]
 
 	// Server state
 	serverState atomic.Value
@@ -91,8 +89,8 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 		client:      powernapClient,
 		name:        name,
 		fileTypes:   config.FileTypes,
-		diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic),
-		openFiles:   make(map[string]*OpenFileInfo),
+		diagnostics: csync.NewMap[protocol.DocumentURI, []protocol.Diagnostic](),
+		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      config,
 	}
 
@@ -122,9 +120,6 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 			}
 			return nil
 		}(),
-		// Note: These need proper type conversion from interface{}
-		// HoverProvider:      caps.HoverProvider,
-		// DefinitionProvider: caps.DefinitionProvider,
 	}
 
 	c.setCapabilities(protocolCaps)
@@ -280,12 +275,9 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 
 	uri := string(protocol.URIFromPath(filepath))
 
-	c.openFilesMu.Lock()
-	if _, exists := c.openFiles[uri]; exists {
-		c.openFilesMu.Unlock()
+	if _, exists := c.openFiles.Get(uri); exists {
 		return nil // Already open
 	}
-	c.openFilesMu.Unlock()
 
 	// Skip files that do not exist or cannot be read
 	content, err := os.ReadFile(filepath)
@@ -299,12 +291,10 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 		return err
 	}
 
-	c.openFilesMu.Lock()
-	c.openFiles[uri] = &OpenFileInfo{
+	c.openFiles.Set(uri, &OpenFileInfo{
 		Version: 1,
 		URI:     protocol.DocumentURI(uri),
-	}
-	c.openFilesMu.Unlock()
+	})
 
 	return nil
 }
@@ -318,17 +308,14 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		return fmt.Errorf("error reading file: %w", err)
 	}
 
-	c.openFilesMu.Lock()
-	fileInfo, isOpen := c.openFiles[uri]
+	fileInfo, isOpen := c.openFiles.Get(uri)
 	if !isOpen {
-		c.openFilesMu.Unlock()
 		return fmt.Errorf("cannot notify change for unopened file: %s", filepath)
 	}
 
 	// Increment version
 	fileInfo.Version++
 	version := int(fileInfo.Version)
-	c.openFilesMu.Unlock()
 
 	// Create change event
 	changes := []protocol.TextDocumentContentChangeEvent{
@@ -347,23 +334,18 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	cfg := config.Get()
 	uri := string(protocol.URIFromPath(filepath))
 
-	c.openFilesMu.Lock()
-	if _, exists := c.openFiles[uri]; !exists {
-		c.openFilesMu.Unlock()
+	if _, exists := c.openFiles.Get(uri); !exists {
 		return nil // Already closed
 	}
-	c.openFilesMu.Unlock()
 
 	if cfg != nil && cfg.Options.DebugLSP {
 		slog.Debug("Closing file", "file", filepath)
 	}
 
-	// Note: powernap doesn't have a direct NotifyDidCloseTextDocument method
+	// TODO: powernap doesn't have a direct NotifyDidCloseTextDocument method
 	// We'll need to implement this or handle it differently
 
-	c.openFilesMu.Lock()
-	delete(c.openFiles, uri)
-	c.openFilesMu.Unlock()
+	c.openFiles.Del(uri)
 
 	return nil
 }
@@ -371,21 +353,17 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 // IsFileOpen checks if a file is currently open.
 func (c *Client) IsFileOpen(filepath string) bool {
 	uri := string(protocol.URIFromPath(filepath))
-	c.openFilesMu.RLock()
-	defer c.openFilesMu.RUnlock()
-	_, exists := c.openFiles[uri]
+	_, exists := c.openFiles.Get(uri)
 	return exists
 }
 
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
 	cfg := config.Get()
-	c.openFilesMu.Lock()
-	defer c.openFilesMu.Unlock()
-	filesToClose := make([]string, 0, len(c.openFiles))
+	filesToClose := make([]string, 0, c.openFiles.Len())
 
 	// First collect all URIs that need to be closed
-	for uri := range c.openFiles {
+	for uri := range c.openFiles.Seq2() {
 		// Convert URI back to file path using proper URI handling
 		filePath, err := protocol.DocumentURI(uri).Path()
 		if err != nil {
@@ -410,21 +388,13 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 
 // GetFileDiagnostics returns diagnostics for a specific file.
 func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
-	c.diagnosticsMu.RLock()
-	defer c.diagnosticsMu.RUnlock()
-	return c.diagnostics[uri]
+	diags, _ := c.diagnostics.Get(uri)
+	return diags
 }
 
 // GetDiagnostics returns all diagnostics for all files.
 func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
-	c.diagnosticsMu.RLock()
-	defer c.diagnosticsMu.RUnlock()
-
-	result := make(map[protocol.DocumentURI][]protocol.Diagnostic)
-	for uri, diags := range c.diagnostics {
-		result[uri] = slices.Clone(diags)
-	}
-	return result
+	return maps.Collect(c.diagnostics.Seq2())
 }
 
 // OpenFileOnDemand opens a file only if it's not already open.
@@ -453,18 +423,14 @@ func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]
 	}
 
 	// Get diagnostics
-	c.diagnosticsMu.RLock()
-	diagnostics := c.diagnostics[documentURI]
-	c.diagnosticsMu.RUnlock()
+	diagnostics, _ := c.diagnostics.Get(documentURI)
 
 	return diagnostics, nil
 }
 
 // ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache.
 func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
-	c.diagnosticsMu.Lock()
-	defer c.diagnosticsMu.Unlock()
-	delete(c.diagnostics, uri)
+	c.diagnostics.Del(uri)
 }
 
 // setCapabilities sets the server capabilities.

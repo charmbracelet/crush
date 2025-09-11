@@ -264,13 +264,7 @@ func (f *filterableGroupList[T]) filterItemsInGroup(group Group[T], query string
 		return matchedItems
 	}
 
-	// No matches, return all items without highlights
-	var allItems []T
-	for _, item := range group.Items {
-		f.setMatchIndexes(item, make([]int, 0))
-		allItems = append(allItems, item)
-	}
-	return allItems
+	return []T{}
 }
 
 func (f *filterableGroupList[T]) searchAllGroups(query string) []Group[T] {
@@ -317,6 +311,21 @@ func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 					Section: matchedGroup.group.Section,
 					Items:   matchedItems,
 				})
+			}
+		}
+
+		// add any matching items from other groups
+		allGroups := f.searchAllGroups(lowerQuery)
+		for _, g := range allGroups {
+			exists := false
+			for _, existing := range newGroups {
+				if existing.Section.ID() == g.Section.ID() {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				newGroups = append(newGroups, g)
 			}
 		}
 	} else {

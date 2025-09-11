@@ -3,6 +3,22 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "Attribution": {
+      "properties": {
+        "co_authored_by": {
+          "type": "boolean",
+          "description": "Add Co-Authored-By trailer to commit messages",
+          "default": true
+        },
+        "generated_with": {
+          "type": "boolean",
+          "description": "Add Generated with Crush line to commit messages and issues and PRs",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Config": {
       "properties": {
         "$schema": {
@@ -283,6 +299,10 @@
           "type": "boolean",
           "description": "Disable providers auto-update",
           "default": false
+        },
+        "attribution": {
+          "$ref": "#/$defs/Attribution",
+          "description": "Attribution settings for generated content"
         }
       },
       "additionalProperties": false,

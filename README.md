@@ -165,6 +165,39 @@ Configuration itself is stored as a JSON object:
 
 As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
 
+### Attribution Settings
+
+By default, Crush adds attribution information to git commits and pull requests it creates. You can customize this behavior with the `attribution` option:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "attribution": {
+      "co_authored_by": true,
+      "generated_with": true
+    }
+  }
+}
+```
+
+- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
+- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
+
+To disable all attribution, set both options to false:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "attribution": {
+      "co_authored_by": false,
+      "generated_with": false
+    }
+  }
+}
+```
+
 ```bash
 # Unix
 $HOME/.local/share/crush/crush.json

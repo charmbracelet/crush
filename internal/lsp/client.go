@@ -361,12 +361,12 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	// Then close them all
 	for _, filePath := range filesToClose {
 		err := c.CloseFile(ctx, filePath)
-		if err != nil && cfg.Options.DebugLSP {
+		if err != nil && cfg != nil && cfg.Options.DebugLSP {
 			slog.Warn("Error closing file", "file", filePath, "error", err)
 		}
 	}
 
-	if cfg.Options.DebugLSP {
+	if cfg != nil && cfg.Options.DebugLSP {
 		slog.Debug("Closed all files", "files", filesToClose)
 	}
 }

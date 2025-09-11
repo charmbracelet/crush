@@ -44,11 +44,8 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	gotest.tools v2.2.0+incompatible
 	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
 )
-
-require github.com/pkg/errors v0.9.1 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

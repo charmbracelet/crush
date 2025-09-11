@@ -1,8 +1,6 @@
 package tools
 
 import (
-	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -59,6 +57,7 @@ func TestGlobToRegexCaching(t *testing.T) {
 }
 
 func TestGrepWithIgnoreFiles(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	// Create test files
@@ -84,32 +83,42 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	crushignoreContent := "node_modules/\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644))
 
-	// Create grep tool
-	grepTool := NewGrepTool(tempDir)
+	// Test both implementations
+	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+		"regex": searchFilesWithRegex,
+		"rg": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(t.Context(), pattern, path, include)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// Create grep parameters
-	params := GrepParams{
-		Pattern: "hello world",
-		Path:    tempDir,
+			if name == "rg" && getRg() == "" {
+				t.Skip("rg is not in $PATH")
+			}
+
+			matches, err := fn("hello world", tempDir, "")
+			require.NoError(t, err)
+
+			// Convert matches to a set of file paths for easier testing
+			foundFiles := make(map[string]bool)
+			for _, match := range matches {
+				foundFiles[filepath.Base(match.path)] = true
+			}
+
+			// Should find file1.txt and file2.txt
+			require.True(t, foundFiles["file1.txt"], "Should find file1.txt")
+			require.True(t, foundFiles["file2.txt"], "Should find file2.txt")
+
+			// Should NOT find ignored files
+			require.False(t, foundFiles["file3.txt"], "Should not find file3.txt (ignored by .gitignore)")
+			require.False(t, foundFiles["lib.js"], "Should not find lib.js (ignored by .crushignore)")
+			require.False(t, foundFiles["secret.key"], "Should not find secret.key (ignored by .gitignore)")
+
+			// Should find exactly 2 matches
+			require.Equal(t, 2, len(matches), "Should find exactly 2 matches")
+		})
 	}
-	paramsJSON, err := json.Marshal(params)
-	require.NoError(t, err)
-
-	// Run grep
-	call := ToolCall{Input: string(paramsJSON)}
-	response, err := grepTool.Run(context.Background(), call)
-	require.NoError(t, err)
-
-	// Check results - should only find file1.txt and file2.txt
-	// ignored/file3.txt should be ignored by .gitignore
-	// node_modules/lib.js should be ignored by .crushignore
-	// secret.key should be ignored by .gitignore
-	result := response.Content
-	require.Contains(t, result, "file1.txt")
-	require.Contains(t, result, "file2.txt")
-	require.NotContains(t, result, "file3.txt")
-	require.NotContains(t, result, "lib.js")
-	require.NotContains(t, result, "secret.key")
 }
 
 func TestSearchImplementations(t *testing.T) {

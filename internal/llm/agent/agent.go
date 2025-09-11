@@ -342,7 +342,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	if !a.Model().SupportsImages && attachments != nil {
 		attachments = nil
 	}
-	events := make(chan AgentEvent)
+	events := make(chan AgentEvent, 1)
 	if a.IsSessionBusy(sessionID) {
 		existing, ok := a.promptQueue.Get(sessionID)
 		if !ok {
@@ -373,10 +373,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		a.activeRequests.Del(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
-		select {
-		case events <- result:
-		case <-genCtx.Done():
-		}
+		events <- result
 		close(events)
 	}()
 	return events, nil
@@ -394,7 +391,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			defer log.RecoverPanic("agent.Run", func() {
 				slog.Error("panic while generating title")
 			})
-			titleErr := a.generateTitle(context.Background(), sessionID, content)
+			titleErr := a.generateTitle(ctx, sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
 				slog.Error("failed to generate title", "error", titleErr)
 			}
@@ -993,11 +990,17 @@ func (a *agent) UpdateModel() error {
 		return fmt.Errorf("provider %s not found in config", largeModelCfg.Provider)
 	}
 
+	var maxTitleTokens int64 = 40
+
+	// if the max output is too low for the gemini provider it won't return anything
+	if smallModelCfg.Provider == "gemini" {
+		maxTitleTokens = 1000
+	}
 	// Recreate title provider
 	titleOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SelectedModelTypeSmall),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-		provider.WithMaxTokens(40),
+		provider.WithMaxTokens(maxTitleTokens),
 	}
 	newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
 	if err != nil {

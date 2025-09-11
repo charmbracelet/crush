@@ -483,12 +483,12 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	}
 
 	cfg.SetupAgents()
-	coderAgent := cfg.Agents["coder"]
-	require.NotNil(t, coderAgent)
+	coderAgent, ok := cfg.Agents["coder"]
+	assert.True(t, ok)
 	assert.Equal(t, []string{"bash", "multiedit", "fetch", "glob", "ls", "sourcegraph", "view", "write"}, coderAgent.AllowedTools)
 
-	taskAgent := cfg.Agents["task"]
-	require.NotNil(t, taskAgent)
+	taskAgent, ok := cfg.Agents["task"]
+	assert.True(t, ok)
 	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 }
 

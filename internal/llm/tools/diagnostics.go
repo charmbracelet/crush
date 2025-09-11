@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type DiagnosticsParams struct {
@@ -110,7 +110,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	for _, client := range lsps {
 		originalDiags := client.GetDiagnostics()
 
-		handler := func(params json.RawMessage) {
+		handler := func(_ context.Context, _ string, params json.RawMessage) {
 			lsp.HandleDiagnostics(client, params)
 			var diagParams protocol.PublishDiagnosticsParams
 			if err := json.Unmarshal(params, &diagParams); err != nil {

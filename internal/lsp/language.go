@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 func DetectLanguageID(uri string) protocol.LanguageKind {

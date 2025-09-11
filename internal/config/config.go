@@ -117,12 +117,14 @@ type MCPConfig struct {
 }
 
 type LSPConfig struct {
-	Disabled  bool              `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command   string            `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
-	Args      []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
-	Env       map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
-	Options   any               `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
-	FileTypes []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
+	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
+	Command     string            `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
+	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
+	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
+	RootMarkers []string          `json:"root_markers,omitempty" jsonschema:"description=Files or directories that indicate the project root,example=go.mod,example=package.json,example=Cargo.toml"`
+	InitOptions map[string]any    `json:"init_options,omitempty" jsonschema:"description=Initialization options passed to the LSP server during initialize request"`
+	Options     map[string]any    `json:"options,omitempty" jsonschema:"description=LSP server-specific settings passed during initialization"`
 }
 
 type TUIOptions struct {

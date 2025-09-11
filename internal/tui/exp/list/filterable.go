@@ -245,7 +245,6 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		}
 	}
 
-	f.selectedItem = ""
 	if query == "" || len(f.items) == 0 {
 		return f.list.SetItems(f.items)
 	}

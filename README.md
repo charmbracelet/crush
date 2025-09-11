@@ -470,6 +470,49 @@ config:
 }
 ```
 
+## Disabling providers auto-update
+
+Crush automatically fetches the updated list of providers and models from
+[Catwalk](https://github.com/charmbracelet/catwalk). We know some environments
+have restricted internet access, so if you need to disable this you have two
+options:
+
+Set `disable_provider_auto_update` into your `crush.json` config:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_provider_auto_update": true
+  }
+}
+```
+
+Or alternatively set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment
+variable:
+
+```bash
+export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
+```
+
+With that set, you'll have to manually update providers from time to time. It's
+possible to do that with the `crush update-providers` command:
+
+```bash
+# Update providers remotely from Catwalk.
+crush update-providers
+
+# Update providers from a custom Catwalk base URL.
+crush update-providers https://example.com/
+
+# Update providers from a local file.
+crush update-providers /path/to/local-providers.json
+
+# Update providers from the embedded version.
+# (Crush ships with an embedded copy of Catwalk on the time of the release).
+crush update-providers embedded
+```
+
 ## Whatcha think?
 
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:

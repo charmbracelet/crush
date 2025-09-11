@@ -338,12 +338,13 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 		return nil // Already closed
 	}
 
-	if cfg != nil && cfg.Options.DebugLSP {
+	if cfg.Options.DebugLSP {
 		slog.Debug("Closing file", "file", filepath)
 	}
 
-	// TODO: powernap doesn't have a direct NotifyDidCloseTextDocument method
-	// We'll need to implement this or handle it differently
+	if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		return err
+	}
 
 	c.openFiles.Del(uri)
 

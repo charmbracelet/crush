@@ -217,11 +217,11 @@ func (f *filterableGroupList[T]) filterItemsInGroup(group Group[T], query string
 		return items
 	}
 
-	gname := f.getGroupName(group)
+	name := f.getGroupName(group) + " "
 
 	names := make([]string, len(group.Items))
 	for i, item := range group.Items {
-		names[i] = strings.ToLower(gname + " " + item.FilterValue())
+		names[i] = strings.ToLower(name + item.FilterValue())
 	}
 
 	matches := fuzzy.Find(query, names)
@@ -236,10 +236,10 @@ func (f *filterableGroupList[T]) filterItemsInGroup(group Group[T], query string
 			var idxs []int
 			for _, idx := range match.MatchedIndexes {
 				// adjusts removing group name highlights
-				if idx < len(gname)+1 {
+				if idx < len(name) {
 					continue
 				}
-				idxs = append(idxs, idx-len(gname)-1)
+				idxs = append(idxs, idx-len(name))
 			}
 			f.setMatchIndexes(item, idxs)
 			matchedItems = append(matchedItems, item)

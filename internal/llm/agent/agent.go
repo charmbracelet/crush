@@ -197,8 +197,22 @@ func NewAgent(
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 
+		mcpToolsOnce.Do(func() {
+			mcpTools = doGetMCPTools(ctx, permissions, cfg)
+		})
+
+		withCoderTools := func(t []tools.BaseTool) []tools.BaseTool {
+			if agentCfg.ID == "coder" {
+				t = append(t, mcpTools...)
+				if len(lspClients) > 0 {
+					t = append(t, tools.NewDiagnosticsTool(lspClients))
+				}
+			}
+			return t
+		}
+
 		if agentCfg.AllowedTools == nil {
-			return allTools
+			return withCoderTools(allTools)
 		}
 
 		var filteredTools []tools.BaseTool
@@ -209,15 +223,9 @@ func NewAgent(
 		}
 
 		if agentCfg.ID == "coder" {
-			mcpToolsOnce.Do(func() {
-				mcpTools = doGetMCPTools(ctx, permissions, cfg)
-			})
 			filteredTools = append(filteredTools, mcpTools...)
-			if len(lspClients) > 0 {
-				filteredTools = append(filteredTools, tools.NewDiagnosticsTool(lspClients))
-			}
 		}
-		return filteredTools
+		return withCoderTools(filteredTools)
 	}
 
 	return &agent{

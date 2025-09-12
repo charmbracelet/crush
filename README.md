@@ -478,6 +478,7 @@ We’d love to hear your thoughts on this project. Need help? We gotchu. You can
 - [Discord][discord]
 - [Slack](https://charm.land/slack)
 - [The Fediverse](https://mastodon.social/@charmcli)
+- [Bluesky](https://bsky.app/profile/charm.land)
 
 [discord]: https://charm.land/discord
 

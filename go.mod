@@ -74,7 +74,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20250910155420-aa0094762299
+	github.com/charmbracelet/ultraviolet v0.0.0-20250912143111-9785ff826cbf
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d
 	github.com/charmbracelet/x/term v0.2.1

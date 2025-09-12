@@ -416,10 +416,6 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	return nil
 }
 
-func (c *Config) AllTools() []string {
-	return []string{}
-}
-
 func allToolNames() []string {
 	return []string{
 		"bash",

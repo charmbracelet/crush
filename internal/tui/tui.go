@@ -135,6 +135,23 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, dialogCmd := a.dialog.Update(msg)
 		a.dialog = u.(dialogs.DialogCmp)
 		return a, tea.Batch(completionCmd, dialogCmd)
+	case sessions.DeleteConfirmMsg:
+		// Handle session deletion confirmation
+		err := a.app.Sessions.Delete(context.Background(), msg.SessionID)
+		if err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to delete session: %w", err))
+		}
+		// Close the confirmation dialog
+		u, dialogCmd := a.dialog.Update(dialogs.CloseDialogMsg{})
+		a.dialog = u.(dialogs.DialogCmp)
+		// If the deleted session was the current session, clear the selection
+		if msg.SessionID == a.selectedSessionID {
+			a.selectedSessionID = ""
+		}
+		// Reopen the sessions dialog to refresh the list
+		return a, tea.Batch(dialogCmd, func() tea.Msg {
+			return a.createSessionDialog(a.selectedSessionID, a.selectedSessionID)
+		})
 	case commands.ShowArgumentsDialogMsg:
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
@@ -164,10 +181,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Commands
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {
-			allSessions, _ := a.app.Sessions.List(context.Background())
-			return dialogs.OpenDialogMsg{
-				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
-			}
+			return a.createSessionDialog(a.selectedSessionID, a.selectedSessionID)
 		}
 
 	case commands.SwitchModelMsg:
@@ -185,6 +199,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	case commands.DeleteSessionMsg:
+		// Open the session switcher with the current session pre-selected for deletion
+		return a, func() tea.Msg {
+			return a.createSessionDialog(msg.SessionID, a.selectedSessionID)
+		}
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
 	case commands.ToggleHelpMsg:
@@ -472,10 +491,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		cmds = append(cmds,
 			func() tea.Msg {
-				allSessions, _ := a.app.Sessions.List(context.Background())
-				return dialogs.OpenDialogMsg{
-					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
-				}
+				return a.createSessionDialog(a.selectedSessionID, a.selectedSessionID)
 			},
 		)
 		return tea.Sequence(cmds...)
@@ -495,6 +511,17 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			a.pages[a.currentPage] = model
 		}
 		return cmd
+	}
+}
+
+// createSessionDialog creates a new session dialog with proper error handling
+func (a *appModel) createSessionDialog(selectedID, currentID string) tea.Msg {
+	allSessions, err := a.app.Sessions.List(context.Background())
+	if err != nil {
+		return util.ReportError(fmt.Errorf("failed to list sessions: %w", err))
+	}
+	return dialogs.OpenDialogMsg{
+		Model: sessions.NewSessionDialogCmp(allSessions, selectedID, currentID),
 	}
 }
 

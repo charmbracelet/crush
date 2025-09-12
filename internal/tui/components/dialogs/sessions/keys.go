@@ -8,7 +8,12 @@ type KeyMap struct {
 	Select,
 	Next,
 	Previous,
-	Close key.Binding
+	Delete,
+	Close,
+	Yes,
+	No,
+	LeftRight,
+	EnterSpace key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -25,9 +30,29 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
 		),
+		Delete: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "delete session"),
+		),
 		Close: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
+		),
+		Yes: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
+		),
+		No: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "no"),
+		),
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "navigate"),
+		),
+		EnterSpace: key.NewBinding(
+			key.WithKeys("enter", " "),
+			key.WithHelp("enter", "confirm"),
 		),
 	}
 }
@@ -38,7 +63,12 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Select,
 		k.Next,
 		k.Previous,
+		k.Delete,
 		k.Close,
+		k.Yes,
+		k.No,
+		k.LeftRight,
+		k.EnterSpace,
 	}
 }
 
@@ -62,6 +92,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Select,
+		k.Delete,
 		k.Close,
 	}
 }

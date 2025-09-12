@@ -275,7 +275,7 @@ var mcpInitRequest = mcp.InitializeRequest{
 	},
 }
 
-func doGetMCPTools(permissions permission.Service, cfg *config.Config) []tools.BaseTool {
+func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
 
@@ -309,7 +309,7 @@ func doGetMCPTools(permissions permission.Service, cfg *config.Config) []tools.B
 				}
 			}()
 
-			ctx, cancel := context.WithTimeout(context.Background(), mcpTimeout(m))
+			ctx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
 			defer cancel()
 			c, err := createAndInitializeClient(ctx, name, m)
 			if err != nil {

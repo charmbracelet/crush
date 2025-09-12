@@ -221,10 +221,6 @@ func NewAgent(
 				filteredTools = append(filteredTools, tool)
 			}
 		}
-
-		if agentCfg.ID == "coder" {
-			filteredTools = append(filteredTools, mcpTools...)
-		}
 		return withCoderTools(filteredTools)
 	}
 

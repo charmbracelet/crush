@@ -288,10 +288,20 @@
           "examples": [
             ".crush"
           ]
+        },
+        "disabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Tools to disable"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "disabled_tools"
+      ]
     },
     "Permissions": {
       "properties": {

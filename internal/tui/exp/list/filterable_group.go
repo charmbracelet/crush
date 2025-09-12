@@ -180,7 +180,12 @@ func (f *filterableGroupList[T]) inputHeight() int {
 	return lipgloss.Height(f.inputStyle.Render(f.input.View()))
 }
 
-func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
+type groupMatch[T FilterableItem] struct {
+	group Group[T]
+	score int
+}
+
+func (f *filterableGroupList[T]) clearItemState() []tea.Cmd {
 	var cmds []tea.Cmd
 	for _, item := range slices.Collect(f.items.Seq()) {
 		if i, ok := any(item).(layout.Focusable); ok {
@@ -190,33 +195,82 @@ func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 			i.MatchIndexes(make([]int, 0))
 		}
 	}
+	return cmds
+}
 
-	f.selectedItem = ""
+func (f *filterableGroupList[T]) getGroupName(g Group[T]) string {
+	if section, ok := g.Section.(*itemSectionModel); ok {
+		return strings.ToLower(section.title)
+	}
+	return strings.ToLower(g.Section.ID())
+}
+
+func (f *filterableGroupList[T]) setMatchIndexes(item T, indexes []int) {
+	if i, ok := any(item).(HasMatchIndexes); ok {
+		i.MatchIndexes(indexes)
+	}
+}
+
+func (f *filterableGroupList[T]) findMatchingGroups(firstWord string) []groupMatch[T] {
+	var matchedGroups []groupMatch[T]
+	for _, g := range f.groups {
+		groupName := f.getGroupName(g)
+		matches := fuzzy.Find(firstWord, []string{groupName})
+		if len(matches) > 0 && matches[0].Score > 0 {
+			matchedGroups = append(matchedGroups, groupMatch[T]{
+				group: g,
+				score: matches[0].Score,
+			})
+		}
+	}
+	// Sort by score (higher scores first - exact matches will have higher scores)
+	sort.SliceStable(matchedGroups, func(i, j int) bool {
+		return matchedGroups[i].score > matchedGroups[j].score
+	})
+	return matchedGroups
+}
+
+func (f *filterableGroupList[T]) filterItemsInGroup(group Group[T], query string) []T {
 	if query == "" {
-		return f.groupedList.SetGroups(f.groups)
+		// No query, return all items with cleared match indexes
+		var items []T
+		for _, item := range group.Items {
+			f.setMatchIndexes(item, make([]int, 0))
+			items = append(items, item)
+		}
+		return items
 	}
 
-	var newGroups []Group[T]
-	for _, g := range f.groups {
-		words := make([]string, len(g.Items))
-		for i, item := range g.Items {
-			words[i] = strings.ToLower(item.FilterValue())
-		}
+	// Build search words
+	words := make([]string, len(group.Items))
+	for i, item := range group.Items {
+		words[i] = strings.ToLower(item.FilterValue())
+	}
 
-		matches := fuzzy.Find(query, words)
+	// Perform fuzzy search
+	matches := fuzzy.Find(query, words)
+	sort.SliceStable(matches, func(i, j int) bool {
+		return matches[i].Score > matches[j].Score
+	})
 
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Score > matches[j].Score
-		})
-
+	if len(matches) > 0 {
+		// Found matches, return only those with highlights
 		var matchedItems []T
 		for _, match := range matches {
-			item := g.Items[match.Index]
-			if i, ok := any(item).(HasMatchIndexes); ok {
-				i.MatchIndexes(match.MatchedIndexes)
-			}
+			item := group.Items[match.Index]
+			f.setMatchIndexes(item, match.MatchedIndexes)
 			matchedItems = append(matchedItems, item)
 		}
+		return matchedItems
+	}
+
+	return []T{}
+}
+
+func (f *filterableGroupList[T]) searchAllGroups(query string) []Group[T] {
+	var newGroups []Group[T]
+	for _, g := range f.groups {
+		matchedItems := f.filterItemsInGroup(g, query)
 		if len(matchedItems) > 0 {
 			newGroups = append(newGroups, Group[T]{
 				Section: g.Section,
@@ -224,6 +278,61 @@ func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
 			})
 		}
 	}
+	return newGroups
+}
+
+func (f *filterableGroupList[T]) Filter(query string) tea.Cmd {
+	cmds := f.clearItemState()
+	f.selectedItem = ""
+
+	if query == "" {
+		return f.groupedList.SetGroups(f.groups)
+	}
+
+	lowerQuery := strings.ToLower(query)
+	queryWords := strings.Fields(lowerQuery)
+	firstWord := queryWords[0]
+
+	// Find groups that match the first word
+	matchedGroups := f.findMatchingGroups(firstWord)
+
+	var newGroups []Group[T]
+	if len(matchedGroups) > 0 {
+		// Filter within matched groups using remaining words
+		remainingQuery := ""
+		if len(queryWords) > 1 {
+			remainingQuery = strings.Join(queryWords[1:], " ")
+		}
+
+		for _, matchedGroup := range matchedGroups {
+			matchedItems := f.filterItemsInGroup(matchedGroup.group, remainingQuery)
+			if len(matchedItems) > 0 {
+				newGroups = append(newGroups, Group[T]{
+					Section: matchedGroup.group.Section,
+					Items:   matchedItems,
+				})
+			}
+		}
+
+		// add any matching items from other groups
+		allGroups := f.searchAllGroups(lowerQuery)
+		for _, g := range allGroups {
+			exists := false
+			for _, existing := range newGroups {
+				if existing.Section.ID() == g.Section.ID() {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				newGroups = append(newGroups, g)
+			}
+		}
+	} else {
+		// No group matches, search all groups
+		newGroups = f.searchAllGroups(lowerQuery)
+	}
+
 	cmds = append(cmds, f.groupedList.SetGroups(newGroups))
 	return tea.Batch(cmds...)
 }

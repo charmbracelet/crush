@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -451,6 +452,44 @@ func TestConfig_IsConfigured(t *testing.T) {
 
 		require.False(t, cfg.IsConfigured())
 	})
+}
+
+func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+	}
+
+	cfg.SetupAgents()
+	coderAgent, ok := cfg.Agents["coder"]
+	require.True(t, ok)
+	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
+
+	taskAgent, ok := cfg.Agents["task"]
+	require.True(t, ok)
+	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{
+				"edit",
+				"download",
+				"grep",
+			},
+		},
+	}
+
+	cfg.SetupAgents()
+	coderAgent, ok := cfg.Agents["coder"]
+	require.True(t, ok)
+	assert.Equal(t, []string{"bash", "multiedit", "fetch", "glob", "ls", "sourcegraph", "view", "write"}, coderAgent.AllowedTools)
+
+	taskAgent, ok := cfg.Agents["task"]
+	require.True(t, ok)
+	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

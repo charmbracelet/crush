@@ -216,7 +216,6 @@ func NewAgent(
 			if len(lspClients) > 0 {
 				filteredTools = append(filteredTools, tools.NewDiagnosticsTool(lspClients))
 			}
-
 		}
 		return filteredTools
 	}

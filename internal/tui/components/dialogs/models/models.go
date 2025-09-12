@@ -170,8 +170,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					util.CmdHandler(dialogs.CloseDialogMsg{}),
 					util.CmdHandler(ModelSelectedMsg{
 						Model: config.SelectedModel{
-							Model:    selectedItem.Model.ID,
-							Provider: string(selectedItem.Provider.ID),
+							Model:           selectedItem.Model.ID,
+							Provider:        string(selectedItem.Provider.ID),
+							ReasoningEffort: selectedItem.Model.DefaultReasoningEffort,
+							MaxTokens:       selectedItem.Model.DefaultMaxTokens,
 						},
 						ModelType: modelType,
 					}),
@@ -379,8 +381,10 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 		util.CmdHandler(dialogs.CloseDialogMsg{}),
 		util.CmdHandler(ModelSelectedMsg{
 			Model: config.SelectedModel{
-				Model:    selectedModel.Model.ID,
-				Provider: string(selectedModel.Provider.ID),
+				Model:           selectedModel.Model.ID,
+				Provider:        string(selectedModel.Provider.ID),
+				ReasoningEffort: selectedModel.Model.DefaultReasoningEffort,
+				MaxTokens:       selectedModel.Model.DefaultMaxTokens,
 			},
 			ModelType: m.selectedModelType,
 		}),

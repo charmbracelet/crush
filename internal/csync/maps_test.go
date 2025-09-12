@@ -5,6 +5,7 @@ import (
 	"maps"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,36 @@ func TestNewMapFrom(t *testing.T) {
 	m := NewMapFrom(original)
 	require.NotNil(t, m)
 	require.Equal(t, original, m.inner)
+	require.Equal(t, 2, m.Len())
+
+	value, ok := m.Get("key1")
+	require.True(t, ok)
+	require.Equal(t, 1, value)
+}
+
+func TestNewLazyMap(t *testing.T) {
+	t.Parallel()
+
+	waiter := sync.Mutex{}
+	waiter.Lock()
+	loadCalled := false
+
+	loadFunc := func() map[string]int {
+		waiter.Lock()
+		defer waiter.Unlock()
+		loadCalled = true
+		return map[string]int{
+			"key1": 1,
+			"key2": 2,
+		}
+	}
+
+	m := NewLazyMap(loadFunc)
+	require.NotNil(t, m)
+
+	waiter.Unlock() // Allow the load function to proceed
+	time.Sleep(100 * time.Millisecond)
+	require.True(t, loadCalled)
 	require.Equal(t, 2, m.Len())
 
 	value, ok := m.Get("key1")

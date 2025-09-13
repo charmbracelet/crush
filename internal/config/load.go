@@ -178,17 +178,18 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			maps.Copy(headers, config.ExtraHeaders)
 		}
 		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
+			ID:                      string(p.ID),
+			Name:                    p.Name,
+			BaseURL:                 p.APIEndpoint,
+			APIKey:                  p.APIKey,
+			Type:                    p.Type,
+			Disable:                 config.Disable,
+			SystemPromptPrefix:      config.SystemPromptPrefix,
+			ExtraHeaders:            headers,
+			ExtraBody:               config.ExtraBody,
+			ExtraParams:             make(map[string]string),
+			Models:                  p.Models,
+			DefaultVerbosityByModel: config.DefaultVerbosityByModel,
 		}
 
 		switch p.ID {
@@ -479,7 +480,11 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			}
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			} else if model.CanReason {
+				large.ReasoningEffort = model.DefaultReasoningEffort
 			}
+			// carry over verbosity if explicitly set (empty => per-call fallback to provider model default)
+			large.Verbosity = largeModelSelected.Verbosity
 			large.Think = largeModelSelected.Think
 		}
 	}
@@ -506,7 +511,13 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
-			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			if smallModelSelected.ReasoningEffort != "" {
+				small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			} else if model.CanReason {
+				small.ReasoningEffort = model.DefaultReasoningEffort
+			}
+			// carry over verbosity if explicitly set (empty => per-call fallback to provider model default)
+			small.Verbosity = smallModelSelected.Verbosity
 			small.Think = smallModelSelected.Think
 		}
 	}

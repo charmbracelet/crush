@@ -37,6 +37,36 @@
         "permissions": {
           "$ref": "#/$defs/Permissions",
           "description": "Permission settings for tool usage"
+        },
+        "keymaps": {
+          "$ref": "#/$defs/KeyMaps",
+          "description": "Keymaps for the TUI"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "KeyMaps": {
+      "properties": {
+        "quit": {
+          "type": "string",
+          "description": "Key binding for quit command"
+        },
+        "help": {
+          "type": "string",
+          "description": "Key binding for help command"
+        },
+        "commands": {
+          "type": "string",
+          "description": "Key binding for commands command"
+        },
+        "sessions": {
+          "type": "string",
+          "description": "Key binding for sessions command"
+        },
+        "suspend": {
+          "type": "string",
+          "description": "Key binding for suspend command"
         }
       },
       "additionalProperties": false,

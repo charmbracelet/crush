@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,6 +22,11 @@ const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
 )
+
+// LogPath returns the path to the log file for the given data directory
+func LogPath(dataDirectory string) string {
+	return filepath.Join(dataDirectory, "logs", fmt.Sprintf("%s.log", appName))
+}
 
 var defaultContextPaths = []string{
 	".github/copilot-instructions.md",

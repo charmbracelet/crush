@@ -483,7 +483,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				select {
 				case <-ctx.Done():
 					// context cancelled
-					if ctx.Err() == nil {
+					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
 					close(eventChan)

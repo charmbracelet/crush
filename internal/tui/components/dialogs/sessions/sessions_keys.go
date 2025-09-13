@@ -4,15 +4,18 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 )
 
-type KeyMap struct {
+type SessionsListKeyMap struct {
 	Select,
 	Next,
 	Previous,
+	Rename,
+	Delete,
+	DeleteAll,
 	Close key.Binding
 }
 
-func DefaultKeyMap() KeyMap {
-	return KeyMap{
+func SessionsKeyMap() SessionsListKeyMap {
+	return SessionsListKeyMap{
 		Select: key.NewBinding(
 			key.WithKeys("enter", "tab", "ctrl+y"),
 			key.WithHelp("enter", "confirm"),
@@ -25,6 +28,18 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
 		),
+		Rename: key.NewBinding(
+			key.WithKeys("ctrl+r"),
+			key.WithHelp("ctrl+r", "rename"),
+		),
+		Delete: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "delete"),
+		),
+		DeleteAll: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "delete all"),
+		),
 		Close: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "cancel"),
@@ -33,17 +48,20 @@ func DefaultKeyMap() KeyMap {
 }
 
 // KeyBindings implements layout.KeyMapProvider
-func (k KeyMap) KeyBindings() []key.Binding {
+func (k SessionsListKeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Select,
 		k.Next,
 		k.Previous,
+		k.Rename,
+		k.Delete,
+		k.DeleteAll,
 		k.Close,
 	}
 }
 
 // FullHelp implements help.KeyMap.
-func (k KeyMap) FullHelp() [][]key.Binding {
+func (k SessionsListKeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
 	slice := k.KeyBindings()
 	for i := 0; i < len(slice); i += 4 {
@@ -54,7 +72,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 }
 
 // ShortHelp implements help.KeyMap.
-func (k KeyMap) ShortHelp() []key.Binding {
+func (k SessionsListKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(
 
@@ -62,6 +80,9 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Select,
+		k.Rename,
+		k.Delete,
+		k.DeleteAll,
 		k.Close,
 	}
 }

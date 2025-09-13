@@ -67,26 +67,30 @@ type SelectedModel struct {
 }
 
 type ProviderConfig struct {
-	// The provider's id.
-	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
-	// The provider's name, used for display purposes.
-	Name string `json:"name,omitempty" jsonschema:"description=Human-readable name for the provider,example=OpenAI"`
-	// The provider's API endpoint.
-	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
-	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
-	// The provider's API key.
-	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
-	// Marks the provider as disabled.
-	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
+    // The provider's id.
+    ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
+    // The provider's name, used for display purposes.
+    Name string `json:"name,omitempty" jsonschema:"description=Human-readable name for the provider,example=OpenAI"`
+    // The provider's API endpoint.
+    BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
+    // The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
+    Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
+    // The provider's API key.
+    APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
+    // Marks the provider as disabled.
+    Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
+
+    // Disable streaming for this provider; when disabled the system will
+    // use non-streaming completions but still emit a single StreamResponse event.
+    DisableStreaming bool `json:"disable_streaming,omitempty" jsonschema:"description=Disable streaming for this provider,default=false"`
 
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 
-	// Extra headers to send with each request to the provider.
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
-	// Extra body
-	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
+    // Extra headers to send with each request to the provider.
+    ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
+    // Extra body
+    ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`

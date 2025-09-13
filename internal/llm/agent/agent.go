@@ -717,6 +717,11 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 	case provider.EventComplete:
 		assistantMsg.FinishThinking()
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)
+		// In non-streaming fallback, the provider emits a single EventComplete
+		// with the full content. Make sure we persist it on the message.
+		if event.Response != nil && event.Response.Content != "" && assistantMsg.Content().String() == "" {
+			assistantMsg.AppendContent(event.Response.Content)
+		}
 		assistantMsg.AddFinish(event.Response.FinishReason, "", "")
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)

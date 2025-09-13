@@ -177,19 +177,21 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
-		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
-		}
+        prepared := ProviderConfig{
+            ID:                 string(p.ID),
+            Name:               p.Name,
+            BaseURL:            p.APIEndpoint,
+            APIKey:             p.APIKey,
+            Type:               p.Type,
+            Disable:            config.Disable,
+            // Preserve user-configured streaming behavior for known providers.
+            DisableStreaming:   config.DisableStreaming,
+            SystemPromptPrefix: config.SystemPromptPrefix,
+            ExtraHeaders:       headers,
+            ExtraBody:          config.ExtraBody,
+            ExtraParams:        make(map[string]string),
+            Models:             p.Models,
+        }
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration

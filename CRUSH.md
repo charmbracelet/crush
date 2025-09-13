@@ -63,3 +63,6 @@ func TestYourFunction(t *testing.T) {
 ## Committing
 
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
+## Provider Options
+
+- `disable_streaming` (boolean): When set per provider, streaming is disabled at the provider layer. The agent still calls `StreamResponse`, which emits a single final event built from the non-streaming completion.

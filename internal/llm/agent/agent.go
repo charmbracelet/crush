@@ -833,7 +833,7 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			if r.Error != nil {
 				event = AgentEvent{
 					Type:  AgentEventTypeError,
-					Error: fmt.Errorf("failed to summarize: %w", err),
+					Error: fmt.Errorf("failed to summarize: %w", r.Error),
 					Done:  true,
 				}
 				a.Publish(pubsub.CreatedEvent, event)

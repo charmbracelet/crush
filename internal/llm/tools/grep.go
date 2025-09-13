@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -295,26 +294,39 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		return nil, err
 	}
 
+	type rgJSONPath struct {
+		Text string `json:"text"`
+	}
+	type rgJSONLines struct {
+		Text string `json:"text"`
+	}
+	type rgJSONData struct {
+		Path       rgJSONPath  `json:"path"`
+		Lines      rgJSONLines `json:"lines"`
+		LineNumber int         `json:"line_number"`
+	}
+	type rgJSON struct {
+		Type string     `json:"type"`
+		Data rgJSONData `json:"data"`
+	}
+
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	matches := make([]grepMatch, 0, len(lines))
 
 	for _, line := range lines {
-		if line == "" {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-
-		// Parse ripgrep output format: file:line:content
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+		var rec rgJSON
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-
-		filePath := parts[0]
-		lineNum, err := strconv.Atoi(parts[1])
-		if err != nil {
+		if rec.Type != "match" {
 			continue
 		}
-		lineText := parts[2]
+		filePath := rec.Data.Path.Text
+		lineNum := rec.Data.LineNumber
+		lineText := rec.Data.Lines.Text
 
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
@@ -325,7 +337,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			path:     filePath,
 			modTime:  fileInfo.ModTime(),
 			lineNum:  lineNum,
-			lineText: lineText,
+			lineText: strings.TrimRight(lineText, "\r\n"),
 		})
 	}
 

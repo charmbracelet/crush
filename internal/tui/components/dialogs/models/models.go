@@ -112,6 +112,28 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, m.keyMap.EditAPIKey):
+			selectedItem := m.modelList.SelectedModel()
+			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
+				var modelType config.SelectedModelType
+				if m.modelList.GetModelType() == LargeModelType {
+					modelType = config.SelectedModelTypeLarge
+				} else {
+					modelType = config.SelectedModelTypeSmall
+				}
+				m.needsAPIKey = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+				m.apiKeyInput.SetTitle("API Key Configuration")
+
+				provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID))
+				if ok {
+					apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey)
+					m.apiKeyInput.SetValue(apiKey)
+				}
+				return m, nil
+			}
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {
 				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
@@ -210,6 +232,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.isAPIKeyValid = false
 				m.apiKeyValue = ""
 				m.apiKeyInput.Reset()
+				m.apiKeyInput.SetTitle("API Key")
 				return m, nil
 			}
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/fsnotify/fsnotify"
+	"github.com/rjeczalik/notify"
 )
 
 func TestGlobalWatcher(t *testing.T) {
@@ -60,15 +60,8 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create a real fsnotify watcher for testing
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("Failed to create fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
-
 	gw := &global{
-		watcher:      watcher,
+		events:       make(chan notify.EventInfo, 100),
 		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
@@ -77,26 +70,31 @@ func TestGlobalWatcherWorkspaceIdempotent(t *testing.T) {
 	}
 
 	// Test that watching the same workspace multiple times is safe (idempotent)
-	err1 := gw.addDirectoryToWatcher(tempDir)
+	// With notify, we use recursive watching with "..."
+	watchPath := filepath.Join(tempDir, "...")
+
+	err1 := notify.Watch(watchPath, gw.events, notify.All)
 	if err1 != nil {
-		t.Fatalf("First addDirectoryToWatcher call failed: %v", err1)
+		t.Fatalf("First Watch call failed: %v", err1)
 	}
+	defer notify.Stop(gw.events)
 
-	err2 := gw.addDirectoryToWatcher(tempDir)
+	// Watching the same path again should be safe (notify handles this)
+	err2 := notify.Watch(watchPath, gw.events, notify.All)
 	if err2 != nil {
-		t.Fatalf("Second addDirectoryToWatcher call failed: %v", err2)
+		t.Fatalf("Second Watch call failed: %v", err2)
 	}
 
-	err3 := gw.addDirectoryToWatcher(tempDir)
+	err3 := notify.Watch(watchPath, gw.events, notify.All)
 	if err3 != nil {
-		t.Fatalf("Third addDirectoryToWatcher call failed: %v", err3)
+		t.Fatalf("Third Watch call failed: %v", err3)
 	}
 
-	// All calls should succeed - fsnotify handles deduplication internally
-	// This test verifies that multiple WatchWorkspace calls are safe
+	// All calls should succeed - notify handles deduplication internally
+	// This test verifies that multiple Watch calls are safe
 }
 
-func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
+func TestGlobalWatcherRecursiveWatching(t *testing.T) {
 	t.Parallel()
 
 	// Create a temporary directory structure for testing
@@ -120,29 +118,24 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create a real fsnotify watcher for testing
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("Failed to create fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
-
 	gw := &global{
-		watcher:      watcher,
+		events:       make(chan notify.EventInfo, 100),
 		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
 		cancel:       cancel,
+		root:         tempDir,
 	}
 
-	// Watch the workspace
-	err = gw.addDirectoryToWatcher(tempDir)
-	if err != nil {
-		t.Fatalf("addDirectoryToWatcher failed: %v", err)
+	// Set up recursive watching on the root directory
+	watchPath := filepath.Join(tempDir, "...")
+	if err := notify.Watch(watchPath, gw.events, notify.All); err != nil {
+		t.Fatalf("Failed to set up recursive watch: %v", err)
 	}
+	defer notify.Stop(gw.events)
 
-	// Verify that our expected directories exist and can be watched
+	// Verify that our expected directories and files exist
 	expectedDirs := []string{tempDir, subDir}
 
 	for _, expectedDir := range expectedDirs {
@@ -153,15 +146,9 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 		if !info.IsDir() {
 			t.Fatalf("Expected %s to be a directory, but it's not", expectedDir)
 		}
-
-		// Try to add it again - fsnotify should handle this gracefully
-		err = gw.addDirectoryToWatcher(expectedDir)
-		if err != nil {
-			t.Fatalf("Failed to add directory %s to watcher: %v", expectedDir, err)
-		}
 	}
 
-	// Verify that files exist but we don't try to watch them directly
+	// Verify that files exist
 	testFiles := []string{file1, file2}
 	for _, file := range testFiles {
 		info, err := os.Stat(file)
@@ -172,39 +159,61 @@ func TestGlobalWatcherOnlyWatchesDirectories(t *testing.T) {
 			t.Fatalf("Expected %s to be a file, but it's a directory", file)
 		}
 	}
+
+	// Create a new file in the subdirectory to test recursive watching
+	newFile := filepath.Join(subDir, "new.txt")
+	if err := os.WriteFile(newFile, []byte("new content"), 0o644); err != nil {
+		t.Fatalf("Failed to create new file: %v", err)
+	}
+
+	// We should receive an event for the file creation
+	select {
+	case event := <-gw.events:
+		// On macOS, paths might have /private prefix, so we need to compare the real paths
+		eventPath, _ := filepath.EvalSymlinks(event.Path())
+		expectedPath, _ := filepath.EvalSymlinks(newFile)
+		if eventPath != expectedPath {
+			// Also try comparing just the base names as a fallback
+			if filepath.Base(event.Path()) != filepath.Base(newFile) {
+				t.Errorf("Expected event for %s, got %s", newFile, event.Path())
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for file creation event")
+	}
 }
 
-func TestFsnotifyDeduplication(t *testing.T) {
+func TestNotifyDeduplication(t *testing.T) {
 	t.Parallel()
 
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
 
-	// Create a real fsnotify watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("Failed to create fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
+	// Create an event channel
+	events := make(chan notify.EventInfo, 100)
+	defer close(events)
 
-	// Add the same directory multiple times
-	err1 := watcher.Add(tempDir)
+	// Add the same directory multiple times with recursive watching
+	watchPath := filepath.Join(tempDir, "...")
+
+	err1 := notify.Watch(watchPath, events, notify.All)
 	if err1 != nil {
-		t.Fatalf("First Add failed: %v", err1)
+		t.Fatalf("First Watch failed: %v", err1)
 	}
+	defer notify.Stop(events)
 
-	err2 := watcher.Add(tempDir)
+	err2 := notify.Watch(watchPath, events, notify.All)
 	if err2 != nil {
-		t.Fatalf("Second Add failed: %v", err2)
+		t.Fatalf("Second Watch failed: %v", err2)
 	}
 
-	err3 := watcher.Add(tempDir)
+	err3 := notify.Watch(watchPath, events, notify.All)
 	if err3 != nil {
-		t.Fatalf("Third Add failed: %v", err3)
+		t.Fatalf("Third Watch failed: %v", err3)
 	}
 
-	// All should succeed - fsnotify handles deduplication internally
-	// This test verifies the fsnotify behavior we're relying on
+	// All should succeed - notify handles deduplication internally
+	// This test verifies the notify behavior we're relying on
 }
 
 func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
@@ -241,31 +250,26 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create a real fsnotify watcher for testing
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		t.Fatalf("Failed to create fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
-
 	gw := &global{
-		watcher:      watcher,
+		events:       make(chan notify.EventInfo, 100),
 		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
 		cancel:       cancel,
+		root:         tempDir,
 	}
 
-	// Watch the workspace
-	err = gw.addDirectoryToWatcher(tempDir)
-	if err != nil {
-		t.Fatalf("addDirectoryToWatcher failed: %v", err)
+	// Set up recursive watching
+	watchPath := filepath.Join(tempDir, "...")
+	if err := notify.Watch(watchPath, gw.events, notify.All); err != nil {
+		t.Fatalf("Failed to set up recursive watch: %v", err)
 	}
+	defer notify.Stop(gw.events)
 
-	// This test verifies that the watcher can successfully add directories to fsnotify
-	// The actual ignore logic is tested in the fsext package
-	// Here we just verify that the watcher integration works
+	// The notify library watches everything, but our processEvents
+	// function should filter out ignored files using fsext.ShouldExcludeFile
+	// This test verifies that the structure is set up correctly
 }
 
 func TestGlobalWatcherShutdown(t *testing.T) {
@@ -277,6 +281,7 @@ func TestGlobalWatcherShutdown(t *testing.T) {
 
 	// Create a temporary global watcher for testing
 	gw := &global{
+		events:       make(chan notify.EventInfo, 100),
 		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),

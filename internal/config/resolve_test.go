@@ -3,9 +3,11 @@ package config
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/stretchr/testify/require"
 )
 
@@ -329,4 +331,120 @@ func TestNewEnvironmentVariableResolver(t *testing.T) {
 
 	require.NotNil(t, resolver)
 	require.Implements(t, (*VariableResolver)(nil), resolver)
+}
+
+func TestMCPConfig_ResolvedCommand(t *testing.T) {
+	homeDir := home.Dir()
+
+	tests := []struct {
+		name     string
+		command  string
+		envVars  map[string]string
+		expected string
+	}{
+		{
+			name:     "plain command",
+			command:  "gopls",
+			expected: "gopls",
+		},
+		{
+			name:     "command with HOME variable",
+			command:  "$HOME/bin/gopls",
+			envVars:  map[string]string{"HOME": "/Users/testuser"},
+			expected: "/Users/testuser/bin/gopls",
+		},
+		{
+			name:     "command with tilde expansion",
+			command:  "~/bin/gopls",
+			expected: filepath.Join(homeDir, "bin/gopls"),
+		},
+		{
+			name:     "command with just tilde",
+			command:  "~",
+			expected: homeDir,
+		},
+		{
+			name:     "command with braced variable",
+			command:  "${HOME}/bin/gopls",
+			envVars:  map[string]string{"HOME": "/Users/testuser"},
+			expected: "/Users/testuser/bin/gopls",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up environment
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			config := MCPConfig{
+				Command: tt.command,
+			}
+
+			result := config.ResolvedCommand()
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestLSPConfig_ResolvedCommand(t *testing.T) {
+	homeDir := home.Dir()
+
+	tests := []struct {
+		name     string
+		command  string
+		envVars  map[string]string
+		expected string
+	}{
+		{
+			name:     "plain command",
+			command:  "gopls",
+			expected: "gopls",
+		},
+		{
+			name:     "command with HOME variable",
+			command:  "$HOME/bin/gopls",
+			envVars:  map[string]string{"HOME": "/Users/testuser"},
+			expected: "/Users/testuser/bin/gopls",
+		},
+		{
+			name:     "command with tilde expansion",
+			command:  "~/bin/gopls",
+			expected: filepath.Join(homeDir, "bin/gopls"),
+		},
+		{
+			name:     "command with just tilde",
+			command:  "~",
+			expected: homeDir,
+		},
+		{
+			name:     "command with XDG_CONFIG_HOME variable",
+			command:  "$XDG_CONFIG_HOME/lsp/gopls",
+			envVars:  map[string]string{"XDG_CONFIG_HOME": "/Users/testuser/.config"},
+			expected: "/Users/testuser/.config/lsp/gopls",
+		},
+		{
+			name:     "command with braced variable",
+			command:  "${HOME}/bin/gopls",
+			envVars:  map[string]string{"HOME": "/Users/testuser"},
+			expected: "/Users/testuser/bin/gopls",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set up environment
+			for k, v := range tt.envVars {
+				t.Setenv(k, v)
+			}
+
+			config := LSPConfig{
+				Command: tt.command,
+			}
+
+			result := config.ResolvedCommand()
+			require.Equal(t, tt.expected, result)
+		})
+	}
 }

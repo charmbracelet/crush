@@ -55,7 +55,7 @@ func RenderMCPList(opts RenderOptions) []string {
 
 		// Determine icon and color based on state
 		icon := t.ItemOfflineIcon
-		description := l.MCP.Command
+		description := l.MCP.ResolvedCommand()
 		extraContent := ""
 
 		if state, exists := mcpStates[l.Name]; exists {

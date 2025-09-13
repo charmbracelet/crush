@@ -21,7 +21,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 
 // createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
 func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
-	slog.Info("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
+	slog.Info("Creating LSP client", "name", name, "command", config.ResolvedCommand(), "fileTypes", config.FileTypes, "args", config.Args)
 
 	// Update state to starting
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)

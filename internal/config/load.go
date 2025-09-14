@@ -131,8 +131,8 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
 			if config.Disable {
+				//Note: we must leave disabled providers in the config so that later calls for providers can properly filter out disabled providers.
 				slog.Debug("Skipping provider due to disable flag", "provider", p.ID)
-				c.Providers.Del(string(p.ID))
 				continue
 			}
 			if config.BaseURL != "" {

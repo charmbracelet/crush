@@ -120,18 +120,13 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 
 	// First, add any configured providers that are not in the known providers list
 	// These should appear at the top of the list
-	knownProviders, err := config.Providers(cfg)
-	if err != nil {
-		return util.ReportError(err)
-	}
 	for providerID, providerConfig := range cfg.Providers.Seq2() {
 		if providerConfig.Disable {
 			continue
 		}
 
 		// Check if this provider is not in the known providers list
-		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) ||
-			!slices.ContainsFunc(m.providers, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
+		if !slices.ContainsFunc(m.providers, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
 			// Convert config provider to provider.Provider format
 			configProvider := catwalk.Provider{
 				Name:   providerConfig.Name,
@@ -196,7 +191,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
+		providerConfig, exists := cfg.Providers.Get(string(provider.ID))
+		if exists && providerConfig.Disable {
 			continue
 		}
 
@@ -206,7 +202,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
+		if exists {
 			section.SetInfo(configured)
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{

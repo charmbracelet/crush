@@ -16,11 +16,11 @@ const (
 	darwinOpenMax = 10240
 )
 
-// MaximizeOpenFileLimit tries to set the resource limit RLIMIT_NOFILE (number
+// maximizeOpenFileLimit tries to set the resource limit RLIMIT_NOFILE (number
 // of open file descriptors) to the max (hard limit), if the current (soft
 // limit) is below the max. Returns the new (though possibly unchanged) limit,
 // or an error if it could not be changed.
-func MaximizeOpenFileLimit() (int, error) {
+func maximizeOpenFileLimit() (int, error) {
 	// Get the current limit on number of open files.
 	var lim syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {

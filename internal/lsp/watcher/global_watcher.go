@@ -16,12 +16,12 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp/protocol"
-	"github.com/rjeczalik/notify"
+	"github.com/raphamorim/notify"
 )
 
 // global manages file watching shared across all LSP clients.
 //
-// IMPORTANT: This implementation uses github.com/rjeczalik/notify which provides
+// IMPORTANT: This implementation uses github.com/raphamorim/notify which provides
 // recursive watching on all platforms. On macOS it uses FSEvents, on Linux it
 // uses inotify (with recursion handled by the library), and on Windows it uses
 // ReadDirectoryChangesW.
@@ -30,6 +30,7 @@ import (
 // - Single watch point for entire directory tree
 // - Automatic recursive watching without manually adding subdirectories
 // - No file descriptor exhaustion issues
+// - Built-in ignore system for filtering file events
 type global struct {
 	// Channel for receiving file system events
 	events chan notify.EventInfo
@@ -83,7 +84,7 @@ func (gw *global) unregister(name string) {
 
 // Start sets up recursive watching on the workspace root.
 //
-// Note: We use github.com/rjeczalik/notify which provides recursive watching
+// Note: We use github.com/raphamorim/notify which provides recursive watching
 // with a single watch point. The "..." suffix means watch recursively.
 // This is much more efficient than manually walking and watching each directory.
 func Start() error {
@@ -102,6 +103,12 @@ func Start() error {
 	// Store the workspace root for hierarchical ignore checking
 	gw.root = root
 	gw.started.Store(true)
+
+	// Set up ignore system
+	if err := setupIgnoreSystem(root); err != nil {
+		slog.Warn("lsp watcher: Failed to set up ignore system", "error", err)
+		// Continue anyway, but without ignore functionality
+	}
 
 	// Start the event processing goroutine
 	gw.wg.Add(1)
@@ -161,11 +168,6 @@ func (gw *global) processEvents() {
 			}
 
 			path := event.Path()
-
-			// Skip ignored files
-			if fsext.ShouldExcludeFile(gw.root, path) {
-				continue
-			}
 
 			if cfg != nil && cfg.Options.DebugLSP {
 				slog.Debug("lsp watcher: Global watcher received event", "path", path, "event", event.Event().String())
@@ -361,4 +363,32 @@ func isFileLimitError(err error) bool {
 	}
 	// Check for common file limit errors
 	return errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
+}
+
+// setupIgnoreSystem configures the notify library's ignore system
+// to use .crushignore and .gitignore files for filtering file events
+func setupIgnoreSystem(root string) error {
+	// Create a new ignore matcher for the workspace root
+	im := notify.NewIgnoreMatcher(root)
+
+	// Load .crushignore file if it exists
+	crushignorePath := filepath.Join(root, ".crushignore")
+	if _, err := os.Stat(crushignorePath); err == nil {
+		if err := im.LoadIgnoreFile(crushignorePath); err != nil {
+			slog.Warn("lsp watcher: Failed to load .crushignore file", "error", err)
+		}
+	}
+
+	// Load .gitignore file if it exists
+	gitignorePath := filepath.Join(root, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		if err := im.LoadIgnoreFile(gitignorePath); err != nil {
+			slog.Warn("lsp watcher: Failed to load .gitignore file", "error", err)
+		}
+	}
+
+	// Set as the global ignore matcher
+	notify.SetIgnoreMatcher(im)
+
+	return nil
 }

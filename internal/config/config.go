@@ -23,6 +23,10 @@ const (
 )
 
 var defaultContextPaths = []string{
+	// User context files
+	"~/.config/crush/CRUSH.md",
+	"~/.config/crush/AGENTS.md",
+	// Project context files
 	".github/copilot-instructions.md",
 	".cursorrules",
 	".cursor/rules/",

@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"sync"
@@ -114,7 +115,7 @@ func Start() error {
 	err := fsext.WalkDirectories(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			slog.Debug("lsp watcher: Skipping directory due to error", "path", path, "error", err)
-			return nil // Skip directories we can't access
+			return fs.SkipDir
 		}
 		watchedDirs = append(watchedDirs, path)
 		return nil

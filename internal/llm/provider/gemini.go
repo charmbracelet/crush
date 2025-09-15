@@ -322,6 +322,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 			for _, part := range lastMsg.Parts {
 				lastMsgParts = append(lastMsgParts, *part)
 			}
+
 			for resp, err := range chat.SendMessageStream(ctx, lastMsgParts...) {
 				if err != nil {
 					retry, after, retryErr := g.shouldRetry(attempts, err)
@@ -385,6 +386,9 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 							}
 						}
 					}
+				} else {
+					// no content received
+					break
 				}
 			}
 
@@ -408,6 +412,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 					},
 				}
 				return
+			} else {
+				eventChan <- ProviderEvent{
+					Type:  EventError,
+					Error: errors.New("no content received"),
+				}
 			}
 		}
 	}()

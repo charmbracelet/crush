@@ -72,6 +72,8 @@ type agent struct {
 	mcpTools []McpTool
 
 	tools *csync.LazySlice[tools.BaseTool]
+	// We need this to be able to update it when model changes
+	agentToolFn func() (tools.BaseTool, error)
 
 	provider   provider.Provider
 	providerID string
@@ -102,18 +104,19 @@ func NewAgent(
 ) (Service, error) {
 	cfg := config.Get()
 
-	var agentTool tools.BaseTool
+	var agentToolFn func() (tools.BaseTool, error)
 	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
-			return nil, fmt.Errorf("task agent not found in config")
+		agentToolFn = func() (tools.BaseTool, error) {
+			taskAgentCfg := config.Get().Agents["task"]
+			if taskAgentCfg.ID == "" {
+				return nil, fmt.Errorf("task agent not found in config")
+			}
+			taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create task agent: %w", err)
+			}
+			return NewAgentTool(taskAgent, sessions, messages), nil
 		}
-		taskAgent, err := NewAgent(ctx, taskAgentCfg, permissions, sessions, messages, history, lspClients)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create task agent: %w", err)
-		}
-
-		agentTool = NewAgentTool(taskAgent, sessions, messages)
 	}
 
 	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)
@@ -197,18 +200,19 @@ func NewAgent(
 		mcpToolsOnce.Do(func() {
 			mcpTools = doGetMCPTools(ctx, permissions, cfg)
 		})
-		allTools = append(allTools, mcpTools...)
 
-		if len(lspClients) > 0 {
-			allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
-		}
-
-		if agentTool != nil {
-			allTools = append(allTools, agentTool)
+		withCoderTools := func(t []tools.BaseTool) []tools.BaseTool {
+			if agentCfg.ID == "coder" {
+				t = append(t, mcpTools...)
+				if len(lspClients) > 0 {
+					t = append(t, tools.NewDiagnosticsTool(lspClients))
+				}
+			}
+			return t
 		}
 
 		if agentCfg.AllowedTools == nil {
-			return allTools
+			return withCoderTools(allTools)
 		}
 
 		var filteredTools []tools.BaseTool
@@ -217,7 +221,7 @@ func NewAgent(
 				filteredTools = append(filteredTools, tool)
 			}
 		}
-		return filteredTools
+		return withCoderTools(filteredTools)
 	}
 
 	return &agent{
@@ -230,6 +234,7 @@ func NewAgent(
 		titleProvider:       titleProvider,
 		summarizeProvider:   summarizeProvider,
 		summarizeProviderID: string(providerCfg.ID),
+		agentToolFn:         agentToolFn,
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               csync.NewLazySlice(toolFn),
 		promptQueue:         csync.NewMap[string, []string](),
@@ -343,7 +348,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	if !a.Model().SupportsImages && attachments != nil {
 		attachments = nil
 	}
-	events := make(chan AgentEvent)
+	events := make(chan AgentEvent, 1)
 	if a.IsSessionBusy(sessionID) {
 		existing, ok := a.promptQueue.Get(sessionID)
 		if !ok {
@@ -374,10 +379,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		a.activeRequests.Del(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
-		select {
-		case events <- result:
-		case <-genCtx.Done():
-		}
+		events <- result
 		close(events)
 	}()
 	return events, nil
@@ -395,7 +397,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			defer log.RecoverPanic("agent.Run", func() {
 				slog.Error("panic while generating title")
 			})
-			titleErr := a.generateTitle(context.Background(), sessionID, content)
+			titleErr := a.generateTitle(ctx, sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
 				slog.Error("failed to generate title", "error", titleErr)
 			}
@@ -503,6 +505,18 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 	})
 }
 
+func (a *agent) getAllTools() ([]tools.BaseTool, error) {
+	allTools := slices.Collect(a.tools.Seq())
+	if a.agentToolFn != nil {
+		agentTool, agentToolErr := a.agentToolFn()
+		if agentToolErr != nil {
+			return nil, agentToolErr
+		}
+		allTools = append(allTools, agentTool)
+	}
+	return allTools, nil
+}
+
 func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 
@@ -517,8 +531,12 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		return assistantMsg, nil, fmt.Errorf("failed to create assistant message: %w", err)
 	}
 
+	allTools, toolsErr := a.getAllTools()
+	if toolsErr != nil {
+		return assistantMsg, nil, toolsErr
+	}
 	// Now collect tools (which may block on MCP initialization)
-	eventChan := a.provider.StreamResponse(ctx, msgHistory, slices.Collect(a.tools.Seq()))
+	eventChan := a.provider.StreamResponse(ctx, msgHistory, allTools)
 
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
@@ -557,7 +575,8 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		default:
 			// Continue processing
 			var tool tools.BaseTool
-			for availableTool := range a.tools.Seq() {
+			allTools, _ := a.getAllTools()
+			for _, availableTool := range allTools {
 				if availableTool.Info().Name == toolCall.Name {
 					tool = availableTool
 					break
@@ -996,11 +1015,17 @@ func (a *agent) UpdateModel() error {
 		return fmt.Errorf("provider %s not found in config", largeModelCfg.Provider)
 	}
 
+	var maxTitleTokens int64 = 40
+
+	// if the max output is too low for the gemini provider it won't return anything
+	if smallModelCfg.Provider == "gemini" {
+		maxTitleTokens = 1000
+	}
 	// Recreate title provider
 	titleOpts := []provider.ProviderClientOption{
 		provider.WithModel(config.SelectedModelTypeSmall),
 		provider.WithSystemMessage(prompt.GetPrompt(prompt.PromptTitle, smallModelProviderCfg.ID)),
-		provider.WithMaxTokens(40),
+		provider.WithMaxTokens(maxTitleTokens),
 	}
 	newTitleProvider, err := provider.NewProvider(smallModelProviderCfg, titleOpts...)
 	if err != nil {

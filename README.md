@@ -3,7 +3,7 @@
 <p align="center">
     <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/adc1a6f4-b284-4603-836c-59038caa2e8b" /></a><br />
     <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
+    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
 </p>
 
 <p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
@@ -157,8 +157,8 @@ Configuration itself is stored as a JSON object:
 
 ```json
 {
-   "this-setting": {"this": "that"},
-   "that-setting": ["ceci", "cela"]
+  "this-setting": { "this": "that" },
+  "that-setting": ["ceci", "cela"]
 }
 ```
 
@@ -390,9 +390,9 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
-* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
 
 ### Vertex AI Platform
 
@@ -428,17 +428,6 @@ To add specific models to the configuration, configure as such:
 }
 ```
 
-## A Note on Claude Max and GitHub Copilot
-
-Crush only supports model providers through official, compliant APIs. We do not
-support or endorse any methods that rely on personal Claude Max and GitHub Copilot
-accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
-Terms of Service.
-
-We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us,
-[reach out](mailto:vt100@charm.sh).
-
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of
@@ -470,6 +459,69 @@ config:
 }
 ```
 
+## Disabling Provider Auto-Updates
+
+By default, Crush automatically checks for the latest and greatest list of
+providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
+the open source Crush provider database. This means that when new providers and
+models are available, or when model metadata changes, Crush automatically
+updates your local configuration.
+
+For those with restricted internet access, or those who prefer to work in
+air-gapped environments, this might not be want you want, and this feature can
+be disabled.
+
+To disable automatic provider updates, set `disable_provider_auto_update` into
+your `crush.json` config:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_provider_auto_update": true
+  }
+}
+```
+
+Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
+
+```bash
+export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
+```
+
+### Manually updating providers
+
+Manually updating providers is possible with the `crush update-providers`
+command:
+
+```bash
+# Update providers remotely from Catwalk.
+crush update-providers
+
+# Update providers from a custom Catwalk base URL.
+crush update-providers https://example.com/
+
+# Update providers from a local file.
+crush update-providers /path/to/local-providers.json
+
+# Reset providers to the embedded version, embedded at crush at build time.
+crush update-providers embedded
+
+# For more info:
+crush update-providers --help
+```
+
+## A Note on Claude Max and GitHub Copilot
+
+Crush only supports model providers through official, compliant APIs. We do not
+support or endorse any methods that rely on personal Claude Max and GitHub
+Copilot accounts or OAuth workarounds, which violate Anthropic and
+Microsoft’s Terms of Service.
+
+We’re committed to building sustainable, trusted integrations with model
+providers. If you’re a provider interested in working with us,
+[reach out](mailto:vt100@charm.sh).
+
 ## Whatcha think?
 
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
@@ -478,6 +530,7 @@ We’d love to hear your thoughts on this project. Need help? We gotchu. You can
 - [Discord][discord]
 - [Slack](https://charm.land/slack)
 - [The Fediverse](https://mastodon.social/@charmcli)
+- [Bluesky](https://bsky.app/profile/charm.land)
 
 [discord]: https://charm.land/discord
 

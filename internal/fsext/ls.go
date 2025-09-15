@@ -141,8 +141,16 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		return true
 	}
 
-	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
-		slog.Debug("ignoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
+	parentDir := filepath.Dir(path)
+	ignoreParser := dl.getIgnore(parentDir)
+	if ignoreParser.MatchesPath(relPath) {
+		slog.Debug("ignoring dir pattern", "path", relPath, "dir", parentDir)
+		return true
+	}
+
+	// For directories, also check with trailing slash (gitignore convention)
+	if ignoreParser.MatchesPath(relPath + "/") {
+		slog.Debug("ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
 		return true
 	}
 
@@ -160,10 +168,13 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 
 func (dl *directoryLister) checkParentIgnores(path string) bool {
 	parent := filepath.Dir(filepath.Dir(path))
-	for parent != dl.rootPath && parent != "." && path != "." {
+	for parent != "." && path != "." {
 		if dl.getIgnore(parent).MatchesPath(path) {
 			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
 			return true
+		}
+		if parent == dl.rootPath {
+			break
 		}
 		parent = filepath.Dir(parent)
 	}

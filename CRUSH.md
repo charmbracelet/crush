@@ -59,3 +59,7 @@ func TestYourFunction(t *testing.T) {
   - If `goimports` is not available, use `gofmt`.
   - You can also use `task fmt` to run `gofumpt -w .` on the entire project,
     as long as `gofumpt` is on the `PATH`.
+
+## Committing
+
+- ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).

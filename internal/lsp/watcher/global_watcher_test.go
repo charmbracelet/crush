@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/rjeczalik/notify"
+	"github.com/raphamorim/notify"
 )
 
 func TestGlobalWatcher(t *testing.T) {

@@ -6,7 +6,7 @@ package watcher
 // Returns a high value to indicate no practical limit.
 func MaximizeOpenFileLimit() (int, error) {
 	// Windows and other non-Unix systems don't have file descriptor limits
-	// in the same way Unix systems do. Return a high value to indicate
+	// in the same way Unix systems do. Return a very high value to indicate
 	// there's no practical limit to worry about.
-	return 1<<20, nil // 1M, effectively unlimited
+	return 10_000_000, nil // 10M handles - way more than any process would use
 }

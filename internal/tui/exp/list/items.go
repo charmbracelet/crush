@@ -327,18 +327,20 @@ type itemSectionModel struct {
 	width int
 	title string
 	inx   int
+	id    string
 	info  string
 }
 
 // ID implements ItemSection.
 func (m *itemSectionModel) ID() string {
-	return uuid.NewString()
+	return m.id
 }
 
 func NewItemSection(title string) ItemSection {
 	return &itemSectionModel{
 		title: title,
 		inx:   -1,
+		id:    uuid.NewString(),
 	}
 }
 

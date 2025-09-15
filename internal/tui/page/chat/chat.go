@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -26,9 +27,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -255,6 +258,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case commands.ToggleThinkingMsg:
 		return p, p.toggleThinking()
+	case commands.OpenReasoningDialogMsg:
+		return p, p.openReasoningDialog()
+	case reasoning.ReasoningEffortSelectedMsg:
+		return p, p.handleReasoningEffortSelected(msg.Effort)
 	case commands.OpenExternalEditorMsg:
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
@@ -545,6 +552,49 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 		return util.InfoMsg{
 			Type: util.InfoTypeInfo,
 			Msg:  "Thinking mode " + status,
+		}
+	}
+}
+
+func (p *chatPage) openReasoningDialog() tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		model := cfg.GetModelByType(agentCfg.Model)
+		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+
+		if providerCfg != nil && model != nil &&
+			providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
+			return dialogs.OpenDialogMsg{
+				Model: reasoning.NewReasoningDialog(),
+			}
+		}
+		return nil
+	}
+}
+
+func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		currentModel := cfg.Models[agentCfg.Model]
+
+		// Update the model configuration
+		currentModel.ReasoningEffort = effort
+		cfg.Models[agentCfg.Model] = currentModel
+
+		// Update the agent with the new configuration
+		if err := p.app.UpdateAgentModel(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update reasoning effort: " + err.Error(),
+			}
+		}
+
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Reasoning effort set to " + effort,
 		}
 	}
 }

@@ -271,10 +271,25 @@
           "examples": [
             ".crush"
           ]
+        },
+        "disabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Tools to disable"
+        },
+        "disable_provider_auto_update": {
+          "type": "boolean",
+          "description": "Disable providers auto-update",
+          "default": false
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "disabled_tools"
+      ]
     },
     "Permissions": {
       "properties": {

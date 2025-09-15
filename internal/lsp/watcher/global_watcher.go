@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,22 +14,23 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/fsnotify/fsnotify"
+	"github.com/rjeczalik/notify"
 )
 
-// global manages a single fsnotify.Watcher instance shared across all LSP clients.
+// global manages file watching shared across all LSP clients.
 //
-// IMPORTANT: This implementation only watches directories, not individual files.
-// The fsnotify library automatically provides events for all files within watched
-// directories, making this approach much more efficient than watching individual files.
+// IMPORTANT: This implementation uses github.com/rjeczalik/notify which provides
+// recursive watching on all platforms. On macOS it uses FSEvents, on Linux it
+// uses inotify (with recursion handled by the library), and on Windows it uses
+// ReadDirectoryChangesW.
 //
-// Key benefits of directory-only watching:
-// - Significantly fewer file descriptors used
-// - Automatic coverage of new files created in watched directories
-// - Better performance with large codebases
-// - fsnotify handles deduplication internally (no need to track watched dirs)
+// Key benefits:
+// - Single watch point for entire directory tree
+// - Automatic recursive watching without manually adding subdirectories
+// - No file descriptor exhaustion issues
 type global struct {
-	watcher *fsnotify.Watcher
+	// Channel for receiving file system events
+	events chan notify.EventInfo
 
 	// Map of workspace watchers by client name
 	watchers *csync.Map[string, *Client]
@@ -54,21 +56,13 @@ type global struct {
 var instance = sync.OnceValue(func() *global {
 	ctx, cancel := context.WithCancel(context.Background())
 	gw := &global{
+		events:       make(chan notify.EventInfo, 4096), // Large buffer to prevent dropping events
 		watchers:     csync.NewMap[string, *Client](),
 		debounceTime: 300 * time.Millisecond,
 		debounceMap:  csync.NewMap[string, *time.Timer](),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-
-	// Initialize the fsnotify watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		slog.Error("lsp watcher: Failed to create global file watcher", "error", err)
-		return gw
-	}
-
-	gw.watcher = watcher
 
 	return gw
 })
@@ -85,11 +79,11 @@ func (gw *global) unregister(name string) {
 	slog.Debug("lsp watcher: Unregistered workspace watcher", "name", name)
 }
 
-// Start walks the given path and sets up the watcher on it.
+// Start sets up recursive watching on the workspace root.
 //
-// Note: We only watch directories, not individual files. fsnotify automatically provides
-// events for all files within watched directories. Multiple calls with the same workspace
-// are safe since fsnotify handles directory deduplication internally.
+// Note: We use github.com/rjeczalik/notify which provides recursive watching
+// with a single watch point. The "..." suffix means watch recursively.
+// This is much more efficient than manually walking and watching each directory.
 func Start() error {
 	gw := instance()
 
@@ -107,59 +101,33 @@ func Start() error {
 	gw.root = root
 	gw.started.Store(true)
 
-	// Start the event processing goroutine now that we're initialized
+	// Start the event processing goroutine
 	gw.wg.Add(1)
 	go gw.processEvents()
 
-	// Walk the workspace and add only directories to the watcher
-	// fsnotify will automatically provide events for all files within these directories
-	// Multiple calls with the same directories are safe (fsnotify deduplicates)
-	err := fsext.WalkDirectories(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	// Set up recursive watching on the root directory
+	// The "..." suffix tells notify to watch recursively
+	watchPath := filepath.Join(root, "...")
 
-		// Add directory to watcher (fsnotify handles deduplication automatically)
-		if err := gw.addDirectoryToWatcher(path); err != nil {
-			slog.Error("lsp watcher: Error watching directory", "path", path, "error", err)
-		}
+	// Watch for all event types we care about
+	events := notify.Create | notify.Write | notify.Remove | notify.Rename
 
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("lsp watcher: error walking workspace %s: %w", root, err)
+	if err := notify.Watch(watchPath, gw.events, events); err != nil {
+		return fmt.Errorf("lsp watcher: error setting up recursive watch on %s: %w", root, err)
 	}
 
+	slog.Info("lsp watcher: Started recursive watching", "root", root)
 	return nil
 }
 
-// addDirectoryToWatcher adds a directory to the fsnotify watcher.
-// fsnotify handles deduplication internally, so we don't need to track watched directories.
-func (gw *global) addDirectoryToWatcher(dirPath string) error {
-	if gw.watcher == nil {
-		return fmt.Errorf("lsp watcher: global watcher not initialized")
-	}
-
-	// Add directory to fsnotify watcher - fsnotify handles deduplication
-	// "A path can only be watched once; watching it more than once is a no-op"
-	err := gw.watcher.Add(dirPath)
-	if err != nil {
-		return fmt.Errorf("lsp watcher: failed to watch directory %s: %w", dirPath, err)
-	}
-
-	slog.Debug("lsp watcher: watching directory", "path", dirPath)
-	return nil
-}
-
-// processEvents processes file system events and handles them centrally.
-// Since we only watch directories, we automatically get events for all files
-// within those directories. When new directories are created, we add them
-// to the watcher to ensure complete coverage.
+// processEvents processes file system events from the notify library.
+// Since notify handles recursive watching for us, we don't need to manually
+// add new directories - they're automatically included.
 func (gw *global) processEvents() {
 	defer gw.wg.Done()
 	cfg := config.Get()
 
-	if gw.watcher == nil || !gw.started.Load() {
+	if !gw.started.Load() {
 		slog.Error("lsp watcher: Global watcher not initialized")
 		return
 	}
@@ -169,68 +137,89 @@ func (gw *global) processEvents() {
 		case <-gw.ctx.Done():
 			return
 
-		case event, ok := <-gw.watcher.Events:
+		case event, ok := <-gw.events:
 			if !ok {
 				return
 			}
 
-			// Handle directory creation globally (only once)
-			// When new directories are created, we need to add them to the watcher
-			// to ensure we get events for files created within them
-			if event.Op&fsnotify.Create != 0 {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if !fsext.ShouldExcludeFile(gw.root, event.Name) {
-						if err := gw.addDirectoryToWatcher(event.Name); err != nil {
-							slog.Error("lsp watcher: Error adding new directory to watcher", "path", event.Name, "error", err)
-						}
-					} else if cfg != nil && cfg.Options.DebugLSP {
-						slog.Debug("lsp watcher: Skipping ignored new directory", "path", event.Name)
-					}
-				}
+			path := event.Path()
+
+			// Skip ignored files
+			if fsext.ShouldExcludeFile(gw.root, path) {
+				continue
 			}
 
 			if cfg != nil && cfg.Options.DebugLSP {
-				slog.Debug("lsp watcher: Global watcher received event", "path", event.Name, "op", event.Op.String())
+				slog.Debug("lsp watcher: Global watcher received event", "path", path, "event", event.Event().String())
 			}
 
-			// Process the event centrally
+			// Convert notify event to our internal format and handle it
 			gw.handleFileEvent(event)
-
-		case err, ok := <-gw.watcher.Errors:
-			if !ok {
-				return
-			}
-			slog.Error("lsp watcher: Global watcher error", "error", err)
 		}
 	}
 }
 
 // handleFileEvent processes a file system event and distributes notifications to relevant clients
-func (gw *global) handleFileEvent(event fsnotify.Event) {
+func (gw *global) handleFileEvent(event notify.EventInfo) {
 	cfg := config.Get()
-	uri := string(protocol.URIFromPath(event.Name))
+	path := event.Path()
+	uri := string(protocol.URIFromPath(path))
 
-	// Handle file creation for all relevant clients (only once)
-	if event.Op&fsnotify.Create != 0 {
-		if info, err := os.Stat(event.Name); err == nil && !info.IsDir() {
-			if !fsext.ShouldExcludeFile(gw.root, event.Name) {
-				gw.openMatchingFileForClients(event.Name)
+	// Map notify events to our change types
+	var changeType protocol.FileChangeType
+	var watchKindNeeded protocol.WatchKind
+
+	switch event.Event() {
+	case notify.Create:
+		changeType = protocol.FileChangeType(protocol.Created)
+		watchKindNeeded = protocol.WatchCreate
+		// Handle file creation for all relevant clients
+		if !isDir(path) && !fsext.ShouldExcludeFile(gw.root, path) {
+			gw.openMatchingFileForClients(path)
+		}
+	case notify.Write:
+		changeType = protocol.FileChangeType(protocol.Changed)
+		watchKindNeeded = protocol.WatchChange
+	case notify.Remove:
+		changeType = protocol.FileChangeType(protocol.Deleted)
+		watchKindNeeded = protocol.WatchDelete
+	case notify.Rename:
+		// Treat rename as delete + create
+		// First handle as delete
+		for _, watcher := range gw.watchers.Seq2() {
+			if !watcher.client.HandlesFile(path) {
+				continue
+			}
+			if watched, watchKind := watcher.isPathWatched(path); watched {
+				if watchKind&protocol.WatchDelete != 0 {
+					gw.handleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Deleted))
+				}
 			}
 		}
+		// Then check if renamed file exists and treat as create
+		if !isDir(path) {
+			changeType = protocol.FileChangeType(protocol.Created)
+			watchKindNeeded = protocol.WatchCreate
+		} else {
+			return // Already handled delete, nothing more to do for directories
+		}
+	default:
+		// Unknown event type, skip
+		return
 	}
 
 	// Process the event for each relevant client
 	for client, watcher := range gw.watchers.Seq2() {
-		if !watcher.client.HandlesFile(event.Name) {
+		if !watcher.client.HandlesFile(path) {
 			continue // client doesn't handle this filetype
 		}
 
 		// Debug logging per client
 		if cfg.Options.DebugLSP {
-			matched, kind := watcher.isPathWatched(event.Name)
+			matched, kind := watcher.isPathWatched(path)
 			slog.Debug("lsp watcher: File event for client",
-				"path", event.Name,
-				"operation", event.Op.String(),
+				"path", path,
+				"event", event.Event().String(),
 				"watched", matched,
 				"kind", kind,
 				"client", client,
@@ -238,44 +227,29 @@ func (gw *global) handleFileEvent(event fsnotify.Event) {
 		}
 
 		// Check if this path should be watched according to server registrations
-		if watched, watchKind := watcher.isPathWatched(event.Name); watched {
-			switch {
-			case event.Op&fsnotify.Write != 0:
-				if watchKind&protocol.WatchChange != 0 {
-					gw.debounceHandleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Changed))
-				}
-			case event.Op&fsnotify.Create != 0:
-				// File creation was already handled globally above
-				// Just send the notification if needed
-				info, err := os.Stat(event.Name)
-				if err != nil {
-					if !os.IsNotExist(err) {
-						slog.Debug("lsp watcher: Error getting file info", "path", event.Name, "error", err)
-					}
+		if watched, watchKind := watcher.isPathWatched(path); watched {
+			if watchKind&watchKindNeeded != 0 {
+				// Skip directory events for non-delete operations
+				if changeType != protocol.FileChangeType(protocol.Deleted) && isDir(path) {
 					continue
 				}
-				if !info.IsDir() && watchKind&protocol.WatchCreate != 0 {
-					gw.debounceHandleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Created))
-				}
-			case event.Op&fsnotify.Remove != 0:
-				if watchKind&protocol.WatchDelete != 0 {
-					gw.handleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Deleted))
-				}
-			case event.Op&fsnotify.Rename != 0:
-				// For renames, first delete
-				if watchKind&protocol.WatchDelete != 0 {
-					gw.handleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Deleted))
-				}
 
-				// Then check if the new file exists and create an event
-				if info, err := os.Stat(event.Name); err == nil && !info.IsDir() {
-					if watchKind&protocol.WatchCreate != 0 {
-						gw.debounceHandleFileEventForClient(watcher, uri, protocol.FileChangeType(protocol.Created))
-					}
+				if changeType == protocol.FileChangeType(protocol.Deleted) {
+					// Don't debounce deletes
+					gw.handleFileEventForClient(watcher, uri, changeType)
+				} else {
+					// Debounce creates and changes
+					gw.debounceHandleFileEventForClient(watcher, uri, changeType)
 				}
 			}
 		}
 	}
+}
+
+// isDir checks if a path is a directory
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // openMatchingFileForClients opens a newly created file for all clients that handle it (only once per file)
@@ -349,10 +323,9 @@ func (gw *global) shutdown() {
 		gw.cancel()
 	}
 
-	if gw.watcher != nil {
-		gw.watcher.Close()
-		gw.watcher = nil
-	}
+	// Stop watching and close the event channel
+	notify.Stop(gw.events)
+	close(gw.events)
 
 	gw.wg.Wait()
 	slog.Debug("lsp watcher: Global watcher shutdown complete")

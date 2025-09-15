@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -41,7 +42,7 @@ type lsTool struct {
 
 const (
 	LSToolName    = "ls"
-	MaxLSFiles    = 1000
+	maxLSFiles    = 1000
 	lsDescription = `Directory listing tool that shows files and subdirectories in a tree structure, helping you explore and understand the project organization.
 
 WHEN TO USE THIS TOOL:
@@ -173,7 +174,13 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 	}
 
 	// Get file count for metadata
-	files, truncated, err := fsext.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
+	ls := config.Get().Tools.Ls
+	files, truncated, err := fsext.ListDirectory(
+		searchPath,
+		params.Ignore,
+		ls.MaxDepth,
+		min(ls.MaxItems, maxLSFiles),
+	)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error listing directory for metadata: %w", err)
 	}
@@ -192,7 +199,14 @@ func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
 		return "", fmt.Errorf("path does not exist: %s", searchPath)
 	}
 
-	files, truncated, err := fsext.ListDirectory(searchPath, ignore, MaxLSFiles)
+	ls := config.Get().Tools.Ls
+	maxFiles := min(maxLSFiles, ls.MaxItems)
+	files, truncated, err := fsext.ListDirectory(
+		searchPath,
+		ignore,
+		ls.MaxDepth,
+		maxFiles,
+	)
 	if err != nil {
 		return "", fmt.Errorf("error listing directory: %w", err)
 	}
@@ -201,7 +215,7 @@ func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
 	output := printTree(tree, searchPath)
 
 	if truncated {
-		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %[1]d files and directories are included below:\n\n%s", maxFiles, output)
 	}
 
 	return output, nil

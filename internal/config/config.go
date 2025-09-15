@@ -129,6 +129,14 @@ type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
+	//
+
+	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+}
+
+// Completions defines options for the completions UI.
+type Completions struct {
+	MaxDepth int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
 }
 
 type Permissions struct {
@@ -237,6 +245,15 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
+type Tools struct {
+	Ls ToolLs `json:"ls,omitzero"`
+}
+
+type ToolLs struct {
+	MaxDepth int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxItems int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -254,6 +271,8 @@ type Config struct {
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+
+	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	// Internal
 	workingDir string `json:"-"`

@@ -232,8 +232,8 @@ github.com/pressly/goose/v3 v3.25.0 h1:6WeYhMWGRCzpyd89SpODFnCBCKz41KrVbRT58nVjG
 github.com/pressly/goose/v3 v3.25.0/go.mod h1:4hC1KrritdCxtuFsqgs1R4AU5bWtTAf+cnWvfhf2DNY=
 github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c h1:kmzxiX+OB0knCo1V0dkEkdPelzCdAzCURCfmFArn2/A=
 github.com/qjebbs/go-jsons v0.0.0-20221222033332-a534c5fc1c4c/go.mod h1:wNJrtinHyC3YSf6giEh4FJN8+yZV7nXBjvmfjhBIcw4=
-github.com/raphamorim/notify v0.9.3 h1:sOUIE8U6wtt93QA3/2HOXsGsrsVvT7US5Ye01+Hzl9E=
-github.com/raphamorim/notify v0.9.3/go.mod h1:3FXSIPyrunV10GCnLGPrpSxoY/Dxi+saeQb9hf+TDSo=
+github.com/raphamorim/notify v0.9.4 h1:JXAGOzeR/cnclKkRCZINKS4EtB47O5TD1N1iCkkarTM=
+github.com/raphamorim/notify v0.9.4/go.mod h1:3FXSIPyrunV10GCnLGPrpSxoY/Dxi+saeQb9hf+TDSo=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=

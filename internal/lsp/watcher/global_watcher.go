@@ -2,12 +2,14 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -113,8 +115,24 @@ func Start() error {
 	events := notify.Create | notify.Write | notify.Remove | notify.Rename
 
 	if err := notify.Watch(watchPath, gw.events, events); err != nil {
+		// Check if the error might be due to file descriptor limits
+		if isFileLimitError(err) {
+			slog.Warn("lsp watcher: Hit file descriptor limit, attempting to increase", "error", err)
+			if newLimit, rlimitErr := MaximizeOpenFileLimit(); rlimitErr == nil {
+				slog.Info("lsp watcher: Increased file descriptor limit", "limit", newLimit)
+				// Retry the watch operation
+				if err = notify.Watch(watchPath, gw.events, events); err == nil {
+					slog.Info("lsp watcher: Successfully set up watch after increasing limit")
+					goto watchSuccess
+				}
+				err = fmt.Errorf("still failed after increasing limit: %w", err)
+			} else {
+				slog.Warn("lsp watcher: Failed to increase file descriptor limit", "error", rlimitErr)
+			}
+		}
 		return fmt.Errorf("lsp watcher: error setting up recursive watch on %s: %w", root, err)
 	}
+watchSuccess:
 
 	slog.Info("lsp watcher: Started recursive watching", "root", root)
 	return nil
@@ -334,4 +352,13 @@ func (gw *global) shutdown() {
 // Shutdown shuts down the singleton global watcher
 func Shutdown() {
 	instance().shutdown()
+}
+
+// isFileLimitError checks if an error is related to file descriptor limits
+func isFileLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for common file limit errors
+	return errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
 }

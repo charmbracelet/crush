@@ -12,6 +12,14 @@
           "examples": [
             10
           ]
+        },
+        "max_items": {
+          "type": "integer",
+          "description": "Maximum number of items to return for the ls tool",
+          "default": 1000,
+          "examples": [
+            100
+          ]
         }
       },
       "additionalProperties": false,

@@ -136,7 +136,12 @@ type TUIOptions struct {
 
 // Completions defines options for the completions UI.
 type Completions struct {
-	MaxDepth int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+func (c Completions) Limits() (depth, items int) {
+	return ptrValOr(c.MaxDepth, -1), ptrValOr(c.MaxItems, -1)
 }
 
 type Permissions struct {
@@ -250,8 +255,12 @@ type Tools struct {
 }
 
 type ToolLs struct {
-	MaxDepth int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
-	MaxItems int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+func (t ToolLs) Limits() (depth, items int) {
+	return ptrValOr(t.MaxDepth, -1), ptrValOr(t.MaxItems, -1)
 }
 
 // Config holds the configuration for crush.
@@ -580,4 +589,11 @@ func resolveEnvs(envs map[string]string) []string {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
 	return res
+}
+
+func ptrValOr[T any](t *T, el T) T {
+	if t == nil {
+		return el
+	}
+	return *t
 }

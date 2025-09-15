@@ -1,12 +1,14 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -65,6 +67,16 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
 		cfg.Options.Debug,
 	)
+
+	if bts, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil || strings.TrimSpace(string(bts)) != "true" {
+		const depth = 2
+		const items = 64
+		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
+		assignIfNil(&cfg.Tools.Ls.MaxDepth, depth)
+		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+	}
 
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
@@ -613,4 +625,10 @@ func GlobalConfigData() string {
 	}
 
 	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+}
+
+func assignIfNil[T any](ptr **T, val T) {
+	if *ptr == nil {
+		*ptr = &val
+	}
 }

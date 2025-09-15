@@ -175,11 +175,12 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 
 	// Get file count for metadata
 	ls := config.Get().Tools.Ls
+	depth, limit := ls.Limits()
 	files, truncated, err := fsext.ListDirectory(
 		searchPath,
 		params.Ignore,
-		ls.MaxDepth,
-		min(ls.MaxItems, maxLSFiles),
+		depth,
+		min(limit, maxLSFiles),
 	)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error listing directory for metadata: %w", err)
@@ -200,11 +201,12 @@ func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
 	}
 
 	ls := config.Get().Tools.Ls
-	maxFiles := min(maxLSFiles, ls.MaxItems)
+	depth, limit := ls.Limits()
+	maxFiles := min(maxLSFiles, limit)
 	files, truncated, err := fsext.ListDirectory(
 		searchPath,
 		ignore,
-		ls.MaxDepth,
+		depth,
 		maxFiles,
 	)
 	if err != nil {

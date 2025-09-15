@@ -118,7 +118,7 @@ func Start() error {
 		// Check if the error might be due to file descriptor limits
 		if isFileLimitError(err) {
 			slog.Warn("lsp watcher: Hit file descriptor limit, attempting to increase", "error", err)
-			if newLimit, rlimitErr := MaximizeOpenFileLimit(); rlimitErr == nil {
+			if newLimit, rlimitErr := maximizeOpenFileLimit(); rlimitErr == nil {
 				slog.Info("lsp watcher: Increased file descriptor limit", "limit", newLimit)
 				// Retry the watch operation
 				if err = notify.Watch(watchPath, gw.events, events); err == nil {

@@ -2,9 +2,9 @@
 
 package watcher
 
-// MaximizeOpenFileLimit is a no-op on non-Unix systems.
+// maximizeOpenFileLimit is a no-op on non-Unix systems.
 // Returns a high value to indicate no practical limit.
-func MaximizeOpenFileLimit() (int, error) {
+func maximizeOpenFileLimit() (int, error) {
 	// Windows and other non-Unix systems don't have file descriptor limits
 	// in the same way Unix systems do. Return a very high value to indicate
 	// there's no practical limit to worry about.

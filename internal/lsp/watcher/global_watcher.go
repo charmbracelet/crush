@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,9 +80,10 @@ func (gw *global) unregister(name string) {
 
 // Start sets up recursive watching on the workspace root.
 //
-// Note: We use github.com/rjeczalik/notify which provides recursive watching
-// with a single watch point. The "..." suffix means watch recursively.
-// This is much more efficient than manually walking and watching each directory.
+// Note: We use github.com/rjeczalik/notify which provides recursive watching.
+// However, to avoid "too many open files" errors on directories with massive
+// node_modules trees, we set up selective watching that excludes large
+// dependency directories upfront rather than filtering events afterward.
 func Start() error {
 	gw := instance()
 
@@ -105,18 +105,46 @@ func Start() error {
 	gw.wg.Add(1)
 	go gw.processEvents()
 
-	// Set up recursive watching on the root directory
-	// The "..." suffix tells notify to watch recursively
-	watchPath := filepath.Join(root, "...")
-
 	// Watch for all event types we care about
 	events := notify.Create | notify.Write | notify.Remove | notify.Rename
 
-	if err := notify.Watch(watchPath, gw.events, events); err != nil {
-		return fmt.Errorf("lsp watcher: error setting up recursive watch on %s: %w", root, err)
+	// Set up selective watching to avoid file descriptor exhaustion
+	// Use the existing fsext.WalkDirectories which respects .gitignore/.crushignore
+	var watchedDirs []string
+	err := fsext.WalkDirectories(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			slog.Debug("lsp watcher: Skipping directory due to error", "path", path, "error", err)
+			return nil // Skip directories we can't access
+		}
+		watchedDirs = append(watchedDirs, path)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("lsp watcher: failed to walk directories: %w", err)
 	}
 
-	slog.Info("lsp watcher: Started recursive watching", "root", root)
+	// Set up non-recursive watches on all allowed directories
+	// This avoids watching excluded directories like node_modules entirely
+	watchCount := 0
+	var watchedPaths []string
+	for _, dir := range watchedDirs {
+		if err := notify.Watch(dir, gw.events, events); err != nil {
+			slog.Warn("lsp watcher: Failed to watch directory, skipping", "path", dir, "error", err)
+			continue
+		}
+		watchCount++
+		watchedPaths = append(watchedPaths, dir)
+		if cfg.Options.DebugLSP {
+			slog.Debug("lsp watcher: Watching directory", "path", dir)
+		}
+	}
+
+	slog.Info("lsp watcher: Set up watches", "count", watchCount, "total_dirs_found", len(watchedDirs))
+	if cfg.Options.DebugLSP {
+		slog.Debug("lsp watcher: Watched directories", "paths", watchedPaths)
+	}
+
+	slog.Info("lsp watcher: Started selective watching", "root", root)
 	return nil
 }
 
@@ -173,6 +201,17 @@ func (gw *global) handleFileEvent(event notify.EventInfo) {
 	case notify.Create:
 		changeType = protocol.FileChangeType(protocol.Created)
 		watchKindNeeded = protocol.WatchCreate
+		// Handle directory creation - set up watch on new directories
+		if isDir(path) && !fsext.ShouldExcludeFile(gw.root, path) {
+			events := notify.Create | notify.Write | notify.Remove | notify.Rename
+			if err := notify.Watch(path, gw.events, events); err != nil {
+				slog.Warn("lsp watcher: Failed to watch newly created directory", "path", path, "error", err)
+			} else {
+				if cfg.Options.DebugLSP {
+					slog.Debug("lsp watcher: Added watch for new directory", "path", path)
+				}
+			}
+		}
 		// Handle file creation for all relevant clients
 		if !isDir(path) && !fsext.ShouldExcludeFile(gw.root, path) {
 			gw.openMatchingFileForClients(path)
@@ -183,6 +222,7 @@ func (gw *global) handleFileEvent(event notify.EventInfo) {
 	case notify.Remove:
 		changeType = protocol.FileChangeType(protocol.Deleted)
 		watchKindNeeded = protocol.WatchDelete
+		// Note: notify library automatically handles cleanup of watches for deleted directories
 	case notify.Rename:
 		// Treat rename as delete + create
 		// First handle as delete

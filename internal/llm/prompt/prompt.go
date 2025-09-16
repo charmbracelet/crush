@@ -15,11 +15,21 @@ import (
 type PromptID string
 
 const (
-	PromptCoder      PromptID = "coder"
-	PromptTitle      PromptID = "title"
-	PromptTask       PromptID = "task"
-	PromptSummarizer PromptID = "summarizer"
-	PromptDefault    PromptID = "default"
+	PromptCoder          PromptID = "coder"
+	PromptTitle          PromptID = "title"
+	PromptTask           PromptID = "task"
+	PromptSummarizer     PromptID = "summarizer"
+	PromptProjectManager PromptID = "project_manager"
+	PromptArchitect      PromptID = "architect"
+	PromptFrontend       PromptID = "frontend"
+	PromptBackend        PromptID = "backend"
+	PromptDatabase       PromptID = "database"
+	PromptDevOps         PromptID = "devops"
+	PromptQA             PromptID = "qa"
+	PromptSecurity       PromptID = "security"
+	PromptDocumentation  PromptID = "documentation"
+	PromptReviewer       PromptID = "reviewer"
+	PromptDefault        PromptID = "default"
 )
 
 func GetPrompt(promptID PromptID, provider string, contextPaths ...string) string {
@@ -33,6 +43,26 @@ func GetPrompt(promptID PromptID, provider string, contextPaths ...string) strin
 		basePrompt = TaskPrompt()
 	case PromptSummarizer:
 		basePrompt = SummarizerPrompt()
+	case PromptProjectManager:
+		basePrompt = ProjectManagerPrompt(provider, contextPaths...)
+	case PromptArchitect:
+		basePrompt = ArchitectPrompt(provider, contextPaths...)
+	case PromptFrontend:
+		basePrompt = FrontendPrompt(provider, contextPaths...)
+	case PromptBackend:
+		basePrompt = BackendPrompt(provider, contextPaths...)
+	case PromptDatabase:
+		basePrompt = DatabasePrompt(provider, contextPaths...)
+	case PromptDevOps:
+		basePrompt = DevOpsPrompt(provider, contextPaths...)
+	case PromptQA:
+		basePrompt = QAPrompt(provider, contextPaths...)
+	case PromptSecurity:
+		basePrompt = SecurityPrompt(provider, contextPaths...)
+	case PromptDocumentation:
+		basePrompt = DocumentationPrompt(provider, contextPaths...)
+	case PromptReviewer:
+		basePrompt = ReviewerPrompt(provider, contextPaths...)
 	default:
 		basePrompt = "You are a helpful assistant"
 	}

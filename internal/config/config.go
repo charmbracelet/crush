@@ -461,6 +461,7 @@ func filterSlice(data []string, mask []string, include bool) []string {
 
 func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	readOnlyTools := resolveReadOnlyTools(allowedTools)
 
 	agents := map[string]Agent{
 		"coder": {
@@ -477,10 +478,90 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: readOnlyTools,
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 			AllowedLSP: []string{},
+		},
+		"project_manager": {
+			ID:           "project_manager",
+			Name:         "Project Manager",
+			Description:  "An agent that handles project planning, task breakdown, and coordination.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: readOnlyTools,
+		},
+		"architect": {
+			ID:           "architect",
+			Name:         "System Architect",
+			Description:  "An agent that handles high-level system design and architecture decisions.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: readOnlyTools,
+		},
+		"frontend": {
+			ID:           "frontend",
+			Name:         "Frontend Developer",
+			Description:  "An agent specialized in UI/UX implementation and frontend development.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"backend": {
+			ID:           "backend",
+			Name:         "Backend Developer",
+			Description:  "An agent specialized in server-side logic and API development.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"database": {
+			ID:           "database",
+			Name:         "Database Specialist",
+			Description:  "An agent specialized in database design and optimization.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"devops": {
+			ID:           "devops",
+			Name:         "DevOps Engineer",
+			Description:  "An agent that handles deployment, CI/CD, and infrastructure management.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"qa": {
+			ID:           "qa",
+			Name:         "QA Engineer",
+			Description:  "An agent that handles testing and quality assurance.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"security": {
+			ID:           "security",
+			Name:         "Security Specialist",
+			Description:  "An agent that handles security auditing and vulnerability assessment.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: readOnlyTools,
+		},
+		"documentation": {
+			ID:           "documentation",
+			Name:         "Documentation Writer",
+			Description:  "An agent that creates and maintains documentation.",
+			Model:        SelectedModelTypeSmall,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+		"reviewer": {
+			ID:           "reviewer",
+			Name:         "Code Reviewer",
+			Description:  "An agent that performs automated code review and style enforcement.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: readOnlyTools,
 		},
 	}
 	c.Agents = agents

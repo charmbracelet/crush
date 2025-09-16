@@ -88,8 +88,18 @@ type agent struct {
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
-	"coder": prompt.PromptCoder,
-	"task":  prompt.PromptTask,
+	"coder":          prompt.PromptCoder,
+	"task":           prompt.PromptTask,
+	"project_manager": prompt.PromptProjectManager,
+	"architect":      prompt.PromptArchitect,
+	"frontend":       prompt.PromptFrontend,
+	"backend":        prompt.PromptBackend,
+	"database":       prompt.PromptDatabase,
+	"devops":         prompt.PromptDevOps,
+	"qa":             prompt.PromptQA,
+	"security":       prompt.PromptSecurity,
+	"documentation":  prompt.PromptDocumentation,
+	"reviewer":       prompt.PromptReviewer,
 }
 
 func NewAgent(

@@ -342,6 +342,20 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
+	if c.Options.ContextPaths == nil {
+		c.Options.ContextPaths = []string{}
+	}
+	if c.Options.MemoryPaths == nil {
+		crushConfigDir := filepath.Dir(GlobalConfig())
+		c.Options.MemoryPaths = []string{
+			filepath.Join(crushConfigDir, "CRUSH.md"),
+			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
+		}
+	}
+	c.Options.ContextPaths = append(c.Options.ContextPaths, c.Options.MemoryPaths...)
+	if c.Options.SkillsPaths == nil {
+		c.Options.SkillsPaths = []string{}
+	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
@@ -372,6 +386,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	// Add the default context paths if they are not already present
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
+
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 

@@ -360,6 +360,17 @@
           "type": "array",
           "description": "Paths to files containing context information for the AI"
         },
+        "memory_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Paths to files containing memory information for the AI",
+          "default": [
+            "~/.config/crush/CRUSH.md",
+            "~/.config/AGENTS.md"
+          ]
+        },
         "skills_paths": {
           "items": {
             "type": "string",

@@ -68,7 +68,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug,
 	)
 
-	if bts, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil || strings.TrimSpace(string(bts)) != "true" {
+	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -631,4 +631,13 @@ func assignIfNil[T any](ptr **T, val T) {
 	if *ptr == nil {
 		*ptr = &val
 	}
+}
+
+func isInsideWorktree() bool {
+	bts, err := exec.CommandContext(
+		context.Background(),
+		"git", "rev-parse",
+		"--is-inside-work-tree",
+	).CombinedOutput()
+	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }

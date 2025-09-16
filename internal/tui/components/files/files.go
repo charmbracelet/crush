@@ -13,7 +13,6 @@ import (
 	"github.com/nom-nom-hub/blush/internal/config"
 	"github.com/nom-nom-hub/blush/internal/fsext"
 	"github.com/nom-nom-hub/blush/internal/history"
-	"github.com/nom-nom-hub/blush/internal/tui/components/core"
 	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
@@ -49,12 +48,18 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 		if sectionName == "" {
 			sectionName = "Modified Files"
 		}
-		section := t.S().Subtle.Render(sectionName)
+		// Create a beautiful section header with decorative elements
+		sectionStyle := t.S().Subtle.Bold(true).Foreground(t.Secondary)
+		section := sectionStyle.Render(sectionName)
 		fileList = append(fileList, section, "")
 	}
 
 	if len(fileSlice) == 0 {
-		fileList = append(fileList, t.S().Base.Foreground(t.Border).Render("None"))
+		// Beautiful empty state with decorative elements
+		emptyStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true)
+		emptyIcon := t.S().Base.Foreground(t.Border).Render("📂")
+		emptyMessage := emptyStyle.Render("No files modified in this session")
+		fileList = append(fileList, fmt.Sprintf("%s %s", emptyIcon, emptyMessage))
 		return fileList
 	}
 
@@ -81,12 +86,15 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 			break
 		}
 
+		// Beautiful status indicators with enhanced styling
 		var statusParts []string
 		if file.Additions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
+			addStyle := t.S().Base.Foreground(t.Success).Bold(true)
+			statusParts = append(statusParts, addStyle.Render(fmt.Sprintf("▲ +%d", file.Additions)))
 		}
 		if file.Deletions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
+			delStyle := t.S().Base.Foreground(t.Error).Bold(true)
+			statusParts = append(statusParts, delStyle.Render(fmt.Sprintf("▼ -%d", file.Deletions)))
 		}
 
 		extraContent := strings.Join(statusParts, " ")
@@ -98,15 +106,62 @@ func RenderFileList(fileSlice []SessionFile, opts RenderOptions) []string {
 		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
 		filePath = ansi.Truncate(filePath, opts.MaxWidth-lipgloss.Width(extraContent)-2, "…")
 
-		fileList = append(fileList,
-			core.Status(
-				core.StatusOpts{
-					Title:        filePath,
-					ExtraContent: extraContent,
-				},
-				opts.MaxWidth,
-			),
-		)
+		// Enhanced file icons based on file extension with beautiful styling
+		icon := "📄" // Default file icon
+		iconStyle := t.S().Base.Foreground(t.FgSubtle)
+		ext := strings.ToLower(filepath.Ext(filePath))
+		switch ext {
+		case ".go":
+			icon = "🐹"
+			iconStyle = t.S().Base.Foreground(t.Primary)
+		case ".js", ".jsx":
+			icon = "📜"
+			iconStyle = t.S().Base.Foreground(t.Secondary)
+		case ".ts", ".tsx":
+			icon = "📘"
+			iconStyle = t.S().Base.Foreground(t.Info)
+		case ".py":
+			icon = "🐍"
+			iconStyle = t.S().Base.Foreground(t.Warning)
+		case ".md":
+			icon = "📝"
+			iconStyle = t.S().Base.Foreground(t.Success)
+		case ".json":
+			icon = "📊"
+			iconStyle = t.S().Base.Foreground(t.Info)
+		case ".html":
+			icon = "🌐"
+			iconStyle = t.S().Base.Foreground(t.Error)
+		case ".css", ".scss", ".sass":
+			icon = "🎨"
+			iconStyle = t.S().Base.Foreground(t.Primary)
+		case ".sql":
+			icon = "🗄️"
+			iconStyle = t.S().Base.Foreground(t.Secondary)
+		case ".yml", ".yaml":
+			icon = "🔧"
+			iconStyle = t.S().Base.Foreground(t.FgHalfMuted)
+		case ".gitignore", ".env":
+			icon = "⚙️"
+			iconStyle = t.S().Base.Foreground(t.FgMuted)
+		}
+
+		// Create a beautiful file entry with enhanced visual styling
+		iconPart := iconStyle.Render(icon)
+		filePathStyle := t.S().Base.Foreground(t.FgBase)
+		fileEntry := fmt.Sprintf("%s %s", iconPart, filePathStyle.Render(filePath))
+		
+		// Combine all parts in a beautiful layout
+		if extraContent != "" {
+			fileEntry = lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				fileEntry,
+				strings.Repeat(" ", max(0, opts.MaxWidth-lipgloss.Width(fileEntry)-lipgloss.Width(extraContent))),
+				extraContent,
+			)
+		}
+		
+		fileList = append(fileList, fileEntry)
 		filesShown++
 	}
 

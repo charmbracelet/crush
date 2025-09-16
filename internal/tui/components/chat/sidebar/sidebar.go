@@ -115,64 +115,107 @@ func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 
-	style := t.S().Base.
+	// Main container style with enhanced visual design
+	containerStyle := t.S().Base.
 		Width(m.width).
 		Height(m.height).
-		Padding(1)
+		Padding(1, 2).
+		Background(t.BgBaseLighter).
+		BorderForeground(t.Border).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderLeft(true)
+		
 	if m.compactMode {
-		style = style.PaddingTop(0)
+		containerStyle = containerStyle.PaddingTop(0)
 	}
 
+	// Create a beautiful header section
 	if !m.compactMode {
 		if m.height > LogoHeightBreakpoint {
-			parts = append(parts, m.logo)
+			// Enhanced logo section with decorative elements
+			logoSection := lipgloss.JoinVertical(
+				lipgloss.Center,
+				"",
+				m.logo,
+				"",
+				t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2)),
+			)
+			parts = append(parts, logoSection)
 		} else {
 			// Use a smaller logo for smaller screens
 			parts = append(parts,
-				logo.SmallRender(m.width-style.GetHorizontalFrameSize()),
-				"")
+				"",
+				logo.SmallRender(m.width-containerStyle.GetHorizontalFrameSize()),
+				t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2)),
+			)
 		}
 	}
 
-	if !m.compactMode && m.session.ID != "" {
-		parts = append(parts, t.S().Muted.Render(m.session.Title), "")
-	} else if m.session.ID != "" {
-		parts = append(parts, t.S().Text.Render(m.session.Title), "")
-	}
-
-	if !m.compactMode {
-		parts = append(parts,
-			m.cwd,
+	// Session information with enhanced styling
+	if m.session.ID != "" {
+		// Create a beautiful card-like container for session info
+		sessionTitle := t.S().Title.Bold(true).Foreground(t.Primary).Render(m.session.Title)
+		sessionCard := lipgloss.JoinVertical(
+			lipgloss.Left,
+			sessionTitle,
 			"",
 		)
+		parts = append(parts, sessionCard)
 	}
-	parts = append(parts,
-		m.currentModelBlock(),
-	)
 
-	// Check if we should use horizontal layout for sections
+	// Current working directory with enhanced styling
+	if !m.compactMode {
+		cwdStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true)
+		cwdIcon := t.S().Base.Foreground(t.Secondary).Bold(true).Render("📁")
+		cwdWithIcon := fmt.Sprintf("%s %s", cwdIcon, cwdStyle.Render(m.cwd))
+		parts = append(parts, cwdWithIcon, "")
+	}
+	
+	// Enhanced model information block with decorative elements
+	modelBlock := m.currentModelBlock()
+	if modelBlock != "" {
+		parts = append(parts, modelBlock)
+	}
+
+	// Enhanced sections with better visual organization
 	if m.compactMode && m.width > m.height {
 		// Horizontal layout for compact mode when width > height
 		sectionsContent := m.renderSectionsHorizontal()
 		if sectionsContent != "" {
-			parts = append(parts, "", sectionsContent)
+			decorativeLine := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2))
+			parts = append(parts, decorativeLine, sectionsContent)
 		}
 	} else {
 		// Vertical layout (default)
 		if m.session.ID != "" {
-			parts = append(parts, "", m.filesBlock())
+			filesBlock := m.filesBlock()
+			if filesBlock != "" {
+				decorativeLine := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2))
+				parts = append(parts, decorativeLine, filesBlock)
+			}
 		}
-		parts = append(parts,
-			"",
-			m.lspBlock(),
-			"",
-			m.mcpBlock(),
-		)
+		
+		lspBlock := m.lspBlock()
+		if lspBlock != "" {
+			decorativeLine := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2))
+			parts = append(parts, decorativeLine, lspBlock)
+		}
+		
+		mcpBlock := m.mcpBlock()
+		if mcpBlock != "" {
+			decorativeLine := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2))
+			parts = append(parts, decorativeLine, mcpBlock)
+		}
 	}
 
-	return style.Render(
-		lipgloss.JoinVertical(lipgloss.Left, parts...),
-	)
+	// Add a decorative footer
+	if !m.compactMode {
+		footerLine := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", m.width-containerStyle.GetHorizontalFrameSize()-2))
+		parts = append(parts, "", footerLine)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return containerStyle.Render(content)
 }
 
 func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
@@ -554,14 +597,18 @@ func (s *sidebarCmp) currentModelBlock() string {
 
 	t := styles.CurrentTheme()
 
-	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
+	// Beautiful model header with enhanced styling
+	modelIcon := t.S().Base.Foreground(t.Primary).Bold(true).Render(styles.ModelIcon)
+	modelName := t.S().Title.Bold(true).Foreground(t.Primary).Render(model.Name)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
+	
 	parts := []string{
 		modelInfo,
 	}
+	
+	// Enhanced reasoning information with beautiful styling
 	if model.CanReason {
-		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+		reasoningInfoStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true).PaddingLeft(2)
 		switch modelProvider.Type {
 		case catwalk.TypeOpenAI:
 			reasoningEffort := model.DefaultReasoningEffort
@@ -569,26 +616,83 @@ func (s *sidebarCmp) currentModelBlock() string {
 				reasoningEffort = selectedModel.ReasoningEffort
 			}
 			formatter := cases.Title(language.English, cases.NoLower)
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+			reasoningIcon := t.S().Base.Foreground(t.Secondary).Render("🧠")
+			reasoningText := reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning: %s", reasoningEffort)))
+			parts = append(parts, fmt.Sprintf("%s %s", reasoningIcon, reasoningText))
 		case catwalk.TypeAnthropic:
 			formatter := cases.Title(language.English, cases.NoLower)
+			reasoningIcon := t.S().Base.Foreground(t.Secondary).Render("🧠")
+			var reasoningText string
 			if selectedModel.Think {
-				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+				reasoningText = reasoningInfoStyle.Render(formatter.String("Thinking: ON"))
 			} else {
-				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+				reasoningText = reasoningInfoStyle.Render(formatter.String("Thinking: OFF"))
 			}
+			parts = append(parts, fmt.Sprintf("%s %s", reasoningIcon, reasoningText))
 		}
 	}
+	
+	// Enhanced token usage information with beautiful styling
 	if s.session.ID != "" {
-		parts = append(
-			parts,
-			"  "+formatTokensAndCost(
-				s.session.CompletionTokens+s.session.PromptTokens,
-				model.ContextWindow,
-				s.session.Cost,
-			),
-		)
+		tokensUsed := s.session.CompletionTokens + s.session.PromptTokens
+		percentage := (float64(tokensUsed) / float64(model.ContextWindow)) * 100
+		
+		// Format tokens in human-readable format (e.g., 110K, 1.2M)
+		var formattedTokens string
+		switch {
+		case tokensUsed >= 1_000_000:
+			formattedTokens = fmt.Sprintf("%.1fM", float64(tokensUsed)/1_000_000)
+		case tokensUsed >= 1_000:
+			formattedTokens = fmt.Sprintf("%.1fK", float64(tokensUsed)/1_000)
+		default:
+			formattedTokens = fmt.Sprintf("%d", tokensUsed)
+		}
+
+		// Remove .0 suffix if present
+		if strings.HasSuffix(formattedTokens, ".0K") {
+			formattedTokens = strings.Replace(formattedTokens, ".0K", "K", 1)
+		}
+		if strings.HasSuffix(formattedTokens, ".0M") {
+			formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
+		}
+
+		// Beautiful token usage visualization
+		tokenStyle := t.S().Base.Foreground(t.FgSubtle)
+		percentageStyle := t.S().Base.Foreground(t.FgMuted)
+		
+		// Color coding for token usage with beautiful gradients
+		if percentage > 90 {
+			percentageStyle = t.S().Base.Foreground(t.Error).Bold(true)
+		} else if percentage > 75 {
+			percentageStyle = t.S().Base.Foreground(t.Warning).Bold(true)
+		} else {
+			percentageStyle = t.S().Base.Foreground(t.Success)
+		}
+		
+		formattedPercentage := percentageStyle.Render(fmt.Sprintf("%d%%", int(percentage)))
+		formattedTokens = tokenStyle.Render(fmt.Sprintf("(%s tokens)", formattedTokens))
+		
+		costInfo := t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("$%.3f", s.session.Cost))
+		
+		// Beautiful token usage entry
+		tokenIcon := t.S().Base.Foreground(t.FgSubtle).Render("📊")
+		tokenInfo := fmt.Sprintf("%s %s %s %s", tokenIcon, formattedPercentage, formattedTokens, costInfo)
+		
+		if percentage > 80 {
+			// Add warning icon for high token usage
+			warningIcon := t.S().Base.Foreground(t.Warning).Render(styles.WarningIcon)
+			tokenInfo = fmt.Sprintf("%s %s", warningIcon, tokenInfo)
+		}
+		
+		parts = append(parts, "  "+tokenInfo)
 	}
+	
+	// Add a beautiful separator line
+	if len(parts) > 1 {
+		separator := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", min(s.getMaxWidth(), 25)))
+		parts = append(parts, separator)
+	}
+	
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		parts...,

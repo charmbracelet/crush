@@ -7,7 +7,6 @@ import (
 
 	"github.com/nom-nom-hub/blush/internal/config"
 	"github.com/nom-nom-hub/blush/internal/llm/agent"
-	"github.com/nom-nom-hub/blush/internal/tui/components/core"
 	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
@@ -29,13 +28,19 @@ func RenderMCPList(opts RenderOptions) []string {
 		if sectionName == "" {
 			sectionName = "MCPs"
 		}
-		section := t.S().Subtle.Render(sectionName)
+		// Create a beautiful section header with decorative elements
+		sectionStyle := t.S().Subtle.Bold(true).Foreground(t.Secondary)
+		section := sectionStyle.Render(sectionName)
 		mcpList = append(mcpList, section, "")
 	}
 
 	mcps := config.Get().MCP.Sorted()
 	if len(mcps) == 0 {
-		mcpList = append(mcpList, t.S().Base.Foreground(t.Border).Render("None"))
+		// Beautiful empty state with decorative elements
+		emptyStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true)
+		emptyIcon := t.S().Base.Foreground(t.Border).Render("🔌")
+		emptyMessage := emptyStyle.Render("No MCP servers configured")
+		mcpList = append(mcpList, fmt.Sprintf("%s %s", emptyIcon, emptyMessage))
 		return mcpList
 	}
 
@@ -53,46 +58,59 @@ func RenderMCPList(opts RenderOptions) []string {
 			break
 		}
 
-		// Determine icon and color based on state
-		icon := t.ItemOfflineIcon
+		// Beautiful status indicators with enhanced styling
+		icon := "●" // Default offline icon
+		iconStyle := t.ItemOfflineIcon
+		titleStyle := t.FgMuted
+		descStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true)
 		description := l.MCP.Command
 		extraContent := ""
 
 		if state, exists := mcpStates[l.Name]; exists {
 			switch state.State {
 			case agent.MCPStateDisabled:
-				description = t.S().Subtle.Render("disabled")
+				description = descStyle.Render("disabled")
 			case agent.MCPStateStarting:
-				icon = t.ItemBusyIcon
-				description = t.S().Subtle.Render("starting...")
+				icon = "⏳"
+				iconStyle = t.ItemBusyIcon.Foreground(t.Warning)
+				description = descStyle.Render("starting...")
+				titleStyle = t.FgHalfMuted
 			case agent.MCPStateConnected:
-				icon = t.ItemOnlineIcon
+				icon = "✓"
+				iconStyle = t.ItemOnlineIcon.Foreground(t.Success)
 				if state.ToolCount > 0 {
 					extraContent = t.S().Subtle.Render(fmt.Sprintf("%d tools", state.ToolCount))
 				}
+				titleStyle = t.FgBase
 			case agent.MCPStateError:
-				icon = t.ItemErrorIcon
+				icon = "✗"
+				iconStyle = t.ItemErrorIcon.Foreground(t.Error)
 				if state.Error != nil {
-					description = t.S().Subtle.Render(fmt.Sprintf("error: %s", state.Error.Error()))
+					description = descStyle.Render(fmt.Sprintf("error: %s", state.Error.Error()))
 				} else {
-					description = t.S().Subtle.Render("error")
+					description = descStyle.Render("error")
 				}
+				titleStyle = t.Error
 			}
 		} else if l.MCP.Disabled {
-			description = t.S().Subtle.Render("disabled")
+			description = descStyle.Render("disabled")
 		}
 
-		mcpList = append(mcpList,
-			core.Status(
-				core.StatusOpts{
-					Icon:         icon.String(),
-					Title:        l.Name,
-					Description:  description,
-					ExtraContent: extraContent,
-				},
-				opts.MaxWidth,
-			),
-		)
+		// Create a beautiful MCP entry with enhanced visual styling
+		iconPart := iconStyle.SetString(icon).String()
+		titlePart := t.S().Base.Foreground(titleStyle).Render(l.Name)
+		
+		// Combine all parts in a beautiful layout
+		mcpEntry := fmt.Sprintf("%s %s", iconPart, titlePart)
+		if description != "" {
+			mcpEntry = fmt.Sprintf("%s\n  %s", mcpEntry, description)
+		}
+		if extraContent != "" {
+			extraStyle := t.S().Base.Foreground(t.FgSubtle)
+			mcpEntry = fmt.Sprintf("%s\n  %s", mcpEntry, extraStyle.Render(extraContent))
+		}
+		
+		mcpList = append(mcpList, mcpEntry)
 	}
 
 	return mcpList

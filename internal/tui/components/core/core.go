@@ -103,6 +103,8 @@ func Status(opts StatusOpts, width int) string {
 	if opts.DescriptionColor != nil {
 		descriptionColor = opts.DescriptionColor
 	}
+	
+	// Style the title and description
 	title = t.S().Base.Foreground(titleColor).Render(title)
 	if description != "" {
 		extraContentWidth := lipgloss.Width(opts.ExtraContent)
@@ -110,19 +112,31 @@ func Status(opts StatusOpts, width int) string {
 			extraContentWidth += 1
 		}
 		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContentWidth, "…")
+		description = t.S().Base.Foreground(descriptionColor).Italic(true).Render(description)
 	}
-	description = t.S().Base.Foreground(descriptionColor).Render(description)
 
 	content := []string{}
 	if icon != "" {
 		content = append(content, icon)
 	}
-	content = append(content, title, description)
+	content = append(content, title)
+	if description != "" {
+		content = append(content, description)
+	}
 	if opts.ExtraContent != "" {
 		content = append(content, opts.ExtraContent)
 	}
 
-	return strings.Join(content, " ")
+	// Join with proper spacing
+	result := strings.Join(content, " ")
+	
+	// Ensure the result fits within the width
+	if width > 0 && lipgloss.Width(result) > width {
+		// Truncate and add ellipsis
+		result = ansi.Truncate(result, width-1, "…")
+	}
+	
+	return result
 }
 
 type ButtonOpts struct {

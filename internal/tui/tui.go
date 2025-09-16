@@ -30,6 +30,7 @@ import (
 	"github.com/nom-nom-hub/blush/internal/tui/components/dialogs/sessions"
 	"github.com/nom-nom-hub/blush/internal/tui/page"
 	"github.com/nom-nom-hub/blush/internal/tui/page/chat"
+	"github.com/nom-nom-hub/blush/internal/tui/page/playground"
 	"github.com/nom-nom-hub/blush/internal/tui/styles"
 	"github.com/nom-nom-hub/blush/internal/tui/util"
 )
@@ -479,6 +480,8 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Playground):
+		return a.moveToPage(playground.PlaygroundPageID)
 	case key.Matches(msg, a.keyMap.Suspend):
 		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")
@@ -615,6 +618,7 @@ func New(app *app.App) tea.Model {
 
 		pages: map[page.PageID]util.Model{
 			chat.ChatPageID: chatPage,
+		playground.PlaygroundPageID: playground.New(),
 		},
 
 		dialog:      dialogs.NewDialogCmp(),

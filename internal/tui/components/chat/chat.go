@@ -2,11 +2,11 @@ package chat
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/nom-nom-hub/blush/internal/app"
 	"github.com/nom-nom-hub/blush/internal/llm/agent"
@@ -73,6 +73,7 @@ type messageListCmp struct {
 	lastClickY    int
 	clickCount    int
 	promptQueue   int
+	spinner       spinner.Model
 }
 
 // New creates a new message list component with custom keybindings
@@ -87,17 +88,23 @@ func New(app *app.App) MessageListCmp {
 		list.WithKeyMap(defaultListKeyMap),
 		list.WithEnableMouse(),
 	)
+	
+	t := styles.CurrentTheme()
+	spin := spinner.New()
+	spin.Style = t.S().Base.Foreground(t.Primary)
+
 	return &messageListCmp{
 		app:               app,
 		listCmp:           listCmp,
 		previousSelected:  "",
 		defaultListKeyMap: defaultListKeyMap,
+		spinner:           spin,
 	}
 }
 
 // Init initializes the component.
 func (m *messageListCmp) Init() tea.Cmd {
-	return m.listCmp.Init()
+	return tea.Batch(m.listCmp.Init(), m.spinner.Tick)
 }
 
 // Update handles incoming messages and updates the component state.
@@ -152,6 +159,10 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.MouseReleaseMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+
 		x := msg.X - 1 // Adjust for padding
 		y := msg.Y - 1 // Adjust for padding
 		if msg.Button == tea.MouseLeft {
@@ -180,6 +191,10 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case SelectionCopyMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+
 		if msg.clickCount == m.clickCount && time.Since(m.lastClickTime) >= doubleClickThreshold {
 			// If the click count matches and within threshold, copy selected text
 			if msg.endSelection {
@@ -216,10 +231,23 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	u, cmd := m.listCmp.Update(msg)
 	m.listCmp = u.(list.List[list.Item])
 	cmds = append(cmds, cmd)
+
+	// In case we don't handle the message in the chat component, let the spinner component handle it, too
+	// It will only react to a subset of messages, but this makes sure that the
+	// spinner is updated correctly, even if other messages are propagated
+	m.spinner, cmd = m.spinner.Update(msg)
+	cmds = append(cmds, cmd)
+
 	return m, tea.Batch(cmds...)
 }
 
-// View renders the message list or an initial screen if empty.\nfunc (m *messageListCmp) View() string {\n\tt := styles.CurrentTheme()\n\theight := m.height\n\tif m.promptQueue > 0 {\n\t\theight -= 4 // pill height and padding\n\t}\n\t\n\t// Enhanced chat view with better visual separation and styling\n\tview := []string{\n\t\tt.S().Base.\n\t\t\tPadding(1, 1, 0, 1).\n\t\t\tWidth(m.width).\n\t\t\tHeight(height).\n\t\t\tRender(\n\t\t\t\tm.listCmp.View(),\n\t\t\t),\n\t}\n\t\n\tif m.app.CoderAgent != nil && m.promptQueue > 0 {\n\t\tqueuePill := queuePill(m.promptQueue, t)\n\t\tview = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))\n\t}\n\t\n\t// Add a subtle border at the top of the chat area\n\tseparator := t.S().Base.Foreground(t.Border).Render(strings.Repeat(\"─\", m.width))\n\t\n\t// Return the view with a subtle top border for better visual separation\n\treturn strings.Join(append([]string{separator}, view...), \"\\n\")\n}
+// View renders the message list or an initial screen if empty.
+func (m *messageListCmp) View() string {
+	if m.session.ID == "" {
+		return m.spinner.View()
+	}
+	return m.listCmp.View()
+}
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
 	items := m.listCmp.Items()

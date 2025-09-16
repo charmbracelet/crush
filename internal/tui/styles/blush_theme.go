@@ -42,7 +42,7 @@ func NewBlushTheme() *Theme {
 
 		// Backgrounds
 		BgBase:        blushCharcoal,
-		BgBaseLighter: color.RGBA{R: 80, G: 80, B: 90, A: 255},  // Dark gray
+		BgBaseLighter: color.RGBA{R: 55, G: 45, B: 50, A: 255},  // Much subtler dark gray
 		BgSubtle:      blushGray,
 		BgOverlay:     color.RGBA{R: 220, G: 220, B: 230, A: 255}, // Light gray
 

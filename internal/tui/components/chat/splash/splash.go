@@ -572,16 +572,32 @@ func (s *splashCmp) logoBlock() string {
 			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
 		)
 	}
-	return logoStyle.Render(
-		logo.Render(version.Version, false, logo.Opts{
-			FieldColor:   t.Primary,
-			TitleColorA:  t.Secondary,
-			TitleColorB:  t.Primary,
-			CharmColor:   t.Secondary,
-			VersionColor: t.Primary,
-			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
-		}),
+	
+	// Create a large, prominent rainbow-colored "BLUSH" splash logo
+	bb := t.S().Base.Foreground(t.BlueLight).Bold(true).Render("B")
+	ll := t.S().Base.Foreground(t.Citron).Bold(true).Render("L")
+	uu := t.S().Base.Foreground(t.Green).Bold(true).Render("U")
+	ss := t.S().Base.Foreground(t.Yellow).Bold(true).Render("S")
+	hh := t.S().Base.Foreground(t.RedLight).Bold(true).Render("H")
+	
+	// Make the logo bigger with more spacing
+	blushLogo := fmt.Sprintf("%s %s %s %s %s", bb, ll, uu, ss, hh)
+	
+	// Add version info with better styling
+	versionInfo := t.S().Base.Foreground(t.FgSubtle).Bold(true).Render(version.Version)
+	
+	// Create a more prominent display with better spacing
+	logoContent := lipgloss.JoinVertical(lipgloss.Center,
+		"",
+		"",
+		blushLogo,
+		"",
+		versionInfo,
+		"",
+		"",
 	)
+	
+	return logoStyle.Render(logoContent)
 }
 
 func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {

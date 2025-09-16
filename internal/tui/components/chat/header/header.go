@@ -61,9 +61,7 @@ func (h *header) View() string {
 	}
 
 	const (
-		gap          = " "
-		diag         = "╱"
-		minDiags     = 3
+		gap          = "  " // Increased gap
 		leftPadding  = 1
 		rightPadding = 1
 	)
@@ -72,12 +70,20 @@ func (h *header) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(t.S().Base.Foreground(t.Secondary).Render("Blush"))
-	b.WriteString(gap)
-	b.WriteString(styles.ApplyBoldForegroundGrad("Blush", t.Secondary, t.Primary))
+	// Create a larger, more prominent rainbow-colored "BLUSH" header logo
+	// Using bigger, bolder letters with more spacing
+	bb := t.S().Base.Foreground(t.BlueLight).Bold(true).Render("B")
+	ll := t.S().Base.Foreground(t.Citron).Bold(true).Render("L")
+	uu := t.S().Base.Foreground(t.Green).Bold(true).Render("U")
+	ss := t.S().Base.Foreground(t.Yellow).Bold(true).Render("S")
+	hh := t.S().Base.Foreground(t.RedLight).Bold(true).Render("H")
+	
+	// Add more spacing between letters for better visibility
+	blushLogo := fmt.Sprintf("%s %s %s %s %s", bb, ll, uu, ss, hh)
+	b.WriteString(blushLogo)
 	b.WriteString(gap)
 
-	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minDiags
+	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String())
 	details := h.details(availDetailWidth)
 
 	remainingWidth := h.width -
@@ -86,9 +92,10 @@ func (h *header) View() string {
 		leftPadding -
 		rightPadding
 
+	// Use a more prominent separator
 	if remainingWidth > 0 {
-		b.WriteString(t.S().Base.Foreground(t.Primary).Render(
-			strings.Repeat(diag, max(minDiags, remainingWidth)),
+		b.WriteString(t.S().Base.Foreground(t.Border).Render(
+			strings.Repeat("─", max(5, remainingWidth)),
 		))
 		b.WriteString(gap)
 	}

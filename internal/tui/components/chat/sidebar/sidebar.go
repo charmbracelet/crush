@@ -120,7 +120,7 @@ func (m *sidebarCmp) View() string {
 		Width(m.width).
 		Height(m.height).
 		Padding(1, 2).
-		Background(t.BgBaseLighter).
+		Background(t.BgBase).
 		BorderForeground(t.Border).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderLeft(true)
@@ -322,14 +322,40 @@ func (m *sidebarCmp) GetSize() (int, int) {
 
 func (m *sidebarCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return logo.Render(version.Version, true, logo.Opts{
-		FieldColor:   t.Primary,
-		TitleColorA:  t.Secondary,
-		TitleColorB:  t.Primary,
-		CharmColor:   t.Secondary,
-		VersionColor: t.Primary,
-		Width:        m.width - 2,
-	})
+	
+	// Handle unknown version more gracefully
+	displayVersion := version.Version
+	if displayVersion == "unknown" {
+		displayVersion = "dev"
+	}
+	
+	// Create a larger, more prominent rainbow-colored "BLUSH" text logo
+	// Using bigger, bolder letters with more spacing
+	bb := t.S().Base.Foreground(t.BlueLight).Bold(true).Render("B")
+	ll := t.S().Base.Foreground(t.Citron).Bold(true).Render("L")
+	uu := t.S().Base.Foreground(t.Green).Bold(true).Render("U")
+	ss := t.S().Base.Foreground(t.Yellow).Bold(true).Render("S")
+	hh := t.S().Base.Foreground(t.RedLight).Bold(true).Render("H")
+	
+	// Add more spacing between letters for better visibility
+	blushLogo := fmt.Sprintf("%s %s %s %s %s", bb, ll, uu, ss, hh)
+	
+	// Version info with better styling
+	versionInfo := t.S().Base.Foreground(t.FgSubtle).Bold(true).Render(displayVersion)
+	
+	// More prominent separator
+	separator := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", 20))
+	
+	return strings.Join([]string{
+		"",
+		"",
+		blushLogo,
+		"",
+		versionInfo,
+		separator,
+		"",
+		"",
+	}, "\n")
 }
 
 func (m *sidebarCmp) getMaxWidth() int {
@@ -597,7 +623,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 
 	t := styles.CurrentTheme()
 
-	// Beautiful model header with enhanced styling
+	// Create a clean, modern model header
 	modelIcon := t.S().Base.Foreground(t.Primary).Bold(true).Render(styles.ModelIcon)
 	modelName := t.S().Title.Bold(true).Foreground(t.Primary).Render(model.Name)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
@@ -606,9 +632,9 @@ func (s *sidebarCmp) currentModelBlock() string {
 		modelInfo,
 	}
 	
-	// Enhanced reasoning information with beautiful styling
+	// Add reasoning information with clean styling
 	if model.CanReason {
-		reasoningInfoStyle := t.S().Base.Foreground(t.FgSubtle).Italic(true).PaddingLeft(2)
+		reasoningInfoStyle := t.S().Base.Foreground(t.FgSubtle).PaddingLeft(2)
 		switch modelProvider.Type {
 		case catwalk.TypeOpenAI:
 			reasoningEffort := model.DefaultReasoningEffort
@@ -632,7 +658,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 		}
 	}
 	
-	// Enhanced token usage information with beautiful styling
+	// Add token usage information with clean styling
 	if s.session.ID != "" {
 		tokensUsed := s.session.CompletionTokens + s.session.PromptTokens
 		percentage := (float64(tokensUsed) / float64(model.ContextWindow)) * 100
@@ -656,11 +682,11 @@ func (s *sidebarCmp) currentModelBlock() string {
 			formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
 		}
 
-		// Beautiful token usage visualization
+		// Clean token usage visualization
 		tokenStyle := t.S().Base.Foreground(t.FgSubtle)
 		percentageStyle := t.S().Base.Foreground(t.FgMuted)
 		
-		// Color coding for token usage with beautiful gradients
+		// Color coding for token usage
 		if percentage > 90 {
 			percentageStyle = t.S().Base.Foreground(t.Error).Bold(true)
 		} else if percentage > 75 {
@@ -674,7 +700,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 		
 		costInfo := t.S().Base.Foreground(t.FgSubtle).Render(fmt.Sprintf("$%.3f", s.session.Cost))
 		
-		// Beautiful token usage entry
+		// Clean token usage entry
 		tokenIcon := t.S().Base.Foreground(t.FgSubtle).Render("📊")
 		tokenInfo := fmt.Sprintf("%s %s %s %s", tokenIcon, formattedPercentage, formattedTokens, costInfo)
 		
@@ -687,7 +713,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 		parts = append(parts, "  "+tokenInfo)
 	}
 	
-	// Add a beautiful separator line
+	// Add a clean separator line only if we have additional info
 	if len(parts) > 1 {
 		separator := t.S().Base.Foreground(t.Border).Render(strings.Repeat("─", min(s.getMaxWidth(), 25)))
 		parts = append(parts, separator)

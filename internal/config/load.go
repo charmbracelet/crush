@@ -68,8 +68,8 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug,
 	)
 
-	cfg.EnableLSPWatch = true
-	if !isInsideWorktree() {
+	cfg.IsGitRepo = isInsideWorktree()
+	if !cfg.IsGitRepo {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -77,7 +77,6 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
-		cfg.EnableLSPWatch = false
 	}
 
 	// Load known providers, this loads the config from catwalk

@@ -283,7 +283,8 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
-	EnableLSPWatch bool `json:"-"`
+	// this is temporary to disable the watcher until we fix it.
+	IsGitRepo bool `json:"-"`
 
 	// Internal
 	workingDir string `json:"-"`

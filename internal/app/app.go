@@ -91,6 +91,8 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		if err := watcher.Start(); err != nil {
 			return nil, fmt.Errorf("app: %w", err)
 		}
+	} else {
+		slog.Warn("Not starting global watcher: not a git repository")
 	}
 
 	// Initialize LSP clients in the background.

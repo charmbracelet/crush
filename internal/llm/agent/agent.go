@@ -186,7 +186,9 @@ func NewAgent(
 		allTools := []tools.BaseTool{
 			tools.NewBashTool(permissions, cwd),
 			tools.NewDownloadTool(permissions, cwd),
+			tools.NewDiagnosticsTool(lspClients),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
+			tools.NewGenerateTestTool(lspClients, permissions, cwd),
 			tools.NewMultiEditTool(lspClients, permissions, history, cwd),
 			tools.NewFetchTool(permissions, cwd),
 			tools.NewGlobTool(cwd),
@@ -194,6 +196,7 @@ func NewAgent(
 			tools.NewLsTool(permissions, cwd),
 			tools.NewSourcegraphTool(),
 			tools.NewViewTool(lspClients, permissions, cwd),
+			tools.NewVisualizeTool(lspClients, permissions, cwd),
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
 		}
 

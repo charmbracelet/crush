@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,11 +56,14 @@ type App struct {
 	cleanupFuncs []func() error
 }
 
-// isGitRepo checks if the given path is a git repository
-func isGitRepo(path string) bool {
-	gitPath := filepath.Join(path, ".git")
-	_, err := os.Stat(gitPath)
-	return err == nil
+// isGitRepo checks if the current directory is a git repository
+func isGitRepo() bool {
+	bts, err := exec.CommandContext(
+		context.Background(),
+		"git", "rev-parse",
+		"--is-inside-work-tree",
+	).CombinedOutput()
+	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
 // New initializes a new applcation instance.
@@ -96,7 +99,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	app.setupEvents()
 
 	// Start the global watcher only if this is a git repository
-	if isGitRepo(cfg.WorkingDir()) {
+	if isGitRepo() {
 		if err := watcher.Start(); err != nil {
 			return nil, fmt.Errorf("app: %w", err)
 		}

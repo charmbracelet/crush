@@ -70,7 +70,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	if bts, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil || strings.TrimSpace(string(bts)) != "true" {
 		const depth = 2
-		const items = 64
+		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
 		assignIfNil(&cfg.Tools.Ls.MaxDepth, depth)
 		assignIfNil(&cfg.Tools.Ls.MaxItems, items)

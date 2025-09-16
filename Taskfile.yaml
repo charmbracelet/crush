@@ -35,6 +35,11 @@ tasks:
     generates:
       - crush
 
+  run:
+    desc: Run build
+    cmds:
+      - go run .
+
   test:
     desc: Run tests
     cmds:

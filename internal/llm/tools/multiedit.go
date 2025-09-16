@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/nom-nom-hub/blush/internal/diff"
+	"github.com/nom-nom-hub/blush/internal/fsext"
+	"github.com/nom-nom-hub/blush/internal/history"
+	"github.com/nom-nom-hub/blush/internal/lsp"
+	"github.com/nom-nom-hub/blush/internal/permission"
 )
 
 type MultiEditOperation struct {

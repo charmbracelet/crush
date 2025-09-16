@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/csync"
 	"github.com/raphamorim/notify"
 )
 
@@ -240,10 +240,10 @@ func TestGlobalWatcherRespectsIgnoreFiles(t *testing.T) {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
 
-	// Create .crushignore file
-	crushignoreContent := "custom_ignored/\n"
-	if err := os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644); err != nil {
-		t.Fatalf("Failed to create .crushignore: %v", err)
+	// Create .blushignore file
+	blushignoreContent := "custom_ignored/\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".blushignore"), []byte(blushignoreContent), 0o644); err != nil {
+		t.Fatalf("Failed to create .blushignore: %v", err)
 	}
 
 	// Create a new global watcher instance for this test

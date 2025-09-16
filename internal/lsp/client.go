@@ -17,9 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/log"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
 )
 
 type Client struct {

@@ -5,8 +5,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core"
 )
 
 func TestStatus(t *testing.T) {

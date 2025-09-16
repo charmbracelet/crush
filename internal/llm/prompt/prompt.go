@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/env"
+	"github.com/nom-nom-hub/blush/internal/home"
 )
 
 type PromptID string

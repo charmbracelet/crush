@@ -12,7 +12,7 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/nom-nom-hub/blush/internal/permission"
 )
 
 type FetchParams struct {
@@ -165,7 +165,7 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "crush/1.0")
+	req.Header.Set("User-Agent", "blush/1.0")
 
 	resp, err := t.client.Do(req)
 	if err != nil {

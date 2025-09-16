@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/env"
 	"github.com/tidwall/sjson"
 )
 
 const (
-	appName              = "crush"
-	defaultDataDirectory = ".crush"
+	appName              = "blush"
+	defaultDataDirectory = ".blush"
 )
 
 var defaultContextPaths = []string{
@@ -30,12 +30,12 @@ var defaultContextPaths = []string{
 	"CLAUDE.local.md",
 	"GEMINI.md",
 	"gemini.md",
-	"crush.md",
-	"crush.local.md",
-	"Crush.md",
-	"Crush.local.md",
-	"CRUSH.md",
-	"CRUSH.local.md",
+	"blush.md",
+	"blush.local.md",
+	"Blush.md",
+	"Blush.local.md",
+	"BLUSH.md",
+	"BLUSH.local.md",
 	"AGENTS.md",
 	"agents.md",
 	"Agents.md",
@@ -137,12 +137,12 @@ type Permissions struct {
 }
 
 type Options struct {
-	ContextPaths              []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	ContextPaths              []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=BLUSH.md"`
 	TUI                       *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                     bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                  bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize      bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DataDirectory             string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.blush,example=.blush"` // Relative to the cwd
 	DisabledTools             []string    `json:"disabled_tools" jsonschema:"description=Tools to disable"`
 	DisableProviderAutoUpdate bool        `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 }
@@ -237,7 +237,7 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
-// Config holds the configuration for crush.
+// Config holds the configuration for blush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 

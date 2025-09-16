@@ -4,8 +4,8 @@ import (
 	"slices"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/nom-nom-hub/blush/internal/tui/util"
 )
 
 type DialogID string

@@ -9,8 +9,8 @@ import (
 
 	_ "github.com/joho/godotenv/autoload" // automatically load .env files
 
-	"github.com/charmbracelet/crush/internal/cmd"
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/nom-nom-hub/blush/internal/cmd"
+	"github.com/nom-nom-hub/blush/internal/log"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 		slog.Error("Application terminated due to unhandled panic")
 	})
 
-	if os.Getenv("CRUSH_PROFILE") != "" {
+	if os.Getenv("BLUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {

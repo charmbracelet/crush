@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/config"
 
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
-	"github.com/charmbracelet/crush/internal/lsp/util"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/lsp/util"
 )
 
 // Requests

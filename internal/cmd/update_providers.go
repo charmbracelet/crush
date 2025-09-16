@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/nom-nom-hub/blush/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -16,16 +16,16 @@ var updateProvidersCmd = &cobra.Command{
 	Long:  `Update the list of providers from a specified local path or remote URL.`,
 	Example: `
 # Update providers remotely from Catwalk
-crush update-providers
+blush update-providers
 
 # Update providers from a custom URL
-crush update-providers https://example.com/
+blush update-providers https://example.com/
 
 # Update providers from a local file
-crush update-providers /path/to/local-providers.json
+blush update-providers /path/to/local-providers.json
 
 # Update providers from embedded version
-crush update-providers embedded
+blush update-providers embedded
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// NOTE(@andreynering): We want to skip logging output do stdout here.

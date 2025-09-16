@@ -5,10 +5,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
+	"github.com/nom-nom-hub/blush/internal/tui/util"
 )
 
 type StatusCmp interface {

@@ -9,19 +9,19 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/tui"
-	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	"github.com/charmbracelet/x/term"
+	"github.com/nom-nom-hub/blush/internal/app"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/db"
+	"github.com/nom-nom-hub/blush/internal/tui"
+	"github.com/nom-nom-hub/blush/internal/version"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
-	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
+	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom blush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
@@ -32,32 +32,32 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "crush",
+	Use:   "blush",
 	Short: "Terminal-based AI assistant for software development",
-	Long: `Crush is a powerful terminal-based AI assistant that helps with software development tasks.
+	Long: `Blush is a powerful terminal-based AI assistant that helps with software development tasks.
 It provides an interactive chat interface with AI capabilities, code analysis, and LSP integration
 to assist developers in writing, debugging, and understanding code directly from the terminal.`,
 	Example: `
 # Run in interactive mode
-crush
+blush
 
 # Run with debug logging
-crush -d
+blush -d
 
 # Run with debug logging in a specific directory
-crush -d -c /path/to/project
+blush -d -c /path/to/project
 
 # Run with custom data directory
-crush -D /path/to/custom/.crush
+blush -D /path/to/custom/.blush
 
 # Print version
-crush -v
+blush -v
 
 # Run a single non-interactive prompt
-crush run "Explain the use of context in Go"
+blush run "Explain the use of context in Go"
 
 # Run in dangerous mode (auto-accept all permissions)
-crush -y
+blush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := setupApp(cmd)
@@ -119,7 +119,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 	cfg.Permissions.SkipRequests = yolo
 
-	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+	if err := createDotBlushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err
 	}
 
@@ -172,7 +172,7 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 	return cwd, nil
 }
 
-func createDotCrushDir(dir string) error {
+func createDotBlushDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
 	}

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/nom-nom-hub/blush/internal/lsp"
+	"github.com/nom-nom-hub/blush/internal/permission"
 )
 
 type ViewParams struct {

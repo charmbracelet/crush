@@ -2,7 +2,7 @@
 # vim: set ts=2 sw=2 tw=0 fo=jcroql
 version: 2
 
-project_name: crush
+project_name: blush
 
 includes:
   - from_url:
@@ -11,7 +11,7 @@ includes:
 metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
   license: "FSL-1.1-MIT"
-  homepage: "https://charm.sh/crush"
+  homepage: "https://charm.sh/blush"
   description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
   full_description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
   maintainers:
@@ -33,10 +33,10 @@ before:
     - mkdir completions
     - rm -rf manpages
     - mkdir manpages
-    - sh -c 'go run . completion bash >./completions/crush.bash'
-    - sh -c 'go run . completion zsh >./completions/crush.zsh'
-    - sh -c 'go run . completion fish >./completions/crush.fish'
-    - sh -c 'go run . man | gzip -c >./manpages/crush.1.gz'
+    - sh -c 'go run . completion bash >./completions/blush.bash'
+    - sh -c 'go run . completion zsh >./completions/blush.zsh'
+    - sh -c 'go run . completion fish >./completions/blush.fish'
+    - sh -c 'go run . man | gzip -c >./manpages/blush.1.gz'
 
 # gomod:
 #   proxy: true
@@ -68,11 +68,11 @@ builds:
       - goos: android
         goarch: "386"
     ldflags:
-      - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
+      - -s -w -X github.com/nom-nom-hub/blush/internal/version.Version={{.Version}}
 
 archives:
   - name_template: >-
-      crush_
+      blush_
       {{- .Version }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -94,7 +94,7 @@ checksum:
 
 aur_sources:
   - private_key: "{{ .Env.AUR_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/crush.git"
+    git_url: "ssh://aur@aur.archlinux.org/blush.git"
     commit_author:
       name: "Charm"
       email: "charmcli@users.noreply.github.com"
@@ -112,58 +112,58 @@ aur_sources:
       export CGO_LDFLAGS="${LDFLAGS}"
       export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
       go build -ldflags="-w -s -buildid='' -linkmode=external -X main.version=v${pkgver}" .
-      ./crush completion bash >./completions/crush.bash
-      ./crush completion zsh >./completions/crush.zsh
-      ./crush completion fish >./completions/crush.fish
-      ./crush man | gzip -c >./manpages/crush.1.gz
+      ./blush completion bash >./completions/blush.bash
+      ./blush completion zsh >./completions/blush.zsh
+      ./blush completion fish >./completions/blush.fish
+      ./blush man | gzip -c >./manpages/blush.1.gz
     package: |-
       # bin
-      install -Dm755 "./crush" "${pkgdir}/usr/bin/crush"
+      install -Dm755 "./blush" "${pkgdir}/usr/bin/blush"
       # license
-      mkdir -p "${pkgdir}/usr/share/licenses/crush/"
-      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/crush/"
+      mkdir -p "${pkgdir}/usr/share/licenses/blush/"
+      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/blush/"
       # completions
       mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
       mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
       mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
-      install -Dm644 "./completions/crush.bash" "${pkgdir}/usr/share/bash-completion/completions/crush"
-      install -Dm644 "./completions/crush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_crush"
-      install -Dm644 "./completions/crush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/crush.fish"
+      install -Dm644 "./completions/blush.bash" "${pkgdir}/usr/share/bash-completion/completions/blush"
+      install -Dm644 "./completions/blush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_blush"
+      install -Dm644 "./completions/blush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/blush.fish"
       # man pages
-      install -Dm644 "./manpages/crush.1.gz" "${pkgdir}/usr/share/man/man1/crush.1.gz"
+      install -Dm644 "./manpages/blush.1.gz" "${pkgdir}/usr/share/man/man1/blush.1.gz"
       # readme
-      mkdir -pv "${pkgdir}/usr/share/doc/crush/"
-      install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
+      mkdir -pv "${pkgdir}/usr/share/doc/blush/"
+      install -Dm644 README* "${pkgdir}/usr/share/doc/blush/"
 
 aurs:
   - private_key: "{{ .Env.AUR_KEY }}"
-    git_url: "ssh://aur@aur.archlinux.org/crush-bin.git"
+    git_url: "ssh://aur@aur.archlinux.org/blush-bin.git"
     commit_author:
       name: "Charm"
       email: "charmcli@users.noreply.github.com"
     provides:
-      - crush
+      - blush
     conflicts:
-      - crush
+      - blush
     package: |-
-      cd "${srcdir}/crush_${pkgver}_Linux_${CARCH}"
+      cd "${srcdir}/blush_${pkgver}_Linux_${CARCH}"
       # bin
-      install -Dm755 "./crush" "${pkgdir}/usr/bin/crush"
+      install -Dm755 "./blush" "${pkgdir}/usr/bin/blush"
       # license
-      mkdir -p "${pkgdir}/usr/share/licenses/crush/"
-      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/crush/"
+      mkdir -p "${pkgdir}/usr/share/licenses/blush/"
+      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/blush/"
       # completions
       mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
       mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
       mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
-      install -Dm644 "./completions/crush.bash" "${pkgdir}/usr/share/bash-completion/completions/crush"
-      install -Dm644 "./completions/crush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_crush"
-      install -Dm644 "./completions/crush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/crush.fish"
+      install -Dm644 "./completions/blush.bash" "${pkgdir}/usr/share/bash-completion/completions/blush"
+      install -Dm644 "./completions/blush.zsh" "${pkgdir}/usr/share/zsh/site-functions/_blush"
+      install -Dm644 "./completions/blush.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/blush.fish"
       # man pages
-      install -Dm644 "./manpages/crush.1.gz" "${pkgdir}/usr/share/man/man1/crush.1.gz"
+      install -Dm644 "./manpages/blush.1.gz" "${pkgdir}/usr/share/man/man1/blush.1.gz"
       # readme
-      mkdir -pv "${pkgdir}/usr/share/doc/crush/"
-      install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
+      mkdir -pv "${pkgdir}/usr/share/doc/blush/"
+      install -Dm644 README* "${pkgdir}/usr/share/doc/blush/"
 
 furies:
   - disable: "{{ .IsNightly }}"
@@ -195,9 +195,9 @@ scoops:
       email: "charmcli@users.noreply.github.com"
 
 npms:
-  - name: "@charmland/crush"
-    repository: "git+https://github.com/charmbracelet/crush.git"
-    bugs: https://github.com/charmbracelet/crush/issues
+  - name: "@charmland/blush"
+    repository: "git+https://github.com/nom-nom-hub/blush.git"
+    bugs: https://github.com/nom-nom-hub/blush/issues
     access: public
 
 nfpms:
@@ -209,14 +209,14 @@ nfpms:
       - termux.deb
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
-      - src: ./completions/crush.bash
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files/usr{{ end }}/etc/bash_completion.d/crush'
-      - src: ./completions/crush.fish
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/fish/vendor_completions.d/crush.fish'
-      - src: ./completions/crush.zsh
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/zsh/site-functions/_crush'
-      - src: ./manpages/crush.1.gz
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/man/man1/crush.1.gz'
+      - src: ./completions/blush.bash
+        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files/usr{{ end }}/etc/bash_completion.d/blush'
+      - src: ./completions/blush.fish
+        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/fish/vendor_completions.d/blush.fish'
+      - src: ./completions/blush.zsh
+        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/zsh/site-functions/_blush'
+      - src: ./manpages/blush.1.gz
+        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/man/man1/blush.1.gz'
     rpm:
       signature:
         key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
@@ -254,15 +254,15 @@ nix:
       email: "charmcli@users.noreply.github.com"
     license: fsl11Mit
     extra_install: |-
-      installManPage ./manpages/crush.1.gz
+      installManPage ./manpages/blush.1.gz
       installShellCompletion ./completions/*
 
 winget:
   - publisher: charmbracelet
     copyright: Charmbracelet, Inc
     publisher_url: https://charm.land
-    release_notes_url: "https://github.com/charmbracelet/crush/releases/tag/{{.Tag}}"
-    license_url: https://github.com/charmbracelet/crush/blob/main/LICENSE.md
+    release_notes_url: "https://github.com/nom-nom-hub/blush/releases/tag/{{.Tag}}"
+    license_url: https://github.com/nom-nom-hub/blush/blob/main/LICENSE.md
     commit_author:
       name: "Charm"
       email: "charmcli@users.noreply.github.com"
@@ -270,7 +270,7 @@ winget:
       owner: "charmbracelet"
       name: winget-pkgs
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-      branch: "crush-{{.Version}}"
+      branch: "blush-{{.Version}}"
       pull_request:
         enabled: true
         draft: false

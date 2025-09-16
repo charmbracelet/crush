@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/nom-nom-hub/blush/internal/env"
 	"github.com/stretchr/testify/require"
 )
 

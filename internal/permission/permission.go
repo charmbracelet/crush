@@ -8,9 +8,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/pubsub"
 )
 
 var ErrorPermissionDenied = errors.New("permission denied")

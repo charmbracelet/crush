@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/fsext"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
 	"github.com/raphamorim/notify"
 )
 
@@ -366,16 +366,16 @@ func isFileLimitError(err error) bool {
 }
 
 // setupIgnoreSystem configures the notify library's ignore system
-// to use .crushignore and .gitignore files for filtering file events
+	// to use .blushignore and .gitignore files for filtering file events
 func setupIgnoreSystem(root string) error {
 	// Create a new ignore matcher for the workspace root
 	im := notify.NewIgnoreMatcher(root)
 
-	// Load .crushignore file if it exists
-	crushignorePath := filepath.Join(root, ".crushignore")
-	if _, err := os.Stat(crushignorePath); err == nil {
-		if err := im.LoadIgnoreFile(crushignorePath); err != nil {
-			slog.Warn("lsp watcher: Failed to load .crushignore file", "error", err)
+	// Load .blushignore file if it exists
+	blushignorePath := filepath.Join(root, ".blushignore")
+	if _, err := os.Stat(blushignorePath); err == nil {
+		if err := im.LoadIgnoreFile(blushignorePath); err != nil {
+			slog.Warn("lsp watcher: Failed to load .blushignore file", "error", err)
 		}
 	}
 

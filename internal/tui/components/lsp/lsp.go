@@ -6,12 +6,12 @@ import (
 
 	"github.com/charmbracelet/lipgloss/v2"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
-	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/nom-nom-hub/blush/internal/app"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/lsp"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
 // RenderOptions contains options for rendering LSP lists.

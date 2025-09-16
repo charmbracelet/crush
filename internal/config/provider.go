@@ -14,7 +14,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/nom-nom-hub/blush/internal/home"
 )
 
 type ProviderClient interface {
@@ -35,8 +35,8 @@ func providerCacheFileData() string {
 	}
 
 	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/crush/`
-	// for linux and macOS, it should be in `$HOME/.local/share/crush/`
+	// for windows, it should be in `%LOCALAPPDATA%/blush/`
+	// for linux and macOS, it should be in `$HOME/.local/share/blush/`
 	if runtime.GOOS == "windows" {
 		localAppData := os.Getenv("LOCALAPPDATA")
 		if localAppData == "" {
@@ -196,7 +196,7 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		providers, err := catwalkGetAndSave()
 		if err != nil {
 			catwalkUrl := fmt.Sprintf("%s/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-			return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
+			return nil, fmt.Errorf("Blush was unable to fetch an updated list of providers from %s. Consider setting BLUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Blush release. You can also update providers manually. For more info see blush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
 		}
 		return providers, nil
 	}

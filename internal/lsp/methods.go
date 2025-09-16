@@ -4,7 +4,7 @@ package lsp
 import (
 	"context"
 
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
 )
 
 // Implementation sends a textDocument/implementation request to the LSP server.

@@ -1,4 +1,4 @@
-module github.com/charmbracelet/crush
+module github.com/nom-nom-hub/blush
 
 go 1.25.0
 

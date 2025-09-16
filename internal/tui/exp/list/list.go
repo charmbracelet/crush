@@ -7,14 +7,14 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/tui/components/anim"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core/layout"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
+	"github.com/nom-nom-hub/blush/internal/tui/util"
 	"github.com/rivo/uniseg"
 )
 

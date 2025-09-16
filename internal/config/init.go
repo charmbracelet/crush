@@ -50,18 +50,18 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	crushExists, err := crushMdExists(cfg.WorkingDir())
+	blushExists, err := blushMdExists(cfg.WorkingDir())
 	if err != nil {
-		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
+		return false, fmt.Errorf("failed to check for BLUSH.md files: %w", err)
 	}
-	if crushExists {
+	if blushExists {
 		return false, nil
 	}
 
 	return true, nil
 }
 
-func crushMdExists(dir string) (bool, error) {
+func blushMdExists(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false, err
@@ -73,7 +73,7 @@ func crushMdExists(dir string) (bool, error) {
 		}
 
 		name := strings.ToLower(entry.Name())
-		if name == "crush.md" {
+		if name == "blush.md" {
 			return true, nil
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/nom-nom-hub/blush/internal/log"
 )
 
 var getRg = sync.OnceValue(func() string {

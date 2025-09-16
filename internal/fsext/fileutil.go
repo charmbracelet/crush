@@ -10,7 +10,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/nom-nom-hub/blush/internal/home"
 )
 
 type FileInfo struct {
@@ -56,7 +56,7 @@ func SkipHidden(path string) bool {
 }
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
-// It uses hierarchical ignore checking like git does, checking .gitignore/.crushignore
+// It uses hierarchical ignore checking like git does, checking .gitignore/.blushignore
 // files in each directory from the root to the target path.
 type FastGlobWalker struct {
 	directoryLister *directoryLister
@@ -69,7 +69,7 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 }
 
 // ShouldSkip checks if a path should be skipped based on hierarchical gitignore,
-// crushignore, and hidden file rules
+// blushignore, and hidden file rules
 func (w *FastGlobWalker) ShouldSkip(path string) bool {
 	return w.directoryLister.shouldIgnore(path, nil)
 }
@@ -150,7 +150,7 @@ func ShouldExcludeFile(rootPath, filePath string) bool {
 }
 
 // WalkDirectories walks a directory tree and calls the provided function for each directory,
-// respecting hierarchical .gitignore/.crushignore files like git does.
+// respecting hierarchical .gitignore/.blushignore files like git does.
 func WalkDirectories(rootPath string, fn func(path string, d os.DirEntry, err error) error) error {
 	dl := NewDirectoryLister(rootPath)
 

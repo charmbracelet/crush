@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
 func queuePill(queue int, t *styles.Theme) string {

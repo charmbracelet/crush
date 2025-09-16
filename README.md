@@ -1,14 +1,14 @@
-# Crush
+# Blush
 
 <p align="center">
-    <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/adc1a6f4-b284-4603-836c-59038caa2e8b" /></a><br />
-    <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
+    <a href="https://stuff.charm.sh/blush/charm-blush.png"><img width="450" alt="Charm Blush Logo" src="https://github.com/user-attachments/assets/adc1a6f4-b284-4603-836c-59038caa2e8b" /></a><br />
+    <a href="https://github.com/nom-nom-hub/blush/releases"><img src="https://img.shields.io/github/release/charmbracelet/blush" alt="Latest Release"></a>
+    <a href="https://github.com/nom-nom-hub/blush/actions"><img src="https://github.com/nom-nom-hub/blush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
 </p>
 
 <p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
 
-<p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
+<p align="center"><img width="800" alt="Blush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
 
 ## Features
 
@@ -25,33 +25,33 @@ Use a package manager:
 
 ```bash
 # Homebrew
-brew install charmbracelet/tap/crush
+brew install charmbracelet/tap/blush
 
 # NPM
-npm install -g @charmland/crush
+npm install -g @charmland/blush
 
 # Arch Linux (btw)
-yay -S crush-bin
+yay -S blush-bin
 
 # Nix
-nix run github:numtide/nix-ai-tools#crush
+nix run github:numtide/nix-ai-tools#blush
 ```
 
 Windows users:
 
 ```bash
 # Winget
-winget install charmbracelet.crush
+winget install charmbracelet.blush
 
 # Scoop
 scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
-scoop install crush
+scoop install blush
 ```
 
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
 
-Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
+Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.blush`.
 
 You can also try out Crush via `nix-shell`:
 
@@ -61,7 +61,7 @@ nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
 nix-channel --update
 
 # Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
+nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.blush'
 ```
 
 </details>
@@ -150,9 +150,9 @@ Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, configuration can be added either local to the project itself,
 or globally, with the following priority:
 
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
+1. `.blush.json`
+2. `blush.json`
+3. `$HOME/.config/blush/blush.json` (Windows: `%USERPROFILE%\AppData\Local\blush\blush.json`)
 
 Configuration itself is stored as a JSON object:
 
@@ -167,10 +167,10 @@ As an additional note, Crush also stores ephemeral data, such as application sta
 
 ```bash
 # Unix
-$HOME/.local/share/crush/crush.json
+$HOME/.local/share/blush/blush.json
 
 # Windows
-%LOCALAPPDATA%\crush\crush.json
+%LOCALAPPDATA%\blush\blush.json
 ```
 
 ### LSPs
@@ -239,11 +239,11 @@ using `$(echo $VAR)` syntax.
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a
-`.crushignore` file to specify additional files and directories that Crush
+`.blushignore` file to specify additional files and directories that Crush
 should ignore. This is useful for excluding files that you want in version
 control but don't want Crush to consider when providing context.
 
-The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
+The `.blushignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
 ### Allowing Tools
@@ -432,27 +432,27 @@ To add specific models to the configuration, configure as such:
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of
-stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
+stuff. Logs are stored in `./.blush/logs/blush.log` relative to the project.
 
 The CLI also contains some helper commands to make perusing recent logs easier:
 
 ```bash
 # Print the last 1000 lines
-crush logs
+blush logs
 
 # Print the last 500 lines
-crush logs --tail 500
+blush logs --tail 500
 
 # Follow logs in real time
-crush logs --follow
+blush logs --follow
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the
+Want more logging? Run `blush` with the `--debug` flag, or enable it in the
 config:
 
 ```json
 {
-  "$schema": "https://charm.land/crush.json",
+  "$schema": "https://charm.land/blush.json",
   "options": {
     "debug": true,
     "debug_lsp": true
@@ -473,43 +473,43 @@ air-gapped environments, this might not be want you want, and this feature can
 be disabled.
 
 To disable automatic provider updates, set `disable_provider_auto_update` into
-your `crush.json` config:
+your `blush.json` config:
 
 ```json
 {
-  "$schema": "https://charm.land/crush.json",
+  "$schema": "https://charm.land/blush.json",
   "options": {
     "disable_provider_auto_update": true
   }
 }
 ```
 
-Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
+Or set the `BLUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
 
 ```bash
-export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
+export BLUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
 ```
 
 ### Manually updating providers
 
-Manually updating providers is possible with the `crush update-providers`
+Manually updating providers is possible with the `blush update-providers`
 command:
 
 ```bash
 # Update providers remotely from Catwalk.
-crush update-providers
+blush update-providers
 
 # Update providers from a custom Catwalk base URL.
-crush update-providers https://example.com/
+blush update-providers https://example.com/
 
 # Update providers from a local file.
-crush update-providers /path/to/local-providers.json
+blush update-providers /path/to/local-providers.json
 
 # Reset providers to the embedded version, embedded at crush at build time.
-crush update-providers embedded
+blush update-providers embedded
 
 # For more info:
-crush update-providers --help
+blush update-providers --help
 ```
 
 ## A Note on Claude Max and GitHub Copilot

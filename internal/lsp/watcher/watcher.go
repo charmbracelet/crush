@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/csync"
 
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/lsp"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
 )
 
 // Client manages LSP file watching for a specific client

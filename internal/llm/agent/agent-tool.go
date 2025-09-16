@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/nom-nom-hub/blush/internal/llm/tools"
+	"github.com/nom-nom-hub/blush/internal/message"
+	"github.com/nom-nom-hub/blush/internal/session"
 )
 
 type agentTool struct {

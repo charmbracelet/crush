@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/config"
 )
 
 // WriteMessage writes an LSP message to the given writer

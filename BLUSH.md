@@ -1,4 +1,4 @@
-# Crush Development Guide
+# Blush Development Guide
 
 ## Build/Test/Lint Commands
 
@@ -8,7 +8,7 @@
   - Update specific package: `go test ./internal/tui/components/core -update` (in this case, we're updating "core")
 - **Lint**: `task lint-fix`
 - **Format**: `task fmt` (gofumpt -w .)
-- **Dev**: `task dev` (runs with profiling enabled)
+- **Dev**: `task dev` (runs with profiling enabled - sets BLUSH_PROFILE=true)
 
 ## Code Style Guidelines
 

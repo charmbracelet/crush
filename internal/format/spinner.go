@@ -7,9 +7,9 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/nom-nom-hub/blush/internal/tui/components/anim"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
 // Spinner wraps the bubbles spinner for non-interactive mode

@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/ansiext"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/highlight"
-	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/nom-nom-hub/blush/internal/ansiext"
+	"github.com/nom-nom-hub/blush/internal/fsext"
+	"github.com/nom-nom-hub/blush/internal/llm/agent"
+	"github.com/nom-nom-hub/blush/internal/llm/tools"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core"
+	"github.com/nom-nom-hub/blush/internal/tui/highlight"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
 )
 
 // responseContextHeight limits the number of lines displayed in tool output

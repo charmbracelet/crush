@@ -9,21 +9,21 @@ import (
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/llm/prompt"
-	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
-	"github.com/charmbracelet/crush/internal/tui/components/logo"
-	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
-	"github.com/charmbracelet/crush/internal/tui/components/mcp"
-	"github.com/charmbracelet/crush/internal/tui/exp/list"
-	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/home"
+	"github.com/nom-nom-hub/blush/internal/llm/prompt"
+	"github.com/nom-nom-hub/blush/internal/tui/components/chat"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core"
+	"github.com/nom-nom-hub/blush/internal/tui/components/core/layout"
+	"github.com/nom-nom-hub/blush/internal/tui/components/dialogs/models"
+	"github.com/nom-nom-hub/blush/internal/tui/components/logo"
+	lspcomponent "github.com/nom-nom-hub/blush/internal/tui/components/lsp"
+	"github.com/nom-nom-hub/blush/internal/tui/components/mcp"
+	"github.com/nom-nom-hub/blush/internal/tui/exp/list"
+	"github.com/nom-nom-hub/blush/internal/tui/styles"
+	"github.com/nom-nom-hub/blush/internal/tui/util"
+	"github.com/nom-nom-hub/blush/internal/version"
 )
 
 type Splash interface {
@@ -464,7 +464,7 @@ func (s *splashCmp) View() string {
 			pathStyle.Render(s.cwd()),
 			"",
 			bodyStyle.Render("When I initialize your codebase I examine the project and put the"),
-			bodyStyle.Render("result into a CRUSH.md file which serves as general context."),
+			bodyStyle.Render("result into a BLUSH.md file which serves as general context."),
 			"",
 			bodyStyle.Render("You can also initialize anytime via ")+shortcutStyle.Render("ctrl+p")+bodyStyle.Render("."),
 			"",

@@ -20,7 +20,7 @@ func TestProvider_loadProvidersEmptyResult(t *testing.T) {
 	tmpPath := t.TempDir() + "/providers.json"
 
 	providers, err := loadProviders(false, client, tmpPath)
-	require.Contains(t, err.Error(), "Crush was unable to fetch an updated list of providers")
+	require.Contains(t, err.Error(), "Blush was unable to fetch an updated list of providers")
 	require.Empty(t, providers)
 	require.Len(t, providers, 0)
 

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/tools"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/llm/tools"
 )
 
 func CoderPrompt(p string, contextFiles ...string) string {
@@ -25,7 +25,7 @@ func CoderPrompt(p string, contextFiles ...string) string {
 	case string(catwalk.InferenceProviderGemini):
 		basePrompt = string(geminiCoderPrompt)
 	}
-	if ok, _ := strconv.ParseBool(os.Getenv("CRUSH_CODER_V2")); ok {
+	if ok, _ := strconv.ParseBool(os.Getenv("BLUSH_CODER_V2")); ok {
 		basePrompt = string(coderV2Prompt)
 	}
 	envInfo := getEnvironmentInfo()

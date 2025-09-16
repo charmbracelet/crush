@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/nom-nom-hub/blush/internal/lsp/protocol"
 )
 
 func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit) error {

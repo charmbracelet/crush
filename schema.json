@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/charmbracelet/crush/internal/config/config",
+  "$id": "https://github.com/nom-nom-hub/blush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
     "Config": {
@@ -267,7 +267,7 @@
         "data_directory": {
           "type": "string",
           "description": "Directory for storing application data (relative to working directory)",
-          "default": ".crush",
+          "default": ".blush",
           "examples": [
             ".crush"
           ]

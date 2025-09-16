@@ -33,7 +33,7 @@ tasks:
     cmds:
       - go build .
     generates:
-      - crush
+      - blush
 
   test:
     desc: Run tests
@@ -48,7 +48,7 @@ tasks:
   dev:
     desc: Run with profiling enabled
     env:
-      CRUSH_PROFILE: true
+      BLUSH_PROFILE: true
     cmds:
       - go run .
 

@@ -11,20 +11,20 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/format"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/nom-nom-hub/blush/internal/config"
+	"github.com/nom-nom-hub/blush/internal/csync"
+	"github.com/nom-nom-hub/blush/internal/db"
+	"github.com/nom-nom-hub/blush/internal/format"
+	"github.com/nom-nom-hub/blush/internal/history"
+	"github.com/nom-nom-hub/blush/internal/llm/agent"
+	"github.com/nom-nom-hub/blush/internal/log"
+	"github.com/nom-nom-hub/blush/internal/pubsub"
 
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/nom-nom-hub/blush/internal/lsp"
+	"github.com/nom-nom-hub/blush/internal/lsp/watcher"
+	"github.com/nom-nom-hub/blush/internal/message"
+	"github.com/nom-nom-hub/blush/internal/permission"
+	"github.com/nom-nom-hub/blush/internal/session"
 )
 
 type App struct {

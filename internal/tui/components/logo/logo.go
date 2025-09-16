@@ -36,7 +36,7 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(version string, compact bool, o Opts) string {
-	const charm = " Charm™"
+	const charm = " Blush"
 
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
@@ -45,8 +45,8 @@ func Render(version string, compact bool, o Opts) string {
 	// Title.
 	const spacing = 1
 	letterforms := []letterform{
-		letterC,
-		letterR,
+		letterB,
+		letterL,
 		letterU,
 		letterSStylized,
 		letterH,
@@ -313,6 +313,74 @@ func letterU(stretch bool) string {
 			maxStretch: 12,
 		}),
 		side,
+	)
+}
+
+// letterB renders the letter B in a stylized way. It takes an integer that
+// determines how many cells to stretch the letter. If the stretch is less than
+// 1, it defaults to no stretching.
+func letterB(stretch bool) string {
+	// Here's what we're making:
+	//
+	// █▀▀▄
+	// █▀▀▄
+	// █▄▄▀
+
+	left := heredoc.Doc(`
+		█
+		█
+		█
+	`)
+	middle := heredoc.Doc(`
+		▀▀
+		▀▀
+		▄▄
+	`)
+	right := heredoc.Doc(`
+		▄
+		▄
+		▀
+	`)
+	return joinLetterform(
+		left,
+		stretchLetterformPart(middle, letterformProps{
+			stretch:    stretch,
+			width:      2,
+			minStretch: 6,
+			maxStretch: 10,
+		}),
+		right,
+	)
+}
+
+// letterL renders the letter L in a stylized way. It takes an integer that
+// determines how many cells to stretch the letter. If the stretch is less than
+// 1, it defaults to no stretching.
+func letterL(stretch bool) string {
+	// Here's what we're making:
+	//
+	// █
+	// █
+	// █▀▀▀
+
+	side := heredoc.Doc(`
+		█
+		█
+		█
+	`)
+	bottom := heredoc.Doc(`
+
+
+		▀
+	`)
+	return joinLetterform(
+		side,
+		stretchLetterformPart(bottom, letterformProps{
+			stretch:    stretch,
+			width:      3,
+			minStretch: 7,
+			maxStretch: 12,
+		}),
 	)
 }
 

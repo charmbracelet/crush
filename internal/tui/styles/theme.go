@@ -518,7 +518,7 @@ func NewManager() *Manager {
 		themes: make(map[string]*Theme),
 	}
 
-	t := NewCharmtoneTheme() // default theme
+	t := NewBlushTheme() // default theme
 	m.Register(t)
 	m.current = m.themes[t.Name]
 

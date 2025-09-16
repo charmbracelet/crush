@@ -219,28 +219,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View renders the message list or an initial screen if empty.
-func (m *messageListCmp) View() string {
-	t := styles.CurrentTheme()
-	height := m.height
-	if m.promptQueue > 0 {
-		height -= 4 // pill height and padding
-	}
-	view := []string{
-		t.S().Base.
-			Padding(1, 1, 0, 1).
-			Width(m.width).
-			Height(height).
-			Render(
-				m.listCmp.View(),
-			),
-	}
-	if m.app.CoderAgent != nil && m.promptQueue > 0 {
-		queuePill := queuePill(m.promptQueue, t)
-		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
-	}
-	return strings.Join(view, "\n")
-}
+// View renders the message list or an initial screen if empty.\nfunc (m *messageListCmp) View() string {\n\tt := styles.CurrentTheme()\n\theight := m.height\n\tif m.promptQueue > 0 {\n\t\theight -= 4 // pill height and padding\n\t}\n\t\n\t// Enhanced chat view with better visual separation and styling\n\tview := []string{\n\t\tt.S().Base.\n\t\t\tPadding(1, 1, 0, 1).\n\t\t\tWidth(m.width).\n\t\t\tHeight(height).\n\t\t\tRender(\n\t\t\t\tm.listCmp.View(),\n\t\t\t),\n\t}\n\t\n\tif m.app.CoderAgent != nil && m.promptQueue > 0 {\n\t\tqueuePill := queuePill(m.promptQueue, t)\n\t\tview = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))\n\t}\n\t\n\t// Add a subtle border at the top of the chat area\n\tseparator := t.S().Base.Foreground(t.Border).Render(strings.Repeat(\"─\", m.width))\n\t\n\t// Return the view with a subtle top border for better visual separation\n\treturn strings.Join(append([]string{separator}, view...), \"\\n\")\n}
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
 	items := m.listCmp.Items()

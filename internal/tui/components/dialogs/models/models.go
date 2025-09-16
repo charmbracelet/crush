@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -251,9 +252,19 @@ func (m *modelDialogCmp) View() string {
 		m.keyMap.isAPIKeyValid = m.isAPIKeyValid
 		apiKeyView := m.apiKeyInput.View()
 		apiKeyView = t.S().Base.Width(m.width - 3).Height(lipgloss.Height(apiKeyView)).PaddingLeft(1).Render(apiKeyView)
+		
+		// Enhanced title with provider and model info
+		var title string
+		if m.selectedModel != nil {
+			title = fmt.Sprintf("API Key Required for %s", m.selectedModel.Provider.Name)
+		} else {
+			title = "API Key Required"
+		}
+		
 		content := lipgloss.JoinVertical(
 			lipgloss.Left,
-			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title(m.apiKeyInput.GetTitle(), m.width-4)),
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title(title, m.width-4)),
+			t.S().Muted.Render(strings.Repeat("─", m.width-4)),
 			apiKeyView,
 			"",
 			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
@@ -261,14 +272,31 @@ func (m *modelDialogCmp) View() string {
 		return m.style().Render(content)
 	}
 
-	// Show model selection
+	// Show enhanced model selection with better organization
 	listView := m.modelList.View()
 	radio := m.modelTypeRadio()
+	
+	// Enhanced header with better visual separation
+	header := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		core.Title("Choose a Model", m.width-lipgloss.Width(radio)-5),
+		"  ",
+		t.S().Base.Foreground(t.Secondary).Render(radio),
+	)
+	
+	// Add a subtle separator line
+	separator := t.S().Muted.Render(strings.Repeat("─", m.width-4))
+	
+	// Enhanced instructions
+	instructions := t.S().Subtle.Render("↑↓ to navigate • Enter to select • Esc to close")
+	
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-lipgloss.Width(radio)-5)+" "+radio),
+		t.S().Base.Padding(0, 1, 1, 1).Render(header),
+		t.S().Base.PaddingLeft(1).Render(separator),
 		listView,
 		"",
+		t.S().Base.Width(m.width-2).PaddingLeft(1).Render(instructions),
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
 	return m.style().Render(content)
@@ -334,13 +362,22 @@ func (m *modelDialogCmp) ID() dialogs.DialogID {
 
 func (m *modelDialogCmp) modelTypeRadio() string {
 	t := styles.CurrentTheme()
-	choices := []string{"Large Task", "Small Task"}
-	iconSelected := "◉"
-	iconUnselected := "○"
+	
+	// Enhanced radio buttons with better styling
+	largeLabel := "Large Tasks"
+	smallLabel := "Small Tasks"
+	
+	var largeButton, smallButton string
+	
 	if m.modelList.GetModelType() == LargeModelType {
-		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + "  " + iconUnselected + " " + choices[1])
+		largeButton = t.S().Base.Foreground(t.Primary).Bold(true).Render("● " + largeLabel)
+		smallButton = t.S().Base.Foreground(t.FgMuted).Render("○ " + smallLabel)
+	} else {
+		largeButton = t.S().Base.Foreground(t.FgMuted).Render("○ " + largeLabel)
+		smallButton = t.S().Base.Foreground(t.Primary).Bold(true).Render("● " + smallLabel)
 	}
-	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + "  " + iconSelected + " " + choices[1])
+	
+	return fmt.Sprintf("%s  %s", largeButton, smallButton)
 }
 
 func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {

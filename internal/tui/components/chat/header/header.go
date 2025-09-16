@@ -72,9 +72,9 @@ func (h *header) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(t.S().Base.Foreground(t.Secondary).Render("Charm™"))
+	b.WriteString(t.S().Base.Foreground(t.Secondary).Render("Blush"))
 	b.WriteString(gap)
-	b.WriteString(styles.ApplyBoldForegroundGrad("BLUSH", t.Secondary, t.Primary))
+	b.WriteString(styles.ApplyBoldForegroundGrad("Blush", t.Secondary, t.Primary))
 	b.WriteString(gap)
 
 	availDetailWidth := h.width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minDiags

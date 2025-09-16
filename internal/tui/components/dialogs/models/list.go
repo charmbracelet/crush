@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/nom-nom-hub/blush/internal/config"
 	"github.com/nom-nom-hub/blush/internal/tui/exp/list"
 	"github.com/nom-nom-hub/blush/internal/tui/styles"
@@ -23,14 +24,23 @@ type ModelListComponent struct {
 
 func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
 	t := styles.CurrentTheme()
-	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
+	
+	// Enhanced input style with better visual appearance
+	inputStyle := t.S().Base.
+		PaddingLeft(1).
+		PaddingBottom(1).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(t.Border)
+	
 	options := []list.ListOption{
 		list.WithKeyMap(keyMap),
 		list.WithWrapNavigation(),
 	}
+	
 	if shouldResize {
 		options = append(options, list.WithResizeByList())
 	}
+	
 	modelList := list.NewFilterableGroupedList(
 		[]list.Group[list.CompletionItem[ModelOption]]{},
 		list.WithFilterInputStyle(inputStyle),

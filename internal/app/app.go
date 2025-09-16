@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -54,6 +56,13 @@ type App struct {
 	cleanupFuncs []func() error
 }
 
+// isGitRepo checks if the given path is a git repository
+func isGitRepo(path string) bool {
+	gitPath := filepath.Join(path, ".git")
+	_, err := os.Stat(gitPath)
+	return err == nil
+}
+
 // New initializes a new applcation instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
@@ -86,9 +95,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	app.setupEvents()
 
-	// Start the global watcher
-	if err := watcher.Start(); err != nil {
-		return nil, fmt.Errorf("app: %w", err)
+	// Start the global watcher only if this is a git repository
+	if isGitRepo(cfg.WorkingDir()) {
+		if err := watcher.Start(); err != nil {
+			return nil, fmt.Errorf("app: %w", err)
+		}
+	} else {
+		slog.Debug("Not starting global watcher: not a git repository")
 	}
 
 	// Initialize LSP clients in the background.

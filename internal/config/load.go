@@ -68,6 +68,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug,
 	)
 
+	cfg.EnableLSPWatch = true
 	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
@@ -76,6 +77,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+		cfg.EnableLSPWatch = false
 	}
 
 	// Load known providers, this loads the config from catwalk

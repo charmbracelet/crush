@@ -87,8 +87,10 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	app.setupEvents()
 
 	// Start the global watcher
-	if err := watcher.Start(); err != nil {
-		return nil, fmt.Errorf("app: %w", err)
+	if cfg.EnableLSPWatch {
+		if err := watcher.Start(); err != nil {
+			return nil, fmt.Errorf("app: %w", err)
+		}
 	}
 
 	// Initialize LSP clients in the background.

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/keymap"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -814,10 +815,7 @@ func (p *chatPage) Help() help.KeyMap {
 				key.WithHelp("enter", "accept"),
 			),
 			// Quit
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
+			keymap.GlobalKeyBindings.Quit,
 		)
 		// keep them the same
 		for _, v := range shortList {
@@ -842,10 +840,7 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 		shortList = append(shortList,
 			// Quit
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
+			keymap.GlobalKeyBindings.Quit,
 		)
 		// keep them the same
 		for _, v := range shortList {
@@ -853,10 +848,7 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 	case p.isProjectInit:
 		shortList = append(shortList,
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
+			keymap.GlobalKeyBindings.Quit,
 		)
 		// keep them the same
 		for _, v := range shortList {
@@ -923,21 +915,8 @@ func (p *chatPage) Help() help.KeyMap {
 			shortList = append(shortList, tabKey)
 			globalBindings = append(globalBindings, tabKey)
 		}
-		commandsBinding := key.NewBinding(
-			key.WithKeys("ctrl+p"),
-			key.WithHelp("ctrl+p", "commands"),
-		)
-		helpBinding := key.NewBinding(
-			key.WithKeys("ctrl+g"),
-			key.WithHelp("ctrl+g", "more"),
-		)
-		globalBindings = append(globalBindings, commandsBinding)
-		globalBindings = append(globalBindings,
-			key.NewBinding(
-				key.WithKeys("ctrl+s"),
-				key.WithHelp("ctrl+s", "sessions"),
-			),
-		)
+		globalBindings = append(globalBindings, keymap.GlobalKeyBindings.Commands)
+		globalBindings = append(globalBindings, keymap.GlobalKeyBindings.Sessions)
 		if p.session.ID != "" {
 			globalBindings = append(globalBindings,
 				key.NewBinding(
@@ -947,7 +926,7 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 		shortList = append(shortList,
 			// Commands
-			commandsBinding,
+			keymap.GlobalKeyBindings.Commands,
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1050,17 +1029,14 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 		shortList = append(shortList,
 			// Quit
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
+			keymap.GlobalKeyBindings.Quit,
 			// Help
-			helpBinding,
+			keymap.GlobalKeyBindings.Help,
 		)
 		fullList = append(fullList, []key.Binding{
 			key.NewBinding(
-				key.WithKeys("ctrl+g"),
-				key.WithHelp("ctrl+g", "less"),
+				key.WithKeys(keymap.GetGlobalHelpKey()),
+				key.WithHelp(keymap.GetGlobalHelpKey(), "less"),
 			),
 		})
 	}

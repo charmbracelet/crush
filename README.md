@@ -558,7 +558,7 @@ providers. If you’re a provider interested in working with us,
 
 ## Contributing
 
-See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file).
+See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
 
 ## Whatcha think?
 

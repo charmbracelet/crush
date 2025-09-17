@@ -102,6 +102,7 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 			}
 
 		case message.Tool:
+			var toolParts []*genai.Part
 			for _, result := range msg.ToolResults() {
 				response := map[string]any{"result": result.Content}
 				parsed, err := parseJSONToMap(result.Content)
@@ -121,16 +122,17 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 					}
 				}
 
-				history = append(history, &genai.Content{
-					Parts: []*genai.Part{
-						{
-							FunctionResponse: &genai.FunctionResponse{
-								Name:     toolCall.Name,
-								Response: response,
-							},
-						},
+				toolParts = append(toolParts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     toolCall.Name,
+						Response: response,
 					},
-					Role: genai.RoleModel,
+				})
+			}
+			if len(toolParts) > 0 {
+				history = append(history, &genai.Content{
+					Parts: toolParts,
+					Role:  genai.RoleUser,
 				})
 			}
 		}
@@ -373,17 +375,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 								Finished: true,
 							}
 
-							isNew := true
-							for _, existing := range toolCalls {
-								if existing.Name == newCall.Name && existing.Input == newCall.Input {
-									isNew = false
-									break
-								}
-							}
-
-							if isNew {
-								toolCalls = append(toolCalls, newCall)
-							}
+							toolCalls = append(toolCalls, newCall)
 						}
 					}
 				} else {

@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -53,16 +51,6 @@ type App struct {
 	// global context and cleanup functions
 	globalCtx    context.Context
 	cleanupFuncs []func() error
-}
-
-// isGitRepo checks if the current directory is a git repository
-func isGitRepo() bool {
-	bts, err := exec.CommandContext(
-		context.Background(),
-		"git", "rev-parse",
-		"--is-inside-work-tree",
-	).CombinedOutput()
-	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
 // New initializes a new applcation instance.

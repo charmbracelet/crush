@@ -132,7 +132,7 @@ func (b *bashTool) bashDescription() string {
 	}
 
 	if generatedWith || coAuthoredBy {
-		attributionParts := []string{}
+		var attributionParts []string
 		if generatedWith {
 			attributionParts = append(attributionParts, "💘 Generated with Crush")
 		}

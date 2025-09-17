@@ -165,6 +165,14 @@ Configuration itself is stored as a JSON object:
 
 As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
 
+```bash
+# Unix
+$HOME/.local/share/crush/crush.json
+
+# Windows
+%LOCALAPPDATA%\crush\crush.json
+```
+
 ### Attribution Settings
 
 By default, Crush adds attribution information to git commits and pull requests it creates. You can customize this behavior with the `attribution` option:
@@ -196,14 +204,6 @@ To disable all attribution, set both options to false:
     }
   }
 }
-```
-
-```bash
-# Unix
-$HOME/.local/share/crush/crush.json
-
-# Windows
-%LOCALAPPDATA%\crush\crush.json
 ```
 
 ### LSPs

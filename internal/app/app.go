@@ -368,7 +368,7 @@ func (app *App) Shutdown() {
 	// Shutdown all LSP clients.
 	for name, client := range clients {
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-		if err := client.Shutdown(shutdownCtx); err != nil {
+		if err := client.Close(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()

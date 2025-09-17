@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type DiagnosticsParams struct {
@@ -110,7 +110,7 @@ func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string
 	for _, client := range lsps {
 		originalDiags := client.GetDiagnostics()
 
-		handler := func(params json.RawMessage) {
+		handler := func(_ context.Context, _ string, params json.RawMessage) {
 			lsp.HandleDiagnostics(client, params)
 			var diagParams protocol.PublishDiagnosticsParams
 			if err := json.Unmarshal(params, &diagParams); err != nil {
@@ -167,121 +167,31 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 
-	formatDiagnostic := func(pth string, diagnostic protocol.Diagnostic, source string) string {
-		severity := "Info"
-		switch diagnostic.Severity {
-		case protocol.SeverityError:
-			severity = "Error"
-		case protocol.SeverityWarning:
-			severity = "Warn"
-		case protocol.SeverityHint:
-			severity = "Hint"
-		}
-
-		location := fmt.Sprintf("%s:%d:%d", pth, diagnostic.Range.Start.Line+1, diagnostic.Range.Start.Character+1)
-
-		sourceInfo := ""
-		if diagnostic.Source != "" {
-			sourceInfo = diagnostic.Source
-		} else if source != "" {
-			sourceInfo = source
-		}
-
-		codeInfo := ""
-		if diagnostic.Code != nil {
-			codeInfo = fmt.Sprintf("[%v]", diagnostic.Code)
-		}
-
-		tagsInfo := ""
-		if len(diagnostic.Tags) > 0 {
-			tags := []string{}
-			for _, tag := range diagnostic.Tags {
-				switch tag {
-				case protocol.Unnecessary:
-					tags = append(tags, "unnecessary")
-				case protocol.Deprecated:
-					tags = append(tags, "deprecated")
-				}
-			}
-			if len(tags) > 0 {
-				tagsInfo = fmt.Sprintf(" (%s)", strings.Join(tags, ", "))
-			}
-		}
-
-		return fmt.Sprintf("%s: %s [%s]%s%s %s",
-			severity,
-			location,
-			sourceInfo,
-			codeInfo,
-			tagsInfo,
-			diagnostic.Message)
-	}
-
 	for lspName, client := range lsps {
-		diagnostics := client.GetDiagnostics()
-		if len(diagnostics) > 0 {
-			for location, diags := range diagnostics {
-				path, err := location.Path()
-				if err != nil {
-					slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
-					continue
-				}
-				isCurrentFile := path == filePath
-
-				for _, diag := range diags {
-					formattedDiag := formatDiagnostic(path, diag, lspName)
-
-					if isCurrentFile {
-						fileDiagnostics = append(fileDiagnostics, formattedDiag)
-					} else {
-						projectDiagnostics = append(projectDiagnostics, formattedDiag)
-					}
+		for location, diags := range client.GetDiagnostics() {
+			path, err := location.Path()
+			if err != nil {
+				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
+				continue
+			}
+			isCurrentFile := path == filePath
+			for _, diag := range diags {
+				formattedDiag := formatDiagnostic(path, diag, lspName)
+				if isCurrentFile {
+					fileDiagnostics = append(fileDiagnostics, formattedDiag)
+				} else {
+					projectDiagnostics = append(projectDiagnostics, formattedDiag)
 				}
 			}
 		}
 	}
 
-	sort.Slice(fileDiagnostics, func(i, j int) bool {
-		iIsError := strings.HasPrefix(fileDiagnostics[i], "Error")
-		jIsError := strings.HasPrefix(fileDiagnostics[j], "Error")
-		if iIsError != jIsError {
-			return iIsError // Errors come first
-		}
-		return fileDiagnostics[i] < fileDiagnostics[j] // Then alphabetically
-	})
-
-	sort.Slice(projectDiagnostics, func(i, j int) bool {
-		iIsError := strings.HasPrefix(projectDiagnostics[i], "Error")
-		jIsError := strings.HasPrefix(projectDiagnostics[j], "Error")
-		if iIsError != jIsError {
-			return iIsError
-		}
-		return projectDiagnostics[i] < projectDiagnostics[j]
-	})
+	sortDiagnostics(fileDiagnostics)
+	sortDiagnostics(projectDiagnostics)
 
 	var output strings.Builder
-
-	if len(fileDiagnostics) > 0 {
-		output.WriteString("\n<file_diagnostics>\n")
-		if len(fileDiagnostics) > 10 {
-			output.WriteString(strings.Join(fileDiagnostics[:10], "\n"))
-			fmt.Fprintf(&output, "\n... and %d more diagnostics", len(fileDiagnostics)-10)
-		} else {
-			output.WriteString(strings.Join(fileDiagnostics, "\n"))
-		}
-		output.WriteString("\n</file_diagnostics>\n")
-	}
-
-	if len(projectDiagnostics) > 0 {
-		output.WriteString("\n<project_diagnostics>\n")
-		if len(projectDiagnostics) > 10 {
-			output.WriteString(strings.Join(projectDiagnostics[:10], "\n"))
-			fmt.Fprintf(&output, "\n... and %d more diagnostics", len(projectDiagnostics)-10)
-		} else {
-			output.WriteString(strings.Join(projectDiagnostics, "\n"))
-		}
-		output.WriteString("\n</project_diagnostics>\n")
-	}
+	writeDiagnostics(&output, "file_diagnostics", fileDiagnostics)
+	writeDiagnostics(&output, "project_diagnostics", projectDiagnostics)
 
 	if len(fileDiagnostics) > 0 || len(projectDiagnostics) > 0 {
 		fileErrors := countSeverity(fileDiagnostics, "Error")
@@ -295,7 +205,85 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 		output.WriteString("</diagnostic_summary>\n")
 	}
 
-	return output.String()
+	out := output.String()
+	slog.Info("Diagnostics", "output", fmt.Sprintf("%q", out))
+	return out
+}
+
+func writeDiagnostics(output *strings.Builder, tag string, in []string) {
+	if len(in) == 0 {
+		return
+	}
+	output.WriteString("\n<" + tag + ">\n")
+	if len(in) > 10 {
+		output.WriteString(strings.Join(in[:10], "\n"))
+		fmt.Fprintf(output, "\n... and %d more diagnostics", len(in)-10)
+	} else {
+		output.WriteString(strings.Join(in, "\n"))
+	}
+	output.WriteString("\n</" + tag + ">\n")
+}
+
+func sortDiagnostics(in []string) []string {
+	sort.Slice(in, func(i, j int) bool {
+		iIsError := strings.HasPrefix(in[i], "Error")
+		jIsError := strings.HasPrefix(in[j], "Error")
+		if iIsError != jIsError {
+			return iIsError // Errors come first
+		}
+		return in[i] < in[j] // Then alphabetically
+	})
+	return in
+}
+
+func formatDiagnostic(pth string, diagnostic protocol.Diagnostic, source string) string {
+	severity := "Info"
+	switch diagnostic.Severity {
+	case protocol.SeverityError:
+		severity = "Error"
+	case protocol.SeverityWarning:
+		severity = "Warn"
+	case protocol.SeverityHint:
+		severity = "Hint"
+	}
+
+	location := fmt.Sprintf("%s:%d:%d", pth, diagnostic.Range.Start.Line+1, diagnostic.Range.Start.Character+1)
+
+	sourceInfo := ""
+	if diagnostic.Source != "" {
+		sourceInfo = diagnostic.Source
+	} else if source != "" {
+		sourceInfo = source
+	}
+
+	codeInfo := ""
+	if diagnostic.Code != nil {
+		codeInfo = fmt.Sprintf("[%v]", diagnostic.Code)
+	}
+
+	tagsInfo := ""
+	if len(diagnostic.Tags) > 0 {
+		tags := []string{}
+		for _, tag := range diagnostic.Tags {
+			switch tag {
+			case protocol.Unnecessary:
+				tags = append(tags, "unnecessary")
+			case protocol.Deprecated:
+				tags = append(tags, "deprecated")
+			}
+		}
+		if len(tags) > 0 {
+			tagsInfo = fmt.Sprintf(" (%s)", strings.Join(tags, ", "))
+		}
+	}
+
+	return fmt.Sprintf("%s: %s [%s]%s%s %s",
+		severity,
+		location,
+		sourceInfo,
+		codeInfo,
+		tagsInfo,
+		diagnostic.Message)
 }
 
 func countSeverity(diagnostics []string, severity string) int {

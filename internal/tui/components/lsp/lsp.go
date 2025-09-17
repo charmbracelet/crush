@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss/v2"
-
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // RenderOptions contains options for rendering LSP lists.
@@ -77,6 +76,9 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 				} else {
 					description = t.S().Subtle.Render("error")
 				}
+			case lsp.StateDisabled:
+				icon = t.ItemOfflineIcon.Foreground(t.FgMuted)
+				description = t.S().Base.Foreground(t.FgMuted).Render("no root markers found")
 			}
 		}
 

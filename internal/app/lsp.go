@@ -14,6 +14,10 @@ import (
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
 	for name, clientConfig := range app.config.LSP {
+		if clientConfig.Disabled {
+			slog.Info("Skipping disabled LSP client", "name", name)
+			continue
+		}
 		go app.createAndStartLSPClient(ctx, name, clientConfig)
 	}
 	slog.Info("LSP clients initialization started in background")
@@ -23,11 +27,18 @@ func (app *App) initLSPClients(ctx context.Context) {
 func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
 	slog.Info("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
+	// Check if any root markers exist in the working directory (config now has defaults)
+	if !lsp.HasRootMarkers(app.config.WorkingDir(), config.RootMarkers) {
+		slog.Info("Skipping LSP client - no root markers found", "name", name, "rootMarkers", config.RootMarkers)
+		updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
+		return
+	}
+
 	// Update state to starting
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
-	lspClient, err := lsp.NewClient(ctx, name, config)
+	lspClient, err := lsp.New(ctx, name, config)
 	if err != nil {
 		slog.Error("Failed to create LSP client for", name, err)
 		updateLSPState(name, lsp.StateError, err, nil, 0)
@@ -42,11 +53,11 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	defer cancel()
 
 	// Initialize LSP client.
-	_, err = lspClient.InitializeLSPClient(initCtx, app.config.WorkingDir())
+	_, err = lspClient.Initialize(initCtx, app.config.WorkingDir())
 	if err != nil {
 		slog.Error("Initialize failed", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, lspClient, 0)
-		lspClient.Close()
+		lspClient.Close(ctx)
 		return
 	}
 
@@ -119,7 +130,7 @@ func (app *App) restartLSPClient(ctx context.Context, name string) {
 	if exists && oldClient != nil {
 		// Try to shut down client gracefully, but don't block on errors.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = oldClient.Shutdown(shutdownCtx)
+		_ = oldClient.Close(shutdownCtx)
 		cancel()
 	}
 

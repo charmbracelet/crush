@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
 )
 
 // initLSPClients initializes LSP clients.
@@ -77,64 +75,8 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 
 	slog.Info("LSP client initialized", "name", name)
 
-	// Create a child context that can be canceled when the app is shutting
-	// down.
-	watchCtx, cancelFunc := context.WithCancel(ctx)
-
-	// Create the workspace watcher.
-	workspaceWatcher := watcher.New(name, lspClient)
-
-	// Store the cancel function to be called during cleanup.
-	app.watcherCancelFuncs.Append(cancelFunc)
-
 	// Add to map with mutex protection before starting goroutine
 	app.clientsMutex.Lock()
 	app.LSPClients[name] = lspClient
 	app.clientsMutex.Unlock()
-
-	// Run workspace watcher.
-	app.lspWatcherWG.Add(1)
-	go app.runWorkspaceWatcher(watchCtx, name, workspaceWatcher)
-}
-
-// runWorkspaceWatcher executes the workspace watcher for an LSP client.
-func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.Client) {
-	defer app.lspWatcherWG.Done()
-	defer log.RecoverPanic("LSP-"+name, func() {
-		// Try to restart the client.
-		app.restartLSPClient(ctx, name)
-	})
-
-	workspaceWatcher.Watch(ctx, app.config.WorkingDir())
-	slog.Info("Workspace watcher stopped", "client", name)
-}
-
-// restartLSPClient attempts to restart a crashed or failed LSP client.
-func (app *App) restartLSPClient(ctx context.Context, name string) {
-	// Get the original configuration.
-	clientConfig, exists := app.config.LSP[name]
-	if !exists {
-		slog.Error("Cannot restart client, configuration not found", "client", name)
-		return
-	}
-
-	// Clean up the old client if it exists.
-	app.clientsMutex.Lock()
-	oldClient, exists := app.LSPClients[name]
-	if exists {
-		// Remove from map before potentially slow shutdown.
-		delete(app.LSPClients, name)
-	}
-	app.clientsMutex.Unlock()
-
-	if exists && oldClient != nil {
-		// Try to shut down client gracefully, but don't block on errors.
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = oldClient.Close(shutdownCtx)
-		cancel()
-	}
-
-	// Create a new client using the shared function.
-	app.createAndStartLSPClient(ctx, name, clientConfig)
-	slog.Info("Successfully restarted LSP client", "client", name)
 }

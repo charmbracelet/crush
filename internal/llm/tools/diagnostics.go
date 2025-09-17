@@ -16,6 +16,7 @@ import (
 type DiagnosticsParams struct {
 	FilePath string `json:"file_path"`
 }
+
 type diagnosticsTool struct {
 	lspClients map[string]*lsp.Client
 }
@@ -76,91 +77,26 @@ func (b *diagnosticsTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 	}
 
 	lsps := b.lspClients
-
 	if len(lsps) == 0 {
 		return NewTextErrorResponse("no LSP clients available"), nil
 	}
-
-	if params.FilePath != "" {
-		notifyLspOpenFile(ctx, params.FilePath, lsps)
-		waitForLspDiagnostics(ctx, params.FilePath, lsps)
-	}
-
+	notifyLSPs(ctx, lsps, params.FilePath)
 	output := getDiagnostics(params.FilePath, lsps)
-
 	return NewTextResponse(output), nil
 }
 
-func notifyLspOpenFile(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
-	for _, client := range lsps {
-		err := client.OpenFile(ctx, filePath)
-		if err != nil {
-			continue
-		}
-	}
-}
-
-func waitForLspDiagnostics(ctx context.Context, filePath string, lsps map[string]*lsp.Client) {
-	if len(lsps) == 0 {
+func notifyLSPs(ctx context.Context, lsps map[string]*lsp.Client, filepath string) {
+	if filepath == "" {
 		return
 	}
-
-	diagChan := make(chan struct{}, 1)
-
 	for _, client := range lsps {
-		originalDiags := client.GetDiagnostics()
-
-		handler := func(_ context.Context, _ string, params json.RawMessage) {
-			lsp.HandleDiagnostics(client, params)
-			var diagParams protocol.PublishDiagnosticsParams
-			if err := json.Unmarshal(params, &diagParams); err != nil {
-				return
-			}
-
-			path, err := diagParams.URI.Path()
-			if err != nil {
-				slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
-				return
-			}
-
-			if path == filePath || hasDiagnosticsChanged(client.GetDiagnostics(), originalDiags) {
-				select {
-				case diagChan <- struct{}{}:
-				default:
-				}
-			}
+		if !client.HandlesFile(filepath) {
+			continue
 		}
-
-		client.RegisterNotificationHandler("textDocument/publishDiagnostics", handler)
-
-		if client.IsFileOpen(filePath) {
-			err := client.NotifyChange(ctx, filePath)
-			if err != nil {
-				continue
-			}
-		} else {
-			err := client.OpenFile(ctx, filePath)
-			if err != nil {
-				continue
-			}
-		}
+		_ = client.OpenFileOnDemand(ctx, filepath)
+		_ = client.NotifyChange(ctx, filepath)
+		client.WaitForDiagnostics(ctx, 5*time.Second)
 	}
-
-	select {
-	case <-diagChan:
-	case <-time.After(5 * time.Second):
-	case <-ctx.Done():
-	}
-}
-
-func hasDiagnosticsChanged(current, original map[protocol.DocumentURI][]protocol.Diagnostic) bool {
-	for uri, diags := range current {
-		origDiags, exists := original[uri]
-		if !exists || len(diags) != len(origDiags) {
-			return true
-		}
-	}
-	return false
 }
 
 func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
@@ -198,7 +134,6 @@ func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
 		fileWarnings := countSeverity(fileDiagnostics, "Warn")
 		projectErrors := countSeverity(projectDiagnostics, "Error")
 		projectWarnings := countSeverity(projectDiagnostics, "Warn")
-
 		output.WriteString("\n<diagnostic_summary>\n")
 		fmt.Fprintf(&output, "Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
 		fmt.Fprintf(&output, "Project: %d errors, %d warnings\n", projectErrors, projectWarnings)

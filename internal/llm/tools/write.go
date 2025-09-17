@@ -221,7 +221,8 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
-	waitForLspDiagnostics(ctx, filePath, w.lspClients)
+
+	notifyLSPs(ctx, w.lspClients, params.FilePath)
 
 	result := fmt.Sprintf("File successfully written: %s", filePath)
 	result = fmt.Sprintf("<result>\n%s\n</result>", result)

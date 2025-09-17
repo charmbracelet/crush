@@ -23,7 +23,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -97,15 +96,6 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	app.setupEvents()
-
-	// Start the global watcher only if this is a git repository
-	if isGitRepo() {
-		if err := watcher.Start(); err != nil {
-			return nil, fmt.Errorf("app: %w", err)
-		}
-	} else {
-		slog.Warn("Not starting global watcher: not a git repository")
-	}
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
@@ -373,9 +363,6 @@ func (app *App) Shutdown() {
 		}
 		cancel()
 	}
-
-	// Shutdown the global watcher
-	watcher.Shutdown()
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

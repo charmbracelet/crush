@@ -523,6 +523,10 @@ We’re committed to building sustainable, trusted integrations with model
 providers. If you’re a provider interested in working with us,
 [reach out](mailto:vt100@charm.sh).
 
+## Contributing
+
+See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file).
+
 ## Whatcha think?
 
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:

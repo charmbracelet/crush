@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/tidwall/sjson"
 )
 
@@ -208,6 +210,34 @@ func (m MCPConfig) ResolvedHeaders() map[string]string {
 		}
 	}
 	return m.Headers
+}
+
+func resolveCommand(command, logContext string) string {
+	// Handle tilde expansion first
+	if strings.HasPrefix(command, "~/") {
+		homeDir := home.Dir()
+		command = filepath.Join(homeDir, command[2:])
+	} else if command == "~" {
+		homeDir := home.Dir()
+		command = homeDir
+	}
+
+	// Then handle environment variable expansion
+	resolver := NewShellVariableResolver(env.New())
+	resolved, err := resolver.ResolveValue(command)
+	if err != nil {
+		slog.Error("error resolving command variable", "error", err, "command", command, "context", logContext)
+		return command
+	}
+	return resolved
+}
+
+func (m MCPConfig) ResolvedCommand() string {
+	return resolveCommand(m.Command, "MCP")
+}
+
+func (l LSPConfig) ResolvedCommand() string {
+	return resolveCommand(l.Command, "LSP")
 }
 
 type Agent struct {

@@ -175,7 +175,8 @@ $HOME/.local/share/crush/crush.json
 
 ### Attribution Settings
 
-By default, Crush adds attribution information to Git commits and pull requests it creates. You can customize this behavior with the `attribution` option:
+By default, Crush adds attribution information to Git commits and pull requests
+it creates. You can customize this behavior with the `attribution` option:
 
 ```json
 {

@@ -35,6 +35,7 @@ type PromptDat struct {
 	Date         string
 	GitStatus    string
 	ContextFiles []ContextFile
+	MemoryFiles  []ContextFile
 }
 
 type ContextFile struct {
@@ -150,16 +151,27 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 	workingDir := cmp.Or(p.workingDir, cfg.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
-	files := map[string][]ContextFile{}
+	contextFiles := map[string][]ContextFile{}
+	memoryFiles := map[string][]ContextFile{}
 
 	for _, pth := range cfg.Options.ContextPaths {
 		expanded := expandPath(pth, cfg)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		if _, ok := contextFiles[pathKey]; ok {
 			continue
 		}
 		content := processContextPath(expanded, cfg)
-		files[pathKey] = content
+		contextFiles[pathKey] = content
+	}
+
+	for _, pth := range cfg.Options.MemoryPaths {
+		expanded := expandPath(pth, cfg)
+		pathKey := strings.ToLower(expanded)
+		if _, ok := memoryFiles[pathKey]; ok {
+			continue
+		}
+		content := processContextPath(expanded, cfg)
+		memoryFiles[pathKey] = content
 	}
 
 	isGit := isGitRepo(cfg.WorkingDir())
@@ -180,8 +192,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	for _, files := range contextFiles {
+		data.ContextFiles = append(data.ContextFiles, files...)
+	}
+	for _, files := range memoryFiles {
+		data.MemoryFiles = append(data.MemoryFiles, files...)
 	}
 	return data, nil
 }

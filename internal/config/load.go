@@ -329,7 +329,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
 		}
 	}
-	c.Options.ContextPaths = append(c.Options.ContextPaths, c.Options.MemoryPaths...)
+	slices.Sort(c.Options.MemoryPaths)
+	c.Options.MemoryPaths = slices.Compact(c.Options.MemoryPaths)
 
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
@@ -361,9 +362,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	// Add the default context paths if they are not already present
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
-
-	// The ordering of contexts can be important; maybe the user's stuff should
-	// go at the bottom? Or top?
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 

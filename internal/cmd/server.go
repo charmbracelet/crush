@@ -42,6 +42,7 @@ var serverCmd = &cobra.Command{
 		}
 
 		srv := server.NewServer(cfg, "unix", server.DefaultAddr())
+		srv.SetLogger(slog.Default())
 		slog.Info("Starting Crush server...", "addr", srv.Addr)
 
 		errch := make(chan error, 1)

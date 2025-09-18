@@ -38,7 +38,7 @@ func DefaultKeyMap() KeyMap {
 		),
 
 		Close: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "close/exit"),
 		),
 	}

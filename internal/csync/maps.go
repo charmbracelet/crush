@@ -70,10 +70,10 @@ func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
 
 // Take gets an item and then deletes it.
 func (m *Map[K, V]) Take(key K) (V, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	v, ok := m.inner[key]
-	delete(m.inner, key)
+	v, ok := m.Get(key)
+	if ok {
+		m.Del(key)
+	}
 	return v, ok
 }
 

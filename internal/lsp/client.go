@@ -34,7 +34,7 @@ type Client struct {
 	onDiagnosticsChanged func(name string, count int)
 
 	// Diagnostic cache
-	diagnostics *csync.Map[protocol.DocumentURI, []protocol.Diagnostic]
+	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
 
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
@@ -83,7 +83,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 		client:      powernapClient,
 		name:        name,
 		fileTypes:   config.FileTypes,
-		diagnostics: csync.NewMap[protocol.DocumentURI, []protocol.Diagnostic](),
+		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      config,
 	}
@@ -314,6 +314,8 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 }
 
 // CloseFile closes a file in the LSP server.
+//
+// NOTE: this is only ever called on LSP shutdown.
 func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	cfg := config.Get()
 	uri := string(protocol.URIFromPath(filepath))
@@ -449,6 +451,26 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 				slog.Debug("Failed to open key config file", "file", file, "error", err)
 			} else {
 				slog.Debug("Opened key config file for initialization", "file", file)
+			}
+		}
+	}
+}
+
+// WaitForDiagnostics waits until diagnostics change or the timeout is reached.
+func (c *Client) WaitForDiagnostics(ctx context.Context, d time.Duration) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(d)
+	pv := c.diagnostics.Version()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeout:
+			return
+		case <-ticker.C:
+			if pv != c.diagnostics.Version() {
+				return
 			}
 		}
 	}

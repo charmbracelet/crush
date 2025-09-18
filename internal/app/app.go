@@ -7,14 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -23,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -41,9 +37,6 @@ type App struct {
 
 	clientsMutex sync.RWMutex
 
-	watcherCancelFuncs *csync.Slice[context.CancelFunc]
-	lspWatcherWG       sync.WaitGroup
-
 	config *config.Config
 
 	serviceEventsWG *sync.WaitGroup
@@ -54,16 +47,6 @@ type App struct {
 	// global context and cleanup functions
 	globalCtx    context.Context
 	cleanupFuncs []func() error
-}
-
-// isGitRepo checks if the current directory is a git repository
-func isGitRepo() bool {
-	bts, err := exec.CommandContext(
-		context.Background(),
-		"git", "rev-parse",
-		"--is-inside-work-tree",
-	).CombinedOutput()
-	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
 // New initializes a new applcation instance.
@@ -89,23 +72,12 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 		config: cfg,
 
-		watcherCancelFuncs: csync.NewSlice[context.CancelFunc](),
-
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
 		tuiWG:           &sync.WaitGroup{},
 	}
 
 	app.setupEvents()
-
-	// Start the global watcher only if this is a git repository
-	if isGitRepo() {
-		if err := watcher.Start(); err != nil {
-			return nil, fmt.Errorf("app: %w", err)
-		}
-	} else {
-		slog.Warn("Not starting global watcher: not a git repository")
-	}
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
@@ -352,13 +324,6 @@ func (app *App) Shutdown() {
 		app.CoderAgent.CancelAll()
 	}
 
-	for cancel := range app.watcherCancelFuncs.Seq() {
-		cancel()
-	}
-
-	// Wait for all LSP watchers to finish.
-	app.lspWatcherWG.Wait()
-
 	// Get all LSP clients.
 	app.clientsMutex.RLock()
 	clients := make(map[string]*lsp.Client, len(app.LSPClients))
@@ -373,9 +338,6 @@ func (app *App) Shutdown() {
 		}
 		cancel()
 	}
-
-	// Shutdown the global watcher
-	watcher.Shutdown()
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

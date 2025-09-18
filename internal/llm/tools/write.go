@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
@@ -30,7 +31,7 @@ type WritePermissionsParams struct {
 }
 
 type writeTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  *csync.Map[string, *lsp.Client]
 	permissions permission.Service
 	files       history.Service
 	workingDir  string
@@ -78,7 +79,7 @@ TIPS:
 - Always include descriptive comments when making changes to existing code`
 )
 
-func NewWriteTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &writeTool{
 		lspClients:  lspClients,
 		permissions: permissions,
@@ -221,7 +222,8 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
-	waitForLspDiagnostics(ctx, filePath, w.lspClients)
+
+	notifyLSPs(ctx, w.lspClients, params.FilePath)
 
 	result := fmt.Sprintf("File successfully written: %s", filePath)
 	result = fmt.Sprintf("<result>\n%s\n</result>", result)

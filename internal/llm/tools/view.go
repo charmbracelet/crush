@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -28,7 +29,7 @@ type ViewPermissionsParams struct {
 }
 
 type viewTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  *csync.Map[string, *lsp.Client]
 	workingDir  string
 	permissions permission.Service
 }
@@ -81,7 +82,7 @@ TIPS:
 - When viewing large files, use the offset parameter to read specific sections`
 )
 
-func NewViewTool(lspClients map[string]*lsp.Client, permissions permission.Service, workingDir string) BaseTool {
+func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) BaseTool {
 	return &viewTool{
 		lspClients:  lspClients,
 		workingDir:  workingDir,
@@ -233,7 +234,7 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 	}
 
-	notifyLspOpenFile(ctx, filePath, v.lspClients)
+	notifyLSPs(ctx, v.lspClients, filePath)
 	output := "<file>\n"
 	// Format the output with line numbers
 	output += addLineNumbers(content, params.Offset+1)

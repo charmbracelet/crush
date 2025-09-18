@@ -6,15 +6,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type Header interface {
@@ -28,11 +29,11 @@ type Header interface {
 type header struct {
 	width       int
 	session     session.Session
-	lspClients  map[string]*lsp.Client
+	lspClients  *csync.Map[string, *lsp.Client]
 	detailsOpen bool
 }
 
-func New(lspClients map[string]*lsp.Client) Header {
+func New(lspClients *csync.Map[string, *lsp.Client]) Header {
 	return &header{
 		lspClients: lspClients,
 		width:      0,
@@ -104,7 +105,7 @@ func (h *header) details(availWidth int) string {
 	var parts []string
 
 	errorCount := 0
-	for _, l := range h.lspClients {
+	for l := range h.lspClients.Seq() {
 		for _, diagnostics := range l.GetDiagnostics() {
 			for _, diagnostic := range diagnostics {
 				if diagnostic.Severity == protocol.SeverityError {

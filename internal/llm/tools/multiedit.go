@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
@@ -43,7 +44,7 @@ type MultiEditResponseMetadata struct {
 }
 
 type multiEditTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  *csync.Map[string, *lsp.Client]
 	permissions permission.Service
 	files       history.Service
 	workingDir  string
@@ -95,7 +96,7 @@ If you want to create a new file, use:
 - Subsequent edits: normal edit operations on the created content`
 )
 
-func NewMultiEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &multiEditTool{
 		lspClients:  lspClients,
 		permissions: permissions,
@@ -188,8 +189,10 @@ func (m *multiEditTool) Run(ctx context.Context, call ToolCall) (ToolResponse, e
 		return response, nil
 	}
 
+	// Notify LSP clients about the change
+	notifyLSPs(ctx, m.lspClients, params.FilePath)
+
 	// Wait for LSP diagnostics and add them to the response
-	waitForLspDiagnostics(ctx, params.FilePath, m.lspClients)
 	text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 	text += getDiagnostics(params.FilePath, m.lspClients)
 	response.Content = text

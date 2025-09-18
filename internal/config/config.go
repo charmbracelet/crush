@@ -117,12 +117,14 @@ type MCPConfig struct {
 }
 
 type LSPConfig struct {
-	Disabled  bool              `json:"enabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command   string            `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
-	Args      []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
-	Env       map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
-	Options   any               `json:"options,omitempty" jsonschema:"description=LSP server-specific configuration options"`
-	FileTypes []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
+	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
+	Command     string            `json:"command" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
+	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
+	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
+	RootMarkers []string          `json:"root_markers,omitempty" jsonschema:"description=Files or directories that indicate the project root,example=go.mod,example=package.json,example=Cargo.toml"`
+	InitOptions map[string]any    `json:"init_options,omitempty" jsonschema:"description=Initialization options passed to the LSP server during initialize request"`
+	Options     map[string]any    `json:"options,omitempty" jsonschema:"description=LSP server-specific settings passed during initialization"`
 }
 
 type TUIOptions struct {
@@ -149,15 +151,21 @@ type Permissions struct {
 	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
 }
 
+type Attribution struct {
+	CoAuthoredBy  bool `json:"co_authored_by,omitempty" jsonschema:"description=Add Co-Authored-By trailer to commit messages,default=true"`
+	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+}
+
 type Options struct {
-	ContextPaths              []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	TUI                       *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                     bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP                  bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize      bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string      `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
-	DisabledTools             []string    `json:"disabled_tools" jsonschema:"description=Tools to disable"`
-	DisableProviderAutoUpdate bool        `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisabledTools             []string     `json:"disabled_tools" jsonschema:"description=Tools to disable"`
+	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 }
 
 type MCPs map[string]MCPConfig

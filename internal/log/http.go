@@ -2,7 +2,6 @@ package log
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,9 +12,6 @@ import (
 
 // NewHTTPClient creates an HTTP client with debug logging enabled when debug mode is on.
 func NewHTTPClient() *http.Client {
-	if !slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
-		return http.DefaultClient
-	}
 	return &http.Client{
 		Transport: &HTTPRoundTripLogger{
 			Transport: http.DefaultTransport,

@@ -270,6 +270,26 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Attribution Settings
+
+By default, Crush adds attribution information to Git commits and pull requests
+it creates. You can customize this behavior with the `attribution` option:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "attribution": {
+      "co_authored_by": true,
+      "generated_with": true
+    }
+  }
+}
+```
+
+- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
+- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
+
 ### Local Models
 
 Local models can also be configured via OpenAI-compatible API. Here are two common examples:
@@ -522,6 +542,10 @@ Microsoft’s Terms of Service.
 We’re committed to building sustainable, trusted integrations with model
 providers. If you’re a provider interested in working with us,
 [reach out](mailto:vt100@charm.sh).
+
+## Contributing
+
+See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
 
 ## Whatcha think?
 

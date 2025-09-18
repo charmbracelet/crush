@@ -382,11 +382,25 @@ If a skill mentions scripts, references, or assets, they are placed in the same 
 {{end}}
 
 {{if .ContextFiles}}
-<memory>
+# Project-Specific Context
+Make sure to follow the instructions in the context below.
+<project_context>
 {{range .ContextFiles}}
 <file path="{{.Path}}">
 {{.Content}}
 </file>
 {{end}}
-</memory>
+</project_context>
+{{end}}
+
+{{if .MemoryFiles}}
+# User context
+The following is personal content added by the user that they'd like you to follow no matter what project you're working in.
+<user_preferences>
+{{range .MemoryFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</user_preferences>
 {{end}}

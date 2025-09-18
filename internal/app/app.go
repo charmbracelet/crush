@@ -12,7 +12,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -37,9 +36,6 @@ type App struct {
 	LSPClients map[string]*lsp.Client
 
 	clientsMutex sync.RWMutex
-
-	watcherCancelFuncs *csync.Slice[context.CancelFunc]
-	lspWatcherWG       sync.WaitGroup
 
 	config *config.Config
 
@@ -75,8 +71,6 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		globalCtx: ctx,
 
 		config: cfg,
-
-		watcherCancelFuncs: csync.NewSlice[context.CancelFunc](),
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -329,13 +323,6 @@ func (app *App) Shutdown() {
 	if app.CoderAgent != nil {
 		app.CoderAgent.CancelAll()
 	}
-
-	for cancel := range app.watcherCancelFuncs.Seq() {
-		cancel()
-	}
-
-	// Wait for all LSP watchers to finish.
-	app.lspWatcherWG.Wait()
 
 	// Get all LSP clients.
 	app.clientsMutex.RLock()

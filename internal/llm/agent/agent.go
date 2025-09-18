@@ -83,8 +83,7 @@ type agent struct {
 	summarizeProviderID string
 
 	activeRequests *csync.Map[string, context.CancelFunc]
-
-	promptQueue *csync.Map[string, []string]
+	promptQueue    *csync.Map[string, []string]
 }
 
 var agentPromptMap = map[string]prompt.PromptID{
@@ -100,7 +99,7 @@ func NewAgent(
 	sessions session.Service,
 	messages message.Service,
 	history history.Service,
-	lspClients map[string]*lsp.Client,
+	lspClients *csync.Map[string, *lsp.Client],
 ) (Service, error) {
 	cfg := config.Get()
 
@@ -204,7 +203,7 @@ func NewAgent(
 		withCoderTools := func(t []tools.BaseTool) []tools.BaseTool {
 			if agentCfg.ID == "coder" {
 				t = append(t, mcpTools...)
-				if len(lspClients) > 0 {
+				if lspClients.Len() > 0 {
 					t = append(t, tools.NewDiagnosticsTool(lspClients))
 				}
 			}

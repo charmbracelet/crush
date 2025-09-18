@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -18,7 +19,7 @@ type DiagnosticsParams struct {
 }
 
 type diagnosticsTool struct {
-	lspClients map[string]*lsp.Client
+	lspClients *csync.Map[string, *lsp.Client]
 }
 
 const (
@@ -46,7 +47,7 @@ TIPS:
 `
 )
 
-func NewDiagnosticsTool(lspClients map[string]*lsp.Client) BaseTool {
+func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) BaseTool {
 	return &diagnosticsTool{
 		lspClients,
 	}
@@ -76,20 +77,19 @@ func (b *diagnosticsTool) Run(ctx context.Context, call ToolCall) (ToolResponse,
 		return NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
 
-	lsps := b.lspClients
-	if len(lsps) == 0 {
+	if b.lspClients.Len() == 0 {
 		return NewTextErrorResponse("no LSP clients available"), nil
 	}
-	notifyLSPs(ctx, lsps, params.FilePath)
-	output := getDiagnostics(params.FilePath, lsps)
+	notifyLSPs(ctx, b.lspClients, params.FilePath)
+	output := getDiagnostics(params.FilePath, b.lspClients)
 	return NewTextResponse(output), nil
 }
 
-func notifyLSPs(ctx context.Context, lsps map[string]*lsp.Client, filepath string) {
+func notifyLSPs(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filepath string) {
 	if filepath == "" {
 		return
 	}
-	for _, client := range lsps {
+	for client := range lsps.Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
@@ -99,11 +99,11 @@ func notifyLSPs(ctx context.Context, lsps map[string]*lsp.Client, filepath strin
 	}
 }
 
-func getDiagnostics(filePath string, lsps map[string]*lsp.Client) string {
+func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 
-	for lspName, client := range lsps {
+	for lspName, client := range lsps.Seq2() {
 		for location, diags := range client.GetDiagnostics() {
 			path, err := location.Path()
 			if err != nil {

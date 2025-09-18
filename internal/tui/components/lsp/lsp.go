@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -22,7 +23,7 @@ type RenderOptions struct {
 }
 
 // RenderLSPList renders a list of LSP status items with the given options.
-func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []string {
+func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOptions) []string {
 	t := styles.CurrentTheme()
 	lspList := []string{}
 
@@ -91,7 +92,7 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 				protocol.SeverityHint:        0,
 				protocol.SeverityInformation: 0,
 			}
-			if client, ok := lspClients[l.Name]; ok {
+			if client, ok := lspClients.Get(l.Name); ok {
 				for _, diagnostics := range client.GetDiagnostics() {
 					for _, diagnostic := range diagnostics {
 						if severity, ok := lspErrs[diagnostic.Severity]; ok {
@@ -134,7 +135,7 @@ func RenderLSPList(lspClients map[string]*lsp.Client, opts RenderOptions) []stri
 }
 
 // RenderLSPBlock renders a complete LSP block with optional truncation indicator.
-func RenderLSPBlock(lspClients map[string]*lsp.Client, opts RenderOptions, showTruncationIndicator bool) string {
+func RenderLSPBlock(lspClients *csync.Map[string, *lsp.Client], opts RenderOptions, showTruncationIndicator bool) string {
 	t := styles.CurrentTheme()
 	lspList := RenderLSPList(lspClients, opts)
 

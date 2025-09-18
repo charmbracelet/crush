@@ -37,6 +37,7 @@ type PromptDat struct {
 	Date          string
 	GitStatus     string
 	ContextFiles  []ContextFile
+	MemoryFiles   []ContextFile
 	AvailSkillXML string
 }
 
@@ -153,17 +154,28 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
-	files := map[string][]ContextFile{}
+	contextFiles := map[string][]ContextFile{}
+	memoryFiles := map[string][]ContextFile{}
 
 	cfg := store.Config()
 	for _, pth := range cfg.Options.ContextPaths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		if _, ok := contextFiles[pathKey]; ok {
 			continue
 		}
 		content := processContextPath(expanded, store)
-		files[pathKey] = content
+		contextFiles[pathKey] = content
+	}
+
+	for _, pth := range cfg.Options.MemoryPaths {
+		expanded := expandPath(pth, store)
+		pathKey := strings.ToLower(expanded)
+		if _, ok := memoryFiles[pathKey]; ok {
+			continue
+		}
+		content := processContextPath(expanded, store)
+		memoryFiles[pathKey] = content
 	}
 
 	// Discover and load skills metadata.
@@ -219,8 +231,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	for _, files := range contextFiles {
+		data.ContextFiles = append(data.ContextFiles, files...)
+	}
+	for _, files := range memoryFiles {
+		data.MemoryFiles = append(data.MemoryFiles, files...)
 	}
 	return data, nil
 }

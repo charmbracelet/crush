@@ -84,6 +84,11 @@ type Server struct {
 	shutdown atomic.Bool
 }
 
+// SetLogger sets the logger for the server.
+func (s *Server) SetLogger(logger *slog.Logger) {
+	s.logger = logger
+}
+
 // DefaultServer returns a new [Server] instance with the default address.
 func DefaultServer(cfg *config.Config) *Server {
 	return NewServer(cfg, "unix", DefaultAddr())
@@ -171,14 +176,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
-	s.info("accepted connection from %s", conn.RemoteAddr())
-	msgpackrpc.ServeConn(conn)
-	// var req rpc.Request
-	// codec := msgpackrpc.NewServerCodec(conn)
-	// if err := codec.ReadRequestHeader(&req); err != nil {
-	// 	s.error("failed to read request header: %v", err)
-	// }
-	// rpc.ServeCodec(codec)
+	s.info("accepted connection", "remote_addr", conn.LocalAddr())
+	codec := &ServerCodec{
+		MsgpackCodec: msgpackrpc.NewCodec(true, true, conn),
+		logger: s.logger.With(
+			slog.String("remote_addr", conn.RemoteAddr().String()),
+			slog.String("local_addr", conn.LocalAddr().String()),
+		),
+	}
+	rpc.ServeCodec(codec)
 }
 
 func (s *Server) shuttingDown() bool {

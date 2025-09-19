@@ -327,7 +327,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 }
 
 func createAndInitializeClient(ctx context.Context, name string, m config.MCPConfig) (*client.Client, error) {
-	c, err := createMcpClient(m)
+	c, err := createMcpClient(name, m)
 	if err != nil {
 		updateMCPState(name, MCPStateError, err, nil, 0)
 		slog.Error("error creating mcp client", "error", err, "name", name)
@@ -353,7 +353,7 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 	return c, nil
 }
 
-func createMcpClient(m config.MCPConfig) (*client.Client, error) {
+func createMcpClient(name string, m config.MCPConfig) (*client.Client, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		if strings.TrimSpace(m.Command) == "" {
@@ -363,7 +363,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 			m.Command,
 			m.ResolvedEnv(),
 			m.Args,
-			transport.WithCommandLogger(mcpLogger{}),
+			transport.WithCommandLogger(mcpLogger{name: name}),
 		)
 	case config.MCPHttp:
 		if strings.TrimSpace(m.URL) == "" {
@@ -372,7 +372,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		return client.NewStreamableHttpClient(
 			m.URL,
 			transport.WithHTTPHeaders(m.ResolvedHeaders()),
-			transport.WithHTTPLogger(mcpLogger{}),
+			transport.WithHTTPLogger(mcpLogger{name: name}),
 		)
 	case config.MCPSse:
 		if strings.TrimSpace(m.URL) == "" {
@@ -381,7 +381,7 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 		return client.NewSSEMCPClient(
 			m.URL,
 			client.WithHeaders(m.ResolvedHeaders()),
-			transport.WithSSELogger(mcpLogger{}),
+			transport.WithSSELogger(mcpLogger{name: name}),
 		)
 	default:
 		return nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
@@ -389,10 +389,15 @@ func createMcpClient(m config.MCPConfig) (*client.Client, error) {
 }
 
 // for MCP's clients.
-type mcpLogger struct{}
+type mcpLogger struct{ name string }
 
-func (l mcpLogger) Errorf(format string, v ...any) { slog.Error(fmt.Sprintf(format, v...)) }
-func (l mcpLogger) Infof(format string, v ...any)  { slog.Info(fmt.Sprintf(format, v...)) }
+func (l mcpLogger) Errorf(format string, v ...any) {
+	slog.Error(fmt.Sprintf(format, v...), "name", l.name)
+}
+
+func (l mcpLogger) Infof(format string, v ...any) {
+	slog.Info(fmt.Sprintf(format, v...), "name", l.name)
+}
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second

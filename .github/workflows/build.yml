@@ -2,7 +2,7 @@ name: build
 on: [push, pull_request]
 
 jobs:
-  build-go:
+  build:
     uses: charmbracelet/meta/.github/workflows/build.yml@main
     with:
       go-version: ""

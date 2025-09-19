@@ -1,0 +1,36 @@
+name: "CLA Assistant"
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  CLAAssistant:
+    if: github.repository == 'charmbracelet/crush'
+    runs-on: ubuntu-latest
+    steps:
+      - name: "CLA Assistant"
+        if: |
+          github.event.comment.body == 'recheck' ||
+          github.event.comment.body == 'I have read the Contributor License Agreement (CLA) and hereby sign the CLA.' ||
+          github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        with:
+          path-to-signatures: ".github/cla-signatures.json"
+          path-to-document: "https://github.com/charmbracelet/crush/blob/main/CLA.md"
+          branch: "main"
+          allowlist: charmcli,charmcrush,dependabot[bot]
+          custom-pr-sign-comment: "I have read the Contributor License Agreement (CLA) and hereby sign the CLA."
+          custom-notsigned-prcomment: "Thank you for your submission. We really appreciate it! Like many open-source projects, we ask that you sign our [Contributor License Agreement](https://github.com/charmbracelet/crush/blob/main/CLA.md) before we can accept your contribution. You can sign the CLA by just posting a Pull Request comment same as the below format."
+          lock-pullrequest-aftermerge: false
+          signed-commit-message: "chore(legal): @$contributorName has signed the CLA"

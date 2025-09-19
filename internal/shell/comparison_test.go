@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,9 +17,9 @@ func TestShellPerformanceComparison(t *testing.T) {
 	duration := time.Since(start)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, exitCode)
-	assert.Contains(t, stdout, "hello")
-	assert.Empty(t, stderr)
+	require.Equal(t, 0, exitCode)
+	require.Contains(t, stdout, "hello")
+	require.Empty(t, stderr)
 
 	t.Logf("Quick command took: %v", duration)
 }

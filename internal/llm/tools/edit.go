@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -18,9 +21,10 @@ import (
 )
 
 type EditParams struct {
-	FilePath  string `json:"file_path"`
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	FilePath   string `json:"file_path"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
 type EditPermissionsParams struct {
@@ -37,69 +41,18 @@ type EditResponseMetadata struct {
 }
 
 type editTool struct {
-	lspClients  map[string]*lsp.Client
+	lspClients  *csync.Map[string, *lsp.Client]
 	permissions permission.Service
 	files       history.Service
 	workingDir  string
 }
 
-const (
-	EditToolName    = "edit"
-	editDescription = `Edits files by replacing text, creating new files, or deleting content. For moving or renaming files, use the Bash tool with the 'mv' command instead. For larger file edits, use the FileWrite tool to overwrite files.
+const EditToolName = "edit"
 
-Before using this tool:
+//go:embed edit.md
+var editDescription []byte
 
-1. Use the FileRead tool to understand the file's contents and context
-
-2. Verify the directory path is correct (only applicable when creating new files):
-   - Use the LS tool to verify the parent directory exists and is the correct location
-
-To make a file edit, provide the following:
-1. file_path: The absolute path to the file to modify (must be absolute, not relative)
-2. old_string: The text to replace (must be unique within the file, and must match the file contents exactly, including all whitespace and indentation)
-3. new_string: The edited text to replace the old_string
-
-Special cases:
-- To create a new file: provide file_path and new_string, leave old_string empty
-- To delete content: provide file_path and old_string, leave new_string empty
-
-The tool will replace ONE occurrence of old_string with new_string in the specified file.
-
-CRITICAL REQUIREMENTS FOR USING THIS TOOL:
-
-1. UNIQUENESS: The old_string MUST uniquely identify the specific instance you want to change. This means:
-   - Include AT LEAST 3-5 lines of context BEFORE the change point
-   - Include AT LEAST 3-5 lines of context AFTER the change point
-   - Include all whitespace, indentation, and surrounding code exactly as it appears in the file
-
-2. SINGLE INSTANCE: This tool can only change ONE instance at a time. If you need to change multiple instances:
-   - Make separate calls to this tool for each instance
-   - Each call must uniquely identify its specific instance using extensive context
-
-3. VERIFICATION: Before using this tool:
-   - Check how many instances of the target text exist in the file
-   - If multiple instances exist, gather enough context to uniquely identify each one
-   - Plan separate tool calls for each instance
-
-WARNING: If you do not follow these requirements:
-   - The tool will fail if old_string matches multiple locations
-   - The tool will fail if old_string doesn't match exactly (including whitespace)
-   - You may change the wrong instance if you don't include enough context
-
-When making edits:
-   - Ensure the edit results in idiomatic, correct code
-   - Do not leave the code in a broken state
-   - Always use absolute file paths (starting with /)
-
-WINDOWS NOTES:
-- File paths should use forward slashes (/) for cross-platform compatibility
-- On Windows, absolute paths start with drive letters (C:/) but forward slashes work throughout
-- File permissions are handled automatically by the Go runtime
-
-Remember: when making multiple file edits in a row to the same file, you should prefer to send all edits in a single message with multiple calls to this tool, rather than multiple messages with a single call each.`
-)
-
-func NewEditTool(lspClients map[string]*lsp.Client, permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
 	return &editTool{
 		lspClients:  lspClients,
 		permissions: permissions,
@@ -115,7 +68,7 @@ func (e *editTool) Name() string {
 func (e *editTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        EditToolName,
-		Description: editDescription,
+		Description: string(editDescription),
 		Parameters: map[string]any{
 			"file_path": map[string]any{
 				"type":        "string",
@@ -128,6 +81,10 @@ func (e *editTool) Info() ToolInfo {
 			"new_string": map[string]any{
 				"type":        "string",
 				"description": "The text to replace it with",
+			},
+			"replace_all": map[string]any{
+				"type":        "boolean",
+				"description": "Replace all occurrences of old_string (default false)",
 			},
 		},
 		Required: []string{"file_path", "old_string", "new_string"},
@@ -152,20 +109,20 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	var err error
 
 	if params.OldString == "" {
-		response, err = e.createNewFile(ctx, params.FilePath, params.NewString)
+		response, err = e.createNewFile(ctx, params.FilePath, params.NewString, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
 	if params.NewString == "" {
-		response, err = e.deleteContent(ctx, params.FilePath, params.OldString)
+		response, err = e.deleteContent(ctx, params.FilePath, params.OldString, params.ReplaceAll, call)
 		if err != nil {
 			return response, err
 		}
 	}
 
-	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString)
+	response, err = e.replaceContent(ctx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 	if err != nil {
 		return response, err
 	}
@@ -175,14 +132,15 @@ func (e *editTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return response, nil
 	}
 
-	waitForLspDiagnostics(ctx, params.FilePath, e.lspClients)
+	notifyLSPs(ctx, e.lspClients, params.FilePath)
+
 	text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 	text += getDiagnostics(params.FilePath, e.lspClients)
 	response.Content = text
 	return response, nil
 }
 
-func (e *editTool) createNewFile(ctx context.Context, filePath, content string) (ToolResponse, error) {
+func (e *editTool) createNewFile(ctx context.Context, filePath, content string, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err == nil {
 		if fileInfo.IsDir() {
@@ -208,15 +166,11 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 		content,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
@@ -264,7 +218,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string) 
 	), nil
 }
 
-func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string) (ToolResponse, error) {
+func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string, replaceAll bool, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -295,19 +249,31 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		return ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent := string(content)
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
-	index := strings.Index(oldContent, oldString)
-	if index == -1 {
-		return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+	var newContent string
+	var deletionCount int
+
+	if replaceAll {
+		newContent = strings.ReplaceAll(oldContent, oldString, "")
+		deletionCount = strings.Count(oldContent, oldString)
+		if deletionCount == 0 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+	} else {
+		index := strings.Index(oldContent, oldString)
+		if index == -1 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+
+		lastIndex := strings.LastIndex(oldContent, oldString)
+		if index != lastIndex {
+			return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+		}
+
+		newContent = oldContent[:index] + oldContent[index+len(oldString):]
+		deletionCount = 1
 	}
-
-	lastIndex := strings.LastIndex(oldContent, oldString)
-	if index != lastIndex {
-		return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match"), nil
-	}
-
-	newContent := oldContent[:index] + oldContent[index+len(oldString):]
 
 	sessionID, messageID := GetContextValues(ctx)
 
@@ -321,15 +287,11 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
@@ -342,6 +304,10 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	)
 	if !p {
 		return ToolResponse{}, permission.ErrorPermissionDenied
+	}
+
+	if isCrlf {
+		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
 
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)
@@ -385,7 +351,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	), nil
 }
 
-func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string) (ToolResponse, error) {
+func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newString string, replaceAll bool, call ToolCall) (ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -416,19 +382,31 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		return ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent := string(content)
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
-	index := strings.Index(oldContent, oldString)
-	if index == -1 {
-		return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+	var newContent string
+	var replacementCount int
+
+	if replaceAll {
+		newContent = strings.ReplaceAll(oldContent, oldString, newString)
+		replacementCount = strings.Count(oldContent, oldString)
+		if replacementCount == 0 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+	} else {
+		index := strings.Index(oldContent, oldString)
+		if index == -1 {
+			return NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+		}
+
+		lastIndex := strings.LastIndex(oldContent, oldString)
+		if index != lastIndex {
+			return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+		}
+
+		newContent = oldContent[:index] + newString + oldContent[index+len(oldString):]
+		replacementCount = 1
 	}
-
-	lastIndex := strings.LastIndex(oldContent, oldString)
-	if index != lastIndex {
-		return NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match"), nil
-	}
-
-	newContent := oldContent[:index] + newString + oldContent[index+len(oldString):]
 
 	if oldContent == newContent {
 		return NewTextErrorResponse("new content is the same as old content. No changes made."), nil
@@ -443,15 +421,12 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	rootDir := e.workingDir
-	permissionPath := filepath.Dir(filePath)
-	if strings.HasPrefix(filePath, rootDir) {
-		permissionPath = rootDir
-	}
+
 	p := e.permissions.Request(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
-			Path:        permissionPath,
+			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
+			ToolCallID:  call.ID,
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),
@@ -464,6 +439,10 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	)
 	if !p {
 		return ToolResponse{}, permission.ErrorPermissionDenied
+	}
+
+	if isCrlf {
+		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
 
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)

@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
+
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -57,20 +58,22 @@ type Provider interface {
 
 	StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() provider.Model
+	Model() catwalk.Model
 }
 
 type providerClientOptions struct {
-	baseURL       string
-	config        config.ProviderConfig
-	apiKey        string
-	modelType     config.SelectedModelType
-	model         func(config.SelectedModelType) provider.Model
-	disableCache  bool
-	systemMessage string
-	maxTokens     int64
-	extraHeaders  map[string]string
-	extraParams   map[string]string
+	baseURL            string
+	config             config.ProviderConfig
+	apiKey             string
+	modelType          config.SelectedModelType
+	model              func(config.SelectedModelType) catwalk.Model
+	disableCache       bool
+	systemMessage      string
+	systemPromptPrefix string
+	maxTokens          int64
+	extraHeaders       map[string]string
+	extraBody          map[string]any
+	extraParams        map[string]string
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -79,7 +82,7 @@ type ProviderClient interface {
 	send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error)
 	stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent
 
-	Model() provider.Model
+	Model() catwalk.Model
 }
 
 type baseProvider[C ProviderClient] struct {
@@ -108,7 +111,7 @@ func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message
 	return p.client.stream(ctx, messages, tools)
 }
 
-func (p *baseProvider[C]) Model() provider.Model {
+func (p *baseProvider[C]) Model() catwalk.Model {
 	return p.client.Model()
 }
 
@@ -137,17 +140,32 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 }
 
 func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+	restore := config.PushPopCrushEnv()
+	defer restore()
 	resolvedAPIKey, err := config.Get().Resolve(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
 
+	// Resolve extra headers
+	resolvedExtraHeaders := make(map[string]string)
+	for key, value := range cfg.ExtraHeaders {
+		resolvedValue, err := config.Get().Resolve(value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
+		}
+		resolvedExtraHeaders[key] = resolvedValue
+	}
+
 	clientOptions := providerClientOptions{
-		baseURL:      cfg.BaseURL,
-		config:       cfg,
-		apiKey:       resolvedAPIKey,
-		extraHeaders: cfg.ExtraHeaders,
-		model: func(tp config.SelectedModelType) provider.Model {
+		baseURL:            cfg.BaseURL,
+		config:             cfg,
+		apiKey:             resolvedAPIKey,
+		extraHeaders:       resolvedExtraHeaders,
+		extraBody:          cfg.ExtraBody,
+		extraParams:        cfg.ExtraParams,
+		systemPromptPrefix: cfg.SystemPromptPrefix,
+		model: func(tp config.SelectedModelType) catwalk.Model {
 			return *config.Get().GetModelByType(tp)
 		},
 	}
@@ -155,41 +173,35 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		o(&clientOptions)
 	}
 	switch cfg.Type {
-	case provider.TypeAnthropic:
+	case catwalk.TypeAnthropic:
 		return &baseProvider[AnthropicClient]{
 			options: clientOptions,
-			client:  newAnthropicClient(clientOptions, false),
+			client:  newAnthropicClient(clientOptions, AnthropicClientTypeNormal),
 		}, nil
-	case provider.TypeOpenAI:
+	case catwalk.TypeOpenAI:
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
 			client:  newOpenAIClient(clientOptions),
 		}, nil
-	case provider.TypeGemini:
+	case catwalk.TypeGemini:
 		return &baseProvider[GeminiClient]{
 			options: clientOptions,
 			client:  newGeminiClient(clientOptions),
 		}, nil
-	case provider.TypeBedrock:
+	case catwalk.TypeBedrock:
 		return &baseProvider[BedrockClient]{
 			options: clientOptions,
 			client:  newBedrockClient(clientOptions),
 		}, nil
-	case provider.TypeAzure:
+	case catwalk.TypeAzure:
 		return &baseProvider[AzureClient]{
 			options: clientOptions,
 			client:  newAzureClient(clientOptions),
 		}, nil
-	case provider.TypeVertexAI:
+	case catwalk.TypeVertexAI:
 		return &baseProvider[VertexAIClient]{
 			options: clientOptions,
 			client:  newVertexAIClient(clientOptions),
-		}, nil
-	case provider.TypeXAI:
-		clientOptions.baseURL = "https://api.x.ai/v1"
-		return &baseProvider[OpenAIClient]{
-			options: clientOptions,
-			client:  newOpenAIClient(clientOptions),
 		}, nil
 	}
 	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)

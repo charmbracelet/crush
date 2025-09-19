@@ -1,0 +1,26 @@
+name: Update Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/config/**"
+
+jobs:
+  update-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go run . schema > ./schema.json
+      - uses: stefanzweifel/git-auto-commit-action@778341af668090896ca464160c2def5d1d1a3eb0 # v5
+        with:
+          commit_message: "chore: auto-update generated files"
+          branch: main
+          commit_user_name: actions-user
+          commit_user_email: actions@github.com
+          commit_author: actions-user <actions@github.com>

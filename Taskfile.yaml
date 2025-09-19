@@ -2,16 +2,43 @@
 
 version: "3"
 
+env:
+  CGO_ENABLED: 0
+  GOEXPERIMENT: greenteagc
+
 tasks:
+  lint:install:
+    desc: Install golangci-lint
+    cmds:
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+    env:
+      GOTOOLCHAIN: go1.25.0
+
   lint:
     desc: Run base linters
     cmds:
       - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
+    env:
+      GOEXPERIMENT: null
 
   lint-fix:
     desc: Run base linters and fix issues
     cmds:
       - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
+    env:
+      GOEXPERIMENT: null
+
+  build:
+    desc: Run build
+    cmds:
+      - go build .
+    generates:
+      - crush
+
+  run:
+    desc: Run build
+    cmds:
+      - go run .
 
   test:
     desc: Run tests
@@ -29,6 +56,11 @@ tasks:
       CRUSH_PROFILE: true
     cmds:
       - go run .
+
+  install:
+    desc: Install the application
+    cmds:
+      - go install -v .
 
   profile:cpu:
     desc: 10s CPU profile
@@ -48,5 +80,7 @@ tasks:
   schema:
     desc: Generate JSON schema for configuration
     cmds:
-      - go run cmd/schema/main.go > crush-schema.json
-      - echo "Generated crush-schema.json"
+      - go run main.go schema > schema.json
+      - echo "Generated schema.json"
+    generates:
+      - schema.json

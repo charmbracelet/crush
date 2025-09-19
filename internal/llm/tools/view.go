@@ -3,15 +3,22 @@ package tools
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 )
+
+//go:embed view.md
+var viewDescription []byte
 
 type ViewParams struct {
 	FilePath string `json:"file_path"`
@@ -19,9 +26,16 @@ type ViewParams struct {
 	Limit    int    `json:"limit"`
 }
 
+type ViewPermissionsParams struct {
+	FilePath string `json:"file_path"`
+	Offset   int    `json:"offset"`
+	Limit    int    `json:"limit"`
+}
+
 type viewTool struct {
-	lspClients map[string]*lsp.Client
-	workingDir string
+	lspClients  *csync.Map[string, *lsp.Client]
+	workingDir  string
+	permissions permission.Service
 }
 
 type ViewResponseMetadata struct {
@@ -34,47 +48,13 @@ const (
 	MaxReadSize      = 250 * 1024
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
-	viewDescription  = `File viewing tool that reads and displays the contents of files with line numbers, allowing you to examine code, logs, or text data.
-
-WHEN TO USE THIS TOOL:
-- Use when you need to read the contents of a specific file
-- Helpful for examining source code, configuration files, or log files
-- Perfect for looking at text-based file formats
-
-HOW TO USE:
-- Provide the path to the file you want to view
-- Optionally specify an offset to start reading from a specific line
-- Optionally specify a limit to control how many lines are read
-
-FEATURES:
-- Displays file contents with line numbers for easy reference
-- Can read from any position in a file using the offset parameter
-- Handles large files by limiting the number of lines read
-- Automatically truncates very long lines for better display
-- Suggests similar file names when the requested file isn't found
-
-LIMITATIONS:
-- Maximum file size is 250KB
-- Default reading limit is 2000 lines
-- Lines longer than 2000 characters are truncated
-- Cannot display binary files or images
-- Images can be identified but not displayed
-
-WINDOWS NOTES:
-- Handles both Windows (CRLF) and Unix (LF) line endings automatically
-- File paths work with both forward slashes (/) and backslashes (\)
-- Text encoding is detected automatically for most common formats
-
-TIPS:
-- Use with Glob tool to first find files you want to view
-- For code exploration, first use Grep to find relevant files, then View to examine them
-- When viewing large files, use the offset parameter to read specific sections`
 )
 
-func NewViewTool(lspClients map[string]*lsp.Client, workingDir string) BaseTool {
+func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) BaseTool {
 	return &viewTool{
-		lspClients: lspClients,
-		workingDir: workingDir,
+		lspClients:  lspClients,
+		workingDir:  workingDir,
+		permissions: permissions,
 	}
 }
 
@@ -85,7 +65,7 @@ func (v *viewTool) Name() string {
 func (v *viewTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        ViewToolName,
-		Description: viewDescription,
+		Description: string(viewDescription),
 		Parameters: map[string]any{
 			"file_path": map[string]any{
 				"type":        "string",
@@ -119,6 +99,42 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	filePath := params.FilePath
 	if !filepath.IsAbs(filePath) {
 		filePath = filepath.Join(v.workingDir, filePath)
+	}
+
+	// Check if file is outside working directory and request permission if needed
+	absWorkingDir, err := filepath.Abs(v.workingDir)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(absWorkingDir, absFilePath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// File is outside working directory, request permission
+		sessionID, messageID := GetContextValues(ctx)
+		if sessionID == "" || messageID == "" {
+			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing files outside working directory")
+		}
+
+		granted := v.permissions.Request(
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        absFilePath,
+				ToolCallID:  call.ID,
+				ToolName:    ViewToolName,
+				Action:      "read",
+				Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
+				Params:      ViewPermissionsParams(params),
+			},
+		)
+
+		if !granted {
+			return ToolResponse{}, permission.ErrorPermissionDenied
+		}
 	}
 
 	// Check if file exists
@@ -173,16 +189,20 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	isImage, imageType := isImageFile(filePath)
 	// TODO: handle images
 	if isImage {
-		return NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\nUse a different tool to process images", imageType)), nil
+		return NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
 	}
 
 	// Read the file content
 	content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
+	isValidUt8 := utf8.ValidString(content)
+	if !isValidUt8 {
+		return NewTextErrorResponse("File content is not valid UTF-8"), nil
+	}
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 	}
 
-	notifyLspOpenFile(ctx, filePath, v.lspClients)
+	notifyLSPs(ctx, v.lspClients, filePath)
 	output := "<file>\n"
 	// Format the output with line numbers
 	output += addLineNumbers(content, params.Offset+1)
@@ -255,7 +275,8 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 		}
 	}
 
-	var lines []string
+	// Pre-allocate slice with expected capacity
+	lines := make([]string, 0, limit)
 	lineCount = offset
 
 	for scanner.Scan() && len(lines) < limit {

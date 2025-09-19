@@ -1,0 +1,8 @@
+/**
+ * this is
+ * a block
+ * comment
+ */
+$(function() {
+    console.log("Hello, world!");
+});

@@ -1,0 +1,65 @@
+# NOTE(@andreynering): We should have a single entry per label, because if we
+# have multiple the action would only apply the label if ALL of them match.
+
+"area: ci":
+  - "/^ci: /i"
+"area: diff":
+  - "/diff/i"
+"area: docs":
+  - "/(docs|documentation|readme)/i"
+"area: images":
+  - "/image/i"
+"area: lsp":
+  - "/lsp/i"
+"area: mcp":
+  - "/mcp/i"
+"area: mouse":
+  - "/(mouse|scroll)/i"
+"area: onboarding":
+  - "/(onboarding)/i"
+"area: permissions":
+  - "/permission/i"
+"area: releasing":
+  - "/(release|releasing|aur|brew|nix|npm|scoop|termux|winget)/i"
+"area: session":
+  - "/session/i"
+"area: shell":
+  - "/shell/i"
+"area: themes":
+  - "/theme/i"
+"area: tools":
+  - "/tool/i"
+"os: android":
+  - "/(android|termux)/i"
+"os: linux":
+  - "/(linux|fedora|debian|ubuntu)/i"
+"os: macos":
+  - "/(macos|osx|darwin)/i"
+"os: windows":
+  - "/(windows|win10|win11|win32|wsl|scoop|winget)/i"
+"panic / crash":
+  - "/(panic|crash|segfault)/i"
+"provider: anthropic claude":
+  - "/(anthropic|claude)/i"
+"provider: aws bedrock":
+  - "/(aws|bedrock)/i"
+"provider: azure":
+  - "/azure/i"
+"provider: google gemini":
+  - "/gemini/i"
+"provider: google vertex":
+  - "/vertex/i"
+"provider: kimi":
+  - "/kimi/i"
+"provider: ollama":
+  - "/llama/i"
+"provider: openai chatgpt":
+  - "/(openai|gpt)/i"
+"provider: openrouter":
+  - "/openrouter/i"
+"provider: qwen":
+  - "/qwen/i"
+"provider: xai grok":
+  - "/(xai|x\\.ai|grok)/i"
+"security":
+  - "/(security|vulnerability|exploit)/i"

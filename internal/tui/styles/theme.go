@@ -62,6 +62,7 @@ type Theme struct {
 
 	// Yellows
 	Yellow color.Color
+	Citron color.Color
 
 	// Greens
 	Green      color.Color
@@ -72,6 +73,22 @@ type Theme struct {
 	Red      color.Color
 	RedDark  color.Color
 	RedLight color.Color
+	Cherry   color.Color
+
+	// Text selection.
+	TextSelection lipgloss.Style
+
+	// LSP and MCP status indicators.
+	ItemOfflineIcon lipgloss.Style
+	ItemBusyIcon    lipgloss.Style
+	ItemErrorIcon   lipgloss.Style
+	ItemOnlineIcon  lipgloss.Style
+
+	// Editor: Yolo Mode
+	YoloIconFocused lipgloss.Style
+	YoloIconBlurred lipgloss.Style
+	YoloDotsFocused lipgloss.Style
+	YoloDotsBlurred lipgloss.Style
 
 	styles *Styles
 }
@@ -150,15 +167,15 @@ func (t *Theme) buildStyles() *Styles {
 		TextInput: textinput.Styles{
 			Focused: textinput.StyleState{
 				Text:        base,
-				Placeholder: base.Foreground(t.FgMuted),
+				Placeholder: base.Foreground(t.FgSubtle),
 				Prompt:      base.Foreground(t.Tertiary),
-				Suggestion:  base.Foreground(t.FgMuted),
+				Suggestion:  base.Foreground(t.FgSubtle),
 			},
 			Blurred: textinput.StyleState{
 				Text:        base.Foreground(t.FgMuted),
-				Placeholder: base.Foreground(t.FgMuted),
+				Placeholder: base.Foreground(t.FgSubtle),
 				Prompt:      base.Foreground(t.FgMuted),
-				Suggestion:  base.Foreground(t.FgMuted),
+				Suggestion:  base.Foreground(t.FgSubtle),
 			},
 			Cursor: textinput.CursorStyle{
 				Color: t.Secondary,
@@ -173,7 +190,7 @@ func (t *Theme) buildStyles() *Styles {
 				LineNumber:       base.Foreground(t.FgSubtle),
 				CursorLine:       base,
 				CursorLineNumber: base.Foreground(t.FgSubtle),
-				Placeholder:      base.Foreground(t.FgMuted),
+				Placeholder:      base.Foreground(t.FgSubtle),
 				Prompt:           base.Foreground(t.Tertiary),
 			},
 			Blurred: textarea.StyleState{
@@ -182,7 +199,7 @@ func (t *Theme) buildStyles() *Styles {
 				LineNumber:       base.Foreground(t.FgMuted),
 				CursorLine:       base,
 				CursorLineNumber: base.Foreground(t.FgMuted),
-				Placeholder:      base.Foreground(t.FgMuted),
+				Placeholder:      base.Foreground(t.FgSubtle),
 				Prompt:           base.Foreground(t.FgMuted),
 			},
 			Cursor: textarea.CursorStyle{
@@ -484,26 +501,26 @@ func SetDefaultManager(m *Manager) {
 
 func DefaultManager() *Manager {
 	if defaultManager == nil {
-		defaultManager = NewManager("crush")
+		defaultManager = NewManager()
 	}
 	return defaultManager
 }
 
 func CurrentTheme() *Theme {
 	if defaultManager == nil {
-		defaultManager = NewManager("crush")
+		defaultManager = NewManager()
 	}
 	return defaultManager.Current()
 }
 
-func NewManager(defaultTheme string) *Manager {
+func NewManager() *Manager {
 	m := &Manager{
 		themes: make(map[string]*Theme),
 	}
 
-	m.Register(NewCrushTheme())
-
-	m.current = m.themes[defaultTheme]
+	t := NewCharmtoneTheme() // default theme
+	m.Register(t)
+	m.current = m.themes[t.Name]
 
 	return m
 }
@@ -574,18 +591,18 @@ func Lighten(c color.Color, percent float64) color.Color {
 	}
 }
 
-// ApplyForegroundGrad renders a given string with a horizontal gradient
-// foreground.
-func ApplyForegroundGrad(input string, color1, color2 color.Color) string {
+func ForegroundGrad(input string, bold bool, color1, color2 color.Color) []string {
 	if input == "" {
-		return ""
+		return []string{""}
 	}
-
-	var o strings.Builder
+	t := CurrentTheme()
 	if len(input) == 1 {
-		return lipgloss.NewStyle().Foreground(color1).Render(input)
+		style := t.S().Base.Foreground(color1)
+		if bold {
+			style.Bold(true)
+		}
+		return []string{style.Render(input)}
 	}
-
 	var clusters []string
 	gr := uniseg.NewGraphemes(input)
 	for gr.Next() {
@@ -594,9 +611,26 @@ func ApplyForegroundGrad(input string, color1, color2 color.Color) string {
 
 	ramp := blendColors(len(clusters), color1, color2)
 	for i, c := range ramp {
-		fmt.Fprint(&o, CurrentTheme().S().Base.Foreground(c).Render(clusters[i]))
+		style := t.S().Base.Foreground(c)
+		if bold {
+			style.Bold(true)
+		}
+		clusters[i] = style.Render(clusters[i])
 	}
+	return clusters
+}
 
+// ApplyForegroundGrad renders a given string with a horizontal gradient
+// foreground.
+func ApplyForegroundGrad(input string, color1, color2 color.Color) string {
+	if input == "" {
+		return ""
+	}
+	var o strings.Builder
+	clusters := ForegroundGrad(input, false, color1, color2)
+	for _, c := range clusters {
+		fmt.Fprint(&o, c)
+	}
 	return o.String()
 }
 
@@ -606,24 +640,11 @@ func ApplyBoldForegroundGrad(input string, color1, color2 color.Color) string {
 	if input == "" {
 		return ""
 	}
-	t := CurrentTheme()
-
 	var o strings.Builder
-	if len(input) == 1 {
-		return t.S().Base.Bold(true).Foreground(color1).Render(input)
+	clusters := ForegroundGrad(input, true, color1, color2)
+	for _, c := range clusters {
+		fmt.Fprint(&o, c)
 	}
-
-	var clusters []string
-	gr := uniseg.NewGraphemes(input)
-	for gr.Next() {
-		clusters = append(clusters, string(gr.Runes()))
-	}
-
-	ramp := blendColors(len(clusters), color1, color2)
-	for i, c := range ramp {
-		fmt.Fprint(&o, t.S().Base.Bold(true).Foreground(c).Render(clusters[i]))
-	}
-
 	return o.String()
 }
 

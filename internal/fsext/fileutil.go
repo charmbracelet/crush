@@ -2,9 +2,7 @@ package fsext
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,54 +10,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/log"
-
-	ignore "github.com/sabhiram/go-gitignore"
+	"github.com/charmbracelet/crush/internal/home"
 )
-
-var rgPath string
-
-func init() {
-	var err error
-	rgPath, err = exec.LookPath("rg")
-	if err != nil {
-		if log.Initialized() {
-			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
-		}
-	}
-}
-
-func GetRgCmd(globPattern string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	rgArgs := []string{
-		"--files",
-		"-L",
-		"--null",
-	}
-	if globPattern != "" {
-		if !filepath.IsAbs(globPattern) && !strings.HasPrefix(globPattern, "/") {
-			globPattern = "/" + globPattern
-		}
-		rgArgs = append(rgArgs, "--glob", globPattern)
-	}
-	return exec.Command(rgPath, rgArgs...)
-}
-
-func GetRgSearchCmd(pattern, path, include string) *exec.Cmd {
-	if rgPath == "" {
-		return nil
-	}
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern}
-	if include != "" {
-		args = append(args, "--glob", include)
-	}
-	args = append(args, path)
-
-	return exec.Command(rgPath, args...)
-}
 
 type FileInfo struct {
 	Path    string
@@ -88,8 +40,6 @@ func SkipHidden(path string) bool {
 		"obj":              true,
 		"out":              true,
 		"coverage":         true,
-		"tmp":              true,
-		"temp":             true,
 		"logs":             true,
 		"generated":        true,
 		"bower_components": true,
@@ -106,40 +56,22 @@ func SkipHidden(path string) bool {
 }
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
+// It uses hierarchical ignore checking like git does, checking .gitignore/.crushignore
+// files in each directory from the root to the target path.
 type FastGlobWalker struct {
-	gitignore *ignore.GitIgnore
-	rootPath  string
+	directoryLister *directoryLister
 }
 
 func NewFastGlobWalker(searchPath string) *FastGlobWalker {
-	walker := &FastGlobWalker{
-		rootPath: searchPath,
+	return &FastGlobWalker{
+		directoryLister: NewDirectoryLister(searchPath),
 	}
-
-	// Load gitignore if it exists
-	gitignorePath := filepath.Join(searchPath, ".gitignore")
-	if _, err := os.Stat(gitignorePath); err == nil {
-		if gi, err := ignore.CompileIgnoreFile(gitignorePath); err == nil {
-			walker.gitignore = gi
-		}
-	}
-
-	return walker
 }
 
-func (w *FastGlobWalker) shouldSkip(path string) bool {
-	if SkipHidden(path) {
-		return true
-	}
-
-	if w.gitignore != nil {
-		relPath, err := filepath.Rel(w.rootPath, path)
-		if err == nil && w.gitignore.MatchesPath(relPath) {
-			return true
-		}
-	}
-
-	return false
+// ShouldSkip checks if a path should be skipped based on hierarchical gitignore,
+// crushignore, and hidden file rules
+func (w *FastGlobWalker) ShouldSkip(path string) bool {
+	return w.directoryLister.shouldIgnore(path, nil)
 }
 
 func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
@@ -157,13 +89,13 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		}
 
 		if d.IsDir() {
-			if walker.shouldSkip(path) {
+			if walker.ShouldSkip(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if walker.shouldSkip(path) {
+		if walker.ShouldSkip(path) {
 			return nil
 		}
 
@@ -210,13 +142,45 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 	return results, truncated, nil
 }
 
-func PrettyPath(path string) string {
-	// replace home directory with ~
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		path = strings.ReplaceAll(path, homeDir, "~")
+// ShouldExcludeFile checks if a file should be excluded from processing
+// based on common patterns and ignore rules
+func ShouldExcludeFile(rootPath, filePath string) bool {
+	return NewDirectoryLister(rootPath).
+		shouldIgnore(filePath, nil)
+}
+
+// WalkDirectories walks a directory tree and calls the provided function for each directory,
+// respecting hierarchical .gitignore/.crushignore files like git does.
+func WalkDirectories(rootPath string, fn func(path string, d os.DirEntry, err error) error) error {
+	dl := NewDirectoryLister(rootPath)
+
+	conf := fastwalk.Config{
+		Follow:  true,
+		ToSlash: fastwalk.DefaultToSlash(),
+		Sort:    fastwalk.SortDirsFirst,
 	}
-	return path
+
+	return fastwalk.Walk(&conf, rootPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return fn(path, d, err)
+		}
+
+		// Only process directories
+		if !d.IsDir() {
+			return nil
+		}
+
+		// Check if directory should be ignored
+		if dl.shouldIgnore(path, nil) {
+			return filepath.SkipDir
+		}
+
+		return fn(path, d, err)
+	})
+}
+
+func PrettyPath(path string) string {
+	return home.Short(path)
 }
 
 func DirTrim(pwd string, lim int) string {
@@ -241,4 +205,40 @@ func DirTrim(pwd string, lim int) string {
 	}
 	out = filepath.Join("~", out)
 	return out
+}
+
+// PathOrPrefix returns the prefix if the path starts with it, or falls back to
+// the path otherwise.
+func PathOrPrefix(path, prefix string) string {
+	if HasPrefix(path, prefix) {
+		return prefix
+	}
+	return path
+}
+
+// HasPrefix checks if the given path starts with the specified prefix.
+// Uses filepath.Rel to determine if path is within prefix.
+func HasPrefix(path, prefix string) bool {
+	rel, err := filepath.Rel(prefix, path)
+	if err != nil {
+		return false
+	}
+	// If path is within prefix, Rel will not return a path starting with ".."
+	return !strings.HasPrefix(rel, "..")
+}
+
+// ToUnixLineEndings converts Windows line endings (CRLF) to Unix line endings (LF).
+func ToUnixLineEndings(content string) (string, bool) {
+	if strings.Contains(content, "\r\n") {
+		return strings.ReplaceAll(content, "\r\n", "\n"), true
+	}
+	return content, false
+}
+
+// ToWindowsLineEndings converts Unix line endings (LF) to Windows line endings (CRLF).
+func ToWindowsLineEndings(content string) (string, bool) {
+	if !strings.Contains(content, "\r\n") {
+		return strings.ReplaceAll(content, "\n", "\r\n"), true
+	}
+	return content, false
 }

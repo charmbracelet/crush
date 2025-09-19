@@ -6,21 +6,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/google/uuid"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
+
+// CopyKey is the key binding for copying message content to the clipboard.
+var CopyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
+
+// ClearSelectionKey is the key binding for clearing the current selection in the chat interface.
+var ClearSelectionKey = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear selection"))
 
 // MessageCmp defines the interface for message components in the chat interface.
 // It combines standard UI model interfaces with message-specific functionality.
@@ -31,6 +40,7 @@ type MessageCmp interface {
 	GetMessage() message.Message    // Access to underlying message data
 	SetMessage(msg message.Message) // Update the message content
 	Spinning() bool                 // Animation state for loading messages
+	ID() string
 }
 
 // messageCmp implements the MessageCmp interface for displaying chat messages.
@@ -43,7 +53,7 @@ type messageCmp struct {
 	// Core message data and state
 	message  message.Message // The underlying message content
 	spinning bool            // Whether to show loading animation
-	anim     anim.Anim       // Animation component for loading states
+	anim     *anim.Anim      // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -89,8 +99,19 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinning = m.shouldSpin()
 		if m.spinning {
 			u, cmd := m.anim.Update(msg)
-			m.anim = u.(anim.Anim)
+			m.anim = u.(*anim.Anim)
 			return m, cmd
+		}
+	case tea.KeyPressMsg:
+		if key.Matches(msg, CopyKey) {
+			return m, tea.Sequence(
+				tea.SetClipboard(m.message.Content().Text),
+				func() tea.Msg {
+					_ = clipboard.WriteAll(m.message.Content().Text)
+					return nil
+				},
+				util.ReportInfo("Message copied to clipboard"),
+			)
 		}
 	}
 	return m, nil
@@ -174,8 +195,8 @@ func (m *messageCmp) renderAssistantMessage() string {
 		truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
 		title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
 		details := t.S().Base.Foreground(t.FgSubtle).Width(m.textWidth() - 2).Render(finishedData.Details)
-		// Handle error messages differently
-		return fmt.Sprintf("%s\n\n%s", title, details)
+		errorContent := fmt.Sprintf("%s\n\n%s", title, details)
+		return m.style().Render(errorContent)
 	}
 
 	if thinkingContent != "" {
@@ -193,30 +214,33 @@ func (m *messageCmp) renderAssistantMessage() string {
 	return m.style().Render(joined)
 }
 
-// renderUserMessage renders user messages with file attachments.
-// Displays message content and any attached files with appropriate icons.
+// renderUserMessage renders user messages with file attachments. It displays
+// message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
 	parts := []string{
 		m.toMarkdown(m.message.Content().String()),
 	}
+
 	attachmentStyles := t.S().Text.
 		MarginLeft(1).
 		Background(t.BgSubtle)
-	attachments := []string{}
-	for _, attachment := range m.message.BinaryContent() {
-		file := filepath.Base(attachment.Path)
-		var filename string
-		if len(file) > 10 {
-			filename = fmt.Sprintf(" %s %s... ", styles.DocumentIcon, file[0:7])
-		} else {
-			filename = fmt.Sprintf(" %s %s ", styles.DocumentIcon, file)
-		}
-		attachments = append(attachments, attachmentStyles.Render(filename))
+
+	attachments := make([]string, len(m.message.BinaryContent()))
+	for i, attachment := range m.message.BinaryContent() {
+		const maxFilenameWidth = 10
+		filename := filepath.Base(attachment.Path)
+		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
+			" %s %s ",
+			styles.DocumentIcon,
+			ansi.Truncate(filename, maxFilenameWidth, "..."),
+		))
 	}
+
 	if len(attachments) > 0 {
 		parts = append(parts, "", strings.Join(attachments, ""))
 	}
+
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.style().Render(joined)
 }
@@ -252,6 +276,7 @@ func (m *messageCmp) renderThinkingContent() string {
 	m.thinkingViewport.SetWidth(m.textWidth())
 	m.thinkingViewport.SetContent(fullContent)
 	m.thinkingViewport.GotoBottom()
+	finishReason := m.message.FinishPart()
 	var footer string
 	if reasoningContent.StartedAt > 0 {
 		duration := m.message.ThinkingDuration()
@@ -260,9 +285,12 @@ func (m *messageCmp) renderThinkingContent() string {
 			opts := core.StatusOpts{
 				Title:       "Thought for",
 				Description: duration.String(),
-				NoIcon:      true,
 			}
-			footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+			if duration.String() != "0s" {
+				footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
+			}
+		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
+			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {
 			footer = m.anim.View()
 		}
@@ -327,19 +355,25 @@ func (m *messageCmp) Spinning() bool {
 }
 
 type AssistantSection interface {
-	util.Model
+	list.Item
 	layout.Sizeable
-	list.SectionHeader
 }
 type assistantSectionModel struct {
 	width               int
+	id                  string
 	message             message.Message
 	lastUserMessageTime time.Time
+}
+
+// ID implements AssistantSection.
+func (m *assistantSectionModel) ID() string {
+	return m.id
 }
 
 func NewAssistantSection(message message.Message, lastUserMessageTime time.Time) AssistantSection {
 	return &assistantSectionModel{
 		width:               0,
+		id:                  uuid.NewString(),
 		message:             message,
 		lastUserMessageTime: lastUserMessageTime,
 	}
@@ -363,11 +397,11 @@ func (m *assistantSectionModel) View() string {
 	model := config.Get().GetModel(m.message.Provider, m.message.Model)
 	if model == nil {
 		// This means the model is not configured anymore
-		model = &provider.Model{
-			Model: "Unknown Model",
+		model = &catwalk.Model{
+			Name: "Unknown Model",
 		}
 	}
-	modelFormatted := t.S().Muted.Render(model.Model)
+	modelFormatted := t.S().Muted.Render(model.Name)
 	assistant := fmt.Sprintf("%s %s %s", icon, modelFormatted, infoMsg)
 	return t.S().Base.PaddingLeft(2).Render(
 		core.Section(assistant, m.width-2),
@@ -385,4 +419,8 @@ func (m *assistantSectionModel) SetSize(width int, height int) tea.Cmd {
 
 func (m *assistantSectionModel) IsSectionHeader() bool {
 	return true
+}
+
+func (m *messageCmp) ID() string {
+	return m.message.ID
 }

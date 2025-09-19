@@ -36,6 +36,12 @@ var TestTabsBefore string
 //go:embed testdata/TestTabs.after
 var TestTabsAfter string
 
+//go:embed testdata/TestLineBreakIssue.before
+var TestLineBreakIssueBefore string
+
+//go:embed testdata/TestLineBreakIssue.after
+var TestLineBreakIssueAfter string
+
 type (
 	TestFunc  func(dv *diffview.DiffView) *diffview.DiffView
 	TestFuncs map[string]TestFunc
@@ -167,6 +173,26 @@ func TestDiffViewTabs(t *testing.T) {
 			dv := diffview.New().
 				Before("main.go", TestTabsBefore).
 				After("main.go", TestTabsAfter).
+				Style(diffview.DefaultLightStyle()).
+				ChromaStyle(styles.Get("catppuccin-latte"))
+			dv = layoutFunc(dv)
+
+			output := dv.String()
+			golden.RequireEqual(t, []byte(output))
+		})
+	}
+}
+
+func TestDiffViewLineBreakIssue(t *testing.T) {
+	t.Parallel()
+
+	for layoutName, layoutFunc := range LayoutFuncs {
+		t.Run(layoutName, func(t *testing.T) {
+			t.Parallel()
+
+			dv := diffview.New().
+				Before("index.js", TestLineBreakIssueBefore).
+				After("index.js", TestLineBreakIssueAfter).
 				Style(diffview.DefaultLightStyle()).
 				ChromaStyle(styles.Get("catppuccin-latte"))
 			dv = layoutFunc(dv)

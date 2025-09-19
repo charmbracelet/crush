@@ -5,116 +5,76 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
 )
 
+// initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
-	// Initialize LSP clients
 	for name, clientConfig := range app.config.LSP {
-		// Start each client initialization in its own goroutine
-		go app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
+		if clientConfig.Disabled {
+			slog.Info("Skipping disabled LSP client", "name", name)
+			continue
+		}
+		go app.createAndStartLSPClient(ctx, name, clientConfig)
 	}
 	slog.Info("LSP clients initialization started in background")
 }
 
 // createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
-func (app *App) createAndStartLSPClient(ctx context.Context, name string, command string, args ...string) {
-	// Create a specific context for initialization with a timeout
-	slog.Info("Creating LSP client", "name", name, "command", command, "args", args)
+func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
+	slog.Info("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
-	// Create the LSP client
-	lspClient, err := lsp.NewClient(ctx, command, args...)
-	if err != nil {
-		slog.Error("Failed to create LSP client for", name, err)
+	// Check if any root markers exist in the working directory (config now has defaults)
+	if !lsp.HasRootMarkers(app.config.WorkingDir(), config.RootMarkers) {
+		slog.Info("Skipping LSP client - no root markers found", "name", name, "rootMarkers", config.RootMarkers)
+		updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
 		return
 	}
 
-	// Create a longer timeout for initialization (some servers take time to start)
+	// Update state to starting
+	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
+
+	// Create LSP client.
+	lspClient, err := lsp.New(ctx, name, config)
+	if err != nil {
+		slog.Error("Failed to create LSP client for", name, err)
+		updateLSPState(name, lsp.StateError, err, nil, 0)
+		return
+	}
+
+	// Set diagnostics callback
+	lspClient.SetDiagnosticsCallback(updateLSPDiagnostics)
+
+	// Increase initialization timeout as some servers take more time to start.
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Initialize with the initialization context
-	_, err = lspClient.InitializeLSPClient(initCtx, app.config.WorkingDir())
+	// Initialize LSP client.
+	_, err = lspClient.Initialize(initCtx, app.config.WorkingDir())
 	if err != nil {
 		slog.Error("Initialize failed", "name", name, "error", err)
-		// Clean up the client to prevent resource leaks
-		lspClient.Close()
+		updateLSPState(name, lsp.StateError, err, lspClient, 0)
+		lspClient.Close(ctx)
 		return
 	}
 
-	// Wait for the server to be ready
+	// Wait for the server to be ready.
 	if err := lspClient.WaitForServerReady(initCtx); err != nil {
 		slog.Error("Server failed to become ready", "name", name, "error", err)
-		// We'll continue anyway, as some functionality might still work
+		// Server never reached a ready state, but let's continue anyway, as
+		// some functionality might still work.
 		lspClient.SetServerState(lsp.StateError)
+		updateLSPState(name, lsp.StateError, err, lspClient, 0)
 	} else {
+		// Server reached a ready state scuccessfully.
 		slog.Info("LSP server is ready", "name", name)
 		lspClient.SetServerState(lsp.StateReady)
+		updateLSPState(name, lsp.StateReady, nil, lspClient, 0)
 	}
 
 	slog.Info("LSP client initialized", "name", name)
 
-	// Create a child context that can be canceled when the app is shutting down
-	watchCtx, cancelFunc := context.WithCancel(ctx)
-
-	// Create the workspace watcher
-	workspaceWatcher := watcher.NewWorkspaceWatcher(name, lspClient)
-
-	// Store the cancel function to be called during cleanup
-	app.cancelFuncsMutex.Lock()
-	app.watcherCancelFuncs = append(app.watcherCancelFuncs, cancelFunc)
-	app.cancelFuncsMutex.Unlock()
-
-	// Add the watcher to a WaitGroup to track active goroutines
-	app.lspWatcherWG.Add(1)
-
 	// Add to map with mutex protection before starting goroutine
-	app.clientsMutex.Lock()
-	app.LSPClients[name] = lspClient
-	app.clientsMutex.Unlock()
-
-	go app.runWorkspaceWatcher(watchCtx, name, workspaceWatcher)
-}
-
-// runWorkspaceWatcher executes the workspace watcher for an LSP client
-func (app *App) runWorkspaceWatcher(ctx context.Context, name string, workspaceWatcher *watcher.WorkspaceWatcher) {
-	defer app.lspWatcherWG.Done()
-	defer log.RecoverPanic("LSP-"+name, func() {
-		// Try to restart the client
-		app.restartLSPClient(ctx, name)
-	})
-
-	workspaceWatcher.WatchWorkspace(ctx, app.config.WorkingDir())
-	slog.Info("Workspace watcher stopped", "client", name)
-}
-
-// restartLSPClient attempts to restart a crashed or failed LSP client
-func (app *App) restartLSPClient(ctx context.Context, name string) {
-	// Get the original configuration
-	clientConfig, exists := app.config.LSP[name]
-	if !exists {
-		slog.Error("Cannot restart client, configuration not found", "client", name)
-		return
-	}
-
-	// Clean up the old client if it exists
-	app.clientsMutex.Lock()
-	oldClient, exists := app.LSPClients[name]
-	if exists {
-		delete(app.LSPClients, name) // Remove from map before potentially slow shutdown
-	}
-	app.clientsMutex.Unlock()
-
-	if exists && oldClient != nil {
-		// Try to shut it down gracefully, but don't block on errors
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = oldClient.Shutdown(shutdownCtx)
-		cancel()
-	}
-
-	// Create a new client using the shared function
-	app.createAndStartLSPClient(ctx, name, clientConfig.Command, clientConfig.Args...)
-	slog.Info("Successfully restarted LSP client", "client", name)
+	app.LSPClients.Set(name, lspClient)
 }

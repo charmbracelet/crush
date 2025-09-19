@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,9 +10,15 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 type LSParams struct {
+	Path   string   `json:"path"`
+	Ignore []string `json:"ignore"`
+}
+
+type LSPermissionsParams struct {
 	Path   string   `json:"path"`
 	Ignore []string `json:"ignore"`
 }
@@ -29,51 +36,22 @@ type LSResponseMetadata struct {
 }
 
 type lsTool struct {
-	workingDir string
+	workingDir  string
+	permissions permission.Service
 }
 
 const (
-	LSToolName    = "ls"
-	MaxLSFiles    = 1000
-	lsDescription = `Directory listing tool that shows files and subdirectories in a tree structure, helping you explore and understand the project organization.
-
-WHEN TO USE THIS TOOL:
-- Use when you need to explore the structure of a directory
-- Helpful for understanding the organization of a project
-- Good first step when getting familiar with a new codebase
-
-HOW TO USE:
-- Provide a path to list (defaults to current working directory)
-- Optionally specify glob patterns to ignore
-- Results are displayed in a tree structure
-
-FEATURES:
-- Displays a hierarchical view of files and directories
-- Automatically skips hidden files/directories (starting with '.')
-- Skips common system directories like __pycache__
-- Can filter out files matching specific patterns
-
-LIMITATIONS:
-- Results are limited to 1000 files
-- Very large directories will be truncated
-- Does not show file sizes or permissions
-- Cannot recursively list all directories in a large project
-
-WINDOWS NOTES:
-- Hidden file detection uses Unix convention (files starting with '.')
-- Windows-specific hidden files (with hidden attribute) are not automatically skipped
-- Common Windows directories like System32, Program Files are not in default ignore list
-- Path separators are handled automatically (both / and \ work)
-
-TIPS:
-- Use Glob tool for finding files by name patterns instead of browsing
-- Use Grep tool for searching file contents
-- Combine with other tools for more effective exploration`
+	LSToolName = "ls"
+	MaxLSFiles = 1000
 )
 
-func NewLsTool(workingDir string) BaseTool {
+//go:embed ls.md
+var lsDescription []byte
+
+func NewLsTool(permissions permission.Service, workingDir string) BaseTool {
 	return &lsTool{
-		workingDir: workingDir,
+		workingDir:  workingDir,
+		permissions: permissions,
 	}
 }
 
@@ -84,7 +62,7 @@ func (l *lsTool) Name() string {
 func (l *lsTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        LSToolName,
-		Description: lsDescription,
+		Description: string(lsDescription),
 		Parameters: map[string]any{
 			"path": map[string]any{
 				"type":        "string",
@@ -113,24 +91,61 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = l.workingDir
 	}
 
+	var err error
+	searchPath, err = fsext.Expand(searchPath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error expanding path: %w", err)
+	}
+
 	if !filepath.IsAbs(searchPath) {
 		searchPath = filepath.Join(l.workingDir, searchPath)
 	}
 
-	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-		return NewTextErrorResponse(fmt.Sprintf("path does not exist: %s", searchPath)), nil
+	// Check if directory is outside working directory and request permission if needed
+	absWorkingDir, err := filepath.Abs(l.workingDir)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 	}
 
+	absSearchPath, err := filepath.Abs(searchPath)
+	if err != nil {
+		return ToolResponse{}, fmt.Errorf("error resolving search path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// Directory is outside working directory, request permission
+		sessionID, messageID := GetContextValues(ctx)
+		if sessionID == "" || messageID == "" {
+			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing directories outside working directory")
+		}
+
+		granted := l.permissions.Request(
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        absSearchPath,
+				ToolCallID:  call.ID,
+				ToolName:    LSToolName,
+				Action:      "list",
+				Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
+				Params:      LSPermissionsParams(params),
+			},
+		)
+
+		if !granted {
+			return ToolResponse{}, permission.ErrorPermissionDenied
+		}
+	}
+
+	output, err := ListDirectoryTree(searchPath, params.Ignore)
+	if err != nil {
+		return ToolResponse{}, err
+	}
+
+	// Get file count for metadata
 	files, truncated, err := fsext.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
 	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error listing directory: %w", err)
-	}
-
-	tree := createFileTree(files)
-	output := printTree(tree, searchPath)
-
-	if truncated {
-		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+		return ToolResponse{}, fmt.Errorf("error listing directory for metadata: %w", err)
 	}
 
 	return WithResponseMetadata(
@@ -142,12 +157,33 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 	), nil
 }
 
-func createFileTree(sortedPaths []string) []*TreeNode {
+func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
+	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("path does not exist: %s", searchPath)
+	}
+
+	files, truncated, err := fsext.ListDirectory(searchPath, ignore, MaxLSFiles)
+	if err != nil {
+		return "", fmt.Errorf("error listing directory: %w", err)
+	}
+
+	tree := createFileTree(files, searchPath)
+	output := printTree(tree, searchPath)
+
+	if truncated {
+		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+	}
+
+	return output, nil
+}
+
+func createFileTree(sortedPaths []string, rootPath string) []*TreeNode {
 	root := []*TreeNode{}
 	pathMap := make(map[string]*TreeNode)
 
 	for _, path := range sortedPaths {
-		parts := strings.Split(path, string(filepath.Separator))
+		relativePath := strings.TrimPrefix(path, rootPath)
+		parts := strings.Split(relativePath, string(filepath.Separator))
 		currentPath := ""
 		var parentPath string
 
@@ -176,7 +212,7 @@ func createFileTree(sortedPaths []string) []*TreeNode {
 			}
 
 			isLastPart := i == len(parts)-1
-			isDir := !isLastPart || strings.HasSuffix(path, string(filepath.Separator))
+			isDir := !isLastPart || strings.HasSuffix(relativePath, string(filepath.Separator))
 			nodeType := "file"
 			if isDir {
 				nodeType = "directory"
@@ -208,7 +244,12 @@ func createFileTree(sortedPaths []string) []*TreeNode {
 func printTree(tree []*TreeNode, rootPath string) string {
 	var result strings.Builder
 
-	result.WriteString(fmt.Sprintf("- %s%s\n", rootPath, string(filepath.Separator)))
+	result.WriteString("- ")
+	result.WriteString(rootPath)
+	if rootPath[len(rootPath)-1] != '/' {
+		result.WriteByte(filepath.Separator)
+	}
+	result.WriteByte('\n')
 
 	for _, node := range tree {
 		printNode(&result, node, 1)

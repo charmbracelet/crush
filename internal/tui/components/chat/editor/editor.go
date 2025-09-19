@@ -1,9 +1,13 @@
 package editor
 
 import (
+	"context"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -20,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -36,6 +41,7 @@ type Editor interface {
 
 	SetSession(session session.Session) tea.Cmd
 	IsCompletionsOpen() bool
+	HasAttachments() bool
 	Cursor() *tea.Cursor
 }
 
@@ -44,14 +50,16 @@ type FileCompletionItem struct {
 }
 
 type editorCmp struct {
-	width       int
-	height      int
-	x, y        int
-	app         *app.App
-	session     session.Session
-	textarea    textarea.Model
-	attachments []message.Attachment
-	deleteMode  bool
+	width              int
+	height             int
+	x, y               int
+	app                *app.App
+	session            session.Session
+	textarea           *textarea.Model
+	attachments        []message.Attachment
+	deleteMode         bool
+	readyPlaceholder   string
+	workingPlaceholder string
 
 	keyMap EditorKeyMap
 
@@ -72,7 +80,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 	),
 	DeleteAllAttachments: key.NewBinding(
 		key.WithKeys("r"),
-		key.WithHelp("ctrl+r+r", "delete all attchments"),
+		key.WithHelp("ctrl+r+r", "delete all attachments"),
 	),
 }
 
@@ -80,7 +88,7 @@ const (
 	maxAttachments = 5
 )
 
-type openEditorMsg struct {
+type OpenEditorMsg struct {
 	Text string
 }
 
@@ -103,7 +111,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
-	c := exec.Command(editor, tmpfile.Name())
+	c := exec.CommandContext(context.TODO(), editor, tmpfile.Name())
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -119,7 +127,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
-		return openEditorMsg{
+		return OpenEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}
 	})
@@ -130,13 +138,6 @@ func (m *editorCmp) Init() tea.Cmd {
 }
 
 func (m *editorCmp) send() tea.Cmd {
-	if m.app.CoderAgent == nil {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
-	}
-	if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
-		return util.ReportWarn("Agent is working, please wait...")
-	}
-
 	value := m.textarea.Value()
 	value = strings.TrimSpace(value)
 
@@ -153,6 +154,10 @@ func (m *editorCmp) send() tea.Cmd {
 	if value == "" {
 		return nil
 	}
+
+	// Change the placeholder when sending a new message.
+	m.randomizePlaceholders()
+
 	return tea.Batch(
 		util.CmdHandler(chat.SendMsg{
 			Text:        value,
@@ -161,16 +166,25 @@ func (m *editorCmp) send() tea.Cmd {
 	)
 }
 
+func (m *editorCmp) repositionCompletions() tea.Msg {
+	x, y := m.completionsPosition()
+	return completions.RepositionCompletionsMsg{X: x, Y: y}
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
 			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
+	case completions.CompletionsOpenedMsg:
+		m.isCompletionsOpen = true
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
@@ -180,56 +194,85 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if item, ok := msg.Value.(FileCompletionItem); ok {
+			word := m.textarea.Word()
 			// If the selected item is a file, insert its path into the textarea
 			value := m.textarea.Value()
-			value = value[:m.completionsStartIndex]
-			if len(value) > 0 && value[len(value)-1] != ' ' {
-				value += " "
-			}
-			value += item.Path
+			value = value[:m.completionsStartIndex] + // Remove the current query
+				item.Path + // Insert the file path
+				value[m.completionsStartIndex+len(word):] // Append the rest of the value
+			// XXX: This will always move the cursor to the end of the textarea.
 			m.textarea.SetValue(value)
-			m.isCompletionsOpen = false
-			m.currentQuery = ""
-			m.completionsStartIndex = 0
-			return m, nil
-		}
-	case openEditorMsg:
-		m.textarea.SetValue(msg.Text)
-		m.textarea.MoveToEnd()
-	case tea.KeyPressMsg:
-		switch {
-		// Completions
-		case msg.String() == "/" && !m.isCompletionsOpen:
-			m.isCompletionsOpen = true
-			m.currentQuery = ""
-			cmds = append(cmds, m.startCompletions)
-			m.completionsStartIndex = len(m.textarea.Value())
-		case msg.String() == "space" && m.isCompletionsOpen:
-			m.isCompletionsOpen = false
-			m.currentQuery = ""
-			m.completionsStartIndex = 0
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		case m.isCompletionsOpen && m.textarea.Cursor().X <= m.completionsStartIndex:
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		case msg.String() == "backspace" && m.isCompletionsOpen:
-			if len(m.currentQuery) > 0 {
-				m.currentQuery = m.currentQuery[:len(m.currentQuery)-1]
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
-			} else {
+			m.textarea.MoveToEnd()
+			if !msg.Insert {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
 				m.completionsStartIndex = 0
-				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 			}
-		default:
-			if m.isCompletionsOpen {
-				m.currentQuery += msg.String()
-				cmds = append(cmds, util.CmdHandler(completions.FilterCompletionsMsg{
-					Query: m.currentQuery,
-				}))
+		}
+
+	case commands.OpenExternalEditorMsg:
+		if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
+			return m, util.ReportWarn("Agent is working, please wait...")
+		}
+		return m, m.openEditor(m.textarea.Value())
+	case OpenEditorMsg:
+		m.textarea.SetValue(msg.Text)
+		m.textarea.MoveToEnd()
+	case tea.PasteMsg:
+		path := strings.ReplaceAll(string(msg), "\\ ", " ")
+		// try to get an image
+		path, err := filepath.Abs(strings.TrimSpace(path))
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		isAllowedType := false
+		for _, ext := range filepicker.AllowedTypes {
+			if strings.HasSuffix(path, ext) {
+				isAllowedType = true
+				break
 			}
+		}
+		if !isAllowedType {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
+		if tooBig {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		fileName := filepath.Base(path)
+		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+		return m, util.CmdHandler(filepicker.FilePickedMsg{
+			Attachment: attachment,
+		})
+
+	case commands.ToggleYoloModeMsg:
+		m.setEditorPrompt()
+		return m, nil
+	case tea.KeyPressMsg:
+		cur := m.textarea.Cursor()
+		curIdx := m.textarea.Width()*cur.Y + cur.X
+		switch {
+		// Completions
+		case msg.String() == "/" && !m.isCompletionsOpen &&
+			// only show if beginning of prompt, or if previous char is a space or newline:
+			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
+			m.isCompletionsOpen = true
+			m.currentQuery = ""
+			m.completionsStartIndex = curIdx
+			cmds = append(cmds, m.startCompletions)
+		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
+			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
@@ -265,13 +308,14 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
+			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
-			if len(value) > 0 && value[len(value)-1] == '\\' {
-				// If the last character is a backslash, remove it and add a newline
-				m.textarea.SetValue(value[:len(value)-1])
+			if strings.HasSuffix(value, "\\") {
+				// If the last character is a backslash, remove it and add a newline.
+				m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
 			} else {
 				// Otherwise, send the message
 				return m, m.send()
@@ -281,7 +325,61 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
+
+	if m.textarea.Focused() {
+		kp, ok := msg.(tea.KeyPressMsg)
+		if ok {
+			if kp.String() == "space" || m.textarea.Value() == "" {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+			} else {
+				word := m.textarea.Word()
+				if strings.HasPrefix(word, "/") {
+					// XXX: wont' work if editing in the middle of the field.
+					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
+					m.currentQuery = word[1:]
+					x, y := m.completionsPosition()
+					x -= len(m.currentQuery)
+					m.isCompletionsOpen = true
+					cmds = append(cmds,
+						util.CmdHandler(completions.FilterCompletionsMsg{
+							Query:  m.currentQuery,
+							Reopen: m.isCompletionsOpen,
+							X:      x,
+							Y:      y,
+						}),
+					)
+				} else if m.isCompletionsOpen {
+					m.isCompletionsOpen = false
+					m.currentQuery = ""
+					m.completionsStartIndex = 0
+					cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+				}
+			}
+		}
+	}
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m *editorCmp) setEditorPrompt() {
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.SetPromptFunc(4, yoloPromptFunc)
+		return
+	}
+	m.textarea.SetPromptFunc(4, normalPromptFunc)
+}
+
+func (m *editorCmp) completionsPosition() (int, int) {
+	cur := m.textarea.Cursor()
+	if cur == nil {
+		return m.x, m.y + 1 // adjust for padding
+	}
+	x := cur.X + m.x
+	y := cur.Y + m.y + 1 // adjust for padding
+	return x, y
 }
 
 func (m *editorCmp) Cursor() *tea.Cursor {
@@ -293,8 +391,38 @@ func (m *editorCmp) Cursor() *tea.Cursor {
 	return cursor
 }
 
+var readyPlaceholders = [...]string{
+	"Ready!",
+	"Ready...",
+	"Ready?",
+	"Ready for instructions",
+}
+
+var workingPlaceholders = [...]string{
+	"Working!",
+	"Working...",
+	"Brrrrr...",
+	"Prrrrrrrr...",
+	"Processing...",
+	"Thinking...",
+}
+
+func (m *editorCmp) randomizePlaceholders() {
+	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
+	// Update placeholder
+	if m.app.CoderAgent != nil && m.app.CoderAgent.IsBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+	} else {
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
+	if m.app.Permissions.SkipRequests() {
+		m.textarea.Placeholder = "Yolo mode!"
+	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
 			m.textarea.View(),
@@ -352,7 +480,8 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 }
 
 func (m *editorCmp) startCompletions() tea.Msg {
-	files, _, _ := fsext.ListDirectory(".", []string{}, 0)
+	files, _, _ := fsext.ListDirectory(".", nil, 0)
+	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
@@ -364,9 +493,7 @@ func (m *editorCmp) startCompletions() tea.Msg {
 		})
 	}
 
-	cur := m.textarea.Cursor()
-	x := cur.X + m.x // adjust for padding
-	y := cur.Y + m.y + 1
+	x, y := m.completionsPosition()
 	return completions.OpenCompletionsMsg{
 		Completions: completionItems,
 		X:           x,
@@ -406,30 +533,54 @@ func (c *editorCmp) IsCompletionsOpen() bool {
 	return c.isCompletionsOpen
 }
 
+func (c *editorCmp) HasAttachments() bool {
+	return len(c.attachments) > 0
+}
+
+func normalPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		return "  > "
+	}
+	if info.Focused {
+		return t.S().Base.Foreground(t.GreenDark).Render("::: ")
+	}
+	return t.S().Muted.Render("::: ")
+}
+
+func yoloPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return fmt.Sprintf("%s ", t.YoloIconFocused)
+		} else {
+			return fmt.Sprintf("%s ", t.YoloIconBlurred)
+		}
+	}
+	if info.Focused {
+		return fmt.Sprintf("%s ", t.YoloDotsFocused)
+	}
+	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
-	ta.SetPromptFunc(4, func(info textarea.PromptInfo) string {
-		if info.LineNumber == 0 {
-			return "  > "
-		}
-		if info.Focused {
-			return t.S().Base.Foreground(t.GreenDark).Render("::: ")
-		} else {
-			return t.S().Muted.Render("::: ")
-		}
-	})
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
-	ta.Placeholder = "Tell me more about this project..."
 	ta.SetVirtualCursor(false)
 	ta.Focus()
-
-	return &editorCmp{
+	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
 	}
+	e.setEditorPrompt()
+
+	e.randomizePlaceholders()
+	e.textarea.Placeholder = e.readyPlaceholder
+
+	return e
 }

@@ -2,22 +2,24 @@ package splash
 
 import (
 	"fmt"
-	"os"
-	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
+	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
+	"github.com/charmbracelet/crush/internal/tui/components/mcp"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -36,6 +38,9 @@ type Splash interface {
 
 	// Showing API key input
 	IsShowingAPIKey() bool
+
+	// IsAPIKeyValid returns whether the API key is valid
+	IsAPIKeyValid() bool
 }
 
 const (
@@ -45,7 +50,10 @@ const (
 )
 
 // OnboardingCompleteMsg is sent when onboarding is complete
-type OnboardingCompleteMsg struct{}
+type (
+	OnboardingCompleteMsg struct{}
+	SubmitAPIKeyMsg       struct{}
+)
 
 type splashCmp struct {
 	width, height int
@@ -62,6 +70,8 @@ type splashCmp struct {
 	modelList     *models.ModelListComponent
 	apiKeyInput   *models.APIKeyInput
 	selectedModel *models.ModelOption
+	isAPIKeyValid bool
+	apiKeyValue   string
 }
 
 func New() Splash {
@@ -76,9 +86,7 @@ func New() Splash {
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
-	t := styles.CurrentTheme()
-	inputStyle := t.S().Base.Padding(0, 1, 0, 1)
-	modelList := models.NewModelListComponent(listKeyMap, inputStyle, "Find your fave")
+	modelList := models.NewModelListComponent(listKeyMap, "Find your fave", false)
 	apiKeyInput := models.NewAPIKeyInput()
 
 	return &splashCmp{
@@ -94,27 +102,6 @@ func New() Splash {
 
 func (s *splashCmp) SetOnboarding(onboarding bool) {
 	s.isOnboarding = onboarding
-	if onboarding {
-		providers, err := config.Providers()
-		if err != nil {
-			return
-		}
-		filteredProviders := []provider.Provider{}
-		simpleProviders := []string{
-			"anthropic",
-			"openai",
-			"gemini",
-			"xai",
-			"groq",
-			"openrouter",
-		}
-		for _, p := range providers {
-			if slices.Contains(simpleProviders, string(p.ID)) {
-				filteredProviders = append(filteredProviders, p)
-			}
-		}
-		s.modelList.SetProviders(filteredProviders)
-	}
 }
 
 func (s *splashCmp) SetProjectInit(needsInit bool) {
@@ -133,14 +120,17 @@ func (s *splashCmp) Init() tea.Cmd {
 
 // SetSize implements SplashPage.
 func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+	wasSmallScreen := s.isSmallScreen()
+	rerenderLogo := width != s.width
 	s.height = height
-	if width != s.width {
-		s.width = width
+	s.width = width
+	if rerenderLogo || wasSmallScreen != s.isSmallScreen() {
 		s.logoRendered = s.logoBlock()
 	}
 	// remove padding, logo height, gap, title space
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
+	s.apiKeyInput.SetWidth(width - 2)
 	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
@@ -149,52 +139,138 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)
+	case models.APIKeyStateChangeMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		if msg.State == models.APIKeyInputStateVerified {
+			return s, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+				return SubmitAPIKeyMsg{}
+			})
+		}
+		return s, cmd
+	case SubmitAPIKeyMsg:
+		if s.isAPIKeyValid {
+			return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Back):
+			if s.isAPIKeyValid {
+				return s, nil
+			}
 			if s.needsAPIKey {
 				// Go back to model selection
 				s.needsAPIKey = false
 				s.selectedModel = nil
+				s.isAPIKeyValid = false
+				s.apiKeyValue = ""
+				s.apiKeyInput.Reset()
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Select):
+			if s.isAPIKeyValid {
+				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+			}
 			if s.isOnboarding && !s.needsAPIKey {
-				modelInx := s.modelList.SelectedIndex()
-				items := s.modelList.Items()
-				selectedItem := items[modelInx].(completions.CompletionItem).Value().(models.ModelOption)
+				selectedItem := s.modelList.SelectedModel()
+				if selectedItem == nil {
+					return s, nil
+				}
 				if s.isProviderConfigured(string(selectedItem.Provider.ID)) {
-					cmd := s.setPreferredModel(selectedItem)
+					cmd := s.setPreferredModel(*selectedItem)
 					s.isOnboarding = false
 					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 				} else {
 					// Provider not configured, show API key input
 					s.needsAPIKey = true
-					s.selectedModel = &selectedItem
+					s.selectedModel = selectedItem
 					s.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
 					return s, nil
 				}
 			} else if s.needsAPIKey {
 				// Handle API key submission
-				apiKey := s.apiKeyInput.Value()
-				if apiKey != "" {
-					return s, s.saveAPIKeyAndContinue(apiKey)
+				s.apiKeyValue = strings.TrimSpace(s.apiKeyInput.Value())
+				if s.apiKeyValue == "" {
+					return s, nil
 				}
+
+				provider, err := s.getProvider(s.selectedModel.Provider.ID)
+				if err != nil || provider == nil {
+					return s, util.ReportError(fmt.Errorf("provider %s not found", s.selectedModel.Provider.ID))
+				}
+				providerConfig := config.ProviderConfig{
+					ID:      string(s.selectedModel.Provider.ID),
+					Name:    s.selectedModel.Provider.Name,
+					APIKey:  s.apiKeyValue,
+					Type:    provider.Type,
+					BaseURL: provider.APIEndpoint,
+				}
+				return s, tea.Sequence(
+					util.CmdHandler(models.APIKeyStateChangeMsg{
+						State: models.APIKeyInputStateVerifying,
+					}),
+					func() tea.Msg {
+						start := time.Now()
+						err := providerConfig.TestConnection(config.Get().Resolver())
+						// intentionally wait for at least 750ms to make sure the user sees the spinner
+						elapsed := time.Since(start)
+						if elapsed < 750*time.Millisecond {
+							time.Sleep(750*time.Millisecond - elapsed)
+						}
+						if err == nil {
+							s.isAPIKeyValid = true
+							return models.APIKeyStateChangeMsg{
+								State: models.APIKeyInputStateVerified,
+							}
+						}
+						return models.APIKeyStateChangeMsg{
+							State: models.APIKeyInputStateError,
+						}
+					},
+				)
 			} else if s.needsProjectInit {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
 			if s.needsProjectInit {
 				s.selectedNo = !s.selectedNo
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Yes):
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+			if s.isOnboarding {
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
+			}
 			if s.needsProjectInit {
+				s.selectedNo = false
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):
-			s.selectedNo = true
-			return s, s.initializeProject()
+			if s.needsAPIKey {
+				u, cmd := s.apiKeyInput.Update(msg)
+				s.apiKeyInput = u.(*models.APIKeyInput)
+				return s, cmd
+			}
+			if s.isOnboarding {
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
+			}
+			if s.needsProjectInit {
+				s.selectedNo = true
+				return s, s.initializeProject()
+			}
 		default:
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
@@ -216,13 +292,17 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.modelList, cmd = s.modelList.Update(msg)
 			return s, cmd
 		}
+	case spinner.TickMsg:
+		u, cmd := s.apiKeyInput.Update(msg)
+		s.apiKeyInput = u.(*models.APIKeyInput)
+		return s, cmd
 	}
 	return s, nil
 }
 
 func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	if s.selectedModel == nil {
-		return util.ReportError(fmt.Errorf("no model selected"))
+		return nil
 	}
 
 	cfg := config.Get()
@@ -236,6 +316,7 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	cmd := s.setPreferredModel(*s.selectedModel)
 	s.isOnboarding = false
 	s.selectedModel = nil
+	s.isAPIKeyValid = false
 
 	return tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 }
@@ -316,8 +397,9 @@ func (s *splashCmp) setPreferredModel(selectedItem models.ModelOption) tea.Cmd {
 	return nil
 }
 
-func (s *splashCmp) getProvider(providerID provider.InferenceProvider) (*provider.Provider, error) {
-	providers, err := config.Providers()
+func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
+	cfg := config.Get()
+	providers, err := config.Providers(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +413,7 @@ func (s *splashCmp) getProvider(providerID provider.InferenceProvider) (*provide
 
 func (s *splashCmp) isProviderConfigured(providerID string) bool {
 	cfg := config.Get()
-	if _, ok := cfg.Providers[providerID]; ok {
+	if _, ok := cfg.Providers.Get(providerID); ok {
 		return true
 	}
 	return false
@@ -372,12 +454,15 @@ func (s *splashCmp) View() string {
 		)
 	} else if s.needsProjectInit {
 		titleStyle := t.S().Base.Foreground(t.FgBase)
+		pathStyle := t.S().Base.Foreground(t.Success).PaddingLeft(2)
 		bodyStyle := t.S().Base.Foreground(t.FgMuted)
 		shortcutStyle := t.S().Base.Foreground(t.Success)
 
 		initText := lipgloss.JoinVertical(
 			lipgloss.Left,
 			titleStyle.Render("Would you like to initialize this project?"),
+			"",
+			pathStyle.Render(s.cwd()),
 			"",
 			bodyStyle.Render("When I initialize your codebase I examine the project and put the"),
 			bodyStyle.Render("result into a CRUSH.md file which serves as general context."),
@@ -400,9 +485,7 @@ func (s *splashCmp) View() string {
 		})
 
 		buttons := lipgloss.JoinHorizontal(lipgloss.Left, yesButton, "  ", noButton)
-		infoSection := s.infoSection()
-
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - lipgloss.Height(infoSection)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 
 		initContent := t.S().Base.AlignVertical(lipgloss.Bottom).PaddingLeft(1).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -416,7 +499,7 @@ func (s *splashCmp) View() string {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
 			s.logoRendered,
-			infoSection,
+			"",
 			initContent,
 		)
 	} else {
@@ -452,12 +535,24 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	return nil
 }
 
+func (s *splashCmp) isSmallScreen() bool {
+	// Consider a screen small if either the width is less than 40 or if the
+	// height is less than 20
+	return s.width < 55 || s.height < 20
+}
+
 func (s *splashCmp) infoSection() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.PaddingLeft(2).Render(
+	infoStyle := t.S().Base.PaddingLeft(2)
+	if s.isSmallScreen() {
+		infoStyle = infoStyle.MarginTop(1)
+	}
+	return infoStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Left,
-			s.cwd(),
+			s.cwdPart(),
+			"",
+			s.currentModelBlock(),
 			"",
 			lipgloss.JoinHorizontal(lipgloss.Left, s.lspBlock(), s.mcpBlock()),
 			"",
@@ -467,14 +562,25 @@ func (s *splashCmp) infoSection() string {
 
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Padding(0, 2).Width(s.width).Render(
+	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
+	if s.isSmallScreen() {
+		// If the width is too small, render a smaller version of the logo
+		// NOTE: 20 is not correct because [splashCmp.height] is not the
+		// *actual* window height, instead, it is the height of the splash
+		// component and that depends on other variables like compact mode and
+		// the height of the editor.
+		return logoStyle.Render(
+			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
+		)
+	}
+	return logoStyle.Render(
 		logo.Render(version.Version, false, logo.Opts{
 			FieldColor:   t.Primary,
 			TitleColorA:  t.Secondary,
 			TitleColorB:  t.Primary,
 			CharmColor:   t.Secondary,
 			VersionColor: t.Primary,
-			Width:        s.width - 4,
+			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
 		}),
 	)
 }
@@ -493,7 +599,7 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 		cursor.Y += offset
 		cursor.X = cursor.X + 1
 	} else if s.isOnboarding {
-		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 3
+		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 2
 		cursor.Y += offset
 		cursor.X = cursor.X + 1
 	}
@@ -534,44 +640,24 @@ func (s *splashCmp) Bindings() []key.Binding {
 }
 
 func (s *splashCmp) getMaxInfoWidth() int {
-	return min(s.width-2, 40) // 2 for left padding
+	return min(s.width-2, 90) // 2 for left padding
+}
+
+func (s *splashCmp) cwdPart() string {
+	t := styles.CurrentTheme()
+	maxWidth := s.getMaxInfoWidth()
+	return t.S().Muted.Width(maxWidth).Render(s.cwd())
 }
 
 func (s *splashCmp) cwd() string {
-	cwd := config.Get().WorkingDir()
-	t := styles.CurrentTheme()
-	homeDir, err := os.UserHomeDir()
-	if err == nil && cwd != homeDir {
-		cwd = strings.ReplaceAll(cwd, homeDir, "~")
-	}
-	maxWidth := s.getMaxInfoWidth()
-	return t.S().Muted.Width(maxWidth).Render(cwd)
+	return home.Short(config.Get().WorkingDir())
 }
 
 func LSPList(maxWidth int) []string {
-	t := styles.CurrentTheme()
-	lspList := []string{}
-	lsp := config.Get().LSP.Sorted()
-	if len(lsp) == 0 {
-		return []string{t.S().Base.Foreground(t.Border).Render("None")}
-	}
-	for _, l := range lsp {
-		iconColor := t.Success
-		if l.LSP.Disabled {
-			iconColor = t.FgMuted
-		}
-		lspList = append(lspList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.LSP.Command,
-				},
-				maxWidth,
-			),
-		)
-	}
-	return lspList
+	return lspcomponent.RenderLSPList(nil, lspcomponent.RenderOptions{
+		MaxWidth:    maxWidth,
+		ShowSection: false,
+	})
 }
 
 func (s *splashCmp) lspBlock() string {
@@ -588,29 +674,10 @@ func (s *splashCmp) lspBlock() string {
 }
 
 func MCPList(maxWidth int) []string {
-	t := styles.CurrentTheme()
-	mcpList := []string{}
-	mcps := config.Get().MCP.Sorted()
-	if len(mcps) == 0 {
-		return []string{t.S().Base.Foreground(t.Border).Render("None")}
-	}
-	for _, l := range mcps {
-		iconColor := t.Success
-		if l.MCP.Disabled {
-			iconColor = t.FgMuted
-		}
-		mcpList = append(mcpList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.MCP.Command,
-				},
-				maxWidth,
-			),
-		)
-	}
-	return mcpList
+	return mcp.RenderMCPList(mcp.RenderOptions{
+		MaxWidth:    maxWidth,
+		ShowSection: false,
+	})
 }
 
 func (s *splashCmp) mcpBlock() string {
@@ -626,6 +693,31 @@ func (s *splashCmp) mcpBlock() string {
 	)
 }
 
+func (s *splashCmp) currentModelBlock() string {
+	cfg := config.Get()
+	agentCfg := cfg.Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
+	if model == nil {
+		return ""
+	}
+	t := styles.CurrentTheme()
+	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
+	modelName := t.S().Text.Render(model.Name)
+	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
+	parts := []string{
+		modelInfo,
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
+	)
+}
+
 func (s *splashCmp) IsShowingAPIKey() bool {
 	return s.needsAPIKey
+}
+
+func (s *splashCmp) IsAPIKeyValid() bool {
+	return s.isAPIKeyValid
 }

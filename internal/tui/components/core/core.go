@@ -82,41 +82,30 @@ func Title(title string, width int) string {
 }
 
 type StatusOpts struct {
-	Icon             string
-	IconColor        color.Color
-	NoIcon           bool // If true, no icon will be displayed
+	Icon             string // if empty no icon will be shown
 	Title            string
 	TitleColor       color.Color
 	Description      string
 	DescriptionColor color.Color
-	ExtraContent     string // Additional content to append after the description
+	ExtraContent     string // additional content to append after the description
 }
 
-func Status(ops StatusOpts, width int) string {
+func Status(opts StatusOpts, width int) string {
 	t := styles.CurrentTheme()
-	icon := "●"
-	iconColor := t.Success
-	if ops.Icon != "" {
-		icon = ops.Icon
-	} else if ops.NoIcon {
-		icon = ""
-	}
-	if ops.IconColor != nil {
-		iconColor = ops.IconColor
-	}
-	title := ops.Title
+	icon := opts.Icon
+	title := opts.Title
 	titleColor := t.FgMuted
-	if ops.TitleColor != nil {
-		titleColor = ops.TitleColor
+	if opts.TitleColor != nil {
+		titleColor = opts.TitleColor
 	}
-	description := ops.Description
+	description := opts.Description
 	descriptionColor := t.FgSubtle
-	if ops.DescriptionColor != nil {
-		descriptionColor = ops.DescriptionColor
+	if opts.DescriptionColor != nil {
+		descriptionColor = opts.DescriptionColor
 	}
 	title = t.S().Base.Foreground(titleColor).Render(title)
 	if description != "" {
-		extraContentWidth := lipgloss.Width(ops.ExtraContent)
+		extraContentWidth := lipgloss.Width(opts.ExtraContent)
 		if extraContentWidth > 0 {
 			extraContentWidth += 1
 		}
@@ -126,11 +115,11 @@ func Status(ops StatusOpts, width int) string {
 
 	content := []string{}
 	if icon != "" {
-		content = append(content, t.S().Base.Foreground(iconColor).Render(icon))
+		content = append(content, icon)
 	}
 	content = append(content, title, description)
-	if ops.ExtraContent != "" {
-		content = append(content, ops.ExtraContent)
+	if opts.ExtraContent != "" {
+		content = append(content, opts.ExtraContent)
 	}
 
 	return strings.Join(content, " ")
@@ -197,7 +186,7 @@ func SelectableButtonsVertical(buttons []ButtonOpts, spacing int) string {
 	for i, button := range buttons {
 		parts = append(parts, SelectableButton(button))
 		if i < len(buttons)-1 {
-			for j := 0; j < spacing; j++ {
+			for range spacing {
 				parts = append(parts, "")
 			}
 		}

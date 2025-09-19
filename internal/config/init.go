@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 )
 
@@ -18,26 +18,20 @@ type ProjectInitFlag struct {
 }
 
 // TODO: we need to remove the global config instance keeping it now just until everything is migrated
-var (
-	instance atomic.Pointer[Config]
-	cwd      string
-	once     sync.Once // Ensures the initialization happens only once
-)
+var instance atomic.Pointer[Config]
 
-func Init(workingDir string, debug bool) (*Config, error) {
-	var err error
-	once.Do(func() {
-		cwd = workingDir
-		var cfg *Config
-		cfg, err = Load(cwd, debug)
-		instance.Store(cfg)
-	})
-
-	return instance.Load(), err
+func Init(workingDir, dataDir string, debug bool) (*Config, error) {
+	cfg, err := Load(workingDir, dataDir, debug)
+	if err != nil {
+		return nil, err
+	}
+	instance.Store(cfg)
+	return instance.Load(), nil
 }
 
 func Get() *Config {
-	return instance.Load()
+	cfg := instance.Load()
+	return cfg
 }
 
 func ProjectNeedsInitialization() (bool, error) {
@@ -57,30 +51,38 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	crushExists, err := crushMdExists(cfg.WorkingDir())
+	someContextFileExists, err := contextPathsExist(cfg.WorkingDir())
 	if err != nil {
-		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
+		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
-	if crushExists {
+	if someContextFileExists {
 		return false, nil
 	}
 
 	return true, nil
 }
 
-func crushMdExists(dir string) (bool, error) {
+func contextPathsExist(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false, err
 	}
 
+	// Create a slice of lowercase filenames for lookup with slices.Contains
+	var files []string
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		if !entry.IsDir() {
+			files = append(files, strings.ToLower(entry.Name()))
 		}
+	}
 
-		name := strings.ToLower(entry.Name())
-		if name == "crush.md" {
+	// Check if any of the default context paths exist in the directory
+	for _, path := range defaultContextPaths {
+		// Extract just the filename from the path
+		_, filename := filepath.Split(path)
+		filename = strings.ToLower(filename)
+
+		if slices.Contains(files, filename) {
 			return true, nil
 		}
 	}
@@ -109,5 +111,5 @@ func HasInitialDataConfig() bool {
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}
-	return true
+	return Get().IsConfigured()
 }

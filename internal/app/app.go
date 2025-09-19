@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -35,13 +35,7 @@ type App struct {
 	CoderAgent agent.Service
 	Notifier   *notification.Notifier
 
-	LSPClients map[string]*lsp.Client
-
-	clientsMutex sync.RWMutex
-
-	watcherCancelFuncs []context.CancelFunc
-	cancelFuncsMutex   sync.Mutex
-	lspWatcherWG       sync.WaitGroup
+	LSPClients *csync.Map[string, *lsp.Client]
 
 	config *config.Config
 
@@ -52,15 +46,20 @@ type App struct {
 
 	// global context and cleanup functions
 	globalCtx    context.Context
-	cleanupFuncs []func()
+	cleanupFuncs []func() error
 }
 
+// New initializes a new applcation instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
-	skipPermissionsRequests := cfg.Options != nil && cfg.Options.SkipPermissionsRequests
+	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
+	allowedTools := []string{}
+	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
+		allowedTools = cfg.Permissions.AllowedTools
+	}
 
 	// Enable notifications by default, disable if configured
 	notifier := notification.New(cfg.Options != nil && !cfg.Options.DisableNotifications)
@@ -74,9 +73,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Notifier:    notifier,
-		LSPClients:  make(map[string]*lsp.Client),
+		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
 
@@ -89,10 +88,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	app.setupEvents()
 
-	// Initialize LSP clients in the background
-	go app.initLSPClients(ctx)
+	// Initialize LSP clients in the background.
+	app.initLSPClients(ctx)
 
-	// TODO: remove the concept of agent config most likely
+	// cleanup database upon app shutdown
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
+
+	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
 		if err := app.InitCoderAgent(); err != nil {
 			return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
@@ -103,20 +105,27 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	return app, nil
 }
 
-// RunNonInteractive handles the execution flow when a prompt is provided via CLI flag.
+// Config returns the application configuration.
+func (app *App) Config() *config.Config {
+	return app.config
+}
+
+// RunNonInteractive handles the execution flow when a prompt is provided via
+// CLI flag.
 func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Start spinner if not in quiet mode
+	// Start spinner if not in quiet mode.
 	var spinner *format.Spinner
 	if !quiet {
 		spinner = format.NewSpinner(ctx, cancel, "Generating")
 		spinner.Start()
 	}
-	// Helper function to stop spinner once
+
+	// Helper function to stop spinner once.
 	stopSpinner := func() {
 		if !quiet && spinner != nil {
 			spinner.Stop()
@@ -151,7 +160,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 
 	messageEvents := app.Messages.Subscribe(ctx)
-	readBts := 0
+	messageReadBytes := make(map[string]int)
 
 	for {
 		select {
@@ -160,28 +169,45 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 			if result.Error != nil {
 				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-					slog.Info("Agent processing cancelled", "session_id", sess.ID)
+					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.Error)
 			}
 
-			part := result.Message.Content().String()[readBts:]
-			fmt.Println(part)
+			msgContent := result.Message.Content().String()
+			readBts := messageReadBytes[result.Message.ID]
 
-			slog.Info("Non-interactive run completed", "session_id", sess.ID)
+			if len(msgContent) < readBts {
+				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
+				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
+			}
+			fmt.Println(msgContent[readBts:])
+			messageReadBytes[result.Message.ID] = len(msgContent)
+
+			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 
 			// Send completion notification
 			app.Notifier.NotifyTaskComplete(ctx, "Crush Task Complete", "Your task has finished successfully")
+
 			return nil
 
 		case event := <-messageEvents:
 			msg := event.Payload
 			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
 				stopSpinner()
-				part := msg.Content().String()[readBts:]
+
+				content := msg.Content().String()
+				readBytes := messageReadBytes[msg.ID]
+
+				if len(content) < readBytes {
+					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+				}
+
+				part := content[readBytes:]
 				fmt.Print(part)
-				readBts += len(part)
+				messageReadBytes[msg.ID] = len(content)
 			}
 
 		case <-ctx.Done():
@@ -203,14 +229,16 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-
 	// Setup notification handler for message completion
 	app.setupNotificationHandler(ctx)
-
-	cleanupFunc := func() {
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
+		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
@@ -222,9 +250,7 @@ func setupSubscriber[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
 ) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -247,7 +273,7 @@ func setupSubscriber[T any](
 				return
 			}
 		}
-	}()
+	})
 }
 
 func (app *App) setupNotificationHandler(ctx context.Context) {
@@ -295,6 +321,7 @@ func (app *App) InitCoderAgent() error {
 	}
 	var err error
 	app.CoderAgent, err = agent.NewAgent(
+		app.globalCtx,
 		coderAgentCfg,
 		app.Permissions,
 		app.Sessions,
@@ -306,24 +333,31 @@ func (app *App) InitCoderAgent() error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+
+	// Add MCP client cleanup to shutdown process
+	app.cleanupFuncs = append(app.cleanupFuncs, agent.CloseMCPClients)
+
 	setupSubscriber(app.eventsCtx, app.serviceEventsWG, "coderAgent", app.CoderAgent.Subscribe, app.events)
 	return nil
 }
 
+// Subscribe sends events to the TUI as tea.Msgs.
 func (app *App) Subscribe(program *tea.Program) {
 	defer log.RecoverPanic("app.Subscribe", func() {
-		slog.Info("TUI subscription panic - attempting graceful shutdown")
+		slog.Info("TUI subscription panic: attempting graceful shutdown")
 		program.Quit()
 	})
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() {
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
+		return nil
 	})
 	defer app.tuiWG.Done()
+
 	for {
 		select {
 		case <-tuiCtx.Done():
@@ -339,34 +373,27 @@ func (app *App) Subscribe(program *tea.Program) {
 	}
 }
 
-// Shutdown performs a clean shutdown of the application
+// Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
 	if app.CoderAgent != nil {
 		app.CoderAgent.CancelAll()
 	}
-	app.cancelFuncsMutex.Lock()
-	for _, cancel := range app.watcherCancelFuncs {
-		cancel()
-	}
-	app.cancelFuncsMutex.Unlock()
-	app.lspWatcherWG.Wait()
 
-	app.clientsMutex.RLock()
-	clients := make(map[string]*lsp.Client, len(app.LSPClients))
-	maps.Copy(clients, app.LSPClients)
-	app.clientsMutex.RUnlock()
-
-	for name, client := range clients {
+	// Shutdown all LSP clients.
+	for name, client := range app.LSPClients.Seq2() {
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-		if err := client.Shutdown(shutdownCtx); err != nil {
+		if err := client.Close(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()
 	}
 
+	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
-			cleanup()
+			if err := cleanup(); err != nil {
+				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+			}
 		}
 	}
 }

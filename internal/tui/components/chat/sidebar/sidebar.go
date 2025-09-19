@@ -3,29 +3,33 @@ package sidebar
 import (
 	"context"
 	"fmt"
-	"os"
-	"sort"
+	"slices"
 	"strings"
-	"sync"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/files"
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
+	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
+	"github.com/charmbracelet/crush/internal/tui/components/mcp"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type FileHistory struct {
@@ -33,7 +37,7 @@ type FileHistory struct {
 	latestVersion  history.File
 }
 
-const LogoHeightBreakpoint = 40
+const LogoHeightBreakpoint = 30
 
 // Default maximum number of items to show in each section
 const (
@@ -65,18 +69,18 @@ type sidebarCmp struct {
 	session       session.Session
 	logo          string
 	cwd           string
-	lspClients    map[string]*lsp.Client
+	lspClients    *csync.Map[string, *lsp.Client]
 	compactMode   bool
 	history       history.Service
-	// Using a sync map here because we might receive file history events concurrently
-	files sync.Map
+	files         *csync.Map[string, SessionFile]
 }
 
-func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
+func New(history history.Service, lspClients *csync.Map[string, *lsp.Client], compact bool) Sidebar {
 	return &sidebarCmp{
 		lspClients:  lspClients,
 		history:     history,
 		compactMode: compact,
+		files:       csync.NewMap[string, SessionFile](),
 	}
 }
 
@@ -87,9 +91,9 @@ func (m *sidebarCmp) Init() tea.Cmd {
 func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SessionFilesMsg:
-		m.files = sync.Map{}
+		m.files = csync.NewMap[string, SessionFile]()
 		for _, file := range msg.Files {
-			m.files.Store(file.FilePath, file)
+			m.files.Set(file.FilePath, file)
 		}
 		return m, nil
 
@@ -111,12 +115,22 @@ func (m *sidebarCmp) View() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
 
+	style := t.S().Base.
+		Width(m.width).
+		Height(m.height).
+		Padding(1)
+	if m.compactMode {
+		style = style.PaddingTop(0)
+	}
+
 	if !m.compactMode {
 		if m.height > LogoHeightBreakpoint {
 			parts = append(parts, m.logo)
 		} else {
 			// Use a smaller logo for smaller screens
-			parts = append(parts, m.smallerScreenLogo(), "")
+			parts = append(parts,
+				logo.SmallRender(m.width-style.GetHorizontalFrameSize()),
+				"")
 		}
 	}
 
@@ -156,13 +170,6 @@ func (m *sidebarCmp) View() string {
 		)
 	}
 
-	style := t.S().Base.
-		Width(m.width).
-		Height(m.height).
-		Padding(1)
-	if m.compactMode {
-		style = style.PaddingTop(0)
-	}
 	return style.Render(
 		lipgloss.JoinVertical(lipgloss.Left, parts...),
 	)
@@ -172,31 +179,30 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 	return func() tea.Msg {
 		file := event.Payload
 		found := false
-		m.files.Range(func(key, value any) bool {
-			existing := value.(SessionFile)
-			if existing.FilePath == file.Path {
-				if existing.History.latestVersion.Version < file.Version {
-					existing.History.latestVersion = file
-				} else if file.Version == 0 {
-					existing.History.initialVersion = file
-				} else {
-					// If the version is not greater than the latest, we ignore it
-					return true
-				}
-				before := existing.History.initialVersion.Content
-				after := existing.History.latestVersion.Content
-				path := existing.History.initialVersion.Path
-				cwd := config.Get().WorkingDir()
-				path = strings.TrimPrefix(path, cwd)
-				_, additions, deletions := diff.GenerateDiff(before, after, path)
-				existing.Additions = additions
-				existing.Deletions = deletions
-				m.files.Store(file.Path, existing)
-				found = true
-				return false
+		for existing := range m.files.Seq() {
+			if existing.FilePath != file.Path {
+				continue
 			}
-			return true
-		})
+			if existing.History.latestVersion.Version < file.Version {
+				existing.History.latestVersion = file
+			} else if file.Version == 0 {
+				existing.History.initialVersion = file
+			} else {
+				// If the version is not greater than the latest, we ignore it
+				continue
+			}
+			before, _ := fsext.ToUnixLineEndings(existing.History.initialVersion.Content)
+			after, _ := fsext.ToUnixLineEndings(existing.History.latestVersion.Content)
+			path := existing.History.initialVersion.Path
+			cwd := config.Get().WorkingDir()
+			path = strings.TrimPrefix(path, cwd)
+			_, additions, deletions := diff.GenerateDiff(before, after, path)
+			existing.Additions = additions
+			existing.Deletions = deletions
+			m.files.Set(file.Path, existing)
+			found = true
+			break
+		}
 		if found {
 			return nil
 		}
@@ -209,7 +215,7 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 			Additions: 0,
 			Deletions: 0,
 		}
-		m.files.Store(file.Path, sf)
+		m.files.Set(file.Path, sf)
 		return nil
 	}
 }
@@ -243,7 +249,9 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 	for path, fh := range fileMap {
 		cwd := config.Get().WorkingDir()
 		path = strings.TrimPrefix(path, cwd)
-		_, additions, deletions := diff.GenerateDiff(fh.initialVersion.Content, fh.latestVersion.Content, path)
+		before, _ := fsext.ToUnixLineEndings(fh.initialVersion.Content)
+		after, _ := fsext.ToUnixLineEndings(fh.latestVersion.Content)
+		_, additions, deletions := diff.GenerateDiff(before, after, path)
 		sessionFiles = append(sessionFiles, SessionFile{
 			History:   fh,
 			FilePath:  path,
@@ -376,469 +384,125 @@ func (m *sidebarCmp) renderSectionsHorizontal() string {
 
 // filesBlockCompact renders the files block with limited width and height for horizontal layout
 func (m *sidebarCmp) filesBlockCompact(maxWidth int) string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render("Modified Files")
-
-	files := make([]SessionFile, 0)
-	m.files.Range(func(key, value any) bool {
-		file := value.(SessionFile)
-		files = append(files, file)
-		return true
-	})
-
-	if len(files) == 0 {
-		content := lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
-		return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	// Convert map to slice and handle type conversion
+	sessionFiles := slices.Collect(m.files.Seq())
+	fileSlice := make([]files.SessionFile, len(sessionFiles))
+	for i, sf := range sessionFiles {
+		fileSlice[i] = files.SessionFile{
+			History: files.FileHistory{
+				InitialVersion: sf.History.initialVersion,
+				LatestVersion:  sf.History.latestVersion,
+			},
+			FilePath:  sf.FilePath,
+			Additions: sf.Additions,
+			Deletions: sf.Deletions,
+		}
 	}
 
-	fileList := []string{section, ""}
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
-	})
-
-	// Limit items for horizontal layout - use less space
-	maxItems := min(5, len(files))
+	// Limit items for horizontal layout
+	maxItems := min(5, len(fileSlice))
 	availableHeight := m.height - 8 // Reserve space for header and other content
 	if availableHeight > 0 {
 		maxItems = min(maxItems, availableHeight)
 	}
 
-	filesShown := 0
-	for _, file := range files {
-		if file.Additions == 0 && file.Deletions == 0 {
-			continue
-		}
-		if filesShown >= maxItems {
-			break
-		}
-
-		var statusParts []string
-		if file.Additions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
-		}
-		if file.Deletions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
-		}
-
-		extraContent := strings.Join(statusParts, " ")
-		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
-		filePath := file.FilePath
-		filePath = strings.TrimPrefix(filePath, cwd)
-		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
-		filePath = ansi.Truncate(filePath, maxWidth-lipgloss.Width(extraContent)-2, "…")
-
-		fileList = append(fileList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:    t.FgMuted,
-					NoIcon:       true,
-					Title:        filePath,
-					ExtraContent: extraContent,
-				},
-				maxWidth,
-			),
-		)
-		filesShown++
-	}
-
-	// Add "..." indicator if there are more files
-	totalFilesWithChanges := 0
-	for _, file := range files {
-		if file.Additions > 0 || file.Deletions > 0 {
-			totalFilesWithChanges++
-		}
-	}
-	if totalFilesWithChanges > maxItems {
-		fileList = append(fileList, t.S().Base.Foreground(t.FgMuted).Render("…"))
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, fileList...)
-	return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	return files.RenderFileBlock(fileSlice, files.RenderOptions{
+		MaxWidth:    maxWidth,
+		MaxItems:    maxItems,
+		ShowSection: true,
+		SectionName: "Modified Files",
+	}, true)
 }
 
 // lspBlockCompact renders the LSP block with limited width and height for horizontal layout
 func (m *sidebarCmp) lspBlockCompact(maxWidth int) string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render("LSPs")
-
-	lspList := []string{section, ""}
-
-	lsp := config.Get().LSP.Sorted()
-	if len(lsp) == 0 {
-		content := lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
-		return lipgloss.NewStyle().Width(maxWidth).Render(content)
-	}
-
 	// Limit items for horizontal layout
-	maxItems := min(5, len(lsp))
+	lspConfigs := config.Get().LSP.Sorted()
+	maxItems := min(5, len(lspConfigs))
 	availableHeight := m.height - 8
 	if availableHeight > 0 {
 		maxItems = min(maxItems, availableHeight)
 	}
 
-	for i, l := range lsp {
-		if i >= maxItems {
-			break
-		}
-
-		iconColor := t.Success
-		if l.LSP.Disabled {
-			iconColor = t.FgMuted
-		}
-
-		lspErrs := map[protocol.DiagnosticSeverity]int{
-			protocol.SeverityError:       0,
-			protocol.SeverityWarning:     0,
-			protocol.SeverityHint:        0,
-			protocol.SeverityInformation: 0,
-		}
-		if client, ok := m.lspClients[l.Name]; ok {
-			for _, diagnostics := range client.GetDiagnostics() {
-				for _, diagnostic := range diagnostics {
-					if severity, ok := lspErrs[diagnostic.Severity]; ok {
-						lspErrs[diagnostic.Severity] = severity + 1
-					}
-				}
-			}
-		}
-
-		errs := []string{}
-		if lspErrs[protocol.SeverityError] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
-		}
-		if lspErrs[protocol.SeverityWarning] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
-		}
-		if lspErrs[protocol.SeverityHint] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
-		}
-		if lspErrs[protocol.SeverityInformation] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
-		}
-
-		lspList = append(lspList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:    iconColor,
-					Title:        l.Name,
-					Description:  l.LSP.Command,
-					ExtraContent: strings.Join(errs, " "),
-				},
-				maxWidth,
-			),
-		)
-	}
-
-	// Add "..." indicator if there are more LSPs
-	if len(lsp) > maxItems {
-		lspList = append(lspList, t.S().Base.Foreground(t.FgMuted).Render("…"))
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, lspList...)
-	return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	return lspcomponent.RenderLSPBlock(m.lspClients, lspcomponent.RenderOptions{
+		MaxWidth:    maxWidth,
+		MaxItems:    maxItems,
+		ShowSection: true,
+		SectionName: "LSPs",
+	}, true)
 }
 
 // mcpBlockCompact renders the MCP block with limited width and height for horizontal layout
 func (m *sidebarCmp) mcpBlockCompact(maxWidth int) string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render("MCPs")
-
-	mcpList := []string{section, ""}
-
-	mcps := config.Get().MCP.Sorted()
-	if len(mcps) == 0 {
-		content := lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
-		return lipgloss.NewStyle().Width(maxWidth).Render(content)
-	}
-
 	// Limit items for horizontal layout
-	maxItems := min(5, len(mcps))
+	maxItems := min(5, len(config.Get().MCP.Sorted()))
 	availableHeight := m.height - 8
 	if availableHeight > 0 {
 		maxItems = min(maxItems, availableHeight)
 	}
 
-	for i, l := range mcps {
-		if i >= maxItems {
-			break
-		}
-
-		iconColor := t.Success
-		if l.MCP.Disabled {
-			iconColor = t.FgMuted
-		}
-
-		mcpList = append(mcpList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.MCP.Command,
-				},
-				maxWidth,
-			),
-		)
-	}
-
-	// Add "..." indicator if there are more MCPs
-	if len(mcps) > maxItems {
-		mcpList = append(mcpList, t.S().Base.Foreground(t.FgMuted).Render("…"))
-	}
-
-	content := lipgloss.JoinVertical(lipgloss.Left, mcpList...)
-	return lipgloss.NewStyle().Width(maxWidth).Render(content)
+	return mcp.RenderMCPBlock(mcp.RenderOptions{
+		MaxWidth:    maxWidth,
+		MaxItems:    maxItems,
+		ShowSection: true,
+		SectionName: "MCPs",
+	}, true)
 }
 
 func (m *sidebarCmp) filesBlock() string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render(
-		core.Section("Modified Files", m.getMaxWidth()),
-	)
-
-	files := make([]SessionFile, 0)
-	m.files.Range(func(key, value any) bool {
-		file := value.(SessionFile)
-		files = append(files, file)
-		return true // continue iterating
-	})
-	if len(files) == 0 {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
+	// Convert map to slice and handle type conversion
+	sessionFiles := slices.Collect(m.files.Seq())
+	fileSlice := make([]files.SessionFile, len(sessionFiles))
+	for i, sf := range sessionFiles {
+		fileSlice[i] = files.SessionFile{
+			History: files.FileHistory{
+				InitialVersion: sf.History.initialVersion,
+				LatestVersion:  sf.History.latestVersion,
+			},
+			FilePath:  sf.FilePath,
+			Additions: sf.Additions,
+			Deletions: sf.Deletions,
+		}
 	}
-
-	fileList := []string{section, ""}
-	// order files by the latest version's created time
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].History.latestVersion.CreatedAt > files[j].History.latestVersion.CreatedAt
-	})
 
 	// Limit the number of files shown
 	maxFiles, _, _ := m.getDynamicLimits()
-	maxFiles = min(len(files), maxFiles)
-	filesShown := 0
+	maxFiles = min(len(fileSlice), maxFiles)
 
-	for _, file := range files {
-		if file.Additions == 0 && file.Deletions == 0 {
-			continue // skip files with no changes
-		}
-		if filesShown >= maxFiles {
-			break
-		}
-
-		var statusParts []string
-		if file.Additions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Success).Render(fmt.Sprintf("+%d", file.Additions)))
-		}
-		if file.Deletions > 0 {
-			statusParts = append(statusParts, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("-%d", file.Deletions)))
-		}
-
-		extraContent := strings.Join(statusParts, " ")
-		cwd := config.Get().WorkingDir() + string(os.PathSeparator)
-		filePath := file.FilePath
-		filePath = strings.TrimPrefix(filePath, cwd)
-		filePath = fsext.DirTrim(fsext.PrettyPath(filePath), 2)
-		filePath = ansi.Truncate(filePath, m.getMaxWidth()-lipgloss.Width(extraContent)-2, "…")
-		fileList = append(fileList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:    t.FgMuted,
-					NoIcon:       true,
-					Title:        filePath,
-					ExtraContent: extraContent,
-				},
-				m.getMaxWidth(),
-			),
-		)
-		filesShown++
-	}
-
-	// Add indicator if there are more files
-	totalFilesWithChanges := 0
-	for _, file := range files {
-		if file.Additions > 0 || file.Deletions > 0 {
-			totalFilesWithChanges++
-		}
-	}
-	if totalFilesWithChanges > maxFiles {
-		remaining := totalFilesWithChanges - maxFiles
-		fileList = append(fileList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
-		)
-	}
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		fileList...,
-	)
+	return files.RenderFileBlock(fileSlice, files.RenderOptions{
+		MaxWidth:    m.getMaxWidth(),
+		MaxItems:    maxFiles,
+		ShowSection: true,
+		SectionName: core.Section("Modified Files", m.getMaxWidth()),
+	}, true)
 }
 
 func (m *sidebarCmp) lspBlock() string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render(
-		core.Section("LSPs", m.getMaxWidth()),
-	)
-
-	lspList := []string{section, ""}
-
-	lsp := config.Get().LSP.Sorted()
-	if len(lsp) == 0 {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
-	}
-
 	// Limit the number of LSPs shown
 	_, maxLSPs, _ := m.getDynamicLimits()
-	maxLSPs = min(len(lsp), maxLSPs)
-	for i, l := range lsp {
-		if i >= maxLSPs {
-			break
-		}
+	lspConfigs := config.Get().LSP.Sorted()
+	maxLSPs = min(len(lspConfigs), maxLSPs)
 
-		iconColor := t.Success
-		if l.LSP.Disabled {
-			iconColor = t.FgMuted
-		}
-		lspErrs := map[protocol.DiagnosticSeverity]int{
-			protocol.SeverityError:       0,
-			protocol.SeverityWarning:     0,
-			protocol.SeverityHint:        0,
-			protocol.SeverityInformation: 0,
-		}
-		if client, ok := m.lspClients[l.Name]; ok {
-			for _, diagnostics := range client.GetDiagnostics() {
-				for _, diagnostic := range diagnostics {
-					if severity, ok := lspErrs[diagnostic.Severity]; ok {
-						lspErrs[diagnostic.Severity] = severity + 1
-					}
-				}
-			}
-		}
-
-		errs := []string{}
-		if lspErrs[protocol.SeverityError] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
-		}
-		if lspErrs[protocol.SeverityWarning] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
-		}
-		if lspErrs[protocol.SeverityHint] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
-		}
-		if lspErrs[protocol.SeverityInformation] > 0 {
-			errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
-		}
-
-		lspList = append(lspList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:    iconColor,
-					Title:        l.Name,
-					Description:  l.LSP.Command,
-					ExtraContent: strings.Join(errs, " "),
-				},
-				m.getMaxWidth(),
-			),
-		)
-	}
-
-	// Add indicator if there are more LSPs
-	if len(lsp) > maxLSPs {
-		remaining := len(lsp) - maxLSPs
-		lspList = append(lspList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
-		)
-	}
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		lspList...,
-	)
+	return lspcomponent.RenderLSPBlock(m.lspClients, lspcomponent.RenderOptions{
+		MaxWidth:    m.getMaxWidth(),
+		MaxItems:    maxLSPs,
+		ShowSection: true,
+		SectionName: core.Section("LSPs", m.getMaxWidth()),
+	}, true)
 }
 
 func (m *sidebarCmp) mcpBlock() string {
-	t := styles.CurrentTheme()
-
-	section := t.S().Subtle.Render(
-		core.Section("MCPs", m.getMaxWidth()),
-	)
-
-	mcpList := []string{section, ""}
-
-	mcps := config.Get().MCP.Sorted()
-	if len(mcps) == 0 {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			section,
-			"",
-			t.S().Base.Foreground(t.Border).Render("None"),
-		)
-	}
-
 	// Limit the number of MCPs shown
 	_, _, maxMCPs := m.getDynamicLimits()
+	mcps := config.Get().MCP.Sorted()
 	maxMCPs = min(len(mcps), maxMCPs)
-	for i, l := range mcps {
-		if i >= maxMCPs {
-			break
-		}
 
-		iconColor := t.Success
-		if l.MCP.Disabled {
-			iconColor = t.FgMuted
-		}
-		mcpList = append(mcpList,
-			core.Status(
-				core.StatusOpts{
-					IconColor:   iconColor,
-					Title:       l.Name,
-					Description: l.MCP.Command,
-				},
-				m.getMaxWidth(),
-			),
-		)
-	}
-
-	// Add indicator if there are more MCPs
-	if len(mcps) > maxMCPs {
-		remaining := len(mcps) - maxMCPs
-		mcpList = append(mcpList,
-			t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("… and %d more", remaining)),
-		)
-	}
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		mcpList...,
-	)
+	return mcp.RenderMCPBlock(mcp.RenderOptions{
+		MaxWidth:    m.getMaxWidth(),
+		MaxItems:    maxMCPs,
+		ShowSection: true,
+		SectionName: core.Section("MCPs", m.getMaxWidth()),
+	}, true)
 }
 
 func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
@@ -880,16 +544,40 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 }
 
 func (s *sidebarCmp) currentModelBlock() string {
-	agentCfg := config.Get().Agents["coder"]
+	cfg := config.Get()
+	agentCfg := cfg.Agents["coder"]
+
+	selectedModel := cfg.Models[agentCfg.Model]
+
 	model := config.Get().GetModelByType(agentCfg.Model)
+	modelProvider := config.Get().GetProviderForModel(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Model)
+	modelName := t.S().Text.Render(model.Name)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,
+	}
+	if model.CanReason {
+		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
+		switch modelProvider.Type {
+		case catwalk.TypeOpenAI:
+			reasoningEffort := model.DefaultReasoningEffort
+			if selectedModel.ReasoningEffort != "" {
+				reasoningEffort = selectedModel.ReasoningEffort
+			}
+			formatter := cases.Title(language.English, cases.NoLower)
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
+		case catwalk.TypeAnthropic:
+			formatter := cases.Title(language.English, cases.NoLower)
+			if selectedModel.Think {
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
+			} else {
+				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
+			}
+		}
 	}
 	if s.session.ID != "" {
 		parts = append(
@@ -907,19 +595,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 	)
 }
 
-func (m *sidebarCmp) smallerScreenLogo() string {
-	t := styles.CurrentTheme()
-	title := t.S().Base.Foreground(t.Secondary).Render("Charm™")
-	title += " " + styles.ApplyBoldForegroundGrad("CRUSH", t.Secondary, t.Primary)
-	remainingWidth := m.width - lipgloss.Width(title) - 3
-	if remainingWidth > 0 {
-		char := "╱"
-		lines := strings.Repeat(char, remainingWidth)
-		title += " " + t.S().Base.Foreground(t.Primary).Render(lines)
-	}
-	return title
-}
-
 // SetSession implements Sidebar.
 func (m *sidebarCmp) SetSession(session session.Session) tea.Cmd {
 	m.session = session
@@ -934,11 +609,5 @@ func (m *sidebarCmp) SetCompactMode(compact bool) {
 func cwd() string {
 	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
-	// Replace home directory with ~, unless we're at the top level of the
-	// home directory).
-	homeDir, err := os.UserHomeDir()
-	if err == nil && cwd != homeDir {
-		cwd = strings.ReplaceAll(cwd, homeDir, "~")
-	}
-	return t.S().Muted.Render(cwd)
+	return t.S().Muted.Render(home.Short(cwd))
 }

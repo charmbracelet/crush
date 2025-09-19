@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -32,7 +32,7 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		}
 	}
 
-	opts.model = func(modelType config.SelectedModelType) provider.Model {
+	opts.model = func(modelType config.SelectedModelType) catwalk.Model {
 		model := config.Get().GetModelByType(modelType)
 
 		// Prefix the model name with region
@@ -52,7 +52,7 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		opts.disableCache = true // Disable cache for Bedrock
 		return &bedrockClient{
 			providerOptions: opts,
-			childProvider:   newAnthropicClient(anthropicOpts, true),
+			childProvider:   newAnthropicClient(anthropicOpts, AnthropicClientTypeBedrock),
 		}
 	}
 
@@ -88,6 +88,6 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 	return b.childProvider.stream(ctx, messages, tools)
 }
 
-func (b *bedrockClient) Model() provider.Model {
+func (b *bedrockClient) Model() catwalk.Model {
 	return b.providerOptions.model(b.providerOptions.modelType)
 }

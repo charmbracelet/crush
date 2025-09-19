@@ -2,12 +2,14 @@ package tools
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
@@ -32,38 +34,10 @@ type fetchTool struct {
 	workingDir  string
 }
 
-const (
-	FetchToolName        = "fetch"
-	fetchToolDescription = `Fetches content from a URL and returns it in the specified format.
+const FetchToolName = "fetch"
 
-WHEN TO USE THIS TOOL:
-- Use when you need to download content from a URL
-- Helpful for retrieving documentation, API responses, or web content
-- Useful for getting external information to assist with tasks
-
-HOW TO USE:
-- Provide the URL to fetch content from
-- Specify the desired output format (text, markdown, or html)
-- Optionally set a timeout for the request
-
-FEATURES:
-- Supports three output formats: text, markdown, and html
-- Automatically handles HTTP redirects
-- Sets reasonable timeouts to prevent hanging
-- Validates input parameters before making requests
-
-LIMITATIONS:
-- Maximum response size is 5MB
-- Only supports HTTP and HTTPS protocols
-- Cannot handle authentication or cookies
-- Some websites may block automated requests
-
-TIPS:
-- Use text format for plain text content or simple API responses
-- Use markdown format for content that should be rendered with formatting
-- Use html format when you need the raw HTML structure
-- Set appropriate timeouts for potentially slow websites`
-)
+//go:embed fetch.md
+var fetchDescription []byte
 
 func NewFetchTool(permissions permission.Service, workingDir string) BaseTool {
 	return &fetchTool{
@@ -87,7 +61,7 @@ func (t *fetchTool) Name() string {
 func (t *fetchTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        FetchToolName,
-		Description: fetchToolDescription,
+		Description: string(fetchDescription),
 		Parameters: map[string]any{
 			"url": map[string]any{
 				"type":        "string",
@@ -135,6 +109,7 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        t.workingDir,
+			ToolCallID:  call.ID,
 			ToolName:    FetchToolName,
 			Action:      "fetch",
 			Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),
@@ -182,6 +157,11 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	}
 
 	content := string(body)
+
+	isValidUt8 := utf8.ValidString(content)
+	if !isValidUt8 {
+		return NewTextErrorResponse("Response content is not valid UTF-8"), nil
+	}
 	contentType := resp.Header.Get("Content-Type")
 
 	switch format {
@@ -191,9 +171,8 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			if err != nil {
 				return NewTextErrorResponse("Failed to extract text from HTML: " + err.Error()), nil
 			}
-			return NewTextResponse(text), nil
+			content = text
 		}
-		return NewTextResponse(content), nil
 
 	case "markdown":
 		if strings.Contains(contentType, "text/html") {
@@ -201,17 +180,36 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			if err != nil {
 				return NewTextErrorResponse("Failed to convert HTML to Markdown: " + err.Error()), nil
 			}
-			return NewTextResponse(markdown), nil
+			content = markdown
 		}
 
-		return NewTextResponse("```\n" + content + "\n```"), nil
+		content = "```\n" + content + "\n```"
 
 	case "html":
-		return NewTextResponse(content), nil
-
-	default:
-		return NewTextResponse(content), nil
+		// return only the body of the HTML document
+		if strings.Contains(contentType, "text/html") {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
+			if err != nil {
+				return NewTextErrorResponse("Failed to parse HTML: " + err.Error()), nil
+			}
+			body, err := doc.Find("body").Html()
+			if err != nil {
+				return NewTextErrorResponse("Failed to extract body from HTML: " + err.Error()), nil
+			}
+			if body == "" {
+				return NewTextErrorResponse("No body content found in HTML"), nil
+			}
+			content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
+		}
 	}
+	// calculate byte size of content
+	contentSize := int64(len(content))
+	if contentSize > MaxReadSize {
+		content = content[:MaxReadSize]
+		content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
+	}
+
+	return NewTextResponse(content), nil
 }
 
 func extractTextFromHTML(html string) (string, error) {
@@ -220,7 +218,7 @@ func extractTextFromHTML(html string) (string, error) {
 		return "", err
 	}
 
-	text := doc.Text()
+	text := doc.Find("body").Text()
 	text = strings.Join(strings.Fields(text), " ")
 
 	return text, nil

@@ -1,1 +1,2 @@
 *.golden linguist-generated=true -text
+.github/crush-schema.json linguist-generated=true

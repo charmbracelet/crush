@@ -1,19 +1,20 @@
 package commands
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fur/provider"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
-	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
-	"github.com/charmbracelet/crush/internal/tui/components/core/list"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -28,6 +29,8 @@ const (
 	SystemCommands int = iota
 	UserCommands
 )
+
+type listModel = list.FilterableList[list.CompletionItem[Command]]
 
 // Command represents a command that can be executed
 type Command struct {
@@ -48,7 +51,7 @@ type commandDialogCmp struct {
 	wWidth  int // Width of the terminal window
 	wHeight int // Height of the terminal window
 
-	commandList  list.ListModel
+	commandList  listModel
 	keyMap       CommandsDialogKeyMap
 	help         help.Model
 	commandType  int       // SystemCommands or UserCommands
@@ -57,34 +60,40 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg    struct{}
-	SwitchModelMsg       struct{}
-	ToggleCompactModeMsg struct{}
-	ToggleThinkingMsg    struct{}
-	CompactMsg           struct {
+	SwitchSessionsMsg      struct{}
+	NewSessionsMsg         struct{}
+	SwitchModelMsg         struct{}
+	QuitMsg                struct{}
+	OpenFilePickerMsg      struct{}
+	ToggleHelpMsg          struct{}
+	ToggleCompactModeMsg   struct{}
+	ToggleThinkingMsg      struct{}
+	OpenReasoningDialogMsg struct{}
+	OpenExternalEditorMsg  struct{}
+	ToggleYoloModeMsg      struct{}
+	CompactMsg             struct {
 		SessionID string
 	}
 )
 
 func NewCommandDialog(sessionID string) CommandsDialog {
-	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultCommandsDialogKeyMap()
-
+	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
 	listKeyMap.Up.SetEnabled(false)
-	listKeyMap.HalfPageDown.SetEnabled(false)
-	listKeyMap.HalfPageUp.SetEnabled(false)
-	listKeyMap.Home.SetEnabled(false)
-	listKeyMap.End.SetEnabled(false)
-
 	listKeyMap.DownOneItem = keyMap.Next
 	listKeyMap.UpOneItem = keyMap.Previous
 
 	t := styles.CurrentTheme()
-	commandList := list.New(
-		list.WithFilterable(true),
-		list.WithKeyMap(listKeyMap),
-		list.WithWrapNavigation(true),
+	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
+	commandList := list.NewFilterableList(
+		[]list.CompletionItem[Command]{},
+		list.WithFilterInputStyle(inputStyle),
+		list.WithFilterListOptions(
+			list.WithKeyMap(listKeyMap),
+			list.WithWrapNavigation(),
+			list.WithResizeByList(),
+		),
 	)
 	help := help.New()
 	help.Styles = t.S().Help
@@ -103,10 +112,8 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-
 	c.userCommands = commands
-	c.SetCommandType(c.commandType)
-	return c.commandList.Init()
+	return c.SetCommandType(c.commandType)
 }
 
 func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -114,22 +121,26 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
-		c.SetCommandType(c.commandType)
-		return c, c.commandList.SetSize(c.listWidth(), c.listHeight())
+		return c, tea.Batch(
+			c.SetCommandType(c.commandType),
+			c.commandList.SetSize(c.listWidth(), c.listHeight()),
+		)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Select):
-			selectedItemInx := c.commandList.SelectedIndex()
-			if selectedItemInx == list.NoSelection {
+			selectedItem := c.commandList.SelectedItem()
+			if selectedItem == nil {
 				return c, nil // No item selected, do nothing
 			}
-			items := c.commandList.Items()
-			selectedItem := items[selectedItemInx].(completions.CompletionItem).Value().(Command)
+			command := (*selectedItem).Value()
 			return c, tea.Sequence(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
-				selectedItem.Handler(selectedItem),
+				command.Handler(command),
 			)
 		case key.Matches(msg, c.keyMap.Tab):
+			if len(c.userCommands) == 0 {
+				return c, nil
+			}
 			// Toggle command type between System and User commands
 			if c.commandType == SystemCommands {
 				return c, c.SetCommandType(UserCommands)
@@ -140,7 +151,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			u, cmd := c.commandList.Update(msg)
-			c.commandList = u.(list.ListModel)
+			c.commandList = u.(listModel)
 			return c, cmd
 		}
 	}
@@ -151,9 +162,14 @@ func (c *commandDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := c.commandList
 	radio := c.commandTypeRadio()
+
+	header := t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5) + " " + radio)
+	if len(c.userCommands) == 0 {
+		header = t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-4))
+	}
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5)+" "+radio),
+		header,
 		listView.View(),
 		"",
 		t.S().Base.Width(c.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(c.help.View(c.keyMap)),
@@ -197,13 +213,18 @@ func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
 		commands = c.userCommands
 	}
 
-	commandItems := []util.Model{}
+	commandItems := []list.CompletionItem[Command]{}
 	for _, cmd := range commands {
-		opts := []completions.CompletionOption{}
-		if cmd.Shortcut != "" {
-			opts = append(opts, completions.WithShortcut(cmd.Shortcut))
+		opts := []list.CompletionItemOption{
+			list.WithCompletionID(cmd.ID),
 		}
-		commandItems = append(commandItems, completions.NewCompletionItem(cmd.Title, cmd, opts...))
+		if cmd.Shortcut != "" {
+			opts = append(
+				opts,
+				list.WithCompletionShortcut(cmd.Shortcut),
+			)
+		}
+		commandItems = append(commandItems, list.NewCompletionItem(cmd.Title, cmd, opts...))
 	}
 	return c.commandList.SetItems(commandItems)
 }
@@ -239,13 +260,29 @@ func (c *commandDialogCmp) Position() (int, int) {
 func (c *commandDialogCmp) defaultCommands() []Command {
 	commands := []Command{
 		{
-			ID:          "init",
-			Title:       "Initialize Project",
-			Description: "Create/Update the CRUSH.md memory file",
+			ID:          "new_session",
+			Title:       "New Session",
+			Description: "start a new session",
+			Shortcut:    "ctrl+n",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(chat.SendMsg{
-					Text: prompt.Initialize(),
-				})
+				return util.CmdHandler(NewSessionsMsg{})
+			},
+		},
+		{
+			ID:          "switch_session",
+			Title:       "Switch Session",
+			Description: "Switch to a different session",
+			Shortcut:    "ctrl+s",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchSessionsMsg{})
+			},
+		},
+		{
+			ID:          "switch_model",
+			Title:       "Switch Model",
+			Description: "Switch to a different model",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchModelMsg{})
 			},
 		},
 	}
@@ -264,29 +301,43 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 
-	// Only show thinking toggle for Anthropic models that can reason
+	// Add reasoning toggle for models that support it
 	cfg := config.Get()
 	if agentCfg, ok := cfg.Agents["coder"]; ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
-		if providerCfg != nil && model != nil &&
-			providerCfg.Type == provider.TypeAnthropic && model.CanReason {
+		if providerCfg != nil && model != nil && model.CanReason {
 			selectedModel := cfg.Models[agentCfg.Model]
-			status := "Enable"
-			if selectedModel.Think {
-				status = "Disable"
+
+			// Anthropic models: thinking toggle
+			if providerCfg.Type == catwalk.TypeAnthropic {
+				status := "Enable"
+				if selectedModel.Think {
+					status = "Disable"
+				}
+				commands = append(commands, Command{
+					ID:          "toggle_thinking",
+					Title:       status + " Thinking Mode",
+					Description: "Toggle model thinking for reasoning-capable models",
+					Handler: func(cmd Command) tea.Cmd {
+						return util.CmdHandler(ToggleThinkingMsg{})
+					},
+				})
 			}
-			commands = append(commands, Command{
-				ID:          "toggle_thinking",
-				Title:       status + " Thinking Mode",
-				Description: "Toggle model thinking for reasoning-capable models",
-				Handler: func(cmd Command) tea.Cmd {
-					return util.CmdHandler(ToggleThinkingMsg{})
-				},
-			})
+
+			// OpenAI models: reasoning effort dialog
+			if providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+				commands = append(commands, Command{
+					ID:          "select_reasoning_effort",
+					Title:       "Select Reasoning Effort",
+					Description: "Choose reasoning effort level (low/medium/high)",
+					Handler: func(cmd Command) tea.Cmd {
+						return util.CmdHandler(OpenReasoningDialogMsg{})
+					},
+				})
+			}
 		}
 	}
-
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
 	if c.wWidth > 120 && c.sessionID != "" {
 		commands = append(commands, Command{
@@ -298,23 +349,70 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			},
 		})
 	}
+	if c.sessionID != "" {
+		agentCfg := config.Get().Agents["coder"]
+		model := config.Get().GetModelByType(agentCfg.Model)
+		if model.SupportsImages {
+			commands = append(commands, Command{
+				ID:          "file_picker",
+				Title:       "Open File Picker",
+				Shortcut:    "ctrl+f",
+				Description: "Open file picker",
+				Handler: func(cmd Command) tea.Cmd {
+					return util.CmdHandler(OpenFilePickerMsg{})
+				},
+			})
+		}
+	}
+
+	// Add external editor command if $EDITOR is available
+	if os.Getenv("EDITOR") != "" {
+		commands = append(commands, Command{
+			ID:          "open_external_editor",
+			Title:       "Open External Editor",
+			Shortcut:    "ctrl+o",
+			Description: "Open external editor to compose message",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenExternalEditorMsg{})
+			},
+		})
+	}
 
 	return append(commands, []Command{
 		{
-			ID:          "switch_session",
-			Title:       "Switch Session",
-			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
+			ID:          "toggle_yolo",
+			Title:       "Toggle Yolo Mode",
+			Description: "Toggle yolo mode",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchSessionsMsg{})
+				return util.CmdHandler(ToggleYoloModeMsg{})
 			},
 		},
 		{
-			ID:          "switch_model",
-			Title:       "Switch Model",
-			Description: "Switch to a different model",
+			ID:          "toggle_help",
+			Title:       "Toggle Help",
+			Shortcut:    "ctrl+g",
+			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
-				return util.CmdHandler(SwitchModelMsg{})
+				return util.CmdHandler(ToggleHelpMsg{})
+			},
+		},
+		{
+			ID:          "init",
+			Title:       "Initialize Project",
+			Description: "Create/Update the CRUSH.md memory file",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(chat.SendMsg{
+					Text: prompt.Initialize(),
+				})
+			},
+		},
+		{
+			ID:          "quit",
+			Title:       "Quit",
+			Description: "Quit",
+			Shortcut:    "ctrl+c",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(QuitMsg{})
 			},
 		},
 	}...)

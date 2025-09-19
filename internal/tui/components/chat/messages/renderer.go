@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -124,9 +125,9 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 	} else if v.cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
-	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool) + " "
+	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(true, width-lipgloss.Width(tool), params...)
+	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
@@ -162,8 +163,10 @@ func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 // Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
+	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
+	registry.register(tools.MultiEditToolName, func() renderer { return multiEditRenderer{} })
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
 	registry.register(tools.FetchToolName, func() renderer { return fetchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
@@ -211,10 +214,19 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	args := newParamBuilder().addMain(cmd).build()
 
 	return br.renderWithParams(v, "Bash", args, func() string {
-		if v.result.Content == tools.BashNoOutput {
+		var meta tools.BashResponseMetadata
+		if err := br.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+		// for backwards compatibility with older tool calls.
+		if meta.Output == "" && v.result.Content != tools.BashNoOutput {
+			meta.Output = v.result.Content
+		}
+
+		if meta.Output == "" {
 			return ""
 		}
-		return renderPlainContent(v, v.result.Content)
+		return renderPlainContent(v, meta.Output)
 	})
 }
 
@@ -280,6 +292,57 @@ func (er editRenderer) Render(v *toolCallCmp) string {
 	return er.renderWithParams(v, "Edit", args, func() string {
 		var meta tools.EditResponseMetadata
 		if err := er.unmarshalParams(v.result.Metadata, &meta); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		formatter := core.DiffFormatter().
+			Before(fsext.PrettyPath(params.FilePath), meta.OldContent).
+			After(fsext.PrettyPath(params.FilePath), meta.NewContent).
+			Width(v.textWidth() - 2) // -2 for padding
+		if v.textWidth() > 120 {
+			formatter = formatter.Split()
+		}
+		// add a message to the bottom if the content was truncated
+		formatted := formatter.String()
+		if lipgloss.Height(formatted) > responseContextHeight {
+			contentLines := strings.Split(formatted, "\n")
+			truncateMessage := t.S().Muted.
+				Background(t.BgBaseLighter).
+				PaddingLeft(2).
+				Width(v.textWidth() - 2).
+				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
+			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
+		}
+		return formatted
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Multi-Edit renderer
+// -----------------------------------------------------------------------------
+
+// multiEditRenderer handles multiple file edits with diff visualization
+type multiEditRenderer struct {
+	baseRenderer
+}
+
+// Render displays the multi-edited file with a formatted diff of changes
+func (mer multiEditRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.MultiEditParams
+	var args []string
+	if err := mer.unmarshalParams(v.call.Input, &params); err == nil {
+		file := fsext.PrettyPath(params.FilePath)
+		editsCount := len(params.Edits)
+		args = newParamBuilder().
+			addMain(file).
+			addKeyValue("edits", fmt.Sprintf("%d", editsCount)).
+			build()
+	}
+
+	return mer.renderWithParams(v, "Multi-Edit", args, func() string {
+		var meta tools.MultiEditResponseMetadata
+		if err := mer.unmarshalParams(v.result.Metadata, &meta); err != nil {
 			return renderPlainContent(v, v.result.Content)
 		}
 
@@ -374,6 +437,32 @@ func formatTimeout(timeout int) string {
 		return ""
 	}
 	return (time.Duration(timeout) * time.Second).String()
+}
+
+// -----------------------------------------------------------------------------
+//  Download renderer
+// -----------------------------------------------------------------------------
+
+// downloadRenderer handles file downloading with URL and file path display
+type downloadRenderer struct {
+	baseRenderer
+}
+
+// Render displays the download URL and destination file path with timeout parameter
+func (dr downloadRenderer) Render(v *toolCallCmp) string {
+	var params tools.DownloadParams
+	var args []string
+	if err := dr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			addKeyValue("file_path", fsext.PrettyPath(params.FilePath)).
+			addKeyValue("timeout", formatTimeout(params.Timeout)).
+			build()
+	}
+
+	return dr.renderWithParams(v, "Download", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -635,7 +724,11 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.cancelled:
 		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
 	case v.result.ToolCallID == "":
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool to start...")
+		if v.permissionRequested && !v.permissionGranted {
+			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting for permission...")
+		} else {
+			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
+		}
 	default:
 		return "", false
 	}
@@ -655,6 +748,8 @@ func joinHeaderBody(header, body string) string {
 
 func renderPlainContent(v *toolCallCmp, content string) string {
 	t := styles.CurrentTheme()
+	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
+	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
@@ -664,6 +759,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		if i >= responseContextHeight {
 			break
 		}
+		ln = ansiext.Escape(ln)
 		ln = " " + ln // left padding
 		if len(ln) > width {
 			ln = v.fit(ln, width)
@@ -680,47 +776,71 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 			Width(width).
 			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
 	}
+
 	return strings.Join(out, "\n")
 }
 
-func pad(v any, width int) string {
-	s := fmt.Sprintf("%v", v)
-	w := ansi.StringWidth(s)
-	if w >= width {
-		return s
+func getDigits(n int) int {
+	if n == 0 {
+		return 1
 	}
-	return strings.Repeat(" ", width-w) + s
+	if n < 0 {
+		n = -n
+	}
+
+	digits := 0
+	for n > 0 {
+		n /= 10
+		digits++
+	}
+
+	return digits
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
 	t := styles.CurrentTheme()
+	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
+	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	truncated := truncateHeight(content, responseContextHeight)
 
-	highlighted, _ := highlight.SyntaxHighlight(truncated, path, t.BgBase)
-	lines := strings.Split(highlighted, "\n")
+	lines := strings.Split(truncated, "\n")
+	for i, ln := range lines {
+		lines[i] = ansiext.Escape(ln)
+	}
+
+	bg := t.BgBase
+	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, bg)
+	lines = strings.Split(highlighted, "\n")
 
 	if len(strings.Split(content, "\n")) > responseContextHeight {
 		lines = append(lines, t.S().Muted.
-			Background(t.BgBase).
+			Background(bg).
 			Render(fmt.Sprintf(" …(%d lines)", len(strings.Split(content, "\n"))-responseContextHeight)))
 	}
 
 	maxLineNumber := len(lines) + offset
-	padding := lipgloss.Width(fmt.Sprintf("%d", maxLineNumber))
+	maxDigits := getDigits(maxLineNumber)
+	numFmt := fmt.Sprintf("%%%dd", maxDigits)
+	const numPR, numPL, codePR, codePL = 1, 1, 1, 2
+	w := v.textWidth() - maxDigits - numPL - numPR - 2 // -2 for left padding
 	for i, ln := range lines {
 		num := t.S().Base.
 			Foreground(t.FgMuted).
 			Background(t.BgBase).
 			PaddingRight(1).
 			PaddingLeft(1).
-			Render(pad(i+1+offset, padding))
-		w := v.textWidth() - 10 - lipgloss.Width(num) // -4 for left padding
+			Render(fmt.Sprintf(numFmt, i+1+offset))
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Left,
 			num,
 			t.S().Base.
-				PaddingLeft(1).
-				Render(v.fit(ln, w-1)))
+				Width(w).
+				Background(bg).
+				PaddingRight(1).
+				PaddingLeft(2).
+				Render(v.fit(ln, w-codePL-codePR)),
+		)
 	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
@@ -746,8 +866,12 @@ func prettifyToolName(name string) string {
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
+	case tools.DownloadToolName:
+		return "Download"
 	case tools.EditToolName:
 		return "Edit"
+	case tools.MultiEditToolName:
+		return "Multi-Edit"
 	case tools.FetchToolName:
 		return "Fetch"
 	case tools.GlobToolName:

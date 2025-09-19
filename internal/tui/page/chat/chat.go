@@ -2,29 +2,36 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/editor"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/header"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/messages"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/sidebar"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -35,8 +42,7 @@ import (
 var ChatPageID page.PageID = "chat"
 
 type (
-	OpenFilePickerMsg struct{}
-	ChatFocusedMsg    struct {
+	ChatFocusedMsg struct {
 		Focused bool
 	}
 	CancelTimerExpiredMsg struct{}
@@ -163,15 +169,82 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
 		return p, nil
+	case tea.MouseWheelMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
+		if p.isMouseOverChat(msg.X, msg.Y) {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
+	case tea.MouseClickMsg:
+		if p.isOnboarding {
+			return p, nil
+		}
+		if p.compact {
+			msg.Y -= 1
+		}
+		if p.isMouseOverChat(msg.X, msg.Y) {
+			p.focusedPane = PanelTypeChat
+			p.chat.Focus()
+			p.editor.Blur()
+		} else {
+			p.focusedPane = PanelTypeEditor
+			p.editor.Focus()
+			p.chat.Blur()
+		}
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
+	case tea.MouseMotionMsg:
+		if p.compact {
+			msg.Y -= 1
+		}
+		if msg.Button == tea.MouseLeft {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
+	case tea.MouseReleaseMsg:
+		if p.isOnboarding {
+			return p, nil
+		}
+		if p.compact {
+			msg.Y -= 1
+		}
+		if msg.Button == tea.MouseLeft {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
+		}
+		return p, nil
+	case chat.SelectionCopyMsg:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
 	case tea.WindowSizeMsg:
-		return p, p.SetSize(msg.Width, msg.Height)
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, tea.Batch(p.SetSize(msg.Width, msg.Height), cmd)
 	case CancelTimerExpiredMsg:
 		p.isCanceling = false
 		return p, nil
+	case editor.OpenEditorMsg:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case chat.SendMsg:
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
+	case splash.SubmitAPIKeyMsg:
+		u, cmd := p.splash.Update(msg)
+		p.splash = u.(splash.Splash)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
 	case commands.ToggleCompactModeMsg:
 		p.forceCompact = !p.forceCompact
 		var cmd tea.Cmd
@@ -185,6 +258,14 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case commands.ToggleThinkingMsg:
 		return p, p.toggleThinking()
+	case commands.OpenReasoningDialogMsg:
+		return p, p.openReasoningDialog()
+	case reasoning.ReasoningEffortSelectedMsg:
+		return p, p.handleReasoningEffortSelected(msg.Effort)
+	case commands.OpenExternalEditorMsg:
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case pubsub.Event[session.Session]:
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
@@ -212,17 +293,40 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
+	case models.APIKeyStateChangeMsg:
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		}
+		return p, tea.Batch(cmds...)
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
-		u, cmd := p.chat.Update(msg)
-		p.chat = u.(chat.MessageListCmp)
-		cmds = append(cmds, cmd)
-		return p, tea.Batch(cmds...)
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		} else {
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			cmds = append(cmds, cmd)
+		}
 
+		return p, tea.Batch(cmds...)
+	case commands.ToggleYoloModeMsg:
+		// update the editor style
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
 		u, cmd := p.sidebar.Update(msg)
 		p.sidebar = u.(sidebar.Sidebar)
+		cmds = append(cmds, cmd)
+		return p, tea.Batch(cmds...)
+	case pubsub.Event[permission.PermissionNotification]:
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
@@ -250,17 +354,29 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.isProjectInit = false
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
+	case commands.NewSessionsMsg:
+		if p.app.CoderAgent.IsBusy() {
+			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
+		}
+		return p, p.newSession()
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
+			// if we have no agent do nothing
+			if p.app.CoderAgent == nil {
+				return p, nil
+			}
+			if p.app.CoderAgent.IsBusy() {
+				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
+			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
 			agentCfg := config.Get().Agents["coder"]
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
-				return p, util.CmdHandler(OpenFilePickerMsg{})
+				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
 			} else {
-				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Model)
+				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {
@@ -275,7 +391,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
-			p.showDetails()
+			p.toggleDetails()
 			return p, nil
 		}
 
@@ -440,18 +556,58 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 	}
 }
 
+func (p *chatPage) openReasoningDialog() tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		model := cfg.GetModelByType(agentCfg.Model)
+		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+
+		if providerCfg != nil && model != nil &&
+			providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
+			return dialogs.OpenDialogMsg{
+				Model: reasoning.NewReasoningDialog(),
+			}
+		}
+		return nil
+	}
+}
+
+func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		currentModel := cfg.Models[agentCfg.Model]
+
+		// Update the model configuration
+		currentModel.ReasoningEffort = effort
+		cfg.Models[agentCfg.Model] = currentModel
+
+		// Update the agent with the new configuration
+		if err := p.app.UpdateAgentModel(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update reasoning effort: " + err.Error(),
+			}
+		}
+
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Reasoning effort set to " + effort,
+		}
+	}
+}
+
 func (p *chatPage) setCompactMode(compact bool) {
 	if p.compact == compact {
 		return
 	}
 	p.compact = compact
 	if compact {
-		p.compact = true
 		p.sidebar.SetCompactMode(true)
 	} else {
-		p.compact = false
-		p.showingDetails = false
-		p.sidebar.SetCompactMode(false)
+		p.setShowDetails(false)
 	}
 }
 
@@ -550,20 +706,33 @@ func (p *chatPage) changeFocus() {
 func (p *chatPage) cancel() tea.Cmd {
 	if p.isCanceling {
 		p.isCanceling = false
-		p.app.CoderAgent.Cancel(p.session.ID)
+		if p.app.CoderAgent != nil {
+			p.app.CoderAgent.Cancel(p.session.ID)
+		}
 		return nil
 	}
 
+	if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+		p.app.CoderAgent.ClearQueue(p.session.ID)
+		return nil
+	}
 	p.isCanceling = true
 	return cancelTimerCmd()
 }
 
-func (p *chatPage) showDetails() {
+func (p *chatPage) setShowDetails(show bool) {
+	p.showingDetails = show
+	p.header.SetDetailsOpen(p.showingDetails)
+	if !p.compact {
+		p.sidebar.SetCompactMode(false)
+	}
+}
+
+func (p *chatPage) toggleDetails() {
 	if p.session.ID == "" || !p.compact {
 		return
 	}
-	p.showingDetails = !p.showingDetails
-	p.header.SetDetailsOpen(p.showingDetails)
+	p.setShowDetails(!p.showingDetails)
 }
 
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
@@ -577,10 +746,14 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		session = newSession
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
 	}
+	if p.app.CoderAgent == nil {
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+	}
 	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
 	if err != nil {
 		return util.ReportError(err)
 	}
+	cmds = append(cmds, p.chat.GoToBottom())
 	return tea.Batch(cmds...)
 }
 
@@ -651,12 +824,23 @@ func (p *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	case p.isOnboarding && p.splash.IsShowingAPIKey():
+		if p.splash.IsAPIKeyValid() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "continue"),
+				),
+			)
+		} else {
+			shortList = append(shortList,
+				// Go back
+				key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "back"),
+				),
+			)
+		}
 		shortList = append(shortList,
-			// Go back
-			key.NewBinding(
-				key.WithKeys("esc"),
-				key.WithHelp("esc", "back"),
-			),
 			// Quit
 			key.NewBinding(
 				key.WithKeys("ctrl+c"),
@@ -708,6 +892,12 @@ func (p *chatPage) Help() help.KeyMap {
 				cancelBinding = key.NewBinding(
 					key.WithKeys("esc"),
 					key.WithHelp("esc", "press again to cancel"),
+				)
+			}
+			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc"),
+					key.WithHelp("esc", "clear queue"),
 				)
 			}
 			shortList = append(shortList, cancelBinding)
@@ -768,6 +958,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithKeys("up", "down"),
 					key.WithHelp("↑↓", "scroll"),
 				),
+				messages.CopyKey,
 			)
 			fullList = append(fullList,
 				[]key.Binding{
@@ -799,12 +990,16 @@ func (p *chatPage) Help() help.KeyMap {
 					),
 					key.NewBinding(
 						key.WithKeys("g", "home"),
-						key.WithHelp("g", "hone"),
+						key.WithHelp("g", "home"),
 					),
 					key.NewBinding(
 						key.WithKeys("G", "end"),
 						key.WithHelp("G", "end"),
 					),
+				},
+				[]key.Binding{
+					messages.CopyKey,
+					messages.ClearSelectionKey,
 				},
 			)
 		case PanelTypeEditor:
@@ -831,10 +1026,27 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("/", "add file"),
 					),
 					key.NewBinding(
-						key.WithKeys("ctrl+v"),
-						key.WithHelp("ctrl+v", "open editor"),
+						key.WithKeys("ctrl+o"),
+						key.WithHelp("ctrl+o", "open editor"),
 					),
 				})
+
+			if p.editor.HasAttachments() {
+				fullList = append(fullList, []key.Binding{
+					key.NewBinding(
+						key.WithKeys("ctrl+r"),
+						key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+r", "r"),
+						key.WithHelp("ctrl+r+r", "delete all attachments"),
+					),
+					key.NewBinding(
+						key.WithKeys("esc"),
+						key.WithHelp("esc", "cancel delete mode"),
+					),
+				})
+			}
 		}
 		shortList = append(shortList,
 			// Quit
@@ -858,4 +1070,32 @@ func (p *chatPage) Help() help.KeyMap {
 
 func (p *chatPage) IsChatFocused() bool {
 	return p.focusedPane == PanelTypeChat
+}
+
+// isMouseOverChat checks if the given mouse coordinates are within the chat area bounds.
+// Returns true if the mouse is over the chat area, false otherwise.
+func (p *chatPage) isMouseOverChat(x, y int) bool {
+	// No session means no chat area
+	if p.session.ID == "" {
+		return false
+	}
+
+	var chatX, chatY, chatWidth, chatHeight int
+
+	if p.compact {
+		// In compact mode: chat area starts after header and spans full width
+		chatX = 0
+		chatY = HeaderHeight
+		chatWidth = p.width
+		chatHeight = p.height - EditorHeight - HeaderHeight
+	} else {
+		// In non-compact mode: chat area spans from left edge to sidebar
+		chatX = 0
+		chatY = 0
+		chatWidth = p.width - SideBarWidth
+		chatHeight = p.height - EditorHeight
+	}
+
+	// Check if mouse coordinates are within chat bounds
+	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
 }

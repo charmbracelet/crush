@@ -16,9 +16,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/x/exp/slice"
+	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -35,13 +38,13 @@ const (
 
 // Logger interface for optional logging
 type Logger interface {
-	InfoPersist(msg string, keysAndValues ...interface{})
+	InfoPersist(msg string, keysAndValues ...any)
 }
 
 // noopLogger is a logger that does nothing
 type noopLogger struct{}
 
-func (noopLogger) InfoPersist(msg string, keysAndValues ...interface{}) {}
+func (noopLogger) InfoPersist(msg string, keysAndValues ...any) {}
 
 // BlockFunc is a function that determines if a command should be blocked
 type BlockFunc func(args []string) bool
@@ -155,39 +158,56 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 }
 
 // CommandsBlocker creates a BlockFunc that blocks exact command matches
-func CommandsBlocker(bannedCommands []string) BlockFunc {
-	bannedSet := make(map[string]bool)
-	for _, cmd := range bannedCommands {
-		bannedSet[cmd] = true
+func CommandsBlocker(cmds []string) BlockFunc {
+	bannedSet := make(map[string]struct{})
+	for _, cmd := range cmds {
+		bannedSet[cmd] = struct{}{}
 	}
 
 	return func(args []string) bool {
 		if len(args) == 0 {
 			return false
 		}
-		return bannedSet[args[0]]
+		_, ok := bannedSet[args[0]]
+		return ok
 	}
 }
 
-// ArgumentsBlocker creates a BlockFunc that blocks specific subcommands
-func ArgumentsBlocker(blockedSubCommands [][]string) BlockFunc {
-	return func(args []string) bool {
-		for _, blocked := range blockedSubCommands {
-			if len(args) >= len(blocked) {
-				match := true
-				for i, part := range blocked {
-					if args[i] != part {
-						match = false
-						break
-					}
-				}
-				if match {
-					return true
-				}
-			}
+// ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
+func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
+	return func(parts []string) bool {
+		if len(parts) == 0 || parts[0] != cmd {
+			return false
 		}
-		return false
+
+		argParts, flagParts := splitArgsFlags(parts[1:])
+		if len(argParts) < len(args) || len(flagParts) < len(flags) {
+			return false
+		}
+
+		argsMatch := slices.Equal(argParts[:len(args)], args)
+		flagsMatch := slice.IsSubset(flags, flagParts)
+
+		return argsMatch && flagsMatch
 	}
+}
+
+func splitArgsFlags(parts []string) (args []string, flags []string) {
+	args = make([]string, 0, len(parts))
+	flags = make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.HasPrefix(part, "-") {
+			// Extract flag name before '=' if present
+			flag := part
+			if idx := strings.IndexByte(part, '='); idx != -1 {
+				flag = part[:idx]
+			}
+			flags = append(flags, flag)
+		} else {
+			args = append(args, part)
+		}
+	}
+	return
 }
 
 func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
@@ -221,7 +241,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.blockHandler()),
+		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)
@@ -248,9 +268,9 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	status, ok := interp.IsExitStatus(err)
-	if ok {
-		return int(status)
+	var exitErr interp.ExitStatus
+	if errors.As(err, &exitErr) {
+		return int(exitErr)
 	}
 	return 1
 }

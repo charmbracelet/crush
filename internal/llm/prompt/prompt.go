@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/home"
 )
 
 type PromptID string
@@ -43,18 +45,7 @@ func getContextFromPaths(workingDir string, contextPaths []string) string {
 
 // expandPath expands ~ and environment variables in file paths
 func expandPath(path string) string {
-	// Handle tilde expansion
-	if strings.HasPrefix(path, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			path = filepath.Join(homeDir, path[2:])
-		}
-	} else if path == "~" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			path = homeDir
-		}
-	}
+	path = home.Long(path)
 
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
@@ -74,8 +65,7 @@ func processContextPaths(workDir string, paths []string) string {
 	)
 
 	// Track processed files to avoid duplicates
-	processedFiles := make(map[string]bool)
-	var processedMutex sync.Mutex
+	processedFiles := csync.NewMap[string, bool]()
 
 	for _, path := range paths {
 		wg.Add(1)
@@ -106,14 +96,8 @@ func processContextPaths(workDir string, paths []string) string {
 						// Check if we've already processed this file (case-insensitive)
 						lowerPath := strings.ToLower(path)
 
-						processedMutex.Lock()
-						alreadyProcessed := processedFiles[lowerPath]
-						if !alreadyProcessed {
-							processedFiles[lowerPath] = true
-						}
-						processedMutex.Unlock()
-
-						if !alreadyProcessed {
+						if alreadyProcessed, _ := processedFiles.Get(lowerPath); !alreadyProcessed {
+							processedFiles.Set(lowerPath, true)
 							if result := processFile(path); result != "" {
 								resultCh <- result
 							}
@@ -126,14 +110,8 @@ func processContextPaths(workDir string, paths []string) string {
 				// Check if we've already processed this file (case-insensitive)
 				lowerPath := strings.ToLower(fullPath)
 
-				processedMutex.Lock()
-				alreadyProcessed := processedFiles[lowerPath]
-				if !alreadyProcessed {
-					processedFiles[lowerPath] = true
-				}
-				processedMutex.Unlock()
-
-				if !alreadyProcessed {
+				if alreadyProcessed, _ := processedFiles.Get(lowerPath); !alreadyProcessed {
+					processedFiles.Set(lowerPath, true)
 					result := processFile(fullPath)
 					if result != "" {
 						resultCh <- result

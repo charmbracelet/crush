@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -12,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -31,26 +34,18 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-// MouseEventFilter filters mouse events based on the current focus state
-// This is used with tea.WithFilter to prevent mouse scroll events from
-// interfering with typing performance in the editor
+var lastMouseEvent time.Time
+
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
-	// Only filter mouse events
 	switch msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
-		// Check if we have an appModel and if editor is focused
-		if appModel, ok := m.(*appModel); ok {
-			if appModel.currentPage == chat.ChatPageID {
-				if chatPage, ok := appModel.pages[appModel.currentPage].(chat.ChatPage); ok {
-					// If editor is focused (not chatFocused), filter out mouse wheel/motion events
-					if !chatPage.IsChatFocused() {
-						return nil // Filter out the event
-					}
-				}
-			}
+		now := time.Now()
+		// trackpad is sending too many requests
+		if now.Sub(lastMouseEvent) < 15*time.Millisecond {
+			return nil
 		}
+		lastMouseEvent = now
 	}
-	// Allow all other events to pass through
 	return msg
 }
 
@@ -71,8 +66,9 @@ type appModel struct {
 
 	app *app.App
 
-	dialog      dialogs.DialogCmp
-	completions completions.Completions
+	dialog       dialogs.DialogCmp
+	completions  completions.Completions
+	isConfigured bool
 
 	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
@@ -80,8 +76,13 @@ type appModel struct {
 
 // Init initializes the application model and returns initial commands.
 func (a appModel) Init() tea.Cmd {
+	item, ok := a.pages[a.currentPage]
+	if !ok {
+		return nil
+	}
+
 	var cmds []tea.Cmd
-	cmd := a.pages[a.currentPage].Init()
+	cmd := item.Init()
 	cmds = append(cmds, cmd)
 	a.loadedPages[a.currentPage] = true
 
@@ -97,25 +98,34 @@ func (a appModel) Init() tea.Cmd {
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
+	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
 		for id, page := range a.pages {
 			m, pageCmd := page.Update(msg)
-			a.pages[id] = m.(util.Model)
+			if model, ok := m.(util.Model); ok {
+				a.pages[id] = model
+			}
+
 			if pageCmd != nil {
 				cmds = append(cmds, pageCmd)
 			}
 		}
 		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		a.wWidth, a.wHeight = msg.Width, msg.Height
 		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
 	// Completions messages
-	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg, completions.CloseCompletionsMsg:
+	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
+		completions.CloseCompletionsMsg, completions.RepositionCompletionsMsg:
 		u, completionCmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
+		if model, ok := u.(completions.Completions); ok {
+			a.completions = model
+		}
+
 		return a, completionCmd
 
 	// Dialog messages
@@ -171,9 +181,21 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
-
+	case commands.QuitMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(),
+		})
+	case commands.ToggleYoloModeMsg:
+		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
+	case commands.ToggleHelpMsg:
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
+		if a.app.CoderAgent.IsBusy() {
+			return a, util.ReportWarn("Agent is busy, please wait...")
+		}
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
@@ -188,18 +210,33 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
 
 	// File Picker
-	case chat.OpenFilePickerMsg:
+	case commands.OpenFilePickerMsg:
 		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: filepicker.NewFilePickerCmp(),
+			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
+	case pubsub.Event[permission.PermissionNotification]:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+
+		// Forward to view.
+		updated, itemCmd := item.Update(msg)
+		if model, ok := updated.(util.Model); ok {
+			a.pages[a.currentPage] = model
+		}
+
+		return a, itemCmd
 	case pubsub.Event[permission.PermissionRequest]:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: permissions.NewPermissionDialogCmp(msg.Payload),
+			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{
+				DiffMode: config.Get().Options.TUI.DiffMode,
+			}),
 		})
 	case permissions.PermissionResponseMsg:
 		switch msg.Action {
@@ -218,7 +255,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Forward agent events to dialogs
 		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
 			u, dialogCmd := a.dialog.Update(payload)
-			a.dialog = u.(dialogs.DialogCmp)
+			if model, ok := u.(dialogs.DialogCmp); ok {
+				a.dialog = model
+			}
+
 			cmds = append(cmds, dialogCmd)
 		}
 
@@ -239,17 +279,85 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return a, tea.Batch(cmds...)
-	// Key Press Messages
+	case splash.OnboardingCompleteMsg:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+
+		a.isConfigured = config.HasInitialDataConfig()
+		updated, pageCmd := item.Update(msg)
+		if model, ok := updated.(util.Model); ok {
+			a.pages[a.currentPage] = model
+		}
+
+		cmds = append(cmds, pageCmd)
+		return a, tea.Batch(cmds...)
+
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
+
+	case tea.MouseWheelMsg:
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			a.dialog = u.(dialogs.DialogCmp)
+			cmds = append(cmds, dialogCmd)
+		} else {
+			item, ok := a.pages[a.currentPage]
+			if !ok {
+				return a, nil
+			}
+
+			updated, pageCmd := item.Update(msg)
+			if model, ok := updated.(util.Model); ok {
+				a.pages[a.currentPage] = model
+			}
+
+			cmds = append(cmds, pageCmd)
+		}
+		return a, tea.Batch(cmds...)
+	case tea.PasteMsg:
+		if a.dialog.HasDialogs() {
+			u, dialogCmd := a.dialog.Update(msg)
+			if model, ok := u.(dialogs.DialogCmp); ok {
+				a.dialog = model
+			}
+
+			cmds = append(cmds, dialogCmd)
+		} else {
+			item, ok := a.pages[a.currentPage]
+			if !ok {
+				return a, nil
+			}
+
+			updated, pageCmd := item.Update(msg)
+			if model, ok := updated.(util.Model); ok {
+				a.pages[a.currentPage] = model
+			}
+
+			cmds = append(cmds, pageCmd)
+		}
+		return a, tea.Batch(cmds...)
 	}
 	s, _ := a.status.Update(msg)
 	a.status = s.(status.StatusCmp)
-	updated, cmd := a.pages[a.currentPage].Update(msg)
-	a.pages[a.currentPage] = updated.(util.Model)
+
+	item, ok := a.pages[a.currentPage]
+	if !ok {
+		return a, nil
+	}
+
+	updated, cmd := item.Update(msg)
+	if model, ok := updated.(util.Model); ok {
+		a.pages[a.currentPage] = model
+	}
+
 	if a.dialog.HasDialogs() {
 		u, dialogCmd := a.dialog.Update(msg)
-		a.dialog = u.(dialogs.DialogCmp)
+		if model, ok := u.(dialogs.DialogCmp); ok {
+			a.dialog = model
+		}
+
 		cmds = append(cmds, dialogCmd)
 	}
 	cmds = append(cmds, cmd)
@@ -259,28 +367,38 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleWindowResize processes window resize events and updates all components.
 func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
-	a.wWidth, a.wHeight = width, height
+
+	// TODO: clean up these magic numbers.
 	if a.showingFullHelp {
 		height -= 5
 	} else {
 		height -= 2
 	}
+
 	a.width, a.height = width, height
 	// Update status bar
 	s, cmd := a.status.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	a.status = s.(status.StatusCmp)
+	if model, ok := s.(status.StatusCmp); ok {
+		a.status = model
+	}
 	cmds = append(cmds, cmd)
 
-	// Update the current page
+	// Update the current view.
 	for p, page := range a.pages {
 		updated, pageCmd := page.Update(tea.WindowSizeMsg{Width: width, Height: height})
-		a.pages[p] = updated.(util.Model)
+		if model, ok := updated.(util.Model); ok {
+			a.pages[p] = model
+		}
+
 		cmds = append(cmds, pageCmd)
 	}
 
 	// Update the dialogs
 	dialog, cmd := a.dialog.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	a.dialog = dialog.(dialogs.DialogCmp)
+	if model, ok := dialog.(dialogs.DialogCmp); ok {
+		a.dialog = model
+	}
+
 	cmds = append(cmds, cmd)
 
 	return tea.Batch(cmds...)
@@ -288,40 +406,45 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 
 // handleKeyPressMsg processes keyboard input and routes to appropriate handlers.
 func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
-	switch {
-	// completions
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Up):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Down):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Select):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-	case a.completions.Open() && key.Matches(msg, a.completions.KeyMap().Cancel):
-		u, cmd := a.completions.Update(msg)
-		a.completions = u.(completions.Completions)
-		return cmd
-		// help
-	case key.Matches(msg, a.keyMap.Help):
-		a.status.ToggleFullHelp()
-		a.showingFullHelp = !a.showingFullHelp
-		return a.handleWindowResize(a.wWidth, a.wHeight)
-	// dialogs
-	case key.Matches(msg, a.keyMap.Quit):
+	// Check this first as the user should be able to quit no matter what.
+	if key.Matches(msg, a.keyMap.Quit) {
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
 			return tea.Quit
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	}
 
+	if a.completions.Open() {
+		// completions
+		keyMap := a.completions.KeyMap()
+		switch {
+		case key.Matches(msg, keyMap.Up), key.Matches(msg, keyMap.Down),
+			key.Matches(msg, keyMap.Select), key.Matches(msg, keyMap.Cancel),
+			key.Matches(msg, keyMap.UpInsert), key.Matches(msg, keyMap.DownInsert):
+			u, cmd := a.completions.Update(msg)
+			a.completions = u.(completions.Completions)
+			return cmd
+		}
+	}
+	if a.dialog.HasDialogs() {
+		u, dialogCmd := a.dialog.Update(msg)
+		a.dialog = u.(dialogs.DialogCmp)
+		return dialogCmd
+	}
+	switch {
+	// help
+	case key.Matches(msg, a.keyMap.Help):
+		a.status.ToggleFullHelp()
+		a.showingFullHelp = !a.showingFullHelp
+		return a.handleWindowResize(a.wWidth, a.wHeight)
+	// dialogs
 	case key.Matches(msg, a.keyMap.Commands):
+		// if the app is not configured show no commands
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -332,6 +455,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Sessions):
+		// if the app is not configured show no sessions
+		if !a.isConfigured {
+			return nil
+		}
 		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -352,16 +479,22 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
-	default:
-		if a.dialog.HasDialogs() {
-			u, dialogCmd := a.dialog.Update(msg)
-			a.dialog = u.(dialogs.DialogCmp)
-			return dialogCmd
-		} else {
-			updated, cmd := a.pages[a.currentPage].Update(msg)
-			a.pages[a.currentPage] = updated.(util.Model)
-			return cmd
+	case key.Matches(msg, a.keyMap.Suspend):
+		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+			return util.ReportWarn("Agent is busy, please wait...")
 		}
+		return tea.Suspend
+	default:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return nil
+		}
+
+		updated, cmd := item.Update(msg)
+		if model, ok := updated.(util.Model); ok {
+			a.pages[a.currentPage] = model
+		}
+		return cmd
 	}
 }
 
@@ -390,6 +523,27 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
+	var view tea.View
+	t := styles.CurrentTheme()
+	view.BackgroundColor = t.BgBase
+	if a.wWidth < 25 || a.wHeight < 15 {
+		view.Layer = lipgloss.NewCanvas(
+			lipgloss.NewLayer(
+				t.S().Base.Width(a.wWidth).Height(a.wHeight).
+					Align(lipgloss.Center, lipgloss.Center).
+					Render(
+						t.S().Base.
+							Padding(1, 4).
+							Foreground(t.White).
+							BorderStyle(lipgloss.RoundedBorder()).
+							BorderForeground(t.Primary).
+							Render("Window too small!"),
+					),
+			),
+		)
+		return view
+	}
+
 	page := a.pages[a.currentPage]
 	if withHelp, ok := page.(core.KeyMapHelp); ok {
 		a.status.SetKeyMap(withHelp.Help())
@@ -414,6 +568,11 @@ func (a *appModel) View() tea.View {
 	var cursor *tea.Cursor
 	if v, ok := page.(util.Cursor); ok {
 		cursor = v.Cursor()
+		// Hide the cursor if it's positioned outside the textarea
+		statusHeight := a.height - strings.Count(pageView, "\n") + 1
+		if cursor != nil && cursor.Y+statusHeight+chat.EditorHeight-2 <= a.height { // 2 for the top and bottom app padding
+			cursor = nil
+		}
 	}
 	activeView := a.dialog.ActiveModel()
 	if activeView != nil {
@@ -436,10 +595,7 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
-	var view tea.View
-	t := styles.CurrentTheme()
 	view.Layer = canvas
-	view.BackgroundColor = t.BgBase
 	view.Cursor = cursor
 	return view
 }

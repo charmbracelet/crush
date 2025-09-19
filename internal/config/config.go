@@ -508,7 +508,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
 		}
-		if c.ID == "openrouter" {
+		if c.ID == string(catwalk.InferenceProviderOpenRouter) {
 			testURL = baseURL + "/credits"
 		} else {
 			testURL = baseURL + "/models"
@@ -546,8 +546,15 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
-	if b.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	if c.ID == string(catwalk.InferenceProviderZAI) {
+		if b.StatusCode == http.StatusUnauthorized {
+			// for z.ai just check if the http response is not 401
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		}
+	} else {
+		if b.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		}
 	}
 	_ = b.Body.Close()
 	return nil

@@ -63,11 +63,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	skipPermissionsRequests := cfg.Options != nil && cfg.Options.SkipPermissionsRequests
 
 	// Enable notifications by default, disable if configured
-	enableNotifications := true
-	if cfg.Options != nil && cfg.Options.DisableNotifications {
-		enableNotifications = false
-	}
-	notifier := notification.New(enableNotifications)
+	notifier := notification.New(cfg.Options != nil && !cfg.Options.DisableNotifications)
 
 	// Test notification on startup (only in debug mode)
 	if cfg.Options != nil && cfg.Options.Debug {

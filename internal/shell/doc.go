@@ -1,30 +1,23 @@
-package shell
-
+// Package shell provides cross-platform shell execution capabilities.
+//
+// WINDOWS COMPATIBILITY:
+// This implementation provides both POSIX shell emulation (mvdan.cc/sh/v3),
+// which also works on Windows.
+// Some caution has to be taken: commands should have forward slashes (/) as
+// path separators to work, even on Windows.
+//
 // Example usage of the shell package:
 //
 // 1. For one-off commands:
 //
-//	shell := shell.NewShell(nil)
-//	stdout, stderr, err := shell.Exec(context.Background(), "echo hello")
+//	sh := shell.NewShell(nil)
+//	stdout, stderr, err := sh.Exec(context.Background(), "echo hello")
 //
 // 2. For maintaining state across commands:
 //
-//	shell := shell.NewShell(&shell.Options{
+//	sh := shell.NewShell(&shell.Options{
 //	    WorkingDir: "/tmp",
-//	    Logger: myLogger,
 //	})
-//	shell.Exec(ctx, "export FOO=bar")
-//	shell.Exec(ctx, "echo $FOO")  // Will print "bar"
-//
-// 3. For the singleton persistent shell (used by tools):
-//
-//	shell := shell.GetPersistentShell("/path/to/cwd")
-//	stdout, stderr, err := shell.Exec(ctx, "ls -la")
-//
-// 4. Managing environment and working directory:
-//
-//	shell := shell.NewShell(nil)
-//	shell.SetEnv("MY_VAR", "value")
-//	shell.SetWorkingDir("/tmp")
-//	cwd := shell.GetWorkingDir()
-//	env := shell.GetEnv()
+//	sh.Exec(ctx, "export FOO=bar")
+//	sh.Exec(ctx, "echo $FOO")  // Will print "bar"
+package shell

@@ -45,9 +45,6 @@ var anthropicCoderPrompt []byte
 //go:embed gemini.md
 var geminiCoderPrompt []byte
 
-//go:embed openai.md
-var openaiCoderPrompt []byte
-
 //go:embed v2.md
 var coderV2Prompt []byte
 

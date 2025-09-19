@@ -340,6 +340,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			toolCalls := make([]message.ToolCall, 0)
 			msgToolCalls := make(map[int64]openai.ChatCompletionMessageToolCall)
 			toolMap := make(map[string]openai.ChatCompletionMessageToolCall)
+			toolCallIDMap := make(map[string]string)
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
 				// Kujtim: this is an issue with openrouter qwen, its sending -1 for the tool index
@@ -367,6 +368,16 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 						currentContent += choice.Delta.Content
 					} else if len(choice.Delta.ToolCalls) > 0 {
 						toolCall := choice.Delta.ToolCalls[0]
+						if strings.HasPrefix(toolCall.ID, "functions.") {
+							exID, ok := toolCallIDMap[toolCall.ID]
+							if !ok {
+								newID := uuid.NewString()
+								toolCallIDMap[toolCall.ID] = newID
+								toolCall.ID = newID
+							} else {
+								toolCall.ID = exID
+							}
+						}
 						newToolCall := false
 						if existingToolCall, ok := msgToolCalls[toolCall.Index]; ok { // tool call exists
 							if toolCall.ID != "" && toolCall.ID != existingToolCall.ID {
@@ -472,7 +483,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				select {
 				case <-ctx.Done():
 					// context cancelled
-					if ctx.Err() == nil {
+					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
 					close(eventChan)

@@ -14,7 +14,7 @@ import (
 
 func TestBashTool(t *testing.T) {
 	dir := t.TempDir()
-	tool := NewBashTool(&allowAllPerms{}, dir)
+	tool := NewBashTool(&allowAllPerms{}, dir, nil)
 	require.NotEmpty(t, tool.Name())
 	require.NotEmpty(t, tool.Info().Description)
 	require.NotEmpty(t, tool.Info().Name)

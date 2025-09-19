@@ -124,6 +124,7 @@ That said, you can also set environment variables for preferred providers.
 | `ANTHROPIC_API_KEY`        | Anthropic                                          |
 | `OPENAI_API_KEY`           | OpenAI                                             |
 | `OPENROUTER_API_KEY`       | OpenRouter                                         |
+| `CEREBRAS_API_KEY`         | Cerebras                                           |
 | `GEMINI_API_KEY`           | Google Gemini                                      |
 | `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
@@ -131,7 +132,7 @@ That said, you can also set environment variables for preferred providers.
 | `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
 | `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
 | `AWS_REGION`               | AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
+| `AZURE_OPENAI_API_ENDPOINT`| Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
 
@@ -157,8 +158,8 @@ Configuration itself is stored as a JSON object:
 
 ```json
 {
-   "this-setting": {"this": "that"},
-   "that-setting": ["ceci", "cela"]
+  "this-setting": { "this": "that" },
+  "that-setting": ["ceci", "cela"]
 }
 ```
 
@@ -268,6 +269,26 @@ permissions. Use this with care.
 
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
+
+### Attribution Settings
+
+By default, Crush adds attribution information to Git commits and pull requests
+it creates. You can customize this behavior with the `attribution` option:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "attribution": {
+      "co_authored_by": true,
+      "generated_with": true
+    }
+  }
+}
+```
+
+- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
+- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
 
 ### Local Models
 
@@ -390,9 +411,9 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
-* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
 
 ### Vertex AI Platform
 
@@ -428,17 +449,6 @@ To add specific models to the configuration, configure as such:
 }
 ```
 
-## A Note on Claude Max and GitHub Copilot
-
-Crush only supports model providers through official, compliant APIs. We do not
-support or endorse any methods that rely on personal Claude Max and GitHub Copilot
-accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
-Terms of Service.
-
-We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us,
-[reach out](mailto:vt100@charm.sh).
-
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of
@@ -470,6 +480,73 @@ config:
 }
 ```
 
+## Disabling Provider Auto-Updates
+
+By default, Crush automatically checks for the latest and greatest list of
+providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
+the open source Crush provider database. This means that when new providers and
+models are available, or when model metadata changes, Crush automatically
+updates your local configuration.
+
+For those with restricted internet access, or those who prefer to work in
+air-gapped environments, this might not be want you want, and this feature can
+be disabled.
+
+To disable automatic provider updates, set `disable_provider_auto_update` into
+your `crush.json` config:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_provider_auto_update": true
+  }
+}
+```
+
+Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
+
+```bash
+export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
+```
+
+### Manually updating providers
+
+Manually updating providers is possible with the `crush update-providers`
+command:
+
+```bash
+# Update providers remotely from Catwalk.
+crush update-providers
+
+# Update providers from a custom Catwalk base URL.
+crush update-providers https://example.com/
+
+# Update providers from a local file.
+crush update-providers /path/to/local-providers.json
+
+# Reset providers to the embedded version, embedded at crush at build time.
+crush update-providers embedded
+
+# For more info:
+crush update-providers --help
+```
+
+## A Note on Claude Max and GitHub Copilot
+
+Crush only supports model providers through official, compliant APIs. We do not
+support or endorse any methods that rely on personal Claude Max and GitHub
+Copilot accounts or OAuth workarounds, which violate Anthropic and
+Microsoft’s Terms of Service.
+
+We’re committed to building sustainable, trusted integrations with model
+providers. If you’re a provider interested in working with us,
+[reach out](mailto:vt100@charm.sh).
+
+## Contributing
+
+See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
+
 ## Whatcha think?
 
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
@@ -478,6 +555,7 @@ We’d love to hear your thoughts on this project. Need help? We gotchu. You can
 - [Discord][discord]
 - [Slack](https://charm.land/slack)
 - [The Fediverse](https://mastodon.social/@charmcli)
+- [Bluesky](https://bsky.app/profile/charm.land)
 
 [discord]: https://charm.land/discord
 

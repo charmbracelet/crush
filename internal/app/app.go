@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"sync"
 	"time"
 
@@ -21,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/lsp/watcher"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -35,12 +33,7 @@ type App struct {
 
 	CoderAgent agent.Service
 
-	LSPClients map[string]*lsp.Client
-
-	clientsMutex sync.RWMutex
-
-	watcherCancelFuncs *csync.Slice[context.CancelFunc]
-	lspWatcherWG       sync.WaitGroup
+	LSPClients *csync.Map[string, *lsp.Client]
 
 	config *config.Config
 
@@ -71,13 +64,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		LSPClients:  make(map[string]*lsp.Client),
+		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
 
 		config: cfg,
-
-		watcherCancelFuncs: csync.NewSlice[context.CancelFunc](),
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -85,11 +76,6 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	app.setupEvents()
-
-	// Start the global watcher
-	if err := watcher.Start(); err != nil {
-		return nil, fmt.Errorf("app: %w", err)
-	}
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
@@ -336,30 +322,14 @@ func (app *App) Shutdown() {
 		app.CoderAgent.CancelAll()
 	}
 
-	for cancel := range app.watcherCancelFuncs.Seq() {
-		cancel()
-	}
-
-	// Wait for all LSP watchers to finish.
-	app.lspWatcherWG.Wait()
-
-	// Get all LSP clients.
-	app.clientsMutex.RLock()
-	clients := make(map[string]*lsp.Client, len(app.LSPClients))
-	maps.Copy(clients, app.LSPClients)
-	app.clientsMutex.RUnlock()
-
 	// Shutdown all LSP clients.
-	for name, client := range clients {
+	for name, client := range app.LSPClients.Seq2() {
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-		if err := client.Shutdown(shutdownCtx); err != nil {
+		if err := client.Close(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()
 	}
-
-	// Shutdown the global watcher
-	watcher.Shutdown()
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

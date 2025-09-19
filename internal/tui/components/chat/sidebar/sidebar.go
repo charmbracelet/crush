@@ -69,13 +69,13 @@ type sidebarCmp struct {
 	session       session.Session
 	logo          string
 	cwd           string
-	lspClients    map[string]*lsp.Client
+	lspClients    *csync.Map[string, *lsp.Client]
 	compactMode   bool
 	history       history.Service
 	files         *csync.Map[string, SessionFile]
 }
 
-func New(history history.Service, lspClients map[string]*lsp.Client, compact bool) Sidebar {
+func New(history history.Service, lspClients *csync.Map[string, *lsp.Client], compact bool) Sidebar {
 	return &sidebarCmp{
 		lspClients:  lspClients,
 		history:     history,

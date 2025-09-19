@@ -1,22 +1,22 @@
 package lsp
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/config"
-
-	"github.com/charmbracelet/crush/internal/lsp/protocol"
 	"github.com/charmbracelet/crush/internal/lsp/util"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
-// Requests
-
-func HandleWorkspaceConfiguration(params json.RawMessage) (any, error) {
+// HandleWorkspaceConfiguration handles workspace configuration requests
+func HandleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	return []map[string]any{{}}, nil
 }
 
-func HandleRegisterCapability(params json.RawMessage) (any, error) {
+// HandleRegisterCapability handles capability registration requests
+func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
 	if err := json.Unmarshal(params, &registerParams); err != nil {
 		slog.Error("Error unmarshaling registration params", "error", err)
@@ -32,22 +32,20 @@ func HandleRegisterCapability(params json.RawMessage) (any, error) {
 				slog.Error("Error marshaling registration options", "error", err)
 				continue
 			}
-
 			var options protocol.DidChangeWatchedFilesRegistrationOptions
 			if err := json.Unmarshal(optionsJSON, &options); err != nil {
 				slog.Error("Error unmarshaling registration options", "error", err)
 				continue
 			}
-
 			// Store the file watchers registrations
 			notifyFileWatchRegistration(reg.ID, options.Watchers)
 		}
 	}
-
 	return nil, nil
 }
 
-func HandleApplyEdit(params json.RawMessage) (any, error) {
+// HandleApplyEdit handles workspace edit requests
+func HandleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var edit protocol.ApplyWorkspaceEditParams
 	if err := json.Unmarshal(params, &edit); err != nil {
 		return nil, err
@@ -80,21 +78,32 @@ func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatche
 	}
 }
 
-// Notifications
-
-func HandleServerMessage(params json.RawMessage) {
+// HandleServerMessage handles server messages
+func HandleServerMessage(_ context.Context, method string, params json.RawMessage) {
 	cfg := config.Get()
-	var msg struct {
-		Type    int    `json:"type"`
-		Message string `json:"message"`
+	if !cfg.Options.DebugLSP {
+		return
 	}
-	if err := json.Unmarshal(params, &msg); err == nil {
-		if cfg.Options.DebugLSP {
-			slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
-		}
+
+	var msg protocol.ShowMessageParams
+	if err := json.Unmarshal(params, &msg); err != nil {
+		slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
+		return
+	}
+
+	switch msg.Type {
+	case protocol.Error:
+		slog.Error("LSP Server", "message", msg.Message)
+	case protocol.Warning:
+		slog.Warn("LSP Server", "message", msg.Message)
+	case protocol.Info:
+		slog.Info("LSP Server", "message", msg.Message)
+	case protocol.Log:
+		slog.Debug("LSP Server", "message", msg.Message)
 	}
 }
 
+// HandleDiagnostics handles diagnostic notifications from the LSP server
 func HandleDiagnostics(client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
@@ -102,15 +111,13 @@ func HandleDiagnostics(client *Client, params json.RawMessage) {
 		return
 	}
 
-	client.diagnosticsMu.Lock()
-	client.diagnostics[diagParams.URI] = diagParams.Diagnostics
+	client.diagnostics.Set(diagParams.URI, diagParams.Diagnostics)
 
 	// Calculate total diagnostic count
 	totalCount := 0
-	for _, diagnostics := range client.diagnostics {
+	for _, diagnostics := range client.diagnostics.Seq2() {
 		totalCount += len(diagnostics)
 	}
-	client.diagnosticsMu.Unlock()
 
 	// Trigger callback if set
 	if client.onDiagnosticsChanged != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 )
@@ -50,30 +51,38 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	crushExists, err := crushMdExists(cfg.WorkingDir())
+	someContextFileExists, err := contextPathsExist(cfg.WorkingDir())
 	if err != nil {
-		return false, fmt.Errorf("failed to check for CRUSH.md files: %w", err)
+		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
-	if crushExists {
+	if someContextFileExists {
 		return false, nil
 	}
 
 	return true, nil
 }
 
-func crushMdExists(dir string) (bool, error) {
+func contextPathsExist(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false, err
 	}
 
+	// Create a slice of lowercase filenames for lookup with slices.Contains
+	var files []string
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		if !entry.IsDir() {
+			files = append(files, strings.ToLower(entry.Name()))
 		}
+	}
 
-		name := strings.ToLower(entry.Name())
-		if name == "crush.md" {
+	// Check if any of the default context paths exist in the directory
+	for _, path := range defaultContextPaths {
+		// Extract just the filename from the path
+		_, filename := filepath.Split(path)
+		filename = strings.ToLower(filename)
+
+		if slices.Contains(files, filename) {
 			return true, nil
 		}
 	}

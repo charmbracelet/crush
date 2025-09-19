@@ -8,6 +8,9 @@ CROSS-PLATFORM SHELL SUPPORT:
   well.
 - Make sure to use forward slashes (/) as path separators in commands, even on
   Windows. Example: "ls C:/foo/bar" instead of "ls C:\foo\bar".
+- The shell is not persistent, so make sure to give it the 'working_dir' in
+  which the command should be run
+- NEVER use 'cd', always use the 'working_dir' parameter instead
 
 Before executing the command, please follow these steps:
 
@@ -19,7 +22,7 @@ Before executing the command, please follow these steps:
 2. Security Check:
 
 - For security and to limit the threat of a prompt injection attack, some commands are limited or banned. If you use a disallowed command, you will receive an error message explaining the restriction. Explain the error to the User.
-- Verify that the command is not one of the banned commands: %s.
+- Verify that the command is not one of the banned commands: {{ .BannedCommands }}.
 
 3. Command Execution:
 
@@ -28,13 +31,14 @@ Before executing the command, please follow these steps:
 
 4. Output Processing:
 
-- If the output exceeds %d characters, output will be truncated before being returned to you.
+- If the output exceeds {{ .MaxOutputLength }} characters, output will be truncated before being returned to you.
 - Prepare the output for display to the user.
 
 5. Return Result:
 
 - Provide the processed output of the command.
 - If any errors occurred during execution, include those in the output.
+- The result will also have metadata like the cwd (current working directory) at the end, included with <cwd></cwd> tags.
 
 Usage notes:
 
@@ -42,8 +46,14 @@ Usage notes:
 - You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). If not specified, commands will timeout after 30 minutes.
 - VERY IMPORTANT: You MUST avoid using search commands like 'find' and 'grep'. Instead use Grep, Glob, or Agent tools to search. You MUST avoid read tools like 'cat', 'head', 'tail', and 'ls', and use FileRead and LS tools to read files.
 - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings).
-- The shell is ephemeral, and won't track directory changes between commands.
-- Avoid using 'cd /path && some-cmd', instead, set the working directory accordingly.
+- IMPORTANT: All commands share the same shell session. Shell state (environment variables, virtual environments, current directory, etc.) persist between commands. For example, if you set an environment variable as part of a command, the environment variable will persist for subsequent commands.
+- Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of 'cd'. You may use 'cd' if the User explicitly requests it.
+  <good-example>
+  pytest /foo/bar/tests
+  </good-example>
+  <bad-example>
+  cd /foo/bar && pytest tests
+  </bad-example>
 
 # Committing changes with git
 
@@ -74,20 +84,10 @@ When the user asks you to create a new git commit, follow these steps carefully:
 - Review the draft message to ensure it accurately reflects the changes and their purpose
   </commit_analysis>
 
-4. Create the commit with a message ending with:
-   💘 Generated with Crush
-   Co-Authored-By: Crush <crush@charm.land>
+{{ .AttributionStep }}
 
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
-  <example>
-  git commit -m "$(cat <<'EOF'
-  Commit message here.
-
-💘 Generated with Crush
-Co-Authored-By: 💘 Crush <crush@charm.land>
-EOF
-)"
-</example>
+  {{ .AttributionExample }}
 
 5. If the commit fails due to pre-commit hook changes, retry the commit ONCE to include these automated changes. If it fails again, it usually means a pre-commit hook is preventing the commit. If the commit succeeds but you notice that files were modified by the pre-commit hook, you MUST amend your commit to include them.
 
@@ -153,7 +153,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 
 [Checklist of TODOs for testing the pull request...]
 
-💘 Generated with Crush
+{{ .PRAttribution }}
 EOF
 )"
 </example>

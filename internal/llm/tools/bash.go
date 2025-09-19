@@ -1,13 +1,16 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -31,6 +34,7 @@ type BashResponseMetadata struct {
 type bashTool struct {
 	permissions permission.Service
 	workingDir  string
+	attribution *config.Attribution
 }
 
 const (
@@ -41,6 +45,22 @@ const (
 	MaxOutputLength = 30000
 	BashNoOutput    = "no output"
 )
+
+//go:embed bash.md
+var bashDescription []byte
+
+var bashDescriptionTpl = template.Must(
+	template.New("bashDescription").
+		Parse(string(bashDescription)),
+)
+
+type bashDescriptionData struct {
+	BannedCommands     string
+	MaxOutputLength    int
+	AttributionStep    string
+	AttributionExample string
+	PRAttribution      string
+}
 
 var bannedCommands = []string{
 	// Network/Download tools
@@ -115,8 +135,66 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-//go:embed bash.md
-var bashDescriptio []byte
+func (b *bashTool) bashDescription() string {
+	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+
+	// Build attribution text based on settings
+	var attributionStep, attributionExample, prAttribution string
+
+	// Default to true if attribution is nil (backward compatibility)
+	generatedWith := b.attribution == nil || b.attribution.GeneratedWith
+	coAuthoredBy := b.attribution == nil || b.attribution.CoAuthoredBy
+
+	// Build PR attribution
+	if generatedWith {
+		prAttribution = "💘 Generated with Crush"
+	}
+
+	if generatedWith || coAuthoredBy {
+		var attributionParts []string
+		if generatedWith {
+			attributionParts = append(attributionParts, "💘 Generated with Crush")
+		}
+		if coAuthoredBy {
+			attributionParts = append(attributionParts, "Co-Authored-By: Crush <crush@charm.land>")
+		}
+
+		if len(attributionParts) > 0 {
+			attributionStep = fmt.Sprintf("4. Create the commit with a message ending with:\n%s", strings.Join(attributionParts, "\n"))
+
+			attributionText := strings.Join(attributionParts, "\n ")
+			attributionExample = fmt.Sprintf(`<example>
+git commit -m "$(cat <<'EOF'
+ Commit message here.
+
+ %s
+ EOF
+)"</example>`, attributionText)
+		}
+	}
+
+	if attributionStep == "" {
+		attributionStep = "4. Create the commit with your commit message."
+		attributionExample = `<example>
+git commit -m "$(cat <<'EOF'
+ Commit message here.
+ EOF
+)"</example>`
+	}
+
+	var out bytes.Buffer
+	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
+		BannedCommands:     bannedCommandsStr,
+		MaxOutputLength:    MaxOutputLength,
+		AttributionStep:    attributionStep,
+		AttributionExample: attributionExample,
+		PRAttribution:      prAttribution,
+	}); err != nil {
+		// this should never happen.
+		panic("failed to execute bash description template: " + err.Error())
+	}
+	return out.String()
+}
 
 func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
@@ -151,10 +229,11 @@ func blockFuncs() []shell.BlockFunc {
 }
 
 // NewBashTool returns a new bash tool instance.
-func NewBashTool(permission permission.Service, workingDir string) BaseTool {
+func NewBashTool(permission permission.Service, workingDir string, attribution *config.Attribution) BaseTool {
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
+		attribution: attribution,
 	}
 }
 
@@ -163,11 +242,9 @@ func (b *bashTool) Name() string {
 }
 
 func (b *bashTool) Info() ToolInfo {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
-	desc := fmt.Sprintf(string(bashDescriptio), bannedCommandsStr, MaxOutputLength)
 	return ToolInfo{
 		Name:        BashToolName,
-		Description: desc,
+		Description: b.bashDescription(),
 		Parameters: map[string]any{
 			"working_dir": map[string]any{
 				"type":        "string",

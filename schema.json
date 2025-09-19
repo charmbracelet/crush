@@ -3,6 +3,22 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "Attribution": {
+      "properties": {
+        "co_authored_by": {
+          "type": "boolean",
+          "description": "Add Co-Authored-By trailer to commit messages",
+          "default": true
+        },
+        "generated_with": {
+          "type": "boolean",
+          "description": "Add Generated with Crush line to commit messages and issues and PRs",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Config": {
       "properties": {
         "$schema": {
@@ -44,7 +60,7 @@
     },
     "LSPConfig": {
       "properties": {
-        "enabled": {
+        "disabled": {
           "type": "boolean",
           "description": "Whether this LSP server is disabled",
           "default": false
@@ -70,9 +86,6 @@
           "type": "object",
           "description": "Environment variables to set to the LSP server command"
         },
-        "options": {
-          "description": "LSP server-specific configuration options"
-        },
         "filetypes": {
           "items": {
             "type": "string",
@@ -87,6 +100,26 @@
           },
           "type": "array",
           "description": "File types this LSP server handles"
+        },
+        "root_markers": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "go.mod",
+              "package.json",
+              "Cargo.toml"
+            ]
+          },
+          "type": "array",
+          "description": "Files or directories that indicate the project root"
+        },
+        "init_options": {
+          "type": "object",
+          "description": "Initialization options passed to the LSP server during initialize request"
+        },
+        "options": {
+          "type": "object",
+          "description": "LSP server-specific settings passed during initialization"
         }
       },
       "additionalProperties": false,
@@ -271,10 +304,29 @@
           "examples": [
             ".crush"
           ]
+        },
+        "disabled_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Tools to disable"
+        },
+        "disable_provider_auto_update": {
+          "type": "boolean",
+          "description": "Disable providers auto-update",
+          "default": false
+        },
+        "attribution": {
+          "$ref": "#/$defs/Attribution",
+          "description": "Attribution settings for generated content"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "disabled_tools"
+      ]
     },
     "Permissions": {
       "properties": {

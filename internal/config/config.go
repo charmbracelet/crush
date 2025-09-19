@@ -291,9 +291,6 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
-	// this is temporary to disable the watcher until we fix it.
-	IsGitRepo bool `json:"-"`
-
 	// Internal
 	workingDir string `json:"-"`
 	// TODO: most likely remove this concept when I come back to it

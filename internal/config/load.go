@@ -69,8 +69,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug,
 	)
 
-	cfg.IsGitRepo = isInsideWorktree()
-	if !cfg.IsGitRepo {
+	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)

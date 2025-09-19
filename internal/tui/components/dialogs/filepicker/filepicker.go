@@ -2,6 +2,7 @@ package filepicker
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -246,8 +247,16 @@ func (m *model) Position() (int, int) {
 	return row, col
 }
 
+func IsFileTooBigWithFS(fsys fs.FS, filePath string, sizeLimit int64) (bool, error) {
+	return isFileTooBigFS(fsys, filePath, sizeLimit)
+}
+
 func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
-	fileInfo, err := os.Stat(filePath)
+	return isFileTooBigFS(os.DirFS("."), filePath, sizeLimit)
+}
+
+func isFileTooBigFS(fsys fs.FS, filePath string, sizeLimit int64) (bool, error) {
+	fileInfo, err := fs.Stat(fsys, filePath)
 	if err != nil {
 		return false, fmt.Errorf("error getting file info: %w", err)
 	}

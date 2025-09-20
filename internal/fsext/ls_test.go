@@ -45,7 +45,7 @@ func TestListDirectory(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	files, truncated, err := ListDirectory(".", nil, 0)
+	files, truncated, err := ListDirectory(".", nil, -1, -1)
 	require.NoError(t, err)
 	assert.False(t, truncated)
 	assert.Equal(t, len(files), 4)

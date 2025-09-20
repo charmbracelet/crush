@@ -1,6 +1,8 @@
 package fsext
 
 import (
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -70,6 +72,11 @@ var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
 
 		// Crush
 		".crush",
+
+		// macOS stuff
+		"OrbStack",
+		".local",
+		".share",
 	)
 })
 
@@ -199,16 +206,17 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 }
 
 // ListDirectory lists files and directories in the specified path,
-func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
+func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
 	var results []string
-	truncated := false
 	dl := NewDirectoryLister(initialPath)
 
+	slog.Warn("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
+
 	conf := fastwalk.Config{
-		Follow: true,
-		// Use forward slashes when running a Windows binary under WSL or MSYS
-		ToSlash: fastwalk.DefaultToSlash(),
-		Sort:    fastwalk.SortDirsFirst,
+		Follow:   true,
+		ToSlash:  fastwalk.DefaultToSlash(),
+		Sort:     fastwalk.SortDirsFirst,
+		MaxDepth: depth,
 	}
 
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
@@ -218,7 +226,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 
 		if dl.shouldIgnore(path, ignorePatterns) {
 			if d.IsDir() {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
@@ -230,16 +238,18 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 			results = append(results, path)
 		}
 
-		if limit > 0 && len(results) >= limit {
-			truncated = true
-			return filepath.SkipAll
+		if limit > -1 && len(results) >= limit {
+			return fs.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil && len(results) == 0 {
-		return nil, truncated, err
+	if err != nil && !errors.Is(err, fs.SkipAll) {
+		return nil, false, err
 	}
 
-	return results, truncated, nil
+	if limit > -1 && len(results) >= limit {
+		return results[:limit], true, nil
+	}
+	return results, false, nil
 }

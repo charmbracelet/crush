@@ -480,7 +480,9 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 }
 
 func (m *editorCmp) startCompletions() tea.Msg {
-	files, _, _ := fsext.ListDirectory(".", nil, 0)
+	ls := m.app.Config().Options.TUI.Completions
+	depth, limit := ls.Limits()
+	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
 	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {

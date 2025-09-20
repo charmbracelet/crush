@@ -68,6 +68,7 @@ type providerClientOptions struct {
 	modelType          config.SelectedModelType
 	model              func(config.SelectedModelType) catwalk.Model
 	disableCache       bool
+	disableStreaming   bool
 	systemMessage      string
 	systemPromptPrefix string
 	maxTokens          int64
@@ -108,7 +109,28 @@ func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.M
 
 func (p *baseProvider[C]) StreamResponse(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	messages = p.cleanMessages(messages)
-	return p.client.stream(ctx, messages, tools)
+
+	if !p.options.disableStreaming {
+		return p.client.stream(ctx, messages, tools)
+	}
+
+	// Fallback to non-streaming call while still exposing a stream-like API
+	// Emit a single ContentDelta (when content exists) followed by Complete.
+	eventChan := make(chan ProviderEvent, 2)
+	go func() {
+		defer close(eventChan)
+		resp, err := p.client.send(ctx, messages, tools)
+		if err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: err}
+			return
+		}
+		if resp != nil && resp.Content != "" {
+			eventChan <- ProviderEvent{Type: EventContentDelta, Content: resp.Content}
+		}
+		eventChan <- ProviderEvent{Type: EventComplete, Response: resp}
+	}()
+
+	return eventChan
 }
 
 func (p *baseProvider[C]) Model() catwalk.Model {
@@ -165,6 +187,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		extraBody:          cfg.ExtraBody,
 		extraParams:        cfg.ExtraParams,
 		systemPromptPrefix: cfg.SystemPromptPrefix,
+		disableStreaming:   cfg.DisableStreaming,
 		model: func(tp config.SelectedModelType) catwalk.Model {
 			return *config.Get().GetModelByType(tp)
 		},
@@ -205,4 +228,10 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		}, nil
 	}
 	return nil, fmt.Errorf("provider not supported: %s", cfg.Type)
+}
+
+func WithDisableStreaming(disable bool) ProviderClientOption {
+	return func(options *providerClientOptions) {
+		options.disableStreaming = disable
+	}
 }

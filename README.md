@@ -399,6 +399,27 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
+#### Disable Streaming
+
+To force non-streaming completions while preserving the streaming contract,
+set `disable_streaming` on the provider. In this mode the provider emits
+exactly one `content_delta` event with the full content (if any), followed by
+one `complete` event with finish reason, tool calls, and usage. This keeps the
+agent’s event handling identical across modes.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "$OPENAI_API_KEY",
+      "disable_streaming": true
+    }
+  }
+}
+```
+
 #### OpenAI-Compatible APIs
 
 Here’s an example configuration for Deepseek, which uses an OpenAI-compatible

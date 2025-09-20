@@ -550,6 +550,12 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 			}
 			return assistantMsg, nil, processErr
 		}
+
+		// If the provider signalled completion, stop waiting for more events.
+		if event.Type == provider.EventComplete {
+			break
+		}
+
 		if ctx.Err() != nil {
 			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
 			return assistantMsg, nil, ctx.Err()

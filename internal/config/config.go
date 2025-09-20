@@ -80,6 +80,10 @@ type ProviderConfig struct {
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
+	// Disable streaming for this provider; when disabled the system will
+	// use non-streaming completions but still emit a single StreamResponse event.
+	DisableStreaming bool `json:"disable_streaming,omitempty" jsonschema:"description=Disable streaming for this provider,default=false"`
+
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 

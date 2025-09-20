@@ -49,3 +49,6 @@ Thumbs.db
 manpages/
 completions/
 !internal/tui/components/completions/
+
+.envrc
+.direnv

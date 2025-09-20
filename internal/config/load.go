@@ -63,7 +63,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	// Setup logs
 	log.Setup(
-		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+		LogPath(cfg.Options.DataDirectory),
 		cfg.Options.Debug,
 	)
 
@@ -612,4 +612,14 @@ func GlobalConfigData() string {
 	}
 
 	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+}
+
+// GetConfigPaths returns the configuration file paths in order of precedence
+func GetConfigPaths(workingDir string) []string {
+	return []string{
+		globalConfig(),
+		GlobalConfigData(),
+		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
+		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
+	}
 }

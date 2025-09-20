@@ -386,6 +386,8 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			p.changeFocus()
 			return p, nil
+		case key.Matches(msg, p.keyMap.ToggleYolo):
+			return p, util.CmdHandler(commands.ToggleYoloModeMsg{})
 		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" && p.app.CoderAgent.IsBusy() {
 				return p, p.cancel()
@@ -922,6 +924,10 @@ func (p *chatPage) Help() help.KeyMap {
 			}
 			shortList = append(shortList, tabKey)
 			globalBindings = append(globalBindings, tabKey)
+			globalBindings = append(globalBindings, key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("shift+tab", "yolo mode"),
+			))
 		}
 		commandsBinding := key.NewBinding(
 			key.WithKeys("ctrl+p"),

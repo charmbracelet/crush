@@ -326,7 +326,13 @@ func (a *agent) generateTitle(ctx context.Context, sessionID string, content str
 		return fmt.Errorf("no response received from title provider")
 	}
 
-	title := strings.TrimSpace(strings.ReplaceAll(finalResponse.Content, "\n", " "))
+	title := strings.ReplaceAll(finalResponse.Content, "\n", " ")
+
+	if idx := strings.Index(title, "</think>"); idx > 0 {
+		title = title[idx+len("</think>"):]
+	}
+
+	title = strings.TrimSpace(title)
 	if title == "" {
 		return nil
 	}

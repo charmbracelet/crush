@@ -259,18 +259,16 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			continue
 		}
 
-		// Parse ripgrep output format: file:line:content
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+		// Parse ripgrep output using null separation
+		filePath, lineNumStr, lineText, ok := parseRipgrepLine(line)
+		if !ok {
 			continue
 		}
 
-		filePath := parts[0]
-		lineNum, err := strconv.Atoi(parts[1])
+		lineNum, err := strconv.Atoi(lineNumStr)
 		if err != nil {
 			continue
 		}
-		lineText := parts[2]
 
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
@@ -286,6 +284,33 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	return matches, nil
+}
+
+// parseRipgrepLine parses ripgrep output with null separation to handle Windows paths
+func parseRipgrepLine(line string) (filePath, lineNum, lineText string, ok bool) {
+	// Split on null byte first to separate filename from rest
+	parts := strings.SplitN(line, "\x00", 2)
+	if len(parts) != 2 {
+		return "", "", "", false
+	}
+
+	filePath = parts[0]
+	remainder := parts[1]
+
+	// Now split the remainder on first colon: "linenum:content"
+	colonIndex := strings.Index(remainder, ":")
+	if colonIndex == -1 {
+		return "", "", "", false
+	}
+
+	lineNumStr := remainder[:colonIndex]
+	lineText = remainder[colonIndex+1:]
+
+	if _, err := strconv.Atoi(lineNumStr); err != nil {
+		return "", "", "", false
+	}
+
+	return filePath, lineNumStr, lineText, true
 }
 
 func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {

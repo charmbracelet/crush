@@ -2,7 +2,6 @@
 
 ## Build/Test/Lint Commands
 
-- **Environment**: Run all commands below with environment variable `GOTOOLCHAIN='go1.25.0'`
 - **Build**: `go build .` or `go run .`
 - **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
 - **Update Golden Files**: `go test ./... -update` (regenerates .golden files when test output changes)

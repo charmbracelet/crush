@@ -69,5 +69,5 @@ func hunkToSplit(h *udiff.Hunk) (sh splitHunk) {
 		sh.lines = append(sh.lines, &sl)
 	}
 
-	return
+	return sh
 }

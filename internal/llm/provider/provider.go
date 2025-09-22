@@ -98,7 +98,7 @@ func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []m
 		}
 		cleaned = append(cleaned, msg)
 	}
-	return
+	return cleaned
 }
 
 func (p *baseProvider[C]) SendMessages(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (*ProviderResponse, error) {

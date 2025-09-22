@@ -41,13 +41,8 @@ func LoadReader(fd io.Reader) (*Config, error) {
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
-	// uses default config paths
-	configPaths := []string{
-		globalConfig(),
-		GlobalConfigData(),
-		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
-		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
-	}
+	configPaths := lookupConfigs(workingDir)
+
 	cfg, err := loadFromConfigPaths(configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
@@ -316,7 +311,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
@@ -512,6 +507,28 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil
+}
+
+// lookupConfigs searches config files recursively from CWD up to FS root
+func lookupConfigs(cwd string) []string {
+	// prepend default config paths
+	configPaths := []string{
+		globalConfig(),
+		GlobalConfigData(),
+	}
+
+	configNames := []string{appName + ".json", "." + appName + ".json"}
+
+	foundConfigs, err := fsext.Lookup(cwd, configNames...)
+	if err != nil {
+		// returns at least default configs
+		return configPaths
+	}
+
+	// reverse order so last config has more priority
+	slices.Reverse(foundConfigs)
+
+	return append(configPaths, foundConfigs...)
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {

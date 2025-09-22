@@ -357,7 +357,7 @@ func (c *Config) applyLSPDefaults() {
 	// Apply defaults to each LSP configuration
 	for name, cfg := range c.LSP {
 		// Try to get defaults from powernap based on command name
-		base, ok := configManager.GetServer(cfg.Command)
+		base, ok := configManager.GetServer(name)
 		if !ok {
 			continue
 		}

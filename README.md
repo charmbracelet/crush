@@ -272,6 +272,8 @@ using `$(echo $VAR)` syntax.
       "type": "stdio",
       "command": "node",
       "args": ["/path/to/mcp-server.js"],
+      "timeout": 120,
+      "disabled": false,
       "env": {
         "NODE_ENV": "production"
       }
@@ -279,6 +281,8 @@ using `$(echo $VAR)` syntax.
     "github": {
       "type": "http",
       "url": "https://example.com/mcp/",
+      "timeout": 120,
+      "disabled": false,
       "headers": {
         "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
       }
@@ -286,6 +290,8 @@ using `$(echo $VAR)` syntax.
     "streaming-service": {
       "type": "sse",
       "url": "https://example.com/mcp/sse",
+      "timeout": 120,
+      "disabled": false,
       "headers": {
         "API-Key": "$(echo $API_KEY)"
       }

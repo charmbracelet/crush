@@ -371,6 +371,9 @@ func (c *Config) applyLSPDefaults() {
 		if len(cfg.RootMarkers) == 0 {
 			cfg.RootMarkers = base.RootMarkers
 		}
+		if cfg.Command == "" {
+			cfg.Command = base.Command
+		}
 		if len(cfg.Args) == 0 {
 			cfg.Args = base.Args
 		}

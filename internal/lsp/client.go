@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/home"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -55,7 +56,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 
 	// Create powernap client config
 	clientConfig := powernap.ClientConfig{
-		Command: config.Command,
+		Command: home.Long(config.Command),
 		Args:    config.Args,
 		RootURI: rootURI,
 		Environment: func() map[string]string {

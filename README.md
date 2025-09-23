@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
+<p align="center">你的新编程伙伴，现在就在你最爱的终端中。<br />你的工具、代码和工作流，都与您选择的 LLM 模型紧密相连。</p>
 
 <p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
 
@@ -64,6 +65,61 @@ nix-channel --update
 nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
 ```
 
+### NixOS & Home Manager Module Usage via NUR
+
+Crush provides NixOS and Home Manager modules via NUR.
+You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nur.url = "github:nix-community/NUR";
+  };
+
+  outputs = { self, nixpkgs, nur, ... }: {
+    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        nur.modules.nixos.default
+        nur.repos.charmbracelet.modules.crush
+        {
+          programs.crush = {
+            enable = true;
+            settings = {
+              providers = {
+                openai = {
+                  id = "openai";
+                  name = "OpenAI";
+                  base_url = "https://api.openai.com/v1";
+                  type = "openai";
+                  api_key = "sk-fake123456789abcdef...";
+                  models = [
+                    {
+                      id = "gpt-4";
+                      name = "GPT-4";
+                    }
+                  ];
+                };
+              };
+              lsp = {
+                go = { command = "gopls"; enabled = true; };
+                nix = { command = "nil"; enabled = true; };
+              };
+              options = {
+                context_paths = [ "/etc/nixos/configuration.nix" ];
+                tui = { compact_mode = true; };
+                debug = false;
+              };
+            };
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
 </details>
 
 <details>
@@ -119,22 +175,25 @@ Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
 
-| Environment Variable       | Provider                                           |
-| -------------------------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Anthropic                                          |
-| `OPENAI_API_KEY`           | OpenAI                                             |
-| `OPENROUTER_API_KEY`       | OpenRouter                                         |
-| `CEREBRAS_API_KEY`         | Cerebras                                           |
-| `GEMINI_API_KEY`           | Google Gemini                                      |
-| `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`             | Groq                                               |
-| `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
-| `AWS_REGION`               | AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_API_ENDPOINT`| Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
+| Environment Variable        | Provider                                           |
+| --------------------------- | -------------------------------------------------- |
+| `ANTHROPIC_API_KEY`         | Anthropic                                          |
+| `OPENAI_API_KEY`            | OpenAI                                             |
+| `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `GEMINI_API_KEY`            | Google Gemini                                      |
+| `CEREBRAS_API_KEY`          | Cerebras                                           |
+| `HF_TOKEN`                  | Huggingface Inference                              |
+| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
+| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
+| `GROQ_API_KEY`              | Groq                                               |
+| `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
+| `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
+| `AWS_REGION`                | AWS Bedrock (Claude)                               |
+| `AWS_PROFILE`               | Custom AWS Profile                                 |
+| `AWS_REGION`                | AWS Region                                         |
+| `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
+| `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
+| `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 
 ### By the Way
 
@@ -214,6 +273,8 @@ using `$(echo $VAR)` syntax.
       "type": "stdio",
       "command": "node",
       "args": ["/path/to/mcp-server.js"],
+      "timeout": 120,
+      "disabled": false,
       "env": {
         "NODE_ENV": "production"
       }
@@ -221,6 +282,8 @@ using `$(echo $VAR)` syntax.
     "github": {
       "type": "http",
       "url": "https://example.com/mcp/",
+      "timeout": 120,
+      "disabled": false,
       "headers": {
         "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
       }
@@ -228,6 +291,8 @@ using `$(echo $VAR)` syntax.
     "streaming-service": {
       "type": "sse",
       "url": "https://example.com/mcp/sse",
+      "timeout": 120,
+      "disabled": false,
       "headers": {
         "API-Key": "$(echo $API_KEY)"
       }

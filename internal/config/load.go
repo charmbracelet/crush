@@ -41,13 +41,8 @@ func LoadReader(fd io.Reader) (*Config, error) {
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
-	// uses default config paths
-	configPaths := []string{
-		globalConfig(),
-		GlobalConfigData(),
-		filepath.Join(workingDir, fmt.Sprintf("%s.json", appName)),
-		filepath.Join(workingDir, fmt.Sprintf(".%s.json", appName)),
-	}
+	configPaths := lookupConfigs(workingDir)
+
 	cfg, err := loadFromConfigPaths(configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
@@ -311,7 +306,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
@@ -352,7 +347,7 @@ func (c *Config) applyLSPDefaults() {
 	// Apply defaults to each LSP configuration
 	for name, cfg := range c.LSP {
 		// Try to get defaults from powernap based on command name
-		base, ok := configManager.GetServer(cfg.Command)
+		base, ok := configManager.GetServer(name)
 		if !ok {
 			continue
 		}
@@ -376,7 +371,7 @@ func (c *Config) applyLSPDefaults() {
 func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return
+		return largeModel, smallModel, err
 	}
 
 	// Use the first provider enabled based on the known providers order
@@ -389,7 +384,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
 		if defaultLargeModel == nil {
 			err = fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			return
+			return largeModel, smallModel, err
 		}
 		largeModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -401,7 +396,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
 			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			return
+			return largeModel, smallModel, err
 		}
 		smallModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -409,7 +404,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
 			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
 		}
-		return
+		return largeModel, smallModel, err
 	}
 
 	enabledProviders := c.EnabledProviders()
@@ -419,13 +414,13 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 
 	if len(enabledProviders) == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return
+		return largeModel, smallModel, err
 	}
 
 	providerConfig := enabledProviders[0]
 	if len(providerConfig.Models) == 0 {
 		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
-		return
+		return largeModel, smallModel, err
 	}
 	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
 	largeModel = SelectedModel{
@@ -439,7 +434,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		Model:     defaultSmallModel.ID,
 		MaxTokens: defaultSmallModel.DefaultMaxTokens,
 	}
-	return
+	return largeModel, smallModel, err
 }
 
 func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) error {
@@ -507,6 +502,28 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil
+}
+
+// lookupConfigs searches config files recursively from CWD up to FS root
+func lookupConfigs(cwd string) []string {
+	// prepend default config paths
+	configPaths := []string{
+		globalConfig(),
+		GlobalConfigData(),
+	}
+
+	configNames := []string{appName + ".json", "." + appName + ".json"}
+
+	foundConfigs, err := fsext.Lookup(cwd, configNames...)
+	if err != nil {
+		// returns at least default configs
+		return configPaths
+	}
+
+	// reverse order so last config has more priority
+	slices.Reverse(foundConfigs)
+
+	return append(configPaths, foundConfigs...)
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {

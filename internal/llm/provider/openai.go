@@ -178,7 +178,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 		}
 	}
 
-	return
+	return openaiMessages
 }
 
 func (o *openaiClient) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {

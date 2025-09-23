@@ -253,6 +253,7 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, cmd
 			}
 			if s.needsProjectInit {
+				s.selectedNo = false
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.No):

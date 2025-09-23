@@ -67,8 +67,12 @@ builds:
         goarch: arm
       - goos: android
         goarch: "386"
+      - goos: windows
+        goarch: arm
     ldflags:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
+    flags:
+      - -trimpath
 
 archives:
   - name_template: >-

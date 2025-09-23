@@ -175,7 +175,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(results...))
 		}
 	}
-	return
+	return anthropicMessages
 }
 
 func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolUnionParam {

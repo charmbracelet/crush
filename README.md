@@ -545,13 +545,15 @@ config:
 }
 ```
 
-## Disabling Provider Auto-Updates
+## Provider Auto-Updates
 
 By default, Crush automatically checks for the latest and greatest list of
 providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
 the open source Crush provider database. This means that when new providers and
 models are available, or when model metadata changes, Crush automatically
 updates your local configuration.
+
+### Disabling automatic provider updates
 
 For those with restricted internet access, or those who prefer to work in
 air-gapped environments, this might not be want you want, and this feature can
@@ -596,6 +598,36 @@ crush update-providers embedded
 # For more info:
 crush update-providers --help
 ```
+
+## Metrics
+
+Crush records pseudonymous usage metrics (tied to a device-specific hash),
+which maintainers rely on to inform development and support priorities. The
+metrics include solely usage metadata; prompts and responses are NEVER
+collected.
+
+Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
+and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
+
+You can opt out of metrics collection at any time by setting the environment
+variable by setting the following in your environment:
+
+```bash
+export CRUSH_DISABLE_METRICS=1
+```
+
+Or by setting the following in your config:
+
+```json
+{
+  "options": {
+    "disable_metrics": true
+  }
+}
+```
+
+Crush also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
+convention which can be enabled via `export DO_NOT_TRACK=1`.
 
 ## A Note on Claude Max and GitHub Copilot
 

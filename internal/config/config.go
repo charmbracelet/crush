@@ -153,6 +153,7 @@ type Options struct {
 	DisabledTools             []string     `json:"disabled_tools" jsonschema:"description=Tools to disable"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 }
 
 type MCPs map[string]MCPConfig

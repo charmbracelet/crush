@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/llm/provider"
@@ -23,12 +24,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
-)
-
-// Common errors
-var (
-	ErrRequestCancelled = errors.New("request canceled by user")
-	ErrSessionBusy      = errors.New("session is currently processing another request")
 )
 
 type AgentEventType string
@@ -66,10 +61,11 @@ type Service interface {
 
 type agent struct {
 	*pubsub.Broker[AgentEvent]
-	agentCfg config.Agent
-	sessions session.Service
-	messages message.Service
-	mcpTools []McpTool
+	agentCfg    config.Agent
+	sessions    session.Service
+	messages    message.Service
+	permissions permission.Service
+	mcpTools    []McpTool
 
 	tools *csync.LazySlice[tools.BaseTool]
 	// We need this to be able to update it when model changes
@@ -237,6 +233,7 @@ func NewAgent(
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               csync.NewLazySlice(toolFn),
 		promptQueue:         csync.NewMap[string, []string](),
+		permissions:         permissions,
 	}, nil
 }
 
@@ -365,8 +362,9 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	}
 
 	genCtx, cancel := context.WithCancel(ctx)
-
 	a.activeRequests.Set(sessionID, cancel)
+	startTime := time.Now()
+
 	go func() {
 		slog.Debug("Request started", "sessionID", sessionID)
 		defer log.RecoverPanic("agent.Run", func() {
@@ -377,16 +375,24 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
 		}
 		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
-		if result.Error != nil && !errors.Is(result.Error, ErrRequestCancelled) && !errors.Is(result.Error, context.Canceled) {
-			slog.Error(result.Error.Error())
+		if result.Error != nil {
+			if isCancelledErr(result.Error) {
+				slog.Error("Request canceled", "sessionID", sessionID)
+			} else {
+				slog.Error("Request errored", "sessionID", sessionID, "error", result.Error.Error())
+				event.Error(result.Error)
+			}
+		} else {
+			slog.Debug("Request completed", "sessionID", sessionID)
 		}
-		slog.Debug("Request completed", "sessionID", sessionID)
+		a.eventPromptResponded(sessionID, time.Since(startTime).Truncate(time.Second))
 		a.activeRequests.Del(sessionID)
 		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
 		events <- result
 		close(events)
 	}()
+	a.eventPromptSent(sessionID)
 	return events, nil
 }
 
@@ -726,13 +732,13 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		if err := a.messages.Update(ctx, *assistantMsg); err != nil {
 			return fmt.Errorf("failed to update message: %w", err)
 		}
-		return a.TrackUsage(ctx, sessionID, a.Model(), event.Response.Usage)
+		return a.trackUsage(ctx, sessionID, a.Model(), event.Response.Usage)
 	}
 
 	return nil
 }
 
-func (a *agent) TrackUsage(ctx context.Context, sessionID string, model catwalk.Model, usage provider.TokenUsage) error {
+func (a *agent) trackUsage(ctx context.Context, sessionID string, model catwalk.Model, usage provider.TokenUsage) error {
 	sess, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -742,6 +748,8 @@ func (a *agent) TrackUsage(ctx context.Context, sessionID string, model catwalk.
 		model.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		model.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		model.CostPer1MOut/1e6*float64(usage.OutputTokens)
+
+	a.eventTokensUsed(sessionID, usage, cost)
 
 	sess.Cost += cost
 	sess.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens

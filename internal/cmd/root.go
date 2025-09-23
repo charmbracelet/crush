@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
@@ -66,6 +68,8 @@ crush -y
 		}
 		defer app.Shutdown()
 
+		event.AppInitialized()
+
 		// Set up the TUI.
 		program := tea.NewProgram(
 			tui.New(app),
@@ -78,10 +82,14 @@ crush -y
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
+			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return fmt.Errorf("TUI error: %v", err)
 		}
 		return nil
+	},
+	PostRun: func(cmd *cobra.Command, args []string) {
+		event.AppExited()
 	},
 }
 
@@ -135,7 +143,24 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
+	if shouldEnableMetrics() {
+		event.Init()
+	}
+
 	return appInstance, nil
+}
+
+func shouldEnableMetrics() bool {
+	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
+		return false
+	}
+	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
+		return false
+	}
+	if config.Get().Options.DisableMetrics {
+		return false
+	}
+	return true
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

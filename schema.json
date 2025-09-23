@@ -320,6 +320,11 @@
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"
+        },
+        "disable_metrics": {
+          "type": "boolean",
+          "description": "Disable sending metrics",
+          "default": false
         }
       },
       "additionalProperties": false,

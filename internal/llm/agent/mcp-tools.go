@@ -152,16 +152,14 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 	m := config.Get().MCP[name]
 	state, _ := mcpStates.Get(name)
 
-	pingCtx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
+	timeout := mcpTimeout(m)
+	pingCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	err := c.Ping(pingCtx)
 	if err == nil {
 		return c, nil
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		err = fmt.Errorf("timed out after %s", mcpTimeout(m))
-	}
-	updateMCPState(name, MCPStateError, err, nil, state.ToolCount)
+	updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, state.ToolCount)
 
 	c, err = createAndInitializeClient(ctx, name, m)
 	if err != nil {
@@ -345,27 +343,28 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 	// Only call Start() for non-stdio clients, as stdio clients auto-start
 	if m.Type != config.MCPStdio {
 		if err := c.Start(initCtx); err != nil {
+			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 			slog.Error("error starting mcp client", "error", err, "name", name)
-			if errors.Is(err, context.DeadlineExceeded) {
-				err = fmt.Errorf("timed out after %s", timeout)
-			}
-			updateMCPState(name, MCPStateError, err, nil, 0)
 			_ = c.Close()
 			return nil, err
 		}
 	}
 	if _, err := c.Initialize(initCtx, mcpInitRequest); err != nil {
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 		slog.Error("error initializing mcp client", "error", err, "name", name)
-		if errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("timed out after %s", timeout)
-		}
-		updateMCPState(name, MCPStateError, err, nil, 0)
 		_ = c.Close()
 		return nil, err
 	}
 
 	slog.Info("Initialized mcp client", "name", name)
 	return c, nil
+}
+
+func maybeTimeoutErr(err error, timeout time.Duration) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("timed out after %s", timeout)
+	}
+	return err
 }
 
 func createMcpClient(name string, m config.MCPConfig) (*client.Client, error) {

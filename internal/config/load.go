@@ -126,11 +126,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		config, configExists := c.Providers.Get(string(p.ID))
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
-			if config.Disable {
-				slog.Debug("Skipping provider due to disable flag", "provider", p.ID)
-				c.Providers.Del(string(p.ID))
-				continue
-			}
 			if config.BaseURL != "" {
 				p.APIEndpoint = config.BaseURL
 			}

@@ -543,10 +543,10 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 	err := cfg.configureProviders(env, resolver, knownProviders)
 	require.NoError(t, err)
 
-	// Provider should be removed from config when disabled
-	require.Equal(t, cfg.Providers.Len(), 0)
-	_, exists := cfg.Providers.Get("openai")
-	require.False(t, exists)
+	require.Equal(t, cfg.Providers.Len(), 1)
+	prov, exists := cfg.Providers.Get("openai")
+	require.True(t, exists)
+	require.True(t, prov.Disable)
 }
 
 func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {

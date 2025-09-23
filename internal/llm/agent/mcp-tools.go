@@ -158,6 +158,9 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 	if err == nil {
 		return c, nil
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("timed out after %s", mcpTimeout(m))
+	}
 	updateMCPState(name, MCPStateError, err, nil, state.ToolCount)
 
 	c, err = createAndInitializeClient(ctx, name, m)
@@ -334,18 +337,29 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 		slog.Error("error creating mcp client", "error", err, "name", name)
 		return nil, err
 	}
+
+	timeout := mcpTimeout(m)
+	initCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	// Only call Start() for non-stdio clients, as stdio clients auto-start
 	if m.Type != config.MCPStdio {
-		if err := c.Start(ctx); err != nil {
-			updateMCPState(name, MCPStateError, err, nil, 0)
+		if err := c.Start(initCtx); err != nil {
 			slog.Error("error starting mcp client", "error", err, "name", name)
+			if errors.Is(err, context.DeadlineExceeded) {
+				err = fmt.Errorf("timed out after %s", timeout)
+			}
+			updateMCPState(name, MCPStateError, err, nil, 0)
 			_ = c.Close()
 			return nil, err
 		}
 	}
-	if _, err := c.Initialize(ctx, mcpInitRequest); err != nil {
-		updateMCPState(name, MCPStateError, err, nil, 0)
+	if _, err := c.Initialize(initCtx, mcpInitRequest); err != nil {
 		slog.Error("error initializing mcp client", "error", err, "name", name)
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("timed out after %s", timeout)
+		}
+		updateMCPState(name, MCPStateError, err, nil, 0)
 		_ = c.Close()
 		return nil, err
 	}

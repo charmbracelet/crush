@@ -180,8 +180,9 @@ That said, you can also set environment variables for preferred providers.
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
-| `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
+| `CEREBRAS_API_KEY`          | Cerebras                                           |
+| `HF_TOKEN`                  | Huggingface Inference                              |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `GROQ_API_KEY`              | Groq                                               |

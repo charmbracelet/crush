@@ -7,12 +7,12 @@ import (
 	"net"
 	"strings"
 
-	"gopkg.in/natefinch/npipe.v2"
+	"github.com/Microsoft/go-winio"
 )
 
 func listen(network, address string) (net.Listener, error) {
 	if !strings.HasPrefix(address, "tcp") {
-		return npipe.Listen(address)
+		return winio.ListenPipe(address, nil)
 	}
 	return net.Listen(network, address)
 }

@@ -77,7 +77,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 	// Create the powernap client
 	powernapClient, err := powernap.NewClient(clientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create powernap client: %w", err)
+		return nil, fmt.Errorf("failed to create lsp client: %w", err)
 	}
 
 	client := &Client{
@@ -98,7 +98,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 // Initialize initializes the LSP client and returns the server capabilities.
 func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
 	if err := c.client.Initialize(ctx, false); err != nil {
-		return nil, fmt.Errorf("failed to initialize powernap client: %w", err)
+		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
 	// Convert powernap capabilities to protocol capabilities

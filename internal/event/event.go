@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 
@@ -24,7 +25,7 @@ var (
 			Set("GOOS", runtime.GOOS).
 			Set("GOARCH", runtime.GOARCH).
 			Set("TERM", os.Getenv("TERM")).
-			Set("SHELL", os.Getenv("SHELL")).
+			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version())
 )

@@ -428,6 +428,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 
 func allToolNames() []string {
 	return []string{
+		"agent",
 		"bash",
 		"download",
 		"edit",

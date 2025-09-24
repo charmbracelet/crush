@@ -149,7 +149,8 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	m := config.Get().MCP[name]
+	cfg := config.Get()
+	m := cfg.MCP[name]
 	state, _ := mcpStates.Get(name)
 
 	timeout := mcpTimeout(m)
@@ -161,7 +162,7 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 	}
 	updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, state.ToolCount)
 
-	c, err = createAndInitializeClient(ctx, name, m)
+	c, err = createAndInitializeClient(ctx, name, m, cfg.Resolver())
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +314,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 
 			ctx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
 			defer cancel()
-			c, err := createAndInitializeClient(ctx, name, m)
+			c, err := createAndInitializeClient(ctx, name, m, cfg.Resolver())
 			if err != nil {
 				return
 			}
@@ -328,8 +329,8 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 	return slices.Collect(result.Seq())
 }
 
-func createAndInitializeClient(ctx context.Context, name string, m config.MCPConfig) (*client.Client, error) {
-	c, err := createMcpClient(name, m)
+func createAndInitializeClient(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*client.Client, error) {
+	c, err := createMcpClient(name, m, resolver)
 	if err != nil {
 		updateMCPState(name, MCPStateError, err, nil, 0)
 		slog.Error("error creating mcp client", "error", err, "name", name)
@@ -367,14 +368,18 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createMcpClient(name string, m config.MCPConfig) (*client.Client, error) {
+func createMcpClient(name string, m config.MCPConfig, resolver config.VariableResolver) (*client.Client, error) {
 	switch m.Type {
 	case config.MCPStdio:
-		if strings.TrimSpace(m.Command) == "" {
+		command, err := resolver.ResolveValue(m.Command)
+		if err != nil {
+			return nil, fmt.Errorf("invalid mcp command: %w", err)
+		}
+		if strings.TrimSpace(command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		return client.NewStdioMCPClientWithOptions(
-			home.Long(m.Command),
+			home.Long(command),
 			m.ResolvedEnv(),
 			m.Args,
 			transport.WithCommandLogger(mcpLogger{name: name}),

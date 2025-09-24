@@ -5,14 +5,15 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/env"
 )
 
-func TestPowernapClient(t *testing.T) {
+func TestClient(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a simple config for testing
 	cfg := config.LSPConfig{
-		Command:   "echo", // Use echo as a dummy command that won't fail
+		Command:   "$THE_CMD", // Use echo as a dummy command that won't fail
 		Args:      []string{"hello"},
 		FileTypes: []string{"go"},
 		Env:       map[string]string{},
@@ -20,7 +21,9 @@ func TestPowernapClient(t *testing.T) {
 
 	// Test creating a powernap client - this will likely fail with echo
 	// but we can still test the basic structure
-	client, err := New(ctx, "test", cfg)
+	client, err := New(ctx, "test", cfg, config.NewEnvironmentVariableResolver(env.NewFromMap(map[string]string{
+		"THE_CMD": "echo",
+	})))
 	if err != nil {
 		// Expected to fail with echo command, skip the rest
 		t.Skipf("Powernap client creation failed as expected with dummy command: %v", err)

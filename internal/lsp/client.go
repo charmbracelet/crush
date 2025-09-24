@@ -45,7 +45,7 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
+func New(ctx context.Context, name string, config config.LSPConfig, resolver config.VariableResolver) (*Client, error) {
 	// Convert working directory to file URI
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -54,9 +54,14 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 
 	rootURI := string(protocol.URIFromPath(workDir))
 
+	command, err := resolver.ResolveValue(config.Command)
+	if err != nil {
+		return nil, fmt.Errorf("invalid lsp command: %w", err)
+	}
+
 	// Create powernap client config
 	clientConfig := powernap.ClientConfig{
-		Command: home.Long(config.Command),
+		Command: home.Long(command),
 		Args:    config.Args,
 		RootURI: rootURI,
 		Environment: func() map[string]string {

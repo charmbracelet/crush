@@ -507,7 +507,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
-	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
+	if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -75,6 +76,12 @@ func (w *FastGlobWalker) ShouldSkip(path string) bool {
 }
 
 func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
+	// Normalize pattern to forward slashes on Windows so their config can use
+	// backslashes
+	if runtime.GOOS == "windows" {
+		pattern = filepath.ToSlash(pattern)
+	}
+
 	walker := NewFastGlobWalker(searchPath)
 	var matches []FileInfo
 	conf := fastwalk.Config{
@@ -98,12 +105,15 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 			return nil
 		}
 
-		// Check if path matches the pattern
 		relPath, err := filepath.Rel(searchPath, path)
 		if err != nil {
 			relPath = path
 		}
 
+		// Normalize separators to forward slashes
+		relPath = filepath.ToSlash(relPath)
+
+		// Check if path matches the pattern
 		matched, err := doublestar.Match(pattern, relPath)
 		if err != nil || !matched {
 			return nil

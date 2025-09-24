@@ -104,7 +104,7 @@ func NewAgent(
 	cfg := config.Get()
 
 	var agentToolFn func() (tools.BaseTool, error)
-	if agentCfg.ID == "coder" {
+	if agentCfg.ID == "coder" && slices.Contains(agentCfg.AllowedTools, AgentToolName) {
 		agentToolFn = func() (tools.BaseTool, error) {
 			taskAgentCfg := config.Get().Agents["task"]
 			if taskAgentCfg.ID == "" {

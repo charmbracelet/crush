@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -200,7 +201,7 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 
 // ListDirectory lists files and directories in the specified path,
 func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
-	var results []string
+	results := csync.NewSlice[string]()
 	truncated := false
 	dl := NewDirectoryLister(initialPath)
 
@@ -227,19 +228,19 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 			if d.IsDir() {
 				path = path + string(filepath.Separator)
 			}
-			results = append(results, path)
+			results.Append(path)
 		}
 
-		if limit > 0 && len(results) >= limit {
+		if limit > 0 && results.Len() >= limit {
 			truncated = true
 			return filepath.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil && len(results) == 0 {
+	if err != nil && results.Len() == 0 {
 		return nil, truncated, err
 	}
 
-	return results, truncated, nil
+	return slices.Collect(results.Seq()), truncated, nil
 }

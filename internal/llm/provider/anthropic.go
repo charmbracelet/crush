@@ -509,7 +509,18 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
 	// 529 (unofficial): The service is overloaded
 	if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != 529 && !isOverloaded {
-		return false, 0, err
+		prev := a.providerOptions.apiKey
+		// in case the key comes from a script, we try to re-evaluate it.
+		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		// if it didn't change, do not retry.
+		if prev == a.providerOptions.apiKey {
+			return false, 0, err
+		}
+		a.client = createAnthropicClient(a.providerOptions, a.tp)
+		return true, 0, nil
 	}
 
 	retryMs := 0

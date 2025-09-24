@@ -436,7 +436,21 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		return false, 0, err
+		prev := g.providerOptions.apiKey
+		// in case the key comes from a script, we try to re-evaluate it.
+		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		// if it didn't change, do not retry.
+		if prev == g.providerOptions.apiKey {
+			return false, 0, err
+		}
+		g.client, err = createGeminiClient(g.providerOptions)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to create Gemini client after API key refresh: %w", err)
+		}
+		return true, 0, nil
 	}
 
 	// Check for common rate limit error messages

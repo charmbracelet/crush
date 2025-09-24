@@ -1,0 +1,356 @@
+package fsext
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestGlobWithDoubleStar(t *testing.T) {
+	t.Run("finds files matching pattern", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create test files
+		mainGo := filepath.Join(testDir, "src", "main.go")
+		utilsGo := filepath.Join(testDir, "src", "utils.go")
+		helperGo := filepath.Join(testDir, "pkg", "helper.go")
+		readmeMd := filepath.Join(testDir, "README.md")
+
+		for _, file := range []string{mainGo, utilsGo, helperGo, readmeMd} {
+			err := os.MkdirAll(filepath.Dir(file), 0o755)
+			require.NoError(t, err)
+			err = os.WriteFile(file, []byte("test content"), 0o644)
+			require.NoError(t, err)
+		}
+
+		// Test finding a specific .go file pattern
+		matches, truncated, err := GlobWithDoubleStar("**/main.go", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find exactly main.go file
+		require.Len(t, matches, 1, "Expected exactly 1 match for '**/main.go' pattern")
+		require.Equal(t, mainGo, matches[0], "Expected to find main.go specifically")
+
+		// Verify other files don't match this pattern
+		require.NotContains(t, matches, utilsGo, "utils.go should not match '**/main.go' pattern")
+		require.NotContains(t, matches, helperGo, "helper.go should not match '**/main.go' pattern")
+		require.NotContains(t, matches, readmeMd, "README.md should not match '**/main.go' pattern")
+	})
+
+	t.Run("finds directories matching pattern", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create test directories and files
+		srcDir := filepath.Join(testDir, "src")
+		pkgDir := filepath.Join(testDir, "pkg")
+		internalDir := filepath.Join(testDir, "internal")
+		cmdDir := filepath.Join(testDir, "cmd")
+		pkgFile := filepath.Join(testDir, "pkg.txt")
+
+		for _, dir := range []string{srcDir, pkgDir, internalDir, cmdDir} {
+			err := os.MkdirAll(dir, 0o755)
+			require.NoError(t, err)
+		}
+
+		// Create files in directories and a similarly named file
+		err := os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0o644)
+		require.NoError(t, err)
+		err = os.WriteFile(pkgFile, []byte("test"), 0o644)
+		require.NoError(t, err)
+
+		// Test finding a specific directory pattern (this tests the fix for the bug)
+		// Look specifically for "pkg" directory, not others and not similar files
+		matches, truncated, err := GlobWithDoubleStar("pkg", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find exactly the pkg directory
+		require.Len(t, matches, 1, "Expected exactly 1 match for 'pkg' pattern")
+		require.Equal(t, pkgDir, matches[0], "Expected to find pkg directory specifically")
+
+		// Verify other directories don't match this pattern
+		require.NotContains(t, matches, srcDir, "src directory should not match 'pkg' pattern")
+		require.NotContains(t, matches, internalDir, "internal directory should not match 'pkg' pattern")
+		require.NotContains(t, matches, cmdDir, "cmd directory should not match 'pkg' pattern")
+
+		// Verify similar files don't match directory pattern
+		require.NotContains(t, matches, pkgFile, "pkg.txt file should not match 'pkg' pattern")
+	})
+
+	t.Run("finds nested directories with wildcard patterns", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create nested directory structure
+		srcPkgDir := filepath.Join(testDir, "src", "pkg")
+		libPkgDir := filepath.Join(testDir, "lib", "pkg")
+		mainPkgDir := filepath.Join(testDir, "pkg")
+		otherDir := filepath.Join(testDir, "other")
+
+		for _, dir := range []string{srcPkgDir, libPkgDir, mainPkgDir, otherDir} {
+			err := os.MkdirAll(dir, 0o755)
+			require.NoError(t, err)
+		}
+
+		// Test **/pkg pattern - should find all pkg directories at any level
+		matches, truncated, err := GlobWithDoubleStar("**/pkg", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find all three pkg directories
+		require.Len(t, matches, 3, "Expected 3 matches for '**/pkg' pattern")
+
+		// Convert to relative paths for easier comparison
+		var relativeMatches []string
+		for _, match := range matches {
+			rel, err := filepath.Rel(testDir, match)
+			require.NoError(t, err)
+			relativeMatches = append(relativeMatches, filepath.ToSlash(rel))
+		}
+
+		require.Contains(t, relativeMatches, "pkg", "Should find top-level pkg directory")
+		require.Contains(t, relativeMatches, "src/pkg", "Should find nested src/pkg directory")
+		require.Contains(t, relativeMatches, "lib/pkg", "Should find nested lib/pkg directory")
+		require.NotContains(t, relativeMatches, "other", "Should not match 'other' directory")
+	})
+
+	t.Run("finds directory contents with recursive patterns", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create directory with contents
+		pkgDir := filepath.Join(testDir, "pkg")
+		pkgFile1 := filepath.Join(pkgDir, "main.go")
+		pkgFile2 := filepath.Join(pkgDir, "utils.go")
+		pkgSubdir := filepath.Join(pkgDir, "internal")
+		pkgSubfile := filepath.Join(pkgSubdir, "helper.go")
+
+		err := os.MkdirAll(pkgSubdir, 0o755)
+		require.NoError(t, err)
+
+		for _, file := range []string{pkgFile1, pkgFile2, pkgSubfile} {
+			err = os.WriteFile(file, []byte("package main"), 0o644)
+			require.NoError(t, err)
+		}
+
+		// Test pkg/** pattern - should find directory and all its contents
+		matches, truncated, err := GlobWithDoubleStar("pkg/**", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find the directory itself and all contents
+		require.GreaterOrEqual(t, len(matches), 4, "Expected at least 4 matches for 'pkg/**' pattern")
+
+		var relativeMatches []string
+		for _, match := range matches {
+			rel, err := filepath.Rel(testDir, match)
+			require.NoError(t, err)
+			relativeMatches = append(relativeMatches, filepath.ToSlash(rel))
+		}
+
+		require.Contains(t, relativeMatches, "pkg", "Should find pkg directory itself")
+		require.Contains(t, relativeMatches, "pkg/main.go", "Should find files in pkg directory")
+		require.Contains(t, relativeMatches, "pkg/internal", "Should find subdirectories")
+		require.Contains(t, relativeMatches, "pkg/internal/helper.go", "Should find files in subdirectories")
+	})
+
+	t.Run("respects limit parameter", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create many test files
+		for i := range 10 {
+			file := filepath.Join(testDir, "file", fmt.Sprintf("test%d.txt", i))
+			err := os.MkdirAll(filepath.Dir(file), 0o755)
+			require.NoError(t, err)
+			err = os.WriteFile(file, []byte("test"), 0o644)
+			require.NoError(t, err)
+		}
+
+		// Test with limit
+		matches, truncated, err := GlobWithDoubleStar("**/*.txt", testDir, 5)
+		require.NoError(t, err)
+		require.True(t, truncated, "Expected truncation with limit")
+		require.Len(t, matches, 5, "Expected exactly 5 matches with limit")
+	})
+
+	t.Run("handles nested directory patterns", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create nested structure
+		file1 := filepath.Join(testDir, "a", "b", "c", "file1.txt")
+		file2 := filepath.Join(testDir, "a", "b", "file2.txt")
+		file3 := filepath.Join(testDir, "a", "file3.txt")
+		file4 := filepath.Join(testDir, "file4.txt")
+
+		for _, file := range []string{file1, file2, file3, file4} {
+			err := os.MkdirAll(filepath.Dir(file), 0o755)
+			require.NoError(t, err)
+			err = os.WriteFile(file, []byte("test"), 0o644)
+			require.NoError(t, err)
+		}
+
+		// Test specific nested pattern - look for file1.txt specifically
+		matches, truncated, err := GlobWithDoubleStar("a/b/c/file1.txt", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find exactly file1.txt
+		require.Len(t, matches, 1, "Expected exactly 1 match for 'a/b/c/file1.txt' pattern")
+		require.Equal(t, filepath.ToSlash(file1), filepath.ToSlash(matches[0]), "Expected to find file1.txt specifically")
+
+		// Verify other files don't match this specific pattern
+		require.NotContains(t, matches, file2, "file2.txt should not match 'a/b/c/file1.txt' pattern")
+		require.NotContains(t, matches, file3, "file3.txt should not match 'a/b/c/file1.txt' pattern")
+		require.NotContains(t, matches, file4, "file4.txt should not match 'a/b/c/file1.txt' pattern")
+	})
+
+	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create files with different modification times
+		file1 := filepath.Join(testDir, "file1.txt")
+		file2 := filepath.Join(testDir, "file2.txt")
+		file3 := filepath.Join(testDir, "file3.txt")
+
+		// Create files with delays to ensure different modification times
+		err := os.WriteFile(file1, []byte("first"), 0o644)
+		require.NoError(t, err)
+
+		// Small delay to ensure different modification times
+		time.Sleep(10 * time.Millisecond)
+
+		err = os.WriteFile(file2, []byte("second"), 0o644)
+		require.NoError(t, err)
+
+		time.Sleep(10 * time.Millisecond)
+
+		err = os.WriteFile(file3, []byte("third"), 0o644)
+		require.NoError(t, err)
+
+		matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+		require.Len(t, matches, 3)
+
+		// Files should be sorted by modification time (newest first)
+		// So file3 should be first, file2 second, file1 last
+		require.Equal(t, file3, matches[0], "Newest file should be first")
+		require.Equal(t, file2, matches[1], "Middle file should be second")
+		require.Equal(t, file1, matches[2], "Oldest file should be last")
+	})
+
+	t.Run("handles empty directory", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		matches, truncated, err := GlobWithDoubleStar("**", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+		// Even empty directories should return the directory itself
+		require.Len(t, matches, 1, "Empty directory should return itself")
+		require.Equal(t, testDir, matches[0], "Should return the directory itself")
+	})
+
+	t.Run("handles non-existent search path", func(t *testing.T) {
+		nonExistentDir := filepath.Join(t.TempDir(), "does", "not", "exist")
+
+		matches, truncated, err := GlobWithDoubleStar("**", nonExistentDir, 0)
+		require.Error(t, err, "Should return error for non-existent search path")
+		require.False(t, truncated)
+		require.Empty(t, matches)
+	})
+
+	t.Run("respects basic ignore patterns", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create basic ignore structure
+		rootIgnore := filepath.Join(testDir, ".crushignore")
+
+		// Root .crushignore ignores *.tmp files and backup directories
+		err := os.WriteFile(rootIgnore, []byte("*.tmp\nbackup/\n"), 0o644)
+		require.NoError(t, err)
+
+		// Create test files and directories
+		goodFile := filepath.Join(testDir, "good.txt")
+		badFile := filepath.Join(testDir, "bad.tmp")
+		goodDir := filepath.Join(testDir, "src")
+		ignoredDir := filepath.Join(testDir, "backup")
+		ignoredFileInDir := filepath.Join(testDir, "backup", "old.txt")
+
+		// Create all files and directories
+		err = os.WriteFile(goodFile, []byte("content"), 0o644)
+		require.NoError(t, err)
+		err = os.WriteFile(badFile, []byte("temp content"), 0o644)
+		require.NoError(t, err)
+		err = os.MkdirAll(goodDir, 0o755)
+		require.NoError(t, err)
+		err = os.MkdirAll(ignoredDir, 0o755)
+		require.NoError(t, err)
+		err = os.WriteFile(ignoredFileInDir, []byte("old content"), 0o644)
+		require.NoError(t, err)
+
+		// Test that ignore patterns work for files
+		matches, truncated, err := GlobWithDoubleStar("*.tmp", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find no .tmp files (ignored by .crushignore)
+		require.Empty(t, matches, "Expected no matches for '*.tmp' pattern (should be ignored)")
+
+		// Test that ignore patterns work for directories
+		matches, truncated, err = GlobWithDoubleStar("backup", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find no backup directory (ignored by .crushignore)
+		require.Empty(t, matches, "Expected no matches for 'backup' pattern (should be ignored)")
+
+		// Test that non-ignored files are found
+		matches, truncated, err = GlobWithDoubleStar("*.txt", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+
+		// Should find only the good file, not the one in ignored directory
+		require.Len(t, matches, 1, "Expected exactly 1 match for '*.txt' pattern")
+		require.Contains(t, matches, goodFile, "Should find good.txt")
+		require.NotContains(t, matches, ignoredFileInDir, "Should not find files in ignored directories")
+	})
+
+	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		// Create files and directories with different modification times
+		oldFile := filepath.Join(testDir, "old.test")
+		newDir := filepath.Join(testDir, "new.test")
+		midFile := filepath.Join(testDir, "mid.test")
+
+		// Create old file first
+		err := os.WriteFile(oldFile, []byte("old"), 0o644)
+		require.NoError(t, err)
+
+		time.Sleep(1 * time.Millisecond)
+
+		// Create directory
+		err = os.MkdirAll(newDir, 0o755)
+		require.NoError(t, err)
+
+		time.Sleep(1 * time.Millisecond)
+
+		// Create newer file
+		err = os.WriteFile(midFile, []byte("mid"), 0o644)
+		require.NoError(t, err)
+
+		// Test pattern that matches both files and directories
+		matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+		require.Len(t, matches, 3, "Expected 3 matches for '*.test' pattern")
+
+		// Results should be sorted by modification time (newest first)
+		require.Equal(t, midFile, matches[0], "Newest file should be first")
+		require.Equal(t, newDir, matches[1], "Directory should be second")
+		require.Equal(t, oldFile, matches[2], "Oldest file should be last")
+	})
+}

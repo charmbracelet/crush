@@ -13,7 +13,7 @@ import (
 
 type EventType string
 
-const maxRetries = 8
+const maxRetries = 3
 
 const (
 	EventContentStart   EventType = "content_start"

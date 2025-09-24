@@ -493,12 +493,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	if apiErr.StatusCode == 401 {
-		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
-		if err != nil {
-			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
-		}
-		a.client = createAnthropicClient(a.providerOptions, a.tp)
-		return true, 0, nil
+		return false, 0, err
 	}
 
 	// Handle context limit exceeded error (400 Bad Request)

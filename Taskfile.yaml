@@ -89,7 +89,7 @@ tasks:
     desc: Create and push a new tag following semver
     vars:
       NEXT:
-        sh: go run github.com/caarlos0/svu@latest next
+        sh: go run github.com/caarlos0/svu/v3@latest next
     prompt: "This will release {{.NEXT}}. Continue?"
     preconditions:
       - sh: '[ $(git symbolic-ref --short HEAD) = "main" ]'

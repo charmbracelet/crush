@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -513,11 +514,11 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	retryAfterValues := []string{}
 	if errors.As(err, &apiErr) {
 		// Check for token expiration (401 Unauthorized)
-		if apiErr.StatusCode == 401 {
+		if apiErr.StatusCode == http.StatusUnauthorized {
 			return false, 0, err
 		}
 
-		if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
+		if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusInternalServerError {
 			return false, 0, err
 		}
 

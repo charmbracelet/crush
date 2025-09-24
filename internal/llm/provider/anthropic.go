@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -492,12 +493,12 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
-	if apiErr.StatusCode == 401 {
+	if apiErr.StatusCode == http.StatusUnauthorized {
 		return false, 0, err
 	}
 
 	// Handle context limit exceeded error (400 Bad Request)
-	if apiErr.StatusCode == 400 {
+	if apiErr.StatusCode == http.StatusBadRequest {
 		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
 			a.adjustedMaxTokens = adjusted
 			slog.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)

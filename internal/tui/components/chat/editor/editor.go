@@ -67,6 +67,9 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// History
+	promptHistoryIndex int
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -309,6 +312,10 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+		}
+		// History
+		if key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			m.textarea.SetValue(m.handleMessageHistory(msg))
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
@@ -583,4 +590,45 @@ func New(app *app.App) Editor {
 	e.textarea.Placeholder = e.readyPlaceholder
 
 	return e
+}
+
+func (m *editorCmp) getUserMessagesAsText(ctx context.Context) ([]string, error) {
+	allMessages, err := m.app.Messages.List(ctx, m.session.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var userMessages []string
+	for _, msg := range allMessages {
+		if msg.Role == message.User {
+			userMessages = append(userMessages, msg.Content().Text)
+		}
+	}
+	return userMessages, nil
+}
+
+func (m *editorCmp) handleMessageHistory(msg tea.KeyMsg) string {
+	ctx := context.Background()
+	userMessages, err := m.getUserMessagesAsText(ctx)
+	if err != nil {
+		return "" // Do nothing.
+	}
+	userMessages = append(userMessages, "") // Give the user a reset option.
+	if len(userMessages) > 0 {
+		if key.Matches(msg, m.keyMap.Previous) {
+			if m.promptHistoryIndex == 0 {
+				m.promptHistoryIndex = len(userMessages) - 1
+			} else {
+				m.promptHistoryIndex -= 1
+			}
+		}
+		if key.Matches(msg, m.keyMap.Next) {
+			if m.promptHistoryIndex == len(userMessages)-1 {
+				m.promptHistoryIndex = 0
+			} else {
+				m.promptHistoryIndex += 1
+			}
+		}
+	}
+	return userMessages[m.promptHistoryIndex]
 }

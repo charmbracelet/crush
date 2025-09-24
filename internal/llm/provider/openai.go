@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,6 +63,30 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	}
 
 	return openai.NewClient(openaiClientOptions...)
+}
+
+// isAzureOpenAI detects if the base URL indicates an Azure OpenAI endpoint
+func (o *openaiClient) isAzureOpenAI() bool {
+	if o.providerOptions.baseURL == "" {
+		return false
+	}
+
+	// Resolve the baseURL to handle any templated values
+	resolvedBaseURL, err := config.Get().Resolve(o.providerOptions.baseURL)
+	if err != nil || resolvedBaseURL == "" {
+		return false
+	}
+
+	// Parse the URL to extract the hostname
+	parsedURL, err := url.Parse(resolvedBaseURL)
+	if err != nil {
+		return false
+	}
+
+	hostname := strings.ToLower(parsedURL.Hostname())
+
+	// Check for Azure OpenAI patterns
+	return strings.HasSuffix(hostname, ".openai.azure.com") || strings.HasSuffix(hostname, ".cognitiveservices.azure.com")
 }
 
 func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessages []openai.ChatCompletionMessageParamUnion) {
@@ -241,8 +266,30 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	if o.providerOptions.maxTokens > 0 {
 		maxTokens = o.providerOptions.maxTokens
 	}
-	if model.CanReason {
+
+	// Ensure maxTokens is not zero, providing a default if necessary
+	if maxTokens == 0 {
+		maxTokens = 1024 // Default to 1024 if no value is configured
+	}
+
+	// Provider-aware parameter logic
+	isAzure := o.isAzureOpenAI()
+
+	if isAzure {
+		// For Azure OpenAI: Always use MaxCompletionTokens regardless of model reasoning capability
 		params.MaxCompletionTokens = openai.Int(maxTokens)
+		// Leave MaxTokens unset for Azure (it's already unset by default)
+	} else {
+		// For standard OpenAI: Use existing logic based on model reasoning capability
+		if model.CanReason {
+			params.MaxCompletionTokens = openai.Int(maxTokens)
+		} else {
+			params.MaxTokens = openai.Int(maxTokens)
+		}
+	}
+
+	// Set reasoning effort for reasoning models (applies to both Azure and standard OpenAI)
+	if model.CanReason {
 		switch reasoningEffort {
 		case "low":
 			params.ReasoningEffort = shared.ReasoningEffortLow
@@ -255,8 +302,6 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		default:
 			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
 		}
-	} else {
-		params.MaxTokens = openai.Int(maxTokens)
 	}
 
 	return params

@@ -88,3 +88,159 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAzureOpenAI(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseURL  string
+		expected bool
+	}{
+		{
+			name:     "Azure OpenAI URL",
+			baseURL:  "https://test.openai.azure.com/openai/deployments/gpt-4/chat/completions?api-version=2024-02-15-preview",
+			expected: true,
+		},
+		{
+			name:     "Azure OpenAI URL subdomain",
+			baseURL:  "https://myresource.openai.azure.com",
+			expected: true,
+		},
+		{
+			name:     "Standard OpenAI URL",
+			baseURL:  "https://api.openai.com/v1",
+			expected: false,
+		},
+		{
+			name:     "Empty URL",
+			baseURL:  "",
+			expected: false,
+		},
+		{
+			name:     "Non-OpenAI URL",
+			baseURL:  "https://api.anthropic.com/v1",
+			expected: false,
+		},
+		{
+			name:     "Case insensitive Azure URL",
+			baseURL:  "https://TEST.OPENAI.AZURE.COM/api",
+			expected: true,
+		},
+		{
+			name:     "Azure Cognitive Services URL",
+			baseURL:  "https://my-custom-name.cognitiveservices.azure.com/",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &openaiClient{
+				providerOptions: providerClientOptions{
+					baseURL: tt.baseURL,
+				},
+			}
+			result := client.isAzureOpenAI()
+			if result != tt.expected {
+				t.Errorf("isAzureOpenAI() = %v, expected %v for URL: %s", result, tt.expected, tt.baseURL)
+			}
+		})
+	}
+}
+
+func TestPreparedParamsProviderAware(t *testing.T) {
+	tests := []struct {
+		name                      string
+		baseURL                   string
+		modelCanReason            bool
+		expectMaxTokens           bool
+		expectMaxCompletionTokens bool
+	}{
+		{
+			name:                      "Azure OpenAI with non-reasoning model",
+			baseURL:                   "https://test.openai.azure.com",
+			modelCanReason:            false,
+			expectMaxTokens:           false,
+			expectMaxCompletionTokens: true,
+		},
+		{
+			name:                      "Azure OpenAI with reasoning model",
+			baseURL:                   "https://test.openai.azure.com",
+			modelCanReason:            true,
+			expectMaxTokens:           false,
+			expectMaxCompletionTokens: true,
+		},
+		{
+			name:                      "Azure Cognitive Services with non-reasoning model",
+			baseURL:                   "https://my-custom-name.cognitiveservices.azure.com/",
+			modelCanReason:            false,
+			expectMaxTokens:           false,
+			expectMaxCompletionTokens: true,
+		},
+		{
+			name:                      "Standard OpenAI with non-reasoning model",
+			baseURL:                   "https://api.openai.com/v1",
+			modelCanReason:            false,
+			expectMaxTokens:           true,
+			expectMaxCompletionTokens: false,
+		},
+		{
+			name:                      "Standard OpenAI with reasoning model",
+			baseURL:                   "https://api.openai.com/v1",
+			modelCanReason:            true,
+			expectMaxTokens:           false,
+			expectMaxCompletionTokens: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &openaiClient{
+				providerOptions: providerClientOptions{
+					baseURL:   tt.baseURL,
+					modelType: config.SelectedModelTypeLarge,
+					model: func(config.SelectedModelType) catwalk.Model {
+						return catwalk.Model{
+							ID:               "test-model",
+							Name:             "test-model",
+							DefaultMaxTokens: 1000,
+							CanReason:        tt.modelCanReason,
+						}
+					},
+				},
+			}
+
+			messages := []openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage("test message"),
+			}
+			tools := []openai.ChatCompletionToolParam{}
+
+			params := client.preparedParams(messages, tools)
+
+			// Check MaxTokens
+			if tt.expectMaxTokens {
+				if !params.MaxTokens.Valid() {
+					t.Error("Expected MaxTokens to be set, but it was not")
+				} else if params.MaxTokens.Value <= 0 {
+					t.Errorf("Expected MaxTokens to be positive, got %d", params.MaxTokens.Value)
+				}
+			} else {
+				if params.MaxTokens.Valid() {
+					t.Errorf("Expected MaxTokens to be unset, but it was set to %d", params.MaxTokens.Value)
+				}
+			}
+
+			// Check MaxCompletionTokens
+			if tt.expectMaxCompletionTokens {
+				if !params.MaxCompletionTokens.Valid() {
+					t.Error("Expected MaxCompletionTokens to be set, but it was not")
+				} else if params.MaxCompletionTokens.Value <= 0 {
+					t.Errorf("Expected MaxCompletionTokens to be positive, got %d", params.MaxCompletionTokens.Value)
+				}
+			} else {
+				if params.MaxCompletionTokens.Valid() {
+					t.Errorf("Expected MaxCompletionTokens to be unset, but it was set to %d", params.MaxCompletionTokens.Value)
+				}
+			}
+		})
+	}
+}

@@ -514,12 +514,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	if errors.As(err, &apiErr) {
 		// Check for token expiration (401 Unauthorized)
 		if apiErr.StatusCode == 401 {
-			o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
-			if err != nil {
-				return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
-			}
-			o.client = createOpenAIClient(o.providerOptions)
-			return true, 0, nil
+			return false, 0, err
 		}
 
 		if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {

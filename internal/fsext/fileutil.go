@@ -92,7 +92,6 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 			if walker.ShouldSkip(path) {
 				return filepath.SkipDir
 			}
-			return nil
 		}
 
 		if walker.ShouldSkip(path) {

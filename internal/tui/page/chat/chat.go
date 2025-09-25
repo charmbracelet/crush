@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -26,9 +27,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -255,6 +258,10 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case commands.ToggleThinkingMsg:
 		return p, p.toggleThinking()
+	case commands.OpenReasoningDialogMsg:
+		return p, p.openReasoningDialog()
+	case reasoning.ReasoningEffortSelectedMsg:
+		return p, p.handleReasoningEffortSelected(msg.Effort)
 	case commands.OpenExternalEditorMsg:
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
@@ -549,6 +556,49 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 	}
 }
 
+func (p *chatPage) openReasoningDialog() tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		model := cfg.GetModelByType(agentCfg.Model)
+		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+
+		if providerCfg != nil && model != nil &&
+			providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
+			return dialogs.OpenDialogMsg{
+				Model: reasoning.NewReasoningDialog(),
+			}
+		}
+		return nil
+	}
+}
+
+func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+		agentCfg := cfg.Agents["coder"]
+		currentModel := cfg.Models[agentCfg.Model]
+
+		// Update the model configuration
+		currentModel.ReasoningEffort = effort
+		cfg.Models[agentCfg.Model] = currentModel
+
+		// Update the agent with the new configuration
+		if err := p.app.UpdateAgentModel(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update reasoning effort: " + err.Error(),
+			}
+		}
+
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Reasoning effort set to " + effort,
+		}
+	}
+}
+
 func (p *chatPage) setCompactMode(compact bool) {
 	if p.compact == compact {
 		return
@@ -716,7 +766,7 @@ func (p *chatPage) Bindings() []key.Binding {
 		cancelBinding := p.keyMap.Cancel
 		if p.isCanceling {
 			cancelBinding = key.NewBinding(
-				key.WithKeys("esc"),
+				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "press again to cancel"),
 			)
 		}
@@ -785,7 +835,7 @@ func (p *chatPage) Help() help.KeyMap {
 			shortList = append(shortList,
 				// Go back
 				key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "back"),
 				),
 			)
@@ -820,7 +870,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("tab/enter", "complete"),
 				),
 				key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "cancel"),
 				),
 				key.NewBinding(
@@ -835,18 +885,18 @@ func (p *chatPage) Help() help.KeyMap {
 		}
 		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 			cancelBinding := key.NewBinding(
-				key.WithKeys("esc"),
+				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "cancel"),
 			)
 			if p.isCanceling {
 				cancelBinding = key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
 			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
 				cancelBinding = key.NewBinding(
-					key.WithKeys("esc"),
+					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "clear queue"),
 				)
 			}
@@ -992,7 +1042,7 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("ctrl+r+r", "delete all attachments"),
 					),
 					key.NewBinding(
-						key.WithKeys("esc"),
+						key.WithKeys("esc", "alt+esc"),
 						key.WithHelp("esc", "cancel delete mode"),
 					),
 				})

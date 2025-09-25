@@ -23,7 +23,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl+f", "add attachment"),
 		),
 		Cancel: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "cancel"),
 		),
 		Tab: key.NewBinding(

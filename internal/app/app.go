@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"sync"
 	"time"
 
@@ -34,12 +33,7 @@ type App struct {
 
 	CoderAgent agent.Service
 
-	LSPClients map[string]*lsp.Client
-
-	clientsMutex sync.RWMutex
-
-	watcherCancelFuncs *csync.Slice[context.CancelFunc]
-	lspWatcherWG       sync.WaitGroup
+	LSPClients *csync.Map[string, *lsp.Client]
 
 	config *config.Config
 
@@ -50,7 +44,7 @@ type App struct {
 
 	// global context and cleanup functions
 	globalCtx    context.Context
-	cleanupFuncs []func()
+	cleanupFuncs []func() error
 }
 
 // New initializes a new applcation instance.
@@ -70,13 +64,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		LSPClients:  make(map[string]*lsp.Client),
+		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
 
 		config: cfg,
-
-		watcherCancelFuncs: csync.NewSlice[context.CancelFunc](),
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -87,6 +79,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
+
+	// cleanup database upon app shutdown
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
@@ -221,9 +216,10 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() {
+	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
+		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
@@ -297,10 +293,11 @@ func (app *App) Subscribe(program *tea.Program) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() {
+	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
+		return nil
 	})
 	defer app.tuiWG.Done()
 
@@ -325,23 +322,10 @@ func (app *App) Shutdown() {
 		app.CoderAgent.CancelAll()
 	}
 
-	for cancel := range app.watcherCancelFuncs.Seq() {
-		cancel()
-	}
-
-	// Wait for all LSP watchers to finish.
-	app.lspWatcherWG.Wait()
-
-	// Get all LSP clients.
-	app.clientsMutex.RLock()
-	clients := make(map[string]*lsp.Client, len(app.LSPClients))
-	maps.Copy(clients, app.LSPClients)
-	app.clientsMutex.RUnlock()
-
 	// Shutdown all LSP clients.
-	for name, client := range clients {
+	for name, client := range app.LSPClients.Seq2() {
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-		if err := client.Shutdown(shutdownCtx); err != nil {
+		if err := client.Close(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
 		}
 		cancel()
@@ -350,7 +334,9 @@ func (app *App) Shutdown() {
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
-			cleanup()
+			if err := cleanup(); err != nil {
+				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+			}
 		}
 	}
 }

@@ -207,7 +207,7 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 			args = append(args, part)
 		}
 	}
-	return
+	return args, flags
 }
 
 func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {

@@ -15,7 +15,7 @@ func TestMerge(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	expected := `{"baz":"qux","foo":"bar"}`
+	expected := `{"foo":"bar","baz":"qux"}`
 	got, err := io.ReadAll(merged)
 	if err != nil {
 		t.Fatalf("expected no error reading merged data, got %v", err)

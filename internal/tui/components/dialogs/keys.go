@@ -12,7 +12,7 @@ type KeyMap struct {
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Close: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 		),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -141,8 +142,16 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		return true
 	}
 
-	if dl.getIgnore(filepath.Dir(path)).MatchesPath(relPath) {
-		slog.Debug("ignoring dir pattern", "path", relPath, "dir", filepath.Dir(path))
+	parentDir := filepath.Dir(path)
+	ignoreParser := dl.getIgnore(parentDir)
+	if ignoreParser.MatchesPath(relPath) {
+		slog.Debug("ignoring dir pattern", "path", relPath, "dir", parentDir)
+		return true
+	}
+
+	// For directories, also check with trailing slash (gitignore convention)
+	if ignoreParser.MatchesPath(relPath + "/") {
+		slog.Debug("ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
 		return true
 	}
 
@@ -160,10 +169,13 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 
 func (dl *directoryLister) checkParentIgnores(path string) bool {
 	parent := filepath.Dir(filepath.Dir(path))
-	for parent != dl.rootPath && parent != "." && path != "." {
+	for parent != "." && path != "." {
 		if dl.getIgnore(parent).MatchesPath(path) {
 			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
 			return true
+		}
+		if parent == dl.rootPath {
+			break
 		}
 		parent = filepath.Dir(parent)
 	}
@@ -189,7 +201,7 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 
 // ListDirectory lists files and directories in the specified path,
 func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
-	var results []string
+	results := csync.NewSlice[string]()
 	truncated := false
 	dl := NewDirectoryLister(initialPath)
 
@@ -216,19 +228,19 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 			if d.IsDir() {
 				path = path + string(filepath.Separator)
 			}
-			results = append(results, path)
+			results.Append(path)
 		}
 
-		if limit > 0 && len(results) >= limit {
+		if limit > 0 && results.Len() >= limit {
 			truncated = true
 			return filepath.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil && len(results) == 0 {
+	if err != nil && results.Len() == 0 {
 		return nil, truncated, err
 	}
 
-	return results, truncated, nil
+	return slices.Collect(results.Seq()), truncated, nil
 }

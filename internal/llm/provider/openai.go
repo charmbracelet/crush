@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -178,7 +179,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 		}
 	}
 
-	return
+	return openaiMessages
 }
 
 func (o *openaiClient) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {
@@ -340,6 +341,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			toolCalls := make([]message.ToolCall, 0)
 			msgToolCalls := make(map[int64]openai.ChatCompletionMessageToolCall)
 			toolMap := make(map[string]openai.ChatCompletionMessageToolCall)
+			toolCallIDMap := make(map[string]string)
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
 				// Kujtim: this is an issue with openrouter qwen, its sending -1 for the tool index
@@ -367,6 +369,16 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 						currentContent += choice.Delta.Content
 					} else if len(choice.Delta.ToolCalls) > 0 {
 						toolCall := choice.Delta.ToolCalls[0]
+						if strings.HasPrefix(toolCall.ID, "functions.") {
+							exID, ok := toolCallIDMap[toolCall.ID]
+							if !ok {
+								newID := uuid.NewString()
+								toolCallIDMap[toolCall.ID] = newID
+								toolCall.ID = newID
+							} else {
+								toolCall.ID = exID
+							}
+						}
 						newToolCall := false
 						if existingToolCall, ok := msgToolCalls[toolCall.Index]; ok { // tool call exists
 							if toolCall.ID != "" && toolCall.ID != existingToolCall.ID {
@@ -472,7 +484,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				select {
 				case <-ctx.Done():
 					// context cancelled
-					if ctx.Err() == nil {
+					if ctx.Err() != nil {
 						eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
 					}
 					close(eventChan)
@@ -502,16 +514,22 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	retryAfterValues := []string{}
 	if errors.As(err, &apiErr) {
 		// Check for token expiration (401 Unauthorized)
-		if apiErr.StatusCode == 401 {
+		if apiErr.StatusCode == http.StatusUnauthorized {
+			prev := o.providerOptions.apiKey
+			// in case the key comes from a script, we try to re-evaluate it.
 			o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
 			if err != nil {
 				return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+			}
+			// if it didn't change, do not retry.
+			if prev == o.providerOptions.apiKey {
+				return false, 0, err
 			}
 			o.client = createOpenAIClient(o.providerOptions)
 			return true, 0, nil
 		}
 
-		if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
+		if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusInternalServerError {
 			return false, 0, err
 		}
 

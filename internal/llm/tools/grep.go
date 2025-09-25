@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,55 +93,10 @@ type grepTool struct {
 	workingDir string
 }
 
-const (
-	GrepToolName    = "grep"
-	grepDescription = `Fast content search tool that finds files containing specific text or patterns, returning matching file paths sorted by modification time (newest first).
+const GrepToolName = "grep"
 
-WHEN TO USE THIS TOOL:
-- Use when you need to find files containing specific text or patterns
-- Great for searching code bases for function names, variable declarations, or error messages
-- Useful for finding all files that use a particular API or pattern
-
-HOW TO USE:
-- Provide a regex pattern to search for within file contents
-- Set literal_text=true if you want to search for the exact text with special characters (recommended for non-regex users)
-- Optionally specify a starting directory (defaults to current working directory)
-- Optionally provide an include pattern to filter which files to search
-- Results are sorted with most recently modified files first
-
-REGEX PATTERN SYNTAX (when literal_text=false):
-- Supports standard regular expression syntax
-- 'function' searches for the literal text "function"
-- 'log\..*Error' finds text starting with "log." and ending with "Error"
-- 'import\s+.*\s+from' finds import statements in JavaScript/TypeScript
-
-COMMON INCLUDE PATTERN EXAMPLES:
-- '*.js' - Only search JavaScript files
-- '*.{ts,tsx}' - Only search TypeScript files
-- '*.go' - Only search Go files
-
-LIMITATIONS:
-- Results are limited to 100 files (newest first)
-- Performance depends on the number of files being searched
-- Very large binary files may be skipped
-- Hidden files (starting with '.') are skipped
-
-IGNORE FILE SUPPORT:
-- Respects .gitignore patterns to skip ignored files and directories
-- Respects .crushignore patterns for additional ignore rules
-- Both ignore files are automatically detected in the search root directory
-
-CROSS-PLATFORM NOTES:
-- Uses ripgrep (rg) command if available for better performance
-- Falls back to built-in Go implementation if ripgrep is not available
-- File paths are normalized automatically for cross-platform compatibility
-
-TIPS:
-- For faster, more targeted searches, first use Glob to find relevant files, then use Grep
-- When doing iterative exploration that may require multiple rounds of searching, consider using the Agent tool instead
-- Always check if results are truncated and refine your search pattern if needed
-- Use literal_text=true when searching for exact text containing special characters like dots, parentheses, etc.`
-)
+//go:embed grep.md
+var grepDescription []byte
 
 func NewGrepTool(workingDir string) BaseTool {
 	return &grepTool{
@@ -155,7 +111,7 @@ func (g *grepTool) Name() string {
 func (g *grepTool) Info() ToolInfo {
 	return ToolInfo{
 		Name:        GrepToolName,
-		Description: grepDescription,
+		Description: string(grepDescription),
 		Parameters: map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
@@ -279,11 +235,13 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
 
-	cmd.Args = append(
-		cmd.Args,
-		"--ignore-file", filepath.Join(path, ".gitignore"),
-		"--ignore-file", filepath.Join(path, ".crushignore"),
-	)
+	// Only add ignore files if they exist
+	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
+		ignorePath := filepath.Join(path, ignoreFile)
+		if _, err := os.Stat(ignorePath); err == nil {
+			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
+		}
+	}
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -301,18 +259,16 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			continue
 		}
 
-		// Parse ripgrep output format: file:line:content
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+		// Parse ripgrep output using null separation
+		filePath, lineNumStr, lineText, ok := parseRipgrepLine(line)
+		if !ok {
 			continue
 		}
 
-		filePath := parts[0]
-		lineNum, err := strconv.Atoi(parts[1])
+		lineNum, err := strconv.Atoi(lineNumStr)
 		if err != nil {
 			continue
 		}
-		lineText := parts[2]
 
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
@@ -328,6 +284,33 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	return matches, nil
+}
+
+// parseRipgrepLine parses ripgrep output with null separation to handle Windows paths
+func parseRipgrepLine(line string) (filePath, lineNum, lineText string, ok bool) {
+	// Split on null byte first to separate filename from rest
+	parts := strings.SplitN(line, "\x00", 2)
+	if len(parts) != 2 {
+		return "", "", "", false
+	}
+
+	filePath = parts[0]
+	remainder := parts[1]
+
+	// Now split the remainder on first colon: "linenum:content"
+	colonIndex := strings.Index(remainder, ":")
+	if colonIndex == -1 {
+		return "", "", "", false
+	}
+
+	lineNumStr := remainder[:colonIndex]
+	lineText = remainder[colonIndex+1:]
+
+	if _, err := strconv.Atoi(lineNumStr); err != nil {
+		return "", "", "", false
+	}
+
+	return filePath, lineNumStr, lineText, true
 }
 
 func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
@@ -357,11 +340,21 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 		}
 
 		if info.IsDir() {
-			return nil // Skip directories
+			// Check if directory should be skipped
+			if walker.ShouldSkip(path) {
+				return filepath.SkipDir
+			}
+			return nil // Continue into directory
 		}
 
-		// Use walker's shouldSkip method instead of just SkipHidden
+		// Use walker's shouldSkip method for files
 		if walker.ShouldSkip(path) {
+			return nil
+		}
+
+		// Skip hidden files (starting with a dot) to match ripgrep's default behavior
+		base := filepath.Base(path)
+		if base != "." && strings.HasPrefix(base, ".") {
 			return nil
 		}
 

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -196,6 +197,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.app.CoderAgent.IsBusy() {
 			return a, util.ReportWarn("Agent is busy, please wait...")
 		}
+
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
@@ -211,6 +213,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// File Picker
 	case commands.OpenFilePickerMsg:
+		event.FilePickerOpened()
+
 		if a.dialog.ActiveDialogID() == filepicker.FilePickerID {
 			// If the commands dialog is already open, close it
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
@@ -406,6 +410,16 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 
 // handleKeyPressMsg processes keyboard input and routes to appropriate handlers.
 func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
+	// Check this first as the user should be able to quit no matter what.
+	if key.Matches(msg, a.keyMap.Quit) {
+		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
+			return tea.Quit
+		}
+		return util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(),
+		})
+	}
+
 	if a.completions.Open() {
 		// completions
 		keyMap := a.completions.KeyMap()
@@ -430,14 +444,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		a.showingFullHelp = !a.showingFullHelp
 		return a.handleWindowResize(a.wWidth, a.wHeight)
 	// dialogs
-	case key.Matches(msg, a.keyMap.Quit):
-		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
-			return tea.Quit
-		}
-		return util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: quit.NewQuitDialog(),
-		})
-
 	case key.Matches(msg, a.keyMap.Commands):
 		// if the app is not configured show no commands
 		if !a.isConfigured {

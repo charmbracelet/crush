@@ -31,7 +31,7 @@ func DefaultCommandsDialogKeyMap() CommandsDialogKeyMap {
 			key.WithHelp("tab", "switch selection"),
 		),
 		Close: key.NewBinding(
-			key.WithKeys("esc"),
+			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "cancel"),
 		),
 	}

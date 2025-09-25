@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -613,6 +614,35 @@ func (p *permissionDialogCmp) generateDefaultContent() string {
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 
 	content := p.permission.Description
+
+	// Add pretty-printed JSON parameters for MCP tools
+	if p.permission.Params != nil {
+		var paramStr string
+
+		// Ensure params is a string
+		if str, ok := p.permission.Params.(string); ok {
+			paramStr = str
+		} else {
+			paramStr = fmt.Sprintf("%v", p.permission.Params)
+		}
+
+		// Try to parse as JSON for pretty printing
+		var parsed any
+		if err := json.Unmarshal([]byte(paramStr), &parsed); err == nil {
+			if b, err := json.MarshalIndent(parsed, "", "  "); err == nil {
+				if content != "" {
+					content += "\n\n"
+				}
+				content += string(b)
+			}
+		} else {
+			// Not JSON, show as-is
+			if content != "" {
+				content += "\n\n"
+			}
+			content += paramStr
+		}
+	}
 
 	content = strings.TrimSpace(content)
 	content = "\n" + content + "\n"

@@ -408,7 +408,7 @@ func (dv *DiffView) renderUnified() string {
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
-		return
+		return content, leadingEllipsis
 	}
 
 outer:
@@ -531,7 +531,7 @@ func (dv *DiffView) renderSplit() string {
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = ansi.Truncate(content, dv.codeWidth, "…")
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
-		return
+		return content, leadingEllipsis
 	}
 
 outer:
@@ -716,7 +716,7 @@ func (dv *DiffView) hunkShownLines(h *udiff.Hunk) (before, after int) {
 			before++
 		}
 	}
-	return
+	return before, after
 }
 
 func (dv *DiffView) lineStyleForType(t udiff.OpKind) LineStyle {

@@ -493,7 +493,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	if apiErr.StatusCode == 401 {
-		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
+		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey.String())
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}

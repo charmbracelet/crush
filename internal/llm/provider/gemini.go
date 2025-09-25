@@ -436,7 +436,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
+		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey.String())
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}

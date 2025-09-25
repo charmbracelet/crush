@@ -129,8 +129,8 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			if config.BaseURL != "" {
 				p.APIEndpoint = config.BaseURL
 			}
-			if config.APIKey != "" {
-				p.APIKey = config.APIKey
+			if config.APIKey.String() != "" {
+				p.APIKey = config.APIKey.String()
 			}
 			if len(config.Models) > 0 {
 				models := []catwalk.Model{}
@@ -172,7 +172,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			ID:                 string(p.ID),
 			Name:               p.Name,
 			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
+			APIKey:             NewFlexibleAPIKey(p.APIKey),
 			Type:               p.Type,
 			Disable:            config.Disable,
 			SystemPromptPrefix: config.SystemPromptPrefix,
@@ -257,7 +257,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.APIKey == "" {
+		if providerConfig.APIKey.String() == "" {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		if providerConfig.BaseURL == "" {
@@ -276,7 +276,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			continue
 		}
 
-		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
+		apiKey, err := resolver.ResolveValue(providerConfig.APIKey.String())
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}

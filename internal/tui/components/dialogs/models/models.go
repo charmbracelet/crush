@@ -126,7 +126,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				providerConfig := config.ProviderConfig{
 					ID:      string(m.selectedModel.Provider.ID),
 					Name:    m.selectedModel.Provider.Name,
-					APIKey:  m.apiKeyValue,
+					APIKey:  config.NewFlexibleAPIKey(m.apiKeyValue),
 					Type:    provider.Type,
 					BaseURL: provider.APIEndpoint,
 				}

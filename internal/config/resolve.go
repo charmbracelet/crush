@@ -38,7 +38,15 @@ func NewShellVariableResolver(env env.Env) VariableResolver {
 // it will resolve shell-like variable substitution anywhere in the string, including:
 // - $(command) for command substitution
 // - $VAR or ${VAR} for environment variables
+// - JSON objects (for API keys that are JSON objects)
 func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
+	// Special case: Check if the value is a JSON object (starts with { and ends with })
+	trimmedValue := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmedValue, "{") && strings.HasSuffix(trimmedValue, "}") {
+		// Return JSON objects as-is, they're valid API keys for some providers
+		return trimmedValue, nil
+	}
+
 	// Special case: lone $ is an error (backward compatibility)
 	if value == "$" {
 		return "", fmt.Errorf("invalid value format: %s", value)
@@ -163,6 +171,13 @@ func NewEnvironmentVariableResolver(env env.Env) VariableResolver {
 
 // ResolveValue resolves environment variables from the provided env.Env.
 func (r *environmentVariableResolver) ResolveValue(value string) (string, error) {
+	// Check if the value is a JSON object (starts with { and ends with })
+	trimmedValue := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmedValue, "{") && strings.HasSuffix(trimmedValue, "}") {
+		// Return JSON objects as-is, they're valid API keys for some providers
+		return trimmedValue, nil
+	}
+
 	if !strings.HasPrefix(value, "$") {
 		return value, nil
 	}

@@ -76,7 +76,7 @@ type ProviderConfig struct {
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
 	// The provider's API key.
-	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
+	APIKey FlexibleAPIKey `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
@@ -392,7 +392,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 
 	providerConfig, exists := c.Providers.Get(providerID)
 	if exists {
-		providerConfig.APIKey = apiKey
+		providerConfig.APIKey = NewFlexibleAPIKey(apiKey)
 		c.Providers.Set(providerID, providerConfig)
 		return nil
 	}
@@ -412,7 +412,7 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 			Name:         foundProvider.Name,
 			BaseURL:      foundProvider.APIEndpoint,
 			Type:         foundProvider.Type,
-			APIKey:       apiKey,
+			APIKey:       NewFlexibleAPIKey(apiKey),
 			Disable:      false,
 			ExtraHeaders: make(map[string]string),
 			ExtraParams:  make(map[string]string),
@@ -502,7 +502,7 @@ func (c *Config) Resolver() VariableResolver {
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	testURL := ""
 	headers := make(map[string]string)
-	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	apiKey, _ := resolver.ResolveValue(c.APIKey.String())
 	switch c.Type {
 	case catwalk.TypeOpenAI:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)

@@ -201,7 +201,7 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				providerConfig := config.ProviderConfig{
 					ID:      string(s.selectedModel.Provider.ID),
 					Name:    s.selectedModel.Provider.Name,
-					APIKey:  s.apiKeyValue,
+					APIKey:  config.NewFlexibleAPIKey(s.apiKeyValue),
 					Type:    provider.Type,
 					BaseURL: provider.APIEndpoint,
 				}

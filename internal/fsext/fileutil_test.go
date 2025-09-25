@@ -81,9 +81,6 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		// Should find all three pkg directories
-		require.Len(t, matches, 3, "Expected 3 matches for '**/pkg' pattern")
-
 		// Convert to relative paths for easier comparison
 		var relativeMatches []string
 		for _, match := range matches {
@@ -92,10 +89,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			relativeMatches = append(relativeMatches, filepath.ToSlash(rel))
 		}
 
-		require.Contains(t, relativeMatches, "pkg", "Should find top-level pkg directory")
-		require.Contains(t, relativeMatches, "src/pkg", "Should find nested src/pkg directory")
-		require.Contains(t, relativeMatches, "lib/pkg", "Should find nested lib/pkg directory")
-		require.NotContains(t, relativeMatches, "other", "Should not match 'other' directory")
+		// Should find all three pkg directories
+		require.ElementsMatch(t, relativeMatches, []string{"pkg", "src/pkg", "lib/pkg"})
 	})
 
 	t.Run("finds directory contents with recursive patterns", func(t *testing.T) {
@@ -119,9 +114,6 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		// Should find the directory itself and all contents
-		require.GreaterOrEqual(t, len(matches), 4, "Expected at least 4 matches for 'pkg/**' pattern")
-
 		var relativeMatches []string
 		for _, match := range matches {
 			rel, err := filepath.Rel(testDir, match)
@@ -129,10 +121,14 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			relativeMatches = append(relativeMatches, filepath.ToSlash(rel))
 		}
 
-		require.Contains(t, relativeMatches, "pkg", "Should find pkg directory itself")
-		require.Contains(t, relativeMatches, "pkg/main.go", "Should find files in pkg directory")
-		require.Contains(t, relativeMatches, "pkg/internal", "Should find subdirectories")
-		require.Contains(t, relativeMatches, "pkg/internal/helper.go", "Should find files in subdirectories")
+		// Should find the directory itself and all contents
+		require.ElementsMatch(t, relativeMatches, []string{
+			"pkg",
+			"pkg/main.go",
+			"pkg/utils.go",
+			"pkg/internal",
+			"pkg/internal/helper.go",
+		})
 	})
 
 	t.Run("respects limit parameter", func(t *testing.T) {
@@ -172,7 +168,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.False(t, truncated)
 
 		// Should find exactly file1.txt
-		require.Equal(t, filepath.ToSlash(file1), filepath.ToSlash(matches[0]))
+		require.Equal(t, matches, []string{file1})
 	})
 
 	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
@@ -202,13 +198,9 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
 			require.NoError(t, err)
 			require.False(t, truncated)
-			require.Len(t, matches, 3)
-
 			// Files should be sorted by modification time (newest first)
 			// So file3 should be first, file2 second, file1 last
-			require.Equal(t, file3, matches[0], "Newest file should be first")
-			require.Equal(t, file2, matches[1], "Middle file should be second")
-			require.Equal(t, file1, matches[2], "Oldest file should be last")
+			require.Equal(t, matches, []string{file3, file2, file1})
 		})
 	})
 
@@ -219,8 +211,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 		// Even empty directories should return the directory itself
-		require.Len(t, matches, 1, "Empty directory should return itself")
-		require.Equal(t, testDir, matches[0], "Should return the directory itself")
+		require.Equal(t, matches, []string{testDir})
 	})
 
 	t.Run("handles non-existent search path", func(t *testing.T) {
@@ -277,9 +268,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.False(t, truncated)
 
 		// Should find only the good file, not the one in ignored directory
-		require.Len(t, matches, 1, "Expected exactly 1 match for '*.txt' pattern")
-		require.Contains(t, matches, goodFile, "Should find good.txt")
-		require.NotContains(t, matches, ignoredFileInDir, "Should not find files in ignored directories")
+		require.Equal(t, matches, []string{goodFile})
 	})
 
 	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
@@ -308,12 +297,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
 			require.NoError(t, err)
 			require.False(t, truncated)
-			require.Len(t, matches, 3, "Expected 3 matches for '*.test' pattern")
-
 			// Results should be sorted by modification time (newest first)
-			require.Equal(t, midFile, matches[0], "Newest file should be first")
-			require.Equal(t, newDir, matches[1], "Directory should be second")
-			require.Equal(t, oldFile, matches[2], "Oldest file should be last")
+			require.Equal(t, matches, []string{midFile, newDir, oldFile})
 		})
 	})
 }

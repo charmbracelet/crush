@@ -31,13 +31,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.False(t, truncated)
 
 		// Should find exactly main.go file
-		require.Len(t, matches, 1, "Expected exactly 1 match for '**/main.go' pattern")
-		require.Equal(t, mainGo, matches[0], "Expected to find main.go specifically")
-
-		// Verify other files don't match this pattern
-		require.NotContains(t, matches, utilsGo, "utils.go should not match '**/main.go' pattern")
-		require.NotContains(t, matches, helperGo, "helper.go should not match '**/main.go' pattern")
-		require.NotContains(t, matches, readmeMd, "README.md should not match '**/main.go' pattern")
+		require.Equal(t, matches, []string{mainGo})
 	})
 
 	t.Run("finds directories matching pattern", func(t *testing.T) {
@@ -65,16 +59,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.False(t, truncated)
 
 		// Should find exactly the pkg directory
-		require.Len(t, matches, 1, "Expected exactly 1 match for 'pkg' pattern")
-		require.Equal(t, pkgDir, matches[0], "Expected to find pkg directory specifically")
-
-		// Verify other directories don't match this pattern
-		require.NotContains(t, matches, srcDir, "src directory should not match 'pkg' pattern")
-		require.NotContains(t, matches, internalDir, "internal directory should not match 'pkg' pattern")
-		require.NotContains(t, matches, cmdDir, "cmd directory should not match 'pkg' pattern")
-
-		// Verify similar files don't match directory pattern
-		require.NotContains(t, matches, pkgFile, "pkg.txt file should not match 'pkg' pattern")
+		require.Equal(t, matches, []string{pkgDir})
 	})
 
 	t.Run("finds nested directories with wildcard patterns", func(t *testing.T) {
@@ -186,13 +171,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.False(t, truncated)
 
 		// Should find exactly file1.txt
-		require.Len(t, matches, 1, "Expected exactly 1 match for 'a/b/c/file1.txt' pattern")
-		require.Equal(t, filepath.ToSlash(file1), filepath.ToSlash(matches[0]), "Expected to find file1.txt specifically")
-
-		// Verify other files don't match this specific pattern
-		require.NotContains(t, matches, file2, "file2.txt should not match 'a/b/c/file1.txt' pattern")
-		require.NotContains(t, matches, file3, "file3.txt should not match 'a/b/c/file1.txt' pattern")
-		require.NotContains(t, matches, file4, "file4.txt should not match 'a/b/c/file1.txt' pattern")
+		require.Equal(t, filepath.ToSlash(file1), filepath.ToSlash(matches[0]))
 	})
 
 	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {

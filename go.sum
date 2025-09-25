@@ -78,8 +78,8 @@ github.com/charlievieth/fastwalk v1.0.14 h1:3Eh5uaFGwHZd8EGwTjJnSpBkfwfsak9h6ICg
 github.com/charlievieth/fastwalk v1.0.14/go.mod h1:diVcUreiU1aQ4/Wu3NbxxH4/KYdKpLDojrQ1Bb2KgNY=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2 h1:973OHYuq2Jx9deyuPwe/6lsuQrDCatOsjP8uCd02URE=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250910155747-997384b0b35e h1:4BBnKWFwJ5FLyhw/ijFxKE04i9rubr8WIPR1kjO57iA=
-github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250910155747-997384b0b35e/go.mod h1:F7AfLKYQqpM3NNBVs7ctW417tavhvoh9SBjsgtwpzbY=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta1 h1:yaxFt97mvofGY7bYZn8U/aSVoamXGE3O4AEvWhshUDI=
+github.com/charmbracelet/bubbletea/v2 v2.0.0-beta1/go.mod h1:qbcZLI5z8R49v9xBdU5V5Dh5D2uccx8wSwBqxQyErqc=
 github.com/charmbracelet/catwalk v0.6.1 h1:2rRqUlwo+fdyIty8jEvUufRTgqBl0aea21LV6YQPqb0=
 github.com/charmbracelet/catwalk v0.6.1/go.mod h1:ReU4SdrLfe63jkEjWMdX2wlZMV3k9r11oQAmzN0m+KY=
 github.com/charmbracelet/colorprofile v0.3.2 h1:9J27WdztfJQVAQKX2WOlSSRB+5gaKqqITmrvb1uTIiI=
@@ -104,6 +104,8 @@ github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a h1:FsHE
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a/go.mod h1:wDlXFlCrmJ8J+swcL/MnGUuYnqgQdW9rhSD61oNMb6U=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d h1:H2oh4WlSsXy8qwLd7I3eAvPd/X3S40aM9l+h47WF1eA=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d/go.mod h1:vI5nDVMWi6veaYH+0Fmvpbe/+cv/iJfMntdh+N0+Tms=
+github.com/charmbracelet/x/input v0.3.4 h1:Mujmnv/4DaitU0p+kIsrlfZl/UlmeLKw1wAP3e1fMN0=
+github.com/charmbracelet/x/input v0.3.4/go.mod h1:JI8RcvdZWQIhn09VzeK3hdp4lTz7+yhiEdpEQtZN+2c=
 github.com/charmbracelet/x/powernap v0.0.0-20250919153222-1038f7e6fef4 h1:ZhDGU688EHQXslD9KphRpXwK0pKP03egUoZAATUDlV0=
 github.com/charmbracelet/x/powernap v0.0.0-20250919153222-1038f7e6fef4/go.mod h1:cmdl5zlP5mR8TF2Y68UKc7hdGUDiSJ2+4hk0h04Hsx4=
 github.com/charmbracelet/x/term v0.2.1 h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=

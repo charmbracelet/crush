@@ -21,10 +21,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		readmeMd := filepath.Join(testDir, "README.md")
 
 		for _, file := range []string{mainGo, utilsGo, helperGo, readmeMd} {
-			err := os.MkdirAll(filepath.Dir(file), 0o755)
-			require.NoError(t, err)
-			err = os.WriteFile(file, []byte("test content"), 0o644)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+			require.NoError(t, os.WriteFile(file, []byte("test content"), 0o644))
 		}
 
 		// Test finding a specific .go file pattern
@@ -53,15 +51,12 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		pkgFile := filepath.Join(testDir, "pkg.txt")
 
 		for _, dir := range []string{srcDir, pkgDir, internalDir, cmdDir} {
-			err := os.MkdirAll(dir, 0o755)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(dir, 0o755))
 		}
 
 		// Create files in directories and a similarly named file
-		err := os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0o644)
-		require.NoError(t, err)
-		err = os.WriteFile(pkgFile, []byte("test"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0o644))
+		require.NoError(t, os.WriteFile(pkgFile, []byte("test"), 0o644))
 
 		// Test finding a specific directory pattern (this tests the fix for the bug)
 		// Look specifically for "pkg" directory, not others and not similar files
@@ -92,8 +87,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		otherDir := filepath.Join(testDir, "other")
 
 		for _, dir := range []string{srcPkgDir, libPkgDir, mainPkgDir, otherDir} {
-			err := os.MkdirAll(dir, 0o755)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(dir, 0o755))
 		}
 
 		// Test **/pkg pattern - should find all pkg directories at any level
@@ -128,12 +122,10 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		pkgSubdir := filepath.Join(pkgDir, "internal")
 		pkgSubfile := filepath.Join(pkgSubdir, "helper.go")
 
-		err := os.MkdirAll(pkgSubdir, 0o755)
-		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(pkgSubdir, 0o755))
 
 		for _, file := range []string{pkgFile1, pkgFile2, pkgSubfile} {
-			err = os.WriteFile(file, []byte("package main"), 0o644)
-			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(file, []byte("package main"), 0o644))
 		}
 
 		// Test pkg/** pattern - should find directory and all its contents
@@ -163,10 +155,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		// Create many test files
 		for i := range 10 {
 			file := filepath.Join(testDir, "file", fmt.Sprintf("test%d.txt", i))
-			err := os.MkdirAll(filepath.Dir(file), 0o755)
-			require.NoError(t, err)
-			err = os.WriteFile(file, []byte("test"), 0o644)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
 		}
 
 		// Test with limit
@@ -186,10 +176,8 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		file4 := filepath.Join(testDir, "file4.txt")
 
 		for _, file := range []string{file1, file2, file3, file4} {
-			err := os.MkdirAll(filepath.Dir(file), 0o755)
-			require.NoError(t, err)
-			err = os.WriteFile(file, []byte("test"), 0o644)
-			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
 		}
 
 		// Test specific nested pattern - look for file1.txt specifically
@@ -216,19 +204,16 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		file3 := filepath.Join(testDir, "file3.txt")
 
 		// Create files with delays to ensure different modification times
-		err := os.WriteFile(file1, []byte("first"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
 
 		// Small delay to ensure different modification times
 		time.Sleep(10 * time.Millisecond)
 
-		err = os.WriteFile(file2, []byte("second"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
 
 		time.Sleep(10 * time.Millisecond)
 
-		err = os.WriteFile(file3, []byte("third"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
 
 		matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
 		require.NoError(t, err)
@@ -269,8 +254,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		rootIgnore := filepath.Join(testDir, ".crushignore")
 
 		// Root .crushignore ignores *.tmp files and backup directories
-		err := os.WriteFile(rootIgnore, []byte("*.tmp\nbackup/\n"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(rootIgnore, []byte("*.tmp\nbackup/\n"), 0o644))
 
 		// Create test files and directories
 		goodFile := filepath.Join(testDir, "good.txt")
@@ -280,16 +264,11 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		ignoredFileInDir := filepath.Join(testDir, "backup", "old.txt")
 
 		// Create all files and directories
-		err = os.WriteFile(goodFile, []byte("content"), 0o644)
-		require.NoError(t, err)
-		err = os.WriteFile(badFile, []byte("temp content"), 0o644)
-		require.NoError(t, err)
-		err = os.MkdirAll(goodDir, 0o755)
-		require.NoError(t, err)
-		err = os.MkdirAll(ignoredDir, 0o755)
-		require.NoError(t, err)
-		err = os.WriteFile(ignoredFileInDir, []byte("old content"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(goodFile, []byte("content"), 0o644))
+		require.NoError(t, os.WriteFile(badFile, []byte("temp content"), 0o644))
+		require.NoError(t, os.MkdirAll(goodDir, 0o755))
+		require.NoError(t, os.MkdirAll(ignoredDir, 0o755))
+		require.NoError(t, os.WriteFile(ignoredFileInDir, []byte("old content"), 0o644))
 
 		// Test that ignore patterns work for files
 		matches, truncated, err := GlobWithDoubleStar("*.tmp", testDir, 0)
@@ -327,20 +306,17 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		midFile := filepath.Join(testDir, "mid.test")
 
 		// Create old file first
-		err := os.WriteFile(oldFile, []byte("old"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(oldFile, []byte("old"), 0o644))
 
 		time.Sleep(1 * time.Millisecond)
 
 		// Create directory
-		err = os.MkdirAll(newDir, 0o755)
-		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(newDir, 0o755))
 
 		time.Sleep(1 * time.Millisecond)
 
 		// Create newer file
-		err = os.WriteFile(midFile, []byte("mid"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(midFile, []byte("mid"), 0o644))
 
 		// Test pattern that matches both files and directories
 		matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)

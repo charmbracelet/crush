@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -175,35 +176,40 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	})
 
 	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
-		testDir := t.TempDir()
+		synctest.Test(t, func(t *testing.T) {
+			testDir := t.TempDir()
 
-		// Create files with different modification times
-		file1 := filepath.Join(testDir, "file1.txt")
-		file2 := filepath.Join(testDir, "file2.txt")
-		file3 := filepath.Join(testDir, "file3.txt")
+			// Create files
+			file1 := filepath.Join(testDir, "file1.txt")
+			file2 := filepath.Join(testDir, "file2.txt")
+			file3 := filepath.Join(testDir, "file3.txt")
 
-		// Create files with delays to ensure different modification times
-		require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
+			require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
+			require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
+			require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
 
-		// Small delay to ensure different modification times
-		time.Sleep(10 * time.Millisecond)
+			// Set deterministic mtimes using the fake clock
+			base := time.Now()
+			m1 := base
+			m2 := base.Add(1 * time.Millisecond)
+			m3 := base.Add(2 * time.Millisecond)
 
-		require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
+			// Set atime and mtime; only mtime matters for your sort
+			require.NoError(t, os.Chtimes(file1, m1, m1))
+			require.NoError(t, os.Chtimes(file2, m2, m2))
+			require.NoError(t, os.Chtimes(file3, m3, m3))
 
-		time.Sleep(10 * time.Millisecond)
+			matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
+			require.NoError(t, err)
+			require.False(t, truncated)
+			require.Len(t, matches, 3)
 
-		require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
-
-		matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
-		require.Len(t, matches, 3)
-
-		// Files should be sorted by modification time (newest first)
-		// So file3 should be first, file2 second, file1 last
-		require.Equal(t, file3, matches[0], "Newest file should be first")
-		require.Equal(t, file2, matches[1], "Middle file should be second")
-		require.Equal(t, file1, matches[2], "Oldest file should be last")
+			// Files should be sorted by modification time (newest first)
+			// So file3 should be first, file2 second, file1 last
+			require.Equal(t, file3, matches[0], "Newest file should be first")
+			require.Equal(t, file2, matches[1], "Middle file should be second")
+			require.Equal(t, file1, matches[2], "Oldest file should be last")
+		})
 	})
 
 	t.Run("handles empty directory", func(t *testing.T) {
@@ -277,35 +283,37 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	})
 
 	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
-		testDir := t.TempDir()
+		synctest.Test(t, func(t *testing.T) {
+			testDir := t.TempDir()
 
-		// Create files and directories with different modification times
-		oldFile := filepath.Join(testDir, "old.test")
-		newDir := filepath.Join(testDir, "new.test")
-		midFile := filepath.Join(testDir, "mid.test")
+			oldFile := filepath.Join(testDir, "old.test")
+			newDir := filepath.Join(testDir, "new.test")
+			midFile := filepath.Join(testDir, "mid.test")
 
-		// Create old file first
-		require.NoError(t, os.WriteFile(oldFile, []byte("old"), 0o644))
+			require.NoError(t, os.WriteFile(oldFile, []byte("old"), 0o644))
+			require.NoError(t, os.MkdirAll(newDir, 0o755))
+			require.NoError(t, os.WriteFile(midFile, []byte("mid"), 0o644))
 
-		time.Sleep(1 * time.Millisecond)
+			// Deterministic ordering via fake time
+			base := time.Now()
+			tOld := base
+			tDir := base.Add(1 * time.Millisecond)
+			tMid := base.Add(2 * time.Millisecond)
 
-		// Create directory
-		require.NoError(t, os.MkdirAll(newDir, 0o755))
+			require.NoError(t, os.Chtimes(oldFile, tOld, tOld))
+			require.NoError(t, os.Chtimes(newDir, tDir, tDir))
+			require.NoError(t, os.Chtimes(midFile, tMid, tMid))
 
-		time.Sleep(1 * time.Millisecond)
+			// Test pattern that matches both files and directories
+			matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
+			require.NoError(t, err)
+			require.False(t, truncated)
+			require.Len(t, matches, 3, "Expected 3 matches for '*.test' pattern")
 
-		// Create newer file
-		require.NoError(t, os.WriteFile(midFile, []byte("mid"), 0o644))
-
-		// Test pattern that matches both files and directories
-		matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
-		require.NoError(t, err)
-		require.False(t, truncated)
-		require.Len(t, matches, 3, "Expected 3 matches for '*.test' pattern")
-
-		// Results should be sorted by modification time (newest first)
-		require.Equal(t, midFile, matches[0], "Newest file should be first")
-		require.Equal(t, newDir, matches[1], "Directory should be second")
-		require.Equal(t, oldFile, matches[2], "Oldest file should be last")
+			// Results should be sorted by modification time (newest first)
+			require.Equal(t, midFile, matches[0], "Newest file should be first")
+			require.Equal(t, newDir, matches[1], "Directory should be second")
+			require.Equal(t, oldFile, matches[2], "Oldest file should be last")
+		})
 	})
 }

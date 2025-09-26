@@ -67,6 +67,12 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// Prompt history
+	history          []string
+	historyIndex     int
+	currentDraft     string
+	inHistory        bool
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -154,6 +160,13 @@ func (m *editorCmp) send() tea.Cmd {
 	if value == "" {
 		return nil
 	}
+
+	// Save to history
+	if len(m.history) == 0 || m.history[len(m.history)-1] != value {
+		m.history = append(m.history, value)
+	}
+	m.historyIndex = -1
+	m.inHistory = false
 
 	// Change the placeholder when sending a new message.
 	m.randomizePlaceholders()
@@ -306,6 +319,41 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deleteMode = false
 			return m, nil
 		}
+		// History navigation
+		if m.textarea.Focused() {
+			switch {
+			case key.Matches(msg, m.keyMap.HistoryUp):
+				if len(m.history) == 0 {
+					break
+				}
+				if !m.inHistory {
+					m.currentDraft = m.textarea.Value()
+					m.inHistory = true
+					m.historyIndex = len(m.history) - 1
+				} else if m.historyIndex > 0 {
+					m.historyIndex--
+				}
+				m.textarea.SetValue(m.history[m.historyIndex])
+				m.textarea.MoveToEnd()
+				return m, nil
+
+			case key.Matches(msg, m.keyMap.HistoryDown):
+				if !m.inHistory {
+					break
+				}
+				if m.historyIndex < len(m.history)-1 {
+					m.historyIndex++
+					m.textarea.SetValue(m.history[m.historyIndex])
+				} else {
+					m.textarea.SetValue(m.currentDraft)
+					m.inHistory = false
+					m.historyIndex = -1
+				}
+				m.textarea.MoveToEnd()
+				return m, nil
+			}
+		}
+
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
@@ -576,6 +624,8 @@ func New(app *app.App) Editor {
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
+		history:  []string{},
+		historyIndex: -1,
 	}
 	e.setEditorPrompt()
 

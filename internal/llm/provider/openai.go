@@ -230,7 +230,11 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	params := openai.ChatCompletionNewParams{
 		Model:    openai.ChatModel(model.ID),
 		Messages: messages,
-		Tools:    tools,
+	}
+	
+	// Only add tools if not disabled via extra_params
+	if o.providerOptions.extraParams["disable_tools"] != "true" {
+		params.Tools = tools
 	}
 
 	maxTokens := model.DefaultMaxTokens
@@ -317,8 +321,12 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 
 func (o *openaiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
-	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
-		IncludeUsage: openai.Bool(true),
+	
+	// Only add stream options if not disabled via extra_params
+	if o.providerOptions.extraParams["disable_stream_options"] != "true" {
+		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: openai.Bool(true),
+		}
 	}
 
 	attempts := 0

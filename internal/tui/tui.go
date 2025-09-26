@@ -529,7 +529,9 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 func (a *appModel) View() tea.View {
 	var view tea.View
 	t := styles.CurrentTheme()
-	view.BackgroundColor = t.BgBase
+	if !a.app.Config().Options.TUI.Transparent {
+		view.BackgroundColor = t.BgBase
+	}
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Layer = lipgloss.NewCanvas(
 			lipgloss.NewLayer(

@@ -162,12 +162,29 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.selectedSessionID = msg.ID
 	case cmpChat.SessionClearedMsg:
 		a.selectedSessionID = ""
+	case sessions.SessionDeletedMsg:
+		// If the deleted session was the currently selected one, create a new session and switch to it
+		if a.selectedSessionID == msg.SessionID {
+			return a, func() tea.Msg {
+				// Create a new session
+				newSession, err := a.app.Sessions.Create(context.Background(), "New Session")
+				if err != nil {
+					return util.InfoMsg{
+						Type: util.InfoTypeError,
+						Msg:  err.Error(),
+					}
+				}
+				
+				// Send session selected message to switch to the new session
+				return cmpChat.SessionSelectedMsg(newSession)
+			}
+		}
 	// Commands
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {
 			allSessions, _ := a.app.Sessions.List(context.Background())
 			return dialogs.OpenDialogMsg{
-				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, a.app),
 			}
 		}
 
@@ -478,7 +495,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			func() tea.Msg {
 				allSessions, _ := a.app.Sessions.List(context.Background())
 				return dialogs.OpenDialogMsg{
-					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, a.app),
 				}
 			},
 		)

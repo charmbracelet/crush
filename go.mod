@@ -152,7 +152,7 @@ require (
 	golang.org/x/text v0.29.0
 	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/api v0.211.0 // indirect
-	google.golang.org/genai v1.25.0
+	google.golang.org/genai v1.26.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/grpc v1.71.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect

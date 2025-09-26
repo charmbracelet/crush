@@ -16,8 +16,9 @@ import (
 )
 
 type BashParams struct {
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
+	WorkingDir string `json:"working_dir"`
+	Command    string `json:"command"`
+	Timeout    int    `json:"timeout"`
 }
 
 type BashPermissionsParams struct {
@@ -26,10 +27,9 @@ type BashPermissionsParams struct {
 }
 
 type BashResponseMetadata struct {
-	StartTime        int64  `json:"start_time"`
-	EndTime          int64  `json:"end_time"`
-	Output           string `json:"output"`
-	WorkingDirectory string `json:"working_directory"`
+	StartTime int64  `json:"start_time"`
+	EndTime   int64  `json:"end_time"`
+	Output    string `json:"output"`
 }
 type bashTool struct {
 	permissions permission.Service
@@ -228,11 +228,8 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// NewBashTool returns a new bash tool instance.
 func NewBashTool(permission permission.Service, workingDir string, attribution *config.Attribution) BaseTool {
-	// Set up command blocking on the persistent shell
-	persistentShell := shell.GetPersistentShell(workingDir)
-	persistentShell.SetBlockFuncs(blockFuncs())
-
 	return &bashTool{
 		permissions: permission,
 		workingDir:  workingDir,
@@ -249,6 +246,10 @@ func (b *bashTool) Info() ToolInfo {
 		Name:        BashToolName,
 		Description: b.bashDescription(),
 		Parameters: map[string]any{
+			"working_dir": map[string]any{
+				"type":        "string",
+				"description": "The absolute path of the directory to execute the command in",
+			},
 			"command": map[string]any{
 				"type":        "string",
 				"description": "The command to execute",
@@ -277,6 +278,9 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	if params.Command == "" {
 		return NewTextErrorResponse("missing command"), nil
 	}
+	if params.WorkingDir == "" {
+		params.WorkingDir = b.workingDir
+	}
 
 	isSafeReadOnly := false
 	cmdLower := strings.ToLower(params.Command)
@@ -295,11 +299,10 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for executing shell command")
 	}
 	if !isSafeReadOnly {
-		shell := shell.GetPersistentShell(b.workingDir)
 		p := b.permissions.Request(
 			permission.CreatePermissionRequest{
 				SessionID:   sessionID,
-				Path:        shell.GetWorkingDir(),
+				Path:        params.WorkingDir,
 				ToolCallID:  call.ID,
 				ToolName:    BashToolName,
 				Action:      "execute",
@@ -320,11 +323,13 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		defer cancel()
 	}
 
-	persistentShell := shell.GetPersistentShell(b.workingDir)
-	stdout, stderr, err := persistentShell.Exec(ctx, params.Command)
+	sh := shell.NewShell(shell.Options{
+		WorkingDir: params.WorkingDir,
+		BlockFuncs: blockFuncs(),
+	})
+	stdout, stderr, err := sh.Exec(ctx, params.Command)
 
 	// Get the current working directory after command execution
-	currentWorkingDir := persistentShell.GetWorkingDir()
 	interrupted := shell.IsInterrupt(err)
 	exitCode := shell.ExitCode(err)
 	if exitCode == 0 && !interrupted && err != nil {
@@ -362,15 +367,13 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	}
 
 	metadata := BashResponseMetadata{
-		StartTime:        startTime.UnixMilli(),
-		EndTime:          time.Now().UnixMilli(),
-		Output:           stdout,
-		WorkingDirectory: currentWorkingDir,
+		StartTime: startTime.UnixMilli(),
+		EndTime:   time.Now().UnixMilli(),
+		Output:    stdout,
 	}
 	if stdout == "" {
 		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
 	}
-	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
 	return WithResponseMetadata(NewTextResponse(stdout), metadata), nil
 }
 

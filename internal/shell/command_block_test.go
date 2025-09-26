@@ -86,7 +86,7 @@ func TestCommandBlocking(t *testing.T) {
 			// Create a temporary directory for each test
 			tmpDir := t.TempDir()
 
-			shell := NewShell(&Options{
+			shell := NewShell(Options{
 				WorkingDir: tmpDir,
 				BlockFuncs: tt.blockFuncs,
 			})

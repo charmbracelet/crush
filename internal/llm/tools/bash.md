@@ -1,4 +1,4 @@
-Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+Executes a given bash command in a shell session with optional timeout, ensuring proper handling and security measures.
 
 CROSS-PLATFORM SHELL SUPPORT:
 
@@ -8,6 +8,9 @@ CROSS-PLATFORM SHELL SUPPORT:
   well.
 - Make sure to use forward slashes (/) as path separators in commands, even on
   Windows. Example: "ls C:/foo/bar" instead of "ls C:\foo\bar".
+- The shell is not persistent, so make sure to give it the 'working_dir' in
+  which the command should be run
+- NEVER use 'cd', always use the 'working_dir' parameter instead
 
 Before executing the command, please follow these steps:
 

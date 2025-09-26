@@ -168,6 +168,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		extraParams := make(map[string]string)
+		// Copy extra_params from user configuration
+		if len(config.ExtraParams) > 0 {
+			maps.Copy(extraParams, config.ExtraParams)
+		}
+		
 		prepared := ProviderConfig{
 			ID:                 string(p.ID),
 			Name:               p.Name,
@@ -178,7 +184,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			SystemPromptPrefix: config.SystemPromptPrefix,
 			ExtraHeaders:       headers,
 			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
+			ExtraParams:        extraParams,
 			Models:             p.Models,
 		}
 
@@ -192,8 +198,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				}
 				continue
 			}
-			prepared.ExtraParams["project"] = env.Get("VERTEXAI_PROJECT")
-			prepared.ExtraParams["location"] = env.Get("VERTEXAI_LOCATION")
+			if prepared.ExtraParams["project"] == "" {
+				prepared.ExtraParams["project"] = env.Get("VERTEXAI_PROJECT")
+			}
+			if prepared.ExtraParams["location"] == "" {
+				prepared.ExtraParams["location"] = env.Get("VERTEXAI_LOCATION")
+			}
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -204,7 +214,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				continue
 			}
 			prepared.BaseURL = endpoint
-			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
+			if prepared.ExtraParams["apiVersion"] == "" {
+				prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
+			}
 		case catwalk.InferenceProviderBedrock:
 			if !hasAWSCredentials(env) {
 				if configExists {
@@ -213,7 +225,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				}
 				continue
 			}
-			prepared.ExtraParams["region"] = env.Get("AWS_REGION")
+			if prepared.ExtraParams["region"] == "" {
+				prepared.ExtraParams["region"] = env.Get("AWS_REGION")
+			}
 			if prepared.ExtraParams["region"] == "" {
 				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
 			}

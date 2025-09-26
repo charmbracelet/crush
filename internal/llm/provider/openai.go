@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -232,6 +234,12 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		Messages: messages,
 		Tools:    tools,
 	}
+	
+	// Check if tools should be disabled for this provider
+	disableTools := o.providerOptions.extraParams["disable_tools"]
+	if disableTools == "true" {
+		params.Tools = nil
+	}
 
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
@@ -257,14 +265,418 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 			params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
 		}
 	} else {
+		// For non-reasoning models, only set MaxTokens (don't set MaxCompletionTokens at all)
 		params.MaxTokens = openai.Int(maxTokens)
 	}
 
 	return params
 }
 
+// convertMessagesSimple converts messages to simple map format for compatibility mode
+func (o *openaiClient) convertMessagesSimple(messages []message.Message) []map[string]interface{} {
+	var result []map[string]interface{}
+	
+	// Add system message
+	systemMessage := o.providerOptions.systemMessage
+	if o.providerOptions.systemPromptPrefix != "" {
+		systemMessage = o.providerOptions.systemPromptPrefix + "\n" + systemMessage
+	}
+	if systemMessage != "" {
+		result = append(result, map[string]interface{}{
+			"role":    "system",
+			"content": systemMessage,
+		})
+	}
+	
+	for _, msg := range messages {
+		switch msg.Role {
+		case message.User:
+			result = append(result, map[string]interface{}{
+				"role":    "user",
+				"content": msg.Content().String(),
+			})
+		case message.Assistant:
+			result = append(result, map[string]interface{}{
+				"role":    "assistant",
+				"content": msg.Content().String(),
+			})
+		}
+	}
+	
+	return result
+}
+
+
+// sendCompatible sends a request using a custom HTTP call to avoid OpenAI client limitations
+func (o *openaiClient) sendCompatible(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
+	
+	model := o.providerOptions.model(o.providerOptions.modelType)
+	cfg := config.Get()
+	
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	}
+	
+	maxTokens := model.DefaultMaxTokens
+	if modelConfig.MaxTokens > 0 {
+		maxTokens = modelConfig.MaxTokens
+	}
+	if o.providerOptions.maxTokens > 0 {
+		maxTokens = o.providerOptions.maxTokens
+	}
+	
+	// Create a simple request payload without problematic fields
+	payload := map[string]interface{}{
+		"model":      model.ID,
+		"messages":   o.convertMessagesSimple(messages),
+		"max_tokens": maxTokens,
+	}
+	
+	// Only add tools if not disabled
+	disableTools := o.providerOptions.extraParams["disable_tools"]
+	if disableTools != "true" {
+		convertedTools := o.convertTools(tools)
+		if len(convertedTools) > 0 {
+			payload["tools"] = convertedTools
+		}
+	}
+	
+	
+	// Make HTTP request
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	
+	baseURL := o.providerOptions.baseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+o.providerOptions.apiKey)
+	
+	// Add extra headers
+	for key, value := range o.providerOptions.extraHeaders {
+		req.Header.Set(key, value)
+	}
+	
+	client := &http.Client{}
+	if cfg.Options.Debug {
+		client = log.NewHTTPClient()
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+	
+	// Read the response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	// Use flexible JSON parsing for compatibility mode
+	var genericResponse map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &genericResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	
+	
+	// Extract choices
+	choicesInterface, ok := genericResponse["choices"]
+	if !ok {
+		return nil, fmt.Errorf("no choices in response")
+	}
+	
+	choices, ok := choicesInterface.([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("received empty choices from API")
+	}
+	
+	firstChoice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid choice format")
+	}
+	
+	// Extract message content
+	messageInterface, ok := firstChoice["message"]
+	if !ok {
+		return nil, fmt.Errorf("no message in choice")
+	}
+	
+	messageMap, ok := messageInterface.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid message format")
+	}
+	
+	content := ""
+	if contentInterface, exists := messageMap["content"]; exists {
+		if contentStr, ok := contentInterface.(string); ok {
+			content = contentStr
+		}
+	}
+	
+	// Extract finish reason
+	finishReasonStr := "stop" // default
+	if finishReasonInterface, exists := firstChoice["finish_reason"]; exists {
+		if finishReasonVal, ok := finishReasonInterface.(string); ok {
+			finishReasonStr = finishReasonVal
+		}
+	}
+	
+	finishReason := o.finishReason(finishReasonStr)
+	
+	// Create usage info - simplified for compatibility mode
+	usage := TokenUsage{
+		InputTokens:  0,
+		OutputTokens: 0,
+	}
+	
+	if usageInterface, exists := genericResponse["usage"]; exists {
+		if usageMap, ok := usageInterface.(map[string]interface{}); ok {
+			if promptTokens, exists := usageMap["prompt_tokens"]; exists {
+				if promptTokensInt, ok := promptTokens.(float64); ok {
+					usage.InputTokens = int64(promptTokensInt)
+				}
+			}
+			if completionTokens, exists := usageMap["completion_tokens"]; exists {
+				if completionTokensInt, ok := completionTokens.(float64); ok {
+					usage.OutputTokens = int64(completionTokensInt)
+				}
+			}
+		}
+	}
+	
+	// No tool calls in compatibility mode for now  
+	var toolCalls []message.ToolCall
+	
+	if len(toolCalls) > 0 {
+		finishReason = message.FinishReasonToolUse
+	}
+	
+	return &ProviderResponse{
+		Content:      content,
+		ToolCalls:    toolCalls,
+		Usage:        usage,
+		FinishReason: finishReason,
+	}, nil
+}
+
+// streamCompatible sends a streaming request using custom HTTP call to avoid OpenAI client limitations
+func (o *openaiClient) streamCompatible(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	eventChan := make(chan ProviderEvent)
+	
+	go func() {
+		defer close(eventChan)
+		
+		model := o.providerOptions.model(o.providerOptions.modelType)
+		cfg := config.Get()
+		
+		modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+		if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+			modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+		}
+		
+		maxTokens := model.DefaultMaxTokens
+		if modelConfig.MaxTokens > 0 {
+			maxTokens = modelConfig.MaxTokens
+		}
+		if o.providerOptions.maxTokens > 0 {
+			maxTokens = o.providerOptions.maxTokens
+		}
+		
+		// Create streaming request payload
+		payload := map[string]interface{}{
+			"model":      model.ID,
+			"messages":   o.convertMessagesSimple(messages),
+			"max_tokens": maxTokens,
+			"stream":     true,
+		}
+		
+		// Only add tools if not disabled
+		disableTools := o.providerOptions.extraParams["disable_tools"]
+		if disableTools != "true" {
+			convertedTools := o.convertTools(tools)
+			if len(convertedTools) > 0 {
+				payload["tools"] = convertedTools
+			}
+		}
+		
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: fmt.Errorf("failed to marshal request: %w", err)}
+			return
+		}
+		
+		baseURL := o.providerOptions.baseURL
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		
+		req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
+		if err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: fmt.Errorf("failed to create request: %w", err)}
+			return
+		}
+		
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+o.providerOptions.apiKey)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Cache-Control", "no-cache")
+		
+		// Add extra headers
+		for key, value := range o.providerOptions.extraHeaders {
+			req.Header.Set(key, value)
+		}
+		
+		client := &http.Client{}
+		if cfg.Options.Debug {
+			client = log.NewHTTPClient()
+		}
+		
+		resp, err := client.Do(req)
+		if err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: fmt.Errorf("request failed: %w", err)}
+			return
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode != 200 {
+			eventChan <- ProviderEvent{Type: EventError, Error: fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)}
+			return
+		}
+		
+		// Parse Server-Sent Events
+		scanner := bufio.NewScanner(resp.Body)
+		currentContent := ""
+		var usage TokenUsage
+		finishReason := message.FinishReasonEndTurn
+		
+		for scanner.Scan() {
+			line := scanner.Text()
+			
+			// Skip empty lines and non-data lines
+			if line == "" || !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			
+			// Extract JSON from "data: " prefix
+			jsonStr := strings.TrimPrefix(line, "data: ")
+			
+			// Skip [DONE] message
+			if jsonStr == "[DONE]" {
+				break
+			}
+			
+			var chunk map[string]interface{}
+			if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+				continue // Skip malformed chunks
+			}
+			
+			// Extract choices
+			choicesInterface, ok := chunk["choices"]
+			if !ok {
+				continue
+			}
+			
+			choices, ok := choicesInterface.([]interface{})
+			if !ok || len(choices) == 0 {
+				continue
+			}
+			
+			firstChoice, ok := choices[0].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			// Check for finish reason
+			if finishReasonInterface, exists := firstChoice["finish_reason"]; exists && finishReasonInterface != nil {
+				if finishReasonVal, ok := finishReasonInterface.(string); ok {
+					finishReason = o.finishReason(finishReasonVal)
+				}
+			}
+			
+			// Extract delta content
+			deltaInterface, ok := firstChoice["delta"]
+			if !ok {
+				continue
+			}
+			
+			delta, ok := deltaInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			if contentInterface, exists := delta["content"]; exists {
+				if contentStr, ok := contentInterface.(string); ok && contentStr != "" {
+					currentContent += contentStr
+					eventChan <- ProviderEvent{
+						Type:    EventContentDelta,
+						Content: contentStr,
+					}
+				}
+			}
+			
+			// Extract usage from final chunk
+			if usageInterface, exists := chunk["usage"]; exists {
+				if usageMap, ok := usageInterface.(map[string]interface{}); ok {
+					if promptTokens, exists := usageMap["prompt_tokens"]; exists {
+						if promptTokensInt, ok := promptTokens.(float64); ok {
+							usage.InputTokens = int64(promptTokensInt)
+						}
+					}
+					if completionTokens, exists := usageMap["completion_tokens"]; exists {
+						if completionTokensInt, ok := completionTokens.(float64); ok {
+							usage.OutputTokens = int64(completionTokensInt)
+						}
+					}
+				}
+			}
+		}
+		
+		if err := scanner.Err(); err != nil {
+			eventChan <- ProviderEvent{Type: EventError, Error: fmt.Errorf("stream reading error: %w", err)}
+			return
+		}
+		
+		// Send completion event
+		eventChan <- ProviderEvent{
+			Type: EventComplete,
+			Response: &ProviderResponse{
+				Content:      currentContent,
+				ToolCalls:    nil, // No tool calls in compatibility mode for now
+				Usage:        usage,
+				FinishReason: finishReason,
+			},
+		}
+	}()
+	
+	return eventChan
+}
+
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
+	// Check if compatibility mode is enabled for providers that don't support all OpenAI parameters
+	compatibilityMode := o.providerOptions.extraParams["compatibility_mode"]
+	if compatibilityMode == "true" {
+		return o.sendCompatible(ctx, messages, tools)
+	}
+	
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
+	
+	
 	attempts := 0
 	for {
 		attempts++
@@ -316,6 +728,30 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 }
 
 func (o *openaiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	// Check if streaming is disabled for this provider
+	disableStreaming := o.providerOptions.extraParams["disable_streaming"]
+	
+	if disableStreaming == "true" {
+		// Use non-streaming send() and convert to streaming events
+		eventChan := make(chan ProviderEvent, 1)
+		go func() {
+			defer close(eventChan)
+			response, err := o.send(ctx, messages, tools)
+			if err != nil {
+				eventChan <- ProviderEvent{Type: EventError, Error: err}
+				return
+			}
+			eventChan <- ProviderEvent{Type: EventComplete, Response: response}
+		}()
+		return eventChan
+	}
+	
+	// Check if compatibility mode is enabled
+	compatibilityMode := o.providerOptions.extraParams["compatibility_mode"]
+	if compatibilityMode == "true" {
+		return o.streamCompatible(ctx, messages, tools)
+	}
+
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),

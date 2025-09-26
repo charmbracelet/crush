@@ -71,6 +71,7 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	SwitchThemeMsg         struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -379,6 +380,15 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "switch_theme",
+			Title:       "Switch Theme",
+			Shortcut:    "ctrl+t",
+			Description: "Switch to a different theme",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchThemeMsg{})
+			},
+		},
 		{
 			ID:          "toggle_yolo",
 			Title:       "Toggle Yolo Mode",

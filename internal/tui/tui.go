@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/themes"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -192,6 +193,25 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
+		return a, a.handleWindowResize(a.wWidth, a.wHeight)
+	case commands.SwitchThemeMsg:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: themes.NewThemeDialogCmp(),
+		})
+	case themes.ThemeSelectedMsg:
+		// Switch the theme in both the theme manager and config
+		themeManager := styles.DefaultManager()
+		if err := themeManager.SetTheme(msg.ThemeName); err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to switch theme: %w", err))
+		}
+
+		// Update the config to persist the theme
+		cfg := config.Get()
+		if err := cfg.SetTheme(msg.ThemeName); err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to save theme configuration: %w", err))
+		}
+
+		// Force UI refresh by triggering a window resize
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
@@ -612,6 +632,9 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
+	// Initialize theme manager with config
+	styles.InitializeWithConfig(app.Config())
+
 	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()

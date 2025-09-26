@@ -259,9 +259,9 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
 func CloseMCPClients() error {
 	var errs []error
-	for c := range mcpClients.Seq() {
+	for name, c := range mcpClients.Seq2() {
 		if err := c.Close(); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("close mcp: %s: %w", name, err))
 		}
 	}
 	mcpBroker.Shutdown()

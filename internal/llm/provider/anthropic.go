@@ -94,7 +94,29 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 
 	switch tp {
 	case AnthropicClientTypeBedrock:
-		anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
+		// Check if bearer token is provided (starts with "Bearer ")
+		useBearerToken := strings.HasPrefix(opts.apiKey, "Bearer ")
+		if !useBearerToken && opts.extraHeaders != nil {
+			for key := range opts.extraHeaders {
+				if strings.ToLower(key) == "authorization" {
+					useBearerToken = true
+					break
+				}
+			}
+		}
+
+		if useBearerToken {
+			// Use bearer token auth - skip bedrock middleware
+			region := opts.extraParams["region"]
+			if region == "" {
+				region = "us-east-1"
+			}
+			baseURL := fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", region)
+			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(baseURL))
+		} else {
+			// Use SigV4 auth
+			anthropicClientOptions = append(anthropicClientOptions, bedrock.WithLoadDefaultConfig(context.Background()))
+		}
 	case AnthropicClientTypeVertex:
 		project := opts.extraParams["project"]
 		location := opts.extraParams["location"]

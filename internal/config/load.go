@@ -213,6 +213,13 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				}
 				continue
 			}
+			bearerToken := env.Get("AWS_BEARER_TOKEN_BEDROCK")
+			if bearerToken != "" {
+				if !strings.HasPrefix(bearerToken, "Bearer ") {
+					bearerToken = "Bearer " + bearerToken
+				}
+				prepared.APIKey = bearerToken
+			}
 			prepared.ExtraParams["region"] = env.Get("AWS_REGION")
 			if prepared.ExtraParams["region"] == "" {
 				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
@@ -577,6 +584,10 @@ func hasVertexCredentials(env env.Env) bool {
 }
 
 func hasAWSCredentials(env env.Env) bool {
+	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return true
+	}
+
 	if env.Get("AWS_ACCESS_KEY_ID") != "" && env.Get("AWS_SECRET_ACCESS_KEY") != "" {
 		return true
 	}

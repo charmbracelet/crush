@@ -484,6 +484,15 @@
             "split"
           ],
           "description": "Diff mode for the TUI interface"
+        },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "charmtone",
+            "boring"
+          ],
+          "description": "Theme to use for the TUI interface",
+          "default": "charmtone"
         }
       },
       "additionalProperties": false,

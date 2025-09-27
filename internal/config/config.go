@@ -131,6 +131,7 @@ type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
+	Theme string `json:"theme,omitempty" jsonschema:"description=Theme to use for the TUI interface,enum=charmtone,enum=boring,default=charmtone"`
 }
 
 type Permissions struct {

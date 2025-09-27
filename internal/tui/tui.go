@@ -606,6 +606,14 @@ func (a *appModel) View() tea.View {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) tea.Model {
+	cfg := config.Get()
+	if cfg.Options.TUI.Theme != "" {
+		stylesManager := styles.NewManager()
+		stylesManager.SetTheme(cfg.Options.TUI.Theme)
+
+		styles.SetDefaultManager(stylesManager)
+	}
+
 	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()

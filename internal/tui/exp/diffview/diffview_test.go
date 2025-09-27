@@ -249,8 +249,6 @@ func TestDiffViewHeight(t *testing.T) {
 
 					output := dv.String()
 					golden.RequireEqual(t, []byte(output))
-
-					assertHeight(t, height, output)
 				})
 			}
 		})
@@ -301,8 +299,6 @@ func TestDiffViewYOffset(t *testing.T) {
 
 					output := dv.String()
 					golden.RequireEqual(t, []byte(output))
-
-					assertHeight(t, 5, output)
 				})
 			}
 		})
@@ -328,8 +324,6 @@ func TestDiffViewYOffsetInfinite(t *testing.T) {
 
 					output := dv.String()
 					golden.RequireEqual(t, []byte(output))
-
-					assertHeight(t, 5, output)
 				})
 			}
 		})

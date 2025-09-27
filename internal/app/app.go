@@ -31,6 +31,7 @@ type App struct {
 	History     history.Service
 	Permissions permission.Service
 
+	// TODO: (kujtim) remove this when fully implemented
 	CoderAgent agent.Service
 
 	LSPClients *csync.Map[string, *lsp.Client]

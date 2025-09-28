@@ -43,9 +43,14 @@ func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
 	cc := &genai.ClientConfig{
 		APIKey:  opts.apiKey,
 		Backend: genai.BackendGeminiAPI,
-		HTTPOptions: genai.HTTPOptions{
-			BaseURL: opts.baseURL,
-		},
+	}
+	if opts.baseURL != "" {
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil && resolvedBaseURL != "" {
+			cc.HTTPOptions = genai.HTTPOptions{
+				BaseURL: resolvedBaseURL,
+			}
+		}
 	}
 	if config.Get().Options.Debug {
 		cc.HTTPClient = log.NewHTTPClient()

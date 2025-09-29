@@ -97,7 +97,8 @@ tasks:
       - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
         msg: "Git is dirty"
     cmds:
+      - git commit --allow-empty -m "{{.NEXT}}"
       - git tag -d nightly
       - git tag --sign {{.NEXT}} {{.CLI_ARGS}}
-      - echo "pushing {{.NEXT}}..."
+      - echo "Pushing {{.NEXT}}..."
       - git push origin --tags

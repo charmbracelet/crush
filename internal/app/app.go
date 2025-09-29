@@ -108,7 +108,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	defer cancel()
 
 	// Start progress bar and spinner
-	fmt.Printf(ansi.SetIntermitentProgress)
+	fmt.Printf(ansi.SetIndeterminateProgress)
 	defer fmt.Printf(ansi.ResetProgress)
 
 	var spinner *format.Spinner

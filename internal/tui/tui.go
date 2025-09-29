@@ -272,7 +272,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if payload.Done {
 				cmds = append(cmds, tea.Raw(ansi.ResetProgress))
 			} else {
-				cmds = append(cmds, tea.Raw(ansi.SetIntermitentProgress))
+				cmds = append(cmds, tea.Raw(ansi.SetIndeterminateProgress))
 			}
 		}
 

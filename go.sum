@@ -94,8 +94,8 @@ github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mS
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
 github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef h1:VrWaUi2LXYLjfjCHowdSOEc6dQ9Ro14KY7Bw4IWd19M=
 github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef/go.mod h1:AThRsQH1t+dfyOKIwXRoJBniYFQUkUpQq4paheHMc2o=
-github.com/charmbracelet/x/ansi v0.10.2-0.20250929200608-3a818a5238dd h1:DqLI8Y1ED/w+tvcxIJx/hcn81NO+MlmcFkGnKzkxrI4=
-github.com/charmbracelet/x/ansi v0.10.2-0.20250929200608-3a818a5238dd/go.mod h1:HbLdJjQH4UH4AqA2HpRWuWNluRE6zxJH/yteYEYCFa8=
+github.com/charmbracelet/x/ansi v0.10.2-0.20250929231137-76218bae042e h1:aN905mmYvQsT4xKUZTdM+lCcuxTrubM3DGVTPxk0ArM=
+github.com/charmbracelet/x/ansi v0.10.2-0.20250929231137-76218bae042e/go.mod h1:HbLdJjQH4UH4AqA2HpRWuWNluRE6zxJH/yteYEYCFa8=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a h1:zYSNtEJM9jwHbJts2k+Hroj+xQwsW1yxc4Wopdv7KaI=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a/go.mod h1:rc2bsPC6MWae3LdOxNO1mOb443NlMrrDL0xEya48NNc=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=

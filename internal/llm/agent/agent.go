@@ -578,7 +578,7 @@ loop:
 			}
 		case <-timer.C:
 			a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "Stream timeout", "No chunk received within timeout")
-			return assistantMsg, nil, fmt.Errorf("stream chunk timeout")
+			return assistantMsg, nil, ErrStreamTimeout
 		case <-ctx.Done():
 			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
 			return assistantMsg, nil, ctx.Err()

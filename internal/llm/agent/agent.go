@@ -567,7 +567,7 @@ loop:
 			}
 			// Reset the timeout timer since we received a chunk
 			timer.Reset(streamChunkTimeout)
-			
+
 			if processErr := a.processEvent(ctx, sessionID, &assistantMsg, event); processErr != nil {
 				if errors.Is(processErr, context.Canceled) {
 					a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")

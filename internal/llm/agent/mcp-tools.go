@@ -343,47 +343,30 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 
 	// XXX: ideally we should be able to use context.WithTimeout here, but,
 	// the SSE MCP client will start failing once that context is canceled.
-	// Because of that, we need to keep it like this, which is
-	// counter-intuitive, but not sure if there's a better alternative.
-	// NOTE: this will make linters complain about context leak, but it's on
-	// purpose: if we cancel the context the client stops working.
-	done := make(chan bool, 1)
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
-	go func() {
-		if err := c.Start(mcpCtx); err != nil {
-			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
-			slog.Error("error starting mcp client", "error", err, "name", name)
-			_ = c.Close()
-			cancel()
-			return
-		}
-		if _, err := c.Initialize(mcpCtx, mcpInitRequest); err != nil {
-			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
-			slog.Error("error initializing mcp client", "error", err, "name", name)
-			_ = c.Close()
-			cancel()
-			return
-		}
-		done <- true
-	}()
-	select {
-	case <-time.After(timeout):
-		slog.Error("timed out initializing mcp client", "name", name)
+	cancelTimer := time.AfterFunc(timeout, cancel)
+	if err := c.Start(mcpCtx); err != nil {
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		slog.Error("error starting mcp client", "error", err, "name", name)
+		_ = c.Close()
 		cancel()
-		return nil, fmt.Errorf("timed out after %s", timeout)
-	case <-mcpCtx.Done():
-		slog.Error("error initializing mcp client", "error", ctx.Err(), "name", name)
-		cancel()
-		return nil, ctx.Err()
-	case <-done:
-		slog.Info("Initialized mcp client", "name", name)
-		return c, nil
+		return nil, err
 	}
+	if _, err := c.Initialize(mcpCtx, mcpInitRequest); err != nil {
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		slog.Error("error initializing mcp client", "error", err, "name", name)
+		_ = c.Close()
+		cancel()
+		return nil, err
+	}
+	cancelTimer.Stop()
+	slog.Info("Initialized mcp client", "name", name)
+	return c, nil
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return fmt.Errorf("timed out after %s", timeout)
 	}
 	return err

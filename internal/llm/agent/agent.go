@@ -26,7 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
-const streamChunkTimeout = 80 * time.Second
+const streamChunkTimeout = 2 * time.Minute
 
 type AgentEventType string
 

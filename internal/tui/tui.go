@@ -33,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var lastMouseEvent time.Time
@@ -264,6 +265,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			cmds = append(cmds, dialogCmd)
+		}
+
+		// Progress bar events
+		if payload.Type == agent.AgentEventTypeProgress {
+			if payload.Done {
+				cmds = append(cmds, tea.Raw(ansi.ResetProgress))
+			} else {
+				cmds = append(cmds, tea.Raw(ansi.SetIntermitentProgress))
+			}
 		}
 
 		// Handle auto-compact logic

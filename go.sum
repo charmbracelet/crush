@@ -94,8 +94,8 @@ github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mS
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706/go.mod h1:mjJGp00cxcfvD5xdCa+bso251Jt4owrQvuimJtVmEmM=
 github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef h1:VrWaUi2LXYLjfjCHowdSOEc6dQ9Ro14KY7Bw4IWd19M=
 github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef/go.mod h1:AThRsQH1t+dfyOKIwXRoJBniYFQUkUpQq4paheHMc2o=
-github.com/charmbracelet/x/ansi v0.10.1 h1:rL3Koar5XvX0pHGfovN03f5cxLbCF2YvLeyz7D2jVDQ=
-github.com/charmbracelet/x/ansi v0.10.1/go.mod h1:3RQDQ6lDnROptfpWuUVIUG64bD2g2BgntdxH0Ya5TeE=
+github.com/charmbracelet/x/ansi v0.10.2-0.20250929200608-3a818a5238dd h1:DqLI8Y1ED/w+tvcxIJx/hcn81NO+MlmcFkGnKzkxrI4=
+github.com/charmbracelet/x/ansi v0.10.2-0.20250929200608-3a818a5238dd/go.mod h1:HbLdJjQH4UH4AqA2HpRWuWNluRE6zxJH/yteYEYCFa8=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a h1:zYSNtEJM9jwHbJts2k+Hroj+xQwsW1yxc4Wopdv7KaI=
 github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a/go.mod h1:rc2bsPC6MWae3LdOxNO1mOb443NlMrrDL0xEya48NNc=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=
@@ -198,8 +198,8 @@ github.com/mark3labs/mcp-go v0.41.0 h1:IFfJaovCet65F3av00bE1HzSnmHpMRWM1kz96R98I
 github.com/mark3labs/mcp-go v0.41.0/go.mod h1:T7tUa2jO6MavG+3P25Oy/jR7iCeJPHImCZHRymCn39g=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
-github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
+github.com/mattn/go-runewidth v0.0.17 h1:78v8ZlW0bP43XfmAfPsdXcoNCelfMHsDmd/pkENfrjQ=
+github.com/mattn/go-runewidth v0.0.17/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/mfridman/interpolate v0.0.2 h1:pnuTK7MQIxxFz1Gr+rjSIx9u7qVjf5VOoM/u6BbAxPY=
 github.com/mfridman/interpolate v0.0.2/go.mod h1:p+7uk6oE07mpE/Ik1b8EckO0O4ZXiGAfshKBWLUM9Xg=
 github.com/microcosm-cc/bluemonday v1.0.27 h1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=

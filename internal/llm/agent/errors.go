@@ -7,6 +7,7 @@ import (
 
 var (
 	ErrRequestCancelled = errors.New("request canceled by user")
+	ErrStreamTimeout    = errors.New("stream chunk timeout")
 	ErrSessionBusy      = errors.New("session is currently processing another request")
 )
 

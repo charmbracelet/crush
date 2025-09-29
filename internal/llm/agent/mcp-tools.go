@@ -341,25 +341,45 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 		return nil, err
 	}
 
+	// XXX: ideally we should be able to use context.WithTimeout here, but,
+	// the SSE MCP client will start failing once that context is canceled.
+	// Because of that, we need to keep it like this, which is
+	// counter-intuitive, but not sure if there's a better alternative.
+	// NOTE: this will make linters complain about context leak, but it's on
+	// purpose: if we cancel the context the client stops working.
 	timeout := mcpTimeout(m)
-	initCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	if err := c.Start(initCtx); err != nil {
-		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
-		slog.Error("error starting mcp client", "error", err, "name", name)
-		_ = c.Close()
-		return nil, err
+	mcpCtx, cancel := context.WithCancel(ctx) //nolint:govet
+	select {
+	case <-time.After(timeout):
+		slog.Error("timed out initializing mcp client", "name", name)
+		cancel()
+		return nil, fmt.Errorf("timed out after %s", timeout)
+	case <-ctx.Done():
+		slog.Error("error initializing mcp client", "error", ctx.Err(), "name", name)
+		cancel()
+		return nil, ctx.Err()
+	case <-mcpCtx.Done():
+		slog.Error("error initializing mcp client", "error", ctx.Err(), "name", name)
+		cancel()
+		return nil, ctx.Err()
+	default:
+		if err := c.Start(mcpCtx); err != nil {
+			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+			slog.Error("error starting mcp client", "error", err, "name", name)
+			_ = c.Close()
+			cancel()
+			return nil, err
+		}
+		if _, err := c.Initialize(mcpCtx, mcpInitRequest); err != nil {
+			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+			slog.Error("error initializing mcp client", "error", err, "name", name)
+			_ = c.Close()
+			cancel()
+			return nil, err
+		}
+		slog.Info("Initialized mcp client", "name", name)
+		return c, nil //nolint:govet
 	}
-	if _, err := c.Initialize(initCtx, mcpInitRequest); err != nil {
-		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
-		slog.Error("error initializing mcp client", "error", err, "name", name)
-		_ = c.Close()
-		return nil, err
-	}
-
-	slog.Info("Initialized mcp client", "name", name)
-	return c, nil
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {

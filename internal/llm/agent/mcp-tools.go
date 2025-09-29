@@ -349,19 +349,21 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 	// purpose: if we cancel the context the client stops working.
 	done := make(chan bool, 1)
 	timeout := mcpTimeout(m)
-	mcpCtx, cancel := context.WithCancel(ctx) //nolint:govet
+	mcpCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		if err := c.Start(mcpCtx); err != nil {
 			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 			slog.Error("error starting mcp client", "error", err, "name", name)
 			_ = c.Close()
 			cancel()
+			return
 		}
 		if _, err := c.Initialize(mcpCtx, mcpInitRequest); err != nil {
 			updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 			slog.Error("error initializing mcp client", "error", err, "name", name)
 			_ = c.Close()
 			cancel()
+			return
 		}
 		done <- true
 	}()

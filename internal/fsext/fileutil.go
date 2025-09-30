@@ -113,9 +113,6 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		// Check if path matches the pattern
 		matched, err := doublestar.Match(pattern, relPath)
 		if err != nil || !matched {
-			if pattern == "*.test" {
-				fmt.Println("didnt match", relPath, "to", pattern, err)
-			}
 			return nil
 		}
 

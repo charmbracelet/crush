@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,22 +44,25 @@ func TestListDirectory(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	files, truncated, err := ListDirectory(".", nil, -1, -1)
-	require.NoError(t, err)
-	assert.False(t, truncated)
-	assert.Equal(t, len(files), 4)
+	t.Run("no limit", func(t *testing.T) {
+		files, truncated, err := ListDirectory(".", nil, -1, -1)
+		require.NoError(t, err)
+		require.False(t, truncated)
 
-	fileSet := make(map[string]bool)
-	for _, file := range files {
-		fileSet[filepath.ToSlash(file)] = true
-	}
-
-	assert.True(t, fileSet["./regular.txt"])
-	assert.True(t, fileSet["./subdir/"])
-	assert.True(t, fileSet["./subdir/file.go"])
-	assert.True(t, fileSet["./regular.txt"])
-
-	assert.False(t, fileSet["./.hidden"])
-	assert.False(t, fileSet["./.gitignore"])
-	assert.False(t, fileSet["./build.log"])
+		require.ElementsMatch(t, []string{
+			"./regular.txt",
+			"./subdir/",
+			"./subdir/.another",
+			"./subdir/file.go",
+		}, files)
+	})
+	t.Run("limit", func(t *testing.T) {
+		files, truncated, err := ListDirectory(".", nil, -1, 2)
+		require.NoError(t, err)
+		require.True(t, truncated)
+		require.ElementsMatch(t, []string{
+			"./regular.txt",
+			"./subdir/",
+		}, files)
+	})
 }

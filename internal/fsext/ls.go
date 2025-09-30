@@ -1,7 +1,6 @@
 package fsext
 
 import (
-	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -208,8 +207,7 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 
 // ListDirectory lists files and directories in the specified path,
 func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
-	var truncated bool
-	results := csync.NewSlice[string]()
+	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
 	slog.Warn("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
@@ -237,19 +235,19 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 			if d.IsDir() {
 				path = path + string(filepath.Separator)
 			}
-			results.Append(path)
+			found.Append(path)
 		}
 
-		if limit > 0 && results.Len() >= limit {
-			truncated = true
+		if limit > 0 && found.Len() >= limit {
 			return fs.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil && !errors.Is(err, fs.SkipAll) {
-		return nil, truncated, err
+	if err != nil {
+		return nil, false, err
 	}
 
-	return slices.Collect(results.Seq()), truncated, nil
+	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
+	return matches, truncated, nil
 }

@@ -8,22 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func chdir(t *testing.T, dir string) {
-	original, err := os.Getwd()
-	require.NoError(t, err)
-
-	err = os.Chdir(dir)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		err := os.Chdir(original)
-		require.NoError(t, err)
-	})
-}
-
 func TestListDirectory(t *testing.T) {
-	tempDir := t.TempDir()
-	chdir(t, tempDir)
+	tmp := t.TempDir()
 
 	testFiles := map[string]string{
 		"regular.txt":     "content",
@@ -34,35 +20,43 @@ func TestListDirectory(t *testing.T) {
 		"build.log":       "build output",
 	}
 
-	for filePath, content := range testFiles {
-		dir := filepath.Dir(filePath)
-		if dir != "." {
-			require.NoError(t, os.MkdirAll(dir, 0o755))
-		}
-
-		err := os.WriteFile(filePath, []byte(content), 0o644)
-		require.NoError(t, err)
+	for name, content := range testFiles {
+		fp := filepath.Join(tmp, name)
+		dir := filepath.Dir(fp)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(fp, []byte(content), 0o644))
 	}
 
 	t.Run("no limit", func(t *testing.T) {
-		files, truncated, err := ListDirectory(".", nil, -1, -1)
+		files, truncated, err := ListDirectory(tmp, nil, -1, -1)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
 		require.ElementsMatch(t, []string{
-			"./regular.txt",
-			"./subdir/",
-			"./subdir/.another",
-			"./subdir/file.go",
-		}, files)
+			"regular.txt",
+			"subdir",
+			"subdir/.another",
+			"subdir/file.go",
+		}, relPaths(t, files, tmp))
 	})
 	t.Run("limit", func(t *testing.T) {
-		files, truncated, err := ListDirectory(".", nil, -1, 2)
+		files, truncated, err := ListDirectory(tmp, nil, -1, 2)
 		require.NoError(t, err)
 		require.True(t, truncated)
 		require.ElementsMatch(t, []string{
-			"./regular.txt",
-			"./subdir/",
-		}, files)
+			"regular.txt",
+			"subdir",
+		}, relPaths(t, files, tmp))
 	})
+}
+
+func relPaths(tb testing.TB, in []string, base string) []string {
+	tb.Helper()
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		rel, err := filepath.Rel(base, p)
+		require.NoError(tb, err)
+		out = append(out, rel)
+	}
+	return out
 }

@@ -12,15 +12,7 @@ import (
 
 func TestLookupClosest(t *testing.T) {
 	tempDir := t.TempDir()
-
-	// Change to temp directory
-	oldWd, _ := os.Getwd()
-	err := os.Chdir(tempDir)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		os.Chdir(oldWd)
-	})
+	t.Chdir(tempDir)
 
 	t.Run("target found in starting directory", func(t *testing.T) {
 		testDir := t.TempDir()
@@ -114,24 +106,15 @@ func TestLookupClosest(t *testing.T) {
 	})
 
 	t.Run("relative path handling", func(t *testing.T) {
-		testDir := t.TempDir()
-
-		// Change to test directory
-		oldWd, _ := os.Getwd()
-		err := os.Chdir(testDir)
-		require.NoError(t, err)
-		defer os.Chdir(oldWd)
-
 		// Create target file in current directory
-		err = os.WriteFile("target.txt", []byte("test"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile("target.txt", []byte("test"), 0o644))
 
 		// Search using relative path
 		foundPath, found := LookupClosest(".", "target.txt")
 		require.True(t, found)
 
 		// Resolve symlinks to handle macOS /private/var vs /var discrepancy
-		expectedPath, err := filepath.EvalSymlinks(filepath.Join(testDir, "target.txt"))
+		expectedPath, err := filepath.EvalSymlinks(filepath.Join(tempDir, "target.txt"))
 		require.NoError(t, err)
 		actualPath, err := filepath.EvalSymlinks(foundPath)
 		require.NoError(t, err)
@@ -145,15 +128,7 @@ func TestLookupClosestWithOwnership(t *testing.T) {
 	// This test focuses on the basic functionality when ownership checks pass.
 
 	tempDir := t.TempDir()
-
-	// Change to temp directory
-	oldWd, _ := os.Getwd()
-	err := os.Chdir(tempDir)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		os.Chdir(oldWd)
-	})
+	t.Chdir(tempDir)
 
 	t.Run("search respects same ownership", func(t *testing.T) {
 		testDir := t.TempDir()
@@ -177,15 +152,7 @@ func TestLookupClosestWithOwnership(t *testing.T) {
 
 func TestLookup(t *testing.T) {
 	tempDir := t.TempDir()
-
-	// Change to temp directory
-	oldWd, _ := os.Getwd()
-	err := os.Chdir(tempDir)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		os.Chdir(oldWd)
-	})
+	t.Chdir(tempDir)
 
 	t.Run("no targets returns empty slice", func(t *testing.T) {
 		testDir := t.TempDir()
@@ -358,22 +325,9 @@ func TestLookup(t *testing.T) {
 	})
 
 	t.Run("relative path handling", func(t *testing.T) {
-		testDir := t.TempDir()
-
-		// Change to test directory
-		oldWd, _ := os.Getwd()
-		err := os.Chdir(testDir)
-		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			os.Chdir(oldWd)
-		})
-
 		// Create target files in current directory
-		err = os.WriteFile("target1.txt", []byte("test1"), 0o644)
-		require.NoError(t, err)
-		err = os.WriteFile("target2.txt", []byte("test2"), 0o644)
-		require.NoError(t, err)
+		require.NoError(t, os.WriteFile("target1.txt", []byte("test1"), 0o644))
+		require.NoError(t, os.WriteFile("target2.txt", []byte("test2"), 0o644))
 
 		// Search using relative path
 		found, err := Lookup(".", "target1.txt", "target2.txt")
@@ -381,9 +335,9 @@ func TestLookup(t *testing.T) {
 		require.Len(t, found, 2)
 
 		// Resolve symlinks to handle macOS /private/var vs /var discrepancy
-		expectedPath1, err := filepath.EvalSymlinks(filepath.Join(testDir, "target1.txt"))
+		expectedPath1, err := filepath.EvalSymlinks(filepath.Join(tempDir, "target1.txt"))
 		require.NoError(t, err)
-		expectedPath2, err := filepath.EvalSymlinks(filepath.Join(testDir, "target2.txt"))
+		expectedPath2, err := filepath.EvalSymlinks(filepath.Join(tempDir, "target2.txt"))
 		require.NoError(t, err)
 
 		// Check that found paths match expected paths (order may vary)

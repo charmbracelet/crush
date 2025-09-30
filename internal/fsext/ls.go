@@ -1,7 +1,7 @@
 package fsext
 
 import (
-	"io/fs"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -226,7 +226,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 		if dl.shouldIgnore(path, ignorePatterns) {
 			if d.IsDir() {
-				return fs.SkipDir
+				return filepath.SkipDir
 			}
 			return nil
 		}
@@ -239,12 +239,12 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 		}
 
 		if limit > 0 && found.Len() >= limit {
-			return fs.SkipAll
+			return filepath.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
 		return nil, false, err
 	}
 

@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,7 +128,7 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
 		return nil, false, fmt.Errorf("fastwalk error: %w", err)
 	}
 

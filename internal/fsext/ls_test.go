@@ -53,7 +53,7 @@ func relPaths(tb testing.TB, in []string, base string) []string {
 	for _, p := range in {
 		rel, err := filepath.Rel(base, p)
 		require.NoError(tb, err)
-		out = append(out, rel)
+		out = append(out, filepath.ToSlash(rel))
 	}
 	return out
 }

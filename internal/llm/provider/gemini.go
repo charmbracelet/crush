@@ -20,8 +20,9 @@ import (
 )
 
 type geminiClient struct {
-	providerOptions providerClientOptions
-	client          *genai.Client
+	providerOptions    providerClientOptions
+	client             *genai.Client
+	malformedCallCount int // Counter to ensure malformed response only happens once for testing
 }
 
 type GeminiClient ProviderClient
@@ -34,8 +35,9 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 	}
 
 	return &geminiClient{
-		providerOptions: opts,
-		client:          client,
+		providerOptions:    opts,
+		client:             client,
+		malformedCallCount: 0,
 	}
 }
 
@@ -214,8 +216,6 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
-		var toolCalls []message.ToolCall
-
 		var lastMsgParts []genai.Part
 		for _, part := range lastMsg.Parts {
 			lastMsgParts = append(lastMsgParts, *part)
@@ -243,22 +243,28 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 			for _, part := range resp.Candidates[0].Content.Parts {
-				switch {
-				case part.Text != "":
+				if part.Text != "" {
 					content = string(part.Text)
-				case part.FunctionCall != nil:
-					id := "call_" + uuid.New().String()
-					args, _ := json.Marshal(part.FunctionCall.Args)
-					toolCalls = append(toolCalls, message.ToolCall{
-						ID:       id,
-						Name:     part.FunctionCall.Name,
-						Input:    string(args),
-						Type:     "function",
-						Finished: true,
-					})
 				}
 			}
 		}
+
+		// Check for malformed JSON in tool calls and retry if needed
+		toolCalls, hasMalformedJSON := g.toolCallsWithValidation(resp)
+		if hasMalformedJSON {
+			if attempts < maxRetries {
+				slog.Info("Malformed JSON detected in tool calls, retrying request", "attempt", attempts, "max_retries", maxRetries)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond): // Brief pause before retry
+					continue
+				}
+			} else {
+				slog.Warn("Maximum retry attempts reached for malformed JSON", "attempts", attempts)
+			}
+		}
+
 		finishReason := message.FinishReasonEndTurn
 		if len(resp.Candidates) > 0 {
 			finishReason = g.finishReason(resp.Candidates[0].FinishReason)
@@ -321,7 +327,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 			attempts++
 
 			currentContent := ""
-			toolCalls := []message.ToolCall{}
 			var finalResp *genai.GenerateContentResponse
 
 			eventChan <- ProviderEvent{Type: EventContentStart}
@@ -361,8 +366,7 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 				if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 					for _, part := range resp.Candidates[0].Content.Parts {
-						switch {
-						case part.Text != "":
+						if part.Text != "" {
 							delta := string(part.Text)
 							if delta != "" {
 								eventChan <- ProviderEvent{
@@ -371,18 +375,6 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 								}
 								currentContent += delta
 							}
-						case part.FunctionCall != nil:
-							id := "call_" + uuid.New().String()
-							args, _ := json.Marshal(part.FunctionCall.Args)
-							newCall := message.ToolCall{
-								ID:       id,
-								Name:     part.FunctionCall.Name,
-								Input:    string(args),
-								Type:     "function",
-								Finished: true,
-							}
-
-							toolCalls = append(toolCalls, newCall)
 						}
 					}
 				} else {
@@ -394,6 +386,25 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 			eventChan <- ProviderEvent{Type: EventContentStop}
 
 			if finalResp != nil {
+				// Check for malformed JSON in tool calls and retry if needed
+				toolCalls, hasMalformedJSON := g.toolCallsWithValidation(finalResp)
+				if hasMalformedJSON {
+					if attempts < maxRetries {
+						slog.Info("Malformed JSON detected in streaming tool calls, retrying request", "attempt", attempts, "max_retries", maxRetries)
+						select {
+						case <-ctx.Done():
+							if ctx.Err() != nil {
+								eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
+							}
+							return
+						case <-time.After(500 * time.Millisecond): // Brief pause before retry
+							continue
+						}
+					} else {
+						slog.Warn("Maximum retry attempts reached for malformed JSON in streaming response", "attempts", attempts)
+					}
+				}
+
 				finishReason := message.FinishReasonEndTurn
 				if len(finalResp.Candidates) > 0 {
 					finishReason = g.finishReason(finalResp.Candidates[0].FinishReason)
@@ -486,6 +497,50 @@ func (g *geminiClient) usage(resp *genai.GenerateContentResponse) TokenUsage {
 
 func (g *geminiClient) Model() catwalk.Model {
 	return g.providerOptions.model(g.providerOptions.modelType)
+}
+
+func (g *geminiClient) toolCallsWithValidation(resp *genai.GenerateContentResponse) ([]message.ToolCall, bool) {
+	var toolCalls []message.ToolCall
+	hasMalformedJSON := false
+
+	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if part.FunctionCall != nil {
+				// Validate the JSON arguments before creating the tool call object.
+				// FOR TESTING: Introduce a malformed response once
+				argsToUse := ""
+				originalArgs, _ := json.Marshal(part.FunctionCall.Args)
+				argsToUse = string(originalArgs)
+
+				if g.malformedCallCount < 2 {
+					// Introduce a deliberate typo to make it malformed: "true" becomes "truee"
+					// This simulates what might come from an LLM with malformed JSON
+					argsToUse = `{"param": truee}` // This is intentionally malformed JSON
+					g.malformedCallCount++         // Increment counter so this only happens once
+					slog.Info("TESTING: Introducing malformed JSON response for testing purposes", "original_args", string(originalArgs), "malformed_args", argsToUse)
+				}
+
+				var temp map[string]interface{}
+				if err := json.Unmarshal([]byte(argsToUse), &temp); err != nil {
+					slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", argsToUse)
+					hasMalformedJSON = true
+					continue
+				}
+
+				id := "call_" + uuid.New().String()
+				toolCall := message.ToolCall{
+					ID:       id,
+					Name:     part.FunctionCall.Name,
+					Input:    string(originalArgs), // Use original args for the actual tool call
+					Type:     "function",
+					Finished: true,
+				}
+				toolCalls = append(toolCalls, toolCall)
+			}
+		}
+	}
+
+	return toolCalls, hasMalformedJSON
 }
 
 // Helper functions

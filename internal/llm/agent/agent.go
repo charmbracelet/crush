@@ -370,6 +370,8 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	go func() {
 		slog.Debug("Request started", "sessionID", sessionID)
 		defer log.RecoverPanic("agent.Run", func() {
+			a.activeRequests.Del(sessionID)
+			cancel()
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
 		var attachmentParts []message.ContentPart

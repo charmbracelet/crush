@@ -24,16 +24,18 @@ import (
 )
 
 type openaiClient struct {
-	providerOptions providerClientOptions
-	client          openai.Client
+	providerOptions    providerClientOptions
+	client             openai.Client
+	malformedCallCount int // Counter to ensure malformed response only happens once for testing
 }
 
 type OpenAIClient ProviderClient
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	return &openaiClient{
-		providerOptions: opts,
-		client:          createOpenAIClient(opts),
+		providerOptions:    opts,
+		client:             createOpenAIClient(opts),
+		malformedCallCount: 0,
 	}
 }
 
@@ -299,7 +301,22 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 			content = openaiResponse.Choices[0].Message.Content
 		}
 
-		toolCalls := o.toolCalls(*openaiResponse)
+		// Check for malformed JSON in tool calls and retry if needed
+		toolCalls, hasMalformedJSON := o.toolCallsWithValidation(*openaiResponse)
+		if hasMalformedJSON {
+			if attempts < maxRetries {
+				slog.Info("Malformed JSON detected in tool calls, retrying request", "attempt", attempts, "max_retries", maxRetries)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond): // Brief pause before retry
+					continue
+				}
+			} else {
+				slog.Warn("Maximum retry attempts reached for malformed JSON", "attempts", attempts)
+			}
+		}
+
 		finishReason := o.finishReason(string(openaiResponse.Choices[0].FinishReason))
 
 		if len(toolCalls) > 0 {
@@ -453,7 +470,28 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				// Stream completed successfully
 				finishReason := o.finishReason(resultFinishReason)
 				if len(acc.Choices[0].Message.ToolCalls) > 0 {
-					toolCalls = append(toolCalls, o.toolCalls(acc.ChatCompletion)...)
+					// Check for malformed JSON in tool calls and retry if needed
+					processedToolCalls, hasMalformedJSON := o.toolCallsWithValidation(acc.ChatCompletion)
+					if hasMalformedJSON {
+						if attempts < maxRetries {
+							slog.Info("Malformed JSON detected in streaming tool calls, retrying request", "attempt", attempts, "max_retries", maxRetries)
+							openaiStream.Close()
+							select {
+							case <-ctx.Done():
+								// context cancelled
+								if ctx.Err() != nil {
+									eventChan <- ProviderEvent{Type: EventError, Error: ctx.Err()}
+								}
+								close(eventChan)
+								return
+							case <-time.After(500 * time.Millisecond): // Brief pause before retry
+								continue
+							}
+						} else {
+							slog.Warn("Maximum retry attempts reached for malformed JSON in streaming response", "attempts", attempts)
+						}
+					}
+					toolCalls = append(toolCalls, processedToolCalls...)
 				}
 				if len(toolCalls) > 0 {
 					finishReason = message.FinishReasonToolUse
@@ -564,8 +602,9 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	return true, int64(retryMs), nil
 }
 
-func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.ToolCall {
+func (o *openaiClient) toolCallsWithValidation(completion openai.ChatCompletion) ([]message.ToolCall, bool) {
 	var toolCalls []message.ToolCall
+	hasMalformedJSON := false
 
 	if len(completion.Choices) > 0 && len(completion.Choices[0].Message.ToolCalls) > 0 {
 		for _, call := range completion.Choices[0].Message.ToolCalls {
@@ -573,11 +612,26 @@ func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.Too
 			if call.Function.Name == "" {
 				continue
 			}
+
+			// Validate the JSON arguments before creating the tool call object.
+			// FOR TESTING: Introduce a malformed response once
+			argsToUse := call.Function.Arguments
+			if o.malformedCallCount == 0 {
+				// Introduce a deliberate typo to make it malformed: "true" becomes "truee"
+				// This simulates what might come from an LLM with malformed JSON
+				argsToUse = `{"param": truee}` // This is intentionally malformed JSON
+				o.malformedCallCount++         // Increment counter so this only happens once
+				slog.Info("TESTING: Introducing malformed JSON response for testing purposes", "original_args", call.Function.Arguments, "malformed_args", argsToUse)
+			}
+
 			var temp map[string]interface{}
-			if err := json.Unmarshal([]byte(call.Function.Arguments), &temp); err != nil {
-				slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", call.Function.Arguments)
+			if err := json.Unmarshal([]byte(argsToUse), &temp); err != nil {
+				slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", argsToUse)
+				hasMalformedJSON = true
+
 				continue
 			}
+
 			toolCall := message.ToolCall{
 				ID:       call.ID,
 				Name:     call.Function.Name,
@@ -589,6 +643,12 @@ func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.Too
 		}
 	}
 
+	return toolCalls, hasMalformedJSON
+}
+
+// Legacy method kept for compatibility - use toolCallsWithValidation instead
+func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.ToolCall {
+	toolCalls, _ := o.toolCallsWithValidation(completion)
 	return toolCalls
 }
 

@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss/v2/table"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -23,8 +27,21 @@ crush dirs config
 crush dirs data
   `,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Println("Config directory:", filepath.Dir(config.GlobalConfig()))
-		cmd.Println("Data directory:", filepath.Dir(config.GlobalConfigData()))
+		if term.IsTerminal(os.Stdout.Fd()) {
+			// We're in a TTY: make it fancy.
+			t := table.New().
+				Border(lipgloss.RoundedBorder()).
+				StyleFunc(func(row, col int) lipgloss.Style {
+					return lipgloss.NewStyle().Padding(0, 2)
+				}).
+				Row("Config", filepath.Dir(config.GlobalConfig())).
+				Row("Data", filepath.Dir(config.GlobalConfigData()))
+			lipgloss.Println(t)
+			return
+		}
+		// Not a TTY.
+		cmd.Println(filepath.Dir(config.GlobalConfig()))
+		cmd.Println(filepath.Dir(config.GlobalConfigData()))
 	},
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -57,13 +58,12 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel      Model
-	smallModel      Model
-	systemPrompt    string
-	tools           []ai.AgentTool
-	maxOutputTokens int64
-	sessions        session.Service
-	messages        message.Service
+	largeModel   Model
+	smallModel   Model
+	systemPrompt string
+	tools        []ai.AgentTool
+	sessions     session.Service
+	messages     message.Service
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -71,8 +71,24 @@ type sessionAgent struct {
 
 type SessionAgentOption func(*sessionAgent)
 
-func NewSessionAgent() SessionAgent {
-	return &sessionAgent{}
+func NewSessionAgent(
+	largeModel Model,
+	smallModel Model,
+	systemPrompt string,
+	sessions session.Service,
+	messages message.Service,
+	tools ...ai.AgentTool,
+) SessionAgent {
+	return &sessionAgent{
+		largeModel:     largeModel,
+		smallModel:     smallModel,
+		systemPrompt:   systemPrompt,
+		sessions:       sessions,
+		messages:       messages,
+		tools:          tools,
+		messageQueue:   csync.NewMap[string, []SessionAgentCall](),
+		activeRequests: csync.NewMap[string, context.CancelFunc](),
+	}
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.AgentResult, error) {
@@ -103,7 +119,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		a.largeModel.model,
 		ai.WithSystemPrompt(a.systemPrompt),
 		ai.WithTools(a.tools...),
-		ai.WithMaxOutputTokens(a.maxOutputTokens),
 	)
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
@@ -116,9 +131,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
+	var wg sync.WaitGroup
 	// Generate title if first message
 	if len(msgs) == 0 {
-		go a.generateTitle(ctx, currentSession, call.Prompt)
+		wg.Go(func() {
+			a.generateTitle(ctx, currentSession, call.Prompt)
+		})
 	}
 
 	// Add the user message to the session
@@ -325,6 +343,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 	if err != nil {
 		return nil, err
 	}
+	wg.Wait()
 
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {

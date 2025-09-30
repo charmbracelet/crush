@@ -573,6 +573,11 @@ func (o *openaiClient) toolCalls(completion openai.ChatCompletion) []message.Too
 			if call.Function.Name == "" {
 				continue
 			}
+			var temp map[string]interface{}
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &temp); err != nil {
+				slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", call.Function.Arguments)
+				continue
+			}
 			toolCall := message.ToolCall{
 				ID:       call.ID,
 				Name:     call.Function.Name,

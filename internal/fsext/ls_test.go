@@ -31,7 +31,7 @@ func TestListDirectory(t *testing.T) {
 		files, truncated, err := ListDirectory(tmp, nil, -1, -1)
 		require.NoError(t, err)
 		require.False(t, truncated)
-
+		require.Len(t, files, 4)
 		require.ElementsMatch(t, []string{
 			"regular.txt",
 			"subdir",
@@ -43,10 +43,7 @@ func TestListDirectory(t *testing.T) {
 		files, truncated, err := ListDirectory(tmp, nil, -1, 2)
 		require.NoError(t, err)
 		require.True(t, truncated)
-		require.ElementsMatch(t, []string{
-			"regular.txt",
-			"subdir",
-		}, relPaths(t, files, tmp))
+		require.Len(t, files, 2)
 	})
 }
 

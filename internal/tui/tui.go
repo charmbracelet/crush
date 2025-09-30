@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 var lastMouseEvent time.Time
@@ -265,15 +265,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			cmds = append(cmds, dialogCmd)
-		}
-
-		// Progress bar events
-		if payload.Type == agent.AgentEventTypeProgress {
-			if payload.Done {
-				cmds = append(cmds, tea.Raw(ansi.ResetProgress))
-			} else {
-				cmds = append(cmds, tea.Raw(ansi.SetIndeterminateProgress))
-			}
 		}
 
 		// Handle auto-compact logic
@@ -611,6 +602,12 @@ func (a *appModel) View() tea.View {
 
 	view.Layer = canvas
 	view.Cursor = cursor
+	view.ProgressBar = tea.NewProgressBar(tea.ProgressBarNone, 0)
+	if a.app.CoderAgent.IsBusy() {
+		// use a random percentage to prevent the ghostty from hiding it after
+		// a timeout.
+		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
+	}
 	return view
 }
 

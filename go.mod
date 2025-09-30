@@ -13,13 +13,13 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250910155747-997384b0b35e
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250930175933-4cafc092c5e7
 	github.com/charmbracelet/catwalk v0.6.1
 	github.com/charmbracelet/fang v0.4.2
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
-	github.com/charmbracelet/x/ansi v0.10.2-0.20250929231137-76218bae042e
+	github.com/charmbracelet/x/ansi v0.10.2
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec

@@ -32,7 +32,6 @@ const (
 	AgentEventTypeError     AgentEventType = "error"
 	AgentEventTypeResponse  AgentEventType = "response"
 	AgentEventTypeSummarize AgentEventType = "summarize"
-	AgentEventTypeProgress  AgentEventType = "progress"
 )
 
 type AgentEvent struct {
@@ -371,10 +370,6 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		defer log.RecoverPanic("agent.Run", func() {
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
-		// Notify TUI to show progress bar; ensure it's hidden on all exits
-		// Emit progress-on/off; TUI will render via tea.Raw, CLI will ignore
-		a.Publish(pubsub.CreatedEvent, AgentEvent{Type: AgentEventTypeProgress})
-		defer a.Publish(pubsub.CreatedEvent, AgentEvent{Type: AgentEventTypeProgress, Done: true})
 		var attachmentParts []message.ContentPart
 		for _, attachment := range attachments {
 			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})

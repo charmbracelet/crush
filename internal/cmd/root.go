@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
@@ -17,6 +19,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
+	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -93,7 +97,39 @@ crush -y
 	},
 }
 
+var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
+    ▄▄▄▄▄▄▄▄    ▄▄▄▄▄▄▄▄
+  ███████████  ███████████
+████████████████████████████
+████████████████████████████
+██████████▀██████▀██████████
+██████████ ██████ ██████████
+▀▀██████▄████▄▄████▄██████▀▀
+  ████████████████████████
+    ████████████████████
+       ▀▀██████████▀▀
+           ▀▀▀▀▀▀
+`)
+
+// copied from cobra:
+const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
+`
+
 func Execute() {
+	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
+	// it forward to a bytes.Buffer, write the colored heartbit to it, and then
+	// finally prepend it in the version template.
+	// Unfortunately cobra doesn't give us a way to set a function to handle
+	// printing the version, and PreRunE runs after the version is already
+	// handled, so that doesn't work either.
+	// This is the only way I could find that works relatively well.
+	if term.IsTerminal(os.Stdout.Fd()) {
+		var b bytes.Buffer
+		w := colorprofile.NewWriter(os.Stdout, os.Environ())
+		w.Forward = &b
+		_, _ = w.WriteString(heartbit.String())
+		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
+	}
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,

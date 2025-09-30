@@ -90,7 +90,7 @@ tasks:
     vars:
       NEXT:
         sh: go run github.com/caarlos0/svu/v3@latest next --always
-    prompt: "This will release {{.NEXT}}. Continue?"
+    prompt: "This will release {{.NEXT}}. Please make sure you've fetch tags. Continue?"
     preconditions:
       - sh: '[ $(git symbolic-ref --short HEAD) = "main" ]'
         msg: Not on main branch
@@ -99,6 +99,6 @@ tasks:
     cmds:
       - git commit --allow-empty -m "{{.NEXT}}"
       - git tag -d nightly
-      - git tag --sign {{.NEXT}} {{.CLI_ARGS}}
+      - git tag --annotate --sign {{.NEXT}} {{.CLI_ARGS}}
       - echo "Pushing {{.NEXT}}..."
       - git push origin --tags

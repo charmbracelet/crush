@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/fantasy/ai"
 	"github.com/charmbracelet/fantasy/anthropic"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
@@ -23,12 +24,12 @@ type builderFunc func(r *recorder.Recorder) (ai.LanguageModel, error)
 func TestSessionSimpleAgent(t *testing.T) {
 	r := newRecorder(t)
 	sonnet, err := anthropicBuilder("claude-sonnet-4-5-20250929")(r)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	haiku, err := anthropicBuilder("claude-3-5-haiku-20241022")(r)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	agent, sessions, messages := testSessionAgent(t, sonnet, haiku, "You are a helpful assistant")
 	session, err := sessions.Create(t.Context(), "New Session")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	res, err := agent.Run(t.Context(), SessionAgentCall{
 		Prompt:          "Hello",
@@ -36,14 +37,14 @@ func TestSessionSimpleAgent(t *testing.T) {
 		MaxOutputTokens: 10000,
 	})
 
-	require.Nil(t, err)
-	require.NotNil(t, res)
+	require.NoError(t, err)
+	assert.NotNil(t, res)
 
 	t.Run("should create session messages", func(t *testing.T) {
 		msgs, err := messages.List(t.Context(), session.ID)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		// Should have the agent and user message
-		require.Equal(t, len(msgs), 2)
+		assert.Equal(t, len(msgs), 2)
 	})
 }
 

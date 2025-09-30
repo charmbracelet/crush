@@ -238,13 +238,13 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
 		testDir := t.TempDir()
 
-		oldestFile := filepath.Join(testDir, "old.test")
+		oldestFile := filepath.Join(testDir, "old.rs")
 		require.NoError(t, os.WriteFile(oldestFile, []byte("old"), 0o644))
 
-		middleDir := filepath.Join(testDir, "mid.test")
+		middleDir := filepath.Join(testDir, "mid.rs")
 		require.NoError(t, os.MkdirAll(middleDir, 0o755))
 
-		newestFile := filepath.Join(testDir, "new.test")
+		newestFile := filepath.Join(testDir, "new.rs")
 		require.NoError(t, os.WriteFile(newestFile, []byte("new"), 0o644))
 
 		base := time.Now()
@@ -257,7 +257,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, os.Chtimes(middleDir, tMiddle, tMiddle))
 		require.NoError(t, os.Chtimes(oldestFile, tNewest, tNewest))
 
-		matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar("*.rs", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Len(t, matches, 3)

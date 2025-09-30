@@ -122,7 +122,7 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.cancelled {
+	} else if v.cancelled || v.retryMode {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
@@ -143,7 +143,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.cancelled {
+	} else if v.cancelled || v.retryMode {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)

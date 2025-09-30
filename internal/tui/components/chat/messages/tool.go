@@ -57,6 +57,7 @@ type toolCallCmp struct {
 	call                message.ToolCall   // The tool call being executed
 	result              message.ToolResult // The result of the tool execution
 	cancelled           bool               // Whether the tool call was cancelled
+	retryMode           bool               // Whether the tool call is in retry mode (temporary cancelled state)
 	permissionRequested bool
 	permissionGranted   bool
 
@@ -142,7 +143,26 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 // Returns a command to start the animation for pending tool calls.
 func (m *toolCallCmp) Init() tea.Cmd {
 	m.spinning = m.shouldSpin()
+	if m.spinning {
+		// Start in retry mode to hide the tool call during potential retries
+		m.retryMode = true
+		// Use a timer to exit retry mode after a short delay
+		return tea.Batch(
+			m.anim.Init(),
+			m.exitRetryMode(),
+		)
+	}
 	return m.anim.Init()
+}
+
+// exitRetryModeMsg is a message type to exit retry mode after a delay
+type exitRetryModeMsg struct{}
+
+// exitRetryMode returns a command that exits retry mode after a delay
+func (m *toolCallCmp) exitRetryMode() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return exitRetryModeMsg{}
+	})
 }
 
 // Update handles incoming messages and updates the component state.
@@ -164,6 +184,12 @@ func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
+	case exitRetryModeMsg:
+		// Exit retry mode to show normal pending state
+		if m.spinning {
+			m.retryMode = false
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		if key.Matches(msg, CopyKey) {
 			return m, m.copyTool()
@@ -177,7 +203,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *toolCallCmp) View() string {
 	box := m.style()
 
-	if !m.call.Finished && !m.cancelled {
+	if !m.call.Finished && !m.cancelled && !m.retryMode {
 		return box.Render(m.renderPending())
 	}
 

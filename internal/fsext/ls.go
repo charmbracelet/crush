@@ -249,5 +249,5 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	}
 
 	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
-	return matches, truncated, nil
+	return matches, truncated || errors.Is(err, filepath.SkipAll), nil
 }

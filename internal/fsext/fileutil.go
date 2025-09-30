@@ -141,7 +141,7 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 	for i, m := range matches {
 		results[i] = m.Path
 	}
-	return results, truncated, nil
+	return results, truncated || errors.Is(err, filepath.SkipAll), nil
 }
 
 // ShouldExcludeFile checks if a file should be excluded from processing

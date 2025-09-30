@@ -20,9 +20,8 @@ import (
 )
 
 type geminiClient struct {
-	providerOptions    providerClientOptions
-	client             *genai.Client
-	malformedCallCount int // Counter to ensure malformed response only happens once for testing
+	providerOptions providerClientOptions
+	client          *genai.Client
 }
 
 type GeminiClient ProviderClient
@@ -35,9 +34,8 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 	}
 
 	return &geminiClient{
-		providerOptions:    opts,
-		client:             client,
-		malformedCallCount: 0,
+		providerOptions: opts,
+		client:          client,
 	}
 }
 
@@ -506,23 +504,17 @@ func (g *geminiClient) toolCallsWithValidation(resp *genai.GenerateContentRespon
 	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		for _, part := range resp.Candidates[0].Content.Parts {
 			if part.FunctionCall != nil {
-				// Validate the JSON arguments before creating the tool call object.
-				// FOR TESTING: Introduce a malformed response once
-				argsToUse := ""
-				originalArgs, _ := json.Marshal(part.FunctionCall.Args)
-				argsToUse = string(originalArgs)
-
-				if g.malformedCallCount < 2 {
-					// Introduce a deliberate typo to make it malformed: "true" becomes "truee"
-					// This simulates what might come from an LLM with malformed JSON
-					argsToUse = `{"param": truee}` // This is intentionally malformed JSON
-					g.malformedCallCount++         // Increment counter so this only happens once
-					slog.Info("TESTING: Introducing malformed JSON response for testing purposes", "original_args", string(originalArgs), "malformed_args", argsToUse)
+				args, err := json.Marshal(part.FunctionCall.Args)
+				if err != nil {
+					slog.Warn("Skipping tool call with invalid JSON arguments during marshaling", "error", err, "functionCallArgs", part.FunctionCall.Args)
+					hasMalformedJSON = true
+					continue
 				}
+				argsStr := string(args)
 
 				var temp map[string]interface{}
-				if err := json.Unmarshal([]byte(argsToUse), &temp); err != nil {
-					slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", argsToUse)
+				if err := json.Unmarshal([]byte(argsStr), &temp); err != nil {
+					slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", argsStr)
 					hasMalformedJSON = true
 					continue
 				}
@@ -531,7 +523,7 @@ func (g *geminiClient) toolCallsWithValidation(resp *genai.GenerateContentRespon
 				toolCall := message.ToolCall{
 					ID:       id,
 					Name:     part.FunctionCall.Name,
-					Input:    string(originalArgs), // Use original args for the actual tool call
+					Input:    argsStr,
 					Type:     "function",
 					Finished: true,
 				}

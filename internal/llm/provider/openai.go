@@ -26,16 +26,14 @@ import (
 type openaiClient struct {
 	providerOptions    providerClientOptions
 	client             openai.Client
-	malformedCallCount int // Counter to ensure malformed response only happens once for testing
 }
 
 type OpenAIClient ProviderClient
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	return &openaiClient{
-		providerOptions:    opts,
-		client:             createOpenAIClient(opts),
-		malformedCallCount: 0,
+		providerOptions: opts,
+		client:          createOpenAIClient(opts),
 	}
 }
 
@@ -613,22 +611,10 @@ func (o *openaiClient) toolCallsWithValidation(completion openai.ChatCompletion)
 				continue
 			}
 
-			// Validate the JSON arguments before creating the tool call object.
-			// FOR TESTING: Introduce a malformed response once
-			argsToUse := call.Function.Arguments
-			if o.malformedCallCount == 0 {
-				// Introduce a deliberate typo to make it malformed: "true" becomes "truee"
-				// This simulates what might come from an LLM with malformed JSON
-				argsToUse = `{"param": truee}` // This is intentionally malformed JSON
-				o.malformedCallCount++         // Increment counter so this only happens once
-				slog.Info("TESTING: Introducing malformed JSON response for testing purposes", "original_args", call.Function.Arguments, "malformed_args", argsToUse)
-			}
-
 			var temp map[string]interface{}
-			if err := json.Unmarshal([]byte(argsToUse), &temp); err != nil {
-				slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", argsToUse)
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &temp); err != nil {
+				slog.Warn("Skipping tool call with invalid JSON arguments", "error", err, "arguments", call.Function.Arguments)
 				hasMalformedJSON = true
-
 				continue
 			}
 

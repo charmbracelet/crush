@@ -29,8 +29,13 @@ func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
-	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(updateProvidersCmd)
+	rootCmd.AddCommand(
+		runCmd,
+		dirsCmd,
+		updateProvidersCmd,
+		logsCmd,
+		schemaCmd,
+	)
 }
 
 var rootCmd = &cobra.Command{

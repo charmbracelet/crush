@@ -520,7 +520,7 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 func lookupConfigs(cwd string) []string {
 	// prepend default config paths
 	configPaths := []string{
-		globalConfig(),
+		GlobalConfig(),
 		GlobalConfigData(),
 	}
 
@@ -596,7 +596,8 @@ func hasAWSCredentials(env env.Env) bool {
 	return false
 }
 
-func globalConfig() string {
+// GlobalConfig returns the global configuration file path for the application.
+func GlobalConfig() string {
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome != "" {
 		return filepath.Join(xdgConfigHome, appName, fmt.Sprintf("%s.json", appName))

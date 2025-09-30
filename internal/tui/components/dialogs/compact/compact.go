@@ -104,16 +104,23 @@ func (c *compactDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case agent.AgentEvent:
-		if msg.Type == agent.AgentEventTypeSummarize {
+		switch msg.Type {
+		case agent.AgentEventTypeSummarize:
 			if msg.Error != nil {
 				c.state = stateError
 				c.progress = "Error: " + msg.Error.Error()
 			} else if msg.Done {
-				return c, util.CmdHandler(
-					dialogs.CloseDialogMsg{},
-				)
+				return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 			} else {
 				c.progress = msg.Progress
+			}
+		case agent.AgentEventTypeError:
+			// Handle errors that occur during summarization but are sent as separate error events.
+			c.state = stateError
+			if msg.Error != nil {
+				c.progress = "Error: " + msg.Error.Error()
+			} else {
+				c.progress = "An unknown error occurred"
 			}
 		}
 		return c, nil

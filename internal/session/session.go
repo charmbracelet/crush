@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -48,6 +49,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	}
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
+	event.SessionCreated()
 	return session, nil
 }
 
@@ -89,6 +91,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	s.Publish(pubsub.DeletedEvent, session)
+	event.SessionDeleted()
 	return nil
 }
 

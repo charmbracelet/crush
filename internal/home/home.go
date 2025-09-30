@@ -1,3 +1,4 @@
+// Package home provides utilities for dealing with the user's home directory.
 package home
 
 import (

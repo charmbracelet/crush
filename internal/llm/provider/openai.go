@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -178,7 +179,7 @@ func (o *openaiClient) convertMessages(messages []message.Message) (openaiMessag
 		}
 	}
 
-	return
+	return openaiMessages
 }
 
 func (o *openaiClient) convertTools(tools []tools.BaseTool) []openai.ChatCompletionToolParam {
@@ -513,20 +514,34 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	retryAfterValues := []string{}
 	if errors.As(err, &apiErr) {
 		// Check for token expiration (401 Unauthorized)
-		if apiErr.StatusCode == 401 {
+		if apiErr.StatusCode == http.StatusUnauthorized {
+			prev := o.providerOptions.apiKey
+			// in case the key comes from a script, we try to re-evaluate it.
 			o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
 			if err != nil {
 				return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+			}
+			// if it didn't change, do not retry.
+			if prev == o.providerOptions.apiKey {
+				return false, 0, err
 			}
 			o.client = createOpenAIClient(o.providerOptions)
 			return true, 0, nil
 		}
 
-		if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
+		if apiErr.StatusCode == http.StatusTooManyRequests {
+			// Check if this is an insufficient quota error (permanent)
+			if apiErr.Type == "insufficient_quota" || apiErr.Code == "insufficient_quota" {
+				return false, 0, fmt.Errorf("OpenAI quota exceeded: %s. Please check your plan and billing details", apiErr.Message)
+			}
+			// Other 429 errors (rate limiting) can be retried
+		} else if apiErr.StatusCode != http.StatusInternalServerError {
 			return false, 0, err
 		}
 
-		retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		if apiErr.Response != nil {
+			retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		}
 	}
 
 	if apiErr != nil {

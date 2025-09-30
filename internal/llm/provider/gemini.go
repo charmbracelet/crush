@@ -44,6 +44,14 @@ func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
 		APIKey:  opts.apiKey,
 		Backend: genai.BackendGeminiAPI,
 	}
+	if opts.baseURL != "" {
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil && resolvedBaseURL != "" {
+			cc.HTTPOptions = genai.HTTPOptions{
+				BaseURL: resolvedBaseURL,
+			}
+		}
+	}
 	if config.Get().Options.Debug {
 		cc.HTTPClient = log.NewHTTPClient()
 	}
@@ -62,9 +70,8 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 			var parts []*genai.Part
 			parts = append(parts, &genai.Part{Text: msg.Content().String()})
 			for _, binaryContent := range msg.BinaryContent() {
-				imageFormat := strings.Split(binaryContent.MIMEType, "/")
 				parts = append(parts, &genai.Part{InlineData: &genai.Blob{
-					MIMEType: imageFormat[1],
+					MIMEType: binaryContent.MIMEType,
 					Data:     binaryContent.Data,
 				}})
 			}
@@ -433,9 +440,15 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
+		prev := g.providerOptions.apiKey
+		// in case the key comes from a script, we try to re-evaluate it.
 		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		// if it didn't change, do not retry.
+		if prev == g.providerOptions.apiKey {
+			return false, 0, err
 		}
 		g.client, err = createGeminiClient(g.providerOptions)
 		if err != nil {

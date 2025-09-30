@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/home"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -44,7 +45,7 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, config config.LSPConfig) (*Client, error) {
+func New(ctx context.Context, name string, config config.LSPConfig, resolver config.VariableResolver) (*Client, error) {
 	// Convert working directory to file URI
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -53,9 +54,14 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 
 	rootURI := string(protocol.URIFromPath(workDir))
 
+	command, err := resolver.ResolveValue(config.Command)
+	if err != nil {
+		return nil, fmt.Errorf("invalid lsp command: %w", err)
+	}
+
 	// Create powernap client config
 	clientConfig := powernap.ClientConfig{
-		Command: config.Command,
+		Command: home.Long(command),
 		Args:    config.Args,
 		RootURI: rootURI,
 		Environment: func() map[string]string {
@@ -76,7 +82,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 	// Create the powernap client
 	powernapClient, err := powernap.NewClient(clientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create powernap client: %w", err)
+		return nil, fmt.Errorf("failed to create lsp client: %w", err)
 	}
 
 	client := &Client{
@@ -97,7 +103,7 @@ func New(ctx context.Context, name string, config config.LSPConfig) (*Client, er
 // Initialize initializes the LSP client and returns the server capabilities.
 func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
 	if err := c.client.Initialize(ctx, false); err != nil {
-		return nil, fmt.Errorf("failed to initialize powernap client: %w", err)
+		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
 	// Convert powernap capabilities to protocol capabilities
@@ -313,30 +319,6 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
 }
 
-// CloseFile closes a file in the LSP server.
-//
-// NOTE: this is only ever called on LSP shutdown.
-func (c *Client) CloseFile(ctx context.Context, filepath string) error {
-	cfg := config.Get()
-	uri := string(protocol.URIFromPath(filepath))
-
-	if _, exists := c.openFiles.Get(uri); !exists {
-		return nil // Already closed
-	}
-
-	if cfg.Options.DebugLSP {
-		slog.Debug("Closing file", "file", filepath)
-	}
-
-	if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
-		return err
-	}
-
-	c.openFiles.Del(uri)
-
-	return nil
-}
-
 // IsFileOpen checks if a file is currently open.
 func (c *Client) IsFileOpen(filepath string) bool {
 	uri := string(protocol.URIFromPath(filepath))
@@ -347,29 +329,16 @@ func (c *Client) IsFileOpen(filepath string) bool {
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
 	cfg := config.Get()
-	filesToClose := make([]string, 0, c.openFiles.Len())
-
-	// First collect all URIs that need to be closed
+	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {
-		// Convert URI back to file path using proper URI handling
-		filePath, err := protocol.DocumentURI(uri).Path()
-		if err != nil {
-			slog.Error("Failed to convert URI to path for file closing", "uri", uri, "error", err)
+		if debugLSP {
+			slog.Debug("Closing file", "file", uri)
+		}
+		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+			slog.Warn("Error closing rile", "uri", uri, "error", err)
 			continue
 		}
-		filesToClose = append(filesToClose, filePath)
-	}
-
-	// Then close them all
-	for _, filePath := range filesToClose {
-		err := c.CloseFile(ctx, filePath)
-		if err != nil && cfg != nil && cfg.Options.DebugLSP {
-			slog.Warn("Error closing file", "file", filePath, "error", err)
-		}
-	}
-
-	if cfg != nil && cfg.Options.DebugLSP {
-		slog.Debug("Closed all files", "files", filesToClose)
+		c.openFiles.Del(uri)
 	}
 }
 

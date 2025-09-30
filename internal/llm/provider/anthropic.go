@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -175,7 +176,7 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(results...))
 		}
 	}
-	return
+	return anthropicMessages
 }
 
 func (a *anthropicClient) convertTools(tools []tools.BaseTool) []anthropic.ToolUnionParam {
@@ -492,17 +493,23 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 		return false, 0, fmt.Errorf("maximum retry attempts reached for rate limit: %d retries", maxRetries)
 	}
 
-	if apiErr.StatusCode == 401 {
+	if apiErr.StatusCode == http.StatusUnauthorized {
+		prev := a.providerOptions.apiKey
+		// in case the key comes from a script, we try to re-evaluate it.
 		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
+		}
+		// if it didn't change, do not retry.
+		if prev == a.providerOptions.apiKey {
+			return false, 0, err
 		}
 		a.client = createAnthropicClient(a.providerOptions, a.tp)
 		return true, 0, nil
 	}
 
 	// Handle context limit exceeded error (400 Bad Request)
-	if apiErr.StatusCode == 400 {
+	if apiErr.StatusCode == http.StatusBadRequest {
 		if adjusted, ok := a.handleContextLimitError(apiErr); ok {
 			a.adjustedMaxTokens = adjusted
 			slog.Debug("Adjusted max_tokens due to context limit", "new_max_tokens", adjusted)
@@ -511,7 +518,8 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	isOverloaded := strings.Contains(apiErr.Error(), "overloaded") || strings.Contains(apiErr.Error(), "rate limit exceeded")
-	if apiErr.StatusCode != 429 && apiErr.StatusCode != 529 && !isOverloaded {
+	// 529 (unofficial): The service is overloaded
+	if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != 529 && !isOverloaded {
 		return false, 0, err
 	}
 

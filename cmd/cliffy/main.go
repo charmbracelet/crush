@@ -31,32 +31,44 @@ var (
 	showStats      bool
 	showVersion    bool
 	verbose        bool
+	sharedContext  string
+	contextFile    string
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "cliffy [flags] <task1> [task2] [task3] ...",
-	Short: "Fast AI coding assistant for one-off tasks",
+	Use:   "cliffy [flags] <task> [task2] [task3] ...",
+	Short: "Fast AI coding assistant - single or multiple tasks",
 	Long: fmt.Sprintf(`%s  Cliffy - Fast AI coding assistant
 
 Fast, focused AI coding assistant for one-off tasks.
-Cliffy zips in, executes your task, and gets back to ready position.
+Execute one or multiple tasks in parallel. Results only, no noise.
 
 USAGE
-  cliffy [flags] <task1> [task2] ...
+  cliffy [flags] <task> [task2] [task3] ...
 
 EXAMPLES
-  # Single task
-  cliffy "list all Go files in internal/"
+  # Single task - clean output
+  cliffy "what is 2+2?"
+  # Output: 4
 
-  # Multiple tasks (parallel)
+  # Multiple tasks - runs in parallel
   cliffy "analyze auth.go" "analyze db.go" "analyze api.go"
 
-  # With verbose progress
+  # Multiple tasks with shared context
+  cliffy --context "You are a security expert" \
+    "review auth.go" \
+    "review db.go" \
+    "review api.go"
+
+  # Show progress and stats with --verbose
   cliffy --verbose "task1" "task2" "task3"
 
   # Model selection
   cliffy --fast "count lines of code"
   cliffy --smart "refactor this function for clarity"
+
+  # Mix flags
+  cliffy --verbose --fast "task1" "task2"
 
 Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -89,6 +101,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&showStats, "stats", false, "Show token usage and timing")
 	rootCmd.Flags().BoolVar(&showVersion, "version", false, "Show version info")
 	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Show progress and stats")
+	rootCmd.Flags().StringVar(&sharedContext, "context", "", "Shared context prepended to each task")
+	rootCmd.Flags().StringVar(&contextFile, "context-file", "", "Load shared context from file")
 }
 
 func main() {
@@ -112,6 +126,16 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 		return fmt.Errorf("config load failed: %w", err)
 	}
 
+	// Load context from file if specified
+	taskContext := sharedContext
+	if contextFile != "" {
+		content, err := os.ReadFile(contextFile)
+		if err != nil {
+			return fmt.Errorf("failed to read context file: %w", err)
+		}
+		taskContext = string(content)
+	}
+
 	// Parse tasks from arguments
 	tasks := make([]volley.Task, len(args))
 	for i, arg := range args {
@@ -126,6 +150,7 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 	opts.ShowProgress = verboseMode
 	opts.ShowSummary = verboseMode
 	opts.OutputFormat = outputFormat
+	opts.Context = taskContext
 
 	// Create message store
 	messageStore := message.NewStore()
@@ -168,8 +193,12 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 		return fmt.Errorf("failed to output results: %w", err)
 	}
 
-	// Return error if any tasks failed
+	// Return error if any tasks failed (silent in non-verbose mode)
 	if summary.FailedTasks > 0 {
+		if !verboseMode {
+			// Exit silently - errors already shown to stderr
+			os.Exit(1)
+		}
 		return fmt.Errorf("%d/%d tasks failed", summary.FailedTasks, summary.TotalTasks)
 	}
 
@@ -177,18 +206,22 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 }
 
 func outputVolleyResults(results []volley.TaskResult, summary volley.VolleySummary, opts volley.VolleyOptions) error {
-	// Silent mode: just output results, no decorations
-	for _, result := range results {
+	// Output results (silent mode: just results, no decorations)
+	for i, result := range results {
 		if result.Status == volley.TaskStatusSuccess {
 			fmt.Println(result.Output)
-			fmt.Println() // Blank line between tasks
+			// Add blank line between tasks (but not after the last one)
+			if i < len(results)-1 {
+				fmt.Println()
+			}
 		} else if result.Status == volley.TaskStatusFailed {
-			fmt.Fprintf(os.Stderr, "Task %d failed: %v\n", result.Task.Index, result.Error)
+			// In silent mode, show minimal error
+			if !opts.ShowProgress {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", result.Error)
+			}
+			// In verbose mode, progress tracker already showed the error
 		}
 	}
-
-	// If verbose, the progress tracker already showed summary
-	// No need to duplicate it here
 
 	return nil
 }

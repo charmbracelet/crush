@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -601,6 +602,12 @@ func (a *appModel) View() tea.View {
 
 	view.Layer = canvas
 	view.Cursor = cursor
+	view.ProgressBar = tea.NewProgressBar(tea.ProgressBarNone, 0)
+	if a.app.CoderAgent.IsBusy() {
+		// use a random percentage to prevent the ghostty from hiding it after
+		// a timeout.
+		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
+	}
 	return view
 }
 

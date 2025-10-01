@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bwl/cliffy/internal/fsext"
 )
@@ -63,6 +64,8 @@ func (g *globTool) Info() ToolInfo {
 }
 
 func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
+	start := time.Now()
+
 	var params GlobParams
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
 		return NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
@@ -75,6 +78,11 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	searchPath := params.Path
 	if searchPath == "" {
 		searchPath = g.workingDir
+	}
+
+	// Emit progress for glob search
+	if progressFunc, ok := ctx.Value(ProgressFuncKey).(ProgressFunc); ok {
+		progressFunc(fmt.Sprintf("Searching: %s", params.Pattern))
 	}
 
 	files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
@@ -92,13 +100,23 @@ func (g *globTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		}
 	}
 
-	return WithResponseMetadata(
+	response := WithResponseMetadata(
 		NewTextResponse(output),
 		GlobResponseMetadata{
 			NumberOfFiles: len(files),
 			Truncated:     truncated,
 		},
-	), nil
+	)
+
+	// Add execution metadata
+	response.ExecutionMetadata = &ExecutionMetadata{
+		ToolName:   GlobToolName,
+		Duration:   time.Since(start),
+		Pattern:    params.Pattern,
+		MatchCount: len(files),
+	}
+
+	return response, nil
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {

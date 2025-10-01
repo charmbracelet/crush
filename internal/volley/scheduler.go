@@ -8,6 +8,7 @@ import (
 
 	"github.com/bwl/cliffy/internal/config"
 	"github.com/bwl/cliffy/internal/llm/agent"
+	"github.com/bwl/cliffy/internal/llm/tools"
 	"github.com/bwl/cliffy/internal/message"
 )
 
@@ -152,7 +153,7 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 		}
 
 		// Execute via agent
-		output, usage, err := s.executeViaAgent(ctx, prompt)
+		output, usage, toolMetadata, err := s.executeViaAgent(ctx, prompt, task)
 
 		if err != nil {
 			lastErr = err
@@ -187,6 +188,7 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 		result.Duration = time.Since(startTime)
 		result.Error = nil
 		result.Model = s.agent.Model().ID
+		result.ToolMetadata = toolMetadata
 
 		s.progress.TaskCompleted(task, result)
 
@@ -204,34 +206,49 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 }
 
 // executeViaAgent runs the task through the agent
-func (s *Scheduler) executeViaAgent(ctx context.Context, prompt string) (string, Usage, error) {
+func (s *Scheduler) executeViaAgent(ctx context.Context, prompt string, task Task) (string, Usage, []*tools.ExecutionMetadata, error) {
 	// Generate unique session ID for this task
 	sessionID := fmt.Sprintf("volley-%d", time.Now().UnixNano())
 
 	// Run agent
 	events, err := s.agent.Run(ctx, sessionID, prompt)
 	if err != nil {
-		return "", Usage{}, fmt.Errorf("failed to run agent: %w", err)
+		return "", Usage{}, nil, fmt.Errorf("failed to run agent: %w", err)
 	}
 
 	if events == nil {
-		return "", Usage{}, fmt.Errorf("request was queued unexpectedly")
+		return "", Usage{}, nil, fmt.Errorf("request was queued unexpectedly")
 	}
 
 	// Process events
 	var output string
 	var usage Usage
+	var toolMetadata []*tools.ExecutionMetadata
 
 	for event := range events {
 		switch event.Type {
+		case agent.AgentEventTypeToolTrace:
+			// Real-time tool trace display
+			if s.options.Verbosity != config.VerbosityQuiet {
+				s.progress.ToolExecuted(task, event.ToolMetadata)
+			}
+			// Collect metadata for result
+			toolMetadata = append(toolMetadata, event.ToolMetadata)
+
+		case agent.AgentEventTypeProgress:
+			// Progress updates (for future Phase 4)
+			if s.options.Verbosity != config.VerbosityQuiet {
+				s.progress.ShowProgress(task, event.Progress)
+			}
+
 		case agent.AgentEventTypeError:
-			return "", Usage{}, event.Error
+			return "", Usage{}, toolMetadata, event.Error
 
 		case agent.AgentEventTypeResponse:
 			// Get final message
 			messages, err := s.messageStore.List(ctx, sessionID)
 			if err != nil {
-				return "", Usage{}, fmt.Errorf("failed to list messages: %w", err)
+				return "", Usage{}, toolMetadata, fmt.Errorf("failed to list messages: %w", err)
 			}
 
 			// Extract output from assistant messages
@@ -248,11 +265,11 @@ func (s *Scheduler) executeViaAgent(ctx context.Context, prompt string) (string,
 				TotalTokens:  event.TokenUsage.InputTokens + event.TokenUsage.OutputTokens,
 			}
 
-			return output, usage, nil
+			return output, usage, toolMetadata, nil
 		}
 	}
 
-	return output, usage, nil
+	return output, usage, toolMetadata, nil
 }
 
 // handleResult processes a completed task result

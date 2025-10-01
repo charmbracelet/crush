@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bwl/cliffy/internal/csync"
@@ -83,6 +84,8 @@ func (v *viewTool) Info() ToolInfo {
 
 // Run implements Tool.
 func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
+	start := time.Now()
+
 	var params ViewParams
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
 		return NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
@@ -156,6 +159,13 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
 	}
 
+	// Emit progress for large files
+	if fileInfo.Size() > 1*1024*1024 { // >1MB
+		if progressFunc, ok := ctx.Value(ProgressFuncKey).(ProgressFunc); ok {
+			progressFunc(fmt.Sprintf("Reading large file %s...", filepath.Base(filePath)))
+		}
+	}
+
 	// Read the file content
 	content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
 	isValidUt8 := utf8.ValidString(content)
@@ -179,13 +189,26 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	output += "\n</file>\n"
 	output += getDiagnostics(filePath, v.lspClients)
 	recordFileRead(filePath)
-	return WithResponseMetadata(
+
+	response := WithResponseMetadata(
 		NewTextResponse(output),
 		ViewResponseMetadata{
 			FilePath: filePath,
 			Content:  content,
 		},
-	), nil
+	)
+
+	// Add execution metadata
+	response.ExecutionMetadata = &ExecutionMetadata{
+		ToolName:  ViewToolName,
+		Duration:  time.Since(start),
+		FilePath:  filePath,
+		Operation: "read",
+		LineCount: len(strings.Split(content, "\n")),
+		ByteSize:  fileInfo.Size(),
+	}
+
+	return response, nil
 }
 
 func addLineNumbers(content string, startLine int) string {

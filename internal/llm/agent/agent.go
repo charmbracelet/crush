@@ -27,7 +27,14 @@ const (
 	AgentEventTypeError     AgentEventType = "error"
 	AgentEventTypeResponse  AgentEventType = "response"
 	AgentEventTypeSummarize AgentEventType = "summarize"
+	AgentEventTypeToolTrace AgentEventType = "tool_trace"
+	AgentEventTypeProgress  AgentEventType = "progress"
 )
+
+// Context keys for event channel
+type eventChanKeyType struct{}
+
+var eventChanKey = eventChanKeyType{}
 
 type AgentEvent struct {
 	Type    AgentEventType
@@ -41,6 +48,9 @@ type AgentEvent struct {
 	SessionID string
 	Progress  string
 	Done      bool
+
+	// Tool execution metadata
+	ToolMetadata *tools.ExecutionMetadata
 }
 
 type Service interface {
@@ -288,7 +298,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	if !a.Model().SupportsImages && attachments != nil {
 		attachments = nil
 	}
-	events := make(chan AgentEvent, 1)
+	events := make(chan AgentEvent, 10) // Increased buffer for tool events
 	if a.IsSessionBusy(sessionID) {
 		existing, ok := a.promptQueue.Get(sessionID)
 		if !ok {
@@ -308,6 +318,10 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		defer log.RecoverPanic("agent.Run", func() {
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
+
+		// Add event channel to context for tool emissions
+		genCtx = context.WithValue(genCtx, eventChanKey, events)
+
 		var attachmentParts []message.ContentPart
 		for _, attachment := range attachments {
 			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
@@ -471,6 +485,21 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
 
+	// Add progress function for tools to emit progress updates
+	progressFunc := tools.ProgressFunc(func(msg string) {
+		if evtChan, ok := ctx.Value(eventChanKey).(chan AgentEvent); ok {
+			select {
+			case evtChan <- AgentEvent{
+				Type:     AgentEventTypeProgress,
+				Progress: msg,
+			}:
+			default:
+				// Don't block if channel is full
+			}
+		}
+	})
+	ctx = context.WithValue(ctx, tools.ProgressFuncKey, progressFunc)
+
 	var tokenUsage provider.TokenUsage
 
 loop:
@@ -568,6 +597,25 @@ loop:
 			case result := <-resultChan:
 				toolResponse = result.response
 				toolErr = result.err
+
+				// Emit tool trace event if metadata exists
+				if toolResponse.ExecutionMetadata != nil {
+					if eventChan, ok := ctx.Value(eventChanKey).(chan AgentEvent); ok {
+						// Non-blocking send to avoid deadlock
+						select {
+						case eventChan <- AgentEvent{
+							Type:         AgentEventTypeToolTrace,
+							ToolMetadata: toolResponse.ExecutionMetadata,
+						}:
+							// Event sent successfully
+						default:
+							// Channel full, log and continue
+							slog.Warn("Tool event channel full, event dropped",
+								"tool", toolResponse.ExecutionMetadata.ToolName,
+								"duration", toolResponse.ExecutionMetadata.Duration)
+						}
+					}
+				}
 			}
 
 			if toolErr != nil {

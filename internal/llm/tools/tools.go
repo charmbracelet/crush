@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 type ToolInfo struct {
@@ -17,6 +18,7 @@ type toolResponseType string
 type (
 	sessionIDContextKey string
 	messageIDContextKey string
+	progressFuncKeyType struct{}
 )
 
 const (
@@ -27,11 +29,46 @@ const (
 	MessageIDContextKey messageIDContextKey = "message_id"
 )
 
+// ProgressFuncKey is the context key for accessing the progress function
+var ProgressFuncKey = progressFuncKeyType{}
+
+// ProgressFunc is a function that emits progress updates
+type ProgressFunc func(message string)
+
 type ToolResponse struct {
-	Type     toolResponseType `json:"type"`
-	Content  string           `json:"content"`
-	Metadata string           `json:"metadata,omitempty"`
-	IsError  bool             `json:"is_error"`
+	Type            toolResponseType `json:"type"`
+	Content         string           `json:"content"`
+	Metadata        string           `json:"metadata,omitempty"`
+	IsError         bool             `json:"is_error"`
+	ExecutionMetadata *ExecutionMetadata `json:"execution_metadata,omitempty"`
+}
+
+// ExecutionMetadata contains detailed information about tool execution
+type ExecutionMetadata struct {
+	ToolName     string        `json:"tool_name"`
+	Duration     time.Duration `json:"duration"`
+
+	// File operations
+	FilePath     string        `json:"file_path,omitempty"`
+	Operation    string        `json:"operation,omitempty"` // "read", "write", "created", "modified"
+	LineCount    int           `json:"line_count,omitempty"`
+	ByteSize     int64         `json:"byte_size,omitempty"`
+
+	// Search operations
+	Pattern      string        `json:"pattern,omitempty"`
+	MatchCount   int           `json:"match_count,omitempty"`
+
+	// Shell operations
+	Command      string        `json:"command,omitempty"`
+	ExitCode     *int          `json:"exit_code,omitempty"`
+
+	// Diff information (for write/edit operations)
+	Diff         string        `json:"diff,omitempty"`
+	Additions    int           `json:"additions,omitempty"`
+	Deletions    int           `json:"deletions,omitempty"`
+
+	// Error information
+	ErrorMessage string        `json:"error_message,omitempty"`
 }
 
 func NewTextResponse(content string) ToolResponse {

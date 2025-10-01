@@ -278,6 +278,11 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
 	// No permission checks needed
 
+	// Emit progress for command execution
+	if progressFunc, ok := ctx.Value(ProgressFuncKey).(ProgressFunc); ok {
+		progressFunc(fmt.Sprintf("Running: %s", truncateCommand(params.Command, 50)))
+	}
+
 	startTime := time.Now()
 	if params.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -332,11 +337,24 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		Output:           stdout,
 		WorkingDirectory: currentWorkingDir,
 	}
+
+	var response ToolResponse
 	if stdout == "" {
-		return WithResponseMetadata(NewTextResponse(BashNoOutput), metadata), nil
+		response = WithResponseMetadata(NewTextResponse(BashNoOutput), metadata)
+	} else {
+		stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
+		response = WithResponseMetadata(NewTextResponse(stdout), metadata)
 	}
-	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
-	return WithResponseMetadata(NewTextResponse(stdout), metadata), nil
+
+	// Add execution metadata
+	response.ExecutionMetadata = &ExecutionMetadata{
+		ToolName: "bash",
+		Duration: time.Since(startTime),
+		Command:  params.Command,
+		ExitCode: &exitCode,
+	}
+
+	return response, nil
 }
 
 func truncateOutput(content string) string {
@@ -357,4 +375,12 @@ func countLines(s string) int {
 		return 0
 	}
 	return len(strings.Split(s, "\n"))
+}
+
+// truncateCommand truncates a command to the specified length with ellipsis
+func truncateCommand(cmd string, maxLen int) string {
+	if len(cmd) <= maxLen {
+		return cmd
+	}
+	return cmd[:maxLen-3] + "..."
 }

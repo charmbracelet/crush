@@ -4,9 +4,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/llm/tools"
+	"github.com/bwl/cliffy/internal/output"
 )
+
+// taskState tracks the state and tool traces for a single task
+type taskState struct {
+	task      Task
+	status    string // "running", "completed", "failed"
+	icon      string // ▶, ✓, ✗
+	result    *TaskResult
+	tools     []*tools.ExecutionMetadata
+	workerID  int
+	lineCount int // Number of lines this task occupies (1 for task + N for tools)
+}
 
 // ProgressTracker tracks and displays volley execution progress
 type ProgressTracker struct {
@@ -17,13 +33,20 @@ type ProgressTracker struct {
 	totalTasks int
 	maxWorkers int
 	started    time.Time
+
+	// Track state per task for in-place updates
+	taskStates   map[int]*taskState // key = task.Index
+	totalLines   int                // Total lines currently displayed
+	taskOrder    []int              // Order of tasks as they appear on screen
 }
 
 // NewProgressTracker creates a new progress tracker
 func NewProgressTracker(enabled bool) *ProgressTracker {
 	return &ProgressTracker{
-		enabled: enabled,
-		out:     os.Stderr,
+		enabled:    enabled,
+		out:        os.Stderr,
+		taskStates: make(map[int]*taskState),
+		taskOrder:  []int{},
 	}
 }
 
@@ -52,8 +75,30 @@ func (p *ProgressTracker) TaskStarted(task Task, workerID int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	fmt.Fprintf(p.out, "[%d/%d] ▶ %s (worker %d)\n",
-		task.Index, p.totalTasks, truncate(task.Prompt, 60), workerID)
+	// Initialize task state
+	p.taskStates[task.Index] = &taskState{
+		task:      task,
+		status:    "running",
+		icon:      "▶",
+		workerID:  workerID,
+		tools:     []*tools.ExecutionMetadata{},
+		lineCount: 1,
+	}
+
+	// Add to task order if not already there
+	found := false
+	for _, idx := range p.taskOrder {
+		if idx == task.Index {
+			found = true
+			break
+		}
+	}
+	if !found {
+		p.taskOrder = append(p.taskOrder, task.Index)
+	}
+
+	// Render all tasks
+	p.renderAll()
 }
 
 // TaskCompleted reports that a task completed successfully
@@ -65,12 +110,18 @@ func (p *ProgressTracker) TaskCompleted(task Task, result TaskResult) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	fmt.Fprintf(p.out, "[%d/%d] ✓ %s (%.1fs, %s tokens, $%.4f, %s)\n",
-		task.Index, p.totalTasks, truncate(task.Prompt, 60),
-		result.Duration.Seconds(),
-		formatTokens(result.TokensTotal),
-		result.Cost,
-		formatModel(result.Model))
+	state := p.taskStates[task.Index]
+	if state == nil {
+		return
+	}
+
+	// Update state
+	state.status = "completed"
+	state.icon = "✓"
+	state.result = &result
+
+	// Re-render all tasks
+	p.renderAll()
 }
 
 // TaskFailed reports that a task failed
@@ -219,4 +270,120 @@ func isDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// renderAll renders all tasks and their tool traces, updating in place
+func (p *ProgressTracker) renderAll() {
+	// Build all lines for all tasks
+	var allLines []string
+
+	for _, taskIndex := range p.taskOrder {
+		state := p.taskStates[taskIndex]
+		if state == nil {
+			continue
+		}
+
+		// Task status line
+		taskLine := p.formatTaskLine(state)
+		allLines = append(allLines, taskLine)
+
+		// Tool trace lines with tree characters
+		for i, toolMeta := range state.tools {
+			var treeChar string
+			if i == len(state.tools)-1 {
+				treeChar = "╰────" // Last tool
+			} else {
+				treeChar = "├────" // Not last tool
+			}
+
+			toolLine := p.formatToolLine(treeChar, toolMeta)
+			allLines = append(allLines, toolLine)
+		}
+	}
+
+	newTotalLines := len(allLines)
+
+	// If this is a re-render, move cursor up and clear
+	if p.totalLines > 0 {
+		// Move cursor up to the start
+		for i := 0; i < p.totalLines; i++ {
+			fmt.Fprintf(p.out, "\033[1A") // Move up one line
+		}
+		// Move to beginning of line
+		fmt.Fprintf(p.out, "\r")
+		// Clear from cursor to end of screen
+		fmt.Fprintf(p.out, "\033[J")
+	}
+
+	// Print all lines
+	for _, line := range allLines {
+		fmt.Fprintln(p.out, line)
+	}
+
+	// Update total line count
+	p.totalLines = newTotalLines
+}
+
+// formatTaskLine formats the main task status line
+func (p *ProgressTracker) formatTaskLine(state *taskState) string {
+	if state.status == "running" {
+		return fmt.Sprintf("[%d/%d] %s %s (worker %d)",
+			state.task.Index, p.totalTasks,
+			state.icon,
+			truncate(state.task.Prompt, 60),
+			state.workerID)
+	}
+
+	// Completed or failed
+	if state.result != nil {
+		return fmt.Sprintf("[%d/%d] %s %s (%.1fs, %s tokens, $%.4f, %s)",
+			state.task.Index, p.totalTasks,
+			state.icon,
+			truncate(state.task.Prompt, 60),
+			state.result.Duration.Seconds(),
+			formatTokens(state.result.TokensTotal),
+			state.result.Cost,
+			formatModel(state.result.Model))
+	}
+
+	return fmt.Sprintf("[%d/%d] %s %s",
+		state.task.Index, p.totalTasks,
+		state.icon,
+		truncate(state.task.Prompt, 60))
+}
+
+// formatToolLine formats a single tool trace line
+func (p *ProgressTracker) formatToolLine(treeChar string, metadata *tools.ExecutionMetadata) string {
+	trace := output.FormatToolTrace(metadata, config.VerbosityNormal)
+	// Remove the [TOOL] prefix since we're using tree characters
+	trace = strings.TrimPrefix(trace, "[TOOL] ")
+	return fmt.Sprintf("  %s %s", treeChar, trace)
+}
+
+// ToolExecuted displays a tool execution trace
+func (p *ProgressTracker) ToolExecuted(task Task, metadata *tools.ExecutionMetadata) {
+	if !p.enabled || metadata == nil {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	state := p.taskStates[task.Index]
+	if state == nil {
+		return
+	}
+
+	// Add tool to state
+	state.tools = append(state.tools, metadata)
+
+	// Re-render all tasks
+	p.renderAll()
+}
+
+// ShowProgress displays a progress update for a running task
+func (p *ProgressTracker) ShowProgress(task Task, message string) {
+	// Progress events are now handled by renderTask, so this is a no-op
+	// The progress message was used for inline updates like "[1/3] ⋯ Running: cmd"
+	// but with tree display, we don't need this anymore
 }

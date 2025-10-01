@@ -30,6 +30,14 @@ type Runner struct {
 	options Options
 	stdout  io.Writer
 	stderr  io.Writer
+	stats   ExecutionStats
+}
+
+type ExecutionStats struct {
+	FilesRead    int
+	FilesWritten int
+	ToolCalls    int
+	Errors       int
 }
 
 func New(cfg *config.Config, opts Options) (*Runner, error) {
@@ -93,6 +101,11 @@ func (r *Runner) Execute(ctx context.Context, prompt string) error {
 		}
 	}
 
+	// Print summary if not quiet
+	if !r.options.Quiet && r.options.Timings {
+		r.printSummary()
+	}
+
 	return nil
 }
 
@@ -143,9 +156,20 @@ func (r *Runner) handleResponse(ctx context.Context, msg message.Message, store 
 		}
 
 		// Show tool calls if not quiet
-		if !r.options.Quiet && len(m.ToolCalls()) > 0 {
-			for _, tc := range m.ToolCalls() {
-				fmt.Fprintf(r.stderr, "[TOOL] %s\n", tc.Name)
+		if len(m.ToolCalls()) > 0 {
+			r.stats.ToolCalls += len(m.ToolCalls())
+			if !r.options.Quiet {
+				for _, tc := range m.ToolCalls() {
+					fmt.Fprintf(r.stderr, "[TOOL] %s\n", tc.Name)
+
+					// Track specific tool types
+					switch tc.Name {
+					case "View", "Glob", "Grep":
+						r.stats.FilesRead++
+					case "Edit", "Write":
+						r.stats.FilesWritten++
+					}
+				}
 			}
 		}
 	}
@@ -154,4 +178,20 @@ func (r *Runner) handleResponse(ctx context.Context, msg message.Message, store 
 	fmt.Fprintln(r.stdout)
 
 	return nil
+}
+
+func (r *Runner) printSummary() {
+	fmt.Fprintf(r.stderr, "\nStats:\n")
+	if r.stats.FilesRead > 0 {
+		fmt.Fprintf(r.stderr, "  • %d files read\n", r.stats.FilesRead)
+	}
+	if r.stats.FilesWritten > 0 {
+		fmt.Fprintf(r.stderr, "  • %d files updated\n", r.stats.FilesWritten)
+	}
+	if r.stats.ToolCalls > 0 {
+		fmt.Fprintf(r.stderr, "  • %d tool calls\n", r.stats.ToolCalls)
+	}
+	if r.stats.Errors > 0 {
+		fmt.Fprintf(r.stderr, "  • %d errors\n", r.stats.Errors)
+	}
 }

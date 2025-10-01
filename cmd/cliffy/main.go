@@ -127,9 +127,39 @@ func init() {
 
 func main() {
 	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		printError(err)
 		os.Exit(1)
 	}
+}
+
+func printError(err error) {
+	errMsg := err.Error()
+
+	fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
+
+	// Provide helpful recovery hints based on error type
+	if strings.Contains(errMsg, "config load failed") || strings.Contains(errMsg, "API key") {
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "Quick setup:\n")
+		fmt.Fprintf(os.Stderr, "  1. Get API key: https://openrouter.ai/settings/keys\n")
+		fmt.Fprintf(os.Stderr, "  2. Set variable: export CLIFFY_OPENROUTER_API_KEY=\"sk-...\"\n")
+		fmt.Fprintf(os.Stderr, "  3. Try again\n")
+		fmt.Fprintf(os.Stderr, "\nOr see: https://cliffy.ettio.com/setup\n")
+	} else if strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found") {
+		fmt.Fprintf(os.Stderr, "\nCheck ~/.config/cliffy/cliffy.json or use:\n")
+		fmt.Fprintf(os.Stderr, "  --fast (small model)\n")
+		fmt.Fprintf(os.Stderr, "  --smart (large model)\n")
+	} else if strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "429") {
+		fmt.Fprintf(os.Stderr, "\nRate limited. Try:\n")
+		fmt.Fprintf(os.Stderr, "  - Wait a moment and retry\n")
+		fmt.Fprintf(os.Stderr, "  - Use --fast for cheaper model\n")
+	} else if strings.Contains(errMsg, "context") || strings.Contains(errMsg, "timeout") {
+		fmt.Fprintf(os.Stderr, "\nRequest timed out. Try:\n")
+		fmt.Fprintf(os.Stderr, "  - Simplify the task\n")
+		fmt.Fprintf(os.Stderr, "  - Break into smaller steps\n")
+	}
+
+	fmt.Fprintf(os.Stderr, "\n%s  Ready to retry\n", tools.AsciiCliffy)
 }
 
 func printVersion() {

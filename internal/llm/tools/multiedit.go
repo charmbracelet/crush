@@ -5,18 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/diff"
+	"github.com/bwl/cliffy/internal/fsext"
+	"github.com/bwl/cliffy/internal/lsp"
 )
 
 type MultiEditOperation struct {
@@ -46,8 +43,6 @@ type MultiEditResponseMetadata struct {
 
 type multiEditTool struct {
 	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
 	workingDir  string
 }
 
@@ -56,12 +51,10 @@ const MultiEditToolName = "multiedit"
 //go:embed multiedit.md
 var multieditDescription []byte
 
-func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) BaseTool {
 	return &multiEditTool{
-		lspClients:  lspClients,
-		permissions: permissions,
-		files:       files,
-		workingDir:  workingDir,
+		lspClients: lspClients,
+		workingDir: workingDir,
 	}
 }
 
@@ -205,47 +198,15 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 		currentContent = newContent
 	}
 
-	// Get session and message IDs
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
-	// Check permissions
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-
-	p := m.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    MultiEditToolName,
-		Action:      "write",
-		Description: fmt.Sprintf("Create file %s with %d edits", params.FilePath, len(params.Edits)),
-		Params: MultiEditPermissionsParams{
-			FilePath:   params.FilePath,
-			OldContent: "",
-			NewContent: currentContent,
-		},
-	})
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
 
 	// Write the file
 	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Update file history
-	_, err = m.files.Create(ctx, sessionID, params.FilePath, "")
-	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(params.FilePath)
@@ -315,30 +276,10 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 		return NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
-	// Get session and message IDs
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for editing file")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
-	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-	p := m.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    MultiEditToolName,
-		Action:      "write",
-		Description: fmt.Sprintf("Apply %d edits to file %s", len(params.Edits), params.FilePath),
-		Params: MultiEditPermissionsParams{
-			FilePath:   params.FilePath,
-			OldContent: oldContent,
-			NewContent: currentContent,
-		},
-	})
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
 
 	if isCrlf {
 		currentContent, _ = fsext.ToWindowsLineEndings(currentContent)
@@ -348,28 +289,6 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Update file history
-	file, err := m.files.GetByPathAndSession(ctx, params.FilePath, sessionID)
-	if err != nil {
-		_, err = m.files.Create(ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content, store an intermediate version
-		_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
-		}
-	}
-
-	// Store the new version
-	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(params.FilePath)

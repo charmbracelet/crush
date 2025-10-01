@@ -1,670 +1,329 @@
-# Crush
+# Cliffy
 
-<p align="center">
-    <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/adc1a6f4-b284-4603-836c-59038caa2e8b" /></a><br />
-    <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
-</p>
+**Cliffy** is a fast, headless fork of [Crush](https://github.com/charmbracelet/crush) optimized for one-off AI coding tasks. No TUI, no database, no sessions—just direct streaming execution.
 
-<p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
-<p align="center">你的新编程伙伴，现在就在你最爱的终端中。<br />你的工具、代码和工作流，都与您选择的 LLM 模型紧密相连。</p>
+## Quick Start
 
-<p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
+### 1. Get an OpenRouter API Key
+
+Cliffy uses [OpenRouter](https://openrouter.ai) with free Grok models by default.
+
+1. Sign up at https://openrouter.ai
+2. Get your API key from https://openrouter.ai/settings/keys
+3. Set the environment variable:
+
+```bash
+export CLIFFY_OPENROUTER_API_KEY="your-api-key-here"
+```
+
+Add this to your `~/.bashrc`, `~/.zshrc`, or shell config to make it permanent.
+
+### 2. Build Cliffy
+
+```bash
+go build -o bin/cliffy ./cmd/cliffy
+```
+
+### 3. Run a Task
+
+```bash
+./bin/cliffy "list all Go files in this project"
+```
 
 ## Features
 
-- **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
-- **Flexible:** switch LLMs mid-session while preserving context
-- **Session-Based:** maintain multiple work sessions and contexts per project
-- **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
-- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
+- **🚀 Fast**: ~4x faster cold start than `crush run -q -y` (target: 200ms vs 800ms)
+- **👁️ Transparent**: Shows LLM thinking/reasoning (crush hides this!)
+- **📦 Zero Persistence**: No database, no sessions, no history
+- **🎯 Focused**: One task, one execution, done
+- **🔧 CLI-First**: Perfect for scripts, CI/CD, automation
 
-## Installation
-
-Use a package manager:
+## Usage
 
 ```bash
-# Homebrew
-brew install charmbracelet/tap/crush
+# Basic usage
+cliffy "your task here"
 
-# NPM
-npm install -g @charmland/crush
+# Show LLM thinking/reasoning
+cliffy --show-thinking "debug this function"
 
-# Arch Linux (btw)
-yay -S crush-bin
+# Use different model
+cliffy --model sonnet "complex refactoring task"
+cliffy --fast "simple task"      # alias for --model small
+cliffy --smart "complex task"    # alias for --model large
 
-# Nix
-nix run github:numtide/nix-ai-tools#crush
+# Quiet mode (no tool logs)
+cliffy --quiet "run tests"
+
+# JSON output for parsing
+cliffy --output-format json "analyze code"
 ```
-
-Windows users:
-
-```bash
-# Winget
-winget install charmbracelet.crush
-
-# Scoop
-scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
-scoop install crush
-```
-
-<details>
-<summary><strong>Nix (NUR)</strong></summary>
-
-Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
-
-You can also try out Crush via `nix-shell`:
-
-```bash
-# Add the NUR channel.
-nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
-nix-channel --update
-
-# Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
-```
-
-### NixOS & Home Manager Module Usage via NUR
-
-Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nur.url = "github:nix-community/NUR";
-  };
-
-  outputs = { self, nixpkgs, nur, ... }: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        nur.modules.nixos.default
-        nur.repos.charmbracelet.modules.crush
-        {
-          programs.crush = {
-            enable = true;
-            settings = {
-              providers = {
-                openai = {
-                  id = "openai";
-                  name = "OpenAI";
-                  base_url = "https://api.openai.com/v1";
-                  type = "openai";
-                  api_key = "sk-fake123456789abcdef...";
-                  models = [
-                    {
-                      id = "gpt-4";
-                      name = "GPT-4";
-                    }
-                  ];
-                };
-              };
-              lsp = {
-                go = { command = "gopls"; enabled = true; };
-                nix = { command = "nil"; enabled = true; };
-              };
-              options = {
-                context_paths = [ "/etc/nixos/configuration.nix" ];
-                tui = { compact_mode = true; };
-                debug = false;
-              };
-            };
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Debian/Ubuntu</strong></summary>
-
-```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install crush
-```
-
-</details>
-
-<details>
-<summary><strong>Fedora/RHEL</strong></summary>
-
-```bash
-echo '[charm]
-name=Charm
-baseurl=https://repo.charm.sh/yum/
-enabled=1
-gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install crush
-```
-
-</details>
-
-Or, download it:
-
-- [Packages][releases] are available in Debian and RPM formats
-- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
-
-[releases]: https://github.com/charmbracelet/crush/releases
-
-Or just install it with Go:
-
-```
-go install github.com/charmbracelet/crush@latest
-```
-
-> [!WARNING]
-> Productivity may increase when using Crush and you may find yourself nerd
-> sniped when first using the application. If the symptoms persist, join the
-> [Discord][discord] and nerd snipe the rest of us.
-
-## Getting Started
-
-The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
-Crush. You'll be prompted to enter your API key.
-
-That said, you can also set environment variables for preferred providers.
-
-| Environment Variable        | Provider                                           |
-| --------------------------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY`         | Anthropic                                          |
-| `OPENAI_API_KEY`            | OpenAI                                             |
-| `OPENROUTER_API_KEY`        | OpenRouter                                         |
-| `GEMINI_API_KEY`            | Google Gemini                                      |
-| `CEREBRAS_API_KEY`          | Cerebras                                           |
-| `HF_TOKEN`                  | Huggingface Inference                              |
-| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`              | Groq                                               |
-| `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
-| `AWS_REGION`                | AWS Bedrock (Claude)                               |
-| `AWS_PROFILE`               | Custom AWS Profile                                 |
-| `AWS_REGION`                | AWS Region                                         |
-| `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
-
-### By the Way
-
-Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?
-
-Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
-
-<a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
 
 ## Configuration
 
-Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, configuration can be added either local to the project itself,
-or globally, with the following priority:
-
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
-
-Configuration itself is stored as a JSON object:
+Configuration is stored in `~/.config/cliffy/cliffy.json` (or `$XDG_CONFIG_HOME/cliffy/cliffy.json`):
 
 ```json
 {
-  "this-setting": { "this": "that" },
-  "that-setting": ["ceci", "cela"]
-}
-```
-
-As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
-
-```bash
-# Unix
-$HOME/.local/share/crush/crush.json
-
-# Windows
-%LOCALAPPDATA%\crush\crush.json
-```
-
-### LSPs
-
-Crush can use LSPs for additional context to help inform its decisions, just
-like you would. LSPs can be added manually like so:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "lsp": {
-    "go": {
-      "command": "gopls",
-      "env": {
-        "GOTOOLCHAIN": "go1.24.5"
-      }
+  "models": {
+    "large": {
+      "provider": "openrouter",
+      "model": "x-ai/grok-4-fast:free",
+      "max_tokens": 4096
     },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"]
-    },
-    "nix": {
-      "command": "nil"
+    "small": {
+      "provider": "openrouter",
+      "model": "x-ai/grok-4-fast:free",
+      "max_tokens": 2048
     }
-  }
-}
-```
-
-### MCPs
-
-Crush also supports Model Context Protocol (MCP) servers through three
-transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/mcp-server.js"],
-      "timeout": 120,
-      "disabled": false,
-      "env": {
-        "NODE_ENV": "production"
-      }
-    },
-    "github": {
-      "type": "http",
-      "url": "https://example.com/mcp/",
-      "timeout": 120,
-      "disabled": false,
-      "headers": {
-        "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
-      }
-    },
-    "streaming-service": {
-      "type": "sse",
-      "url": "https://example.com/mcp/sse",
-      "timeout": 120,
-      "disabled": false,
-      "headers": {
-        "API-Key": "$(echo $API_KEY)"
-      }
+  },
+  "providers": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "${CLIFFY_OPENROUTER_API_KEY}",
+      "models": [
+        {
+          "id": "x-ai/grok-4-fast:free",
+          "name": "Grok 4 Fast (Free)"
+        }
+      ]
     }
-  }
-}
-```
-
-### Ignoring Files
-
-Crush respects `.gitignore` files by default, but you can also create a
-`.crushignore` file to specify additional files and directories that Crush
-should ignore. This is useful for excluding files that you want in version
-control but don't want Crush to consider when providing context.
-
-The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
-in the root of your project or in subdirectories.
-
-### Allowing Tools
-
-By default, Crush will ask you for permission before running tool calls. If
-you'd like, you can allow tools to be executed without prompting you for
-permissions. Use this with care.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "permissions": {
-    "allowed_tools": [
-      "view",
-      "ls",
-      "grep",
-      "edit",
-      "mcp_context7_get-library-doc"
-    ]
-  }
-}
-```
-
-You can also skip all permission prompts entirely by running Crush with the
-`--yolo` flag. Be very, very careful with this feature.
-
-### Attribution Settings
-
-By default, Crush adds attribution information to Git commits and pull requests
-it creates. You can customize this behavior with the `attribution` option:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
+  },
   "options": {
-    "attribution": {
-      "co_authored_by": true,
-      "generated_with": true
-    }
+    "debug": false,
+    "data_directory": ".crush"
   }
 }
 ```
 
-- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
-- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
+You can also create a local `.cliffy.json` or `cliffy.json` in your project directory to override global settings.
 
-### Local Models
+## Crush-Headless Documentation
 
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
+This directory also contains comprehensive documentation for the **crush-headless** project design.
 
-#### Ollama
+## Documentation Structure
 
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "openai",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
+### [Overview](./crush-headless-overview.md)
+**Start here** - High-level introduction covering:
+- Why a separate headless binary?
+- Key improvements over `crush run -q -y`
+- Performance targets
+- Quick usage examples
 
-#### LM Studio
+### [Architecture](./architecture.md)
+**For developers** - Detailed system design:
+- Component breakdown
+- Execution flow
+- Memory model
+- Removed vs. shared components
+- Concurrency patterns
 
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
+### [Implementation Guide](./implementation-guide.md)
+**For contributors** - Step-by-step build instructions:
+- 4-phase implementation plan
+- Code examples for each component
+- Testing strategy
+- Week-by-week milestones
 
-### Custom Providers
+### [Performance Analysis](./performance-analysis.md)
+**For optimization work** - Deep dive into performance:
+- Current overhead breakdown
+- Optimization impact by component
+- Real-world scenario comparisons
+- Benchmark targets
+- Cost analysis
 
-Crush supports custom provider configurations for both OpenAI-compatible and
-Anthropic-compatible APIs.
+### [API Specification](./api-specification.md)
+**For users** - Complete CLI reference:
+- All flags and options
+- Input/output formats
+- JSON schema
+- Environment variables
+- Usage examples
 
-#### OpenAI-Compatible APIs
+### [Model Selection & Reasoning](./model-selection.md)
+**For users** - Critical for one-off tasks:
+- Choose models per task (fast vs. smart)
+- Control reasoning levels (none/low/medium/high)
+- Cost awareness and budgets
+- Provider switching
+- Interactive model selection
 
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
-API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+### [Fork Strategy](./fork-strategy.md)
+**For maintainers** - How to keep up with Crush:
+- Sync vs. hard fork analysis
+- Commit activity breakdown (82% shared components)
+- Recommended: Structured sync via Go modules
+- Implementation roadmap
+- Risk mitigation
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
-```
+## Quick Reference
 
-#### Anthropic-Compatible APIs
+### Current Problems with `crush run -q -y`
 
-Custom Anthropic-compatible providers follow this format:
+1. **Slow:** 800ms cold start + 1.5s title generation = **2.3s before first token**
+2. **Wasteful:** 50+ DB writes for one-off task that never needs history
+3. **Opaque:** Extended thinking is captured but **never shown to users**
+4. **Heavy:** 50MB memory, full SQLite + TUI infrastructure for simple streaming
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "custom-anthropic": {
-      "type": "anthropic",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key": "$ANTHROPIC_API_KEY",
-      "extra_headers": {
-        "anthropic-version": "2023-06-01"
-      },
-      "models": [
-        {
-          "id": "claude-sonnet-4-20250514",
-          "name": "Claude Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
-```
-
-### Amazon Bedrock
-
-Crush currently supports running Anthropic models through Bedrock, with caching disabled.
-
-- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
-
-### Vertex AI Platform
-
-Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
+### Headless Solution
 
 ```bash
-gcloud auth application-default login
+# 200ms cold start, no title gen, direct streaming
+crush-headless "fix the type errors"
+
+# With thinking visible for debugging
+crush-headless --show-thinking "why is this test failing?" 2>thinking.log
+
+# JSON output for CI/CD
+crush-headless --output-format=json "review this diff" | jq '.content'
 ```
 
-To add specific models to the configuration, configure as such:
+### Performance Targets
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "vertexai": {
-      "models": [
-        {
-          "id": "claude-sonnet-4@20250514",
-          "name": "VertexAI Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
+| Metric | Current | Target | Improvement |
+|--------|---------|--------|-------------|
+| Cold start | 800ms | 200ms | **4x faster** |
+| First token | 2500ms | 600ms | **4x faster** |
+| Memory | 50MB | 12MB | **4x less** |
+| Code | 100% | 35% | **65% simpler** |
+
+## Implementation Phases
+
+### Phase 1: Fork & Simplify (Week 1)
+- Remove: DB, pub/sub, sessions, TUI, permissions
+- Create: Direct streaming architecture
+- **Target:** Working prototype, 50% code reduction
+
+### Phase 2: Thinking Exposure (Week 2)
+- Add: `--show-thinking`, `--thinking-format`
+- Implement: JSON/text formatters
+- **Target:** Full reasoning transparency
+
+### Phase 3: Performance (Week 3)
+- Add: Lazy LSP, parallel tools
+- Optimize: Prompt, memory usage
+- **Target:** 2-3x faster execution
+
+### Phase 4: Polish (Week 4)
+- Add: Error handling, tests, docs
+- Verify: Production readiness
+- **Target:** Ship it
+
+## Key Design Decisions
+
+### 1. Separate Binary (Not a Mode)
+**Why?** Cleaner dependencies, smaller binary, different optimization targets.
+
+### 2. Zero Persistence
+**Why?** One-off execution implies no need for history. Can be added later as opt-in feature.
+
+### 3. Thinking Exposed by Default
+**Why?** Current limitation - thinking is captured but never shown. Critical for debugging.
+
+### 4. Reuse Tool System
+**Why?** Tools are the core value. Just remove permission layer, not the tools themselves.
+
+## File Structure
+
+Proposed structure for `crush-headless`:
+
+```
+crush-headless/
+├── main.go
+├── internal/
+│   ├── runner/
+│   │   ├── runner.go          # HeadlessRunner
+│   │   └── runner_test.go
+│   ├── stream/
+│   │   ├── processor.go       # StreamingProcessor
+│   │   ├── thinking.go        # ThinkingFormatter
+│   │   └── output.go          # OutputFormatter
+│   ├── executor/
+│   │   ├── executor.go        # DirectToolExecutor
+│   │   └── parallel.go        # ParallelExecutor
+│   └── prompt/
+│       └── headless.md        # Headless prompt
+├── go.mod
+└── README.md
+```
+
+**Shared from crush:**
+- `internal/llm/provider/` (providers unchanged)
+- `internal/llm/tools/` (tool implementations)
+- `internal/config/` (minimal config loading)
+- `internal/lsp/` (LSP clients)
+- Utility modules
+
+## Critical Missing Feature
+
+### Extended Thinking Not Exposed
+
+**Current state in Crush:**
+```go
+// agent.go:709-714
+case provider.EventThinkingDelta:
+    assistantMsg.AppendReasoningContent(event.Thinking)
+    return a.messages.Update(ctx, *assistantMsg)
+```
+
+Thinking is **captured and stored in DB** but:
+
+```go
+// app.go:174-195 - RunNonInteractive()
+fmt.Print(part)  // Only prints msg.Content().String()
+```
+
+**Thinking is NEVER printed to user!**
+
+**Headless fix:**
+```go
+case EventThinkingDelta:
+    if showThinking {
+        stderr.Write(formatThinking(event.Thinking))
     }
-  }
-}
 ```
 
-## Logging
+This alone is a huge value-add for debugging and understanding model behavior.
 
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of
-stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
+## Cost Savings
 
-The CLI also contains some helper commands to make perusing recent logs easier:
+### Token Optimization
+- Current prompt: ~2500 tokens overhead (TUI instructions, session mgmt)
+- Headless prompt: ~1000 tokens (focused, minimal)
+- **Savings:** 1500 tokens × $0.003/1K = $0.0045 per call
 
-```bash
-# Print the last 1000 lines
-crush logs
+At 1000 calls/day: **$135/month**
 
-# Print the last 500 lines
-crush logs --tail 500
+### Title Generation
+- Current: Extra LLM call (~$0.0006 + 1.5s per run)
+- Headless: Skip entirely
+- **Savings:** $18/month + time
 
-# Follow logs in real time
-crush logs --follow
-```
+### Total
+**~$150/month** at 1000 calls/day + significant performance improvement
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the
-config:
+## Next Steps
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
-```
+1. **Read the docs** in order (Overview → Architecture → Implementation → Performance → API)
+2. **Prototype Phase 1** - Get basic streaming working
+3. **Validate approach** - Compare performance with current `crush run`
+4. **Iterate** - Implement phases 2-4
+5. **Ship** - Release as separate binary
 
-## Provider Auto-Updates
+## Questions?
 
-By default, Crush automatically checks for the latest and greatest list of
-providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
-the open source Crush provider database. This means that when new providers and
-models are available, or when model metadata changes, Crush automatically
-updates your local configuration.
+For implementation questions, see [Implementation Guide](./implementation-guide.md).
 
-### Disabling automatic provider updates
+For performance specifics, see [Performance Analysis](./performance-analysis.md).
 
-For those with restricted internet access, or those who prefer to work in
-air-gapped environments, this might not be want you want, and this feature can
-be disabled.
+For API details, see [API Specification](./api-specification.md).
 
-To disable automatic provider updates, set `disable_provider_auto_update` into
-your `crush.json` config:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disable_provider_auto_update": true
-  }
-}
-```
-
-Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
-
-```bash
-export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
-```
-
-### Manually updating providers
-
-Manually updating providers is possible with the `crush update-providers`
-command:
-
-```bash
-# Update providers remotely from Catwalk.
-crush update-providers
-
-# Update providers from a custom Catwalk base URL.
-crush update-providers https://example.com/
-
-# Update providers from a local file.
-crush update-providers /path/to/local-providers.json
-
-# Reset providers to the embedded version, embedded at crush at build time.
-crush update-providers embedded
-
-# For more info:
-crush update-providers --help
-```
-
-## Metrics
-
-Crush records pseudonymous usage metrics (tied to a device-specific hash),
-which maintainers rely on to inform development and support priorities. The
-metrics include solely usage metadata; prompts and responses are NEVER
-collected.
-
-Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
-and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
-
-You can opt out of metrics collection at any time by setting the environment
-variable by setting the following in your environment:
-
-```bash
-export CRUSH_DISABLE_METRICS=1
-```
-
-Or by setting the following in your config:
-
-```json
-{
-  "options": {
-    "disable_metrics": true
-  }
-}
-```
-
-Crush also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
-convention which can be enabled via `export DO_NOT_TRACK=1`.
-
-## A Note on Claude Max and GitHub Copilot
-
-Crush only supports model providers through official, compliant APIs. We do not
-support or endorse any methods that rely on personal Claude Max and GitHub
-Copilot accounts or OAuth workarounds, which violate Anthropic and
-Microsoft’s Terms of Service.
-
-We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us,
-[reach out](mailto:vt100@charm.sh).
-
-## Contributing
-
-See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
-
-## Whatcha think?
-
-We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
-
-- [Twitter](https://twitter.com/charmcli)
-- [Discord][discord]
-- [Slack](https://charm.land/slack)
-- [The Fediverse](https://mastodon.social/@charmcli)
-- [Bluesky](https://bsky.app/profile/charm.land)
-
-[discord]: https://charm.land/discord
-
-## License
-
-[FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE.md)
+For architecture decisions, see [Architecture](./architecture.md).
 
 ---
 
-Part of [Charm](https://charm.land).
-
-<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
-
-<!--prettier-ignore-->
-Charm热爱开源 • Charm loves open source
+**Status:** Documentation complete, implementation not started
+**Target:** Separate binary, not a mode within Crush
+**Goal:** 4x faster, 4x lighter, 100% thinking visible

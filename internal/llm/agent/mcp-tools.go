@@ -13,13 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/home"
+	"github.com/bwl/cliffy/internal/llm/tools"
+	"github.com/bwl/cliffy/internal/version"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -81,13 +79,11 @@ var (
 	mcpTools     []tools.BaseTool
 	mcpClients   = csync.NewMap[string, *client.Client]()
 	mcpStates    = csync.NewMap[string, MCPClientInfo]()
-	mcpBroker    = pubsub.NewBroker[MCPEvent]()
 )
 
 type McpTool struct {
 	mcpName     string
 	tool        mcp.Tool
-	permissions permission.Service
 	workingDir  string
 }
 
@@ -173,30 +169,10 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 }
 
 func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolResponse, error) {
-	sessionID, messageID := tools.GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return tools.ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
-	permissionDescription := fmt.Sprintf("execute %s with the following parameters:", b.Info().Name)
-	p := b.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  params.ID,
-			Path:        b.workingDir,
-			ToolName:    b.Info().Name,
-			Action:      "execute",
-			Description: permissionDescription,
-			Params:      params.Input,
-		},
-	)
-	if !p {
-		return tools.ToolResponse{}, permission.ErrorPermissionDenied
-	}
-
 	return runTool(ctx, b.mcpName, b.tool.Name, params.Input)
 }
 
-func getTools(ctx context.Context, name string, permissions permission.Service, c *client.Client, workingDir string) ([]tools.BaseTool, error) {
+func getTools(ctx context.Context, name string, c *client.Client, workingDir string) ([]tools.BaseTool, error) {
 	result, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		return nil, err
@@ -204,18 +180,12 @@ func getTools(ctx context.Context, name string, permissions permission.Service, 
 	mcpTools := make([]tools.BaseTool, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		mcpTools = append(mcpTools, &McpTool{
-			mcpName:     name,
-			tool:        tool,
-			permissions: permissions,
-			workingDir:  workingDir,
+			mcpName:    name,
+			tool:       tool,
+			workingDir: workingDir,
 		})
 	}
 	return mcpTools, nil
-}
-
-// SubscribeMCPEvents returns a channel for MCP events
-func SubscribeMCPEvents(ctx context.Context) <-chan pubsub.Event[MCPEvent] {
-	return mcpBroker.Subscribe(ctx)
 }
 
 // GetMCPStates returns the current state of all MCP clients
@@ -228,7 +198,7 @@ func GetMCPState(name string) (MCPClientInfo, bool) {
 	return mcpStates.Get(name)
 }
 
-// updateMCPState updates the state of an MCP client and publishes an event
+// updateMCPState updates the state of an MCP client
 func updateMCPState(name string, state MCPState, err error, client *client.Client, toolCount int) {
 	info := MCPClientInfo{
 		Name:      name,
@@ -241,15 +211,7 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 		info.ConnectedAt = time.Now()
 	}
 	mcpStates.Set(name, info)
-
-	// Publish state change event
-	mcpBroker.Publish(pubsub.UpdatedEvent, MCPEvent{
-		Type:      MCPEventStateChanged,
-		Name:      name,
-		State:     state,
-		Error:     err,
-		ToolCount: toolCount,
-	})
+	slog.Debug("MCP state changed", "name", name, "state", state.String(), "toolCount", toolCount)
 }
 
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
@@ -260,7 +222,6 @@ func CloseMCPClients() error {
 			errs = append(errs, fmt.Errorf("close mcp: %s: %w", name, err))
 		}
 	}
-	mcpBroker.Shutdown()
 	return errors.Join(errs...)
 }
 
@@ -274,7 +235,7 @@ var mcpInitRequest = mcp.InitializeRequest{
 	},
 }
 
-func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
+func doGetMCPTools(ctx context.Context, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
 
@@ -316,7 +277,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				return
 			}
 
-			tools, err := getTools(ctx, name, permissions, c, cfg.WorkingDir())
+			tools, err := getTools(ctx, name, c, cfg.WorkingDir())
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
 				updateMCPState(name, MCPStateError, err, nil, 0)

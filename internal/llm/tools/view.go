@@ -12,9 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/lsp"
 )
 
 //go:embed view.md
@@ -35,7 +34,6 @@ type ViewPermissionsParams struct {
 type viewTool struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 	workingDir  string
-	permissions permission.Service
 }
 
 type ViewResponseMetadata struct {
@@ -50,11 +48,10 @@ const (
 	MaxLineLength    = 2000
 )
 
-func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) BaseTool {
+func NewViewTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) BaseTool {
 	return &viewTool{
-		lspClients:  lspClients,
-		workingDir:  workingDir,
-		permissions: permissions,
+		lspClients: lspClients,
+		workingDir: workingDir,
 	}
 }
 
@@ -101,41 +98,8 @@ func (v *viewTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		filePath = filepath.Join(v.workingDir, filePath)
 	}
 
-	// Check if file is outside working directory and request permission if needed
-	absWorkingDir, err := filepath.Abs(v.workingDir)
-	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
-	}
-
-	absFilePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
-	}
-
-	relPath, err := filepath.Rel(absWorkingDir, absFilePath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		// File is outside working directory, request permission
-		sessionID, messageID := GetContextValues(ctx)
-		if sessionID == "" || messageID == "" {
-			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing files outside working directory")
-		}
-
-		granted := v.permissions.Request(
-			permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				Path:        absFilePath,
-				ToolCallID:  call.ID,
-				ToolName:    ViewToolName,
-				Action:      "read",
-				Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
-				Params:      ViewPermissionsParams(params),
-			},
-		)
-
-		if !granted {
-			return ToolResponse{}, permission.ErrorPermissionDenied
-		}
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	// Check if file exists
 	fileInfo, err := os.Stat(filePath)

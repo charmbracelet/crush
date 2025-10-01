@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/message"
+	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/llm/tools"
+	"github.com/bwl/cliffy/internal/message"
 )
 
 type bedrockClient struct {

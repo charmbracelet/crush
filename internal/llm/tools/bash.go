@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/shell"
 )
 
 type BashParams struct {
@@ -32,7 +31,6 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 type bashTool struct {
-	permissions permission.Service
 	workingDir  string
 	attribution *config.Attribution
 }
@@ -147,16 +145,16 @@ func (b *bashTool) bashDescription() string {
 
 	// Build PR attribution
 	if generatedWith {
-		prAttribution = "💘 Generated with Crush"
+		prAttribution = "🫡 Generated with Cliffy"
 	}
 
 	if generatedWith || coAuthoredBy {
 		var attributionParts []string
 		if generatedWith {
-			attributionParts = append(attributionParts, "💘 Generated with Crush")
+			attributionParts = append(attributionParts, "🫡 Generated with Cliffy")
 		}
 		if coAuthoredBy {
-			attributionParts = append(attributionParts, "Co-Authored-By: Crush <crush@charm.land>")
+			attributionParts = append(attributionParts, "Co-Authored-By: Cliffy <cliffy@ettio.com>")
 		}
 
 		if len(attributionParts) > 0 {
@@ -228,13 +226,12 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permission permission.Service, workingDir string, attribution *config.Attribution) BaseTool {
+func NewBashTool(workingDir string, attribution *config.Attribution) BaseTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
 	persistentShell.SetBlockFuncs(blockFuncs())
 
 	return &bashTool{
-		permissions: permission,
 		workingDir:  workingDir,
 		attribution: attribution,
 	}
@@ -278,41 +275,9 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		return NewTextErrorResponse("missing command"), nil
 	}
 
-	isSafeReadOnly := false
-	cmdLower := strings.ToLower(params.Command)
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
-	for _, safe := range safeCommands {
-		if strings.HasPrefix(cmdLower, safe) {
-			if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-				isSafeReadOnly = true
-				break
-			}
-		}
-	}
-
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for executing shell command")
-	}
-	if !isSafeReadOnly {
-		shell := shell.GetPersistentShell(b.workingDir)
-		p := b.permissions.Request(
-			permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				Path:        shell.GetWorkingDir(),
-				ToolCallID:  call.ID,
-				ToolName:    BashToolName,
-				Action:      "execute",
-				Description: fmt.Sprintf("Execute command: %s", params.Command),
-				Params: BashPermissionsParams{
-					Command: params.Command,
-				},
-			},
-		)
-		if !p {
-			return ToolResponse{}, permission.ErrorPermissionDenied
-		}
-	}
 	startTime := time.Now()
 	if params.Timeout > 0 {
 		var cancel context.CancelFunc

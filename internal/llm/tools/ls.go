@@ -9,8 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/bwl/cliffy/internal/fsext"
 )
 
 type LSParams struct {
@@ -37,7 +36,6 @@ type LSResponseMetadata struct {
 
 type lsTool struct {
 	workingDir  string
-	permissions permission.Service
 }
 
 const (
@@ -48,10 +46,9 @@ const (
 //go:embed ls.md
 var lsDescription []byte
 
-func NewLsTool(permissions permission.Service, workingDir string) BaseTool {
+func NewLsTool(workingDir string) BaseTool {
 	return &lsTool{
-		workingDir:  workingDir,
-		permissions: permissions,
+		workingDir: workingDir,
 	}
 }
 
@@ -101,41 +98,8 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = filepath.Join(l.workingDir, searchPath)
 	}
 
-	// Check if directory is outside working directory and request permission if needed
-	absWorkingDir, err := filepath.Abs(l.workingDir)
-	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
-	}
-
-	absSearchPath, err := filepath.Abs(searchPath)
-	if err != nil {
-		return ToolResponse{}, fmt.Errorf("error resolving search path: %w", err)
-	}
-
-	relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		// Directory is outside working directory, request permission
-		sessionID, messageID := GetContextValues(ctx)
-		if sessionID == "" || messageID == "" {
-			return ToolResponse{}, fmt.Errorf("session ID and message ID are required for accessing directories outside working directory")
-		}
-
-		granted := l.permissions.Request(
-			permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				Path:        absSearchPath,
-				ToolCallID:  call.ID,
-				ToolName:    LSToolName,
-				Action:      "list",
-				Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
-				Params:      LSPermissionsParams(params),
-			},
-		)
-
-		if !granted {
-			return ToolResponse{}, permission.ErrorPermissionDenied
-		}
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	output, err := ListDirectoryTree(searchPath, params.Ignore)
 	if err != nil {

@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/env"
+	"github.com/bwl/cliffy/internal/fsext"
+	"github.com/bwl/cliffy/internal/home"
+	"github.com/bwl/cliffy/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
@@ -165,6 +165,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(p.DefaultHeaders) > 0 {
 			maps.Copy(headers, p.DefaultHeaders)
 		}
+		// Override with Cliffy branding for all providers
+		headers["HTTP-Referer"] = "https://cliffy.ettio.com"
+		headers["X-Title"] = "Cliffy"
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}

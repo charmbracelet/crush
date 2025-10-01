@@ -384,3 +384,11 @@ func (m *Message) AddImageURL(url, detail string) {
 func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
 }
+
+// CreateMessageParams contains parameters for creating a new message
+type CreateMessageParams struct {
+	Role     MessageRole
+	Parts    []ContentPart
+	Model    string
+	Provider string
+}

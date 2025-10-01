@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/llm/tools"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/bwl/cliffy/internal/llm/tools"
+	"github.com/bwl/cliffy/internal/message"
 )
 
 type agentTool struct {
 	agent    Service
-	sessions session.Service
-	messages message.Service
+	messages *message.Store
 }
 
 const (
@@ -56,12 +54,10 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 		return tools.ToolResponse{}, fmt.Errorf("session_id and message_id are required")
 	}
 
-	session, err := b.sessions.CreateTaskSession(ctx, call.ID, sessionID, "New Agent Session")
-	if err != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
-	}
+	// For headless mode, use a sub-session ID based on the tool call
+	subSessionID := fmt.Sprintf("%s-task-%s", sessionID, call.ID)
 
-	done, err := b.agent.Run(ctx, session.ID, params.Prompt)
+	done, err := b.agent.Run(ctx, subSessionID, params.Prompt)
 	if err != nil {
 		return tools.ToolResponse{}, fmt.Errorf("error generating agent: %s", err)
 	}
@@ -75,31 +71,14 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 		return tools.NewTextErrorResponse("no response"), nil
 	}
 
-	updatedSession, err := b.sessions.Get(ctx, session.ID)
-	if err != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
-	}
-	parentSession, err := b.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
-	}
-
-	parentSession.Cost += updatedSession.Cost
-
-	_, err = b.sessions.Save(ctx, parentSession)
-	if err != nil {
-		return tools.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
-	}
 	return tools.NewTextResponse(response.Content().String()), nil
 }
 
 func NewAgentTool(
 	agent Service,
-	sessions session.Service,
-	messages message.Service,
+	messages *message.Store,
 ) tools.BaseTool {
 	return &agentTool{
-		sessions: sessions,
 		messages: messages,
 		agent:    agent,
 	}

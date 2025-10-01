@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/permission"
 )
 
 type DownloadParams struct {
@@ -29,7 +28,6 @@ type DownloadPermissionsParams struct {
 
 type downloadTool struct {
 	client      *http.Client
-	permissions permission.Service
 	workingDir  string
 }
 
@@ -38,7 +36,7 @@ const DownloadToolName = "download"
 //go:embed download.md
 var downloadDescription []byte
 
-func NewDownloadTool(permissions permission.Service, workingDir string) BaseTool {
+func NewDownloadTool(workingDir string) BaseTool {
 	return &downloadTool{
 		client: &http.Client{
 			Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
@@ -48,8 +46,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string) BaseTool
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		permissions: permissions,
-		workingDir:  workingDir,
+		workingDir: workingDir,
 	}
 }
 
@@ -105,25 +102,8 @@ func (t *downloadTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 		filePath = filepath.Join(t.workingDir, params.FilePath)
 	}
 
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for downloading files")
-	}
-
-	p := t.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        filePath,
-			ToolName:    DownloadToolName,
-			Action:      "download",
-			Description: fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath),
-			Params:      DownloadPermissionsParams(params),
-		},
-	)
-
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	// Handle timeout with context
 	requestCtx := ctx
@@ -142,7 +122,7 @@ func (t *downloadTool) Run(ctx context.Context, call ToolCall) (ToolResponse, er
 		return ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "crush/1.0")
+	req.Header.Set("User-Agent", "cliffy/1.0")
 
 	resp, err := t.client.Do(req)
 	if err != nil {

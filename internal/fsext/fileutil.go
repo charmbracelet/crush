@@ -10,7 +10,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/bwl/cliffy/internal/home"
 )
 
 type FileInfo struct {

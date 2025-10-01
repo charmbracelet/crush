@@ -5,19 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/diff"
+	"github.com/bwl/cliffy/internal/fsext"
+	"github.com/bwl/cliffy/internal/lsp"
 )
 
 type EditParams struct {
@@ -42,8 +38,6 @@ type EditResponseMetadata struct {
 
 type editTool struct {
 	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
 	workingDir  string
 }
 
@@ -52,12 +46,10 @@ const EditToolName = "edit"
 //go:embed edit.md
 var editDescription []byte
 
-func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewEditTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) BaseTool {
 	return &editTool{
-		lspClients:  lspClients,
-		permissions: permissions,
-		files:       files,
-		workingDir:  workingDir,
+		lspClients: lspClients,
+		workingDir: workingDir,
 	}
 }
 
@@ -156,52 +148,18 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 		return ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	_, additions, removals := diff.GenerateDiff(
 		"",
 		content,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	p := e.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: "",
-				NewContent: content,
-			},
-		},
-	)
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
 
 	err = os.WriteFile(filePath, []byte(content), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// File can't be in the history so we create a new file history
-	_, err = e.files.Create(ctx, sessionID, filePath, "")
-	if err != nil {
-		// Log error but don't fail the operation
-		return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	// Add the new content to the file history
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, content)
-	if err != nil {
-		// Log error but don't fail the operation
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)
@@ -275,36 +233,14 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		deletionCount = 1
 	}
 
-	sessionID, messageID := GetContextValues(ctx)
-
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-
-	p := e.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Delete content from file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
-		},
-	)
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
 
 	if isCrlf {
 		newContent, _ = fsext.ToWindowsLineEndings(newContent)
@@ -313,28 +249,6 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Check if file exists in history
-	file, err := e.files.GetByPathAndSession(ctx, filePath, sessionID)
-	if err != nil {
-		_, err = e.files.Create(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			// Log error but don't fail the operation
-			return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User Manually changed the content store an intermediate version
-		_, err = e.files.CreateVersion(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
-		}
-	}
-	// Store the new version
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, "")
-	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)
@@ -411,35 +325,15 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	if oldContent == newContent {
 		return NewTextErrorResponse("new content is the same as old content. No changes made."), nil
 	}
-	sessionID, messageID := GetContextValues(ctx)
 
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
+
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-
-	p := e.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Replace content in file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
-		},
-	)
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
 
 	if isCrlf {
 		newContent, _ = fsext.ToWindowsLineEndings(newContent)
@@ -448,28 +342,6 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	err = os.WriteFile(filePath, []byte(newContent), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Check if file exists in history
-	file, err := e.files.GetByPathAndSession(ctx, filePath, sessionID)
-	if err != nil {
-		_, err = e.files.Create(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			// Log error but don't fail the operation
-			return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User Manually changed the content store an intermediate version
-		_, err = e.files.CreateVersion(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
-		}
-	}
-	// Store the new version
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, newContent)
-	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)

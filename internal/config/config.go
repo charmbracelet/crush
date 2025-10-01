@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/env"
 	"github.com/tidwall/sjson"
 )
 
 const (
-	appName              = "crush"
+	appName              = "cliffy"
 	defaultDataDirectory = ".crush"
 )
 

@@ -5,19 +5,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/diff"
+	"github.com/bwl/cliffy/internal/lsp"
 )
 
 //go:embed write.md
@@ -36,8 +31,6 @@ type WritePermissionsParams struct {
 
 type writeTool struct {
 	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
 	workingDir  string
 }
 
@@ -49,12 +42,10 @@ type WriteResponseMetadata struct {
 
 const WriteToolName = "write"
 
-func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) BaseTool {
+func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) BaseTool {
 	return &writeTool{
-		lspClients:  lspClients,
-		permissions: permissions,
-		files:       files,
-		workingDir:  workingDir,
+		lspClients: lspClients,
+		workingDir: workingDir,
 	}
 }
 
@@ -133,10 +124,8 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		}
 	}
 
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session_id and message_id are required")
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	diff, additions, removals := diff.GenerateDiff(
 		oldContent,
@@ -144,50 +133,9 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		strings.TrimPrefix(filePath, w.workingDir),
 	)
 
-	p := w.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, w.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    WriteToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
-			Params: WritePermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: params.Content,
-			},
-		},
-	)
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
-
 	err = os.WriteFile(filePath, []byte(params.Content), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error writing file: %w", err)
-	}
-
-	// Check if file exists in history
-	file, err := w.files.GetByPathAndSession(ctx, filePath, sessionID)
-	if err != nil {
-		_, err = w.files.Create(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			// Log error but don't fail the operation
-			return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User Manually changed the content store an intermediate version
-		_, err = w.files.CreateVersion(ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
-		}
-	}
-	// Store the new version
-	_, err = w.files.CreateVersion(ctx, sessionID, filePath, params.Content)
-	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(filePath)

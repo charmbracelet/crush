@@ -13,7 +13,6 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/charmbracelet/crush/internal/permission"
 )
 
 type FetchParams struct {
@@ -30,7 +29,6 @@ type FetchPermissionsParams struct {
 
 type fetchTool struct {
 	client      *http.Client
-	permissions permission.Service
 	workingDir  string
 }
 
@@ -39,7 +37,7 @@ const FetchToolName = "fetch"
 //go:embed fetch.md
 var fetchDescription []byte
 
-func NewFetchTool(permissions permission.Service, workingDir string) BaseTool {
+func NewFetchTool(workingDir string) BaseTool {
 	return &fetchTool{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -49,8 +47,7 @@ func NewFetchTool(permissions permission.Service, workingDir string) BaseTool {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		permissions: permissions,
-		workingDir:  workingDir,
+		workingDir: workingDir,
 	}
 }
 
@@ -100,26 +97,8 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return NewTextErrorResponse("URL must start with http:// or https://"), nil
 	}
 
-	sessionID, messageID := GetContextValues(ctx)
-	if sessionID == "" || messageID == "" {
-		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
-	}
-
-	p := t.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        t.workingDir,
-			ToolCallID:  call.ID,
-			ToolName:    FetchToolName,
-			Action:      "fetch",
-			Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),
-			Params:      FetchPermissionsParams(params),
-		},
-	)
-
-	if !p {
-		return ToolResponse{}, permission.ErrorPermissionDenied
-	}
+	// In cliffy, all commands are auto-approved (user running CLI = implied consent)
+	// No permission checks needed
 
 	// Handle timeout with context
 	requestCtx := ctx
@@ -138,7 +117,7 @@ func (t *fetchTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "crush/1.0")
+	req.Header.Set("User-Agent", "cliffy/1.0")
 
 	resp, err := t.client.Do(req)
 	if err != nil {

@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/bwl/cliffy/internal/fsext"
 )
 
 const GlobToolName = "glob"

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/bwl/cliffy/internal/home"
 )
 
 func TestExpandPath(t *testing.T) {

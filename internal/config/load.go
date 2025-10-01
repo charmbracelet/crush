@@ -348,6 +348,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
+
+	if c.Options.Attribution == nil {
+		c.Options.Attribution = &Attribution{
+			CoAuthoredBy:  true,
+			GeneratedWith: true,
+		}
+	}
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations

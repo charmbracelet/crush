@@ -22,7 +22,7 @@ type Options struct {
 	OutputFormat   string
 	Model          string
 	Quiet          bool
-	Timings        bool
+	ShowStats      bool
 }
 
 type Runner struct {
@@ -38,6 +38,8 @@ type ExecutionStats struct {
 	FilesWritten int
 	ToolCalls    int
 	Errors       int
+	InputTokens  int
+	OutputTokens int
 }
 
 func New(cfg *config.Config, opts Options) (*Runner, error) {
@@ -99,11 +101,6 @@ func (r *Runner) Execute(ctx context.Context, prompt string) error {
 		if err := r.handleEvent(ctx, event, messageStore, sessionID); err != nil {
 			return err
 		}
-	}
-
-	// Print summary if not quiet
-	if !r.options.Quiet && r.options.Timings {
-		r.printSummary()
 	}
 
 	return nil
@@ -180,18 +177,6 @@ func (r *Runner) handleResponse(ctx context.Context, msg message.Message, store 
 	return nil
 }
 
-func (r *Runner) printSummary() {
-	fmt.Fprintf(r.stderr, "\nStats:\n")
-	if r.stats.FilesRead > 0 {
-		fmt.Fprintf(r.stderr, "  • %d files read\n", r.stats.FilesRead)
-	}
-	if r.stats.FilesWritten > 0 {
-		fmt.Fprintf(r.stderr, "  • %d files updated\n", r.stats.FilesWritten)
-	}
-	if r.stats.ToolCalls > 0 {
-		fmt.Fprintf(r.stderr, "  • %d tool calls\n", r.stats.ToolCalls)
-	}
-	if r.stats.Errors > 0 {
-		fmt.Fprintf(r.stderr, "  • %d errors\n", r.stats.Errors)
-	}
+func (r *Runner) GetStats() ExecutionStats {
+	return r.stats
 }

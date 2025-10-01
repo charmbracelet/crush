@@ -25,7 +25,7 @@ var (
 	quiet          bool
 	fast           bool
 	smart          bool
-	timings        bool
+	showStats      bool
 	showVersion    bool
 )
 
@@ -79,10 +79,7 @@ Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 			model = string(config.SelectedModelTypeLarge)
 		}
 
-		// Print startup banner (unless quiet)
-		if !quiet {
-			printBanner(cfg, model, fast, smart)
-		}
+		// Skip banner - keep it clean for pipeline use
 
 		// Track execution time
 		startTime := time.Now()
@@ -94,7 +91,7 @@ Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 			OutputFormat:   outputFormat,
 			Model:          model,
 			Quiet:          quiet,
-			Timings:        timings,
+			ShowStats:      showStats,
 		})
 		if err != nil {
 			return err
@@ -104,9 +101,9 @@ Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 		prompt := strings.Join(args, " ")
 		err = r.Execute(ctx, prompt)
 
-		// Print timing summary if requested
-		if timings && !quiet {
-			printTimings(startTime)
+		// Print stats summary if requested
+		if showStats && !quiet {
+			printStats(r, startTime)
 		}
 
 		return err
@@ -118,10 +115,10 @@ func init() {
 	rootCmd.Flags().StringVar(&thinkingFormat, "thinking-format", "text", "Format for thinking: text|json")
 	rootCmd.Flags().StringVarP(&outputFormat, "output-format", "o", "text", "Output format: text|json")
 	rootCmd.Flags().StringVarP(&model, "model", "m", "", "Override model selection")
-	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Hide tool logs and banner")
+	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Hide tool logs")
 	rootCmd.Flags().BoolVar(&fast, "fast", false, "Use small/fast model")
 	rootCmd.Flags().BoolVar(&smart, "smart", false, "Use large/smart model")
-	rootCmd.Flags().BoolVar(&timings, "timings", false, "Show performance breakdown")
+	rootCmd.Flags().BoolVar(&showStats, "stats", false, "Show token usage and timing")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version info")
 }
 
@@ -139,12 +136,11 @@ func printError(err error) {
 
 	// Provide helpful recovery hints based on error type
 	if strings.Contains(errMsg, "config load failed") || strings.Contains(errMsg, "API key") {
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "Quick setup:\n")
+		fmt.Fprintf(os.Stderr, "\nQuick setup:\n")
 		fmt.Fprintf(os.Stderr, "  1. Get API key: https://openrouter.ai/settings/keys\n")
 		fmt.Fprintf(os.Stderr, "  2. Set variable: export CLIFFY_OPENROUTER_API_KEY=\"sk-...\"\n")
 		fmt.Fprintf(os.Stderr, "  3. Try again\n")
-		fmt.Fprintf(os.Stderr, "\nOr see: https://cliffy.ettio.com/setup\n")
+		fmt.Fprintf(os.Stderr, "\nSee: https://cliffy.ettio.com/setup\n")
 	} else if strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found") {
 		fmt.Fprintf(os.Stderr, "\nCheck ~/.config/cliffy/cliffy.json or use:\n")
 		fmt.Fprintf(os.Stderr, "  --fast (small model)\n")
@@ -159,7 +155,7 @@ func printError(err error) {
 		fmt.Fprintf(os.Stderr, "  - Break into smaller steps\n")
 	}
 
-	fmt.Fprintf(os.Stderr, "\n%s  Ready to retry\n", tools.AsciiCliffy)
+	fmt.Fprintf(os.Stderr, "\n")
 }
 
 func printVersion() {
@@ -171,29 +167,28 @@ func printVersion() {
 	fmt.Printf("\n%s  Ready to help\n", tools.AsciiCliffy)
 }
 
-func printBanner(cfg *config.Config, model string, fast bool, smart bool) {
-	// Determine which model will be used
-	modelName := "large" // default
-	if fast {
-		modelName = "small"
-	} else if smart {
-		modelName = "large"
-	} else if model != "" {
-		modelName = model
-	}
+func printStats(r *runner.Runner, startTime time.Time) {
+	elapsed := time.Since(startTime)
 
-	// Get model info from config
-	var modelDisplay string
-	if modelCfg, ok := cfg.Models[config.SelectedModelType(modelName)]; ok {
-		modelDisplay = modelCfg.Model
-	} else {
-		modelDisplay = modelName
-	}
-
-	fmt.Fprintf(os.Stderr, "%s  Cliffy ready | Model: %s\n", tools.AsciiCliffy, modelDisplay)
+	fmt.Fprintf(os.Stderr, "\n---\n")
+	// TODO: Add token usage from agent when available
+	// For now just show timing
+	fmt.Fprintf(os.Stderr, "Completed in %s\n", elapsed.Round(time.Millisecond))
 }
 
-func printTimings(startTime time.Time) {
-	elapsed := time.Since(startTime)
-	fmt.Fprintf(os.Stderr, "\n%s  Task complete | Time: %s\n", tools.AsciiCliffy, elapsed.Round(time.Millisecond))
+func formatNumber(n int) string {
+	// Format number with commas
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+
+	var result []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, c)
+	}
+	return string(result)
 }

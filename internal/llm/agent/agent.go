@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -65,11 +66,13 @@ type agent struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
-	mcpTools    []McpTool
+	baseTools   *csync.Map[string, tools.BaseTool]
+	mcpTools    *csync.Map[string, tools.BaseTool]
+	lspClients  *csync.Map[string, *lsp.Client]
 
-	tools *csync.LazySlice[tools.BaseTool]
 	// We need this to be able to update it when model changes
-	agentToolFn func() (tools.BaseTool, error)
+	agentToolFn  func() (tools.BaseTool, error)
+	cleanupFuncs []func()
 
 	provider   provider.Provider
 	providerID string
@@ -171,14 +174,16 @@ func NewAgent(
 		return nil, err
 	}
 
-	toolFn := func() []tools.BaseTool {
-		slog.Info("Initializing agent tools", "agent", agentCfg.ID)
+	baseToolsFn := func() map[string]tools.BaseTool {
+		slog.Info("Initializing agent base tools", "agent", agentCfg.ID)
 		defer func() {
-			slog.Info("Initialized agent tools", "agent", agentCfg.ID)
+			slog.Info("Initialized agent base tools", "agent", agentCfg.ID)
 		}()
 
+		// Base tools available to all agents
 		cwd := cfg.WorkingDir()
-		allTools := []tools.BaseTool{
+		result := make(map[string]tools.BaseTool)
+		for _, tool := range []tools.BaseTool{
 			tools.NewBashTool(permissions, cwd, cfg.Options.Attribution),
 			tools.NewDownloadTool(permissions, cwd),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
@@ -190,36 +195,25 @@ func NewAgent(
 			tools.NewSourcegraphTool(),
 			tools.NewViewTool(lspClients, permissions, cwd),
 			tools.NewWriteTool(lspClients, permissions, history, cwd),
+		} {
+			result[tool.Name()] = tool
 		}
+		return result
+	}
+	mcpToolsFn := func() map[string]tools.BaseTool {
+		slog.Info("Initializing agent mcp tools", "agent", agentCfg.ID)
+		defer func() {
+			slog.Info("Initialized agent mcp tools", "agent", agentCfg.ID)
+		}()
 
 		mcpToolsOnce.Do(func() {
-			mcpTools = doGetMCPTools(ctx, permissions, cfg)
+			doGetMCPTools(ctx, permissions, cfg)
 		})
 
-		withCoderTools := func(t []tools.BaseTool) []tools.BaseTool {
-			if agentCfg.ID == "coder" {
-				t = append(t, mcpTools...)
-				if lspClients.Len() > 0 {
-					t = append(t, tools.NewDiagnosticsTool(lspClients))
-				}
-			}
-			return t
-		}
-
-		if agentCfg.AllowedTools == nil {
-			return withCoderTools(allTools)
-		}
-
-		var filteredTools []tools.BaseTool
-		for _, tool := range allTools {
-			if slices.Contains(agentCfg.AllowedTools, tool.Name()) {
-				filteredTools = append(filteredTools, tool)
-			}
-		}
-		return withCoderTools(filteredTools)
+		return maps.Collect(mcpTools.Seq2())
 	}
 
-	return &agent{
+	a := &agent{
 		Broker:              pubsub.NewBroker[AgentEvent](),
 		agentCfg:            agentCfg,
 		provider:            agentProvider,
@@ -231,10 +225,14 @@ func NewAgent(
 		summarizeProviderID: string(providerCfg.ID),
 		agentToolFn:         agentToolFn,
 		activeRequests:      csync.NewMap[string, context.CancelFunc](),
-		tools:               csync.NewLazySlice(toolFn),
+		mcpTools:            csync.NewLazyMap(mcpToolsFn),
+		baseTools:           csync.NewLazyMap(baseToolsFn),
 		promptQueue:         csync.NewMap[string, []string](),
 		permissions:         permissions,
-	}, nil
+		lspClients:          lspClients,
+	}
+	a.setupEvents(ctx)
+	return a, nil
 }
 
 func (a *agent) Model() catwalk.Model {
@@ -517,7 +515,18 @@ func (a *agent) createUserMessage(ctx context.Context, sessionID, content string
 }
 
 func (a *agent) getAllTools() ([]tools.BaseTool, error) {
-	allTools := slices.Collect(a.tools.Seq())
+	var allTools []tools.BaseTool
+	for tool := range a.baseTools.Seq() {
+		if a.agentCfg.AllowedTools == nil || slices.Contains(a.agentCfg.AllowedTools, tool.Name()) {
+			allTools = append(allTools, tool)
+		}
+	}
+	if a.agentCfg.ID == "coder" {
+		allTools = slices.AppendSeq(allTools, a.mcpTools.Seq())
+		if a.lspClients.Len() > 0 {
+			allTools = append(allTools, tools.NewDiagnosticsTool(a.lspClients))
+		}
+	}
 	if a.agentToolFn != nil {
 		agentTool, agentToolErr := a.agentToolFn()
 		if agentToolErr != nil {
@@ -591,7 +600,7 @@ loop:
 		default:
 			// Continue processing
 			var tool tools.BaseTool
-			allTools, _ := a.getAllTools()
+			allTools, _ = a.getAllTools()
 			for _, availableTool := range allTools {
 				if availableTool.Info().Name == toolCall.Name {
 					tool = availableTool
@@ -960,6 +969,12 @@ func (a *agent) CancelAll() {
 		a.Cancel(key) // key is sessionID
 	}
 
+	for _, cleanup := range a.cleanupFuncs {
+		if cleanup != nil {
+			cleanup()
+		}
+	}
+
 	timeout := time.After(5 * time.Second)
 	for a.IsBusy() {
 		select {
@@ -1070,4 +1085,49 @@ func (a *agent) UpdateModel() error {
 	}
 
 	return nil
+}
+
+func (a *agent) setupEvents(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		subCh := SubscribeMCPEvents(ctx)
+
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("MCPEvents subscription channel closed")
+					return
+				}
+				switch event.Payload.Type {
+				case MCPEventToolsListChanged:
+					name := event.Payload.Name
+					c, ok := mcpClients.Get(name)
+					if !ok {
+						slog.Warn("MCP client not found for tools update", "name", name)
+						continue
+					}
+					cfg := config.Get()
+					tools, err := getTools(ctx, name, a.permissions, c, cfg.WorkingDir())
+					if err != nil {
+						slog.Error("error listing tools", "error", err)
+						updateMCPState(name, MCPStateError, err, nil, 0)
+						_ = c.Close()
+						continue
+					}
+					updateMcpTools(name, tools)
+					a.mcpTools.Reset(maps.Collect(mcpTools.Seq2()))
+					updateMCPState(name, MCPStateConnected, nil, c, a.mcpTools.Len())
+				default:
+					continue
+				}
+			case <-ctx.Done():
+				slog.Debug("MCPEvents subscription cancelled")
+				return
+			}
+		}
+	}()
+
+	a.cleanupFuncs = append(a.cleanupFuncs, cancel)
 }

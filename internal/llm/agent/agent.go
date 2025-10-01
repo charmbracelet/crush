@@ -34,6 +34,9 @@ type AgentEvent struct {
 	Message message.Message
 	Error   error
 
+	// Token usage from the response
+	TokenUsage provider.TokenUsage
+
 	// When summarizing
 	SessionID string
 	Progress  string
@@ -362,7 +365,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		default:
 			// Continue processing
 		}
-		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
+		agentMessage, toolResults, tokenUsage, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
@@ -415,9 +418,10 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			return a.err(ErrRequestCancelled)
 		}
 		return AgentEvent{
-			Type:    AgentEventTypeResponse,
-			Message: agentMessage,
-			Done:    true,
+			Type:       AgentEventTypeResponse,
+			Message:    agentMessage,
+			TokenUsage: tokenUsage,
+			Done:       true,
 		}
 	}
 }
@@ -443,7 +447,7 @@ func (a *agent) getAllTools() ([]tools.BaseTool, error) {
 	return allTools, nil
 }
 
-func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, error) {
+func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msgHistory []message.Message) (message.Message, *message.Message, provider.TokenUsage, error) {
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 
 	// Create the assistant message first so the spinner shows immediately
@@ -454,18 +458,20 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 		Provider: a.providerID,
 	})
 	if err != nil {
-		return assistantMsg, nil, fmt.Errorf("failed to create assistant message: %w", err)
+		return assistantMsg, nil, provider.TokenUsage{}, fmt.Errorf("failed to create assistant message: %w", err)
 	}
 
 	allTools, toolsErr := a.getAllTools()
 	if toolsErr != nil {
-		return assistantMsg, nil, toolsErr
+		return assistantMsg, nil, provider.TokenUsage{}, toolsErr
 	}
 	// Now collect tools (which may block on MCP initialization)
 	eventChan := a.provider.StreamResponse(ctx, msgHistory, allTools)
 
 	// Add the session and message ID into the context if needed by tools.
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
+
+	var tokenUsage provider.TokenUsage
 
 loop:
 	for {
@@ -480,11 +486,15 @@ loop:
 				} else {
 					a.finishMessage(ctx, &assistantMsg, message.FinishReasonError, "API Error", processErr.Error())
 				}
-				return assistantMsg, nil, processErr
+				return assistantMsg, nil, tokenUsage, processErr
+			}
+			// Capture token usage from EventComplete
+			if event.Type == provider.EventComplete && event.Response != nil {
+				tokenUsage = event.Response.Usage
 			}
 		case <-ctx.Done():
 			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
-			return assistantMsg, nil, ctx.Err()
+			return assistantMsg, nil, tokenUsage, ctx.Err()
 		}
 	}
 
@@ -579,7 +589,7 @@ loop:
 	}
 out:
 	if len(toolResults) == 0 {
-		return assistantMsg, nil, nil
+		return assistantMsg, nil, tokenUsage, nil
 	}
 	parts := make([]message.ContentPart, 0)
 	for _, tr := range toolResults {
@@ -591,10 +601,10 @@ out:
 		Provider: a.providerID,
 	})
 	if err != nil {
-		return assistantMsg, nil, fmt.Errorf("failed to create cancelled tool message: %w", err)
+		return assistantMsg, nil, tokenUsage, fmt.Errorf("failed to create cancelled tool message: %w", err)
 	}
 
-	return assistantMsg, &msg, err
+	return assistantMsg, &msg, tokenUsage, err
 }
 
 func (a *agent) finishMessage(ctx context.Context, msg *message.Message, finishReason message.FinishReason, message, details string) {

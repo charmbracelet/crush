@@ -145,13 +145,13 @@ func (b *bashTool) bashDescription() string {
 
 	// Build PR attribution
 	if generatedWith {
-		prAttribution = "🫡 Generated with Cliffy"
+		prAttribution = AsciiCliffy + "  Generated with Cliffy"
 	}
 
 	if generatedWith || coAuthoredBy {
 		var attributionParts []string
 		if generatedWith {
-			attributionParts = append(attributionParts, "🫡 Generated with Cliffy")
+			attributionParts = append(attributionParts, AsciiCliffy+"  Generated with Cliffy")
 		}
 		if coAuthoredBy {
 			attributionParts = append(attributionParts, "Co-Authored-By: Cliffy <cliffy@ettio.com>")

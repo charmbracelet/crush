@@ -618,6 +618,83 @@ cd benchmark
 - [ ] Smart tool preloading
 - [ ] Response caching (opt-in)
 
+## Token Usage Transparency
+
+**Key differentiator from Crush:** Expose token usage and costs to users.
+
+Crush logs token usage to database but never shows it to users. For one-off tasks, users care about cost and efficiency.
+
+### Proposed Implementation
+
+```bash
+# Default: No stats
+cliffy "task"
+> result
+
+# With stats flag: Show token usage
+cliffy --stats "task"
+> result
+>
+> ---
+> 12,235 tokens (10,500 in / 1,735 out)
+> $0.0042 estimated cost
+> Completed in 1.933s
+```
+
+### Technical Approach
+
+1. **Capture from agent:** Agent already tracks token usage in `trackUsage()` but only logs it
+2. **Expose via events:** Add token usage to `AgentEventTypeResponse` or create new event type
+3. **Aggregate in runner:** Runner collects token counts across all API calls
+4. **Display with --stats:** Format with commas, show breakdown, estimate cost
+
+### Why This Matters
+
+**For one-off tasks, cost awareness is critical:**
+- Users running Cliffy in CI/CD want to track spend
+- Automation at scale needs cost monitoring
+- Token counts help optimize prompts
+
+**Crush doesn't expose this because:**
+- Session-based usage - aggregating across sessions is complex
+- TUI focused - not designed for machine-readable output
+- Database stores it but no UI to surface it
+
+**Cliffy advantages:**
+- One task = one cost calculation (simple)
+- CLI output easy to parse and log
+- `--stats` flag makes it opt-in, doesn't clutter default output
+- Natural fit for automation and monitoring
+
+### Cost Calculation
+
+```go
+// Use model pricing from config
+cost := (inputTokens * model.CostPer1MIn / 1_000_000) +
+        (outputTokens * model.CostPer1MOut / 1_000_000) +
+        (cacheReadTokens * model.CostPer1MInCached / 1_000_000) +
+        (cacheCreationTokens * model.CostPer1MOutCached / 1_000_000)
+```
+
+### Future Enhancements
+
+- `--stats=json` for structured output (CI/CD parsing)
+- Running cost total in batch mode
+- Cost warnings/limits (e.g., abort if > $0.10)
+- Provider-specific pricing updates
+- Cache hit rate display
+
+### Implementation Steps
+
+1. Modify `agent.trackUsage()` to return or event usage data
+2. Add token fields to `ExecutionStats`
+3. Capture usage in `Runner.handleEvent()`
+4. Display in `printStats()` with `--stats` flag
+5. Test with different providers (OpenRouter, Anthropic, etc.)
+6. Document flag in help text and README
+
+**Priority:** Medium-high - good functional differentiator, useful for users
+
 ## Success Criteria
 
 **Performance targets met when:**

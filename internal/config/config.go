@@ -131,6 +131,19 @@ type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
+	//
+
+	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+}
+
+// Completions defines options for the completions UI.
+type Completions struct {
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+func (c Completions) Limits() (depth, items int) {
+	return ptrValOr(c.MaxDepth, -1), ptrValOr(c.MaxItems, -1)
 }
 
 type Permissions struct {
@@ -246,6 +259,19 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
+type Tools struct {
+	Ls ToolLs `json:"ls,omitzero"`
+}
+
+type ToolLs struct {
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+func (t ToolLs) Limits() (depth, items int) {
+	return ptrValOr(t.MaxDepth, -1), ptrValOr(t.MaxItems, -1)
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -263,6 +289,8 @@ type Config struct {
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+
+	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	// Internal
 	workingDir string `json:"-"`
@@ -578,4 +606,11 @@ func resolveEnvs(envs map[string]string) []string {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
 	return res
+}
+
+func ptrValOr[T any](t *T, el T) T {
+	if t == nil {
+		return el
+	}
+	return *t
 }

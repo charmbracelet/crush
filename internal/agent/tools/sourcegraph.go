@@ -31,14 +31,16 @@ const SourcegraphToolName = "sourcegraph"
 //go:embed sourcegraph.md
 var sourcegraphDescription []byte
 
-func NewSourcegraphTool() ai.AgentTool {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
+func NewSourcegraphTool(client *http.Client) ai.AgentTool {
+	if client == nil {
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
 	}
 	return ai.NewAgentTool(
 		SourcegraphToolName,

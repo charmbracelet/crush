@@ -24,13 +24,13 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1759316452-zjAj0sEKiIFFAKMkb9ry","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1759322621-088y2ZDJ2qWERmy5LEKL","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
 
-      data: {"id":"gen-1759316452-zjAj0sEKiIFFAKMkb9ry","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1759322621-088y2ZDJ2qWERmy5LEKL","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
 
-      data: {"id":"gen-1759316452-zjAj0sEKiIFFAKMkb9ry","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
+      data: {"id":"gen-1759322621-088y2ZDJ2qWERmy5LEKL","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
 
-      data: {"id":"gen-1759316452-zjAj0sEKiIFFAKMkb9ry","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":113,"completion_tokens":2,"total_tokens":115,"cost":0.0000129,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0000113,"upstream_inference_completions_cost":0.0000016},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1759322621-088y2ZDJ2qWERmy5LEKL","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":113,"completion_tokens":2,"total_tokens":115,"cost":0.0000129,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0000113,"upstream_inference_completions_cost":0.0000016},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
 
       data: [DONE]
 
@@ -39,7 +39,7 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 1.246887958s
+    duration: 1.105230416s
 - id: 1
   request:
     proto: HTTP/1.1
@@ -63,15 +63,13 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1759316452-0gJYswImYao5Of0iy7j1","provider":"Moonshot AI","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
+      data: {"id":"gen-1759322621-TFyRE7QqvCi8A7vVSHKy","provider":"Novita","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
 
-      data: {"id":"gen-1759316452-0gJYswImYao5Of0iy7j1","provider":"Moonshot AI","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
+      data: {"id":"gen-1759322621-TFyRE7QqvCi8A7vVSHKy","provider":"Novita","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
 
-      data: {"id":"gen-1759316452-0gJYswImYao5Of0iy7j1","provider":"Moonshot AI","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":"."},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
+      data: {"id":"gen-1759322621-TFyRE7QqvCi8A7vVSHKy","provider":"Novita","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
 
-      data: {"id":"gen-1759316452-0gJYswImYao5Of0iy7j1","provider":"Moonshot AI","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}],"system_fingerprint":"fpv0_ef28f882"}
-
-      data: {"id":"gen-1759316452-0gJYswImYao5Of0iy7j1","provider":"Moonshot AI","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759316452,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":7552,"completion_tokens":3,"total_tokens":7555,"cost":0.0045387,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0045312,"upstream_inference_completions_cost":0.0000075},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1759322621-TFyRE7QqvCi8A7vVSHKy","provider":"Novita","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1759322621,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":7552,"completion_tokens":2,"total_tokens":7554,"cost":0.0045362,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0045312,"upstream_inference_completions_cost":0.000005},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
 
       data: [DONE]
 
@@ -80,4 +78,4 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 4.667991458s
+    duration: 2.331369875s

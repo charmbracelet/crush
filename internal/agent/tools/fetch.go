@@ -39,14 +39,16 @@ const FetchToolName = "fetch"
 //go:embed fetch.md
 var fetchDescription []byte
 
-func NewFetchTool(permissions permission.Service, workingDir string) ai.AgentTool {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
+func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) ai.AgentTool {
+	if client == nil {
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
 	}
 
 	return ai.NewAgentTool(

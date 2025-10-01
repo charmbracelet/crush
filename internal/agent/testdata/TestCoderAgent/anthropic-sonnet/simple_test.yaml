@@ -25,29 +25,41 @@ interactions:
     content_length: -1
     body: |+
       event: message_start
-      data: {"type":"message_start","message":{"id":"msg_01EA1yHe2hGWqG98PVSSf5s8","type":"message","role":"assistant","model":"claude-3-5-haiku-20241022","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":108,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard"}} }
+      data: {"type":"message_start","message":{"id":"msg_01Pn5WLdGCLP5aKCti1Y47pz","type":"message","role":"assistant","model":"claude-3-5-haiku-20241022","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":108,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}       }
 
       event: content_block_start
-      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}           }
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}      }
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Greeting"}               }
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"First"}           }
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Contact"}         }
+
+      event: ping
+      data: {"type": "ping"}
 
       event: content_block_stop
-      data: {"type":"content_block_stop","index":0    }
+      data: {"type":"content_block_stop","index":0               }
+
+      event: ping
+      data: {"type": "ping"}
+
+      event: ping
+      data: {"type": "ping"}
 
       event: message_delta
-      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":108,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}              }
+      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":108,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}               }
 
       event: message_stop
-      data: {"type":"message_stop"      }
+      data: {"type":"message_stop"       }
 
     headers:
       Content-Type:
       - text/event-stream; charset=utf-8
     status: 200 OK
     code: 200
-    duration: 642.344708ms
+    duration: 692.799334ms
 - id: 1
   request:
     proto: HTTP/1.1
@@ -72,22 +84,22 @@ interactions:
     content_length: -1
     body: |+
       event: message_start
-      data: {"type":"message_start","message":{"id":"msg_01S99d6CmzZeEvf987aG9ksX","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":8645,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":8645,"ephemeral_1h_input_tokens":0},"output_tokens":3,"service_tier":"standard"}}   }
+      data: {"type":"message_start","message":{"id":"msg_015DTCS4wTuYNBhwJXZtLJLm","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":8645,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":8645,"ephemeral_1h_input_tokens":0},"output_tokens":3,"service_tier":"standard"}}              }
 
       event: content_block_start
-      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}   }
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}     }
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello! How"}   }
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello! How"}}
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can I help you today?"}}
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can I help you today?"}           }
 
       event: ping
       data: {"type": "ping"}
 
       event: content_block_stop
-      data: {"type":"content_block_stop","index":0          }
+      data: {"type":"content_block_stop","index":0         }
 
       event: ping
       data: {"type": "ping"}
@@ -96,14 +108,14 @@ interactions:
       data: {"type": "ping"}
 
       event: message_delta
-      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":3,"cache_creation_input_tokens":8645,"cache_read_input_tokens":0,"output_tokens":12}}
+      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":3,"cache_creation_input_tokens":8645,"cache_read_input_tokens":0,"output_tokens":12}            }
 
       event: message_stop
-      data: {"type":"message_stop"      }
+      data: {"type":"message_stop"             }
 
     headers:
       Content-Type:
       - text/event-stream; charset=utf-8
     status: 200 OK
     code: 200
-    duration: 2.390267667s
+    duration: 3.558943042s

@@ -32,14 +32,16 @@ const DownloadToolName = "download"
 //go:embed download.md
 var downloadDescription []byte
 
-func NewDownloadTool(permissions permission.Service, workingDir string) ai.AgentTool {
-	client := &http.Client{
-		Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
+func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) ai.AgentTool {
+	if client == nil {
+		client = &http.Client{
+			Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
 	}
 	return ai.NewAgentTool(
 		DownloadToolName,

@@ -129,7 +129,7 @@ func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt strin
 	return agent
 }
 
-func coderAgent(env env, large, small ai.LanguageModel) (SessionAgent, error) {
+func coderAgent(r *recorder.Recorder, env env, large, small ai.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -149,14 +149,14 @@ func coderAgent(env env, large, small ai.LanguageModel) (SessionAgent, error) {
 	}
 	allTools := []ai.AgentTool{
 		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution),
-		tools.NewDownloadTool(env.permissions, env.workingDir),
+		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewEditTool(env.lspClients, env.permissions, env.history, env.workingDir),
 		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, env.workingDir),
-		tools.NewFetchTool(env.permissions, env.workingDir),
+		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewGlobTool(env.workingDir),
 		tools.NewGrepTool(env.workingDir),
 		tools.NewLsTool(env.permissions, env.workingDir),
-		tools.NewSourcegraphTool(),
+		tools.NewSourcegraphTool(r.GetDefaultClient()),
 		tools.NewViewTool(env.lspClients, env.permissions, env.workingDir),
 		tools.NewWriteTool(env.lspClients, env.permissions, env.history, env.workingDir),
 	}

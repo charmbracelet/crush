@@ -98,7 +98,10 @@ func (s *Scheduler) Execute(ctx context.Context, tasks []Task) ([]TaskResult, Vo
 	// Calculate summary
 	summary := s.calculateSummary(time.Since(startTime))
 
-	s.progress.Finish(summary)
+	// Only show summary if enabled
+	if s.options.ShowSummary {
+		s.progress.Finish(summary)
+	}
 
 	return s.results, summary, nil
 }

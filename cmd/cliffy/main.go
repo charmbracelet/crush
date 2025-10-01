@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 
 	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/bwl/cliffy/internal/llm/agent"
 	"github.com/bwl/cliffy/internal/llm/tools"
-	"github.com/bwl/cliffy/internal/runner"
+	"github.com/bwl/cliffy/internal/lsp"
+	"github.com/bwl/cliffy/internal/message"
+	"github.com/bwl/cliffy/internal/volley"
 	"github.com/spf13/cobra"
 )
 
@@ -27,10 +30,11 @@ var (
 	smart          bool
 	showStats      bool
 	showVersion    bool
+	verbose        bool
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "cliffy [prompt]",
+	Use:   "cliffy [flags] <task1> [task2] [task3] ...",
 	Short: "Fast AI coding assistant for one-off tasks",
 	Long: fmt.Sprintf(`%s  Cliffy - Fast AI coding assistant
 
@@ -38,13 +42,21 @@ Fast, focused AI coding assistant for one-off tasks.
 Cliffy zips in, executes your task, and gets back to ready position.
 
 USAGE
-  cliffy [flags] "your task"
+  cliffy [flags] <task1> [task2] ...
 
 EXAMPLES
+  # Single task
   cliffy "list all Go files in internal/"
+
+  # Multiple tasks (parallel)
+  cliffy "analyze auth.go" "analyze db.go" "analyze api.go"
+
+  # With verbose progress
+  cliffy --verbose "task1" "task2" "task3"
+
+  # Model selection
   cliffy --fast "count lines of code"
   cliffy --smart "refactor this function for clarity"
-  cliffy --show-thinking "explain this algorithm"
 
 Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -60,53 +72,9 @@ Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 			printVersion()
 			return nil
 		}
-		ctx := context.Background()
 
-		// Load config
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
-		}
-		cfg, err := config.Init(cwd, ".cliffy", false)
-		if err != nil {
-			return fmt.Errorf("config load failed: %w", err)
-		}
-
-		// Handle convenience flags (--fast, --smart)
-		if fast {
-			model = string(config.SelectedModelTypeSmall)
-		} else if smart {
-			model = string(config.SelectedModelTypeLarge)
-		}
-
-		// Skip banner - keep it clean for pipeline use
-
-		// Track execution time
-		startTime := time.Now()
-
-		// Create runner
-		r, err := runner.New(cfg, runner.Options{
-			ShowThinking:   showThinking,
-			ThinkingFormat: thinkingFormat,
-			OutputFormat:   outputFormat,
-			Model:          model,
-			Quiet:          quiet,
-			ShowStats:      showStats,
-		})
-		if err != nil {
-			return err
-		}
-
-		// Execute
-		prompt := strings.Join(args, " ")
-		err = r.Execute(ctx, prompt)
-
-		// Print stats summary if requested
-		if showStats && !quiet {
-			printStats(r, startTime)
-		}
-
-		return err
+		// Route to volley execution (unified path)
+		return executeVolley(cmd, args, verbose)
 	},
 }
 
@@ -119,7 +87,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&fast, "fast", false, "Use small/fast model")
 	rootCmd.Flags().BoolVar(&smart, "smart", false, "Use large/smart model")
 	rootCmd.Flags().BoolVar(&showStats, "stats", false, "Show token usage and timing")
-	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Show version info")
+	rootCmd.Flags().BoolVar(&showVersion, "version", false, "Show version info")
+	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Show progress and stats")
 }
 
 func main() {
@@ -127,6 +96,101 @@ func main() {
 		printError(err)
 		os.Exit(1)
 	}
+}
+
+func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
+	ctx := context.Background()
+
+	// Load config
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	cfg, err := config.Init(cwd, ".cliffy", false)
+	if err != nil {
+		return fmt.Errorf("config load failed: %w", err)
+	}
+
+	// Parse tasks from arguments
+	tasks := make([]volley.Task, len(args))
+	for i, arg := range args {
+		tasks[i] = volley.Task{
+			Index:  i + 1,
+			Prompt: arg,
+		}
+	}
+
+	// Set up volley options (silent by default, unless verbose)
+	opts := volley.DefaultVolleyOptions()
+	opts.ShowProgress = verboseMode
+	opts.ShowSummary = verboseMode
+	opts.OutputFormat = outputFormat
+
+	// Create message store
+	messageStore := message.NewStore()
+
+	// Initialize LSP clients
+	lspClients := csync.NewMap[string, *lsp.Client]()
+
+	// Get agent configuration
+	agentCfg, ok := cfg.Agents["coder"]
+	if !ok {
+		return fmt.Errorf("coder agent not found in config")
+	}
+
+	// Override model if specified via global flags
+	if model != "" {
+		agentCfg.Model = config.SelectedModelType(model)
+	} else if fast {
+		agentCfg.Model = config.SelectedModelTypeSmall
+	} else if smart {
+		agentCfg.Model = config.SelectedModelTypeLarge
+	}
+
+	// Create agent
+	ag, err := agent.NewAgent(ctx, agentCfg, messageStore, lspClients)
+	if err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	// Create scheduler
+	scheduler := volley.NewScheduler(cfg, ag, messageStore, opts)
+
+	// Execute volley
+	results, summary, err := scheduler.Execute(ctx, tasks)
+	if err != nil {
+		return fmt.Errorf("volley execution failed: %w", err)
+	}
+
+	// Output results (silent mode: just results, no decorations)
+	if err := outputVolleyResults(results, summary, opts); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+
+	// Return error if any tasks failed
+	if summary.FailedTasks > 0 {
+		return fmt.Errorf("%d/%d tasks failed", summary.FailedTasks, summary.TotalTasks)
+	}
+
+	return nil
+}
+
+func outputVolleyResults(results []volley.TaskResult, summary volley.VolleySummary, opts volley.VolleyOptions) error {
+	// Silent mode: just output results, no decorations
+	for _, result := range results {
+		if result.Status == volley.TaskStatusSuccess {
+			fmt.Println(result.Output)
+			fmt.Println() // Blank line between tasks
+		} else if result.Status == volley.TaskStatusFailed {
+			fmt.Fprintf(os.Stderr, "Task %d failed: %v\n", result.Task.Index, result.Error)
+		}
+	}
+
+	// If verbose, the progress tracker already showed summary
+	// No need to duplicate it here
+
+	return nil
 }
 
 func printError(err error) {
@@ -167,28 +231,3 @@ func printVersion() {
 	fmt.Printf("\n%s  Ready to help\n", tools.AsciiCliffy)
 }
 
-func printStats(r *runner.Runner, startTime time.Time) {
-	elapsed := time.Since(startTime)
-
-	fmt.Fprintf(os.Stderr, "\n---\n")
-	// TODO: Add token usage from agent when available
-	// For now just show timing
-	fmt.Fprintf(os.Stderr, "Completed in %s\n", elapsed.Round(time.Millisecond))
-}
-
-func formatNumber(n int) string {
-	// Format number with commas
-	s := fmt.Sprintf("%d", n)
-	if len(s) <= 3 {
-		return s
-	}
-
-	var result []byte
-	for i, c := range []byte(s) {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			result = append(result, ',')
-		}
-		result = append(result, c)
-	}
-	return string(result)
-}

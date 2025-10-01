@@ -53,6 +53,9 @@ type VolleyOptions struct {
 	// ShowProgress enables live progress output to stderr
 	ShowProgress bool
 
+	// ShowSummary enables summary output after execution
+	ShowSummary bool
+
 	// OutputFormat controls output formatting (text or json)
 	OutputFormat string
 
@@ -66,12 +69,13 @@ type VolleyOptions struct {
 	SkipConfirmation bool
 }
 
-// DefaultVolleyOptions returns sensible defaults
+// DefaultVolleyOptions returns sensible defaults (silent mode)
 func DefaultVolleyOptions() VolleyOptions {
 	return VolleyOptions{
 		MaxConcurrent:    3, // Conservative default
 		MaxRetries:       3,
-		ShowProgress:     true,
+		ShowProgress:     false, // Silent by default
+		ShowSummary:      false, // Silent by default
 		OutputFormat:     "text",
 		FailFast:         false,
 		Estimate:         false,

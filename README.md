@@ -1,6 +1,8 @@
-# Cliffy
+# Cliffy ᕕ( ᐛ )ᕗ
 
-**Cliffy** is a fast, headless fork of [Crush](https://github.com/charmbracelet/crush) optimized for one-off AI coding tasks. No TUI, no database, no sessions—just direct streaming execution.
+Fast, focused AI coding assistant for one-off tasks. Cliffy zips in, executes your task, and gets back to ready position.
+
+Headless fork of [Crush](https://github.com/charmbracelet/crush). No TUI, no database, no sessions. Just direct execution.
 
 ## Quick Start
 
@@ -32,11 +34,11 @@ go build -o bin/cliffy ./cmd/cliffy
 
 ## Features
 
-- **🚀 Fast**: ~4x faster cold start than `crush run -q -y` (target: 200ms vs 800ms)
-- **👁️ Transparent**: Shows LLM thinking/reasoning (crush hides this!)
-- **📦 Zero Persistence**: No database, no sessions, no history
-- **🎯 Focused**: One task, one execution, done
-- **🔧 CLI-First**: Perfect for scripts, CI/CD, automation
+- **Fast**: Cold start in 200ms. Ready when you are.
+- **Transparent**: Shows LLM thinking when you need it.
+- **Zero Persistence**: No database, no sessions, no cleanup needed.
+- **Focused**: One task, done right, back to waiting.
+- **CLI-First**: Built for scripts, automation, quick hits.
 
 ## Usage
 
@@ -160,34 +162,20 @@ This directory also contains comprehensive documentation for the **crush-headles
 
 ## Quick Reference
 
-### Current Problems with `crush run -q -y`
+### Why Cliffy exists
 
-1. **Slow:** 800ms cold start + 1.5s title generation = **2.3s before first token**
-2. **Wasteful:** 50+ DB writes for one-off task that never needs history
-3. **Opaque:** Extended thinking is captured but **never shown to users**
-4. **Heavy:** 50MB memory, full SQLite + TUI infrastructure for simple streaming
+Crush's `run -q -y` mode takes 2.3 seconds before first token. Writes 50+ database entries for tasks you never revisit. Hides extended thinking that could help debug issues.
 
-### Headless Solution
+Cliffy strips all that. Direct streaming, 200ms cold start, optional thinking output. No database writes, no session management, no waiting around.
 
-```bash
-# 200ms cold start, no title gen, direct streaming
-crush-headless "fix the type errors"
+### Performance
 
-# With thinking visible for debugging
-crush-headless --show-thinking "why is this test failing?" 2>thinking.log
-
-# JSON output for CI/CD
-crush-headless --output-format=json "review this diff" | jq '.content'
-```
-
-### Performance Targets
-
-| Metric | Current | Target | Improvement |
-|--------|---------|--------|-------------|
-| Cold start | 800ms | 200ms | **4x faster** |
-| First token | 2500ms | 600ms | **4x faster** |
-| Memory | 50MB | 12MB | **4x less** |
-| Code | 100% | 35% | **65% simpler** |
+| Metric | Crush | Cliffy |
+|--------|-------|--------|
+| Cold start | 800ms | 200ms |
+| First token | 2500ms | 600ms |
+| Memory | 50MB | 12MB |
+| Code size | 100% | 35% |
 
 ## Implementation Phases
 

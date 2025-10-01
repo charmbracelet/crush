@@ -22,8 +22,8 @@ var viewDescription []byte
 
 type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
-	Offset   int    `json:"offset" description:"The line number to start reading from (0-based)"`
-	Limit    int    `json:"limit" description:"The number of lines to read (defaults to 2000)"`
+	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
+	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
 }
 
 type ViewPermissionsParams struct {

@@ -22,7 +22,7 @@ var globDescription []byte
 
 type GlobParams struct {
 	Pattern string `json:"pattern" description:"The glob pattern to match files against"`
-	Path    string `json:"path" description:"The directory to search in. Defaults to the current working directory."`
+	Path    string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
 }
 
 type GlobResponseMetadata struct {

@@ -9,8 +9,8 @@ import (
 //go:embed templates/coder.gotmpl
 var coderPromptTmpl []byte
 
-func coderPrompt() (*prompt.Prompt, error) {
-	systemPrompt, err := prompt.NewPrompt("coder", string(coderPromptTmpl))
+func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
+	systemPrompt, err := prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
 	if err != nil {
 		return nil, err
 	}

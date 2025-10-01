@@ -17,6 +17,7 @@ import (
 type Prompt struct {
 	name     string
 	template string
+	now      func() time.Time
 }
 
 type PromptDat struct {
@@ -34,11 +35,24 @@ type ContextFile struct {
 	Content string
 }
 
-func NewPrompt(name, promptTemplate string) (*Prompt, error) {
-	return &Prompt{
+type Option func(*Prompt)
+
+func WithTimeFunc(fn func() time.Time) Option {
+	return func(p *Prompt) {
+		p.now = fn
+	}
+}
+
+func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
+	p := &Prompt{
 		name:     name,
 		template: promptTemplate,
-	}, nil
+		now:      time.Now,
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p, nil
 }
 
 func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error) {
@@ -47,7 +61,7 @@ func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	if err := t.Execute(&sb, promptData(provider, model, cfg)); err != nil {
+	if err := t.Execute(&sb, p.promptData(provider, model, cfg)); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
 
@@ -118,7 +132,7 @@ func expandPath(path string, cfg config.Config) string {
 	return path
 }
 
-func promptData(provider, model string, cfg config.Config) PromptDat {
+func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat {
 	return PromptDat{
 		Provider:   provider,
 		Model:      model,
@@ -126,7 +140,7 @@ func promptData(provider, model string, cfg config.Config) PromptDat {
 		WorkingDir: cfg.WorkingDir(),
 		IsGitRepo:  isGitRepo(cfg.WorkingDir()),
 		Platform:   runtime.GOOS,
-		Date:       time.Now().Format("1/2/2006"),
+		Date:       p.now().Format("1/2/2006"),
 	}
 }
 

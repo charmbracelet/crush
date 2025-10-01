@@ -184,6 +184,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			currentAssistant = &assistantMsg
 
 			prepared.Messages = options.Messages
+			// reset all cached items
+			for i := range prepared.Messages {
+				prepared.Messages[i].ProviderOptions = nil
+			}
 
 			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
 			a.messageQueue.Del(call.SessionID)
@@ -206,7 +210,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 					systemMessageUpdated = true
 				}
 				// than add cache control to the last 2 messages
-				if i > len(msgs)-3 {
+				if i > len(prepared.Messages)-3 {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
 			}

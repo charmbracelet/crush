@@ -24,8 +24,8 @@ import (
 )
 
 type openaiClient struct {
-	providerOptions    providerClientOptions
-	client             openai.Client
+	providerOptions providerClientOptions
+	client          openai.Client
 }
 
 type OpenAIClient ProviderClient

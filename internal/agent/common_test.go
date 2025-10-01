@@ -134,7 +134,11 @@ func coderAgent(r *recorder.Recorder, env env, large, small ai.LanguageModel) (S
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
 	}
-	prompt, err := coderPrompt(prompt.WithTimeFunc(fixedTime))
+	prompt, err := coderPrompt(
+		prompt.WithTimeFunc(fixedTime),
+		prompt.WithPlatform("linux"),
+		prompt.WithWorkingDir(env.workingDir),
+	)
 	if err != nil {
 		return nil, err
 	}

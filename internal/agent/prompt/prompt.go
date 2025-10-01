@@ -15,9 +15,11 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name     string
-	template string
-	now      func() time.Time
+	name        string
+	template    string
+	now         func() time.Time
+	platform    string
+	workingDir  string
 }
 
 type PromptDat struct {
@@ -40,6 +42,18 @@ type Option func(*Prompt)
 func WithTimeFunc(fn func() time.Time) Option {
 	return func(p *Prompt) {
 		p.now = fn
+	}
+}
+
+func WithPlatform(platform string) Option {
+	return func(p *Prompt) {
+		p.platform = platform
+	}
+}
+
+func WithWorkingDir(workingDir string) Option {
+	return func(p *Prompt) {
+		p.workingDir = workingDir
 	}
 }
 
@@ -133,13 +147,21 @@ func expandPath(path string, cfg config.Config) string {
 }
 
 func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat {
+	workingDir := cfg.WorkingDir()
+	if p.workingDir != "" {
+		workingDir = p.workingDir
+	}
+	platform := runtime.GOOS
+	if p.platform != "" {
+		platform = p.platform
+	}
 	return PromptDat{
 		Provider:   provider,
 		Model:      model,
 		Config:     cfg,
-		WorkingDir: cfg.WorkingDir(),
+		WorkingDir: workingDir,
 		IsGitRepo:  isGitRepo(cfg.WorkingDir()),
-		Platform:   runtime.GOOS,
+		Platform:   platform,
 		Date:       p.now().Format("1/2/2006"),
 	}
 }

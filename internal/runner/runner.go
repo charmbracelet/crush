@@ -22,6 +22,7 @@ type Options struct {
 	OutputFormat   string
 	Model          string
 	Quiet          bool
+	Timings        bool
 }
 
 type Runner struct {

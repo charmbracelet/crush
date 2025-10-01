@@ -199,6 +199,19 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 	})
 }
 
+type (
+	DirectoryLister         func(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error)
+	DirectoryListerResolver func() DirectoryLister
+)
+
+func ResolveDirectoryLister() DirectoryLister {
+	return listDirectory
+}
+
+func listDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
+	return ListDirectory(initialPath, ignorePatterns, limit)
+}
+
 // ListDirectory lists files and directories in the specified path,
 func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
 	results := csync.NewSlice[string]()

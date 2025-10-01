@@ -1,0 +1,53 @@
+{
+  "cold_start": [
+    {
+      "name": "list_files",
+      "prompt": "list all Go files in the internal/ directory",
+      "description": "Simple file listing task"
+    },
+    {
+      "name": "count_lines",
+      "prompt": "count the total number of lines in all .go files in this project",
+      "description": "Basic counting task"
+    },
+    {
+      "name": "find_function",
+      "prompt": "find which file contains the NewAgent function",
+      "description": "Simple search task"
+    }
+  ],
+  "medium": [
+    {
+      "name": "fibonacci_go",
+      "prompt": "write a Go function to calculate the nth fibonacci number using dynamic programming",
+      "description": "Modular code generation"
+    },
+    {
+      "name": "fibonacci_python",
+      "prompt": "port this Go fibonacci function to Python with the same logic",
+      "description": "Code translation task"
+    },
+    {
+      "name": "add_tests",
+      "prompt": "write unit tests for the fibonacci function that test edge cases like n=0, n=1, n=10",
+      "description": "Test generation task"
+    }
+  ],
+  "long_running": [
+    {
+      "name": "implement_cache",
+      "prompt": "create a simple LRU cache implementation in Go with Set, Get, and Delete methods, include comprehensive tests",
+      "description": "Full implementation with tests"
+    },
+    {
+      "name": "refactor_with_explanation",
+      "prompt": "read internal/llm/tools/bash.go and refactor the git commit attribution logic into a separate function, explain the changes",
+      "description": "Real refactoring task"
+    },
+    {
+      "name": "api_design",
+      "prompt": "design a REST API for a todo list application with endpoints for CRUD operations, write OpenAPI spec and example implementations",
+      "description": "Design and implementation task"
+    }
+  ]
+}

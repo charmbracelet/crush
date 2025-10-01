@@ -1,0 +1,36 @@
+{
+  "timestamp": "20251001_105020",
+  "runs": 5,
+  "results": {
+  "cold_start": [
+    {
+      "name": "list_files",
+      "description": "Simple file listing task",
+      "cliffy": {
+        "mean_ms": 5552,
+        "stddev_ms": 1290,
+        "runs": [5295,8023,5372,4714,4358]
+      },
+      "crush": {
+        "mean_ms": 39,
+        "stddev_ms": 40,
+        "runs": [121,21,20,18,19]
+      },
+      "speedup": 0
+    }
+,
+    {
+      "name": "count_lines",
+      "description": "Basic counting task",
+      "cliffy": {
+        "mean_ms": 10891,
+        "stddev_ms": 6451,
+        "runs": [5296,23258,10548,8921,6432]
+      },
+      "crush": {
+        "mean_ms": 34,
+        "stddev_ms": 29,
+        "runs": [93,22,20,19,18]
+      },
+      "speedup": 0
+    }

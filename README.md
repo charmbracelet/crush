@@ -170,12 +170,14 @@ Cliffy strips all that. Direct streaming, 200ms cold start, optional thinking ou
 
 ### Performance
 
-| Metric | Crush | Cliffy |
-|--------|-------|--------|
-| Cold start | 800ms | 200ms |
-| First token | 2500ms | 600ms |
-| Memory | 50MB | 12MB |
-| Code size | 100% | 35% |
+Benchmarked with identical configurations (same model, same settings):
+
+| Task | Crush | Cliffy | Speedup |
+|------|-------|--------|---------|
+| List files | 7719ms | 6902ms | 1.11x |
+| Count lines | 14278ms | 9243ms | 1.54x |
+
+See `benchmark/` for full test suite and methodology.
 
 ## Implementation Phases
 

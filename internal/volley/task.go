@@ -3,7 +3,9 @@ package volley
 import (
 	"time"
 
+	"github.com/bwl/cliffy/internal/config"
 	"github.com/bwl/cliffy/internal/llm/provider"
+	"github.com/bwl/cliffy/internal/llm/tools"
 )
 
 // Task represents a single task to execute in a volley
@@ -26,6 +28,7 @@ type TaskResult struct {
 	Retries      int
 	WorkerID     int
 	Model        string // Model ID used for this task
+	ToolMetadata []*tools.ExecutionMetadata // Tool execution metadata
 }
 
 // TaskStatus represents the execution status of a task
@@ -67,19 +70,23 @@ type VolleyOptions struct {
 
 	// SkipConfirmation skips the cost confirmation prompt
 	SkipConfirmation bool
+
+	// Verbosity controls output detail level
+	Verbosity config.VerbosityLevel
 }
 
-// DefaultVolleyOptions returns sensible defaults (silent mode)
+// DefaultVolleyOptions returns sensible defaults
 func DefaultVolleyOptions() VolleyOptions {
 	return VolleyOptions{
 		MaxConcurrent:    3, // Conservative default
 		MaxRetries:       3,
-		ShowProgress:     false, // Silent by default
-		ShowSummary:      false, // Silent by default
+		ShowProgress:     true, // Show progress by default
+		ShowSummary:      false,
 		OutputFormat:     "text",
 		FailFast:         false,
 		Estimate:         false,
 		SkipConfirmation: false,
+		Verbosity:        config.VerbosityNormal, // Show tool traces by default
 	}
 }
 

@@ -3,7 +3,10 @@
     "allow": [
       "Bash(find:*)",
       "Bash(go build:*)",
-      "Bash(go list:*)"
+      "Bash(go list:*)",
+      "Bash(./bin/cliffy:*)",
+      "Bash(go test:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

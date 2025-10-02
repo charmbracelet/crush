@@ -72,6 +72,8 @@ func (w *writeTool) Info() ToolInfo {
 }
 
 func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
+	start := time.Now()
+
 	var params WriteParams
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
 		return NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
@@ -146,11 +148,33 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	result := fmt.Sprintf("File successfully written: %s", filePath)
 	result = fmt.Sprintf("<result>\n%s\n</result>", result)
 	result += getDiagnostics(filePath, w.lspClients)
-	return WithResponseMetadata(NewTextResponse(result),
+
+	// Determine operation type
+	operation := "modified"
+	if oldContent == "" {
+		operation = "created"
+	}
+
+	response := WithResponseMetadata(NewTextResponse(result),
 		WriteResponseMetadata{
 			Diff:      diff,
 			Additions: additions,
 			Removals:  removals,
 		},
-	), nil
+	)
+
+	// Add execution metadata
+	response.ExecutionMetadata = &ExecutionMetadata{
+		ToolName:   WriteToolName,
+		Duration:   time.Since(start),
+		FilePath:   filePath,
+		Operation:  operation,
+		LineCount:  len(strings.Split(params.Content, "\n")),
+		ByteSize:   int64(len(params.Content)),
+		Diff:       diff,
+		Additions:  additions,
+		Deletions:  removals,
+	}
+
+	return response, nil
 }

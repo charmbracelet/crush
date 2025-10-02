@@ -45,6 +45,7 @@ Thumbs.db
 **/.crush/**
 
 /crush
+/cliffy
 
 manpages/
 completions/

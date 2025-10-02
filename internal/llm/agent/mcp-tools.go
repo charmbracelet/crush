@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -54,7 +53,8 @@ func (s MCPState) String() string {
 type MCPEventType string
 
 const (
-	MCPEventStateChanged MCPEventType = "state_changed"
+	MCPEventStateChanged     MCPEventType = "state_changed"
+	MCPEventToolsListChanged MCPEventType = "tools_list_changed"
 )
 
 // MCPEvent represents an event in the MCP system
@@ -77,11 +77,12 @@ type MCPClientInfo struct {
 }
 
 var (
-	mcpToolsOnce sync.Once
-	mcpTools     []tools.BaseTool
-	mcpClients   = csync.NewMap[string, *client.Client]()
-	mcpStates    = csync.NewMap[string, MCPClientInfo]()
-	mcpBroker    = pubsub.NewBroker[MCPEvent]()
+	mcpToolsOnce    sync.Once
+	mcpTools        = csync.NewMap[string, tools.BaseTool]()
+	mcpClient2Tools = csync.NewMap[string, []tools.BaseTool]()
+	mcpClients      = csync.NewMap[string, *client.Client]()
+	mcpStates       = csync.NewMap[string, MCPClientInfo]()
+	mcpBroker       = pubsub.NewBroker[MCPEvent]()
 )
 
 type McpTool struct {
@@ -237,8 +238,12 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 		Client:    client,
 		ToolCount: toolCount,
 	}
-	if state == MCPStateConnected {
+	switch state {
+	case MCPStateConnected:
 		info.ConnectedAt = time.Now()
+	case MCPStateError:
+		updateMcpTools(name, nil)
+		mcpClients.Del(name)
 	}
 	mcpStates.Set(name, info)
 
@@ -249,6 +254,14 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 		State:     state,
 		Error:     err,
 		ToolCount: toolCount,
+	})
+}
+
+// publishMCPEventToolsListChanged publishes a tool list changed event
+func publishMCPEventToolsListChanged(name string) {
+	mcpBroker.Publish(pubsub.UpdatedEvent, MCPEvent{
+		Type: MCPEventToolsListChanged,
+		Name: name,
 	})
 }
 
@@ -274,10 +287,8 @@ var mcpInitRequest = mcp.InitializeRequest{
 	},
 }
 
-func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) []tools.BaseTool {
+func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *config.Config) {
 	var wg sync.WaitGroup
-	result := csync.NewSlice[tools.BaseTool]()
-
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
 		if m.Disabled {
@@ -316,6 +327,8 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				return
 			}
 
+			mcpClients.Set(name, c)
+
 			tools, err := getTools(ctx, name, permissions, c, cfg.WorkingDir())
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
@@ -324,13 +337,26 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				return
 			}
 
+			updateMcpTools(name, tools)
 			mcpClients.Set(name, c)
 			updateMCPState(name, MCPStateConnected, nil, c, len(tools))
-			result.Append(tools...)
 		}(name, m)
 	}
 	wg.Wait()
-	return slices.Collect(result.Seq())
+}
+
+// updateMcpTools updates the global mcpTools and mcpClient2Tools maps
+func updateMcpTools(mcpName string, tools []tools.BaseTool) {
+	if len(tools) == 0 {
+		mcpClient2Tools.Del(mcpName)
+	} else {
+		mcpClient2Tools.Set(mcpName, tools)
+	}
+	for _, tools := range mcpClient2Tools.Seq2() {
+		for _, t := range tools {
+			mcpTools.Set(t.Name(), t)
+		}
+	}
 }
 
 func createAndInitializeClient(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*client.Client, error) {
@@ -341,29 +367,45 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 		return nil, err
 	}
 
-	timeout := mcpTimeout(m)
-	initCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	c.OnNotification(func(n mcp.JSONRPCNotification) {
+		slog.Debug("Received MCP notification", "name", name, "notification", n)
+		switch n.Method {
+		case "notifications/tools/list_changed":
+			publishMCPEventToolsListChanged(name)
+		default:
+			slog.Debug("Unhandled MCP notification", "name", name, "method", n.Method)
+		}
+	})
 
-	if err := c.Start(initCtx); err != nil {
+	// XXX: ideally we should be able to use context.WithTimeout here, but,
+	// the SSE MCP client will start failing once that context is canceled.
+	timeout := mcpTimeout(m)
+	mcpCtx, cancel := context.WithCancel(ctx)
+	cancelTimer := time.AfterFunc(timeout, cancel)
+
+	if err := c.Start(mcpCtx); err != nil {
 		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 		slog.Error("error starting mcp client", "error", err, "name", name)
 		_ = c.Close()
-		return nil, err
-	}
-	if _, err := c.Initialize(initCtx, mcpInitRequest); err != nil {
-		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
-		slog.Error("error initializing mcp client", "error", err, "name", name)
-		_ = c.Close()
+		cancel()
 		return nil, err
 	}
 
+	if _, err := c.Initialize(mcpCtx, mcpInitRequest); err != nil {
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		slog.Error("error initializing mcp client", "error", err, "name", name)
+		_ = c.Close()
+		cancel()
+		return nil, err
+	}
+
+	cancelTimer.Stop()
 	slog.Info("Initialized mcp client", "name", name)
 	return c, nil
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return fmt.Errorf("timed out after %s", timeout)
 	}
 	return err

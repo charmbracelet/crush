@@ -19,6 +19,28 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Completions": {
+      "properties": {
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum depth for the ls tool",
+          "default": 0,
+          "examples": [
+            10
+          ]
+        },
+        "max_items": {
+          "type": "integer",
+          "description": "Maximum number of items to return for the ls tool",
+          "default": 1000,
+          "examples": [
+            100
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Config": {
       "properties": {
         "$schema": {
@@ -53,10 +75,17 @@
         "permissions": {
           "$ref": "#/$defs/Permissions",
           "description": "Permission settings for tool usage"
+        },
+        "tools": {
+          "$ref": "#/$defs/Tools",
+          "description": "Tool configurations"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "tools"
+      ]
     },
     "LSPConfig": {
       "properties": {
@@ -484,10 +513,51 @@
             "split"
           ],
           "description": "Diff mode for the TUI interface"
+        },
+        "completions": {
+          "$ref": "#/$defs/Completions",
+          "description": "Completions UI options"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "completions"
+      ]
+    },
+    "ToolLs": {
+      "properties": {
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum depth for the ls tool",
+          "default": 0,
+          "examples": [
+            10
+          ]
+        },
+        "max_items": {
+          "type": "integer",
+          "description": "Maximum number of items to return for the ls tool",
+          "default": 1000,
+          "examples": [
+            100
+          ]
         }
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Tools": {
+      "properties": {
+        "ls": {
+          "$ref": "#/$defs/ToolLs"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ls"
+      ]
     }
   }
 }

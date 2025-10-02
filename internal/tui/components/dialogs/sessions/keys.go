@@ -15,7 +15,7 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Select: key.NewBinding(
 			key.WithKeys("enter", "tab", "ctrl+y"),
-			key.WithHelp("enter", "confirm"),
+			key.WithHelp("enter", "choose"),
 		),
 		Next: key.NewBinding(
 			key.WithKeys("down", "ctrl+n"),
@@ -27,7 +27,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Close: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "exit"),
 		),
 	}
 }

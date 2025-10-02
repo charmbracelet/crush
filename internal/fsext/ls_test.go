@@ -5,26 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func chdir(t *testing.T, dir string) {
-	original, err := os.Getwd()
-	require.NoError(t, err)
-
-	err = os.Chdir(dir)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		err := os.Chdir(original)
-		require.NoError(t, err)
-	})
-}
-
 func TestListDirectory(t *testing.T) {
-	tempDir := t.TempDir()
-	chdir(t, tempDir)
+	tmp := t.TempDir()
 
 	testFiles := map[string]string{
 		"regular.txt":     "content",
@@ -35,32 +20,40 @@ func TestListDirectory(t *testing.T) {
 		"build.log":       "build output",
 	}
 
-	for filePath, content := range testFiles {
-		dir := filepath.Dir(filePath)
-		if dir != "." {
-			require.NoError(t, os.MkdirAll(dir, 0o755))
-		}
+	for name, content := range testFiles {
+		fp := filepath.Join(tmp, name)
+		dir := filepath.Dir(fp)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(fp, []byte(content), 0o644))
+	}
 
-		err := os.WriteFile(filePath, []byte(content), 0o644)
+	t.Run("no limit", func(t *testing.T) {
+		files, truncated, err := ListDirectory(tmp, nil, -1, -1)
 		require.NoError(t, err)
+		require.False(t, truncated)
+		require.Len(t, files, 4)
+		require.ElementsMatch(t, []string{
+			"regular.txt",
+			"subdir",
+			"subdir/.another",
+			"subdir/file.go",
+		}, relPaths(t, files, tmp))
+	})
+	t.Run("limit", func(t *testing.T) {
+		files, truncated, err := ListDirectory(tmp, nil, -1, 2)
+		require.NoError(t, err)
+		require.True(t, truncated)
+		require.Len(t, files, 2)
+	})
+}
+
+func relPaths(tb testing.TB, in []string, base string) []string {
+	tb.Helper()
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		rel, err := filepath.Rel(base, p)
+		require.NoError(tb, err)
+		out = append(out, filepath.ToSlash(rel))
 	}
-
-	files, truncated, err := ListDirectory(".", nil, 0)
-	require.NoError(t, err)
-	assert.False(t, truncated)
-	assert.Equal(t, len(files), 4)
-
-	fileSet := make(map[string]bool)
-	for _, file := range files {
-		fileSet[filepath.ToSlash(file)] = true
-	}
-
-	assert.True(t, fileSet["./regular.txt"])
-	assert.True(t, fileSet["./subdir/"])
-	assert.True(t, fileSet["./subdir/file.go"])
-	assert.True(t, fileSet["./regular.txt"])
-
-	assert.False(t, fileSet["./.hidden"])
-	assert.False(t, fileSet["./.gitignore"])
-	assert.False(t, fileSet["./build.log"])
+	return out
 }

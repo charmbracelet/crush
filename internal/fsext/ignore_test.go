@@ -9,14 +9,8 @@ import (
 )
 
 func TestCrushIgnore(t *testing.T) {
-	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-
-	// Change to temp directory
-	oldWd, _ := os.Getwd()
-	err := os.Chdir(tempDir)
-	require.NoError(t, err)
-	defer os.Chdir(oldWd)
+	t.Chdir(tempDir)
 
 	// Create test files
 	require.NoError(t, os.WriteFile("test1.txt", []byte("test"), 0o644))

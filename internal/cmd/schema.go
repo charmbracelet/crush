@@ -24,7 +24,3 @@ var schemaCmd = &cobra.Command{
 		return nil
 	},
 }
-
-func init() {
-	rootCmd.AddCommand(schemaCmd)
-}

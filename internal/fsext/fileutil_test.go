@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -148,37 +147,35 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		require.Equal(t, matches, []string{file1})
+		require.Equal(t, []string{file1}, matches)
 	})
 
 	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			testDir := t.TempDir()
+		testDir := t.TempDir()
 
-			file1 := filepath.Join(testDir, "file1.txt")
-			require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
+		file1 := filepath.Join(testDir, "file1.txt")
+		require.NoError(t, os.WriteFile(file1, []byte("first"), 0o644))
 
-			file2 := filepath.Join(testDir, "file2.txt")
-			require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
+		file2 := filepath.Join(testDir, "file2.txt")
+		require.NoError(t, os.WriteFile(file2, []byte("second"), 0o644))
 
-			file3 := filepath.Join(testDir, "file3.txt")
-			require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
+		file3 := filepath.Join(testDir, "file3.txt")
+		require.NoError(t, os.WriteFile(file3, []byte("third"), 0o644))
 
-			base := time.Now()
-			m1 := base
-			m2 := base.Add(1 * time.Millisecond)
-			m3 := base.Add(2 * time.Millisecond)
+		base := time.Now()
+		m1 := base
+		m2 := base.Add(10 * time.Hour)
+		m3 := base.Add(20 * time.Hour)
 
-			require.NoError(t, os.Chtimes(file1, m1, m1))
-			require.NoError(t, os.Chtimes(file2, m2, m2))
-			require.NoError(t, os.Chtimes(file3, m3, m3))
+		require.NoError(t, os.Chtimes(file1, m1, m1))
+		require.NoError(t, os.Chtimes(file2, m2, m2))
+		require.NoError(t, os.Chtimes(file3, m3, m3))
 
-			matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
-			require.NoError(t, err)
-			require.False(t, truncated)
+		matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
 
-			require.Equal(t, matches, []string{file3, file2, file1})
-		})
+		require.Equal(t, []string{file3, file2, file1}, matches)
 	})
 
 	t.Run("handles empty directory", func(t *testing.T) {
@@ -188,7 +185,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 		// Even empty directories should return the directory itself
-		require.Equal(t, matches, []string{testDir})
+		require.Equal(t, []string{testDir}, matches)
 	})
 
 	t.Run("handles non-existent search path", func(t *testing.T) {
@@ -235,39 +232,38 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		matches, truncated, err = GlobWithDoubleStar("*.txt", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
-		require.Equal(t, matches, []string{goodFile})
+		require.Equal(t, []string{goodFile}, matches)
 	})
 
 	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			testDir := t.TempDir()
+		testDir := t.TempDir()
 
-			oldestFile := filepath.Join(testDir, "old.test")
-			require.NoError(t, os.WriteFile(oldestFile, []byte("old"), 0o644))
+		oldestFile := filepath.Join(testDir, "old.rs")
+		require.NoError(t, os.WriteFile(oldestFile, []byte("old"), 0o644))
 
-			middleDir := filepath.Join(testDir, "mid.test")
-			require.NoError(t, os.MkdirAll(middleDir, 0o755))
+		middleDir := filepath.Join(testDir, "mid.rs")
+		require.NoError(t, os.MkdirAll(middleDir, 0o755))
 
-			newestFile := filepath.Join(testDir, "new.test")
-			require.NoError(t, os.WriteFile(newestFile, []byte("new"), 0o644))
+		newestFile := filepath.Join(testDir, "new.rs")
+		require.NoError(t, os.WriteFile(newestFile, []byte("new"), 0o644))
 
-			base := time.Now()
-			tOldest := base
-			tMiddle := base.Add(1 * time.Millisecond)
-			tNewest := base.Add(2 * time.Millisecond)
+		base := time.Now()
+		tOldest := base
+		tMiddle := base.Add(10 * time.Hour)
+		tNewest := base.Add(20 * time.Hour)
 
-			// Reverse the expected order
-			require.NoError(t, os.Chtimes(newestFile, tOldest, tOldest))
-			require.NoError(t, os.Chtimes(middleDir, tMiddle, tMiddle))
-			require.NoError(t, os.Chtimes(oldestFile, tNewest, tNewest))
+		// Reverse the expected order
+		require.NoError(t, os.Chtimes(newestFile, tOldest, tOldest))
+		require.NoError(t, os.Chtimes(middleDir, tMiddle, tMiddle))
+		require.NoError(t, os.Chtimes(oldestFile, tNewest, tNewest))
 
-			matches, truncated, err := GlobWithDoubleStar("*.test", testDir, 0)
-			require.NoError(t, err)
-			require.False(t, truncated)
+		matches, truncated, err := GlobWithDoubleStar("*.rs", testDir, 0)
+		require.NoError(t, err)
+		require.False(t, truncated)
+		require.Len(t, matches, 3)
 
-			// Results should be sorted by mod time, but we set the oldestFile
-			// to have the most recent mod time
-			require.Equal(t, matches, []string{oldestFile, middleDir, newestFile})
-		})
+		// Results should be sorted by mod time, but we set the oldestFile
+		// to have the most recent mod time
+		require.Equal(t, []string{oldestFile, middleDir, newestFile}, matches)
 	})
 }

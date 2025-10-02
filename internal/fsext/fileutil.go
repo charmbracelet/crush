@@ -1,15 +1,17 @@
 package fsext
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 )
 
@@ -80,10 +82,9 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 	pattern = filepath.ToSlash(pattern)
 
 	walker := NewFastGlobWalker(searchPath)
-	var matches []FileInfo
+	found := csync.NewSlice[FileInfo]()
 	conf := fastwalk.Config{
-		Follow: true,
-		// Use forward slashes when running a Windows binary under WSL or MSYS
+		Follow:  true,
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortFilesFirst,
 	}
@@ -121,31 +122,26 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 			return nil
 		}
 
-		matches = append(matches, FileInfo{Path: path, ModTime: info.ModTime()})
-		if limit > 0 && len(matches) >= limit*2 {
+		found.Append(FileInfo{Path: path, ModTime: info.ModTime()})
+		if limit > 0 && found.Len() >= limit*2 { // NOTE: why x2?
 			return filepath.SkipAll
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
 		return nil, false, fmt.Errorf("fastwalk error: %w", err)
 	}
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].ModTime.After(matches[j].ModTime)
+	matches := slices.SortedFunc(found.Seq(), func(a, b FileInfo) int {
+		return b.ModTime.Compare(a.ModTime)
 	})
-
-	truncated := false
-	if limit > 0 && len(matches) > limit {
-		matches = matches[:limit]
-		truncated = true
-	}
+	matches, truncated := truncate(matches, limit)
 
 	results := make([]string, len(matches))
 	for i, m := range matches {
 		results[i] = m.Path
 	}
-	return results, truncated, nil
+	return results, truncated || errors.Is(err, filepath.SkipAll), nil
 }
 
 // ShouldExcludeFile checks if a file should be excluded from processing
@@ -153,36 +149,6 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 func ShouldExcludeFile(rootPath, filePath string) bool {
 	return NewDirectoryLister(rootPath).
 		shouldIgnore(filePath, nil)
-}
-
-// WalkDirectories walks a directory tree and calls the provided function for each directory,
-// respecting hierarchical .gitignore/.crushignore files like git does.
-func WalkDirectories(rootPath string, fn func(path string, d os.DirEntry, err error) error) error {
-	dl := NewDirectoryLister(rootPath)
-
-	conf := fastwalk.Config{
-		Follow:  true,
-		ToSlash: fastwalk.DefaultToSlash(),
-		Sort:    fastwalk.SortDirsFirst,
-	}
-
-	return fastwalk.Walk(&conf, rootPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return fn(path, d, err)
-		}
-
-		// Only process directories
-		if !d.IsDir() {
-			return nil
-		}
-
-		// Check if directory should be ignored
-		if dl.shouldIgnore(path, nil) {
-			return filepath.SkipDir
-		}
-
-		return fn(path, d, err)
-	})
 }
 
 func PrettyPath(path string) string {
@@ -247,4 +213,11 @@ func ToWindowsLineEndings(content string) (string, bool) {
 		return strings.ReplaceAll(content, "\n", "\r\n"), true
 	}
 	return content, false
+}
+
+func truncate[T any](input []T, limit int) ([]T, bool) {
+	if limit > 0 && len(input) > limit {
+		return input[:limit], true
+	}
+	return input, false
 }

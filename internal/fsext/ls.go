@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,6 +72,11 @@ var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
 
 		// Crush
 		".crush",
+
+		// macOS stuff
+		"OrbStack",
+		".local",
+		".share",
 	)
 })
 
@@ -200,16 +206,17 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 }
 
 // ListDirectory lists files and directories in the specified path,
-func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {
-	results := csync.NewSlice[string]()
-	truncated := false
+func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
+	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
+	slog.Warn("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
+
 	conf := fastwalk.Config{
-		Follow: true,
-		// Use forward slashes when running a Windows binary under WSL or MSYS
-		ToSlash: fastwalk.DefaultToSlash(),
-		Sort:    fastwalk.SortDirsFirst,
+		Follow:   true,
+		ToSlash:  fastwalk.DefaultToSlash(),
+		Sort:     fastwalk.SortDirsFirst,
+		MaxDepth: depth,
 	}
 
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
@@ -228,19 +235,19 @@ func ListDirectory(initialPath string, ignorePatterns []string, limit int) ([]st
 			if d.IsDir() {
 				path = path + string(filepath.Separator)
 			}
-			results.Append(path)
+			found.Append(path)
 		}
 
-		if limit > 0 && results.Len() >= limit {
-			truncated = true
+		if limit > 0 && found.Len() >= limit {
 			return filepath.SkipAll
 		}
 
 		return nil
 	})
-	if err != nil && results.Len() == 0 {
-		return nil, truncated, err
+	if err != nil && !errors.Is(err, filepath.SkipAll) {
+		return nil, false, err
 	}
 
-	return slices.Collect(results.Seq()), truncated, nil
+	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
+	return matches, truncated || errors.Is(err, filepath.SkipAll), nil
 }

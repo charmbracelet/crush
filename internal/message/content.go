@@ -2,10 +2,13 @@ package message
 
 import (
 	"encoding/base64"
+	"errors"
 	"slices"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/fantasy/ai"
+	"github.com/charmbracelet/fantasy/anthropic"
 )
 
 type MessageRole string
@@ -85,11 +88,12 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Input    string `json:"input"`
-	Type     string `json:"type"`
-	Finished bool   `json:"finished"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Input            string `json:"input"`
+	ProviderExecuted bool   `json:"provider_executed"`
+	Type             string `json:"type"`
+	Finished         bool   `json:"finished"`
 }
 
 func (ToolCall) isPart() {}
@@ -98,6 +102,8 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	Name       string `json:"name"`
 	Content    string `json:"content"`
+	Data       string `json:"data"`
+	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
 }
@@ -383,4 +389,81 @@ func (m *Message) AddImageURL(url, detail string) {
 
 func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
+}
+
+func (m *Message) ToAIMessage() []ai.Message {
+	var messages []ai.Message
+	switch m.Role {
+	case User:
+		var parts []ai.MessagePart
+		if m.Content().Text != "" {
+			parts = append(parts, ai.TextPart{Text: m.Content().Text})
+		}
+		for _, content := range m.BinaryContent() {
+			parts = append(parts, ai.FilePart{
+				Filename:  content.Path,
+				Data:      content.Data,
+				MediaType: content.MIMEType,
+			})
+		}
+		messages = append(messages, ai.Message{
+			Role:    ai.MessageRoleUser,
+			Content: parts,
+		})
+	case Assistant:
+		var parts []ai.MessagePart
+		if m.Content().Text != "" {
+			parts = append(parts, ai.TextPart{Text: m.Content().Text})
+		}
+		reasoning := m.ReasoningContent()
+		if reasoning.Thinking != "" {
+			reasoningPart := ai.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: ai.ProviderOptions{}}
+			if reasoning.Signature != "" {
+				reasoningPart.ProviderOptions["anthropic"] = &anthropic.ReasoningOptionMetadata{
+					Signature: reasoning.Signature,
+				}
+			}
+			parts = append(parts, reasoningPart)
+		}
+		for _, call := range m.ToolCalls() {
+			parts = append(parts, ai.ToolCallPart{
+				ToolCallID:       call.ID,
+				ToolName:         call.Name,
+				Input:            call.Input,
+				ProviderExecuted: call.ProviderExecuted,
+			})
+		}
+		messages = append(messages, ai.Message{
+			Role:    ai.MessageRoleAssistant,
+			Content: parts,
+		})
+	case Tool:
+		var parts []ai.MessagePart
+		for _, result := range m.ToolResults() {
+			var content ai.ToolResultOutputContent
+			if result.IsError {
+				content = ai.ToolResultOutputContentError{
+					Error: errors.New(result.Content),
+				}
+			} else if result.Data != "" {
+				content = ai.ToolResultOutputContentMedia{
+					Data:      result.Data,
+					MediaType: result.MIMEType,
+				}
+			} else {
+				content = ai.ToolResultOutputContentText{
+					Text: result.Content,
+				}
+			}
+			parts = append(parts, ai.ToolResultPart{
+				ToolCallID: result.ToolCallID,
+				Output:     content,
+			})
+		}
+		messages = append(messages, ai.Message{
+			Role:    ai.MessageRoleTool,
+			Content: parts,
+		})
+	}
+	return messages
 }

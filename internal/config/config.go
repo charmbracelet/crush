@@ -143,6 +143,14 @@ type Attribution struct {
 	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
 }
 
+type VerbosityLevel int
+
+const (
+	VerbosityNormal  VerbosityLevel = iota  // Default: show tool traces
+	VerbosityQuiet                          // --quiet: results only
+	VerbosityVerbose                        // --verbose: everything including thinking
+)
+
 type Options struct {
 	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`

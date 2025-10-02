@@ -11,6 +11,7 @@ import (
 	"github.com/bwl/cliffy/internal/config"
 	"github.com/bwl/cliffy/internal/llm/tools"
 	"github.com/bwl/cliffy/internal/output"
+	"golang.org/x/term"
 )
 
 // taskState tracks the state and tool traces for a single task
@@ -46,6 +47,11 @@ type ProgressTracker struct {
 
 // NewProgressTracker creates a new progress tracker
 func NewProgressTracker(enabled bool) *ProgressTracker {
+	// Disable progress if not a TTY (e.g., output is redirected or piped)
+	if enabled && !term.IsTerminal(int(os.Stderr.Fd())) {
+		enabled = false
+	}
+
 	return &ProgressTracker{
 		enabled:    enabled,
 		out:        os.Stderr,
@@ -270,9 +276,17 @@ func (p *ProgressTracker) renderAll() {
 
 		// Tool trace lines with tree characters (skip if collapsed)
 		if !state.collapsed {
-			for i, toolMeta := range state.tools {
+			// Only show the most recent 4 tool calls
+			visibleTools := state.tools
+			startIdx := 0
+			if len(state.tools) > 4 {
+				startIdx = len(state.tools) - 4
+				visibleTools = state.tools[startIdx:]
+			}
+
+			for i, toolMeta := range visibleTools {
 				var treeChar string
-				if i == len(state.tools)-1 {
+				if i == len(visibleTools)-1 {
 					treeChar = tools.AsciiTreeLast // ╰
 				} else {
 					treeChar = tools.AsciiTreeMid // ├
@@ -288,8 +302,12 @@ func (p *ProgressTracker) renderAll() {
 
 	// If this is a re-render, move cursor up and clear
 	if p.totalLines > 0 {
+		// Always move up by the actual number of lines we previously printed
+		// This handles the case where visible lines decrease (e.g., tools scrolling off)
+		linesToClear := p.totalLines
+
 		// Move cursor up to the start
-		for i := 0; i < p.totalLines; i++ {
+		for i := 0; i < linesToClear; i++ {
 			fmt.Fprintf(p.out, "\033[1A") // Move up one line
 		}
 		// Move to beginning of line
@@ -303,7 +321,7 @@ func (p *ProgressTracker) renderAll() {
 		fmt.Fprintln(p.out, line)
 	}
 
-	// Update total line count
+	// Update total line count to reflect what we actually printed
 	p.totalLines = newTotalLines
 }
 

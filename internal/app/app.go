@@ -10,14 +10,16 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/fantasy/ai"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -32,7 +34,7 @@ type App struct {
 	Permissions permission.Service
 
 	// TODO: (kujtim) remove this when fully implemented
-	CoderAgent agent.Service
+	AgentCoordinator agent.Coordinator
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -144,10 +146,23 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	// Automatically approve all permission requests for this non-interactive session
 	app.Permissions.AutoApproveSession(sess.ID)
 
-	done, err := app.CoderAgent.Run(ctx, sess.ID, prompt)
-	if err != nil {
-		return fmt.Errorf("failed to start agent processing stream: %w", err)
+	type response struct {
+		result *ai.AgentResult
+		err    error
 	}
+	done := make(chan response, 1)
+
+	go func(ctx context.Context, sessionID, prompt string) {
+		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		if err != nil {
+			done <- response{
+				err: fmt.Errorf("failed to start agent processing stream: %w", err),
+			}
+		}
+		done <- response{
+			result: result,
+		}
+	}(ctx, sess.ID, prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
@@ -156,26 +171,13 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 		select {
 		case result := <-done:
 			stopSpinner()
-
-			if result.Error != nil {
-				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
+			if result.err != nil {
+				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
 					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
-				return fmt.Errorf("agent processing failed: %w", result.Error)
+				return fmt.Errorf("agent processing failed: %w", result.err)
 			}
-
-			msgContent := result.Message.Content().String()
-			readBts := messageReadBytes[result.Message.ID]
-
-			if len(msgContent) < readBts {
-				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
-				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
-			}
-			fmt.Println(msgContent[readBts:])
-			messageReadBytes[result.Message.ID] = len(msgContent)
-
-			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 			return nil
 
 		case event := <-messageEvents:
@@ -204,7 +206,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 }
 
 func (app *App) UpdateAgentModel() error {
-	return app.CoderAgent.UpdateModel()
+	return app.AgentCoordinator.UpdateModels()
 }
 
 func (app *App) setupEvents() {
@@ -215,7 +217,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", tools.SubscribeMCPEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func() error {
 		cancel()
@@ -259,17 +261,16 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent() error {
-	coderAgentCfg := app.config.Agents["coder"]
+	coderAgentCfg := app.config.Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
-	app.CoderAgent, err = agent.NewAgent(
-		app.globalCtx,
-		coderAgentCfg,
-		app.Permissions,
+	app.AgentCoordinator, err = agent.NewCoordinator(
+		app.config,
 		app.Sessions,
 		app.Messages,
+		app.Permissions,
 		app.History,
 		app.LSPClients,
 	)
@@ -279,9 +280,7 @@ func (app *App) InitCoderAgent() error {
 	}
 
 	// Add MCP client cleanup to shutdown process
-	app.cleanupFuncs = append(app.cleanupFuncs, agent.CloseMCPClients)
-
-	setupSubscriber(app.eventsCtx, app.serviceEventsWG, "coderAgent", app.CoderAgent.Subscribe, app.events)
+	app.cleanupFuncs = append(app.cleanupFuncs, tools.CloseMCPClients)
 	return nil
 }
 
@@ -319,8 +318,8 @@ func (app *App) Subscribe(program *tea.Program) {
 
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
-	if app.CoderAgent != nil {
-		app.CoderAgent.CancelAll()
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.CancelAll()
 	}
 
 	// Shutdown all LSP clients.

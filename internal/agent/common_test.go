@@ -114,14 +114,14 @@ func testEnv(t *testing.T) env {
 
 func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt string, tools ...ai.AgentTool) SessionAgent {
 	largeModel := Model{
-		model:  large,
-		config: catwalk.Model{
+		Model:      large,
+		CatwalkCfg: catwalk.Model{
 			// todo: add values
 		},
 	}
 	smallModel := Model{
-		model:  small,
-		config: catwalk.Model{
+		Model:      small,
+		CatwalkCfg: catwalk.Model{
 			// todo: add values
 		},
 	}

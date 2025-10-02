@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -50,11 +51,13 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
+	Model() Model
 }
 
 type Model struct {
-	model  ai.LanguageModel
-	config catwalk.Model
+	Model      ai.LanguageModel
+	CatwalkCfg catwalk.Model
+	ModelCfg   config.SelectedModel
 }
 
 type sessionAgent struct {
@@ -116,7 +119,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 	}
 
 	agent := ai.NewAgent(
-		a.largeModel.model,
+		a.largeModel.Model,
 		ai.WithSystemPrompt(a.systemPrompt),
 		ai.WithTools(a.tools...),
 	)
@@ -174,8 +177,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			assistantMsg, err = a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
 				Parts:    []message.ContentPart{},
-				Model:    a.largeModel.model.Model(),
-				Provider: a.largeModel.model.Provider(),
+				Model:    a.largeModel.ModelCfg.Model,
+				Provider: a.largeModel.ModelCfg.Provider,
 			})
 			if err != nil {
 				return prepared, err
@@ -384,13 +387,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := ai.NewAgent(a.largeModel.model,
+	agent := ai.NewAgent(a.largeModel.Model,
 		ai.WithSystemPrompt(string(summaryPrompt)),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
-		Model:    a.largeModel.model.Model(),
-		Provider: a.largeModel.model.Provider(),
+		Model:    a.largeModel.Model.Model(),
+		Provider: a.largeModel.Model.Provider(),
 	})
 	if err != nil {
 		return err
@@ -516,7 +519,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session session.Sessio
 		return
 	}
 
-	agent := ai.NewAgent(a.smallModel.model,
+	agent := ai.NewAgent(a.smallModel.Model,
 		ai.WithSystemPrompt(string(titlePrompt)),
 		ai.WithMaxOutputTokens(40),
 	)
@@ -554,7 +557,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session session.Sessio
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage ai.Usage) {
-	modelConfig := model.config
+	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
@@ -640,4 +643,8 @@ func (a *sessionAgent) SetModels(large Model, small Model) {
 
 func (a *sessionAgent) SetTools(tools []ai.AgentTool) {
 	a.tools = tools
+}
+
+func (a *sessionAgent) Model() Model {
+	return a.largeModel
 }

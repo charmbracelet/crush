@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -180,7 +179,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Compact
 	case commands.CompactMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
+			Model: compact.NewCompactDialogCmp(a.app.AgentCoordinator, msg.SessionID, true),
 		})
 	case commands.QuitMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
@@ -194,7 +193,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
-		if a.app.CoderAgent.IsBusy() {
+		if a.app.AgentCoordinator.IsBusy() {
 			return a, util.ReportWarn("Agent is busy, please wait...")
 		}
 
@@ -253,36 +252,37 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	// Agent Events
-	case pubsub.Event[agent.AgentEvent]:
-		payload := msg.Payload
-
-		// Forward agent events to dialogs
-		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
-			u, dialogCmd := a.dialog.Update(payload)
-			if model, ok := u.(dialogs.DialogCmp); ok {
-				a.dialog = model
-			}
-
-			cmds = append(cmds, dialogCmd)
-		}
-
-		// Handle auto-compact logic
-		if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSessionID != "" {
-			// Get current session to check token usage
-			session, err := a.app.Sessions.Get(context.Background(), a.selectedSessionID)
-			if err == nil {
-				model := a.app.CoderAgent.Model()
-				contextWindow := model.ContextWindow
-				tokens := session.CompletionTokens + session.PromptTokens
-				if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
-					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
-						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),
-					}))
-				}
-			}
-		}
-
-		return a, tea.Batch(cmds...)
+	// TODO: HANDLE AUTO COMPACT
+	// case pubsub.Event[agent.AgentEvent]:
+	// 	payload := msg.Payload
+	//
+	// 	// Forward agent events to dialogs
+	// 	if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
+	// 		u, dialogCmd := a.dialog.Update(payload)
+	// 		if model, ok := u.(dialogs.DialogCmp); ok {
+	// 			a.dialog = model
+	// 		}
+	//
+	// 		cmds = append(cmds, dialogCmd)
+	// 	}
+	//
+	// 	// Handle auto-compact logic
+	// 	if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSessionID != "" {
+	// 		// Get current session to check token usage
+	// 		session, err := a.app.Sessions.Get(context.Background(), a.selectedSessionID)
+	// 		if err == nil {
+	// 			model := a.app.AgentCoordinator.Model()
+	// 			contextWindow := model.CatwalkCfg.ContextWindow
+	// 			tokens := session.CompletionTokens + session.PromptTokens
+	// 			if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
+	// 				cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
+	// 					Model: compact.NewCompactDialogCmp(a.app.AgentCoordinator, a.selectedSessionID, false),
+	// 				}))
+	// 			}
+	// 		}
+	// 	}
+	//
+	// 	return a, tea.Batch(cmds...)
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]
 		if !ok {
@@ -484,7 +484,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		)
 		return tea.Sequence(cmds...)
 	case key.Matches(msg, a.keyMap.Suspend):
-		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")
 		}
 		return tea.Suspend
@@ -504,7 +504,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
-	if a.app.CoderAgent.IsBusy() {
+	if a.app.AgentCoordinator.IsBusy() {
 		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
 		return util.ReportWarn("Agent is busy, please wait...")
 	}

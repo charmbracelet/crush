@@ -48,6 +48,11 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
+const (
+	AgentCoder string = "coder"
+	AgentTask  string = "task"
+)
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -103,9 +108,6 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
-
-	// Override provider specific options.
-	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
 type MCPType string
@@ -263,10 +265,6 @@ type Agent struct {
 	//  the string array is the list of tools from the AllowedMCP the agent has available
 	//  if the string array is nil, all tools from the AllowedMCP are available
 	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty"`
-
-	// The list of LSPs that this agent can use
-	//  if this is nil, all LSPs are available
-	AllowedLSP []string `json:"allowed_lsp,omitempty"`
 
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
@@ -514,16 +512,17 @@ func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
+		AgentCoder: {
+			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: allowedTools,
 		},
-		"task": {
-			ID:           "task",
+
+		AgentTask: {
+			ID:           AgentCoder,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
@@ -531,7 +530,6 @@ func (c *Config) SetupAgents() {
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
-			AllowedLSP: []string{},
 		},
 	}
 	c.Agents = agents

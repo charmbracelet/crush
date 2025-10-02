@@ -331,7 +331,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, tea.Batch(cmds...)
 
 	case commands.CommandRunCustomMsg:
-		if p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 
@@ -355,7 +355,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
 	case commands.NewSessionsMsg:
-		if p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 		}
 		return p, p.newSession()
@@ -363,15 +363,15 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
 			// if we have no agent do nothing
-			if p.app.CoderAgent == nil {
+			if p.app.AgentCoordinator == nil {
 				return p, nil
 			}
-			if p.app.CoderAgent.IsBusy() {
+			if p.app.AgentCoordinator.IsBusy() {
 				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			agentCfg := config.Get().Agents["coder"]
+			agentCfg := config.Get().Agents[config.AgentCoder]
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
@@ -387,7 +387,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.changeFocus()
 			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
-			if p.session.ID != "" && p.app.CoderAgent.IsBusy() {
+			if p.session.ID != "" && p.app.AgentCoordinator.IsBusy() {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
@@ -530,7 +530,7 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 func (p *chatPage) toggleThinking() tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		currentModel := cfg.Models[agentCfg.Model]
 
 		// Toggle the thinking mode
@@ -559,7 +559,7 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 func (p *chatPage) openReasoningDialog() tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		model := cfg.GetModelByType(agentCfg.Model)
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 
@@ -577,7 +577,7 @@ func (p *chatPage) openReasoningDialog() tea.Cmd {
 func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		currentModel := cfg.Models[agentCfg.Model]
 
 		// Update the model configuration
@@ -706,14 +706,14 @@ func (p *chatPage) changeFocus() {
 func (p *chatPage) cancel() tea.Cmd {
 	if p.isCanceling {
 		p.isCanceling = false
-		if p.app.CoderAgent != nil {
-			p.app.CoderAgent.Cancel(p.session.ID)
+		if p.app.AgentCoordinator != nil {
+			p.app.AgentCoordinator.Cancel(p.session.ID)
 		}
 		return nil
 	}
 
-	if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
-		p.app.CoderAgent.ClearQueue(p.session.ID)
+	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.QueuedPrompts(p.session.ID) > 0 {
+		p.app.AgentCoordinator.ClearQueue(p.session.ID)
 		return nil
 	}
 	p.isCanceling = true
@@ -746,14 +746,20 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		session = newSession
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
 	}
-	if p.app.CoderAgent == nil {
+	if p.app.AgentCoordinator == nil {
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
-	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
-	if err != nil {
-		return util.ReportError(err)
-	}
 	cmds = append(cmds, p.chat.GoToBottom())
+	cmds = append(cmds, func() tea.Msg {
+		_, err := p.app.AgentCoordinator.Run(context.Background(), session.ID, text, attachments...)
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  err.Error(),
+			}
+		}
+		return nil
+	})
 	return tea.Batch(cmds...)
 }
 
@@ -762,7 +768,7 @@ func (p *chatPage) Bindings() []key.Binding {
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
 	}
-	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
+	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
 		if p.isCanceling {
 			cancelBinding = key.NewBinding(
@@ -883,7 +889,7 @@ func (p *chatPage) Help() help.KeyMap {
 			}
 			return core.NewSimpleHelp(shortList, fullList)
 		}
-		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 			cancelBinding := key.NewBinding(
 				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "cancel"),
@@ -894,7 +900,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
-			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+			if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.QueuedPrompts(p.session.ID) > 0 {
 				cancelBinding = key.NewBinding(
 					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "clear queue"),

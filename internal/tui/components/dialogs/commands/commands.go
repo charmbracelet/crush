@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/prompt"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -303,7 +303,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 
 	// Add reasoning toggle for models that support it
 	cfg := config.Get()
-	if agentCfg, ok := cfg.Agents["coder"]; ok {
+	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil && model.CanReason {
@@ -350,7 +350,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 	if c.sessionID != "" {
-		agentCfg := config.Get().Agents["coder"]
+		agentCfg := config.Get().Agents[config.AgentCoder]
 		model := config.Get().GetModelByType(agentCfg.Model)
 		if model.SupportsImages {
 			commands = append(commands, Command{
@@ -402,7 +402,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Create/Update the CRUSH.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(chat.SendMsg{
-					Text: prompt.Initialize(),
+					Text: agent.InitializePrompt(),
 				})
 			},
 		},

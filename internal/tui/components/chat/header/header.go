@@ -119,7 +119,7 @@ func (h *header) details(availWidth int) string {
 		parts = append(parts, s.Error.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
 	}
 
-	agentCfg := config.Get().Agents["coder"]
+	agentCfg := config.Get().Agents[config.AgentCoder]
 	model := config.Get().GetModelByType(agentCfg.Model)
 	percentage := (float64(h.session.CompletionTokens+h.session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := s.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))

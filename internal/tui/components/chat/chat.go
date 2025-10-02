@@ -8,8 +8,8 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -103,8 +103,8 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.session.ID != "" && m.app.CoderAgent != nil {
-		queueSize := m.app.CoderAgent.QueuedPrompts(m.session.ID)
+	if m.session.ID != "" && m.app.AgentCoordinator != nil {
+		queueSize := m.app.AgentCoordinator.QueuedPrompts(m.session.ID)
 		if queueSize != m.promptQueue {
 			m.promptQueue = queueSize
 			cmds = append(cmds, m.SetSize(m.width, m.height))
@@ -235,7 +235,7 @@ func (m *messageListCmp) View() string {
 				m.listCmp.View(),
 			),
 	}
-	if m.app.CoderAgent != nil && m.promptQueue > 0 {
+	if m.app.AgentCoordinator != nil && m.promptQueue > 0 {
 		queuePill := queuePill(m.promptQueue, t)
 		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
 	}

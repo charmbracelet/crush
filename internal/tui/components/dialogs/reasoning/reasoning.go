@@ -120,7 +120,7 @@ func (r *reasoningDialogCmp) Init() tea.Cmd {
 
 func (r *reasoningDialogCmp) populateEffortOptions() tea.Cmd {
 	cfg := config.Get()
-	if agentCfg, ok := cfg.Agents["coder"]; ok {
+	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
 		selectedModel := cfg.Models[agentCfg.Model]
 		model := cfg.GetModelByType(agentCfg.Model)
 

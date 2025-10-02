@@ -11,7 +11,7 @@ import (
 
 type emptyProviderClient struct{}
 
-func (m *emptyProviderClient) GetProviders() ([]catwalk.Provider, error) {
+func (m *emptyProviderClient) GetProvidersV2() ([]catwalk.Provider, error) {
 	return []catwalk.Provider{}, nil
 }
 

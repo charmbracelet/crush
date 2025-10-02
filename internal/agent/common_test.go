@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/fantasy/ai"
 	"github.com/charmbracelet/fantasy/anthropic"
 	"github.com/charmbracelet/fantasy/openai"
+	"github.com/charmbracelet/fantasy/openaicompat"
 	"github.com/charmbracelet/fantasy/openrouter"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
@@ -80,6 +81,26 @@ func openRouterBuilder(model string) builderFunc {
 			openrouter.WithHTTPClient(&http.Client{Transport: r}),
 			openrouter.WithLanguageUniqueToolCallIds(),
 			openrouter.WithLanguageModelGenerateIDFunc(tf()),
+		)
+		return provider.LanguageModel(model)
+	}
+}
+
+func zAIBuilder(model string) builderFunc {
+	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
+		tf := func() func() string {
+			id := 0
+			return func() string {
+				id += 1
+				return fmt.Sprintf("%s-%d", t.Name(), id)
+			}
+		}
+		provider := openaicompat.New(
+			"https://api.z.ai/api/coding/paas/v4",
+			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
+			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
+			openaicompat.WithLanguageUniqueToolCallIds(),
+			openaicompat.WithLanguageModelGenerateIDFunc(tf()),
 		)
 		return provider.LanguageModel(model)
 	}

@@ -371,6 +371,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
 	opts := []openaicompat.Option{
 		openaicompat.WithAPIKey(apiKey),
+		openaicompat.WithLanguageUniqueToolCallIds(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()

@@ -14,7 +14,7 @@ type mockProviderClient struct {
 	shouldFail bool
 }
 
-func (m *mockProviderClient) GetProviders() ([]catwalk.Provider, error) {
+func (m *mockProviderClient) GetProvidersV2() ([]catwalk.Provider, error) {
 	if m.shouldFail {
 		return nil, errors.New("failed to load providers")
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -92,7 +93,6 @@ type ToolCall struct {
 	Name             string `json:"name"`
 	Input            string `json:"input"`
 	ProviderExecuted bool   `json:"provider_executed"`
-	Type             string `json:"type"`
 	Finished         bool   `json:"finished"`
 }
 
@@ -309,7 +309,6 @@ func (m *Message) FinishToolCall(toolCallID string) {
 					ID:       c.ID,
 					Name:     c.Name,
 					Input:    c.Input,
-					Type:     c.Type,
 					Finished: true,
 				}
 				return
@@ -326,7 +325,6 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 					ID:       c.ID,
 					Name:     c.Name,
 					Input:    c.Input + inputDelta,
-					Type:     c.Type,
 					Finished: c.Finished,
 				}
 				return
@@ -396,8 +394,9 @@ func (m *Message) ToAIMessage() []ai.Message {
 	switch m.Role {
 	case User:
 		var parts []ai.MessagePart
-		if m.Content().Text != "" {
-			parts = append(parts, ai.TextPart{Text: m.Content().Text})
+		text := strings.TrimSpace(m.Content().Text)
+		if text != "" {
+			parts = append(parts, ai.TextPart{Text: text})
 		}
 		for _, content := range m.BinaryContent() {
 			parts = append(parts, ai.FilePart{
@@ -412,8 +411,9 @@ func (m *Message) ToAIMessage() []ai.Message {
 		})
 	case Assistant:
 		var parts []ai.MessagePart
-		if m.Content().Text != "" {
-			parts = append(parts, ai.TextPart{Text: m.Content().Text})
+		text := strings.TrimSpace(m.Content().Text)
+		if text != "" {
+			parts = append(parts, ai.TextPart{Text: text})
 		}
 		reasoning := m.ReasoningContent()
 		if reasoning.Thinking != "" {

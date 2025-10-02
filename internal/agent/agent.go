@@ -250,6 +250,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		OnRetry: func(err *ai.APICallError, delay time.Duration) {
 			// TODO: implement
 		},
+		OnToolCall: func(tc ai.ToolCallContent) error {
+			toolCall := message.ToolCall{
+				ID:               tc.ToolCallID,
+				Name:             tc.ToolName,
+				Input:            tc.Input,
+				ProviderExecuted: false,
+				Finished:         true,
+			}
+			currentAssistant.AddToolCall(toolCall)
+			return a.messages.Update(genCtx, *currentAssistant)
+		},
 		OnToolResult: func(result ai.ToolResultContent) error {
 			var resultContent string
 			isError := false

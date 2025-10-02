@@ -159,7 +159,7 @@ func coderAgent(r *recorder.Recorder, env env, large, small ai.LanguageModel) (S
 		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewGlobTool(env.workingDir),
 		tools.NewGrepTool(env.workingDir),
-		tools.NewLsTool(env.permissions, env.workingDir),
+		tools.NewLsTool(env.permissions, env.workingDir, cfg.Tools.Ls),
 		tools.NewSourcegraphTool(r.GetDefaultClient()),
 		tools.NewViewTool(env.lspClients, env.permissions, env.workingDir),
 		tools.NewWriteTool(env.lspClients, env.permissions, env.history, env.workingDir),

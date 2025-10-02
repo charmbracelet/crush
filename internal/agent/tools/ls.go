@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/fantasy/ai"
@@ -16,11 +18,13 @@ import (
 type LSParams struct {
 	Path   string   `json:"path" description:"The path to the directory to list (defaults to current working directory)"`
 	Ignore []string `json:"ignore,omitempty" description:"List of glob patterns to ignore"`
+	Depth  int      `json:"depth,omitempty" description:"The maximum depth to traverse"`
 }
 
 type LSPermissionsParams struct {
 	Path   string   `json:"path"`
 	Ignore []string `json:"ignore"`
+	Depth  int      `json:"depth"`
 }
 
 type TreeNode struct {
@@ -37,24 +41,18 @@ type LSResponseMetadata struct {
 
 const (
 	LSToolName = "ls"
-	MaxLSFiles = 1000
+	maxLSFiles = 1000
 )
 
 //go:embed ls.md
 var lsDescription []byte
 
-func NewLsTool(permissions permission.Service, workingDir string) ai.AgentTool {
+func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) ai.AgentTool {
 	return ai.NewAgentTool(
 		LSToolName,
 		string(lsDescription),
 		func(ctx context.Context, params LSParams, call ai.ToolCall) (ai.ToolResponse, error) {
-			searchPath := params.Path
-			if searchPath == "" {
-				searchPath = workingDir
-			}
-
-			var err error
-			searchPath, err = fsext.Expand(searchPath)
+			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
 			if err != nil {
 				return ai.ToolResponse{}, fmt.Errorf("error expanding path: %w", err)
 			}
@@ -99,45 +97,49 @@ func NewLsTool(permissions permission.Service, workingDir string) ai.AgentTool {
 				}
 			}
 
-			output, err := ListDirectoryTree(searchPath, params.Ignore)
+			output, metadata, err := ListDirectoryTree(searchPath, params, lsConfig)
 			if err != nil {
 				return ai.ToolResponse{}, err
 			}
 
-			// Get file count for metadata
-			files, truncated, err := fsext.ListDirectory(searchPath, params.Ignore, MaxLSFiles)
-			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error listing directory for metadata: %w", err)
-			}
-
 			return ai.WithResponseMetadata(
 				ai.NewTextResponse(output),
-				LSResponseMetadata{
-					NumberOfFiles: len(files),
-					Truncated:     truncated,
-				},
+				metadata,
 			), nil
 		})
 }
 
-func ListDirectoryTree(searchPath string, ignore []string) (string, error) {
+func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolLs) (string, LSResponseMetadata, error) {
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("path does not exist: %s", searchPath)
+		return "", LSResponseMetadata{}, fmt.Errorf("path does not exist: %s", searchPath)
 	}
 
-	files, truncated, err := fsext.ListDirectory(searchPath, ignore, MaxLSFiles)
+	depth, limit := lsConfig.Limits()
+	maxFiles := min(limit, maxLSFiles)
+	files, truncated, err := fsext.ListDirectory(
+		searchPath,
+		params.Ignore,
+		cmp.Or(params.Depth, depth),
+		maxFiles,
+	)
 	if err != nil {
-		return "", fmt.Errorf("error listing directory: %w", err)
+		return "", LSResponseMetadata{}, fmt.Errorf("error listing directory: %w", err)
 	}
 
+	metadata := LSResponseMetadata{
+		NumberOfFiles: len(files),
+		Truncated:     truncated,
+	}
 	tree := createFileTree(files, searchPath)
-	output := printTree(tree, searchPath)
 
+	var output string
 	if truncated {
-		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
+		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %[1]d files and directories are included below.\n", maxFiles)
 	}
-
-	return output, nil
+	if depth > 0 {
+		output = fmt.Sprintf("The directory tree is shown up to a depth of %d. Use a higher depth and a specific path to see more levels.\n", cmp.Or(params.Depth, depth))
+	}
+	return output + "\n" + printTree(tree, searchPath), metadata, nil
 }
 
 func createFileTree(sortedPaths []string, rootPath string) []*TreeNode {

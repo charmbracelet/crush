@@ -38,6 +38,28 @@ P",ad33O333O3Ob
 ⣿⣿⡁⠀⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣤⣤⣶⣿⣿⣿⣿⣿⣿⣿
 ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿`
 
+	// Volley progress icons
+	// Tennis racket head for volley start/finish
+	AsciiTennisRacketHead = "◍"
+
+	// Task status icons
+	AsciiTaskComplete = "●" // Solid dot - task complete
+	AsciiTaskQueued   = "○" // Hollow dot - task queued
+	AsciiTaskSpinner0 = "◴" // Spinner frame 1
+	AsciiTaskSpinner1 = "◵" // Spinner frame 2
+	AsciiTaskSpinner2 = "◶" // Spinner frame 3
+	AsciiTaskSpinner3 = "◷" // Spinner frame 4
+
+	// Tool execution icons
+	AsciiToolSuccess = "▣" // Tool succeeded
+	AsciiToolFailed  = "☒" // Tool failed
+
+	// Tree structure characters
+	AsciiTreeBranch = "╮"  // Task with tools branches down
+	AsciiTreeMid    = "├"  // Middle tool in list
+	AsciiTreeLast   = "╰"  // Last tool in list
+	AsciiTreeLine   = "───" // Horizontal connector
+
 	// Other ASCII emojis for future use
 	AsciiCheck = "[✓]"
 	AsciiCross = "[✗]"

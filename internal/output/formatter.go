@@ -16,18 +16,27 @@ func FormatToolTrace(metadata *tools.ExecutionMetadata, verbosity config.Verbosi
 
 	var parts []string
 
-	// Tool name
-	parts = append(parts, metadata.ToolName)
+	// Tool name (padded for alignment)
+	toolName := fmt.Sprintf("%-6s", metadata.ToolName)
+	parts = append(parts, toolName)
 
 	// Format based on tool type
 	switch {
 	case metadata.Operation == "read" && metadata.FilePath != "":
 		sizeStr := formatBytes(metadata.ByteSize)
-		parts = append(parts, fmt.Sprintf("%s (%d lines, %s)", metadata.FilePath, metadata.LineCount, sizeStr))
+		parts = append(parts, fmt.Sprintf("◱╼%s (%d lines, %s)", metadata.FilePath, metadata.LineCount, sizeStr))
 
 	case metadata.Operation == "write" || metadata.Operation == "created" || metadata.Operation == "modified":
 		if metadata.FilePath != "" {
-			parts = append(parts, fmt.Sprintf("%s (%s, %d lines)", metadata.FilePath, metadata.Operation, metadata.LineCount))
+			// Calculate stats for write operations
+			statsStr := ""
+			if metadata.ByteSize > 0 {
+				statsStr = fmt.Sprintf(" +%dc", metadata.ByteSize)
+			}
+			if metadata.LineCount > 0 {
+				statsStr += fmt.Sprintf(" +%dL", metadata.LineCount)
+			}
+			parts = append(parts, fmt.Sprintf("◱╼%s%s", metadata.FilePath, statsStr))
 		}
 
 	case metadata.Pattern != "" && metadata.MatchCount >= 0:
@@ -39,16 +48,12 @@ func FormatToolTrace(metadata *tools.ExecutionMetadata, verbosity config.Verbosi
 		}
 
 	case metadata.Command != "":
-		// Bash command
+		// Bash command - no exit code display (icon shows success/fail)
 		cmdPreview := metadata.Command
-		if len(cmdPreview) > 50 {
-			cmdPreview = cmdPreview[:47] + "..."
+		if len(cmdPreview) > 60 {
+			cmdPreview = cmdPreview[:57] + "..."
 		}
-		exitInfo := ""
-		if metadata.ExitCode != nil {
-			exitInfo = fmt.Sprintf(" (exit %d)", *metadata.ExitCode)
-		}
-		parts = append(parts, fmt.Sprintf("%s%s", cmdPreview, exitInfo))
+		parts = append(parts, cmdPreview)
 	}
 
 	// Duration (always show in normal/verbose mode)
@@ -56,8 +61,8 @@ func FormatToolTrace(metadata *tools.ExecutionMetadata, verbosity config.Verbosi
 		parts = append(parts, fmt.Sprintf("%.1fs", metadata.Duration.Seconds()))
 	}
 
-	// Join with " — "
-	result := "[TOOL] " + strings.Join(parts, " — ")
+	// Join with space (tree chars and icon added by progress.go)
+	result := "[TOOL] " + strings.Join(parts, " ")
 
 	// In verbose mode, add diff if available
 	if verbosity == config.VerbosityVerbose && metadata.Diff != "" {

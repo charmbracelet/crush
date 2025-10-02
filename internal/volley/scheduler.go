@@ -61,8 +61,15 @@ func (s *Scheduler) Execute(ctx context.Context, tasks []Task) ([]TaskResult, Vo
 		}
 	}
 
+	// Set model name on progress tracker
+	modelName := formatModel(s.agent.Model().ID)
+	s.progress.SetModel(modelName)
+
 	// Start progress tracker
 	s.progress.Start(len(tasks), s.options.MaxConcurrent)
+
+	// Initialize all tasks as queued
+	s.progress.InitializeTasks(tasks)
 
 	// Create task queue
 	taskQueue := make(chan Task, len(tasks))
@@ -404,4 +411,67 @@ func hasSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// formatModel shortens model ID for display
+func formatModel(modelID string) string {
+	// For common model patterns, show a shorter version
+	// e.g., "anthropic/claude-sonnet-4-20250514" -> "claude-sonnet-4"
+	// e.g., "openai/gpt-4o" -> "gpt-4o"
+	// e.g., "x-ai/grok-4-fast:free" -> "grok-4-fast:free"
+
+	// Split by / to get the model name without provider prefix
+	parts := splitByChar(modelID, '/')
+	if len(parts) > 1 {
+		modelName := parts[len(parts)-1]
+
+		// Further shorten if it contains a date (YYYYMMDD pattern)
+		// e.g., "claude-sonnet-4-20250514" -> "claude-sonnet-4"
+		if len(modelName) > 8 {
+			// Look for -YYYYMMDD pattern at the end
+			if modelName[len(modelName)-9] == '-' && isAllDigits(modelName[len(modelName)-8:]) {
+				return modelName[:len(modelName)-9]
+			}
+		}
+
+		return modelName
+	}
+
+	return modelID
+}
+
+// splitByChar splits a string by a delimiter character
+func splitByChar(s string, delim rune) []string {
+	var parts []string
+	var current string
+
+	for _, ch := range s {
+		if ch == delim {
+			if current != "" {
+				parts = append(parts, current)
+				current = ""
+			}
+		} else {
+			current += string(ch)
+		}
+	}
+
+	if current != "" {
+		parts = append(parts, current)
+	}
+
+	return parts
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }

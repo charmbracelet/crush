@@ -15,13 +15,13 @@ import (
 
 // taskState tracks the state and tool traces for a single task
 type taskState struct {
-	task      Task
-	status    string // "running", "completed", "failed"
-	icon      string // ▶, ✓, ✗
-	result    *TaskResult
-	tools     []*tools.ExecutionMetadata
-	workerID  int
-	lineCount int // Number of lines this task occupies (1 for task + N for tools)
+	task         Task
+	status       string // "running", "completed", "failed"
+	result       *TaskResult
+	tools        []*tools.ExecutionMetadata
+	workerID     int
+	lineCount    int // Number of lines this task occupies (1 for task + N for tools)
+	spinnerFrame int // Current spinner animation frame (0-3)
 }
 
 // ProgressTracker tracks and displays volley execution progress
@@ -33,11 +33,14 @@ type ProgressTracker struct {
 	totalTasks int
 	maxWorkers int
 	started    time.Time
+	modelName  string // Model name for header
 
 	// Track state per task for in-place updates
 	taskStates   map[int]*taskState // key = task.Index
 	totalLines   int                // Total lines currently displayed
 	taskOrder    []int              // Order of tasks as they appear on screen
+	spinnerTick  chan struct{}      // Ticker for spinner animation
+	stopSpinner  chan struct{}      // Stop signal for spinner
 }
 
 // NewProgressTracker creates a new progress tracker
@@ -63,7 +66,40 @@ func (p *ProgressTracker) Start(totalTasks, maxWorkers int) {
 	p.maxWorkers = maxWorkers
 	p.started = time.Now()
 
-	fmt.Fprintf(p.out, "Volley: %d tasks queued, max %d concurrent\n\n", totalTasks, maxWorkers)
+	// Print tennis racket header
+	fmt.Fprintf(p.out, "%s═╕   %d tasks volleyed\n", tools.AsciiTennisRacketHead, totalTasks)
+	fmt.Fprintf(p.out, "  ╰-╮ Using %s\n", p.modelName)
+
+	// Start spinner animation
+	p.spinnerTick = make(chan struct{})
+	p.stopSpinner = make(chan struct{})
+	go p.spinnerLoop()
+}
+
+// InitializeTasks sets up all tasks as queued at the start
+func (p *ProgressTracker) InitializeTasks(tasks []Task) {
+	if !p.enabled {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Initialize all tasks as queued in submission order
+	for _, task := range tasks {
+		p.taskStates[task.Index] = &taskState{
+			task:         task,
+			status:       "queued",
+			workerID:     0,
+			tools:        []*tools.ExecutionMetadata{},
+			lineCount:    1,
+			spinnerFrame: 0,
+		}
+		p.taskOrder = append(p.taskOrder, task.Index)
+	}
+
+	// Initial render showing all queued tasks
+	p.renderAll()
 }
 
 // TaskStarted reports that a task has started
@@ -75,26 +111,23 @@ func (p *ProgressTracker) TaskStarted(task Task, workerID int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Initialize task state
-	p.taskStates[task.Index] = &taskState{
-		task:      task,
-		status:    "running",
-		icon:      "▶",
-		workerID:  workerID,
-		tools:     []*tools.ExecutionMetadata{},
-		lineCount: 1,
-	}
-
-	// Add to task order if not already there
-	found := false
-	for _, idx := range p.taskOrder {
-		if idx == task.Index {
-			found = true
-			break
+	state := p.taskStates[task.Index]
+	if state == nil {
+		// Fallback: create state if not initialized
+		state = &taskState{
+			task:         task,
+			status:       "running",
+			workerID:     workerID,
+			tools:        []*tools.ExecutionMetadata{},
+			lineCount:    1,
+			spinnerFrame: 0,
 		}
-	}
-	if !found {
+		p.taskStates[task.Index] = state
 		p.taskOrder = append(p.taskOrder, task.Index)
+	} else {
+		// Update existing queued task to running
+		state.status = "running"
+		state.workerID = workerID
 	}
 
 	// Render all tasks
@@ -117,7 +150,6 @@ func (p *ProgressTracker) TaskCompleted(task Task, result TaskResult) {
 
 	// Update state
 	state.status = "completed"
-	state.icon = "✓"
 	state.result = &result
 
 	// Re-render all tasks
@@ -174,16 +206,23 @@ func (p *ProgressTracker) Finish(summary VolleySummary) {
 		return
 	}
 
+	// Stop spinner animation
+	if p.stopSpinner != nil {
+		close(p.stopSpinner)
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	fmt.Fprintf(p.out, "\n")
 
 	if summary.FailedTasks == 0 && summary.CanceledTasks == 0 {
-		fmt.Fprintf(p.out, "Volley complete: %d/%d tasks succeeded in %.1fs\n",
+		fmt.Fprintf(p.out, "%s %d/%d tasks succeeded in %.1fs\n",
+			tools.AsciiTennisRacketHead,
 			summary.SucceededTasks, summary.TotalTasks, summary.Duration.Seconds())
 	} else {
-		fmt.Fprintf(p.out, "Volley complete: %d/%d succeeded, %d failed",
+		fmt.Fprintf(p.out, "%s %d/%d succeeded, %d failed",
+			tools.AsciiTennisRacketHead,
 			summary.SucceededTasks, summary.TotalTasks, summary.FailedTasks)
 
 		if summary.CanceledTasks > 0 {
@@ -210,90 +249,29 @@ func formatTokens(tokens int64) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
-// formatModel shortens model ID for display
-func formatModel(modelID string) string {
-	// For common model patterns, show a shorter version
-	// e.g., "anthropic/claude-sonnet-4-20250514" -> "claude-sonnet-4"
-	// e.g., "openai/gpt-4o" -> "gpt-4o"
-
-	// Split by / to get the model name without provider prefix
-	parts := splitString(modelID, '/')
-	if len(parts) > 1 {
-		modelName := parts[len(parts)-1]
-
-		// Further shorten if it contains a date (YYYYMMDD pattern)
-		// e.g., "claude-sonnet-4-20250514" -> "claude-sonnet-4"
-		if len(modelName) > 8 {
-			// Look for -YYYYMMDD pattern at the end
-			if modelName[len(modelName)-9] == '-' && isDigits(modelName[len(modelName)-8:]) {
-				return modelName[:len(modelName)-9]
-			}
-		}
-
-		return modelName
-	}
-
-	return modelID
-}
-
-// splitString splits a string by a delimiter
-func splitString(s string, delim rune) []string {
-	var parts []string
-	var current string
-
-	for _, ch := range s {
-		if ch == delim {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-		} else {
-			current += string(ch)
-		}
-	}
-
-	if current != "" {
-		parts = append(parts, current)
-	}
-
-	return parts
-}
-
-// isDigits checks if a string contains only digits
-func isDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	return true
-}
 
 // renderAll renders all tasks and their tool traces, updating in place
 func (p *ProgressTracker) renderAll() {
 	// Build all lines for all tasks
 	var allLines []string
 
-	for _, taskIndex := range p.taskOrder {
+	for displayNum, taskIndex := range p.taskOrder {
 		state := p.taskStates[taskIndex]
 		if state == nil {
 			continue
 		}
 
-		// Task status line
-		taskLine := p.formatTaskLine(state)
+		// Task status line (displayNum is 0-indexed, so add 1)
+		taskLine := p.formatTaskLine(displayNum+1, state)
 		allLines = append(allLines, taskLine)
 
 		// Tool trace lines with tree characters
 		for i, toolMeta := range state.tools {
 			var treeChar string
 			if i == len(state.tools)-1 {
-				treeChar = "╰────" // Last tool
+				treeChar = tools.AsciiTreeLast // ╰
 			} else {
-				treeChar = "├────" // Not last tool
+				treeChar = tools.AsciiTreeMid // ├
 			}
 
 			toolLine := p.formatToolLine(treeChar, toolMeta)
@@ -325,39 +303,80 @@ func (p *ProgressTracker) renderAll() {
 }
 
 // formatTaskLine formats the main task status line
-func (p *ProgressTracker) formatTaskLine(state *taskState) string {
+func (p *ProgressTracker) formatTaskLine(displayNum int, state *taskState) string {
+	// Get icon based on status
+	var icon string
+	switch state.status {
+	case "running":
+		// Use spinner frames
+		spinnerFrames := []string{
+			tools.AsciiTaskSpinner0,
+			tools.AsciiTaskSpinner1,
+			tools.AsciiTaskSpinner2,
+			tools.AsciiTaskSpinner3,
+		}
+		icon = spinnerFrames[state.spinnerFrame%4]
+	case "completed":
+		icon = tools.AsciiTaskComplete
+	case "failed":
+		icon = tools.AsciiTaskComplete // Use same icon for now
+	default:
+		icon = tools.AsciiTaskQueued
+	}
+
+	// Format task description
+	taskDesc := truncate(state.task.Prompt, 60)
+
+	// Determine if task has tools (will show branching)
+	hasBranch := len(state.tools) > 0
+
 	if state.status == "running" {
-		return fmt.Sprintf("[%d/%d] %s %s (worker %d)",
-			state.task.Index, p.totalTasks,
-			state.icon,
-			truncate(state.task.Prompt, 60),
-			state.workerID)
+		// Running task: show worker label
+		if hasBranch {
+			return fmt.Sprintf("%d %s %s %s (worker %d)",
+				displayNum, tools.AsciiTreeBranch, icon, taskDesc, state.workerID)
+		}
+		return fmt.Sprintf("%d   %s %s (worker %d)",
+			displayNum, icon, taskDesc, state.workerID)
 	}
 
-	// Completed or failed
+	// Completed task
 	if state.result != nil {
-		return fmt.Sprintf("[%d/%d] %s %s (%.1fs, %s tokens, $%.4f, %s)",
-			state.task.Index, p.totalTasks,
-			state.icon,
-			truncate(state.task.Prompt, 60),
+		if hasBranch {
+			// Tasks with tools show metrics on same line
+			return fmt.Sprintf("%d %s %s %s %s tokens $%.4f  %.1fs",
+				displayNum, tools.AsciiTreeBranch, icon, taskDesc,
+				formatTokens(state.result.TokensTotal),
+				state.result.Cost,
+				state.result.Duration.Seconds())
+		}
+		// Tasks without tools show metrics in parens
+		return fmt.Sprintf("%d   %s %s (%.1fs, %s tokens)",
+			displayNum, icon, taskDesc,
 			state.result.Duration.Seconds(),
-			formatTokens(state.result.TokensTotal),
-			state.result.Cost,
-			formatModel(state.result.Model))
+			formatTokens(state.result.TokensTotal))
 	}
 
-	return fmt.Sprintf("[%d/%d] %s %s",
-		state.task.Index, p.totalTasks,
-		state.icon,
-		truncate(state.task.Prompt, 60))
+	// Fallback for queued or unknown
+	return fmt.Sprintf("%d   %s %s",
+		displayNum, icon, taskDesc)
 }
 
 // formatToolLine formats a single tool trace line
 func (p *ProgressTracker) formatToolLine(treeChar string, metadata *tools.ExecutionMetadata) string {
+	// Determine tool icon based on exit code (for bash) or success
+	toolIcon := tools.AsciiToolSuccess // Default: success
+	if metadata.ExitCode != nil && *metadata.ExitCode != 0 {
+		toolIcon = tools.AsciiToolFailed
+	}
+
+	// Get formatted trace without [TOOL] prefix
 	trace := output.FormatToolTrace(metadata, config.VerbosityNormal)
-	// Remove the [TOOL] prefix since we're using tree characters
 	trace = strings.TrimPrefix(trace, "[TOOL] ")
-	return fmt.Sprintf("  %s %s", treeChar, trace)
+
+	// Format: "  ├───▣ bash   cd crates && cargo new 0.5s"
+	return fmt.Sprintf("  %s%s%s %s",
+		treeChar, tools.AsciiTreeLine, toolIcon, trace)
 }
 
 // ToolExecuted displays a tool execution trace
@@ -386,4 +405,35 @@ func (p *ProgressTracker) ShowProgress(task Task, message string) {
 	// Progress events are now handled by renderTask, so this is a no-op
 	// The progress message was used for inline updates like "[1/3] ⋯ Running: cmd"
 	// but with tree display, we don't need this anymore
+}
+
+// spinnerLoop runs the spinner animation in a goroutine
+func (p *ProgressTracker) spinnerLoop() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stopSpinner:
+			return
+		case <-ticker.C:
+			p.mu.Lock()
+			// Update spinner frame for all running tasks
+			for _, state := range p.taskStates {
+				if state.status == "running" {
+					state.spinnerFrame = (state.spinnerFrame + 1) % 4
+				}
+			}
+			// Re-render
+			p.renderAll()
+			p.mu.Unlock()
+		}
+	}
+}
+
+// SetModel sets the model name for display in the header
+func (p *ProgressTracker) SetModel(modelName string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.modelName = modelName
 }

@@ -85,8 +85,16 @@ Built on Crush • https://cliffy.ettio.com`, tools.AsciiCliffy),
 			return nil
 		}
 
+		// Determine verbosity level
+		verbosity := config.VerbosityNormal
+		if quiet {
+			verbosity = config.VerbosityQuiet
+		} else if verbose {
+			verbosity = config.VerbosityVerbose
+		}
+
 		// Route to volley execution (unified path)
-		return executeVolley(cmd, args, verbose)
+		return executeVolley(cmd, args, verbosity)
 	},
 }
 
@@ -95,12 +103,12 @@ func init() {
 	rootCmd.Flags().StringVar(&thinkingFormat, "thinking-format", "text", "Format for thinking: text|json")
 	rootCmd.Flags().StringVarP(&outputFormat, "output-format", "o", "text", "Output format: text|json")
 	rootCmd.Flags().StringVarP(&model, "model", "m", "", "Override model selection")
-	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Hide tool logs")
+	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Results only - suppress tool traces and progress")
 	rootCmd.Flags().BoolVar(&fast, "fast", false, "Use small/fast model")
 	rootCmd.Flags().BoolVar(&smart, "smart", false, "Use large/smart model")
 	rootCmd.Flags().BoolVar(&showStats, "stats", false, "Show token usage and timing")
 	rootCmd.Flags().BoolVar(&showVersion, "version", false, "Show version info")
-	rootCmd.Flags().BoolVar(&verbose, "verbose", false, "Show progress and stats")
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show detailed tool traces, thinking, and events")
 	rootCmd.Flags().StringVar(&sharedContext, "context", "", "Shared context prepended to each task")
 	rootCmd.Flags().StringVar(&contextFile, "context-file", "", "Load shared context from file")
 }
@@ -112,7 +120,7 @@ func main() {
 	}
 }
 
-func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
+func executeVolley(cmd *cobra.Command, args []string, verbosity config.VerbosityLevel) error {
 	ctx := context.Background()
 
 	// Load config
@@ -145,10 +153,11 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 		}
 	}
 
-	// Set up volley options (silent by default, unless verbose)
+	// Set up volley options
 	opts := volley.DefaultVolleyOptions()
-	opts.ShowProgress = verboseMode
-	opts.ShowSummary = verboseMode
+	opts.Verbosity = verbosity
+	opts.ShowProgress = verbosity != config.VerbosityQuiet
+	opts.ShowSummary = verbosity != config.VerbosityQuiet
 	opts.OutputFormat = outputFormat
 	opts.Context = taskContext
 
@@ -193,9 +202,9 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 		return fmt.Errorf("failed to output results: %w", err)
 	}
 
-	// Return error if any tasks failed (silent in non-verbose mode)
+	// Return error if any tasks failed
 	if summary.FailedTasks > 0 {
-		if !verboseMode {
+		if verbosity == config.VerbosityQuiet {
 			// Exit silently - errors already shown to stderr
 			os.Exit(1)
 		}
@@ -206,24 +215,50 @@ func executeVolley(cmd *cobra.Command, args []string, verboseMode bool) error {
 }
 
 func outputVolleyResults(results []volley.TaskResult, summary volley.VolleySummary, opts volley.VolleyOptions) error {
-	// Output results (silent mode: just results, no decorations)
+	// If only one task, no need for separators
+	multipleResults := len(results) > 1
+
 	for i, result := range results {
+		// Add task header for multiple results
+		if multipleResults {
+			taskNum := i + 1
+			// Show task header with status indicator
+			statusIcon := "◍" // success
+			if result.Status == volley.TaskStatusFailed {
+				statusIcon = "✗" // failed
+			}
+			fmt.Printf("%s Task %d/%d: %s\n", statusIcon, taskNum, len(results), truncatePrompt(result.Task.Prompt, 60))
+		}
+
 		if result.Status == volley.TaskStatusSuccess {
 			fmt.Println(result.Output)
-			// Add blank line between tasks (but not after the last one)
-			if i < len(results)-1 {
-				fmt.Println()
-			}
 		} else if result.Status == volley.TaskStatusFailed {
-			// In silent mode, show minimal error
-			if !opts.ShowProgress {
+			// Show error for failed tasks
+			if multipleResults {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", result.Error)
+			} else {
+				// Single task - show error inline
+				if !opts.ShowProgress {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", result.Error)
+				}
 			}
-			// In verbose mode, progress tracker already showed the error
+		}
+
+		// Add blank line between tasks (but not after the last one)
+		if i < len(results)-1 {
+			fmt.Println()
 		}
 	}
 
 	return nil
+}
+
+// truncatePrompt shortens a prompt for display
+func truncatePrompt(prompt string, maxLen int) string {
+	if len(prompt) <= maxLen {
+		return prompt
+	}
+	return prompt[:maxLen-3] + "..."
 }
 
 func printError(err error) {

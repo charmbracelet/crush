@@ -145,6 +145,7 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 
 	// Try executing with retries
 	var lastErr error
+	var lastOutput string
 	for attempt := 0; attempt <= s.options.MaxRetries; attempt++ {
 		if attempt > 0 {
 			result.Retries = attempt
@@ -159,8 +160,20 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 			prompt = s.options.Context + "\n\n" + prompt
 		}
 
+		// On retry, append error feedback to help LLM self-correct
+		// Only feed back non-network errors (e.g., tool failures, validation errors)
+		if attempt > 0 && lastErr != nil && !isNetworkError(lastErr) {
+			errorFeedback := fmt.Sprintf("\n\n[Previous attempt failed with error: %v", lastErr)
+			if lastOutput != "" {
+				errorFeedback += fmt.Sprintf("\nPartial output: %s", truncateOutput(lastOutput, 200))
+			}
+			errorFeedback += "\nPlease try a different approach.]"
+			prompt = prompt + errorFeedback
+		}
+
 		// Execute via agent
 		output, usage, toolMetadata, err := s.executeViaAgent(ctx, prompt, task)
+		lastOutput = output // Save for potential error feedback
 
 		if err != nil {
 			lastErr = err
@@ -398,6 +411,30 @@ func shouldRetry(err error, attempt, maxRetries int) bool {
 
 	// Default: retry for unknown errors
 	return true
+}
+
+// isNetworkError determines if an error is network-related (not worth feeding back to LLM)
+func isNetworkError(err error) bool {
+	errStr := err.Error()
+
+	// Network/infrastructure errors that LLM can't fix
+	return contains(errStr, "429") ||
+		contains(errStr, "rate limit") ||
+		contains(errStr, "timeout") ||
+		contains(errStr, "context deadline") ||
+		contains(errStr, "connection") ||
+		contains(errStr, "network") ||
+		contains(errStr, "401") ||
+		contains(errStr, "403") ||
+		contains(errStr, "unauthorized")
+}
+
+// truncateOutput truncates output for error feedback
+func truncateOutput(output string, maxLen int) string {
+	if len(output) <= maxLen {
+		return output
+	}
+	return output[:maxLen] + "..."
 }
 
 func contains(s, substr string) bool {

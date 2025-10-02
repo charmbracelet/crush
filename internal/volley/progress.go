@@ -20,8 +20,9 @@ type taskState struct {
 	result       *TaskResult
 	tools        []*tools.ExecutionMetadata
 	workerID     int
-	lineCount    int // Number of lines this task occupies (1 for task + N for tools)
-	spinnerFrame int // Current spinner animation frame (0-3)
+	lineCount    int  // Number of lines this task occupies (1 for task + N for tools)
+	spinnerFrame int  // Current spinner animation frame (0-3)
+	collapsed    bool // Whether completed task tools are hidden
 }
 
 // ProgressTracker tracks and displays volley execution progress
@@ -151,6 +152,8 @@ func (p *ProgressTracker) TaskCompleted(task Task, result TaskResult) {
 	// Update state
 	state.status = "completed"
 	state.result = &result
+	// Auto-collapse completed tasks to save screen space
+	state.collapsed = true
 
 	// Re-render all tasks
 	p.renderAll()
@@ -265,17 +268,19 @@ func (p *ProgressTracker) renderAll() {
 		taskLine := p.formatTaskLine(displayNum+1, state)
 		allLines = append(allLines, taskLine)
 
-		// Tool trace lines with tree characters
-		for i, toolMeta := range state.tools {
-			var treeChar string
-			if i == len(state.tools)-1 {
-				treeChar = tools.AsciiTreeLast // ╰
-			} else {
-				treeChar = tools.AsciiTreeMid // ├
-			}
+		// Tool trace lines with tree characters (skip if collapsed)
+		if !state.collapsed {
+			for i, toolMeta := range state.tools {
+				var treeChar string
+				if i == len(state.tools)-1 {
+					treeChar = tools.AsciiTreeLast // ╰
+				} else {
+					treeChar = tools.AsciiTreeMid // ├
+				}
 
-			toolLine := p.formatToolLine(treeChar, toolMeta)
-			allLines = append(allLines, toolLine)
+				toolLine := p.formatToolLine(treeChar, toolMeta)
+				allLines = append(allLines, toolLine)
+			}
 		}
 	}
 
@@ -343,6 +348,15 @@ func (p *ProgressTracker) formatTaskLine(displayNum int, state *taskState) strin
 	// Completed task
 	if state.result != nil {
 		if hasBranch {
+			// If collapsed, show summary with tool count
+			if state.collapsed {
+				toolSummary := p.formatToolSummary(state.tools)
+				return fmt.Sprintf("%d %s %s %s %s  %s tokens $%.4f  %.1fs",
+					displayNum, tools.AsciiTreeBranch, icon, taskDesc, toolSummary,
+					formatTokens(state.result.TokensTotal),
+					state.result.Cost,
+					state.result.Duration.Seconds())
+			}
 			// Tasks with tools show metrics on same line
 			return fmt.Sprintf("%d %s %s %s %s tokens $%.4f  %.1fs",
 				displayNum, tools.AsciiTreeBranch, icon, taskDesc,
@@ -436,4 +450,44 @@ func (p *ProgressTracker) SetModel(modelName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.modelName = modelName
+}
+
+// formatToolSummary creates a compact summary of tools executed
+func (p *ProgressTracker) formatToolSummary(toolMetas []*tools.ExecutionMetadata) string {
+	if len(toolMetas) == 0 {
+		return ""
+	}
+
+	// Count tools by name (preserve order)
+	type toolCount struct {
+		name  string
+		count int
+	}
+	seen := make(map[string]int)
+	var order []string
+
+	for _, meta := range toolMetas {
+		if _, exists := seen[meta.ToolName]; !exists {
+			order = append(order, meta.ToolName)
+		}
+		seen[meta.ToolName]++
+	}
+
+	// Build summary string with counts
+	var parts []string
+	for _, name := range order {
+		count := seen[name]
+		if count > 1 {
+			parts = append(parts, fmt.Sprintf("%d×%s", count, name))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+
+	// Show first 3 tools, then indicate more
+	if len(parts) > 3 {
+		parts = append(parts[:3], fmt.Sprintf("+%d more", len(parts)-3))
+	}
+
+	return fmt.Sprintf("[%s]", strings.Join(parts, " "))
 }

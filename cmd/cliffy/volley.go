@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/bwl/cliffy/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +25,7 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Force verbose mode
-		return executeVolley(cmd, args, true)
+		return executeVolley(cmd, args, config.VerbosityVerbose)
 	},
 }
 

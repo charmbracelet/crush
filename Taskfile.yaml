@@ -90,15 +90,15 @@ tasks:
     vars:
       NEXT:
         sh: go run github.com/caarlos0/svu/v3@latest next --always
-    prompt: "This will release {{.NEXT}}. Please make sure you've fetch tags. Continue?"
+    prompt: "This will release {{.NEXT}}. Continue?"
     preconditions:
       - sh: '[ $(git symbolic-ref --short HEAD) = "main" ]'
         msg: Not on main branch
       - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
         msg: "Git is dirty"
     cmds:
+      - task: fetch-tags
       - git commit --allow-empty -m "{{.NEXT}}"
-      - git tag -d nightly
       - git tag --annotate --sign {{.NEXT}} {{.CLI_ARGS}}
       - echo "Pushing {{.NEXT}}..."
       - git push origin --tags

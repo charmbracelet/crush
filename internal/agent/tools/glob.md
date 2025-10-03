@@ -7,13 +7,12 @@ Fast file pattern matching tool that finds files by name/pattern, returning path
 </usage>
 
 <pattern_syntax>
-
 - '\*' matches any sequence of non-separator characters
 - '\*\*' matches any sequence including separators
 - '?' matches any single non-separator character
 - '[...]' matches any character in brackets
 - '[!...]' matches any character not in brackets
-  </pattern_syntax>
+</pattern_syntax>
 
 <examples>
 - '*.js' - JavaScript files in current directory
@@ -29,11 +28,10 @@ Fast file pattern matching tool that finds files by name/pattern, returning path
 </limitations>
 
 <cross_platform>
-
 - Path separators handled automatically (/ and \ work)
 - Uses ripgrep (rg) if available, otherwise Go implementation
 - Patterns should use forward slashes (/) for compatibility
-  </cross_platform>
+</cross_platform>
 
 <tips>
 - Combine with Grep: find files with Glob, search contents with Grep

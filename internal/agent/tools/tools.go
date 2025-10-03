@@ -11,6 +11,7 @@ type (
 
 const (
 	SessionIDContextKey sessionIDContextKey = "session_id"
+	MessageIDContextKey messageIDContextKey = "message_id"
 )
 
 func GetSessionFromContext(ctx context.Context) string {
@@ -19,6 +20,18 @@ func GetSessionFromContext(ctx context.Context) string {
 		return ""
 	}
 	s, ok := sessionID.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func GetMessageFromContext(ctx context.Context) string {
+	messageID := ctx.Value(MessageIDContextKey)
+	if messageID == nil {
+		return ""
+	}
+	s, ok := messageID.(string)
 	if !ok {
 		return ""
 	}

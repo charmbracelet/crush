@@ -68,7 +68,7 @@ require (
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.12.0 // indirect
-	github.com/charmbracelet/fantasy v0.0.0-20251002051643-c96822199d77
+	github.com/charmbracelet/fantasy v0.0.0-20251003071236-5d39f0348e5d
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 )
 

@@ -108,7 +108,7 @@ Important:
 
 - Return empty response - user sees gh output
 - Never update git config
-  </pull_requests>
+</pull_requests>
 
 <examples>
 Good: pytest /foo/bar/tests

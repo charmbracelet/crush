@@ -261,12 +261,19 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
 	}
+
+	// Check if this is an agent tool session and parse it
+	childSessionID := event.Payload.SessionID
+	parentMessageID, toolCallID, ok := m.app.Sessions.ParseAgentToolSessionID(childSessionID)
+	if !ok {
+		return nil
+	}
 	items := m.listCmp.Items()
 	toolCallInx := NotFound
 	var toolCall messages.ToolCallCmp
 	for i := len(items) - 1; i >= 0; i-- {
 		if msg, ok := items[i].(messages.ToolCallCmp); ok {
-			if msg.GetToolCall().ID == event.Payload.SessionID {
+			if msg.ParentMessageID() == parentMessageID && msg.GetToolCall().ID == toolCallID {
 				toolCallInx = i
 				toolCall = msg
 			}
@@ -613,7 +620,8 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions, options...))
 		// If this tool call is the agent tool, fetch nested tool calls
 		if tc.Name == agent.AgentToolName {
-			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)
+			agentToolSessionID := m.app.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
+			nestedMessages, _ := m.app.Messages.List(context.Background(), agentToolSessionID)
 			nestedToolResultMap := m.buildToolResultMap(nestedMessages)
 			nestedUIMessages := m.convertMessagesToUI(nestedMessages, nestedToolResultMap)
 			nestedToolCalls := make([]messages.ToolCallCmp, 0, len(nestedUIMessages))

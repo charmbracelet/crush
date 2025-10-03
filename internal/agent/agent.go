@@ -175,7 +175,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
 		// Before each step create the new assistant message
-		PrepareStep: func(options ai.PrepareStepFunctionOptions) (prepared ai.PrepareStepResult, err error) {
+		PrepareStep: func(callContext context.Context, options ai.PrepareStepFunctionOptions) (_ context.Context, prepared ai.PrepareStepResult, err error) {
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -184,8 +184,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 				Provider: a.largeModel.ModelCfg.Provider,
 			})
 			if err != nil {
-				return prepared, err
+				return callContext, prepared, err
 			}
+
+			callContext = context.WithValue(ctx, tools.MessageIDContextKey, assistantMsg.ID)
 
 			currentAssistant = &assistantMsg
 
@@ -200,7 +202,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			for _, queued := range queuedCalls {
 				userMessage, createErr := a.createUserMessage(genCtx, queued)
 				if createErr != nil {
-					return prepared, createErr
+					return callContext, prepared, createErr
 				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
@@ -220,7 +222,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
 			}
-			return prepared, err
+			return callContext, prepared, err
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			currentAssistant.AppendReasoningContent(text)
@@ -307,7 +309,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			case ai.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
 			}
-			slog.Info("OnStepFinish", "reason", stepResult.FinishReason)
 			currentAssistant.AddFinish(finishReason, "", "")
 			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage)
 			sessionLock.Lock()

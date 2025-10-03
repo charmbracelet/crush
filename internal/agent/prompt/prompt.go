@@ -15,11 +15,11 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name        string
-	template    string
-	now         func() time.Time
-	platform    string
-	workingDir  string
+	name       string
+	template   string
+	now        func() time.Time
+	platform   string
+	workingDir string
 }
 
 type PromptDat struct {

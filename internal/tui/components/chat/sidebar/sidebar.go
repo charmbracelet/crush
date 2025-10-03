@@ -563,13 +563,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
 		switch modelProvider.Type {
-		case catwalk.TypeOpenAI:
-			reasoningEffort := model.DefaultReasoningEffort
-			if selectedModel.ReasoningEffort != "" {
-				reasoningEffort = selectedModel.ReasoningEffort
-			}
-			formatter := cases.Title(language.English, cases.NoLower)
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		case catwalk.TypeAnthropic:
 			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
@@ -577,6 +570,13 @@ func (s *sidebarCmp) currentModelBlock() string {
 			} else {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
 			}
+		default:
+			reasoningEffort := model.DefaultReasoningEffort
+			if selectedModel.ReasoningEffort != "" {
+				reasoningEffort = selectedModel.ReasoningEffort
+			}
+			formatter := cases.Title(language.English, cases.NoLower)
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		}
 	}
 	if s.session.ID != "" {

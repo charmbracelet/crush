@@ -7,7 +7,6 @@ Search code across public repositories using Sourcegraph's GraphQL API.
 </usage>
 
 <basic_syntax>
-
 - "fmt.Println" - exact matches
 - "file:.go fmt.Println" - limit to Go files
 - "repo:^github\.com/golang/go$ fmt.Println" - specific repos
@@ -16,7 +15,7 @@ Search code across public repositories using Sourcegraph's GraphQL API.
 - "fmt\.(Print|Printf|Println)" - regex patterns
 - "\"exact phrase\"" - exact phrase matching
 - "-file:test" or "-repo:forks" - exclude matches
-  </basic_syntax>
+</basic_syntax>
 
 <key_filters>
 Repository: repo:name, repo:^exact$, repo:org/repo@branch, -repo:exclude, fork:yes, archived:yes, visibility:public
@@ -35,12 +34,11 @@ Result: select:repo, select:file, select:content, count:100, timeout:30s
 </examples>
 
 <boolean_operators>
-
 - "term1 AND term2" - both terms
 - "term1 OR term2" - either term
 - "term1 NOT term2" - term1 but not term2
 - "term1 and (term2 or term3)" - grouping with parentheses
-  </boolean_operators>
+</boolean_operators>
 
 <limitations>
 - Only searches public repositories

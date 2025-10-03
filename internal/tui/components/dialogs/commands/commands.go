@@ -326,7 +326,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			}
 
 			// OpenAI models: reasoning effort dialog
-			if providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+			if model.HasReasoningEffort {
 				commands = append(commands, Command{
 					ID:          "select_reasoning_effort",
 					Title:       "Select Reasoning Effort",

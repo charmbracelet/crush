@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 )
 
-//go:embed templates/agentTool.md
+//go:embed templates/agent_tool.md
 var agentToolDescription []byte
 
 type AgentParams struct {
@@ -55,7 +55,13 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 				return ai.ToolResponse{}, errors.New("session id missing from context")
 			}
 
-			session, err := c.sessions.CreateTaskSession(ctx, call.ID, sessionID, "New Agent Session")
+			agentMessageID := tools.GetMessageFromContext(ctx)
+			if agentMessageID == "" {
+				return ai.ToolResponse{}, errors.New("agent message id missing from context")
+			}
+
+			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
+			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "New Agent Session")
 			if err != nil {
 				return ai.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
@@ -65,7 +71,7 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 				maxTokens = model.ModelCfg.MaxTokens
 			}
 			result, err := agent.Run(ctx, SessionAgentCall{
-				SessionID:        sessionID,
+				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,
 				ProviderOptions:  c.getProviderOptions(model),

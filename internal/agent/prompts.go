@@ -6,10 +6,10 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 )
 
-//go:embed templates/coder.gotmpl
+//go:embed templates/coder.md.tpl
 var coderPromptTmpl []byte
 
-//go:embed templates/task.gotmpl
+//go:embed templates/task.md.tpl
 var taskPromptTmpl []byte
 
 //go:embed templates/initialize.md

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,18 +68,9 @@ func openaiBuilder(model string) builderFunc {
 
 func openRouterBuilder(model string) builderFunc {
 	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
-		tf := func() func() string {
-			id := 0
-			return func() string {
-				id += 1
-				return fmt.Sprintf("%s-%d", t.Name(), id)
-			}
-		}
 		provider := openrouter.New(
 			openrouter.WithAPIKey(os.Getenv("CRUSH_OPENROUTER_API_KEY")),
 			openrouter.WithHTTPClient(&http.Client{Transport: r}),
-			openrouter.WithLanguageUniqueToolCallIds(),
-			openrouter.WithLanguageModelGenerateIDFunc(tf()),
 		)
 		return provider.LanguageModel(model)
 	}
@@ -88,19 +78,10 @@ func openRouterBuilder(model string) builderFunc {
 
 func zAIBuilder(model string) builderFunc {
 	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
-		tf := func() func() string {
-			id := 0
-			return func() string {
-				id += 1
-				return fmt.Sprintf("%s-%d", t.Name(), id)
-			}
-		}
 		provider := openaicompat.New(
 			"https://api.z.ai/api/coding/paas/v4",
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
-			openaicompat.WithLanguageUniqueToolCallIds(),
-			openaicompat.WithLanguageModelGenerateIDFunc(tf()),
 		)
 		return provider.LanguageModel(model)
 	}

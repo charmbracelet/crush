@@ -21,11 +21,10 @@ Makes multiple edits to a single file in one operation. Built on Edit tool for e
 </operation>
 
 <critical_requirements>
-
 1. All edits follow same requirements as single Edit tool
 2. Edits are atomic - either all succeed or none applied
 3. Plan edits carefully to avoid conflicts between sequential operations
-   </critical_requirements>
+</critical_requirements>
 
 <warnings>
 - Tool fails if old_string doesn't match file contents exactly (including whitespace)
@@ -34,17 +33,15 @@ Makes multiple edits to a single file in one operation. Built on Edit tool for e
 </warnings>
 
 <best_practices>
-
 - Ensure all edits result in correct, idiomatic code
 - Don't leave code in broken state
 - Use absolute file paths (starting with /)
 - Use replace_all for renaming variables across file
 - Avoid adding emojis unless user explicitly requests
-  </best_practices>
+</best_practices>
 
 <new_file_creation>
-
 - Provide new file path (including directory if needed)
 - First edit: empty old_string, new file contents as new_string
 - Subsequent edits: normal edit operations on created content
-  </new_file_creation>
+</new_file_creation>

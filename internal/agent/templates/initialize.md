@@ -1,4 +1,4 @@
-`Please analyze this codebase and create a **CRUSH.md** file containing:
+Please analyze this codebase and create a **CRUSH.md** file containing:
 
 - Build/lint/test commands - especially for running a single test
 - Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.

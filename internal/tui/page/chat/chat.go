@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -563,8 +562,7 @@ func (p *chatPage) openReasoningDialog() tea.Cmd {
 		model := cfg.GetModelByType(agentCfg.Model)
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 
-		if providerCfg != nil && model != nil &&
-			providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+		if providerCfg != nil && model != nil && model.HasReasoningEffort {
 			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
 			return dialogs.OpenDialogMsg{
 				Model: reasoning.NewReasoningDialog(),

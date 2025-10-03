@@ -44,7 +44,7 @@ const (
 	BashNoOutput    = "no output"
 )
 
-//go:embed bash.gotmpl
+//go:embed bash.tpl
 var bashDescriptionTmpl []byte
 
 var bashDescriptionTpl = template.Must(

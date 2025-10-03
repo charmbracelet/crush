@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,28 @@ func Setup(logFile string, debug bool) {
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+// MaskAPIKey masks an API key by showing only the first and last 5 characters.
+// For keys shorter than 10 characters, it shows first 2 and last 2 characters.
+// Returns "***EMPTY***" for empty strings.
+func MaskAPIKey(apiKey string) string {
+	if apiKey == "" {
+		return "***EMPTY***"
+	}
+	
+	// Remove common prefixes
+	key := strings.TrimPrefix(apiKey, "Bearer ")
+	key = strings.TrimPrefix(key, "sk-")
+	
+	keyLen := len(key)
+	if keyLen <= 4 {
+		return strings.Repeat("*", keyLen)
+	} else if keyLen <= 10 {
+		return key[:2] + strings.Repeat("*", keyLen-4) + key[keyLen-2:]
+	} else {
+		return key[:5] + strings.Repeat("*", keyLen-10) + key[keyLen-5:]
+	}
 }
 
 func RecoverPanic(name string, cleanup func()) {

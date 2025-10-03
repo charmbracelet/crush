@@ -214,6 +214,11 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	attempts := 0
 	for {
 		attempts++
+		slog.Debug("Making Gemini API request", 
+			"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
+			"model", model.ID,
+			"attempt", attempts)
+		
 		var toolCalls []message.ToolCall
 
 		var lastMsgParts []genai.Part
@@ -319,6 +324,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 
 		for {
 			attempts++
+			
+			slog.Debug("Making Gemini streaming API request", 
+				"api_key", log.MaskAPIKey(g.providerOptions.apiKey),
+				"model", model.ID,
+				"attempt", attempts)
 
 			currentContent := ""
 			toolCalls := []message.ToolCall{}

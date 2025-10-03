@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -751,6 +752,11 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	cmds = append(cmds, func() tea.Msg {
 		_, err := p.app.AgentCoordinator.Run(context.Background(), session.ID, text, attachments...)
 		if err != nil {
+			isCancelErr := errors.Is(err, context.Canceled)
+			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+			if isCancelErr || isPermissionErr {
+				return nil
+			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  err.Error(),

@@ -15,6 +15,7 @@ require (
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250910155747-997384b0b35e
 	github.com/charmbracelet/catwalk v0.6.4-0.20251002104711-f8c6c1e5b4a5
 	github.com/charmbracelet/fang v0.4.2
+	github.com/charmbracelet/fantasy v0.0.0-20251003110041-a581de4d1d81
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
@@ -50,30 +51,8 @@ require (
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
-	github.com/charmbracelet/x/json v0.2.0 // indirect
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/s2a-go v0.1.8 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/openai/openai-go/v2 v2.3.0 // indirect
-	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.41.0 // indirect
-	google.golang.org/genai v1.26.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/grpc v1.66.2 // indirect
-	google.golang.org/protobuf v1.36.8 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
-)
-
-require (
-	github.com/anthropics/anthropic-sdk-go v1.12.0 // indirect
-	github.com/charmbracelet/fantasy v0.0.0-20251003071236-5d39f0348e5d
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-)
-
-require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.12.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -82,6 +61,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
+	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/powernap v0.0.0-20250919153222-1038f7e6fef4
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -93,7 +73,13 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/s2a-go v0.1.8 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
@@ -112,6 +98,7 @@ require (
 	github.com/muesli/mango-pflag v0.1.0 // indirect
 	github.com/muesli/roff v0.1.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
+	github.com/openai/openai-go/v2 v2.3.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/posthog/posthog-go v1.6.10
@@ -132,14 +119,21 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
+	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/image v0.26.0 // indirect
+	golang.org/x/image v0.27.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/term v0.34.0 // indirect
 	golang.org/x/text v0.29.0
+	google.golang.org/genai v1.26.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
+	google.golang.org/grpc v1.66.2 // indirect
+	google.golang.org/protobuf v1.36.8 // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5

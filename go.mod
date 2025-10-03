@@ -31,7 +31,7 @@ require (
 	github.com/ncruces/go-sqlite3 v0.29.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/nxadm/tail v1.4.11
-	github.com/openai/openai-go v1.12.0
+	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06

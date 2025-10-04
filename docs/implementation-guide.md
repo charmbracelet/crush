@@ -1,6 +1,14 @@
-# Crush-Headless Implementation Guide
+# Implementation Guide - Historical Design Document
 
-## Phase 1: Fork & Simplify (Week 1)
+> **⚠️ HISTORICAL DOCUMENT**
+> **Status:** This was the original design/planning document for "crush-headless"
+> **Current Reality:** Cliffy has been implemented with a different approach
+> **For Current Architecture:** See [architecture.md](./architecture.md)
+> **For Missing Features:** See [ROADMAP.md](./ROADMAP.md)
+>
+> This document is preserved for historical context and shows the original implementation plan. The actual Cliffy implementation evolved differently, using the volley scheduler pattern instead of the headless runner approach outlined here.
+
+## Original Design: Phase 1 - Fork & Simplify
 
 ### Goal
 Working prototype with direct streaming, no persistence, 50% code reduction.

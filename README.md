@@ -403,6 +403,26 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
 }
 ```
 
+If a provider only offers non-streaming completions, set
+`"disable_streaming": true` to have Crush fall back to the non-streaming API
+while still emitting a single streamed response event:
+
+```json
+{
+  "providers": {
+    "nonstream": {
+      "type": "openai",
+      "base_url": "https://example.com/v1",
+      "api_key": "$NONSTREAM_API_KEY",
+      "disable_streaming": true,
+      "models": [
+        { "id": "example-large", "name": "Example Large" }
+      ]
+    }
+  }
+}
+```
+
 ### Custom Providers
 
 Crush supports custom provider configurations for both OpenAI-compatible and

@@ -427,6 +427,11 @@
           "description": "Whether this provider is disabled",
           "default": false
         },
+        "disable_streaming": {
+          "type": "boolean",
+          "description": "Disable streaming for this provider",
+          "default": false
+        },
         "system_prompt_prefix": {
           "type": "string",
           "description": "Custom prefix to add to system prompts for this provider"

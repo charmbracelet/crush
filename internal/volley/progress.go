@@ -439,6 +439,44 @@ func (p *ProgressTracker) ShowProgress(task Task, message string) {
 	// but with tree display, we don't need this anymore
 }
 
+// ShowThinking displays thinking/reasoning content from the LLM
+func (p *ProgressTracker) ShowThinking(task Task, thinking string, format string) {
+	if !p.enabled {
+		// When progress is disabled, output to stderr for verbosity
+		if format == "json" {
+			fmt.Fprintf(p.out, `{"type":"thinking","task":%d,"content":%q}`+"\n", task.Index, thinking)
+		} else {
+			fmt.Fprintf(p.out, "\n[THINKING - Task %d]\n%s\n[/THINKING]\n\n", task.Index, thinking)
+		}
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// When progress is enabled, print thinking separately (not in the progress display)
+	// This is because thinking can be quite long and would interfere with the live updates
+
+	// Temporarily clear the current display
+	if p.totalLines > 0 {
+		for i := 0; i < p.totalLines; i++ {
+			fmt.Fprintf(p.out, "\033[1A") // Move up one line
+		}
+		fmt.Fprintf(p.out, "\r")
+		fmt.Fprintf(p.out, "\033[J") // Clear from cursor to end of screen
+	}
+
+	// Print thinking
+	if format == "json" {
+		fmt.Fprintf(p.out, `{"type":"thinking","task":%d,"content":%q}`+"\n", task.Index, thinking)
+	} else {
+		fmt.Fprintf(p.out, "\n[THINKING - Task %d]\n%s\n[/THINKING]\n\n", task.Index, thinking)
+	}
+
+	// Re-render the progress display
+	p.renderAll()
+}
+
 // spinnerLoop runs the spinner animation in a goroutine
 func (p *ProgressTracker) spinnerLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)

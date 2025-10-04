@@ -73,6 +73,18 @@ type VolleyOptions struct {
 
 	// Verbosity controls output detail level
 	Verbosity config.VerbosityLevel
+
+	// ShowThinking enables display of LLM thinking/reasoning
+	ShowThinking bool
+
+	// ThinkingFormat controls format of thinking output (text or json)
+	ThinkingFormat string
+
+	// ShowStats enables token usage and timing statistics
+	ShowStats bool
+
+	// EmitToolTrace enables NDJSON tool trace output to stderr
+	EmitToolTrace bool
 }
 
 // DefaultVolleyOptions returns sensible defaults

@@ -10,6 +10,7 @@ import (
 	"github.com/bwl/cliffy/internal/config"
 	"github.com/bwl/cliffy/internal/csync"
 	"github.com/bwl/cliffy/internal/llm/agent"
+	"github.com/bwl/cliffy/internal/llm/tools"
 	"github.com/bwl/cliffy/internal/log"
 	"github.com/bwl/cliffy/internal/lsp"
 	"github.com/bwl/cliffy/internal/message"
@@ -52,10 +53,10 @@ func New(cfg *config.Config, opts Options) (*Runner, error) {
 }
 
 func (r *Runner) Execute(ctx context.Context, prompt string) error {
-	// Setup logging if not already initialized
-	if !log.Initialized() {
-		// Use a default log location
-		logFile := ".crush/cliffy.log"
+	// Setup logging if not already initialized and debug mode is enabled (opt-in)
+	if !log.Initialized() && r.cfg.Options.Debug {
+		// Use a default log location in .cliffy directory
+		logFile := ".cliffy/logs/cliffy.log"
 		log.Setup(logFile, r.cfg.Options.Debug)
 	}
 
@@ -111,7 +112,24 @@ func (r *Runner) handleEvent(ctx context.Context, event agent.AgentEvent, store 
 	case agent.AgentEventTypeError:
 		return event.Error
 
+	case agent.AgentEventTypeToolTrace:
+		// Show tool execution in real-time if not quiet
+		if !r.options.Quiet && event.ToolMetadata != nil {
+			r.showToolTrace(event.ToolMetadata)
+		}
+		return nil
+
+	case agent.AgentEventTypeProgress:
+		// Show progress updates if not quiet
+		if !r.options.Quiet && event.Progress != "" {
+			fmt.Fprintf(r.stderr, "[PROGRESS] %s\n", event.Progress)
+		}
+		return nil
+
 	case agent.AgentEventTypeResponse:
+		// Track token usage from the event
+		r.stats.InputTokens += int(event.TokenUsage.InputTokens)
+		r.stats.OutputTokens += int(event.TokenUsage.OutputTokens)
 		return r.handleResponse(ctx, event.Message, store, sessionID)
 
 	case agent.AgentEventTypeSummarize:
@@ -152,23 +170,8 @@ func (r *Runner) handleResponse(ctx context.Context, msg message.Message, store 
 			}
 		}
 
-		// Show tool calls if not quiet
-		if len(m.ToolCalls()) > 0 {
-			r.stats.ToolCalls += len(m.ToolCalls())
-			if !r.options.Quiet {
-				for _, tc := range m.ToolCalls() {
-					fmt.Fprintf(r.stderr, "[TOOL] %s\n", tc.Name)
-
-					// Track specific tool types
-					switch tc.Name {
-					case "View", "Glob", "Grep":
-						r.stats.FilesRead++
-					case "Edit", "Write":
-						r.stats.FilesWritten++
-					}
-				}
-			}
-		}
+		// Tool stats are tracked in showToolTrace via AgentEventTypeToolTrace events
+		// No need to count them here to avoid double-counting
 	}
 
 	// Ensure final newline
@@ -179,4 +182,25 @@ func (r *Runner) handleResponse(ctx context.Context, msg message.Message, store 
 
 func (r *Runner) GetStats() ExecutionStats {
 	return r.stats
+}
+
+func (r *Runner) showToolTrace(metadata *tools.ExecutionMetadata) {
+	// Format tool execution trace
+	toolName := metadata.ToolName
+
+	// Simple format: [TOOL] name (duration)
+	if metadata.Duration > 0 {
+		fmt.Fprintf(r.stderr, "[TOOL] %s (%.2fs)\n", toolName, metadata.Duration.Seconds())
+	} else {
+		fmt.Fprintf(r.stderr, "[TOOL] %s\n", toolName)
+	}
+
+	// Track stats
+	r.stats.ToolCalls++
+	switch toolName {
+	case "View", "Glob", "Grep":
+		r.stats.FilesRead++
+	case "Edit", "Write":
+		r.stats.FilesWritten++
+	}
 }

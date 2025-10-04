@@ -1,0 +1,30 @@
+{
+  "id": "deep-review",
+  "name": "Deep Review",
+  "description": "Comprehensive code review with advanced reasoning for thorough analysis",
+  "category": "quality",
+  "model": "large",
+  "max_tokens": 16384,
+  "reasoning_effort": "high",
+  "think": true,
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "agent"
+  ],
+  "context_paths": [
+    "CLAUDE.md",
+    ".cursorrules",
+    ".github/copilot-instructions.md"
+  ],
+  "max_concurrent": 2,
+  "fail_fast": false,
+  "examples": [
+    "cliffy --preset deep-review \"comprehensive review of auth system\"",
+    "cliffy --preset deep-review \"analyze API design patterns\" \"review error handling\"",
+    "cliffy --preset deep-review \"evaluate test coverage and quality\""
+  ]
+}

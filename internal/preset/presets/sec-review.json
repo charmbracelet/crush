@@ -1,0 +1,30 @@
+{
+  "id": "sec-review",
+  "name": "Security Review",
+  "description": "Security-focused audit for vulnerabilities and best practices",
+  "category": "security",
+  "model": "large",
+  "max_tokens": 16384,
+  "reasoning_effort": "high",
+  "think": true,
+  "system_prompt_prefix": "You are a security expert specializing in code audits. Focus on:\n- Authentication and authorization vulnerabilities\n- Input validation and sanitization\n- SQL injection, XSS, and CSRF risks\n- Secrets and credential management\n- Cryptographic implementations\n- Dependency vulnerabilities\n\n",
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "agent"
+  ],
+  "context_paths": [
+    "CLAUDE.md",
+    ".cursorrules"
+  ],
+  "max_concurrent": 2,
+  "fail_fast": true,
+  "examples": [
+    "cliffy --preset sec-review \"audit authentication flow in auth.go\"",
+    "cliffy --preset sec-review \"check for SQL injection risks\" \"review API input validation\"",
+    "cliffy --preset sec-review \"scan for hardcoded secrets and credentials\""
+  ]
+}

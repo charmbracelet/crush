@@ -1,0 +1,26 @@
+{
+  "id": "perf-analyze",
+  "name": "Performance Analyzer",
+  "description": "Performance analysis and optimization recommendations",
+  "category": "performance",
+  "model": "large",
+  "max_tokens": 8192,
+  "reasoning_effort": "high",
+  "think": true,
+  "system_prompt_prefix": "You are a performance optimization expert. Focus on:\n- Algorithmic complexity analysis\n- Memory allocation patterns\n- Concurrency and parallelism opportunities\n- Caching strategies\n- Database query optimization\n- Profiling bottlenecks\n\n",
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "agent"
+  ],
+  "max_concurrent": 2,
+  "fail_fast": false,
+  "examples": [
+    "cliffy --preset perf-analyze \"identify performance bottlenecks in server.go\"",
+    "cliffy --preset perf-analyze \"suggest optimizations for database queries\"",
+    "cliffy --preset perf-analyze \"analyze memory allocation patterns\""
+  ]
+}

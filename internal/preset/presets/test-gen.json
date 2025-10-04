@@ -1,0 +1,26 @@
+{
+  "id": "test-gen",
+  "name": "Test Generator",
+  "description": "Generate comprehensive test cases with write access",
+  "category": "testing",
+  "model": "large",
+  "max_tokens": 8192,
+  "system_prompt_prefix": "You are a test engineering expert. Focus on:\n- Comprehensive test coverage\n- Edge cases and error conditions\n- Table-driven tests where appropriate\n- Clear test descriptions and assertions\n- Proper setup and teardown\n\n",
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "write",
+    "edit",
+    "agent"
+  ],
+  "max_concurrent": 2,
+  "fail_fast": false,
+  "examples": [
+    "cliffy --preset test-gen \"write unit tests for auth.go\"",
+    "cliffy --preset test-gen \"generate table-driven tests for validator\"",
+    "cliffy --preset test-gen \"add edge case tests for parser\""
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "fast-qa",
+  "name": "Fast QA",
+  "description": "Quick quality assurance check with fast model for rapid feedback",
+  "category": "quality",
+  "model": "small",
+  "max_tokens": 4096,
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls"
+  ],
+  "max_concurrent": 5,
+  "fail_fast": false,
+  "examples": [
+    "cliffy --preset fast-qa \"check for obvious bugs in main.go\"",
+    "cliffy --preset fast-qa \"list all TODO comments\" \"find unused imports\"",
+    "cliffy --preset fast-qa \"verify function names follow conventions\""
+  ]
+}

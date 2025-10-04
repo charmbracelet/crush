@@ -1,0 +1,25 @@
+{
+  "id": "doc-gen",
+  "name": "Documentation Generator",
+  "description": "Generate comprehensive documentation with write access",
+  "category": "documentation",
+  "model": "large",
+  "max_tokens": 16384,
+  "system_prompt_prefix": "You are a technical documentation expert. Focus on:\n- Clear, concise explanations\n- Practical examples and usage patterns\n- API documentation with parameters and return values\n- Architecture and design decisions\n- Installation and setup instructions\n\n",
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "write",
+    "agent"
+  ],
+  "max_concurrent": 2,
+  "fail_fast": false,
+  "examples": [
+    "cliffy --preset doc-gen \"generate API documentation for server.go\"",
+    "cliffy --preset doc-gen \"create README for this package\"",
+    "cliffy --preset doc-gen \"document configuration options\""
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "refactor",
+  "name": "Refactor Assistant",
+  "description": "Code refactoring with full write access for improvements",
+  "category": "refactoring",
+  "model": "large",
+  "max_tokens": 8192,
+  "reasoning_effort": "medium",
+  "allowed_tools": [
+    "view",
+    "glob",
+    "grep",
+    "ls",
+    "bash",
+    "edit",
+    "multiedit",
+    "write",
+    "agent"
+  ],
+  "context_paths": [
+    "CLAUDE.md",
+    ".cursorrules",
+    ".github/copilot-instructions.md"
+  ],
+  "max_concurrent": 1,
+  "fail_fast": true,
+  "examples": [
+    "cliffy --preset refactor \"extract repeated code into helper function\"",
+    "cliffy --preset refactor \"rename function getCwd to getCurrentWorkingDirectory\"",
+    "cliffy --preset refactor \"simplify error handling in main.go\""
+  ]
+}

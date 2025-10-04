@@ -56,11 +56,13 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug = true
 	}
 
-	// Setup logs
-	log.Setup(
-		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
-		cfg.Options.Debug,
-	)
+	// Setup logs only if debug mode is enabled (opt-in logging)
+	if cfg.Options.Debug {
+		log.Setup(
+			filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+			cfg.Options.Debug,
+		)
+	}
 
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)

@@ -19,7 +19,7 @@ import (
 
 const (
 	appName              = "cliffy"
-	defaultDataDirectory = ".crush"
+	defaultDataDirectory = ".cliffy"
 )
 
 var defaultContextPaths = []string{
@@ -157,7 +157,7 @@ type Options struct {
 	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.cliffy,example=.cliffy"` // Relative to the cwd
 	DisabledTools             []string     `json:"disabled_tools" jsonschema:"description=Tools to disable"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`

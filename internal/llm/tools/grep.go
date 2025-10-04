@@ -236,7 +236,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	// Only add ignore files if they exist
-	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
+	for _, ignoreFile := range []string{".gitignore", ".cliffyignore"} {
 		ignorePath := filepath.Join(path, ignoreFile)
 		if _, err := os.Stat(ignorePath); err == nil {
 			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)

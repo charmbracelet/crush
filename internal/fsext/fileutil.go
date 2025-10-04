@@ -26,7 +26,7 @@ func SkipHidden(path string) bool {
 	}
 
 	commonIgnoredDirs := map[string]bool{
-		".crush":           true,
+		".cliffy":          true,
 		"node_modules":     true,
 		"vendor":           true,
 		"dist":             true,
@@ -56,7 +56,7 @@ func SkipHidden(path string) bool {
 }
 
 // FastGlobWalker provides gitignore-aware file walking with fastwalk
-// It uses hierarchical ignore checking like git does, checking .gitignore/.crushignore
+// It uses hierarchical ignore checking like git does, checking .gitignore/.cliffyignore
 // files in each directory from the root to the target path.
 type FastGlobWalker struct {
 	directoryLister *directoryLister
@@ -156,7 +156,7 @@ func ShouldExcludeFile(rootPath, filePath string) bool {
 }
 
 // WalkDirectories walks a directory tree and calls the provided function for each directory,
-// respecting hierarchical .gitignore/.crushignore files like git does.
+// respecting hierarchical .gitignore/.cliffyignore files like git does.
 func WalkDirectories(rootPath string, fn func(path string, d os.DirEntry, err error) error) error {
 	dl := NewDirectoryLister(rootPath)
 

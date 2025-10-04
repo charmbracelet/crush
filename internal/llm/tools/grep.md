@@ -37,7 +37,7 @@ LIMITATIONS:
 IGNORE FILE SUPPORT:
 
 - Respects .gitignore patterns to skip ignored files and directories
-- Respects .crushignore patterns for additional ignore rules
+- Respects .cliffyignore patterns for additional ignore rules
 - Both ignore files are automatically detected in the search root directory
 
 CROSS-PLATFORM NOTES:

@@ -49,7 +49,7 @@ func TestConfig_setDefaults(t *testing.T) {
 	require.NotNil(t, cfg.Models)
 	require.NotNil(t, cfg.LSP)
 	require.NotNil(t, cfg.MCP)
-	require.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
+	require.Equal(t, filepath.Join("/tmp", ".cliffy"), cfg.Options.DataDirectory)
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}

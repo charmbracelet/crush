@@ -42,7 +42,7 @@ Thumbs.db
 .env
 .env.local
 
-**/.crush/**
+**/.cliffy/**
 
 /crush
 /cliffy

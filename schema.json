@@ -300,9 +300,9 @@
         "data_directory": {
           "type": "string",
           "description": "Directory for storing application data (relative to working directory)",
-          "default": ".crush",
+          "default": ".cliffy",
           "examples": [
-            ".crush"
+            ".cliffy"
           ]
         },
         "disabled_tools": {
@@ -371,7 +371,8 @@
           "format": "uri",
           "description": "Base URL for the provider's API",
           "examples": [
-            "https://api.openai.com/v1"
+            "https://api.openai.com/v1",
+            "https://openrouter.ai/api/v1"
           ]
         },
         "type": {
@@ -383,14 +384,16 @@
             "azure",
             "vertexai"
           ],
-          "description": "Provider type that determines the API format",
+          "description": "Provider type that determines the API format. OpenRouter uses 'openai' type for compatibility.",
           "default": "openai"
         },
         "api_key": {
           "type": "string",
-          "description": "API key for authentication with the provider",
+          "description": "API key for authentication with the provider. Use ${VAR_NAME} syntax to reference environment variables. Common variables: ${CLIFFY_OPENROUTER_API_KEY} for OpenRouter (recommended default), ${OPENAI_API_KEY} for OpenAI, ${ANTHROPIC_API_KEY} for Anthropic, ${GEMINI_API_KEY} for Gemini.",
           "examples": [
-            "$OPENAI_API_KEY"
+            "${CLIFFY_OPENROUTER_API_KEY}",
+            "${OPENAI_API_KEY}",
+            "${ANTHROPIC_API_KEY}"
           ]
         },
         "disable": {

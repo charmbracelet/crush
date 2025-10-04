@@ -576,6 +576,10 @@ loop:
 				}
 				return assistantMsg, nil, processErr
 			}
+
+			if event.Type == provider.EventComplete {
+				break loop
+			}
 		case <-ctx.Done():
 			a.finishMessage(context.Background(), &assistantMsg, message.FinishReasonCanceled, "Request cancelled", "")
 			return assistantMsg, nil, ctx.Err()

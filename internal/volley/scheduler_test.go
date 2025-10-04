@@ -1,6 +1,7 @@
 package volley
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -11,11 +12,11 @@ func TestRetryDelay(t *testing.T) {
 		minExpected time.Duration
 		maxExpected time.Duration
 	}{
-		{0, 1 * time.Second, 2 * time.Second},
-		{1, 2 * time.Second, 3 * time.Second},
-		{2, 4 * time.Second, 5 * time.Second},
-		{3, 8 * time.Second, 9 * time.Second},
-		{10, 60 * time.Second, 61 * time.Second}, // capped at max
+		{0, 750 * time.Millisecond, 1500 * time.Millisecond},  // 1s ± 25% jitter
+		{1, 1500 * time.Millisecond, 3000 * time.Millisecond}, // 2s ± 25% jitter
+		{2, 3 * time.Second, 6 * time.Second},                 // 4s ± 25% jitter
+		{3, 6 * time.Second, 12 * time.Second},                // 8s ± 25% jitter
+		{10, 45 * time.Second, 75 * time.Second},              // capped at 60s ± 25% jitter
 	}
 
 	for _, tt := range tests {
@@ -24,6 +25,100 @@ func TestRetryDelay(t *testing.T) {
 			t.Errorf("retryDelay(%d) = %v, want between %v and %v",
 				tt.attempt, delay, tt.minExpected, tt.maxExpected)
 		}
+	}
+}
+
+func TestRetryDelayForError(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		attempt     int
+		minExpected time.Duration
+		maxExpected time.Duration
+	}{
+		{
+			name:        "rate limit error - first attempt",
+			err:         errors.New("429 rate limit exceeded"),
+			attempt:     0,
+			minExpected: 3750 * time.Millisecond, // 5s ± 25%
+			maxExpected: 6250 * time.Millisecond,
+		},
+		{
+			name:        "rate limit error - second attempt",
+			err:         errors.New("rate limit exceeded"),
+			attempt:     1,
+			minExpected: 7500 * time.Millisecond, // 10s ± 25%
+			maxExpected: 12500 * time.Millisecond,
+		},
+		{
+			name:        "timeout error - first attempt",
+			err:         errors.New("context deadline exceeded"),
+			attempt:     0,
+			minExpected: 1500 * time.Millisecond, // 2s ± 25%
+			maxExpected: 2500 * time.Millisecond,
+		},
+		{
+			name:        "network error - first attempt",
+			err:         errors.New("connection refused"),
+			attempt:     0,
+			minExpected: 375 * time.Millisecond, // 500ms ± 25%
+			maxExpected: 625 * time.Millisecond,
+		},
+		{
+			name:        "network error - third attempt",
+			err:         errors.New("network error"),
+			attempt:     2,
+			minExpected: 1500 * time.Millisecond, // 2s ± 25%
+			maxExpected: 2500 * time.Millisecond,
+		},
+		{
+			name:        "unknown error - first attempt",
+			err:         errors.New("something went wrong"),
+			attempt:     0,
+			minExpected: 750 * time.Millisecond, // 1s ± 25%
+			maxExpected: 1250 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delay := retryDelayForError(tt.err, tt.attempt)
+			if delay < tt.minExpected || delay > tt.maxExpected {
+				t.Errorf("retryDelayForError(%v, %d) = %v, want between %v and %v",
+					tt.err, tt.attempt, delay, tt.minExpected, tt.maxExpected)
+			}
+		})
+	}
+}
+
+func TestClassifyError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected ErrorClass
+	}{
+		{"nil error", nil, ErrorClassUnknown},
+		{"rate limit 429", errors.New("429 Too Many Requests"), ErrorClassRateLimit},
+		{"rate limit text", errors.New("rate limit exceeded"), ErrorClassRateLimit},
+		{"auth 401", errors.New("401 unauthorized"), ErrorClassAuth},
+		{"auth 403", errors.New("403 forbidden"), ErrorClassAuth},
+		{"auth text", errors.New("unauthorized access"), ErrorClassAuth},
+		{"validation 400", errors.New("400 bad request"), ErrorClassValidation},
+		{"validation text", errors.New("invalid input"), ErrorClassValidation},
+		{"timeout", errors.New("context deadline exceeded"), ErrorClassTimeout},
+		{"timeout text", errors.New("request timeout"), ErrorClassTimeout},
+		{"network connection", errors.New("connection refused"), ErrorClassNetwork},
+		{"network text", errors.New("network error"), ErrorClassNetwork},
+		{"unknown", errors.New("something went wrong"), ErrorClassUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyError(tt.err)
+			if got != tt.expected {
+				t.Errorf("classifyError(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
 	}
 }
 

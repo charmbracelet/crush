@@ -3,6 +3,8 @@ package volley
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -10,9 +12,21 @@ import (
 	"github.com/bwl/cliffy/internal/llm/agent"
 	"github.com/bwl/cliffy/internal/llm/tools"
 	"github.com/bwl/cliffy/internal/message"
+	outputpkg "github.com/bwl/cliffy/internal/output"
 )
 
-// Scheduler manages parallel execution of tasks with rate limiting
+// Scheduler manages parallel execution of tasks with resilience features
+//
+// Resilience Features:
+//   - Smart retry with exponential backoff and jitter to prevent thundering herd
+//   - Per-error retry policies (rate limits get longer backoff, network errors retry quickly)
+//   - Clean queue draining on fail-fast cancellation
+//   - Adaptive concurrency tracking with health metrics
+//   - Context-aware cancellation during retry delays
+//
+// The scheduler maintains success/failure counts for adaptive behavior and tracks
+// actual concurrent workers for observability. These metrics enable future
+// enhancements like dynamic concurrency adjustment based on error rates.
 type Scheduler struct {
 	config       *config.Config
 	agent        agent.Service
@@ -20,11 +34,11 @@ type Scheduler struct {
 	options      VolleyOptions
 	progress     *ProgressTracker
 
-	// Concurrency control
+	// Concurrency control and health tracking
 	mu                sync.Mutex
-	currentConcurrent int
-	successCount      int
-	failureCount      int
+	currentConcurrent int // Current number of active workers
+	successCount      int // Consecutive successful tasks (reset on failure)
+	failureCount      int // Consecutive failed tasks (reset on success)
 
 	// Results tracking
 	results     []TaskResult
@@ -119,15 +133,48 @@ func (s *Scheduler) worker(ctx context.Context, workerID int, taskQueue <-chan T
 	for {
 		select {
 		case <-ctx.Done():
+			// Context canceled - drain remaining tasks as canceled
+			s.drainQueue(taskQueue, workerID)
 			return
 		case task, ok := <-taskQueue:
 			if !ok {
 				return
 			}
 
+			// Track concurrent worker count
+			s.mu.Lock()
+			s.currentConcurrent++
+			s.mu.Unlock()
+
 			result := s.executeTask(ctx, workerID, task)
+
+			// Update concurrent count
+			s.mu.Lock()
+			s.currentConcurrent--
+			s.mu.Unlock()
+
 			s.resultsChan <- result
 		}
+	}
+}
+
+// drainQueue marks all remaining tasks as canceled when context is done
+//
+// This is called during fail-fast cancellation or context cancellation to ensure
+// all queued tasks are properly marked as canceled rather than left in pending state.
+// Each worker drains tasks from the queue until it's empty or closed.
+//
+// Without this, tasks would remain in the queue indefinitely when fail-fast triggers,
+// creating incomplete results and confusing output.
+func (s *Scheduler) drainQueue(taskQueue <-chan Task, workerID int) {
+	for task := range taskQueue {
+		result := TaskResult{
+			Task:     task,
+			Status:   TaskStatusCanceled,
+			Error:    fmt.Errorf("task canceled due to fail-fast or context cancellation"),
+			WorkerID: workerID,
+		}
+		s.resultsChan <- result
 	}
 }
 
@@ -149,9 +196,18 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 	for attempt := 0; attempt <= s.options.MaxRetries; attempt++ {
 		if attempt > 0 {
 			result.Retries = attempt
-			delay := retryDelay(attempt)
+			delay := retryDelayForError(lastErr, attempt)
 			s.progress.TaskRetrying(task, attempt, delay)
-			time.Sleep(delay)
+
+			// Sleep with context awareness for clean cancellation
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				result.Status = TaskStatusCanceled
+				result.Error = ctx.Err()
+				result.Duration = time.Since(startTime)
+				return result
+			}
 		}
 
 		// Build prompt with optional context
@@ -252,6 +308,10 @@ func (s *Scheduler) executeViaAgent(ctx context.Context, prompt string, task Tas
 			if s.options.Verbosity != config.VerbosityQuiet {
 				s.progress.ToolExecuted(task, event.ToolMetadata)
 			}
+			// Emit NDJSON tool trace if requested
+			if s.options.EmitToolTrace {
+				_ = outputpkg.EmitToolTraceNDJSON(os.Stderr, task.Index, event.ToolMetadata)
+			}
 			// Collect metadata for result
 			toolMetadata = append(toolMetadata, event.ToolMetadata)
 
@@ -271,9 +331,17 @@ func (s *Scheduler) executeViaAgent(ctx context.Context, prompt string, task Tas
 				return "", Usage{}, toolMetadata, fmt.Errorf("failed to list messages: %w", err)
 			}
 
-			// Extract output from assistant messages
+			// Extract output and thinking from assistant messages
 			for _, msg := range messages {
 				if msg.Role == message.Assistant {
+					// Show thinking if requested
+					if s.options.ShowThinking {
+						reasoning := msg.ReasoningContent()
+						if reasoning.Thinking != "" {
+							s.progress.ShowThinking(task, reasoning.Thinking, s.options.ThinkingFormat)
+						}
+					}
+
 					output += msg.Content().Text
 				}
 			}
@@ -304,6 +372,39 @@ func (s *Scheduler) handleResult(ctx context.Context, result TaskResult, cancel 
 	if s.options.FailFast && result.Status == TaskStatusFailed {
 		cancel()
 	}
+}
+
+// getHealthMetrics returns current success/failure metrics for adaptive behavior
+//
+// These metrics track the scheduler's health and can be used for:
+//   - Adaptive concurrency scaling (reduce workers during high failure rates)
+//   - Circuit breaking (stop sending requests if provider is down)
+//   - Telemetry and monitoring
+//
+// Success/failure counts track consecutive results and reset on state change,
+// enabling detection of temporary provider issues vs. permanent errors.
+func (s *Scheduler) getHealthMetrics() (successCount, failureCount, currentConcurrent int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.successCount, s.failureCount, s.currentConcurrent
+}
+
+// shouldBackoff determines if the scheduler should slow down based on failure rate
+//
+// Returns true if consecutive failures exceed threshold (3+) with no recent successes.
+// This can be used by future adaptive concurrency implementations to:
+//   - Reduce concurrent workers when provider is struggling
+//   - Implement circuit breaker pattern
+//   - Add extra delays before starting new tasks
+//
+// Currently used for observability; actual backoff logic can be added as needed.
+func (s *Scheduler) shouldBackoff() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// If we have 3+ consecutive failures and no recent successes, back off
+	// This can be used by future adaptive concurrency implementations
+	return s.failureCount >= 3 && s.successCount == 0
 }
 
 // calculateSummary generates aggregate statistics
@@ -358,21 +459,128 @@ func (s *Scheduler) calculateCost(usage Usage) float64 {
 	return inputCost + outputCost
 }
 
-// retryDelay calculates exponential backoff with jitter
-func retryDelay(attempt int) time.Duration {
-	base := 1 * time.Second
-	maxDelay := 60 * time.Second
+// ErrorClass represents the category of error for retry strategy
+//
+// Different error types require different retry strategies:
+//   - Rate limits need long backoff to avoid further throttling
+//   - Network errors can retry quickly since they're usually transient
+//   - Timeouts need moderate backoff as the service may be degraded
+//   - Auth/validation errors are fatal and should not be retried
+type ErrorClass int
 
-	// Exponential: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped)
-	delay := base * (1 << attempt)
+const (
+	ErrorClassUnknown    ErrorClass = iota // Unknown errors use standard backoff
+	ErrorClassRateLimit                    // Rate limit (429) - needs longest backoff
+	ErrorClassTimeout                      // Timeout errors - moderate backoff
+	ErrorClassNetwork                      // Network errors - quick retry
+	ErrorClassAuth                         // Auth errors (401/403) - fatal, no retry
+	ErrorClassValidation                   // Validation errors (400) - fatal, no retry
+)
+
+// classifyError determines the error category for adaptive retry
+//
+// This function examines error messages to determine the appropriate retry strategy.
+// It uses simple string matching since errors come from various providers with
+// different formats. More sophisticated error classification could be added in future.
+func classifyError(err error) ErrorClass {
+	if err == nil {
+		return ErrorClassUnknown
+	}
+
+	errStr := err.Error()
+
+	// Rate limit errors need longer backoff
+	if contains(errStr, "429") || contains(errStr, "rate limit") {
+		return ErrorClassRateLimit
+	}
+
+	// Auth errors are fatal
+	if contains(errStr, "401") || contains(errStr, "403") || contains(errStr, "unauthorized") {
+		return ErrorClassAuth
+	}
+
+	// Validation errors are fatal
+	if contains(errStr, "400") || contains(errStr, "invalid") {
+		return ErrorClassValidation
+	}
+
+	// Timeout errors need moderate backoff
+	if contains(errStr, "timeout") || contains(errStr, "context deadline") {
+		return ErrorClassTimeout
+	}
+
+	// Network errors need quick retry
+	if contains(errStr, "connection") || contains(errStr, "network") {
+		return ErrorClassNetwork
+	}
+
+	return ErrorClassUnknown
+}
+
+// retryDelayForError calculates backoff based on error type and attempt
+//
+// Retry Strategy by Error Class:
+//   - Rate Limit: 5s → 10s → 20s → 40s ... (max 120s)
+//   - Timeout:    2s → 4s → 8s → 16s ... (max 60s)
+//   - Network:    500ms → 1s → 2s → 4s ... (max 30s)
+//   - Unknown:    1s → 2s → 4s → 8s ... (max 60s)
+//
+// All delays include ±25% jitter to prevent thundering herd when multiple
+// workers retry simultaneously (e.g., after a provider outage).
+//
+// Examples:
+//   - Rate limit on 1st attempt: ~5s (3.75s to 6.25s with jitter)
+//   - Network error on 1st attempt: ~500ms (375ms to 625ms with jitter)
+//   - Timeout on 2nd attempt: ~4s (3s to 5s with jitter)
+func retryDelayForError(err error, attempt int) time.Duration {
+	class := classifyError(err)
+
+	var baseDelay time.Duration
+	var maxDelay time.Duration
+
+	switch class {
+	case ErrorClassRateLimit:
+		// Rate limits need longer backoff: 5s, 10s, 20s, 40s...
+		baseDelay = 5 * time.Second
+		maxDelay = 120 * time.Second
+	case ErrorClassTimeout:
+		// Timeouts get moderate backoff: 2s, 4s, 8s, 16s...
+		baseDelay = 2 * time.Second
+		maxDelay = 60 * time.Second
+	case ErrorClassNetwork:
+		// Network errors retry quickly: 500ms, 1s, 2s, 4s...
+		baseDelay = 500 * time.Millisecond
+		maxDelay = 30 * time.Second
+	default:
+		// Unknown errors use standard backoff: 1s, 2s, 4s, 8s...
+		baseDelay = 1 * time.Second
+		maxDelay = 60 * time.Second
+	}
+
+	// Exponential backoff
+	delay := baseDelay * (1 << attempt)
 	if delay > maxDelay {
 		delay = maxDelay
 	}
 
-	// Add jitter (0-1000ms) to avoid thundering herd
-	// jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+	// Add jitter (±25% of delay) to avoid thundering herd
+	// This spreads out retries to prevent all workers hitting the API simultaneously
+	jitterRange := int64(float64(delay) * 0.25)
+	if jitterRange > 0 {
+		jitter := time.Duration(rand.Int63n(jitterRange*2) - jitterRange)
+		delay += jitter
+		// Ensure delay stays positive
+		if delay < baseDelay/2 {
+			delay = baseDelay
+		}
+	}
 
 	return delay
+}
+
+// retryDelay calculates exponential backoff with jitter (legacy, kept for compatibility)
+func retryDelay(attempt int) time.Duration {
+	return retryDelayForError(nil, attempt)
 }
 
 // shouldRetry determines if a task should be retried based on the error

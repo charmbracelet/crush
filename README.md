@@ -6,25 +6,27 @@ Headless fork of [Crush](https://github.com/charmbracelet/crush). No TUI, no dat
 
 ## Quick Start
 
-### 1. Get an OpenRouter API Key
+### 1. Build Cliffy
 
-Cliffy uses [OpenRouter](https://openrouter.ai) with free Grok models by default.
+```bash
+go build -o bin/cliffy ./cmd/cliffy
+```
 
-1. Sign up at https://openrouter.ai
-2. Get your API key from https://openrouter.ai/settings/keys
-3. Set the environment variable:
+### 2. Configure (first run)
+
+Generate a starter config with the provider you want to use:
+
+```bash
+./bin/cliffy init
+```
+
+If you already have an OpenRouter key, set it first so the wizard can pick it up:
 
 ```bash
 export CLIFFY_OPENROUTER_API_KEY="your-api-key-here"
 ```
 
-Add this to your `~/.bashrc`, `~/.zshrc`, or shell config to make it permanent.
-
-### 2. Build Cliffy
-
-```bash
-go build -o bin/cliffy ./cmd/cliffy
-```
+Prefer to hand-edit config? Run `./bin/cliffy doctor` to validate it.
 
 ### 3. Run a Task
 
@@ -43,8 +45,11 @@ go build -o bin/cliffy ./cmd/cliffy
 ## Usage
 
 ```bash
-# Basic usage
+# Basic usage - single task
 cliffy "your task here"
+
+# Multiple tasks in parallel (volley mode)
+cliffy "analyze auth.go" "analyze db.go" "analyze api.go"
 
 # Show LLM thinking/reasoning
 cliffy --show-thinking "debug this function"
@@ -54,12 +59,68 @@ cliffy --model sonnet "complex refactoring task"
 cliffy --fast "simple task"      # alias for --model small
 cliffy --smart "complex task"    # alias for --model large
 
+# Shared context across multiple tasks
+cliffy --context "You are a security expert" \
+  "review auth.go" \
+  "review db.go" \
+  "review api.go"
+
+# Load context from file
+cliffy --context-file security-rules.md \
+  "review auth.go" \
+  "review payment.go"
+
 # Quiet mode (no tool logs)
 cliffy --quiet "run tests"
 
-# JSON output for parsing
-cliffy --output-format json "analyze code"
+# Structured output formats
+cliffy --output-format json "analyze code"   # JSON blob with summary
+cliffy --output-format diff "summarize changes"   # Only show tool diffs
+
+# Verbose mode with detailed stats
+cliffy --verbose "task1" "task2"
+
+# Show token usage and timing stats
+cliffy --stats "complex analysis"
+
+# Emit tool traces as NDJSON (perfect for logging)
+cliffy --emit-tool-trace --verbose "task1"
+
+# Tune concurrency and models with presets
+cliffy --preset sec-review --max-concurrent 2 "audit auth.go" "scan payments.go"
+
+# Feed prompts from files or pipelines
+cliffy --tasks-file prompts.txt
+cat tasks.json | cliffy --json -
+
+# Verify configuration health
+cliffy doctor
 ```
+
+### Shell Completions
+
+Install shell completions for tab-completion of commands and flags:
+
+```bash
+# Bash (Linux)
+cliffy completion bash | sudo tee /etc/bash_completion.d/cliffy
+
+# Bash (macOS with Homebrew)
+cliffy completion bash > $(brew --prefix)/etc/bash_completion.d/cliffy
+
+# Zsh
+cliffy completion zsh > "${fpath[1]}/_cliffy"
+# Then reload: exec zsh
+
+# Fish
+cliffy completion fish > ~/.config/fish/completions/cliffy.fish
+
+# PowerShell
+cliffy completion powershell > cliffy.ps1
+# Then add to your PowerShell profile
+```
+
+After installation, restart your shell or source the completion file. Tab-completion will then work for all flags and commands.
 
 ## Configuration
 
@@ -93,12 +154,40 @@ Configuration is stored in `~/.config/cliffy/cliffy.json` (or `$XDG_CONFIG_HOME/
   },
   "options": {
     "debug": false,
-    "data_directory": ".crush"
+    "data_directory": ".cliffy"
   }
 }
 ```
 
-You can also create a local `.cliffy.json` or `cliffy.json` in your project directory to override global settings.
+You can also create a local `.cliffy.json` or `cliffy.json` in your project directory to override global settings. The `cliffy init` wizard writes the global config; `cliffy doctor` verifies keys, provider connectivity, and context files before you start a session.
+
+### Task Input Options
+
+Cliffy reads task prompts from the following sources (highest priority first):
+
+1. `--tasks-file` – line-delimited text, or JSON when paired with `--json`
+2. `-` (single hyphen) – STDIN stream, supporting text or JSON
+3. Positional arguments – traditional CLI usage
+
+Blank lines and lines beginning with `#` are ignored in text mode, so you can keep prompt libraries under version control without extra tooling.
+
+### Presets
+
+Presets bundle model size, tool access, context paths, and concurrency defaults:
+
+- List available options: `cliffy preset list`
+- Inspect details: `cliffy preset show sec-review`
+- Apply to your project config: `cliffy preset apply fast-qa`
+- Use ad-hoc: `cliffy --preset perf-analyze "profile rendering"`
+
+Custom presets live under `internal/preset/presets/` as JSON if you want to author your own.
+
+### Health Checks
+
+- `cliffy init` — interactive first-run setup for credentials and defaults
+- `cliffy doctor` — validates configs, provider connectivity, API keys, and context paths
+
+Both commands exit non-zero on failure, so you can wire them into CI or bootstrap scripts without surprises.
 
 ## Crush-Headless Documentation
 

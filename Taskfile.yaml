@@ -45,6 +45,12 @@ tasks:
     cmds:
       - go test ./... {{.CLI_ARGS}}
 
+  validate:
+    desc: Run tests and linters for routine validation
+    cmds:
+      - task: test
+      - task: lint
+
   fmt:
     desc: Run gofumpt
     cmds:

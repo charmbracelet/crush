@@ -1,0 +1,9 @@
+# Example tasks file for cliffy
+# Lines starting with # are comments and will be ignored
+
+# Simple arithmetic
+what is 2 + 2?
+what is 10 * 5?
+
+# String operations
+reverse the string "hello world"

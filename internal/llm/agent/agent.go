@@ -406,7 +406,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			defer log.RecoverPanic("agent.Run", func() {
 				slog.Error("panic while generating title")
 			})
-			titleErr := a.generateTitle(ctx, sessionID, content)
+			titleErr := a.generateTitle(context.Background(), sessionID, content)
 			if titleErr != nil && !errors.Is(titleErr, context.Canceled) && !errors.Is(titleErr, context.DeadlineExceeded) {
 				slog.Error("failed to generate title", "error", titleErr)
 			}

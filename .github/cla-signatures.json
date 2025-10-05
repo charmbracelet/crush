@@ -679,6 +679,14 @@
       "created_at": "2025-09-29T01:19:40Z",
       "repoId": 987670088,
       "pullRequestNo": 1148
+    },
+    {
+      "name": "kucukkanat",
+      "id": 914316,
+      "comment_id": 3369230313,
+      "created_at": "2025-10-05T18:13:57Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1195
     }
   ]
 }

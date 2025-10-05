@@ -1,5 +1,20 @@
 {
   "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "claudecode": {
+      "id": "claudecode",
+      "name": "Claude Code CLI",
+      "type": "claudecode",
+      "models": [
+        {
+          "id": "claude-sonnet-4-5-20250929",
+          "name": "Claude Sonnet 4.5",
+          "context_window": 200000,
+          "default_max_tokens": 8000
+        }
+      ]
+    }
+  },
   "lsp": {
     "gopls": {}
   }

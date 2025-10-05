@@ -272,7 +272,8 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if providerConfig.APIKey == "" {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
-		if providerConfig.BaseURL == "" {
+		// claudecode provider doesn't need a base URL since it uses subprocess
+		if providerConfig.BaseURL == "" && providerConfig.Type != "claudecode" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
 			c.Providers.Del(id)
 			continue
@@ -282,7 +283,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.Type != catwalk.TypeOpenAI && providerConfig.Type != catwalk.TypeAnthropic && providerConfig.Type != catwalk.TypeGemini {
+		if providerConfig.Type != catwalk.TypeOpenAI && providerConfig.Type != catwalk.TypeAnthropic && providerConfig.Type != catwalk.TypeGemini && providerConfig.Type != "claudecode" {
 			slog.Warn("Skipping custom provider because the provider type is not supported", "provider", id, "type", providerConfig.Type)
 			c.Providers.Del(id)
 			continue
@@ -293,7 +294,8 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
-		if baseURL == "" || err != nil {
+		// claudecode provider doesn't need a base URL since it uses subprocess
+		if (baseURL == "" || err != nil) && providerConfig.Type != "claudecode" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
 			c.Providers.Del(id)
 			continue

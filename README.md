@@ -189,6 +189,7 @@ That said, you can also set environment variables for preferred providers.
 | `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
 | `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
 | `AWS_REGION`                | AWS Bedrock (Claude)                               |
+| `AWS_BEARER_TOKEN_BEDROCK`  | AWS Bedrock (Claude) Bearer Token                  |
 | `AWS_PROFILE`               | Custom AWS Profile                                 |
 | `AWS_REGION`                | AWS Region                                         |
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
@@ -476,9 +477,17 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
-- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+You can authenticate with Bedrock in two ways:
+
+1. **Bearer Token (recommended for simpler auth)**:
+   - Set `AWS_BEARER_TOKEN_BEDROCK` with your Bedrock API key
+   - Set `AWS_REGION` or `AWS_DEFAULT_REGION`
+   - Example: `AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-... AWS_REGION=us-east-1 crush`
+
+2. **AWS Credentials**:
+   - A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
+   - Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
+   - To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
 
 ### Vertex AI Platform
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,9 +33,10 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 type bashTool struct {
-	permissions permission.Service
-	workingDir  string
-	attribution *config.Attribution
+	permissions    permission.Service
+	workingDir     string
+	attribution    *config.Attribution
+	bannedCommands []string
 }
 
 const (
@@ -62,7 +64,7 @@ type bashDescriptionData struct {
 	PRAttribution      string
 }
 
-var bannedCommands = []string{
+var defaultBannedCommands = []string{
 	// Network/Download tools
 	"alias",
 	"aria2c",
@@ -135,10 +137,7 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func (b *bashTool) bashDescription() string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
-
-	// Build attribution text based on settings
+func (b *bashTool) bashDescriptionWithOverrides(bannedCommandsStr string) string {
 	var attributionStep, attributionExample, prAttribution string
 
 	// Default to true if attribution is nil (backward compatibility)
@@ -196,7 +195,7 @@ git commit -m "$(cat <<'EOF'
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+func blockFuncs(bannedCommands []string) []shell.BlockFunc {
 	return []shell.BlockFunc{
 		shell.CommandsBlocker(bannedCommands),
 
@@ -231,12 +230,49 @@ func blockFuncs() []shell.BlockFunc {
 func NewBashTool(permission permission.Service, workingDir string, attribution *config.Attribution) BaseTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
-	persistentShell.SetBlockFuncs(blockFuncs())
+
+	// Get banned commands from config or use defaults
+	banned := defaultBannedCommands
+	allowed := []string{}
+	cfg := config.Get()
+	if cfg != nil && cfg.Options != nil {
+		if len(cfg.Options.BannedCommands) > 0 {
+			// Merge default banned commands with user configured ones
+			banned = append(defaultBannedCommands, cfg.Options.BannedCommands...)
+			// Remove duplicates
+			banned = slices.Compact(banned)
+		}
+		
+		if len(cfg.Options.AllowedCommands) > 0 {
+			allowed = cfg.Options.AllowedCommands
+		}
+	}
+
+	// Remove allowed commands from banned list
+	if len(allowed) > 0 {
+		// Create a set of allowed commands for efficient lookup
+		allowedSet := make(map[string]struct{})
+		for _, cmd := range allowed {
+			allowedSet[cmd] = struct{}{}
+		}
+		
+		// Filter banned commands to remove allowed ones
+		filteredBanned := make([]string, 0, len(banned))
+		for _, cmd := range banned {
+			if _, found := allowedSet[cmd]; !found {
+				filteredBanned = append(filteredBanned, cmd)
+			}
+		}
+		banned = filteredBanned
+	}
+
+	persistentShell.SetBlockFuncs(blockFuncs(banned))
 
 	return &bashTool{
-		permissions: permission,
-		workingDir:  workingDir,
-		attribution: attribution,
+		permissions:    permission,
+		workingDir:     workingDir,
+		attribution:    attribution,
+		bannedCommands: banned,
 	}
 }
 
@@ -245,9 +281,11 @@ func (b *bashTool) Name() string {
 }
 
 func (b *bashTool) Info() ToolInfo {
+	bannedCommandsStr := strings.Join(b.bannedCommands, ", ")
+
 	return ToolInfo{
 		Name:        BashToolName,
-		Description: b.bashDescription(),
+		Description: b.bashDescriptionWithOverrides(bannedCommandsStr),
 		Parameters: map[string]any{
 			"command": map[string]any{
 				"type":        "string",

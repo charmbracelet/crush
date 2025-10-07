@@ -20,6 +20,25 @@ Before executing the command, please follow these steps:
 
 - For security and to limit the threat of a prompt injection attack, some commands are limited or banned. If you use a disallowed command, you will receive an error message explaining the restriction. Explain the error to the User.
 - Verify that the command is not one of the banned commands: {{ .BannedCommands }}.
+- Users can configure additional banned commands in their Crush configuration file using the "banned_commands" option. For example:
+  ```
+  {
+    "options": {
+      "banned_commands": ["custom-banned-command", "another-banned-command"]
+    }
+  }
+  ```
+- Users can also allow specific commands that are in the default or configured banned list using the "allowed_commands" option. For example:
+  ```
+  {
+    "options": {
+      "allowed_commands": ["curl", "wget"]
+    }
+  }
+  ```
+  Commands in the allowed_commands list will override any bans, including default bans.
+
+3. Command Execution:
 
 3. Command Execution:
 

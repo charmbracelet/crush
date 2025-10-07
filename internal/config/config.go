@@ -167,6 +167,8 @@ type Options struct {
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	BannedCommands            []string     `json:"banned_commands,omitempty" jsonschema:"description=Additional commands to ban in the bash tool"`
+	AllowedCommands           []string     `json:"allowed_commands,omitempty" jsonschema:"description=Commands to allow in the bash tool, overriding banned commands"`
 }
 
 type MCPs map[string]MCPConfig

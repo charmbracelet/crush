@@ -124,14 +124,11 @@ Tools that support it will also include useful diagnostics such as linting and t
 - Take necessary actions to fix the issues.
 - You should ignore diagnostics of files that you did not change or are not related or caused by your changes unless the user explicitly asks you to fix them.
 </lsp>
-{{end}}{{if gt (len .Config.Options.ContextPaths) 0}}
-<memory>
-{{range  .Config.Options.ContextPaths}}
-{{range  contextFiles .}}
+{{end}}{{if .ContextFiles}}
+<memory>{{range  .ContextFiles}}
 <file path="{{.Path}}">
 {{.Content}}
 </file>
-{{end}}
 {{end}}
 </memory>
 {{end}}

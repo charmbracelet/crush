@@ -23,13 +23,14 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider   string
-	Model      string
-	Config     config.Config
-	WorkingDir string
-	IsGitRepo  bool
-	Platform   string
-	Date       string
+	Provider     string
+	Model        string
+	Config       config.Config
+	WorkingDir   string
+	IsGitRepo    bool
+	Platform     string
+	Date         string
+	ContextFiles []ContextFile
 }
 
 type ContextFile struct {
@@ -70,7 +71,7 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 }
 
 func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error) {
-	t, err := template.New(p.name).Funcs(p.funcMap(cfg)).Parse(p.template)
+	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
@@ -80,15 +81,6 @@ func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error
 	}
 
 	return sb.String(), nil
-}
-
-func (p *Prompt) funcMap(cfg config.Config) template.FuncMap {
-	return template.FuncMap{
-		"contextFiles": func(path string) []ContextFile {
-			path = expandPath(path, cfg)
-			return processContextPath(path, cfg)
-		},
-	}
 }
 
 func processFile(filePath string) *ContextFile {
@@ -155,7 +147,20 @@ func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat
 	if p.platform != "" {
 		platform = p.platform
 	}
-	return PromptDat{
+
+	files := map[string][]ContextFile{}
+
+	for _, pth := range cfg.Options.ContextPaths {
+		expanded := expandPath(pth, cfg)
+		pathKey := strings.ToLower(expanded)
+		if _, ok := files[pathKey]; ok {
+			continue
+		}
+		content := processContextPath(expanded, cfg)
+		files[pathKey] = content
+	}
+
+	data := PromptDat{
 		Provider:   provider,
 		Model:      model,
 		Config:     cfg,
@@ -164,6 +169,11 @@ func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat
 		Platform:   platform,
 		Date:       p.now().Format("1/2/2006"),
 	}
+
+	for _, contextFiles := range files {
+		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	}
+	return data
 }
 
 func isGitRepo(dir string) bool {

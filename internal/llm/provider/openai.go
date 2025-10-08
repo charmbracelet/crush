@@ -529,11 +529,19 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 			return true, 0, nil
 		}
 
-		if apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusInternalServerError {
+		if apiErr.StatusCode == http.StatusTooManyRequests {
+			// Check if this is an insufficient quota error (permanent)
+			if apiErr.Type == "insufficient_quota" || apiErr.Code == "insufficient_quota" {
+				return false, 0, fmt.Errorf("OpenAI quota exceeded: %s. Please check your plan and billing details", apiErr.Message)
+			}
+			// Other 429 errors (rate limiting) can be retried
+		} else if apiErr.StatusCode != http.StatusInternalServerError {
 			return false, 0, err
 		}
 
-		retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		if apiErr.Response != nil {
+			retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		}
 	}
 
 	if apiErr != nil {

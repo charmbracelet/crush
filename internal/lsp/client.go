@@ -319,30 +319,6 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
 }
 
-// CloseFile closes a file in the LSP server.
-//
-// NOTE: this is only ever called on LSP shutdown.
-func (c *Client) CloseFile(ctx context.Context, filepath string) error {
-	cfg := config.Get()
-	uri := string(protocol.URIFromPath(filepath))
-
-	if _, exists := c.openFiles.Get(uri); !exists {
-		return nil // Already closed
-	}
-
-	if cfg.Options.DebugLSP {
-		slog.Debug("Closing file", "file", filepath)
-	}
-
-	if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
-		return err
-	}
-
-	c.openFiles.Del(uri)
-
-	return nil
-}
-
 // IsFileOpen checks if a file is currently open.
 func (c *Client) IsFileOpen(filepath string) bool {
 	uri := string(protocol.URIFromPath(filepath))
@@ -353,29 +329,16 @@ func (c *Client) IsFileOpen(filepath string) bool {
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
 	cfg := config.Get()
-	filesToClose := make([]string, 0, c.openFiles.Len())
-
-	// First collect all URIs that need to be closed
+	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {
-		// Convert URI back to file path using proper URI handling
-		filePath, err := protocol.DocumentURI(uri).Path()
-		if err != nil {
-			slog.Error("Failed to convert URI to path for file closing", "uri", uri, "error", err)
+		if debugLSP {
+			slog.Debug("Closing file", "file", uri)
+		}
+		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+			slog.Warn("Error closing rile", "uri", uri, "error", err)
 			continue
 		}
-		filesToClose = append(filesToClose, filePath)
-	}
-
-	// Then close them all
-	for _, filePath := range filesToClose {
-		err := c.CloseFile(ctx, filePath)
-		if err != nil && cfg != nil && cfg.Options.DebugLSP {
-			slog.Warn("Error closing file", "file", filePath, "error", err)
-		}
-	}
-
-	if cfg != nil && cfg.Options.DebugLSP {
-		slog.Debug("Closed all files", "files", filesToClose)
+		c.openFiles.Del(uri)
 	}
 }
 

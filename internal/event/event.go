@@ -9,7 +9,6 @@ import (
 	"runtime"
 
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/denisbrodbeck/machineid"
 	"github.com/posthog/posthog-go"
 )
 
@@ -39,6 +38,7 @@ func Init() {
 		slog.Error("Failed to initialize PostHog client", "error", err)
 	}
 	client = c
+	distinctId = getDistinctId()
 }
 
 // send logs an event to PostHog with the given event name and properties.
@@ -47,7 +47,7 @@ func send(event string, props ...any) {
 		return
 	}
 	err := client.Enqueue(posthog.Capture{
-		DistinctId: distinctId(),
+		DistinctId: distinctId,
 		Event:      event,
 		Properties: pairsToProps(props...).Merge(baseProps),
 	})
@@ -104,12 +104,4 @@ func pairsToProps(props ...any) posthog.Properties {
 
 func isEven(n int) bool {
 	return n%2 == 0
-}
-
-func distinctId() string {
-	id, err := machineid.ProtectedID("charm")
-	if err != nil {
-		return "crush-cli"
-	}
-	return id
 }

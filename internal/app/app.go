@@ -17,12 +17,12 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/pubsub"
-
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type App struct {
@@ -107,7 +107,10 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Start spinner if not in quiet mode.
+	// Start progress bar and spinner
+	fmt.Printf(ansi.SetIndeterminateProgressBar)
+	defer fmt.Printf(ansi.ResetProgressBar)
+
 	var spinner *format.Spinner
 	if !quiet {
 		spinner = format.NewSpinner(ctx, cancel, "Generating")

@@ -312,19 +312,19 @@ changelog:
       - "^wip "
       - "^wip:"
   groups:
-    - title: "New Features"
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
+    - title: "Deps"
+      regexp: "^.*\\(deps\\)*:+.*$"
+      order: 300
+    - title: "New!"
+      regexp: "^.*feat[(\\w)]*:+.*$"
       order: 100
-    - title: "Security updates"
-      regexp: '^.*?sec(\(.+\))??!?:.+$'
-      order: 150
-    - title: "Bug fixes and improvements"
-      regexp: '^.*?(fix|refactor)(\(.+\))??!?:.+$'
+    - title: "Fixed"
+      regexp: "^.*fix[(\\w)]*:+.*$"
       order: 200
-    - title: "Documentation updates"
-      regexp: ^.*?docs?(\(.+\))??!?:.+$
+    - title: "Docs"
+      regexp: "^.*docs[(\\w)]*:+.*$"
       order: 400
-    - title: Other work
+    - title: "Other stuff"
       order: 9999
 
 release:

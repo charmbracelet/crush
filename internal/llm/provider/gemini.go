@@ -43,9 +43,14 @@ func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
 	cc := &genai.ClientConfig{
 		APIKey:  opts.apiKey,
 		Backend: genai.BackendGeminiAPI,
-		HTTPOptions: genai.HTTPOptions{
-			BaseURL: opts.baseURL,
-		},
+	}
+	if opts.baseURL != "" {
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		if err == nil && resolvedBaseURL != "" {
+			cc.HTTPOptions = genai.HTTPOptions{
+				BaseURL: resolvedBaseURL,
+			}
+		}
 	}
 	if config.Get().Options.Debug {
 		cc.HTTPClient = log.NewHTTPClient()
@@ -65,9 +70,8 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 			var parts []*genai.Part
 			parts = append(parts, &genai.Part{Text: msg.Content().String()})
 			for _, binaryContent := range msg.BinaryContent() {
-				imageFormat := strings.Split(binaryContent.MIMEType, "/")
 				parts = append(parts, &genai.Part{InlineData: &genai.Blob{
-					MIMEType: imageFormat[1],
+					MIMEType: binaryContent.MIMEType,
 					Data:     binaryContent.Data,
 				}})
 			}

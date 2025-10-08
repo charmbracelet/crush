@@ -413,6 +413,21 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Check this first as the user should be able to quit no matter what.
 	if key.Matches(msg, a.keyMap.Quit) {
+		// If the agent is currently busy (processing tool calls, etc), initiate
+		// safe cancellation first to avoid session corruption
+		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+			return tea.Sequence(
+				// Initiate agent cancellation
+				func() tea.Msg {
+					a.app.CoderAgent.CancelAll()
+					return nil
+				},
+				// Wait a brief moment for cancellation to complete before quitting
+				tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+					return tea.Quit
+				}),
+			)
+		}
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
 			return tea.Quit
 		}

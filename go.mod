@@ -15,7 +15,6 @@ require (
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20250910155747-997384b0b35e
 	github.com/charmbracelet/catwalk v0.6.4-0.20251002104711-f8c6c1e5b4a5
 	github.com/charmbracelet/fang v0.4.2
-	github.com/charmbracelet/fantasy v0.0.0-20251003110041-a581de4d1d81
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
@@ -46,6 +45,8 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
 )
+
+require github.com/charmbracelet/fantasy v0.0.0-20251003071236-5d39f0348e5d
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

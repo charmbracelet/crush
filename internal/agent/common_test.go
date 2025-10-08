@@ -127,7 +127,7 @@ func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt strin
 			// todo: add values
 		},
 	}
-	agent := NewSessionAgent(largeModel, smallModel, systemPrompt, env.sessions, env.messages, tools...)
+	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, systemPrompt, false, env.sessions, env.messages, tools})
 	return agent
 }
 

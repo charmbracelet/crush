@@ -165,7 +165,7 @@ func (c *coordinator) buildAgent(prompt *prompt.Prompt, agent config.Agent) (Ses
 	if err != nil {
 		return nil, err
 	}
-	return NewSessionAgent(large, small, systemPrompt, c.sessions, c.messages, tools...), nil
+	return NewSessionAgent(SessionAgentOptions{large, small, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.sessions, c.messages, tools}), nil
 }
 
 func (c *coordinator) buildTools(agent config.Agent) ([]ai.AgentTool, error) {

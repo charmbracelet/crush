@@ -82,7 +82,7 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 				PresencePenalty:  model.ModelCfg.PresencePenalty,
 			})
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error generating agent: %s", err)
+				return ai.NewTextErrorResponse("error generating response"), nil
 			}
 			updatedSession, err := c.sessions.Get(ctx, session.ID)
 			if err != nil {

@@ -62,36 +62,41 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel   Model
-	smallModel   Model
-	systemPrompt string
-	tools        []ai.AgentTool
-	sessions     session.Service
-	messages     message.Service
+	largeModel           Model
+	smallModel           Model
+	systemPrompt         string
+	tools                []ai.AgentTool
+	sessions             session.Service
+	messages             message.Service
+	disableAutoSummarize bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
 }
 
-type SessionAgentOption func(*sessionAgent)
+type SessionAgentOptions struct {
+	LargeModel           Model
+	SmallModel           Model
+	SystemPrompt         string
+	DisableAutoSummarize bool
+	Sessions             session.Service
+	Messages             message.Service
+	Tools                []ai.AgentTool
+}
 
 func NewSessionAgent(
-	largeModel Model,
-	smallModel Model,
-	systemPrompt string,
-	sessions session.Service,
-	messages message.Service,
-	tools ...ai.AgentTool,
+	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
-		largeModel:     largeModel,
-		smallModel:     smallModel,
-		systemPrompt:   systemPrompt,
-		sessions:       sessions,
-		messages:       messages,
-		tools:          tools,
-		messageQueue:   csync.NewMap[string, []SessionAgentCall](),
-		activeRequests: csync.NewMap[string, context.CancelFunc](),
+		largeModel:           opts.LargeModel,
+		smallModel:           opts.SmallModel,
+		systemPrompt:         opts.SystemPrompt,
+		sessions:             opts.Sessions,
+		messages:             opts.Messages,
+		disableAutoSummarize: opts.DisableAutoSummarize,
+		tools:                opts.Tools,
+		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
 }
 
@@ -164,6 +169,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
 	var currentAssistant *message.Message
+	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, ai.AgentStreamCall{
 		Prompt:           call.Prompt,
 		Files:            files,
@@ -292,16 +298,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 				IsError:    isError,
 				Metadata:   result.ClientMetadata,
 			}
-			_, err := a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
 				},
 			})
-			if err != nil {
-				return err
+			if createMsgErr != nil {
+				return createMsgErr
 			}
-			return a.messages.Update(genCtx, *currentAssistant)
+			return nil
 		},
 		OnStepFinish: func(stepResult ai.StepResult) error {
 			finishReason := message.FinishReasonUnknown
@@ -322,6 +328,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 				return sessionErr
 			}
 			return a.messages.Update(genCtx, *currentAssistant)
+		},
+		StopWhen: []ai.StopCondition{
+			func(_ []ai.StepResult) bool {
+				contextWindow := a.largeModel.CatwalkCfg.ContextWindow
+				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+				percentage := (float64(tokens) / float64(contextWindow)) * 100
+				if (percentage > 80) && !a.disableAutoSummarize {
+					shouldSummarize = true
+					return true
+				}
+				return false
+			},
 		},
 	})
 	if err != nil {
@@ -358,28 +376,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 					break
 				}
 			}
-			if !found {
-				content := "There was an error while executing the tool"
-				if isCancelErr {
-					content = "Tool execution canceled by user"
-				} else if isPermissionErr {
-					content = "Permission denied"
-				}
-				toolResult := message.ToolResult{
-					ToolCallID: tc.ID,
-					Name:       tc.Name,
-					Content:    content,
-					IsError:    true,
-				}
-				_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
-					Role: message.Tool,
-					Parts: []message.ContentPart{
-						toolResult,
-					},
-				})
-				if createErr != nil {
-					return nil, createErr
-				}
+			if found {
+				continue
+			}
+			content := "There was an error while executing the tool"
+			if isCancelErr {
+				content = "Tool execution canceled by user"
+			} else if isPermissionErr {
+				content = "Permission denied"
+			}
+			toolResult := message.ToolResult{
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+				Content:    content,
+				IsError:    true,
+			}
+			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+				Role: message.Tool,
+				Parts: []message.ContentPart{
+					toolResult,
+				},
+			})
+			if createErr != nil {
+				return nil, createErr
 			}
 		}
 		if isCancelErr {
@@ -397,6 +416,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		return nil, err
 	}
 	wg.Wait()
+
+	if shouldSummarize {
+		a.activeRequests.Del(call.SessionID)
+		if summarizeErr := a.Summarize(genCtx, call.SessionID); summarizeErr != nil {
+			return nil, summarizeErr
+		}
+	}
 
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {
@@ -437,20 +463,21 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 		ai.WithSystemPrompt(string(summaryPrompt)),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:     message.Assistant,
-		Model:    a.largeModel.Model.Model(),
-		Provider: a.largeModel.Model.Provider(),
+		Role:             message.Assistant,
+		Model:            a.largeModel.Model.Model(),
+		Provider:         a.largeModel.Model.Provider(),
+		IsSummaryMessage: true,
 	})
 	if err != nil {
 		return err
 	}
 
-	resp, err := agent.Stream(ctx, ai.AgentStreamCall{
+	resp, err := agent.Stream(genCtx, ai.AgentStreamCall{
 		Prompt:   "Provide a detailed summary of our conversation above.",
 		Messages: aiMsgs,
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
-			return a.messages.Update(ctx, summaryMessage)
+			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning ai.ReasoningContent) error {
 			// handle anthropic signature
@@ -460,14 +487,20 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 				}
 			}
 			summaryMessage.FinishThinking()
-			return a.messages.Update(ctx, summaryMessage)
+			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnTextDelta: func(id, text string) error {
 			summaryMessage.AppendContent(text)
-			return a.messages.Update(ctx, summaryMessage)
+			return a.messages.Update(genCtx, summaryMessage)
 		},
 	})
 	if err != nil {
+		isCancelErr := errors.Is(err, context.Canceled)
+		if isCancelErr {
+			// User cancelled summarize we need to remove the summary message
+			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+			return deleteErr
+		}
 		return err
 	}
 

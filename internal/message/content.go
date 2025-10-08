@@ -120,14 +120,15 @@ type Finish struct {
 func (Finish) isPart() {}
 
 type Message struct {
-	ID        string
-	Role      MessageRole
-	SessionID string
-	Parts     []ContentPart
-	Model     string
-	Provider  string
-	CreatedAt int64
-	UpdatedAt int64
+	ID               string
+	Role             MessageRole
+	SessionID        string
+	Parts            []ContentPart
+	Model            string
+	Provider         string
+	CreatedAt        int64
+	UpdatedAt        int64
+	IsSummaryMessage bool
 }
 
 func (m *Message) Content() TextContent {

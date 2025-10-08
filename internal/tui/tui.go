@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
@@ -178,9 +177,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 	// Compact
 	case commands.CompactMsg:
-		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: compact.NewCompactDialogCmp(a.app.AgentCoordinator, msg.SessionID, true),
-		})
+		return a, func() tea.Msg {
+			err := a.app.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		}
 	case commands.QuitMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
@@ -251,38 +254,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Deny(msg.Permission)
 		}
 		return a, nil
-	// Agent Events
-	// TODO: HANDLE AUTO COMPACT
-	// case pubsub.Event[agent.AgentEvent]:
-	// 	payload := msg.Payload
-	//
-	// 	// Forward agent events to dialogs
-	// 	if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
-	// 		u, dialogCmd := a.dialog.Update(payload)
-	// 		if model, ok := u.(dialogs.DialogCmp); ok {
-	// 			a.dialog = model
-	// 		}
-	//
-	// 		cmds = append(cmds, dialogCmd)
-	// 	}
-	//
-	// 	// Handle auto-compact logic
-	// 	if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSessionID != "" {
-	// 		// Get current session to check token usage
-	// 		session, err := a.app.Sessions.Get(context.Background(), a.selectedSessionID)
-	// 		if err == nil {
-	// 			model := a.app.AgentCoordinator.Model()
-	// 			contextWindow := model.CatwalkCfg.ContextWindow
-	// 			tokens := session.CompletionTokens + session.PromptTokens
-	// 			if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
-	// 				cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
-	// 					Model: compact.NewCompactDialogCmp(a.app.AgentCoordinator, a.selectedSessionID, false),
-	// 				}))
-	// 			}
-	// 		}
-	// 	}
-	//
-	// 	return a, tea.Batch(cmds...)
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]
 		if !ok {

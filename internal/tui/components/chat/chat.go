@@ -334,6 +334,11 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 			return nil
 		}
 		return m.handleNewMessage(event.Payload)
+	case pubsub.DeletedEvent:
+		if event.Payload.SessionID != m.session.ID {
+			return nil
+		}
+		return m.handleDeleteMessage(event.Payload)
 	case pubsub.UpdatedEvent:
 		if event.Payload.SessionID != m.session.ID {
 			return m.handleChildSession(event)
@@ -358,6 +363,18 @@ func (m *messageListCmp) messageExists(messageID string) bool {
 		}
 	}
 	return false
+}
+
+// handleDeleteMessage removes a message from the list.
+func (m *messageListCmp) handleDeleteMessage(msg message.Message) tea.Cmd {
+	items := m.listCmp.Items()
+	for i := len(items) - 1; i >= 0; i-- {
+		if msgCmp, ok := items[i].(messages.MessageCmp); ok && msgCmp.GetMessage().ID == msg.ID {
+			m.listCmp.DeleteItem(items[i].ID())
+			return nil
+		}
+	}
+	return nil
 }
 
 // handleNewMessage routes new messages to appropriate handlers based on role.

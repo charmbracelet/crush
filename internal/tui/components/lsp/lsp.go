@@ -56,32 +56,7 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 			break
 		}
 
-		// Determine icon color and description based on state
-		icon := t.ItemOfflineIcon
-		description := l.LSP.Command
-
-		if l.LSP.Disabled {
-			description = t.S().Subtle.Render("disabled")
-		} else if state, exists := lspStates[l.Name]; exists {
-			switch state.State {
-			case lsp.StateStarting:
-				icon = t.ItemBusyIcon
-				description = t.S().Subtle.Render("starting...")
-			case lsp.StateReady:
-				icon = t.ItemOnlineIcon
-				description = l.LSP.Command
-			case lsp.StateError:
-				icon = t.ItemErrorIcon
-				if state.Error != nil {
-					description = t.S().Subtle.Render(fmt.Sprintf("error: %s", state.Error.Error()))
-				} else {
-					description = t.S().Subtle.Render("error")
-				}
-			case lsp.StateDisabled:
-				icon = t.ItemOfflineIcon.Foreground(t.FgMuted)
-				description = t.S().Base.Foreground(t.FgMuted).Render("no root markers found")
-			}
-		}
+		icon, description := iconAndDescription(l, t, lspStates)
 
 		// Calculate diagnostic counts if we have LSP clients
 		var extraContent string
@@ -132,6 +107,30 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 	}
 
 	return lspList
+}
+
+func iconAndDescription(l config.LSP, t *styles.Theme, states map[string]app.LSPClientInfo) (lipgloss.Style, string) {
+	if l.LSP.Disabled {
+		return t.ItemOfflineIcon.Foreground(t.FgMuted), t.S().Subtle.Render("disabled")
+	}
+
+	info := states[l.Name]
+	switch info.State {
+	case lsp.StateStarting:
+		return t.ItemBusyIcon, t.S().Subtle.Render("starting...")
+	case lsp.StateReady:
+		return t.ItemOnlineIcon, ""
+	case lsp.StateError:
+		description := t.S().Subtle.Render("error")
+		if info.Error != nil {
+			description = t.S().Subtle.Render(fmt.Sprintf("error: %s", info.Error.Error()))
+		}
+		return t.ItemErrorIcon, description
+	case lsp.StateDisabled:
+		return t.ItemOfflineIcon.Foreground(t.FgMuted), t.S().Subtle.Render("inactive")
+	default:
+		return t.ItemOfflineIcon, ""
+	}
 }
 
 // RenderLSPBlock renders a complete LSP block with optional truncation indicator.

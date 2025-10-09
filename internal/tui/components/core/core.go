@@ -110,14 +110,17 @@ func Status(opts StatusOpts, width int) string {
 			extraContentWidth += 1
 		}
 		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContentWidth, "…")
+		description = t.S().Base.Foreground(descriptionColor).Render(description)
 	}
-	description = t.S().Base.Foreground(descriptionColor).Render(description)
 
 	content := []string{}
 	if icon != "" {
 		content = append(content, icon)
 	}
-	content = append(content, title, description)
+	content = append(content, title)
+	if description != "" {
+		content = append(content, description)
+	}
 	if opts.ExtraContent != "" {
 		content = append(content, opts.ExtraContent)
 	}

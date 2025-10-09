@@ -38,7 +38,7 @@ tasks:
   run:
     desc: Run build
     cmds:
-      - go run .
+      - go run . {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -104,6 +104,6 @@ tasks:
       - git push origin --tags
 
   fetch-tags:
-      cmds:
+    cmds:
       - git tag -d nightly || true
       - git fetch --tags

@@ -54,17 +54,23 @@ func (s MCPState) String() string {
 type MCPEventType string
 
 const (
-	MCPEventStateChanged     MCPEventType = "state_changed"
-	MCPEventToolsListChanged MCPEventType = "tools_list_changed"
+	MCPEventToolsListChanged   MCPEventType = "tools_list_changed"
+	MCPEventPromptsListChanged MCPEventType = "prompts_list_changed"
 )
 
 // MCPEvent represents an event in the MCP system
 type MCPEvent struct {
-	Type      MCPEventType
-	Name      string
-	State     MCPState
-	Error     error
-	ToolCount int
+	Type   MCPEventType
+	Name   string
+	State  MCPState
+	Error  error
+	Counts MCPCounts
+}
+
+// MCPCounts number of available tools, prompts, etc.
+type MCPCounts struct {
+	Tools   int
+	Prompts int
 }
 
 // MCPClientInfo holds information about an MCP client's state
@@ -73,17 +79,19 @@ type MCPClientInfo struct {
 	State       MCPState
 	Error       error
 	Client      *mcp.ClientSession
-	ToolCount   int
+	Counts      MCPCounts
 	ConnectedAt time.Time
 }
 
 var (
-	mcpToolsOnce    sync.Once
-	mcpTools        = csync.NewMap[string, tools.BaseTool]()
-	mcpClient2Tools = csync.NewMap[string, []tools.BaseTool]()
-	mcpClients      = csync.NewMap[string, *mcp.ClientSession]()
-	mcpStates       = csync.NewMap[string, MCPClientInfo]()
-	mcpBroker       = pubsub.NewBroker[MCPEvent]()
+	mcpToolsOnce      sync.Once
+	mcpTools          = csync.NewMap[string, tools.BaseTool]()
+	mcpClient2Tools   = csync.NewMap[string, []tools.BaseTool]()
+	mcpClients        = csync.NewMap[string, *mcp.ClientSession]()
+	mcpStates         = csync.NewMap[string, MCPClientInfo]()
+	mcpBroker         = pubsub.NewBroker[MCPEvent]()
+	mcpPrompts        = csync.NewMap[string, *mcp.Prompt]()
+	mcpClient2Prompts = csync.NewMap[string, []*mcp.Prompt]()
 )
 
 type McpTool struct {
@@ -155,14 +163,14 @@ func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, err
 	if err == nil {
 		return sess, nil
 	}
-	updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, state.ToolCount)
+	updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
 
 	sess, err = createMCPSession(ctx, name, m, cfg.Resolver())
 	if err != nil {
 		return nil, err
 	}
 
-	updateMCPState(name, MCPStateConnected, nil, sess, state.ToolCount)
+	updateMCPState(name, MCPStateConnected, nil, sess, state.Counts)
 	mcpClients.Set(name, sess)
 	return sess, nil
 }
@@ -192,6 +200,9 @@ func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 }
 
 func getTools(ctx context.Context, name string, permissions permission.Service, c *mcp.ClientSession, workingDir string) ([]tools.BaseTool, error) {
+	if c.InitializeResult().Capabilities.Tools == nil {
+		return nil, nil
+	}
 	result, err := c.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
 		return nil, err
@@ -224,31 +235,23 @@ func GetMCPState(name string) (MCPClientInfo, bool) {
 }
 
 // updateMCPState updates the state of an MCP client and publishes an event
-func updateMCPState(name string, state MCPState, err error, client *mcp.ClientSession, toolCount int) {
+func updateMCPState(name string, state MCPState, err error, client *mcp.ClientSession, counts MCPCounts) {
 	info := MCPClientInfo{
-		Name:      name,
-		State:     state,
-		Error:     err,
-		Client:    client,
-		ToolCount: toolCount,
+		Name:   name,
+		State:  state,
+		Error:  err,
+		Client: client,
+		Counts: counts,
 	}
 	switch state {
 	case MCPStateConnected:
 		info.ConnectedAt = time.Now()
 	case MCPStateError:
 		updateMcpTools(name, nil)
+		updateMcpPrompts(name, nil)
 		mcpClients.Del(name)
 	}
 	mcpStates.Set(name, info)
-
-	// Publish state change event
-	mcpBroker.Publish(pubsub.UpdatedEvent, MCPEvent{
-		Type:      MCPEventStateChanged,
-		Name:      name,
-		State:     state,
-		Error:     err,
-		ToolCount: toolCount,
-	})
 }
 
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
@@ -271,13 +274,13 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
 		if m.Disabled {
-			updateMCPState(name, MCPStateDisabled, nil, nil, 0)
+			updateMCPState(name, MCPStateDisabled, nil, nil, MCPCounts{})
 			slog.Debug("skipping disabled mcp", "name", name)
 			continue
 		}
 
 		// Set initial starting state
-		updateMCPState(name, MCPStateStarting, nil, nil, 0)
+		updateMCPState(name, MCPStateStarting, nil, nil, MCPCounts{})
 
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
@@ -293,7 +296,7 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 					default:
 						err = fmt.Errorf("panic: %v", v)
 					}
-					updateMCPState(name, MCPStateError, err, nil, 0)
+					updateMCPState(name, MCPStateError, err, nil, MCPCounts{})
 					slog.Error("panic in mcp client initialization", "error", err, "name", name)
 				}
 			}()
@@ -311,14 +314,27 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 			tools, err := getTools(ctx, name, permissions, c, cfg.WorkingDir())
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
-				updateMCPState(name, MCPStateError, err, nil, 0)
+				updateMCPState(name, MCPStateError, err, nil, MCPCounts{})
+				c.Close()
+				return
+			}
+
+			prompts, err := getPrompts(ctx, c)
+			if err != nil {
+				slog.Error("error listing prompts", "error", err)
+				updateMCPState(name, MCPStateError, err, nil, MCPCounts{})
 				c.Close()
 				return
 			}
 
 			updateMcpTools(name, tools)
+			updateMcpPrompts(name, prompts)
 			mcpClients.Set(name, c)
-			updateMCPState(name, MCPStateConnected, nil, c, len(tools))
+			counts := MCPCounts{
+				Tools:   len(tools),
+				Prompts: len(prompts),
+			}
+			updateMCPState(name, MCPStateConnected, nil, c, counts)
 		}(name, m)
 	}
 	wg.Wait()
@@ -345,7 +361,7 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 
 	transport, err := createMCPTransport(mcpCtx, m, resolver)
 	if err != nil {
-		updateMCPState(name, MCPStateError, err, nil, 0)
+		updateMCPState(name, MCPStateError, err, nil, MCPCounts{})
 		slog.Error("error creating mcp client", "error", err, "name", name)
 		return nil, err
 	}
@@ -363,13 +379,19 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 					Name: name,
 				})
 			},
+			PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
+				mcpBroker.Publish(pubsub.UpdatedEvent, MCPEvent{
+					Type: MCPEventPromptsListChanged,
+					Name: name,
+				})
+			},
 			KeepAlive: time.Minute * 10,
 		},
 	)
 
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
-		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, MCPCounts{})
 		slog.Error("error starting mcp client", "error", err, "name", name)
 		cancel()
 		return nil, err
@@ -446,4 +468,58 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+}
+
+func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*mcp.Prompt, error) {
+	if c.InitializeResult().Capabilities.Prompts == nil {
+		return nil, nil
+	}
+	result, err := c.ListPrompts(ctx, &mcp.ListPromptsParams{})
+	if err != nil {
+		return nil, err
+	}
+	return result.Prompts, nil
+}
+
+// updateMcpPrompts updates the global mcpPrompts and mcpClient2Prompts maps.
+func updateMcpPrompts(mcpName string, prompts []*mcp.Prompt) {
+	if len(prompts) == 0 {
+		mcpClient2Prompts.Del(mcpName)
+	} else {
+		mcpClient2Prompts.Set(mcpName, prompts)
+	}
+	for clientName, prompts := range mcpClient2Prompts.Seq2() {
+		for _, p := range prompts {
+			key := clientName + ":" + p.Name
+			mcpPrompts.Set(key, p)
+		}
+	}
+}
+
+// GetMCPPrompts returns all available MCP prompts.
+func GetMCPPrompts() map[string]*mcp.Prompt {
+	return maps.Collect(mcpPrompts.Seq2())
+}
+
+// GetMCPPrompt returns a specific MCP prompt by name.
+func GetMCPPrompt(name string) (*mcp.Prompt, bool) {
+	return mcpPrompts.Get(name)
+}
+
+// GetMCPPromptsByClient returns all prompts for a specific MCP client.
+func GetMCPPromptsByClient(clientName string) ([]*mcp.Prompt, bool) {
+	return mcpClient2Prompts.Get(clientName)
+}
+
+// GetMCPPromptContent retrieves the content of an MCP prompt with the given arguments.
+func GetMCPPromptContent(ctx context.Context, clientName, promptName string, args map[string]string) (*mcp.GetPromptResult, error) {
+	c, err := getOrRenewClient(ctx, clientName)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name:      promptName,
+		Arguments: args,
+	})
 }

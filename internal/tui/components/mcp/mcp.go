@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss/v2"
 
@@ -56,7 +57,7 @@ func RenderMCPList(opts RenderOptions) []string {
 		// Determine icon and color based on state
 		icon := t.ItemOfflineIcon
 		description := ""
-		extraContent := ""
+		extraContent := []string{}
 
 		if state, exists := mcpStates[l.Name]; exists {
 			switch state.State {
@@ -67,8 +68,11 @@ func RenderMCPList(opts RenderOptions) []string {
 				description = t.S().Subtle.Render("starting...")
 			case agent.MCPStateConnected:
 				icon = t.ItemOnlineIcon
-				if state.ToolCount > 0 {
-					extraContent = t.S().Subtle.Render(fmt.Sprintf("%d tools", state.ToolCount))
+				if count := state.Counts.Tools; count > 0 {
+					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d tools", count)))
+				}
+				if count := state.Counts.Prompts; count > 0 {
+					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d prompts", count)))
 				}
 			case agent.MCPStateError:
 				icon = t.ItemErrorIcon
@@ -88,7 +92,7 @@ func RenderMCPList(opts RenderOptions) []string {
 					Icon:         icon.String(),
 					Title:        l.Name,
 					Description:  description,
-					ExtraContent: extraContent,
+					ExtraContent: strings.Join(extraContent, " "),
 				},
 				opts.MaxWidth,
 			),

@@ -1,3 +1,4 @@
+// Package agent contains the implementation of the AI agent service.
 package agent
 
 import (

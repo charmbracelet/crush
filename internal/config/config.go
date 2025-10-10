@@ -99,7 +99,7 @@ type MCPType string
 
 const (
 	MCPStdio MCPType = "stdio"
-	MCPSse   MCPType = "sse"
+	MCPSSE   MCPType = "sse"
 	MCPHttp  MCPType = "http"
 )
 

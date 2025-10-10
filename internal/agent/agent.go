@@ -359,6 +359,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 				tc.Finished = true
 				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
+				updateErr := a.messages.Update(ctx, *currentAssistant)
+				if updateErr != nil {
+					return nil, updateErr
+				}
 			}
 
 			found := false

@@ -3,6 +3,8 @@ package editor
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -62,6 +65,9 @@ type editorCmp struct {
 	workingPlaceholder string
 
 	keyMap EditorKeyMap
+
+	// injected file dir lister
+	listDirResolver fsext.DirectoryListerResolver
 
 	// File path completions
 	currentQuery          string
@@ -171,6 +177,75 @@ func (m *editorCmp) repositionCompletions() tea.Msg {
 	return completions.RepositionCompletionsMsg{X: x, Y: y}
 }
 
+func onCompletionItemSelect(fsys fs.FS, activeModelHasImageSupport func() (bool, string), item FileCompletionItem, insert bool, m *editorCmp) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	path := item.Path
+	// check if item is an image
+	if isExtOfAllowedImageType(path) {
+		if imagesSupported, modelName := activeModelHasImageSupport(); !imagesSupported {
+			// TODO(tauraamui): consolidate this kind of standard image attachment related warning
+			return m, util.ReportWarn("File attachments are not supported by the current model: " + modelName)
+		}
+		slog.Debug("checking if image is too big", path, 1)
+		tooBig, _ := filepicker.IsFileTooBigWithFS(os.DirFS(filepath.Dir(path)), path, filepicker.MaxAttachmentSize)
+		if tooBig {
+			return m, nil
+		}
+
+		content, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return m, nil
+		}
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		fileName := filepath.Base(path)
+		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+		cmd = util.CmdHandler(filepicker.FilePickedMsg{
+			Attachment: attachment,
+		})
+	}
+
+	word := m.textarea.Word()
+	// If the selected item is a file, insert its path into the textarea
+	originalValue := m.textarea.Value()
+	newValue := originalValue[:m.completionsStartIndex] // Remove the current query
+	if cmd == nil {
+		newValue += path // insert the file path for non-images
+	}
+	newValue += originalValue[m.completionsStartIndex+len(word):] // Append the rest of the value
+	// XXX: This will always move the cursor to the end of the textarea.
+	m.textarea.SetValue(newValue)
+	m.textarea.MoveToEnd()
+	if !insert {
+		m.isCompletionsOpen = false
+		m.currentQuery = ""
+		m.completionsStartIndex = 0
+	}
+
+	return m, cmd
+}
+
+func isExtOfAllowedImageType(path string) bool {
+	isAllowedType := false
+	// TODO(tauraamui) [17/09/2025]: this needs to be combined with the actual data inference/checking
+	//                  of the contents that happens when we resolve the "mime" type
+	for _, ext := range filepicker.AllowedTypes {
+		if strings.HasSuffix(path, ext) {
+			isAllowedType = true
+			break
+		}
+	}
+	return isAllowedType
+}
+
+type ResolveAbs func(path string) (string, error)
+
+func activeModelHasImageSupport() (bool, string) {
+	agentCfg := config.Get().Agents["coder"]
+	model := config.Get().GetModelByType(agentCfg.Model)
+	return model.SupportsImages, model.Name
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -194,22 +269,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if item, ok := msg.Value.(FileCompletionItem); ok {
-			word := m.textarea.Word()
-			// If the selected item is a file, insert its path into the textarea
-			value := m.textarea.Value()
-			value = value[:m.completionsStartIndex] + // Remove the current query
-				item.Path + // Insert the file path
-				value[m.completionsStartIndex+len(word):] // Append the rest of the value
-			// XXX: This will always move the cursor to the end of the textarea.
-			m.textarea.SetValue(value)
-			m.textarea.MoveToEnd()
-			if !msg.Insert {
-				m.isCompletionsOpen = false
-				m.currentQuery = ""
-				m.completionsStartIndex = 0
-			}
+			return onCompletionItemSelect(os.DirFS("."), activeModelHasImageSupport, item, msg.Insert, m)
 		}
-
 	case commands.OpenExternalEditorMsg:
 		if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 			return m, util.ReportWarn("Agent is working, please wait...")
@@ -218,44 +279,6 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
-	case tea.PasteMsg:
-		path := strings.ReplaceAll(string(msg), "\\ ", " ")
-		// try to get an image
-		path, err := filepath.Abs(strings.TrimSpace(path))
-		if err != nil {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-		isAllowedType := false
-		for _, ext := range filepicker.AllowedTypes {
-			if strings.HasSuffix(path, ext) {
-				isAllowedType = true
-				break
-			}
-		}
-		if !isAllowedType {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-		tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
-		if tooBig {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
-		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
-		return m, util.CmdHandler(filepicker.FilePickedMsg{
-			Attachment: attachment,
-		})
-
 	case commands.ToggleYoloModeMsg:
 		m.setEditorPrompt()
 		return m, nil
@@ -270,7 +293,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
 			m.completionsStartIndex = curIdx
-			cmds = append(cmds, m.startCompletions)
+
+			cmds = append(cmds, m.startCompletions())
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
@@ -365,9 +389,11 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *editorCmp) setEditorPrompt() {
-	if m.app.Permissions.SkipRequests() {
-		m.textarea.SetPromptFunc(4, yoloPromptFunc)
-		return
+	if perm := m.app.Permissions; perm != nil {
+		if perm.SkipRequests() {
+			m.textarea.SetPromptFunc(4, yoloPromptFunc)
+			return
+		}
 	}
 	m.textarea.SetPromptFunc(4, normalPromptFunc)
 }
@@ -479,27 +505,27 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 	return nil
 }
 
-func (m *editorCmp) startCompletions() tea.Msg {
-	ls := m.app.Config().Options.TUI.Completions
-	depth, limit := ls.Limits()
-	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
-	slices.Sort(files)
-	completionItems := make([]completions.Completion, 0, len(files))
-	for _, file := range files {
-		file = strings.TrimPrefix(file, "./")
-		completionItems = append(completionItems, completions.Completion{
-			Title: file,
-			Value: FileCompletionItem{
-				Path: file,
-			},
-		})
-	}
+func (m *editorCmp) startCompletions() func() tea.Msg {
+	return func() tea.Msg {
+		files, _, _ := m.listDirResolver()(".", nil)
+		slices.Sort(files)
+		completionItems := make([]completions.Completion, 0, len(files))
+		for _, file := range files {
+			file = strings.TrimPrefix(file, "./")
+			completionItems = append(completionItems, completions.Completion{
+				Title: file,
+				Value: FileCompletionItem{
+					Path: file,
+				},
+			})
+		}
 
-	x, y := m.completionsPosition()
-	return completions.OpenCompletionsMsg{
-		Completions: completionItems,
-		X:           x,
-		Y:           y,
+		x, y := m.completionsPosition()
+		return completions.OpenCompletionsMsg{
+			Completions: completionItems,
+			X:           x,
+			Y:           y,
+		}
 	}
 }
 
@@ -565,7 +591,7 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
 }
 
-func New(app *app.App) Editor {
+func newTextArea() *textarea.Model {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
 	ta.SetStyles(t.S().TextArea)
@@ -573,16 +599,26 @@ func New(app *app.App) Editor {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.Focus()
-	e := &editorCmp{
+	return ta
+}
+
+func newEditor(app *app.App, resolveDirLister fsext.DirectoryListerResolver) *editorCmp {
+	e := editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:             app,
+		textarea:        newTextArea(),
+		keyMap:          DefaultEditorKeyMap(),
+		listDirResolver: resolveDirLister,
 	}
 	e.setEditorPrompt()
 
 	e.randomizePlaceholders()
 	e.textarea.Placeholder = e.readyPlaceholder
 
-	return e
+	return &e
+}
+
+func New(app *app.App) Editor {
+	ls := app.Config().Options.TUI.Completions.Limits
+	return newEditor(app, fsext.ResolveDirectoryLister(ls()))
 }

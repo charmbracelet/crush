@@ -2,6 +2,7 @@ package filepicker
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,33 +130,42 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Get the path of the selected file.
 		return m, tea.Sequence(
 			util.CmdHandler(dialogs.CloseDialogMsg{}),
-			func() tea.Msg {
-				isFileLarge, err := IsFileTooBig(path, MaxAttachmentSize)
-				if err != nil {
-					return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
-				}
-				if isFileLarge {
-					return util.ReportError(fmt.Errorf("file too large, max 5MB"))
-				}
-
-				content, err := os.ReadFile(path)
-				if err != nil {
-					return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
-				}
-
-				mimeBufferSize := min(512, len(content))
-				mimeType := http.DetectContentType(content[:mimeBufferSize])
-				fileName := filepath.Base(path)
-				attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
-				return FilePickedMsg{
-					Attachment: attachment,
-				}
-			},
+			onPaste(resolveFS, path),
 		)
 	}
 	m.image, cmd = m.image.Update(msg)
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)
+}
+
+func resolveFS(baseDirPath string) fs.FS {
+	return os.DirFS(baseDirPath)
+}
+
+func onPaste(resolveFsys func(path string) fs.FS, path string) func() tea.Msg {
+	fsys := resolveFsys(filepath.Dir(path))
+	name := filepath.Base(path)
+	return func() tea.Msg {
+		isFileLarge, err := IsFileTooBigWithFS(fsys, name, MaxAttachmentSize)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("unable to read the image: %w, %s", err, path))
+		}
+		if isFileLarge {
+			return util.ReportError(fmt.Errorf("file too large, max 5MB"))
+		}
+
+		content, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("unable to read the image: %w", err))
+		}
+
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		attachment := message.Attachment{FilePath: path, FileName: name, MimeType: mimeType, Content: content}
+		return FilePickedMsg{
+			Attachment: attachment,
+		}
+	}
 }
 
 func (m *model) View() string {
@@ -246,8 +256,16 @@ func (m *model) Position() (int, int) {
 	return row, col
 }
 
+func IsFileTooBigWithFS(fsys fs.FS, filePath string, sizeLimit int64) (bool, error) {
+	return isFileTooBigFS(fsys, filePath, sizeLimit)
+}
+
 func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
-	fileInfo, err := os.Stat(filePath)
+	return isFileTooBigFS(os.DirFS("."), filePath, sizeLimit)
+}
+
+func isFileTooBigFS(fsys fs.FS, filePath string, sizeLimit int64) (bool, error) {
+	fileInfo, err := fs.Stat(fsys, filePath)
 	if err != nil {
 		return false, fmt.Errorf("error getting file info: %w", err)
 	}

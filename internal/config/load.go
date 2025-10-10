@@ -282,12 +282,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.Type != catwalk.TypeOpenAI && providerConfig.Type != catwalk.TypeAnthropic && providerConfig.Type != catwalk.TypeGemini {
-			slog.Warn("Skipping custom provider because the provider type is not supported", "provider", id, "type", providerConfig.Type)
-			c.Providers.Del(id)
-			continue
-		}
-
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)

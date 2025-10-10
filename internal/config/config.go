@@ -563,7 +563,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		testURL = baseURL + "/models"
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGemini:
+	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://generativelanguage.googleapis.com"

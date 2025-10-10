@@ -326,7 +326,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			}
 
 			// OpenAI models: reasoning effort dialog
-			if model.HasReasoningEffort {
+			if len(model.ReasoningLevels) > 0 {
 				commands = append(commands, Command{
 					ID:          "select_reasoning_effort",
 					Title:       "Select Reasoning Effort",

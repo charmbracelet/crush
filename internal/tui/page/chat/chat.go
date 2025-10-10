@@ -563,7 +563,7 @@ func (p *chatPage) openReasoningDialog() tea.Cmd {
 		model := cfg.GetModelByType(agentCfg.Model)
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 
-		if providerCfg != nil && model != nil && model.HasReasoningEffort {
+		if providerCfg != nil && model != nil && len(model.ReasoningLevels) > 0 {
 			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
 			return dialogs.OpenDialogMsg{
 				Model: reasoning.NewReasoningDialog(),

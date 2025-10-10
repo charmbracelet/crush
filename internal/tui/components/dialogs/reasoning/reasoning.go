@@ -5,6 +5,8 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -130,19 +132,13 @@ func (r *reasoningDialogCmp) populateEffortOptions() tea.Cmd {
 			currentEffort = model.DefaultReasoningEffort
 		}
 
-		efforts := []EffortOption{
-			{
-				Title:  "Low",
-				Effort: "low",
-			},
-			{
-				Title:  "Medium",
-				Effort: "medium",
-			},
-			{
-				Title:  "High",
-				Effort: "high",
-			},
+		efforts := []EffortOption{}
+		caser := cases.Title(language.Und)
+		for _, level := range model.ReasoningLevels {
+			efforts = append(efforts, EffortOption{
+				Title:  caser.String(level),
+				Effort: level,
+			})
 		}
 
 		effortItems := []list.CompletionItem[EffortOption]{}

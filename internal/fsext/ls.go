@@ -210,7 +210,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
-	slog.Warn("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
+	slog.Debug("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
 
 	conf := fastwalk.Config{
 		Follow:   true,

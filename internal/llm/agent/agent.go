@@ -175,9 +175,9 @@ func NewAgent(
 	}
 
 	baseToolsFn := func() map[string]tools.BaseTool {
-		slog.Info("Initializing agent base tools", "agent", agentCfg.ID)
+		slog.Debug("Initializing agent base tools", "agent", agentCfg.ID)
 		defer func() {
-			slog.Info("Initialized agent base tools", "agent", agentCfg.ID)
+			slog.Debug("Initialized agent base tools", "agent", agentCfg.ID)
 		}()
 
 		// Base tools available to all agents
@@ -201,9 +201,9 @@ func NewAgent(
 		return result
 	}
 	mcpToolsFn := func() map[string]tools.BaseTool {
-		slog.Info("Initializing agent mcp tools", "agent", agentCfg.ID)
+		slog.Debug("Initializing agent mcp tools", "agent", agentCfg.ID)
 		defer func() {
-			slog.Info("Initialized agent mcp tools", "agent", agentCfg.ID)
+			slog.Debug("Initialized agent mcp tools", "agent", agentCfg.ID)
 		}()
 
 		mcpToolsOnce.Do(func() {

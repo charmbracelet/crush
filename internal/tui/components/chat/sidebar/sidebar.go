@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/components/agent"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
@@ -167,6 +168,8 @@ func (m *sidebarCmp) View() string {
 			m.lspBlock(),
 			"",
 			m.mcpBlock(),
+			"",
+			m.agentFilesBlock(),
 		)
 	}
 
@@ -503,6 +506,15 @@ func (m *sidebarCmp) mcpBlock() string {
 		ShowSection: true,
 		SectionName: core.Section("MCPs", m.getMaxWidth()),
 	}, true)
+}
+
+func (m *sidebarCmp) agentFilesBlock() string {
+	return agent.RenderAgentFilesBlock(agent.RenderOptions{
+		MaxWidth:    m.getMaxWidth(),
+		MaxItems:    2,
+		ShowSection: true,
+		SectionName: core.Section("Agent Files", m.getMaxWidth()),
+	})
 }
 
 func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {

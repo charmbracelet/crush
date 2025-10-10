@@ -130,8 +130,7 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	Theme       string `json:"theme,omitempty" jsonschema:"description=Theme for the TUI interface,enum=charmtone,enum=charmtone-light,default=charmtone"`
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 }
@@ -371,8 +370,32 @@ func (c *Config) SetCompactMode(enabled bool) error {
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
+	if c.Options.TUI == nil {
+		c.Options.TUI = &TUIOptions{}
+	}
 	c.Options.TUI.CompactMode = enabled
 	return c.SetConfigField("options.tui.compact_mode", enabled)
+}
+
+func (c *Config) SetTheme(theme string) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	if c.Options.TUI == nil {
+		c.Options.TUI = &TUIOptions{}
+	}
+	c.Options.TUI.Theme = theme
+	return c.SetConfigField("options.tui.theme", theme)
+}
+
+func (c *Config) GetTheme() string {
+	if c.Options == nil || c.Options.TUI == nil {
+		return "charmtone" // default theme
+	}
+	if c.Options.TUI.Theme == "" {
+		return "charmtone" // default theme
+	}
+	return c.Options.TUI.Theme
 }
 
 func (c *Config) Resolve(key string) (string, error) {

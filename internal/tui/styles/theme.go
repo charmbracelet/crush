@@ -506,6 +506,22 @@ func DefaultManager() *Manager {
 	return defaultManager
 }
 
+// InitializeWithConfig sets up the default theme manager using config
+func InitializeWithConfig(cfg interface{}) {
+	// Accept interface{} to avoid circular imports, but we expect it to have a method to get theme
+	if configGetter, ok := cfg.(interface {
+		GetTheme() string
+	}); ok {
+		themeName := configGetter.GetTheme()
+		if themeName != "" {
+			defaultManager = NewManagerWithTheme(themeName)
+			return
+		}
+	}
+	// Fall back to default if no config or theme specified
+	defaultManager = NewManager()
+}
+
 func CurrentTheme() *Theme {
 	if defaultManager == nil {
 		defaultManager = NewManager()
@@ -518,10 +534,27 @@ func NewManager() *Manager {
 		themes: make(map[string]*Theme),
 	}
 
-	t := NewCharmtoneTheme() // default theme
-	m.Register(t)
-	m.current = m.themes[t.Name]
+	// Register default dark theme
+	darkTheme := NewCharmtoneTheme()
+	m.Register(darkTheme)
 
+	// Register light theme
+	lightTheme := NewCharmtoneLightTheme()
+	m.Register(lightTheme)
+
+	// Set dark theme as default
+	m.current = m.themes[darkTheme.Name]
+
+	return m
+}
+
+// NewManagerWithTheme creates a new theme manager and sets the specified theme
+func NewManagerWithTheme(themeName string) *Manager {
+	m := NewManager()
+	if err := m.SetTheme(themeName); err != nil {
+		// If the theme doesn't exist, fall back to default
+		return m
+	}
 	return m
 }
 

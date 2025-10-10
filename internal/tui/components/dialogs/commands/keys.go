@@ -76,6 +76,7 @@ type ArgumentsDialogKeyMap struct {
 	Confirm  key.Binding
 	Next     key.Binding
 	Previous key.Binding
+	Cancel   key.Binding
 }
 
 func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
@@ -92,6 +93,10 @@ func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
 		Previous: key.NewBinding(
 			key.WithKeys("shift+tab", "up"),
 			key.WithHelp("shift+tab/↑", "previous"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/fantasy/ai"
 	"github.com/charmbracelet/fantasy/anthropic"
+	"github.com/charmbracelet/fantasy/azure"
 	"github.com/charmbracelet/fantasy/google"
 	"github.com/charmbracelet/fantasy/openai"
 	"github.com/charmbracelet/fantasy/openaicompat"
@@ -369,6 +370,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 
 func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
 	opts := []openaicompat.Option{
+		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
 	}
 	if c.cfg.Options.Debug {
@@ -379,7 +381,29 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(opts, openaicompat.WithHeaders(headers))
 	}
 
-	return openaicompat.New(baseURL, opts...)
+	return openaicompat.New(opts...)
+}
+
+func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) ai.Provider {
+	opts := []azure.Option{
+		azure.WithBaseURL(baseURL),
+		azure.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, azure.WithHTTPClient(httpClient))
+	}
+	if options == nil {
+		options = make(map[string]string)
+	}
+	if apiVersion, ok := options["apiVersion"]; ok {
+		opts = append(opts, azure.WithAPIVersion(apiVersion))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, azure.WithHeaders(headers))
+	}
+
+	return azure.New(opts...)
 }
 
 // TODO: add baseURL for google
@@ -435,6 +459,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		provider = c.buildAnthropicProvider(baseURL, apiKey, headers)
 	case openrouter.Name:
 		provider = c.buildOpenrouterProvider(baseURL, apiKey, headers)
+	case azure.Name:
+		provider = c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case google.Name:
 		provider = c.buildGoogleProvider(baseURL, apiKey, headers)
 	case openaicompat.Name:

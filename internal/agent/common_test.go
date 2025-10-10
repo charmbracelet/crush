@@ -79,7 +79,7 @@ func openRouterBuilder(model string) builderFunc {
 func zAIBuilder(model string) builderFunc {
 	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
 		provider := openaicompat.New(
-			"https://api.z.ai/api/coding/paas/v4",
+			openaicompat.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)

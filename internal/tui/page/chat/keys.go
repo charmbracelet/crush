@@ -5,11 +5,12 @@ import (
 )
 
 type KeyMap struct {
-	NewSession    key.Binding
-	AddAttachment key.Binding
-	Cancel        key.Binding
-	Tab           key.Binding
-	Details       key.Binding
+	NewSession     key.Binding
+	AddAttachment  key.Binding
+	AddMCPResource key.Binding
+	Cancel         key.Binding
+	Tab            key.Binding
+	Details        key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -21,6 +22,10 @@ func DefaultKeyMap() KeyMap {
 		AddAttachment: key.NewBinding(
 			key.WithKeys("ctrl+f"),
 			key.WithHelp("ctrl+f", "add attachment"),
+		),
+		AddMCPResource: key.NewBinding(
+			key.WithKeys("ctrl+r"),
+			key.WithHelp("ctrl+r", "add mcp resource"),
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),

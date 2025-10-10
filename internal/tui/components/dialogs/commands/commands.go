@@ -79,6 +79,7 @@ type (
 	SwitchModelMsg         struct{}
 	QuitMsg                struct{}
 	OpenFilePickerMsg      struct{}
+	OpenResourcePickerMsg  struct{}
 	ToggleHelpMsg          struct{}
 	ToggleCompactModeMsg   struct{}
 	ToggleThinkingMsg      struct{}

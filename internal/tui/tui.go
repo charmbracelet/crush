@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcp"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -253,6 +254,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
+		})
+	// Resource Picker
+	case commands.OpenResourcePickerMsg:
+		if a.dialog.ActiveDialogID() == mcp.ResourcePickerID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: mcp.NewResourcePickerCmp(),
 		})
 	// Permissions
 	case pubsub.Event[permission.PermissionNotification]:

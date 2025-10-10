@@ -126,9 +126,16 @@ func (a *anthropicClient) convertMessages(messages []message.Message) (anthropic
 			var contentBlocks []anthropic.ContentBlockParamUnion
 			contentBlocks = append(contentBlocks, content)
 			for _, binaryContent := range msg.BinaryContent() {
-				base64Image := binaryContent.String(catwalk.InferenceProviderAnthropic)
-				imageBlock := anthropic.NewImageBlockBase64(binaryContent.MIMEType, base64Image)
-				contentBlocks = append(contentBlocks, imageBlock)
+				if strings.HasPrefix(binaryContent.MIMEType, "image/") {
+					base64Image := binaryContent.String(catwalk.InferenceProviderAnthropic)
+					imageBlock := anthropic.NewImageBlockBase64(binaryContent.MIMEType, base64Image)
+					contentBlocks = append(contentBlocks, imageBlock)
+					continue
+				}
+				blk := anthropic.NewDocumentBlock(anthropic.PlainTextSourceParam{
+					Data: string(binaryContent.Data),
+				})
+				contentBlocks = append(contentBlocks, blk)
 			}
 			anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(contentBlocks...))
 

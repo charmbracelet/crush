@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -30,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcp"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
@@ -286,6 +288,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 	case filepicker.FilePickedMsg,
+		mcp.ResourcePickedMsg,
 		completions.CompletionsClosedMsg,
 		completions.SelectCompletionMsg:
 		u, cmd := p.editor.Update(msg)
@@ -378,6 +381,9 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
 			}
+		case key.Matches(msg, p.keyMap.AddMCPResource):
+			slog.Warn("AQUI")
+			return p, util.CmdHandler(commands.OpenResourcePickerMsg{})
 		case key.Matches(msg, p.keyMap.Tab):
 			if p.session.ID == "" {
 				u, cmd := p.splash.Update(msg)
@@ -761,6 +767,7 @@ func (p *chatPage) Bindings() []key.Binding {
 	bindings := []key.Binding{
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
+		p.keyMap.AddMCPResource,
 	}
 	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
@@ -1020,6 +1027,10 @@ func (p *chatPage) Help() help.KeyMap {
 					key.NewBinding(
 						key.WithKeys("ctrl+f"),
 						key.WithHelp("ctrl+f", "add image"),
+					),
+					key.NewBinding(
+						key.WithKeys("ctrl+m"),
+						key.WithHelp("ctrl+m", "add mcp resource"),
 					),
 					key.NewBinding(
 						key.WithKeys("/"),

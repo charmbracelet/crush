@@ -349,9 +349,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			return result, err
 		}
 		toolCalls := currentAssistant.ToolCalls()
-		toolResults := currentAssistant.ToolResults()
 		// INFO: we use the parent context here because the genCtx has been cancelled
-		msgs, createErr := a.messages.List(ctx, currentSession.ID)
+		msgs, createErr := a.messages.List(ctx, currentAssistant.SessionID)
 		if createErr != nil {
 			return nil, createErr
 		}
@@ -359,13 +358,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			if !tc.Finished {
 				tc.Finished = true
 				tc.Input = "{}"
+				currentAssistant.AddToolCall(tc)
 			}
-			currentAssistant.AddToolCall(tc)
 
 			found := false
 			for _, msg := range msgs {
 				if msg.Role == message.Tool {
-					for _, tr := range toolResults {
+					for _, tr := range msg.ToolResults() {
 						if tr.ToolCallID == tc.ID {
 							found = true
 							break

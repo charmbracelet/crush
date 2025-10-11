@@ -602,7 +602,6 @@ func (a *appModel) View() tea.View {
 
 	view.Layer = canvas
 	view.Cursor = cursor
-	view.ProgressBar = tea.NewProgressBar(tea.ProgressBarNone, 0)
 	if a.app != nil && a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.

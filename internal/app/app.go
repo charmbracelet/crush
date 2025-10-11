@@ -107,10 +107,6 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Start progress bar and spinner
-	fmt.Printf(ansi.SetIndeterminateProgressBar)
-	defer fmt.Printf(ansi.ResetProgressBar)
-
 	var spinner *format.Spinner
 	if !quiet {
 		spinner = format.NewSpinner(ctx, cancel, "Generating")
@@ -154,7 +150,11 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 
+	defer fmt.Printf(ansi.ResetProgressBar)
 	for {
+		// HACK: add it again on every iteration so it doesn't get hidden by
+		// the terminal due to inactivity.
+		fmt.Printf(ansi.SetIndeterminateProgressBar)
 		select {
 		case result := <-done:
 			stopSpinner()

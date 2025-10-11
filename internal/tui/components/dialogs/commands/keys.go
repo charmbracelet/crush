@@ -77,6 +77,7 @@ type ArgumentsDialogKeyMap struct {
 	Next     key.Binding
 	Previous key.Binding
 	Paste    key.Binding
+	Close    key.Binding
 }
 
 func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
@@ -98,6 +99,10 @@ func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
 			key.WithKeys("ctrl+v"),
 			key.WithHelp("ctrl+v", "paste"),
 		),
+		Close: key.NewBinding(
+			key.WithKeys("esc", "alt+esc"),
+			key.WithHelp("esc", "cancel"),
+		),
 	}
 }
 
@@ -108,6 +113,7 @@ func (k ArgumentsDialogKeyMap) KeyBindings() []key.Binding {
 		k.Next,
 		k.Previous,
 		k.Paste,
+		k.Close,
 	}
 }
 
@@ -129,5 +135,6 @@ func (k ArgumentsDialogKeyMap) ShortHelp() []key.Binding {
 		k.Next,
 		k.Previous,
 		k.Paste,
+		k.Close,
 	}
 }

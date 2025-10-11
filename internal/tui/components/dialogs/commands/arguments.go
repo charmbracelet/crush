@@ -130,6 +130,8 @@ func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.inputs[c.focusIndex].Focus()
 		case key.Matches(msg, c.keys.Paste):
 			return c, textinput.Paste
+		case key.Matches(msg, c.keys.Close):
+			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			var cmd tea.Cmd
 			c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)

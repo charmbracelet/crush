@@ -150,9 +150,10 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 
-	// Start progress bar and spinner
 	defer fmt.Printf(ansi.ResetProgressBar)
 	for {
+		// HACK: add it again on every iteration so it doesn't get hidden by
+		// the terminal due to inactivity.
 		fmt.Printf(ansi.SetIndeterminateProgressBar)
 		select {
 		case result := <-done:

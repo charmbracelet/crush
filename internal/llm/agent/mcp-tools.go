@@ -398,7 +398,9 @@ func createMCPTransport(ctx context.Context, m config.MCPConfig, resolver config
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
-		cmd.Env = m.ResolvedEnv()
+		if env := m.ResolvedEnv(); len(env) > 0 {
+			cmd.Env = env
+		}
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil

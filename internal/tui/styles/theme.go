@@ -24,6 +24,58 @@ const (
 	defaultMargin          = 2
 )
 
+type MarkdownColors struct {
+	// Basic Markdown elements
+	Document     color.Color
+	Heading      color.Color
+	H1Bg         color.Color
+	H1Fg         color.Color
+	H6           color.Color
+	Rule         color.Color
+	BlockQuote   color.Color
+	Item         color.Color
+	Enumeration  color.Color
+	TaskTicked   color.Color
+	TaskUnticked color.Color
+	Link         color.Color
+	LinkText     color.Color
+	Image        color.Color
+	ImageText    color.Color
+	Code         color.Color
+	CodeBg       color.Color
+	CodeBlock    color.Color
+
+	// Chroma syntax highlighting
+	Chroma ChromaColors
+}
+
+type ChromaColors struct {
+	Text                color.Color
+	Error               color.Color
+	Comment             color.Color
+	CommentPreproc      color.Color
+	Keyword             color.Color
+	KeywordReserved     color.Color
+	KeywordNamespace    color.Color
+	KeywordType         color.Color
+	Operator            color.Color
+	Punctuation         color.Color
+	Name                color.Color
+	NameBuiltin         color.Color
+	NameTag             color.Color
+	NameAttribute       color.Color
+	NameClass           color.Color
+	NameDecorator       color.Color
+	NameFunction        color.Color
+	LiteralNumber       color.Color
+	LiteralString       color.Color
+	LiteralStringEscape color.Color
+	GenericDeleted      color.Color
+	GenericInserted     color.Color
+	GenericSubheading   color.Color
+	Background          color.Color
+}
+
 type Theme struct {
 	Name   string
 	IsDark bool
@@ -74,6 +126,9 @@ type Theme struct {
 	RedDark  color.Color
 	RedLight color.Color
 	Cherry   color.Color
+
+	// Markdown colors
+	Markdown MarkdownColors
 
 	// Text selection.
 	TextSelection lipgloss.Style
@@ -214,14 +269,16 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					// BlockPrefix: "\n",
 					// BlockSuffix: "\n",
-					Color: stringPtr(charmtone.Smoke.Hex()),
+					Color: colorHex(t.getMdColor(t.Markdown.Document, t.FgBase)),
 				},
 				// Margin: uintPtr(defaultMargin),
 			},
 			BlockQuote: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{},
-				Indent:         uintPtr(1),
-				IndentToken:    stringPtr("│ "),
+				StylePrimitive: ansi.StylePrimitive{
+					Color: colorHex(t.getMdColor(t.Markdown.BlockQuote, t.FgMuted)),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: stringPtr("│ "),
 			},
 			List: ansi.StyleList{
 				LevelIndent: defaultListIndent,
@@ -229,7 +286,7 @@ func (t *Theme) buildStyles() *Styles {
 			Heading: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					BlockSuffix: "\n",
-					Color:       stringPtr(charmtone.Malibu.Hex()),
+					Color:       colorHex(t.getMdColor(t.Markdown.Heading, t.Accent)),
 					Bold:        boolPtr(true),
 				},
 			},
@@ -237,8 +294,8 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix:          " ",
 					Suffix:          " ",
-					Color:           stringPtr(charmtone.Zest.Hex()),
-					BackgroundColor: stringPtr(charmtone.Charple.Hex()),
+					Color:           colorHex(t.getMdColor(t.Markdown.H1Fg, t.Markdown.H1Bg)),
+					BackgroundColor: colorHex(t.getMdColor(t.Markdown.H1Bg, t.Primary)),
 					Bold:            boolPtr(true),
 				},
 			},
@@ -265,7 +322,7 @@ func (t *Theme) buildStyles() *Styles {
 			H6: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix: "###### ",
-					Color:  stringPtr(charmtone.Guac.Hex()),
+					Color:  colorHex(t.getMdColor(t.Markdown.H6, t.FgMuted)),
 					Bold:   boolPtr(false),
 				},
 			},
@@ -279,132 +336,136 @@ func (t *Theme) buildStyles() *Styles {
 				Bold: boolPtr(true),
 			},
 			HorizontalRule: ansi.StylePrimitive{
-				Color:  stringPtr(charmtone.Charcoal.Hex()),
+				Color:  colorHex(t.getMdColor(t.Markdown.Rule, t.Border)),
 				Format: "\n--------\n",
 			},
 			Item: ansi.StylePrimitive{
 				BlockPrefix: "• ",
+				Color:       colorHex(t.getMdColor(t.Markdown.Item, t.FgBase)),
 			},
 			Enumeration: ansi.StylePrimitive{
 				BlockPrefix: ". ",
+				Color:       colorHex(t.getMdColor(t.Markdown.Enumeration, t.FgBase)),
 			},
 			Task: ansi.StyleTask{
-				StylePrimitive: ansi.StylePrimitive{},
-				Ticked:         "[✓] ",
-				Unticked:       "[ ] ",
+				StylePrimitive: ansi.StylePrimitive{
+					Color: colorHex(t.getMdColor(t.Markdown.TaskTicked, t.FgBase)),
+				},
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
 			},
 			Link: ansi.StylePrimitive{
-				Color:     stringPtr(charmtone.Zinc.Hex()),
+				Color:     colorHex(t.getMdColor(t.Markdown.Link, t.Accent)),
 				Underline: boolPtr(true),
 			},
 			LinkText: ansi.StylePrimitive{
-				Color: stringPtr(charmtone.Guac.Hex()),
+				Color: colorHex(t.getMdColor(t.Markdown.LinkText, t.Accent)),
 				Bold:  boolPtr(true),
 			},
 			Image: ansi.StylePrimitive{
-				Color:     stringPtr(charmtone.Cheeky.Hex()),
+				Color:     colorHex(t.getMdColor(t.Markdown.Image, t.Accent)),
 				Underline: boolPtr(true),
 			},
 			ImageText: ansi.StylePrimitive{
-				Color:  stringPtr(charmtone.Squid.Hex()),
+				Color:  colorHex(t.getMdColor(t.Markdown.ImageText, t.FgMuted)),
 				Format: "Image: {{.text}} →",
 			},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix:          " ",
 					Suffix:          " ",
-					Color:           stringPtr(charmtone.Coral.Hex()),
-					BackgroundColor: stringPtr(charmtone.Charcoal.Hex()),
+					Color:           colorHex(t.getMdColor(t.Markdown.Code, t.Accent)),
+					BackgroundColor: colorHex(t.getMdColor(t.Markdown.CodeBg, t.BgSubtle)),
 				},
 			},
 			CodeBlock: ansi.StyleCodeBlock{
 				StyleBlock: ansi.StyleBlock{
 					StylePrimitive: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Charcoal.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.CodeBlock, t.FgBase)),
 					},
 					Margin: uintPtr(defaultMargin),
 				},
 				Chroma: &ansi.Chroma{
 					Text: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Smoke.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Text, t.FgBase)),
 					},
 					Error: ansi.StylePrimitive{
-						Color:           stringPtr(charmtone.Butter.Hex()),
+						Color:           colorHex(t.getMdColor(t.Markdown.Chroma.Error, t.Error)),
 						BackgroundColor: stringPtr(charmtone.Sriracha.Hex()),
 					},
 					Comment: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Oyster.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Comment, t.FgMuted)),
 					},
 					CommentPreproc: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Bengal.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.CommentPreproc, t.FgMuted)),
 					},
 					Keyword: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Malibu.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Keyword, t.Accent)),
 					},
 					KeywordReserved: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Pony.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.KeywordReserved, t.Accent)),
 					},
 					KeywordNamespace: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Pony.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.KeywordNamespace, t.Accent)),
 					},
 					KeywordType: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guppy.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.KeywordType, t.Secondary)),
 					},
 					Operator: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Salmon.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Operator, t.FgBase)),
 					},
 					Punctuation: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Zest.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Punctuation, t.FgBase)),
 					},
 					Name: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Smoke.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.Name, t.FgBase)),
 					},
 					NameBuiltin: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Cheeky.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.NameBuiltin, t.Accent)),
 					},
 					NameTag: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Mauve.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.NameTag, t.Secondary)),
 					},
 					NameAttribute: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Hazy.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.NameAttribute, t.Tertiary)),
 					},
 					NameClass: ansi.StylePrimitive{
-						Color:     stringPtr(charmtone.Salt.Hex()),
+						Color:     colorHex(t.getMdColor(t.Markdown.Chroma.NameClass, t.FgBase)),
 						Underline: boolPtr(true),
 						Bold:      boolPtr(true),
 					},
 					NameDecorator: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Citron.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.NameDecorator, t.Tertiary)),
 					},
 					NameFunction: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guac.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.NameFunction, t.Accent)),
 					},
 					LiteralNumber: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Julep.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.LiteralNumber, t.Secondary)),
 					},
 					LiteralString: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Cumin.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.LiteralString, t.Secondary)),
 					},
 					LiteralStringEscape: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Bok.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.LiteralStringEscape, t.FgBase)),
 					},
 					GenericDeleted: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Coral.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.GenericDeleted, t.Error)),
 					},
 					GenericEmph: ansi.StylePrimitive{
 						Italic: boolPtr(true),
 					},
 					GenericInserted: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guac.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.GenericInserted, t.Success)),
 					},
 					GenericStrong: ansi.StylePrimitive{
 						Bold: boolPtr(true),
 					},
 					GenericSubheading: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Squid.Hex()),
+						Color: colorHex(t.getMdColor(t.Markdown.Chroma.GenericSubheading, t.FgMuted)),
 					},
 					Background: ansi.StylePrimitive{
-						BackgroundColor: stringPtr(charmtone.Charcoal.Hex()),
+						BackgroundColor: colorHex(t.getMdColor(t.Markdown.Chroma.Background, t.BgSubtle)),
 					},
 				},
 			},
@@ -651,6 +712,25 @@ func ForegroundGrad(input string, bold bool, color1, color2 color.Color) []strin
 		clusters[i] = style.Render(clusters[i])
 	}
 	return clusters
+}
+
+// Helper to get Markdown color with fallback to theme colors
+func (t *Theme) getMdColor(mdColor, fallback color.Color) color.Color {
+	if mdColor != nil {
+		return mdColor
+	}
+	return fallback
+}
+
+// Helper to convert color to hex string pointer
+func colorHex(c color.Color) *string {
+	if c == nil {
+		return nil
+	}
+	// Convert color.Color to hex string
+	r, g, b, _ := c.RGBA()
+	hex := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	return &hex
 }
 
 // ApplyForegroundGrad renders a given string with a horizontal gradient

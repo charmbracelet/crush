@@ -23,9 +23,9 @@ func NewCharmtoneLightTheme() *Theme {
 
 		// Foregrounds - Light theme uses dark colors for better contrast
 		FgBase:      charmtone.Pepper,   // Very dark for main text (#201F26)
-		FgMuted:     charmtone.BBQ,      // Dark for muted text (#2d2c35)
-		FgHalfMuted: charmtone.Charcoal, // Medium dark for half-muted (#3A3943)
-		FgSubtle:    charmtone.Iron,     // Medium gray for subtle text (#4D4C57)
+		FgMuted:     charmtone.Iron,     // Medium gray for muted text (#4D4C57)
+		FgHalfMuted: charmtone.BBQ,      // Dark for half-muted text (#2d2c35)
+		FgSubtle:    charmtone.Charcoal, // Medium dark for subtle text (#3A3943)
 		FgSelected:  charmtone.Butter,   // Light text for selected items
 
 		// Borders
@@ -55,6 +55,53 @@ func NewCharmtoneLightTheme() *Theme {
 		RedDark:  charmtone.Cherry,
 		RedLight: charmtone.Salmon,
 		Cherry:   charmtone.Cheeky,
+
+		// Markdown colors
+		Markdown: MarkdownColors{
+			Document:     charmtone.Pepper,   // Dark text on light bg
+			Heading:      charmtone.Sapphire, // Darker blue for contrast
+			H1Bg:         charmtone.Hazy,     // Light purple background
+			H1Fg:         charmtone.Pepper,   // Dark text
+			H6:           charmtone.Turtle,   // Darker green
+			Rule:         charmtone.Ash,      // Medium gray
+			BlockQuote:   nil,                // Use theme default
+			Item:         nil,                // Use theme default
+			Enumeration:  nil,                // Use theme default
+			TaskTicked:   nil,                // Use theme default
+			TaskUnticked: nil,                // Use theme default
+			Link:         charmtone.Sapphire, // Blue for links
+			LinkText:     charmtone.Turtle,   // Dark green
+			Code:         charmtone.Cherry,   // Dark red
+			CodeBg:       charmtone.Ash,      // Light gray background
+			CodeBlock:    charmtone.Ash,      // Light gray background
+
+			Chroma: ChromaColors{
+				Text:                charmtone.Pepper,
+				Error:               charmtone.Cherry,
+				Comment:             charmtone.Iron,
+				CommentPreproc:      charmtone.Squid,
+				Keyword:             charmtone.Sapphire,
+				KeywordReserved:     charmtone.Citron,
+				KeywordNamespace:    charmtone.Citron,
+				KeywordType:         charmtone.Turtle,
+				Operator:            charmtone.Salmon,
+				Punctuation:         charmtone.Charcoal,
+				Name:                charmtone.Pepper,
+				NameBuiltin:         charmtone.Cheeky,
+				NameTag:             charmtone.Mauve,
+				NameAttribute:       charmtone.Hazy,
+				NameClass:           charmtone.Charcoal,
+				NameDecorator:       charmtone.Citron,
+				NameFunction:        charmtone.Turtle,
+				LiteralNumber:       charmtone.Julep,
+				LiteralString:       charmtone.Cumin,
+				LiteralStringEscape: charmtone.Bok,
+				GenericDeleted:      charmtone.Cherry,
+				GenericInserted:     charmtone.Turtle,
+				GenericSubheading:   charmtone.Squid,
+				Background:          charmtone.Ash,
+			},
+		},
 	}
 
 	// Text selection - Dark text on light purple background

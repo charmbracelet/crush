@@ -183,9 +183,13 @@ func NewAgent(
 
 		// Base tools available to all agents
 		cwd := cfg.WorkingDir()
+		allowedCommands := []string{}
+		if cfg.Permissions != nil {
+			allowedCommands = cfg.Permissions.AllowedCommands
+		}
 		result := make(map[string]tools.BaseTool)
 		for _, tool := range []tools.BaseTool{
-			tools.NewBashTool(permissions, cwd, cfg.Options.Attribution),
+			tools.NewBashTool(permissions, cwd, cfg.Options.Attribution, allowedCommands),
 			tools.NewDownloadTool(permissions, cwd),
 			tools.NewEditTool(lspClients, permissions, history, cwd),
 			tools.NewMultiEditTool(lspClients, permissions, history, cwd),

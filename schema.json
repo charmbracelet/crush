@@ -374,6 +374,17 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "wget"
+            ]
+          },
+          "type": "array",
+          "description": "List of commands that are allowed in bash tool"
         }
       },
       "additionalProperties": false,

@@ -2,5 +2,8 @@
   "$schema": "https://charm.land/crush.json",
   "lsp": {
     "gopls": {}
+  },
+  "permissions": {
+    "allowed_commands": ["curl"]
   }
 }

@@ -18,13 +18,13 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/fantasy/ai"
-
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/fantasy/ai"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type App struct {
@@ -109,7 +109,6 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Start spinner if not in quiet mode.
 	var spinner *format.Spinner
 	if !quiet {
 		spinner = format.NewSpinner(ctx, cancel, "Generating")
@@ -166,7 +165,11 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 
+	defer fmt.Printf(ansi.ResetProgressBar)
 	for {
+		// HACK: add it again on every iteration so it doesn't get hidden by
+		// the terminal due to inactivity.
+		fmt.Printf(ansi.SetIndeterminateProgressBar)
 		select {
 		case result := <-done:
 			stopSpinner()

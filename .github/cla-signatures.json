@@ -679,6 +679,38 @@
       "created_at": "2025-09-29T01:19:40Z",
       "repoId": 987670088,
       "pullRequestNo": 1148
+    },
+    {
+      "name": "kucukkanat",
+      "id": 914316,
+      "comment_id": 3369230313,
+      "created_at": "2025-10-05T18:13:57Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1195
+    },
+    {
+      "name": "thuggys",
+      "id": 150315417,
+      "comment_id": 3369149503,
+      "created_at": "2025-10-05T15:59:55Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1194
+    },
+    {
+      "name": "nikaro",
+      "id": 3918653,
+      "comment_id": 3373586148,
+      "created_at": "2025-10-06T19:31:50Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1200
+    },
+    {
+      "name": "daps94",
+      "id": 35882689,
+      "comment_id": 3395964275,
+      "created_at": "2025-10-13T05:56:20Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1223
     }
   ]
 }

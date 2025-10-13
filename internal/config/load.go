@@ -261,7 +261,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		}
 		// default to OpenAI if not set
 		if providerConfig.Type == "" {
-			providerConfig.Type = catwalk.TypeOpenAI
+			providerConfig.Type = catwalk.TypeOpenAICompat
+		}
+		if !slices.Contains(c.knownProviderTypes(), providerConfig.Type) {
+			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
+			c.Providers.Del(id)
+			continue
 		}
 
 		if providerConfig.Disable {
@@ -296,6 +301,18 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		c.Providers.Set(id, providerConfig)
 	}
 	return nil
+}
+
+func (c *Config) knownProviderTypes() []catwalk.Type {
+	return []catwalk.Type{
+		catwalk.TypeOpenAI,
+		catwalk.TypeAnthropic,
+		catwalk.TypeAzure,
+		catwalk.TypeBedrock,
+		catwalk.TypeGoogle,
+		catwalk.TypeVertexAI,
+		catwalk.TypeOpenAICompat,
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

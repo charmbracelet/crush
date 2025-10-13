@@ -116,15 +116,17 @@ func testEnv(t *testing.T) env {
 
 func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt string, tools ...ai.AgentTool) SessionAgent {
 	largeModel := Model{
-		Model:      large,
+		Model: large,
 		CatwalkCfg: catwalk.Model{
-			// todo: add values
+			ContextWindow:    200000,
+			DefaultMaxTokens: 10000,
 		},
 	}
 	smallModel := Model{
-		Model:      small,
+		Model: small,
 		CatwalkCfg: catwalk.Model{
-			// todo: add values
+			ContextWindow:    200000,
+			DefaultMaxTokens: 10000,
 		},
 	}
 	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, systemPrompt, false, env.sessions, env.messages, tools})

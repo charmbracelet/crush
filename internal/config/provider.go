@@ -18,7 +18,7 @@ import (
 )
 
 type ProviderClient interface {
-	GetProvidersV2() ([]catwalk.Provider, error)
+	GetProviders() ([]catwalk.Provider, error)
 }
 
 var (
@@ -129,7 +129,7 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 	cacheIsStale, cacheExists := isCacheStale(path)
 
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
-		providers, err := client.GetProvidersV2()
+		providers, err := client.GetProviders()
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch providers from catwalk: %w", err)
 		}
@@ -146,7 +146,7 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		go func() {
 			slog.Info("Updating providers cache in background", "path", path)
 
-			providers, err := client.GetProvidersV2()
+			providers, err := client.GetProviders()
 			if err != nil {
 				slog.Error("Failed to fetch providers in background from Catwalk", "error", err)
 				return

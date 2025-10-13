@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -619,14 +618,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		return
 	}
 
-	data, _ := json.Marshal(resp)
-
-	slog.Info("Title Response")
-	slog.Info(string(data))
 	title := resp.Response.Content.Text()
 
 	title = strings.ReplaceAll(title, "\n", " ")
-	slog.Info(title)
 
 	// remove thinking tags if present
 	if idx := strings.Index(title, "</think>"); idx > 0 {

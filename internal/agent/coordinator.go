@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -126,24 +128,29 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 func getProviderOptions(model Model) ai.ProviderOptions {
 	options := ai.ProviderOptions{}
 
-	cfgOpts := "{}"
-	catwalkOpts := "{}"
+	cfgOpts := []byte("{}")
+	catwalkOpts := []byte("{}")
 
 	if model.ModelCfg.ProviderOptions != nil {
 		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
 		if err == nil {
-			cfgOpts = string(data)
+			cfgOpts = data
 		}
 	}
 
 	if model.CatwalkCfg.Options.ProviderOptions != nil {
 		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
 		if err == nil {
-			catwalkOpts = string(data)
+			catwalkOpts = data
 		}
 	}
 
-	got, err := jsons.Merge([]string{catwalkOpts, cfgOpts})
+	readers := []io.Reader{
+		bytes.NewReader(catwalkOpts),
+		bytes.NewReader(cfgOpts),
+	}
+
+	got, err := jsons.Merge(readers)
 	if err != nil {
 		slog.Error("Could not merge call config", "err", err)
 		return options

@@ -5,8 +5,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 )
@@ -40,7 +40,7 @@ func RenderMCPList(opts RenderOptions) []string {
 	}
 
 	// Get MCP states
-	mcpStates := agent.GetMCPStates()
+	mcpStates := tools.GetMCPStates()
 
 	// Determine how many items to show
 	maxItems := len(mcps)
@@ -60,17 +60,17 @@ func RenderMCPList(opts RenderOptions) []string {
 
 		if state, exists := mcpStates[l.Name]; exists {
 			switch state.State {
-			case agent.MCPStateDisabled:
+			case tools.MCPStateDisabled:
 				description = t.S().Subtle.Render("disabled")
-			case agent.MCPStateStarting:
+			case tools.MCPStateStarting:
 				icon = t.ItemBusyIcon
 				description = t.S().Subtle.Render("starting...")
-			case agent.MCPStateConnected:
+			case tools.MCPStateConnected:
 				icon = t.ItemOnlineIcon
 				if state.ToolCount > 0 {
 					extraContent = t.S().Subtle.Render(fmt.Sprintf("%d tools", state.ToolCount))
 				}
-			case agent.MCPStateError:
+			case tools.MCPStateError:
 				icon = t.ItemErrorIcon
 				if state.Error != nil {
 					description = t.S().Subtle.Render(fmt.Sprintf("error: %s", state.Error.Error()))

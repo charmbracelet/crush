@@ -48,6 +48,11 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
+const (
+	AgentCoder string = "coder"
+	AgentTask  string = "task"
+)
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -57,13 +62,23 @@ type SelectedModel struct {
 	Provider string `json:"provider" jsonschema:"required,description=The model provider ID that matches a key in the providers config,example=openai"`
 
 	// Only used by models that use the openai provider and need this set.
+	// Deprecated: use provider_options instead.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
 
-	// Overrides the default model configuration.
-	MaxTokens int64 `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
-
 	// Used by anthropic models that can reason to indicate if the model should think.
+	// Deprecated: use provider_options instead.
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
+
+	// Overrides the default model configuration.
+	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
+	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
+	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
+	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty" jsonschema:"description=Frequency penalty to reduce repetition"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty" jsonschema:"description=Presence penalty to increase topic diversity"`
+
+	// Override provider specific options.
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
 type ProviderConfig struct {
@@ -250,10 +265,6 @@ type Agent struct {
 	//  the string array is the list of tools from the AllowedMCP the agent has available
 	//  if the string array is nil, all tools from the AllowedMCP are available
 	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty"`
-
-	// The list of LSPs that this agent can use
-	//  if this is nil, all LSPs are available
-	AllowedLSP []string `json:"allowed_lsp,omitempty"`
 
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
@@ -501,16 +512,17 @@ func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
+		AgentCoder: {
+			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: allowedTools,
 		},
-		"task": {
-			ID:           "task",
+
+		AgentTask: {
+			ID:           AgentCoder,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
@@ -518,7 +530,6 @@ func (c *Config) SetupAgents() {
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
-			AllowedLSP: []string{},
 		},
 	}
 	c.Agents = agents
@@ -552,7 +563,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		testURL = baseURL + "/models"
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGemini:
+	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://generativelanguage.googleapis.com"

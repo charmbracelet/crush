@@ -121,6 +121,9 @@ func (m *messageCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
 	if m.spinning && m.message.ReasoningContent().Thinking == "" {
+		if m.message.IsSummaryMessage {
+			m.anim.SetLabel("Summarizing")
+		}
 		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {

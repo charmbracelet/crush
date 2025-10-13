@@ -29,6 +29,12 @@ func GetPersistentShell(cwd string) *PersistentShell {
 	return shellInstance
 }
 
+// INFO: only used for tests
+func Reset(cwd string) {
+	once = sync.Once{}
+	_ = GetPersistentShell(cwd)
+}
+
 // slog.dapter adapts the internal slog.package to the Logger interface
 type loggingAdapter struct{}
 

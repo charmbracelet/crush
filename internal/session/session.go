@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -32,6 +34,11 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	Delete(ctx context.Context, id string) error
+
+	// Agent tool session management
+	CreateAgentToolSessionID(messageID, toolCallID string) string
+	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
+	IsAgentToolSession(sessionID string) bool
 }
 
 type service struct {
@@ -156,4 +163,24 @@ func NewService(q db.Querier) Service {
 		broker,
 		q,
 	}
+}
+
+// CreateAgentToolSessionID creates a session ID for agent tool sessions using the format "messageID$$toolCallID"
+func (s *service) CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
+}
+
+// ParseAgentToolSessionID parses an agent tool session ID into its components
+func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
+	parts := strings.Split(sessionID, "$$")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// IsAgentToolSession checks if a session ID follows the agent tool session format
+func (s *service) IsAgentToolSession(sessionID string) bool {
+	_, _, ok := s.ParseAgentToolSessionID(sessionID)
+	return ok
 }

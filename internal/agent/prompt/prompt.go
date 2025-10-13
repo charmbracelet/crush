@@ -1,0 +1,186 @@
+package prompt
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"text/template"
+	"time"
+
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/home"
+)
+
+// Prompt represents a template-based prompt generator.
+type Prompt struct {
+	name       string
+	template   string
+	now        func() time.Time
+	platform   string
+	workingDir string
+}
+
+type PromptDat struct {
+	Provider     string
+	Model        string
+	Config       config.Config
+	WorkingDir   string
+	IsGitRepo    bool
+	Platform     string
+	Date         string
+	ContextFiles []ContextFile
+}
+
+type ContextFile struct {
+	Path    string
+	Content string
+}
+
+type Option func(*Prompt)
+
+func WithTimeFunc(fn func() time.Time) Option {
+	return func(p *Prompt) {
+		p.now = fn
+	}
+}
+
+func WithPlatform(platform string) Option {
+	return func(p *Prompt) {
+		p.platform = platform
+	}
+}
+
+func WithWorkingDir(workingDir string) Option {
+	return func(p *Prompt) {
+		p.workingDir = workingDir
+	}
+}
+
+func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
+	p := &Prompt{
+		name:     name,
+		template: promptTemplate,
+		now:      time.Now,
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p, nil
+}
+
+func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error) {
+	t, err := template.New(p.name).Parse(p.template)
+	if err != nil {
+		return "", fmt.Errorf("parsing template: %w", err)
+	}
+	var sb strings.Builder
+	if err := t.Execute(&sb, p.promptData(provider, model, cfg)); err != nil {
+		return "", fmt.Errorf("executing template: %w", err)
+	}
+
+	return sb.String(), nil
+}
+
+func processFile(filePath string) *ContextFile {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+	return &ContextFile{
+		Path:    filePath,
+		Content: string(content),
+	}
+}
+
+func processContextPath(p string, cfg config.Config) []ContextFile {
+	var contexts []ContextFile
+	fullPath := p
+	if !filepath.IsAbs(p) {
+		fullPath = filepath.Join(cfg.WorkingDir(), p)
+	}
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return contexts
+	}
+	if info.IsDir() {
+		filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				if result := processFile(path); result != nil {
+					contexts = append(contexts, *result)
+				}
+			}
+			return nil
+		})
+	} else {
+		result := processFile(fullPath)
+		if result != nil {
+			contexts = append(contexts, *result)
+		}
+	}
+	return contexts
+}
+
+// expandPath expands ~ and environment variables in file paths
+func expandPath(path string, cfg config.Config) string {
+	path = home.Long(path)
+	// Handle environment variable expansion using the same pattern as config
+	if strings.HasPrefix(path, "$") {
+		if expanded, err := cfg.Resolver().ResolveValue(path); err == nil {
+			path = expanded
+		}
+	}
+
+	return path
+}
+
+func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat {
+	workingDir := cfg.WorkingDir()
+	if p.workingDir != "" {
+		workingDir = p.workingDir
+	}
+	platform := runtime.GOOS
+	if p.platform != "" {
+		platform = p.platform
+	}
+
+	files := map[string][]ContextFile{}
+
+	for _, pth := range cfg.Options.ContextPaths {
+		expanded := expandPath(pth, cfg)
+		pathKey := strings.ToLower(expanded)
+		if _, ok := files[pathKey]; ok {
+			continue
+		}
+		content := processContextPath(expanded, cfg)
+		files[pathKey] = content
+	}
+
+	data := PromptDat{
+		Provider:   provider,
+		Model:      model,
+		Config:     cfg,
+		WorkingDir: workingDir,
+		IsGitRepo:  isGitRepo(cfg.WorkingDir()),
+		Platform:   platform,
+		Date:       p.now().Format("1/2/2006"),
+	}
+
+	for _, contextFiles := range files {
+		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	}
+	return data
+}
+
+func isGitRepo(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+func (p *Prompt) Name() string {
+	return p.name
+}

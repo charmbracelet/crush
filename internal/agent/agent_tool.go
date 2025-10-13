@@ -74,7 +74,7 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,
-				ProviderOptions:  c.getProviderOptions(model),
+				ProviderOptions:  getProviderOptions(model),
 				Temperature:      model.ModelCfg.Temperature,
 				TopP:             model.ModelCfg.TopP,
 				TopK:             model.ModelCfg.TopK,

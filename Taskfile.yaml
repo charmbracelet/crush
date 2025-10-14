@@ -102,6 +102,7 @@ tasks:
       - git tag --annotate --sign {{.NEXT}} {{.CLI_ARGS}}
       - echo "Pushing {{.NEXT}}..."
       - git push origin --tags
+      - git push origin main
 
   fetch-tags:
     cmds:

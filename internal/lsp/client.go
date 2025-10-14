@@ -445,6 +445,14 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, d time.Duration) {
 	}
 }
 
+// FindReferences finds all references to the symbol at the given position.
+func (c *Client) FindReferences(ctx context.Context, filepath string, line, character int, includeDeclaration bool) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+	return c.client.FindReferences(ctx, filepath, line, character, includeDeclaration)
+}
+
 // HasRootMarkers checks if any of the specified root marker patterns exist in the given directory.
 // Uses glob patterns to match files, allowing for more flexible matching.
 func HasRootMarkers(dir string, rootMarkers []string) bool {

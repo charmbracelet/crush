@@ -160,3 +160,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )
+
+replace github.com/charmbracelet/x/powernap => ../x/powernap/

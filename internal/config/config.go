@@ -143,7 +143,7 @@ type Completions struct {
 }
 
 func (c Completions) Limits() (depth, items int) {
-	return ptrValOr(c.MaxDepth, -1), ptrValOr(c.MaxItems, -1)
+	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
 
 type Permissions struct {
@@ -269,7 +269,7 @@ type ToolLs struct {
 }
 
 func (t ToolLs) Limits() (depth, items int) {
-	return ptrValOr(t.MaxDepth, -1), ptrValOr(t.MaxItems, -1)
+	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
 }
 
 // Config holds the configuration for crush.

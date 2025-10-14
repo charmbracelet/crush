@@ -99,7 +99,7 @@ tasks:
     cmds:
       - task: fetch-tags
       - git commit --allow-empty -m "{{.NEXT}}"
-      - git tag --annotate --sign {{.NEXT}} {{.CLI_ARGS}}
+      - git tag --annotate -m "{{.NEXT}}" {{.NEXT}} {{.CLI_ARGS}}
       - echo "Pushing {{.NEXT}}..."
       - git push origin main --follow-tags
 

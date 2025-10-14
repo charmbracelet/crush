@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -390,8 +391,8 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 }
 
 func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, string, error) {
-	// Quick binary file detection
-	if isBinaryFile(filePath) {
+	// Only search text files.
+	if !isTextFile(filePath) {
 		return false, 0, "", nil
 	}
 
@@ -414,45 +415,30 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, st
 	return false, 0, "", scanner.Err()
 }
 
-var binaryExts = map[string]struct{}{
-	".exe": {}, ".dll": {}, ".so": {}, ".dylib": {},
-	".bin": {}, ".obj": {}, ".o": {}, ".a": {},
-	".zip": {}, ".tar": {}, ".gz": {}, ".bz2": {},
-	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {},
-	".pdf": {}, ".doc": {}, ".docx": {}, ".xls": {},
-	".mp3": {}, ".mp4": {}, ".avi": {}, ".mov": {},
-}
-
-// isBinaryFile performs a quick check to determine if a file is binary
-func isBinaryFile(filePath string) bool {
-	// Check file extension first (fastest)
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if _, isBinary := binaryExts[ext]; isBinary {
-		return true
-	}
-
-	// Quick content check for files without clear extensions
+// isTextFile checks if a file is a text file by examining its MIME type.
+func isTextFile(filePath string) bool {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return false // If we can't open it, let the caller handle the error
+		return false
 	}
 	defer file.Close()
 
-	// Read first 512 bytes to check for null bytes
+	// Read first 512 bytes for MIME type detection.
 	buffer := make([]byte, 512)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return false
 	}
 
-	// Check for null bytes (common in binary files)
-	for i := range n {
-		if buffer[i] == 0 {
-			return true
-		}
-	}
+	// Detect content type.
+	contentType := http.DetectContentType(buffer[:n])
 
-	return false
+	// Check if it's a text MIME type.
+	return strings.HasPrefix(contentType, "text/") ||
+		contentType == "application/json" ||
+		contentType == "application/xml" ||
+		contentType == "application/javascript" ||
+		contentType == "application/x-sh"
 }
 
 func globToRegex(glob string) string {

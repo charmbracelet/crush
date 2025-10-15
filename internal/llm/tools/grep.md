@@ -1,10 +1,13 @@
 Fast content search tool that finds files containing specific text or patterns, returning matching file paths sorted by modification time (newest first).
 
+**WARNING: For finding symbol references (functions, variables, types, methods), use the References tool instead. It is semantic-aware and much more accurate.**
+
 WHEN TO USE THIS TOOL:
 
-- Use when you need to find files containing specific text or patterns
-- Great for searching code bases for function names, variable declarations, or error messages
+- Use when you need to find files containing specific text or patterns (NOT symbols)
+- Great for searching for error messages, comments, or string literals
 - Useful for finding all files that use a particular API or pattern
+- **DO NOT USE for finding where functions/variables/types are used** - use References tool instead
 
 HOW TO USE:
 
@@ -48,6 +51,7 @@ CROSS-PLATFORM NOTES:
 
 TIPS:
 
+- For finding references to functions, variables, etc, use the References tool instead
 - For faster, more targeted searches, first use Glob to find relevant files, then use Grep
 - When doing iterative exploration that may require multiple rounds of searching, consider using the Agent tool instead
 - Always check if results are truncated and refine your search pattern if needed

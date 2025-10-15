@@ -1,36 +1,38 @@
-Find all references to a symbol at a specific position in a file using the Language Server Protocol (LSP).
+Find all references to a symbol by name using the Language Server Protocol (LSP).
 
 WHEN TO USE THIS TOOL:
 
-- Use when you need to find all usages of a function, variable, type, or other symbol
+- **ALWAYS USE THIS FIRST** when searching for where a function, method, variable, type, or constant is used
+- **DO NOT use grep/glob for symbol searches** - this tool is semantic-aware and much more accurate
+- Use when you need to find all usages of a specific symbol (function, variable, type, class, method, etc.)
+- More accurate than grep because it understands code semantics and scope
+- Finds only actual references, not string matches in comments or unrelated code
 - Helpful for understanding where a symbol is used throughout the codebase
 - Useful for refactoring or analyzing code dependencies
-- Good for finding all call sites of a function
+- Good for finding all call sites of a function or method
 
 HOW TO USE:
 
-- Provide the file path containing the symbol
-- Specify the line number (0-based) where the symbol is located
-- Specify the character position (0-based) where the symbol starts
-- Optionally specify whether to include the declaration (default: true)
+- Provide the symbol name (e.g., "MyFunction", "myVariable", "MyType")
+- Optionally specify a path to narrow the search to a specific directory
+- The tool will automatically find the symbol and locate all references
 
 FEATURES:
 
 - Returns all references grouped by file
 - Shows line and column numbers for each reference
 - Supports multiple programming languages through LSP
-- Can include or exclude the symbol's declaration
+- Automatically finds the symbol without needing exact position
 
 LIMITATIONS:
 
-- Requires an LSP server to be running for the file type
-- Line and character positions are 0-based (first line is 0, first character is 0)
 - May not find references in files that haven't been opened or indexed
 - Results depend on the LSP server's capabilities
+- If multiple symbols have the same name, it will use the first match found
 
 TIPS:
 
-- Use the View tool first to find the exact line and character position of the symbol
-- Remember that line and character positions are 0-based
-- Include the declaration to see where the symbol is defined
+- **Use this tool instead of grep when looking for symbol references** - it's more accurate and semantic-aware
+- Simply provide the symbol name and let the tool find it for you
 - Combine with other LSP tools for comprehensive code analysis
+- This tool understands code structure, so it won't match unrelated strings or comments

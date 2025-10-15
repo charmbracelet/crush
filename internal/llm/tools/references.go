@@ -29,7 +29,7 @@ type referencesTool struct {
 	lspClients *csync.Map[string, *lsp.Client]
 }
 
-const ReferencesToolName = "references"
+const ReferencesToolName = "lsp_references"
 
 //go:embed references.md
 var referencesDescription []byte

@@ -605,6 +605,11 @@ func hasAWSCredentials(env env.Env) bool {
 		env.Get("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
 		return true
 	}
+
+	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/credentials")); err == nil {
+		return true
+	}
+
 	return false
 }
 

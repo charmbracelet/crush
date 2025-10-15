@@ -70,11 +70,16 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 			if model.ModelCfg.MaxTokens != 0 {
 				maxTokens = model.ModelCfg.MaxTokens
 			}
+
+			providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+			if !ok {
+				return ai.ToolResponse{}, errors.New("model provider not configured")
+			}
 			result, err := agent.Run(ctx, SessionAgentCall{
 				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,
-				ProviderOptions:  getProviderOptions(model),
+				ProviderOptions:  getProviderOptions(model, providerCfg.Type),
 				Temperature:      model.ModelCfg.Temperature,
 				TopP:             model.ModelCfg.TopP,
 				TopK:             model.ModelCfg.TopK,

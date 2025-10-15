@@ -109,7 +109,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		attachments = nil
 	}
 
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model)
+	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return nil, errors.New("model provider not configured")
+	}
+
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg.Type)
 
 	return c.currentAgent.Run(ctx, SessionAgentCall{
 		SessionID:        sessionID,
@@ -125,7 +130,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	})
 }
 
-func getProviderOptions(model Model) ai.ProviderOptions {
+func getProviderOptions(model Model, tp catwalk.Type) ai.ProviderOptions {
 	options := ai.ProviderOptions{}
 
 	cfgOpts := []byte("{}")
@@ -164,18 +169,37 @@ func getProviderOptions(model Model) ai.ProviderOptions {
 		return options
 	}
 
-	switch model.Model.Provider() {
+	switch tp {
 	case openai.Name:
+		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		}
 		parsed, err := openai.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openai.Name] = parsed
 		}
 	case anthropic.Name:
+		_, hasThink := mergedOptions["thinking"]
+		if !hasThink && model.ModelCfg.Think {
+			mergedOptions["thinking"] = map[string]any{
+				// TODO: kujtim see if we need to make this dynamic
+				"budget_tokens": 2000,
+			}
+		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
 		if err == nil {
 			options[anthropic.Name] = parsed
 		}
+
 	case openrouter.Name:
+		_, hasReasoning := mergedOptions["reasoning"]
+		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning"] = map[string]any{
+				"enabled": true,
+				"effort":  model.ModelCfg.ReasoningEffort,
+			}
+		}
 		parsed, err := openrouter.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openrouter.Name] = parsed
@@ -185,7 +209,21 @@ func getProviderOptions(model Model) ai.ProviderOptions {
 		if err == nil {
 			options[google.Name] = parsed
 		}
+	case azure.Name:
+		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		}
+		// azure uses the same options as openaicompat
+		parsed, err := openaicompat.ParseOptions(mergedOptions)
+		if err == nil {
+			options[azure.Name] = parsed
+		}
 	case openaicompat.Name:
+		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openaicompat.Name] = parsed
@@ -195,8 +233,8 @@ func getProviderOptions(model Model) ai.ProviderOptions {
 	return options
 }
 
-func mergeCallOptions(model Model) (ai.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
-	modelOptions := getProviderOptions(model)
+func mergeCallOptions(model Model, tp catwalk.Type) (ai.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
+	modelOptions := getProviderOptions(model, tp)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
 	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
 	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
@@ -460,10 +498,10 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-// TODO: add baseURL for google
 func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
 	opts := []google.Option{
-		google.WithAPIKey(apiKey),
+		google.WithBaseURL(baseURL),
+		google.WithGeminiAPIKey(apiKey),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -472,6 +510,24 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 	if len(headers) > 0 {
 		opts = append(opts, google.WithHeaders(headers))
 	}
+	return google.New(opts...)
+}
+
+func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) ai.Provider {
+	opts := []google.Option{}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, google.WithHTTPClient(httpClient))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, google.WithHeaders(headers))
+	}
+
+	project := options["project"]
+	location := options["location"]
+
+	opts = append(opts, google.WithVertex(project, location))
+
 	return google.New(opts...)
 }
 
@@ -517,6 +573,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		provider = c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case google.Name:
 		provider = c.buildGoogleProvider(baseURL, apiKey, headers)
+	// this is not in fantasy since its just the google provider with extra stuff
+	case "google-vertex":
+		provider = c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		provider = c.buildOpenaiCompatProvider(baseURL, apiKey, headers)
 	default:

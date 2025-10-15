@@ -81,6 +81,7 @@ type grepMatch struct {
 	path     string
 	modTime  time.Time
 	lineNum  int
+	charNum  int
 	lineText string
 }
 
@@ -188,7 +189,11 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 				fmt.Fprintf(&output, "%s:\n", match.path)
 			}
 			if match.lineNum > 0 {
-				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, match.lineText)
+				if match.charNum > 0 {
+					fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, match.lineText)
+				} else {
+					fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, match.lineText)
+				}
 			} else {
 				fmt.Fprintf(&output, "  %s\n", match.path)
 			}
@@ -275,10 +280,20 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			continue // Skip files we can't access
 		}
 
+		// Find character position of match in line
+		regex, _ := searchRegexCache.get(pattern)
+		charNum := 0
+		if regex != nil {
+			if loc := regex.FindStringIndex(lineText); loc != nil {
+				charNum = loc[0] + 1 // 1-indexed
+			}
+		}
+
 		matches = append(matches, grepMatch{
 			path:     filePath,
 			modTime:  fileInfo.ModTime(),
 			lineNum:  lineNum,
+			charNum:  charNum,
 			lineText: lineText,
 		})
 	}
@@ -362,7 +377,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
-		match, lineNum, lineText, err := fileContainsPattern(path, regex)
+		match, lineNum, charNum, lineText, err := fileContainsPattern(path, regex)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -372,6 +387,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 				path:     path,
 				modTime:  info.ModTime(),
 				lineNum:  lineNum,
+				charNum:  charNum,
 				lineText: lineText,
 			})
 
@@ -389,15 +405,15 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	return matches, nil
 }
 
-func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, string, error) {
+func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
 	// Quick binary file detection
 	if isBinaryFile(filePath) {
-		return false, 0, "", nil
+		return false, 0, 0, "", nil
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return false, 0, "", err
+		return false, 0, 0, "", err
 	}
 	defer file.Close()
 
@@ -406,12 +422,13 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, st
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		if pattern.MatchString(line) {
-			return true, lineNum, line, nil
+		if loc := pattern.FindStringIndex(line); loc != nil {
+			charNum := loc[0] + 1 // 1-indexed
+			return true, lineNum, charNum, line, nil
 		}
 	}
 
-	return false, 0, "", scanner.Err()
+	return false, 0, 0, "", scanner.Err()
 }
 
 var binaryExts = map[string]struct{}{

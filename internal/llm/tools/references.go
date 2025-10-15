@@ -5,10 +5,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -88,21 +88,30 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 	}
 
 	var allLocations []protocol.Location
+	var allErrs error
 	for _, match := range matches {
 		locations, err := r.find(ctx, match, params.Symbol)
 		if err != nil {
-			slog.Error("Failed to find references", "error", err)
-			return NewTextErrorResponse(fmt.Sprintf("failed to find references: %s", err)), nil
+			if strings.Contains(err.Error(), "no identifier found") {
+				// grep probably matched a comment, string value, or something else that's irrelevant
+				continue
+			}
+			slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", match.path, "line", match.lineNum, "char", match.charNum)
+			allErrs = errors.Join(allErrs, err)
+			continue
 		}
 		allLocations = append(allLocations, locations...)
 	}
 
-	if len(allLocations) == 0 {
-		return NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
+	if len(allLocations) > 0 {
+		output := formatReferences(allLocations)
+		return NewTextResponse(output), nil
 	}
 
-	output := formatReferences(allLocations)
-	return NewTextResponse(output), nil
+	if allErrs != nil {
+		return NewTextErrorResponse(allErrs.Error()), nil
+	}
+	return NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
 }
 
 func (r *referencesTool) find(ctx context.Context, match grepMatch, symbol string) ([]protocol.Location, error) {
@@ -124,22 +133,7 @@ func (r *referencesTool) find(ctx context.Context, match grepMatch, symbol strin
 		return nil, nil
 	}
 
-	content, err := os.ReadFile(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %s", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-	if match.lineNum < 1 || match.lineNum > len(lines) {
-		return nil, fmt.Errorf("invalid line number: %d", match.lineNum)
-	}
-
-	line := lines[match.lineNum-1]
-	charPos := strings.Index(line, symbol)
-	if charPos == -1 {
-		return nil, fmt.Errorf("symbol not found on line %d", match.lineNum)
-	}
-	return client.FindReferences(ctx, absPath, match.lineNum-1, charPos, true)
+	return client.FindReferences(ctx, absPath, match.lineNum-1, match.charNum, true)
 }
 
 func formatReferences(locations []protocol.Location) string {

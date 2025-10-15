@@ -285,7 +285,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		charNum := 0
 		if regex != nil {
 			if loc := regex.FindStringIndex(lineText); loc != nil {
-				charNum = loc[0] + 1 // 1-indexed
+				charNum = loc[0]
 			}
 		}
 
@@ -423,7 +423,7 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 		lineNum++
 		line := scanner.Text()
 		if loc := pattern.FindStringIndex(line); loc != nil {
-			charNum := loc[0] + 1 // 1-indexed
+			charNum := loc[0]
 			return true, lineNum, charNum, line, nil
 		}
 	}

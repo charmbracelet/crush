@@ -104,7 +104,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 	}
 
 	if len(allLocations) > 0 {
-		output := formatReferences(deduplicateLocations(allLocations))
+		output := formatReferences(cleanupLocations(allLocations))
 		return NewTextResponse(output), nil
 	}
 
@@ -160,35 +160,38 @@ func getSymbolOffset(symbol string) int {
 	return 0
 }
 
-func deduplicateLocations(locations []protocol.Location) []protocol.Location {
-	slices.CompactFunc(locations, func(a, b protocol.Location) bool {
+func cleanupLocations(locations []protocol.Location) []protocol.Location {
+	slices.SortFunc(locations, func(a, b protocol.Location) int {
+		if a.URI != b.URI {
+			return strings.Compare(string(a.URI), string(b.URI))
+		}
+		if a.Range.Start.Line != b.Range.Start.Line {
+			return cmp.Compare(a.Range.Start.Line, b.Range.Start.Line)
+		}
+		return cmp.Compare(a.Range.Start.Character, b.Range.Start.Character)
+	})
+	return slices.CompactFunc(locations, func(a, b protocol.Location) bool {
 		return a.URI == b.URI &&
 			a.Range.Start.Line == b.Range.Start.Line &&
 			a.Range.Start.Character == b.Range.Start.Character
 	})
-	seen := make(map[string]struct{})
-	var result []protocol.Location
-	for _, loc := range locations {
-		key := fmt.Sprintf("%s:%d:%d", loc.URI, loc.Range.Start.Line, loc.Range.Start.Character)
-		if _, ok := seen[key]; !ok {
-			seen[key] = struct{}{}
-			result = append(result, loc)
-		}
-	}
-	return result
 }
 
-func formatReferences(locations []protocol.Location) string {
-	fileRefs := make(map[string][]protocol.Location)
+func groupByFilename(locations []protocol.Location) map[string][]protocol.Location {
+	files := make(map[string][]protocol.Location)
 	for _, loc := range locations {
 		path, err := loc.URI.Path()
 		if err != nil {
 			slog.Error("Failed to convert location URI to path", "uri", loc.URI, "error", err)
 			continue
 		}
-		fileRefs[path] = append(fileRefs[path], loc)
+		files[path] = append(files[path], loc)
 	}
+	return files
+}
 
+func formatReferences(locations []protocol.Location) string {
+	fileRefs := groupByFilename(locations)
 	files := slices.Collect(maps.Keys(fileRefs))
 	sort.Strings(files)
 
@@ -197,13 +200,6 @@ func formatReferences(locations []protocol.Location) string {
 
 	for _, file := range files {
 		refs := fileRefs[file]
-		sort.Slice(refs, func(i, j int) bool {
-			if refs[i].Range.Start.Line != refs[j].Range.Start.Line {
-				return refs[i].Range.Start.Line < refs[j].Range.Start.Line
-			}
-			return refs[i].Range.Start.Character < refs[j].Range.Start.Character
-		})
-
 		output.WriteString(fmt.Sprintf("%s (%d reference(s)):\n", file, len(refs)))
 		for _, ref := range refs {
 			line := ref.Range.Start.Line + 1

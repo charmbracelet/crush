@@ -1,4 +1,4 @@
-Find all references to a symbol by name using the Language Server Protocol (LSP).
+Find all references to/usage of a symbol by name using the Language Server Protocol (LSP).
 
 WHEN TO USE THIS TOOL:
 
@@ -9,7 +9,7 @@ WHEN TO USE THIS TOOL:
 - Finds only actual references, not string matches in comments or unrelated code
 - Helpful for understanding where a symbol is used throughout the codebase
 - Useful for refactoring or analyzing code dependencies
-- Good for finding all call sites of a function or method
+- Good for finding all call sites of a function, method, type, package, constant, variable, etc.
 
 HOW TO USE:
 
@@ -28,11 +28,9 @@ LIMITATIONS:
 
 - May not find references in files that haven't been opened or indexed
 - Results depend on the LSP server's capabilities
-- If multiple symbols have the same name, it will use the first match found
 
 TIPS:
 
 - **Use this tool instead of grep when looking for symbol references** - it's more accurate and semantic-aware
 - Simply provide the symbol name and let the tool find it for you
-- Combine with other LSP tools for comprehensive code analysis
 - This tool understands code structure, so it won't match unrelated strings or comments

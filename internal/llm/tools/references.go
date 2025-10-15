@@ -90,7 +90,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 	var allLocations []protocol.Location
 	var allErrs error
 	for _, match := range matches {
-		locations, err := r.find(ctx, match, params.Symbol)
+		locations, err := r.find(ctx, params.Symbol, match)
 		if err != nil {
 			if strings.Contains(err.Error(), "no identifier found") {
 				// grep probably matched a comment, string value, or something else that's irrelevant
@@ -104,7 +104,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 	}
 
 	if len(allLocations) > 0 {
-		output := formatReferences(allLocations)
+		output := formatReferences(deduplicateLocations(allLocations))
 		return NewTextResponse(output), nil
 	}
 
@@ -114,7 +114,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 	return NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
 }
 
-func (r *referencesTool) find(ctx context.Context, match grepMatch, symbol string) ([]protocol.Location, error) {
+func (r *referencesTool) find(ctx context.Context, symbol string, match grepMatch) ([]protocol.Location, error) {
 	absPath, err := filepath.Abs(match.path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path: %s", err)
@@ -133,7 +133,49 @@ func (r *referencesTool) find(ctx context.Context, match grepMatch, symbol strin
 		return nil, nil
 	}
 
-	return client.FindReferences(ctx, absPath, match.lineNum-1, match.charNum, true)
+	return client.FindReferences(
+		ctx,
+		absPath,
+		match.lineNum,
+		match.charNum+getSymbolOffset(symbol),
+		true,
+	)
+}
+
+// getSymbolOffset returns the character offset to the actual symbol name
+// in a qualified symbol (e.g., "Bar" in "foo.Bar" or "method" in "Class::method").
+func getSymbolOffset(symbol string) int {
+	// Check for :: separator (Rust, C++, Ruby modules/classes, PHP static).
+	if idx := strings.LastIndex(symbol, "::"); idx != -1 {
+		return idx + 2
+	}
+	// Check for . separator (Go, Python, JavaScript, Java, C#, Ruby methods).
+	if idx := strings.LastIndex(symbol, "."); idx != -1 {
+		return idx + 1
+	}
+	// Check for \ separator (PHP namespaces).
+	if idx := strings.LastIndex(symbol, "\\"); idx != -1 {
+		return idx + 1
+	}
+	return 0
+}
+
+func deduplicateLocations(locations []protocol.Location) []protocol.Location {
+	slices.CompactFunc(locations, func(a, b protocol.Location) bool {
+		return a.URI == b.URI &&
+			a.Range.Start.Line == b.Range.Start.Line &&
+			a.Range.Start.Character == b.Range.Start.Character
+	})
+	seen := make(map[string]struct{})
+	var result []protocol.Location
+	for _, loc := range locations {
+		key := fmt.Sprintf("%s:%d:%d", loc.URI, loc.Range.Start.Line, loc.Range.Start.Character)
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			result = append(result, loc)
+		}
+	}
+	return result
 }
 
 func formatReferences(locations []protocol.Location) string {

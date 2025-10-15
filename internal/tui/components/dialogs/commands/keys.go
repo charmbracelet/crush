@@ -76,7 +76,6 @@ type ArgumentsDialogKeyMap struct {
 	Confirm  key.Binding
 	Next     key.Binding
 	Previous key.Binding
-	Paste    key.Binding
 	Close    key.Binding
 }
 
@@ -95,10 +94,6 @@ func DefaultArgumentsDialogKeyMap() ArgumentsDialogKeyMap {
 			key.WithKeys("shift+tab", "up"),
 			key.WithHelp("shift+tab/↑", "previous"),
 		),
-		Paste: key.NewBinding(
-			key.WithKeys("ctrl+v"),
-			key.WithHelp("ctrl+v", "paste"),
-		),
 		Close: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "cancel"),
@@ -112,7 +107,6 @@ func (k ArgumentsDialogKeyMap) KeyBindings() []key.Binding {
 		k.Confirm,
 		k.Next,
 		k.Previous,
-		k.Paste,
 		k.Close,
 	}
 }
@@ -134,7 +128,6 @@ func (k ArgumentsDialogKeyMap) ShortHelp() []key.Binding {
 		k.Confirm,
 		k.Next,
 		k.Previous,
-		k.Paste,
 		k.Close,
 	}
 }

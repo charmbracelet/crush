@@ -76,7 +76,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d
-	github.com/charmbracelet/x/powernap v0.0.0-20250919153222-1038f7e6fef4
+	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -160,5 +160,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )
-
-replace github.com/charmbracelet/x/powernap => ../x/powernap/

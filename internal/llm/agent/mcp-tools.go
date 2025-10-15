@@ -98,9 +98,26 @@ func (b *McpTool) Name() string {
 }
 
 func (b *McpTool) Info() tools.ToolInfo {
-	input := b.tool.InputSchema.(map[string]any)
-	required, _ := input["required"].([]string)
-	parameters, _ := input["properties"].(map[string]any)
+	var parameters map[string]any
+	var required []string
+
+	if input, ok := b.tool.InputSchema.(map[string]any); ok {
+		if props, ok := input["properties"].(map[string]any); ok {
+			parameters = props
+		}
+		if req, ok := input["required"].([]any); ok {
+			// Convert []any -> []string when elements are strings
+			for _, v := range req {
+				if s, ok := v.(string); ok {
+					required = append(required, s)
+				}
+			}
+		} else if reqStr, ok := input["required"].([]string); ok {
+			// Handle case where it's already []string
+			required = reqStr
+		}
+	}
+
 	return tools.ToolInfo{
 		Name:        fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,

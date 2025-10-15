@@ -102,6 +102,8 @@ github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3/go.mod h1:T9jr8CzFpjhFVHjNjKwbAD7KwBNyFnj2pntAO7F2zw0=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a h1:FsHEJ52OC4VuTzU8t+n5frMjLvpYWEznSr/u8tnkCYw=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a/go.mod h1:wDlXFlCrmJ8J+swcL/MnGUuYnqgQdW9rhSD61oNMb6U=
+github.com/charmbracelet/x/exp/ordered v0.1.0 h1:55/qLwjIh0gL0Vni+QAWk7T/qRVP6sBf+2agPBgnOFE=
+github.com/charmbracelet/x/exp/ordered v0.1.0/go.mod h1:5UHwmG+is5THxMyCJHNPCn2/ecI07aKNrW+LcResjJ8=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d h1:H2oh4WlSsXy8qwLd7I3eAvPd/X3S40aM9l+h47WF1eA=
 github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d/go.mod h1:vI5nDVMWi6veaYH+0Fmvpbe/+cv/iJfMntdh+N0+Tms=
 github.com/charmbracelet/x/powernap v0.0.0-20250919153222-1038f7e6fef4 h1:ZhDGU688EHQXslD9KphRpXwK0pKP03egUoZAATUDlV0=

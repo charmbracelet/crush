@@ -46,6 +46,8 @@ require (
 	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
 )
 
+require github.com/charmbracelet/x/exp/ordered v0.1.0
+
 require (
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.13.0 // indirect

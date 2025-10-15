@@ -136,8 +136,8 @@ func (r *referencesTool) find(ctx context.Context, symbol string, match grepMatc
 	return client.FindReferences(
 		ctx,
 		absPath,
-		match.lineNum,
-		match.charNum+getSymbolOffset(symbol),
+		match.lineNum-1,
+		match.charNum+getSymbolOffset(symbol)-1,
 		true,
 	)
 }

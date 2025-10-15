@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -256,76 +256,47 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		return nil, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	matches := make([]grepMatch, 0, len(lines))
-
-	for _, line := range lines {
-		if line == "" {
+	var matches []grepMatch
+	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
+		if len(line) == 0 {
 			continue
 		}
-
-		// Parse ripgrep output using null separation
-		filePath, lineNumStr, lineText, ok := parseRipgrepLine(line)
-		if !ok {
+		var match ripgrepMatch
+		if err := json.Unmarshal(line, &match); err != nil {
 			continue
 		}
-
-		lineNum, err := strconv.Atoi(lineNumStr)
-		if err != nil {
+		if match.Type != "match" {
 			continue
 		}
-
-		fileInfo, err := os.Stat(filePath)
-		if err != nil {
-			continue // Skip files we can't access
+		for _, m := range match.Data.Submatches {
+			matches = append(matches, grepMatch{
+				path:     match.Data.Path.Text,
+				modTime:  time.Time{},
+				lineNum:  match.Data.LineNumber,
+				charNum:  m.Start,
+				lineText: match.Data.Lines.Text,
+			})
+			// only get the first match of each line
+			break
 		}
-
-		// Find character position of match in line
-		regex, _ := searchRegexCache.get(pattern)
-		charNum := 0
-		if regex != nil {
-			if loc := regex.FindStringIndex(lineText); loc != nil {
-				charNum = loc[0]
-			}
-		}
-
-		matches = append(matches, grepMatch{
-			path:     filePath,
-			modTime:  fileInfo.ModTime(),
-			lineNum:  lineNum,
-			charNum:  charNum,
-			lineText: lineText,
-		})
 	}
-
 	return matches, nil
 }
 
-// parseRipgrepLine parses ripgrep output with null separation to handle Windows paths
-func parseRipgrepLine(line string) (filePath, lineNum, lineText string, ok bool) {
-	// Split on null byte first to separate filename from rest
-	parts := strings.SplitN(line, "\x00", 2)
-	if len(parts) != 2 {
-		return "", "", "", false
-	}
-
-	filePath = parts[0]
-	remainder := parts[1]
-
-	// Now split the remainder on first colon: "linenum:content"
-	colonIndex := strings.Index(remainder, ":")
-	if colonIndex == -1 {
-		return "", "", "", false
-	}
-
-	lineNumStr := remainder[:colonIndex]
-	lineText = remainder[colonIndex+1:]
-
-	if _, err := strconv.Atoi(lineNumStr); err != nil {
-		return "", "", "", false
-	}
-
-	return filePath, lineNumStr, lineText, true
+type ripgrepMatch struct {
+	Type string `json:"type"`
+	Data struct {
+		Path struct {
+			Text string `json:"text"`
+		} `json:"path"`
+		Lines struct {
+			Text string `json:"text"`
+		} `json:"lines"`
+		LineNumber int `json:"line_number"`
+		Submatches []struct {
+			Start int `json:"start"`
+		} `json:"submatches"`
+	} `json:"data"`
 }
 
 func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
@@ -386,8 +357,8 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			matches = append(matches, grepMatch{
 				path:     path,
 				modTime:  info.ModTime(),
-				lineNum:  lineNum,
-				charNum:  charNum,
+				lineNum:  lineNum + 1,
+				charNum:  charNum + 1,
 				lineText: lineText,
 			})
 

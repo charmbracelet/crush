@@ -101,7 +101,7 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 	t := styles.CurrentTheme()
 	lines := []string{}
 
-	// Section header (same style approach as LSPs)
+	// Section header 
 	if opts.ShowSection {
 		sectionName := opts.SectionName
 		if sectionName == "" {
@@ -114,10 +114,8 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 	agentFiles := CollectContextFileNames(cfg.WorkingDir(), cfg.Options.ContextPaths)
 
 	if len(agentFiles) == 0 {
-		// “None” styled like LSPs
 		lines = append(lines, t.S().Base.Foreground(t.Border).Render("None"))
 	} else {
-		// Stable order like LSP list uses deterministic ordering
 		sort.Strings(agentFiles)
 
 		// Determine how many items to show (avoid relying on min helper)
@@ -138,7 +136,6 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 			))
 		}
 
-		// Truncation indicator consistent with LSPs
 		if len(agentFiles) > maxItems && opts.MaxItems > 0 {
 			remaining := len(agentFiles) - maxItems
 			if remaining == 1 {

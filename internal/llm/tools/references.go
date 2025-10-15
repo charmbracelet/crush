@@ -1,14 +1,17 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -52,7 +55,7 @@ func (r *referencesTool) Info() ToolInfo {
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "The directory to search in. Defaults to the current working directory.",
+				"description": "The directory to search in. Should be the entire project most of the time. Defaults to the current working directory.",
 			},
 		},
 		Required: []string{"symbol"},
@@ -73,15 +76,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 		return NewTextErrorResponse("no LSP clients available"), nil
 	}
 
-	return r.findReferencesBySymbol(ctx, params)
-}
-
-func (r *referencesTool) findReferencesBySymbol(ctx context.Context, params ReferencesParams) (ToolResponse, error) {
-	// Use grep to find the symbol
-	workingDir := "."
-	if params.Path != "" {
-		workingDir = params.Path
-	}
+	workingDir := cmp.Or(params.Path, ".")
 
 	matches, _, err := searchFiles(ctx, regexp.QuoteMeta(params.Symbol), workingDir, "", 100)
 	if err != nil {
@@ -92,14 +87,30 @@ func (r *referencesTool) findReferencesBySymbol(ctx context.Context, params Refe
 		return NewTextResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 	}
 
-	// Try to find references for the first match
-	firstMatch := matches[0]
-	absPath, err := filepath.Abs(firstMatch.path)
-	if err != nil {
-		return NewTextErrorResponse(fmt.Sprintf("failed to get absolute path: %s", err)), nil
+	var allLocations []protocol.Location
+	for _, match := range matches {
+		locations, err := r.find(ctx, match, params.Symbol)
+		if err != nil {
+			slog.Error("Failed to find references", "error", err)
+			return NewTextErrorResponse(fmt.Sprintf("failed to find references: %s", err)), nil
+		}
+		allLocations = append(allLocations, locations...)
 	}
 
-	// Find the appropriate LSP client for this file
+	if len(allLocations) == 0 {
+		return NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
+	}
+
+	output := formatReferences(allLocations)
+	return NewTextResponse(output), nil
+}
+
+func (r *referencesTool) find(ctx context.Context, match grepMatch, symbol string) ([]protocol.Location, error) {
+	absPath, err := filepath.Abs(match.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path: %s", err)
+	}
+
 	var client *lsp.Client
 	for c := range r.lspClients.Seq() {
 		if c.HandlesFile(absPath) {
@@ -109,43 +120,29 @@ func (r *referencesTool) findReferencesBySymbol(ctx context.Context, params Refe
 	}
 
 	if client == nil {
-		return NewTextErrorResponse(fmt.Sprintf("no LSP client available for file: %s", absPath)), nil
+		slog.Warn("No LSP clients to handle", "path", match.path)
+		return nil, nil
 	}
 
-	// Read the file to find the exact character position
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return NewTextErrorResponse(fmt.Sprintf("failed to read file: %s", err)), nil
+		return nil, fmt.Errorf("failed to read file: %s", err)
 	}
 
 	lines := strings.Split(string(content), "\n")
-	if firstMatch.lineNum < 1 || firstMatch.lineNum > len(lines) {
-		return NewTextErrorResponse(fmt.Sprintf("invalid line number: %d", firstMatch.lineNum)), nil
+	if match.lineNum < 1 || match.lineNum > len(lines) {
+		return nil, fmt.Errorf("invalid line number: %d", match.lineNum)
 	}
 
-	line := lines[firstMatch.lineNum-1]
-	charPos := strings.Index(line, params.Symbol)
+	line := lines[match.lineNum-1]
+	charPos := strings.Index(line, symbol)
 	if charPos == -1 {
-		return NewTextErrorResponse(fmt.Sprintf("symbol not found on line %d", firstMatch.lineNum)), nil
+		return nil, fmt.Errorf("symbol not found on line %d", match.lineNum)
 	}
-
-	// Find references using LSP (line numbers are 0-based in LSP)
-	locations, err := client.FindReferences(ctx, absPath, firstMatch.lineNum-1, charPos, true)
-	if err != nil {
-		slog.Error("Failed to find references", "error", err)
-		return NewTextErrorResponse(fmt.Sprintf("failed to find references: %s", err)), nil
-	}
-
-	if len(locations) == 0 {
-		return NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
-	}
-
-	output := formatReferences(locations)
-	return NewTextResponse(output), nil
+	return client.FindReferences(ctx, absPath, match.lineNum-1, charPos, true)
 }
 
 func formatReferences(locations []protocol.Location) string {
-	// Group references by file
 	fileRefs := make(map[string][]protocol.Location)
 	for _, loc := range locations {
 		path, err := loc.URI.Path()
@@ -156,11 +153,7 @@ func formatReferences(locations []protocol.Location) string {
 		fileRefs[path] = append(fileRefs[path], loc)
 	}
 
-	// Sort files
-	files := make([]string, 0, len(fileRefs))
-	for file := range fileRefs {
-		files = append(files, file)
-	}
+	files := slices.Collect(maps.Keys(fileRefs))
 	sort.Strings(files)
 
 	var output strings.Builder
@@ -168,8 +161,6 @@ func formatReferences(locations []protocol.Location) string {
 
 	for _, file := range files {
 		refs := fileRefs[file]
-
-		// Sort references by line number
 		sort.Slice(refs, func(i, j int) bool {
 			if refs[i].Range.Start.Line != refs[j].Range.Start.Line {
 				return refs[i].Range.Start.Line < refs[j].Range.Start.Line

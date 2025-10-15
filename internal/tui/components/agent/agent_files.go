@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
 )
@@ -98,25 +100,57 @@ func CollectContextFileNames(workDir string, paths []string) []string {
 func RenderAgentFilesBlock(opts RenderOptions) string {
 	t := styles.CurrentTheme()
 	lines := []string{}
+
+	// Section header (same style approach as LSPs)
 	if opts.ShowSection {
 		sectionName := opts.SectionName
-		heading := t.S().Subtle.Render(sectionName)
-		lines = append(lines, heading, "")
+		if sectionName == "" {
+			sectionName = "Agent Files"
+		}
+		lines = append(lines, t.S().Subtle.Render(sectionName), "")
 	}
+
 	cfg := config.Get()
 	agentFiles := CollectContextFileNames(cfg.WorkingDir(), cfg.Options.ContextPaths)
+
 	if len(agentFiles) == 0 {
-		lines = append(lines, "None")
+		// “None” styled like LSPs
+		lines = append(lines, t.S().Base.Foreground(t.Border).Render("None"))
 	} else {
-		sort.Strings(agentFiles) // consistent order
-		maxItems := min(len(agentFiles), opts.MaxItems)
-		for i, f := range agentFiles {
-			if i >= maxItems {
-				break
+		// Stable order like LSP list uses deterministic ordering
+		sort.Strings(agentFiles)
+
+		// Determine how many items to show (avoid relying on min helper)
+		maxItems := len(agentFiles)
+		if opts.MaxItems > 0 && opts.MaxItems < maxItems {
+			maxItems = opts.MaxItems
+		}
+
+		// Render each row using core.Status with a themed status dot
+		for i := 0; i < maxItems; i++ {
+			f := agentFiles[i]
+			lines = append(lines, core.Status(
+				core.StatusOpts{
+					Icon:        t.ItemOnlineIcon.String(), 
+					Title:       f,                        
+				},
+				opts.MaxWidth,
+			))
+		}
+
+		// Truncation indicator consistent with LSPs
+		if len(agentFiles) > maxItems && opts.MaxItems > 0 {
+			remaining := len(agentFiles) - maxItems
+			if remaining == 1 {
+				lines = append(lines, t.S().Base.Foreground(t.FgMuted).Render("…"))
+			} else {
+				lines = append(lines, t.S().Base.Foreground(t.FgSubtle).Render(
+					fmt.Sprintf("…and %d more", remaining),
+				))
 			}
-			lines = append(lines, "• "+f)
 		}
 	}
+
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if opts.MaxWidth > 0 {
 		return lipgloss.NewStyle().Width(opts.MaxWidth).Render(content)

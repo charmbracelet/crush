@@ -376,13 +376,13 @@ func (m *sidebarCmp) renderSectionsHorizontal() string {
 	sectionWidth := min(50, totalWidth/3)
 
 	// Get the sections content with limited height
-	var filesContent, lspContent, mcpContent string
+	var filesContent, lspContent, mcpContent,agentContent string
 
 	filesContent = m.filesBlockCompact(sectionWidth)
 	lspContent = m.lspBlockCompact(sectionWidth)
 	mcpContent = m.mcpBlockCompact(sectionWidth)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent)
+	agentContent= m.agentFilesBlockCompact(sectionWidth)
+	return lipgloss.JoinHorizontal(lipgloss.Top, filesContent, " ", lspContent, " ", mcpContent," ",agentContent)
 }
 
 // filesBlockCompact renders the files block with limited width and height for horizontal layout
@@ -452,6 +452,16 @@ func (m *sidebarCmp) mcpBlockCompact(maxWidth int) string {
 	}, true)
 }
 
+// agentFilesBlock renders the MCP block with limited width and height for horizontal layout
+func (m *sidebarCmp) agentFilesBlockCompact(maxWidth int) string {
+	return agent.RenderAgentFilesBlock(agent.RenderOptions{
+		MaxWidth:    maxWidth,
+		MaxItems:    3,
+		ShowSection: true,
+		SectionName: "Agent Files",
+	})
+}
+
 func (m *sidebarCmp) filesBlock() string {
 	// Convert map to slice and handle type conversion
 	sessionFiles := slices.Collect(m.files.Seq())
@@ -511,7 +521,7 @@ func (m *sidebarCmp) mcpBlock() string {
 func (m *sidebarCmp) agentFilesBlock() string {
 	return agent.RenderAgentFilesBlock(agent.RenderOptions{
 		MaxWidth:    m.getMaxWidth(),
-		MaxItems:    2,
+		MaxItems:    5,
 		ShowSection: true,
 		SectionName: core.Section("Agent Files", m.getMaxWidth()),
 	})

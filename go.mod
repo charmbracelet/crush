@@ -22,6 +22,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.2
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
+	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0

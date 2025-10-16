@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/rivo/uniseg"
 )
 
@@ -1283,14 +1284,14 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 				newItem, ok := l.renderedItems.Get(item.ID())
 				if ok {
 					newLines := newItem.height - oldItem.height
-					l.offset = util.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+					l.offset = ordered.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
 				}
 			}
 		} else if hasOldItem && l.offset > oldItem.start {
 			newItem, ok := l.renderedItems.Get(item.ID())
 			if ok {
 				newLines := newItem.height - oldItem.height
-				l.offset = util.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+				l.offset = ordered.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
 			}
 		}
 	}

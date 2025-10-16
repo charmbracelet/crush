@@ -410,12 +410,11 @@ func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
-	stdiot, ok := transport.(*mcp.CommandTransport)
+	ct, ok := transport.(*mcp.CommandTransport)
 	if !ok {
 		return err
 	}
-	old := stdiot.Command
-	if err2 := stdioMCPCheck(old.Path, old.Args, old.Env); err2 != nil {
+	if err2 := stdioMCPCheck(ct.Command); err2 != nil {
 		err = errors.Join(err, err2)
 	}
 	return err
@@ -489,11 +488,11 @@ func mcpTimeout(m config.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
 }
 
-func stdioMCPCheck(path string, args, env []string) error {
+func stdioMCPCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Env = env
+	cmd := exec.CommandContext(ctx, old.Path, old.Args...)
+	cmd.Env = old.Env
 	out, err := cmd.CombinedOutput()
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil

@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/mcp"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -179,10 +180,13 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
 		if len(m.attachments) >= maxAttachments {
-			return m, util.ReportError(fmt.Errorf("cannot add more than %d images", maxAttachments))
+			// TODO: check if this still needed
+			return m, util.ReportError(fmt.Errorf("cannot add more than %d attachments", maxAttachments))
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
+	case mcp.ResourcePickedMsg:
+		m.attachments = append(m.attachments, msg.Attachment)
 	case completions.CompletionsOpenedMsg:
 		m.isCompletionsOpen = true
 	case completions.CompletionsClosedMsg:
@@ -458,16 +462,21 @@ func (m *editorCmp) attachmentsContent() string {
 		Background(t.FgMuted).
 		Foreground(t.FgBase)
 	for i, attachment := range m.attachments {
-		var filename string
+		icon := styles.DocumentIcon
+		if strings.HasPrefix(attachment.MimeType, "image/") {
+			icon = styles.ImageIcon
+		}
+
+		var item string
 		if len(attachment.FileName) > 10 {
-			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, attachment.FileName[0:7])
+			item = fmt.Sprintf(" %s %s...", icon, attachment.FileName[0:7])
 		} else {
-			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, attachment.FileName)
+			item = fmt.Sprintf(" %s %s", icon, attachment.FileName)
 		}
 		if m.deleteMode {
-			filename = fmt.Sprintf("%d%s", i, filename)
+			item = fmt.Sprintf("%d%s", i, item)
 		}
-		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
+		styledAttachments = append(styledAttachments, attachmentStyles.Render(item))
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 	return content

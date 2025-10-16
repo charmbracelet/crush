@@ -74,6 +74,9 @@ func RenderMCPList(opts RenderOptions) []string {
 				if count := state.Counts.Prompts; count > 0 {
 					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d prompts", count)))
 				}
+				if count := state.Counts.Resources; count > 0 {
+					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d resources", count)))
+				}
 			case agent.MCPStateError:
 				icon = t.ItemErrorIcon
 				if state.Error != nil {

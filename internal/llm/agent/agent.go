@@ -346,9 +346,6 @@ func (a *agent) err(err error) AgentEvent {
 }
 
 func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error) {
-	if !a.Model().SupportsImages && attachments != nil {
-		attachments = nil
-	}
 	events := make(chan AgentEvent, 1)
 	if a.IsSessionBusy(sessionID) {
 		existing, ok := a.promptQueue.Get(sessionID)
@@ -371,7 +368,15 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		})
 		var attachmentParts []message.ContentPart
 		for _, attachment := range attachments {
-			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
+			if !a.Model().SupportsImages && strings.HasPrefix(attachment.MimeType, "image/") {
+				slog.Warn("Model does not support images, skipping attachment", "mimeType", attachment.MimeType, "fileName", attachment.FileName)
+				continue
+			}
+			attachmentParts = append(attachmentParts, message.BinaryContent{
+				Path:     attachment.FilePath,
+				MIMEType: attachment.MimeType,
+				Data:     attachment.Content,
+			})
 		}
 		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
 		if result.Error != nil {

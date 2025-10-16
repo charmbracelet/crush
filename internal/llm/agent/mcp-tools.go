@@ -69,8 +69,9 @@ type MCPEvent struct {
 
 // MCPCounts number of available tools, prompts, etc.
 type MCPCounts struct {
-	Tools   int
-	Prompts int
+	Tools     int
+	Prompts   int
+	Resources int
 }
 
 // MCPClientInfo holds information about an MCP client's state
@@ -84,14 +85,16 @@ type MCPClientInfo struct {
 }
 
 var (
-	mcpToolsOnce      sync.Once
-	mcpTools          = csync.NewMap[string, tools.BaseTool]()
-	mcpClient2Tools   = csync.NewMap[string, []tools.BaseTool]()
-	mcpClients        = csync.NewMap[string, *mcp.ClientSession]()
-	mcpStates         = csync.NewMap[string, MCPClientInfo]()
-	mcpBroker         = pubsub.NewBroker[MCPEvent]()
-	mcpPrompts        = csync.NewMap[string, *mcp.Prompt]()
-	mcpClient2Prompts = csync.NewMap[string, []*mcp.Prompt]()
+	mcpToolsOnce        sync.Once
+	mcpTools            = csync.NewMap[string, tools.BaseTool]()
+	mcpClient2Tools     = csync.NewMap[string, []tools.BaseTool]()
+	mcpClients          = csync.NewMap[string, *mcp.ClientSession]()
+	mcpStates           = csync.NewMap[string, MCPClientInfo]()
+	mcpBroker           = pubsub.NewBroker[MCPEvent]()
+	mcpPrompts          = csync.NewMap[string, *mcp.Prompt]()
+	mcpClient2Prompts   = csync.NewMap[string, []*mcp.Prompt]()
+	mcpResources        = csync.NewMap[string, *mcp.Resource]()
+	mcpClient2Resources = csync.NewMap[string, []*mcp.Resource]()
 )
 
 type McpTool struct {
@@ -344,12 +347,22 @@ func doGetMCPTools(ctx context.Context, permissions permission.Service, cfg *con
 				return
 			}
 
+			resources, err := getResources(ctx, c)
+			if err != nil {
+				slog.Error("error listing resources", "error", err)
+				updateMCPState(name, MCPStateError, err, nil, MCPCounts{})
+				c.Close()
+				return
+			}
+
 			updateMcpTools(name, tools)
 			updateMcpPrompts(name, prompts)
+			updateMcpResources(name, resources)
 			mcpClients.Set(name, c)
 			counts := MCPCounts{
-				Tools:   len(tools),
-				Prompts: len(prompts),
+				Tools:     len(tools),
+				Prompts:   len(prompts),
+				Resources: len(resources),
 			}
 			updateMCPState(name, MCPStateConnected, nil, c, counts)
 		}(name, m)
@@ -513,6 +526,32 @@ func updateMcpPrompts(mcpName string, prompts []*mcp.Prompt) {
 	}
 }
 
+func getResources(ctx context.Context, c *mcp.ClientSession) ([]*mcp.Resource, error) {
+	if c.InitializeResult().Capabilities.Resources == nil {
+		return nil, nil
+	}
+	result, err := c.ListResources(ctx, &mcp.ListResourcesParams{})
+	if err != nil {
+		return nil, err
+	}
+	return result.Resources, nil
+}
+
+// updateMcpResources updates the global mcpResources and mcpClient2Resources maps.
+func updateMcpResources(mcpName string, resources []*mcp.Resource) {
+	if len(resources) == 0 {
+		mcpClient2Resources.Del(mcpName)
+	} else {
+		mcpClient2Resources.Set(mcpName, resources)
+	}
+	for clientName, resources := range mcpClient2Resources.Seq2() {
+		for _, p := range resources {
+			key := clientName + ":" + p.Name
+			mcpResources.Set(key, p)
+		}
+	}
+}
+
 // GetMCPPrompts returns all available MCP prompts.
 func GetMCPPrompts() map[string]*mcp.Prompt {
 	return maps.Collect(mcpPrompts.Seq2())
@@ -538,5 +577,32 @@ func GetMCPPromptContent(ctx context.Context, clientName, promptName string, arg
 	return c.GetPrompt(ctx, &mcp.GetPromptParams{
 		Name:      promptName,
 		Arguments: args,
+	})
+}
+
+// GetMCPResources returns all available MCP resources.
+func GetMCPResources() map[string]*mcp.Resource {
+	return maps.Collect(mcpResources.Seq2())
+}
+
+// GetMCPResource returns a specific MCP resource by name.
+func GetMCPResource(name string) (*mcp.Resource, bool) {
+	return mcpResources.Get(name)
+}
+
+// GetMCPResourcesByClient returns all resources for a specific MCP client.
+func GetMCPResourcesByClient(clientName string) ([]*mcp.Resource, bool) {
+	return mcpClient2Resources.Get(clientName)
+}
+
+// GetMCPResourceContent retrieves the content of an MCP resource.
+func GetMCPResourceContent(ctx context.Context, clientName, uri string) (*mcp.ReadResourceResult, error) {
+	c, err := getOrRenewClient(ctx, clientName)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.ReadResource(ctx, &mcp.ReadResourceParams{
+		URI: uri,
 	})
 }

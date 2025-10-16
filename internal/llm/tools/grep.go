@@ -270,12 +270,16 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			continue
 		}
 		for _, m := range match.Data.Submatches {
+			fi, err := os.Stat(match.Data.Path.Text)
+			if err != nil {
+				continue // Skip files we can't access
+			}
 			matches = append(matches, grepMatch{
 				path:     match.Data.Path.Text,
-				modTime:  time.Time{},
+				modTime:  fi.ModTime(),
 				lineNum:  match.Data.LineNumber,
-				charNum:  m.Start,
-				lineText: match.Data.Lines.Text,
+				charNum:  m.Start + 1, // ensure 1-based
+				lineText: strings.TrimSpace(match.Data.Lines.Text),
 			})
 			// only get the first match of each line
 			break
@@ -358,8 +362,8 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			matches = append(matches, grepMatch{
 				path:     path,
 				modTime:  info.ModTime(),
-				lineNum:  lineNum + 1,
-				charNum:  charNum + 1,
+				lineNum:  lineNum,
+				charNum:  charNum,
 				lineText: lineText,
 			})
 
@@ -395,7 +399,7 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 		lineNum++
 		line := scanner.Text()
 		if loc := pattern.FindStringIndex(line); loc != nil {
-			charNum := loc[0]
+			charNum := loc[0] + 1
 			return true, lineNum, charNum, line, nil
 		}
 	}

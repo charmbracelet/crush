@@ -101,6 +101,7 @@ func (r *referencesTool) Run(ctx context.Context, call ToolCall) (ToolResponse, 
 			continue
 		}
 		allLocations = append(allLocations, locations...)
+		// XXX: should we break here or look for all results?
 	}
 
 	if len(allLocations) > 0 {
@@ -136,8 +137,8 @@ func (r *referencesTool) find(ctx context.Context, symbol string, match grepMatc
 	return client.FindReferences(
 		ctx,
 		absPath,
-		match.lineNum-1,
-		match.charNum+getSymbolOffset(symbol)-1,
+		match.lineNum,
+		match.charNum+getSymbolOffset(symbol),
 		true,
 	)
 }

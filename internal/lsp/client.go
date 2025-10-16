@@ -450,7 +450,9 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
 		return nil, err
 	}
-	return c.client.FindReferences(ctx, filepath, line, character, includeDeclaration)
+	// NOTE: line and character should be 0-based.
+	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
+	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
 
 // HasRootMarkers checks if any of the specified root marker patterns exist in the given directory.

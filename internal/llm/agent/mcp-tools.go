@@ -387,8 +387,9 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
-		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		err = maybeStdioErr(err, transport)
 		slog.Error("error starting mcp client", "error", err, "name", name)
+		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 		cancel()
 		return nil, err
 	}
@@ -396,6 +397,26 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 	cancelTimer.Stop()
 	slog.Info("Initialized mcp client", "name", name)
 	return session, nil
+}
+
+// maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
+// to parse, and the cli will then close it, causing the EOF error.
+// so, if we got an EOF err, and the transport is STDIO, we try to exec it
+// again with a timeout and collect the output so we can add details to the
+// error.
+func maybeStdioErr(err error, transport mcp.Transport) error {
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	stdiot, ok := transport.(*mcp.CommandTransport)
+	if !ok {
+		return err
+	}
+	old := stdiot.Command
+	if err2 := stdioMCPCheck(old.Path, old.Args, old.Env); err2 != nil {
+		err = errors.Join(err, err2)
+	}
+	return err
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {
@@ -464,4 +485,16 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+}
+
+func stdioMCPCheck(path string, args, env []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", err, string(out))
 }

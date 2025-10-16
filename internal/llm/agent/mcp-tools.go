@@ -404,6 +404,8 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 // so, if we got an EOF err, and the transport is STDIO, we try to exec it
 // again with a timeout and collect the output so we can add details to the
 // error.
+// this happens particularly when starting things with npx, e.g. if node can't
+// be found or some other error like that.
 func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err

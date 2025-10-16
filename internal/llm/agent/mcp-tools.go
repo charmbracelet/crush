@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -415,7 +416,7 @@ func createMCPTransport(ctx context.Context, m config.MCPConfig, resolver config
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
-		cmd.Env = m.ResolvedEnv()
+		cmd.Env = append(m.ResolvedEnv(), os.Environ()...)
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil

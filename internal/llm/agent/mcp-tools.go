@@ -99,8 +99,8 @@ func (b *McpTool) Name() string {
 }
 
 func (b *McpTool) Info() tools.ToolInfo {
-	var parameters map[string]any
-	var required []string
+	parameters := make(map[string]any)
+	required := make([]string, 0)
 
 	if input, ok := b.tool.InputSchema.(map[string]any); ok {
 		if props, ok := input["properties"].(map[string]any); ok {

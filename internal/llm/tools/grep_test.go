@@ -392,6 +392,8 @@ func TestIsTextFile(t *testing.T) {
 }
 
 func TestColumnMatch(t *testing.T) {
+	t.Parallel()
+
 	// Test both implementations
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,

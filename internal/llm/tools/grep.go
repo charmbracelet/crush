@@ -94,7 +94,10 @@ type grepTool struct {
 	workingDir string
 }
 
-const GrepToolName = "grep"
+const (
+	GrepToolName        = "grep"
+	maxGrepContentWidth = 500
+)
 
 //go:embed grep.md
 var grepDescription []byte
@@ -168,7 +171,7 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		searchPath = g.workingDir
 	}
 
-	matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
+	matches, truncated, err := searchFiles(ctx, searchWithRipgrep, searchPattern, searchPath, params.Include, 100)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 	}
@@ -189,7 +192,11 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 				fmt.Fprintf(&output, "%s:\n", match.path)
 			}
 			if match.lineNum > 0 {
-				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, match.lineText)
+				lineText := match.lineText
+				if len(lineText) > maxGrepContentWidth {
+					lineText = lineText[:maxGrepContentWidth] + "..."
+				}
+				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
 			} else {
 				fmt.Fprintf(&output, "  %s\n", match.path)
 			}
@@ -209,8 +216,8 @@ func (g *grepTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 	), nil
 }
 
-func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
+func searchFiles(ctx context.Context, ripGrepSearch searchWithRipgrapFn, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
+	matches, err := ripGrepSearch(ctx, getRgSearchCmd, pattern, rootPath, include)
 	if err != nil {
 		matches, err = searchFilesWithRegex(pattern, rootPath, include)
 		if err != nil {
@@ -230,8 +237,11 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 	return matches, truncated, nil
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include)
+type searchWithRipgrapFn func(ctx context.Context, rgSearchCmd resolveRgSearchCmd, pattern, path, include string) ([]grepMatch, error)
+
+// NOTE(tauraamui): ideally I would want to not pass in the search specific args here but will leave for now
+func searchWithRipgrep(ctx context.Context, rgSearchCmd resolveRgSearchCmd, pattern, path, include string) ([]grepMatch, error) {
+	cmd := rgSearchCmd(ctx, pattern, path, include)
 	if cmd == nil {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}
@@ -240,7 +250,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
 		ignorePath := filepath.Join(path, ignoreFile)
 		if _, err := os.Stat(ignorePath); err == nil {
-			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
+			cmd.AddArgs("--ignore-file", ignorePath)
 		}
 	}
 

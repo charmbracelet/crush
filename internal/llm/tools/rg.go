@@ -37,7 +37,26 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
+type execCmd interface {
+	AddArgs(arg ...string)
+	Output() ([]byte, error)
+}
+
+type wrappedCmd struct {
+	cmd *exec.Cmd
+}
+
+func (w wrappedCmd) AddArgs(arg ...string) {
+	w.cmd.Args = append(w.cmd.Args, arg...)
+}
+
+func (w wrappedCmd) Output() ([]byte, error) {
+	return w.cmd.Output()
+}
+
+type resolveRgSearchCmd func(ctx context.Context, pattern, path, include string) execCmd
+
+func getRgSearchCmd(ctx context.Context, pattern, path, include string) execCmd {
 	name := getRg()
 	if name == "" {
 		return nil
@@ -49,5 +68,7 @@ func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cm
 	}
 	args = append(args, path)
 
-	return exec.CommandContext(ctx, name, args...)
+	return wrappedCmd{
+		cmd: exec.CommandContext(ctx, name, args...),
+	}
 }

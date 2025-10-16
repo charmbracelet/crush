@@ -1,10 +1,14 @@
 package tools
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -87,7 +91,7 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			return searchWithRipgrep(t.Context(), getRgSearchCmd, pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -147,7 +151,7 @@ func TestSearchImplementations(t *testing.T) {
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+			return searchWithRipgrep(t.Context(), getRgSearchCmd, pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -171,6 +175,137 @@ func TestSearchImplementations(t *testing.T) {
 				require.NotContains(t, match.path, "file5.txt")
 				require.NotContains(t, match.path, "binary.exe")
 			}
+		})
+	}
+}
+
+type mockRgExecCmd struct {
+	args []string
+	err  error
+}
+
+func (m *mockRgExecCmd) AddArgs(args ...string) {
+	m.args = append(m.args, args...)
+}
+
+func (m *mockRgExecCmd) Output() ([]byte, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return []byte{}, nil
+}
+
+func TestSearchWithRipGrepButItFailsToRunHandleError(t *testing.T) {
+	tests := []struct {
+		name          string
+		err           error
+		expectMatches bool
+		expectError   bool
+	}{
+		{
+			name: "exit code 1 returns no matches and no error",
+			err: func() error {
+				ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "sh", "-c", "exit 1")
+				err := cmd.Run()
+				require.Error(t, err)
+				exitErr, ok := err.(*exec.ExitError)
+				require.True(t, ok)
+				require.Equal(t, 1, exitErr.ExitCode())
+				return exitErr
+			}(),
+			expectMatches: false,
+			expectError:   false,
+		},
+		{
+			name:          "non-exit error returns error",
+			err:           os.ErrPermission,
+			expectMatches: false,
+			expectError:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRgCmd := mockRgExecCmd{
+				err: tt.err,
+			}
+
+			matches, err := searchWithRipgrep(t.Context(), func(ctx context.Context, pattern, path, include string) execCmd {
+				return &mockRgCmd
+			}, "", "", "")
+
+			if tt.expectMatches {
+				require.NotEmpty(t, matches)
+			} else {
+				require.Empty(t, matches)
+			}
+
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSearchFilesWithLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		limit             int
+		numMatches        int
+		expectedMatches   int
+		expectedTruncated bool
+	}{
+		{
+			name:              "limit of 100 truncates 150 results",
+			limit:             100,
+			numMatches:        150,
+			expectedMatches:   100,
+			expectedTruncated: true,
+		},
+		{
+			name:              "limit of 200 does not truncate 150 results",
+			limit:             200,
+			numMatches:        150,
+			expectedMatches:   150,
+			expectedTruncated: false,
+		},
+		{
+			name:              "limit of 150 exactly matches all files",
+			limit:             150,
+			numMatches:        150,
+			expectedMatches:   150,
+			expectedTruncated: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create mock ripgrep search that returns fake matches.
+			mockRipgrepSearch := func(ctx context.Context, rgSearchCmd resolveRgSearchCmd, pattern, path, include string) ([]grepMatch, error) {
+				matches := make([]grepMatch, tt.numMatches)
+				for i := 0; i < tt.numMatches; i++ {
+					matches[i] = grepMatch{
+						path:     fmt.Sprintf("/fake/path/file%03d.txt", i),
+						modTime:  time.Now().Add(-time.Duration(i) * time.Minute),
+						lineNum:  1,
+						lineText: "test pattern",
+					}
+				}
+				return matches, nil
+			}
+
+			matches, truncated, err := searchFiles(t.Context(), mockRipgrepSearch, "test pattern", "/fake/path", "", tt.limit)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedMatches, len(matches))
+			require.Equal(t, tt.expectedTruncated, truncated)
 		})
 	}
 }

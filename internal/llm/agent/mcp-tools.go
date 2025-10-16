@@ -365,6 +365,8 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 	if err != nil {
 		updateMCPState(name, MCPStateError, err, nil, 0)
 		slog.Error("error creating mcp client", "error", err, "name", name)
+		cancel()
+		cancelTimer.Stop()
 		return nil, err
 	}
 
@@ -391,6 +393,7 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 		slog.Error("error starting mcp client", "error", err, "name", name)
 		cancel()
+		cancelTimer.Stop()
 		return nil, err
 	}
 

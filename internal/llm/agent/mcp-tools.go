@@ -388,8 +388,8 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
 		err = maybeStdioErr(err, transport)
-		slog.Error("error starting mcp client", "error", err, "name", name)
 		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
+		slog.Error("error starting mcp client", "error", err, "name", name)
 		cancel()
 		return nil, err
 	}

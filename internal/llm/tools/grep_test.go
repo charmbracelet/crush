@@ -413,7 +413,7 @@ func TestColumnMatch(t *testing.T) {
 			require.Equal(t, 2, match.lineNum)
 			require.Equal(t, 14, match.charNum)
 			require.Equal(t, "I wanna grep THIS particular word", match.lineText)
-			require.Equal(t, "testdata/grep.txt", filepath.Clean(match.path))
+			require.Equal(t, "testdata/grep.txt", filepath.ToSlash(filepath.Clean(match.path)))
 		})
 	}
 }

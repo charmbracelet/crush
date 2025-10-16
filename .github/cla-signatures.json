@@ -711,6 +711,14 @@
       "created_at": "2025-10-13T05:56:20Z",
       "repoId": 987670088,
       "pullRequestNo": 1223
+    },
+    {
+      "name": "BrunoKrugel",
+      "id": 30608179,
+      "comment_id": 3411978929,
+      "created_at": "2025-10-16T17:30:07Z",
+      "repoId": 987670088,
+      "pullRequestNo": 1245
     }
   ]
 }

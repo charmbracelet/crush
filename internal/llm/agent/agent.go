@@ -525,7 +525,7 @@ func (a *agent) getAllTools() ([]tools.BaseTool, error) {
 	if a.agentCfg.ID == "coder" {
 		allTools = slices.AppendSeq(allTools, a.mcpTools.Seq())
 		if a.lspClients.Len() > 0 {
-			allTools = append(allTools, tools.NewDiagnosticsTool(a.lspClients))
+			allTools = append(allTools, tools.NewDiagnosticsTool(a.lspClients), tools.NewReferencesTool(a.lspClients))
 		}
 	}
 	if a.agentToolFn != nil {

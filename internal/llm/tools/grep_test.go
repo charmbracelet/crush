@@ -390,3 +390,32 @@ func TestIsTextFile(t *testing.T) {
 		})
 	}
 }
+
+func TestColumnMatch(t *testing.T) {
+	t.Parallel()
+
+	// Test both implementations
+	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+		"regex": searchFilesWithRegex,
+		"rg": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(t.Context(), pattern, path, include)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if name == "rg" && getRg() == "" {
+				t.Skip("rg is not in $PATH")
+			}
+
+			matches, err := fn("THIS", "./testdata/", "")
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			match := matches[0]
+			require.Equal(t, 2, match.lineNum)
+			require.Equal(t, 14, match.charNum)
+			require.Equal(t, "I wanna grep THIS particular word", match.lineText)
+			require.Equal(t, "testdata/grep.txt", filepath.ToSlash(filepath.Clean(match.path)))
+		})
+	}
+}

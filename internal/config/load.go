@@ -593,6 +593,10 @@ func hasAWSCredentials(env env.Env) bool {
 		return true
 	}
 
+	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return true
+	}
+
 	if env.Get("AWS_PROFILE") != "" || env.Get("AWS_DEFAULT_PROFILE") != "" {
 		return true
 	}

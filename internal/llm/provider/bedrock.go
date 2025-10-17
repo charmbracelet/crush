@@ -1,11 +1,18 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/llm/tools"
@@ -46,10 +53,34 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 
 	// Determine which provider to use based on the model
 	if strings.Contains(string(model.ID), "anthropic") {
-		// Create Anthropic client with Bedrock configuration
+		// Check if using bearer token authentication
+		if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
+			// Use direct Anthropic client with bearer token in Authorization header
+			anthropicOpts := opts
+			// Note: Caching is enabled by default, will be used if the model supports it
+			anthropicOpts.baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", region)
+
+			// Set bearer token as Authorization header
+			if anthropicOpts.extraHeaders == nil {
+				anthropicOpts.extraHeaders = make(map[string]string)
+			}
+			anthropicOpts.extraHeaders["Authorization"] = fmt.Sprintf("Bearer %s", os.Getenv("AWS_BEARER_TOKEN_BEDROCK"))
+
+			// Store the model ID and middleware flag for the Anthropic client
+			anthropicOpts.extraParams["bedrockBearerToken"] = "true"
+			anthropicOpts.extraParams["bedrockModelID"] = string(model.ID)
+
+			return &bedrockClient{
+				providerOptions: opts,
+				childProvider:   newAnthropicClient(anthropicOpts, AnthropicClientTypeNormal),
+			}
+		}
+
+		// Use standard AWS credentials with Bedrock SDK integration
 		anthropicOpts := opts
-		// TODO: later find a way to check if the AWS account has caching enabled
-		opts.disableCache = true // Disable cache for Bedrock
+		anthropicOpts.disableCache = true
+		anthropicOpts.extraParams["bedrockRegion"] = region
+
 		return &bedrockClient{
 			providerOptions: opts,
 			childProvider:   newAnthropicClient(anthropicOpts, AnthropicClientTypeBedrock),
@@ -90,4 +121,62 @@ func (b *bedrockClient) stream(ctx context.Context, messages []message.Message, 
 
 func (b *bedrockClient) Model() catwalk.Model {
 	return b.providerOptions.model(b.providerOptions.modelType)
+}
+
+// bedrockBearerTokenMiddleware transforms Anthropic API requests to Bedrock format
+func bedrockBearerTokenMiddleware(modelID string) option.Middleware {
+	return func(r *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		// Only transform POST requests to /v1/messages
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/messages" {
+			// Read the request body
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				return nil, err
+			}
+			r.Body.Close()
+
+			// Parse the JSON to extract model and stream fields
+			var reqData map[string]interface{}
+			if err := json.Unmarshal(body, &reqData); err != nil {
+				return nil, err
+			}
+
+			// Extract stream flag (default to false)
+			stream, _ := reqData["stream"].(bool)
+
+			// Remove model and stream from the body
+			delete(reqData, "model")
+			delete(reqData, "stream")
+
+			// Add anthropic_version if not present
+			if _, ok := reqData["anthropic_version"]; !ok {
+				reqData["anthropic_version"] = "bedrock-2023-05-31"
+			}
+
+			// Re-encode the body
+			modifiedBody, err := json.Marshal(reqData)
+			if err != nil {
+				return nil, err
+			}
+
+			// Determine the method
+			method := "invoke"
+			if stream {
+				method = "invoke-with-response-stream"
+			}
+
+			// Update the URL path
+			r.URL.Path = fmt.Sprintf("/model/%s/%s", modelID, method)
+			r.URL.RawPath = fmt.Sprintf("/model/%s/%s", url.QueryEscape(modelID), method)
+
+			// Set the new body
+			r.Body = io.NopCloser(bytes.NewReader(modifiedBody))
+			r.ContentLength = int64(len(modifiedBody))
+			r.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(modifiedBody)), nil
+			}
+		}
+
+		return next(r)
+	}
 }

@@ -227,6 +227,36 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+func TestConfig_configureProvidersBedrockWithBearerToken(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"AWS_BEARER_TOKEN_BEDROCK": "test-bearer-token",
+		"AWS_REGION":               "us-east-1",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, cfg.Providers.Len(), 1)
+
+	bedrockProvider, ok := cfg.Providers.Get("bedrock")
+	require.True(t, ok, "Bedrock provider should be present with bearer token")
+	require.Len(t, bedrockProvider.Models, 1)
+	require.Equal(t, "anthropic.claude-sonnet-4-20250514-v1:0", bedrockProvider.Models[0].ID)
+	require.Equal(t, "us-east-1", bedrockProvider.ExtraParams["region"])
+}
+
 func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

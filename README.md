@@ -188,6 +188,7 @@ That said, you can also set environment variables for preferred providers.
 | `GROQ_API_KEY`              | Groq                                               |
 | `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
 | `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
+| `AWS_BEARER_TOKEN_BEDROCK`  | AWS Bedrock (Claude) - Bearer token authentication |
 | `AWS_REGION`                | AWS Bedrock (Claude)                               |
 | `AWS_PROFILE`               | Custom AWS Profile                                 |
 | `AWS_REGION`                | AWS Region                                         |
@@ -476,9 +477,22 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
+#### Standard AWS Credentials
+
 - A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
 - Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
 - To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+
+#### Bearer Token Authentication
+
+Crush also supports bearer token authentication for Bedrock, which is used by tools like Claude Code:
+
+```bash
+export AWS_BEARER_TOKEN_BEDROCK=your-bearer-token
+export AWS_REGION=us-east-1
+```
+
+When `AWS_BEARER_TOKEN_BEDROCK` is set, Crush will use bearer token authentication instead of the standard AWS credential chain.
 
 ### Vertex AI Platform
 

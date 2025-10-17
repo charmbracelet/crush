@@ -99,6 +99,14 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 		project := opts.extraParams["project"]
 		location := opts.extraParams["location"]
 		anthropicClientOptions = append(anthropicClientOptions, vertex.WithGoogleAuth(context.Background(), location, project))
+	case AnthropicClientTypeNormal:
+		// Check if this is a Bedrock bearer token setup
+		if opts.extraParams["bedrockBearerToken"] == "true" {
+			modelID := opts.extraParams["bedrockModelID"]
+			if modelID != "" {
+				anthropicClientOptions = append(anthropicClientOptions, option.WithMiddleware(bedrockBearerTokenMiddleware(modelID)))
+			}
+		}
 	}
 	for key, header := range opts.extraHeaders {
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHeaderAdd(key, header))

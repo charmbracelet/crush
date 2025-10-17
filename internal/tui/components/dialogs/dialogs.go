@@ -32,7 +32,7 @@ type CloseDialogMsg struct{}
 
 // DialogCmp manages a stack of dialogs with keyboard navigation.
 type DialogCmp interface {
-	tea.Model
+	util.Model
 
 	Dialogs() []DialogModel
 	HasDialogs() bool
@@ -62,7 +62,7 @@ func (d dialogCmp) Init() tea.Cmd {
 }
 
 // Update handles dialog lifecycle and forwards messages to the active dialog.
-func (d dialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (d dialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		var cmds []tea.Cmd
@@ -98,7 +98,11 @@ func (d dialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return d, nil
 }
 
-func (d dialogCmp) handleOpen(msg OpenDialogMsg) (tea.Model, tea.Cmd) {
+func (d dialogCmp) View() string {
+	return ""
+}
+
+func (d dialogCmp) handleOpen(msg OpenDialogMsg) (util.Model, tea.Cmd) {
 	if d.HasDialogs() {
 		dialog := d.dialogs[len(d.dialogs)-1]
 		if dialog.ID() == msg.Model.ID() {

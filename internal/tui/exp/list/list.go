@@ -217,7 +217,7 @@ func (l *list[T]) Init() tea.Cmd {
 }
 
 // Update implements List.
-func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
 		if l.enableMouse {
@@ -277,7 +277,7 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return l, nil
 }
 
-func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.Button {
 	case tea.MouseWheelDown:

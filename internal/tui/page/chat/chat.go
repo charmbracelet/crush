@@ -163,7 +163,7 @@ func (p *chatPage) Init() tea.Cmd {
 	)
 }
 
-func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:

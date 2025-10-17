@@ -135,7 +135,7 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 }
 
 // Update implements SplashPage.
-func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)

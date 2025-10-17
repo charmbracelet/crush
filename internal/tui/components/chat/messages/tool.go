@@ -27,7 +27,7 @@ import (
 // ToolCallCmp defines the interface for tool call components in the chat interface.
 // It manages the display of tool execution including pending states, results, and errors.
 type ToolCallCmp interface {
-	util.Model                         // Basic Bubble Tea model interface
+	util.Model                         // Basic Bubble util.Model interface
 	layout.Sizeable                    // Width/height management
 	layout.Focusable                   // Focus state management
 	GetToolCall() message.ToolCall     // Access to tool call data
@@ -147,7 +147,7 @@ func (m *toolCallCmp) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the component state.
 // Manages animation updates for pending tool calls.
-func (m *toolCallCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.StepMsg:
 		var cmds []tea.Cmd

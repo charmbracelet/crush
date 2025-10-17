@@ -88,7 +88,7 @@ func (m *sidebarCmp) Init() tea.Cmd {
 	return nil
 }
 
-func (m *sidebarCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *sidebarCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case SessionFilesMsg:
 		m.files = csync.NewMap[string, SessionFile]()

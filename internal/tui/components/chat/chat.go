@@ -101,7 +101,7 @@ func (m *messageListCmp) Init() tea.Cmd {
 }
 
 // Update handles incoming messages and updates the component state.
-func (m *messageListCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if m.session.ID != "" && m.app.CoderAgent != nil {
 		queueSize := m.app.CoderAgent.QueuedPrompts(m.session.ID)

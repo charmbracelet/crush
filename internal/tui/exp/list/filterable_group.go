@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 )
@@ -65,7 +66,7 @@ func NewFilterableGroupedList[T FilterableItem](items []Group[T], opts ...filter
 	return f
 }
 
-func (f *filterableGroupList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (f *filterableGroupList[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {

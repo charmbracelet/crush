@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/google/uuid"
@@ -602,7 +603,7 @@ func (s *simpleItem) Init() tea.Cmd {
 	return nil
 }
 
-func (s *simpleItem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s *simpleItem) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	return s, nil
 }
 
@@ -644,7 +645,7 @@ func (s *selectableItem) IsFocused() bool {
 	return s.focused
 }
 
-func execCmd(m tea.Model, cmd tea.Cmd) {
+func execCmd(m util.Model, cmd tea.Cmd) {
 	for cmd != nil {
 		msg := cmd()
 		m, cmd = m.Update(msg)

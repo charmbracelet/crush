@@ -116,7 +116,7 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 	return c.SetCommandType(c.commandType)
 }
 
-func (c *commandDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width

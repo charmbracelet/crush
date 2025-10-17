@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
@@ -75,7 +76,7 @@ func (a *APIKeyInput) Init() tea.Cmd {
 	return a.spinner.Tick
 }
 
-func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (a *APIKeyInput) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		if a.state == APIKeyInputStateVerifying {

@@ -23,8 +23,8 @@ type model struct {
 	anim   *anim.Anim
 }
 
-func (m model) Init() tea.Cmd { return m.anim.Init() }
-func (m model) View() string  { return m.anim.View() }
+func (m model) Init() tea.Cmd  { return m.anim.Init() }
+func (m model) View() tea.View { return tea.NewView(m.anim.View()) }
 
 // Update implements tea.Model.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

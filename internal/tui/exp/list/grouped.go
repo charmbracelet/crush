@@ -58,7 +58,7 @@ func (g *groupedList[T]) Init() tea.Cmd {
 	return g.render()
 }
 
-func (l *groupedList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (l *groupedList[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	u, cmd := l.list.Update(msg)
 	l.list = u.(*list[Item])
 	return l, cmd

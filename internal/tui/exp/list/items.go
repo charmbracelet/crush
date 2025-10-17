@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/google/uuid"
@@ -97,7 +98,7 @@ func (c *completionItemCmp[T]) Init() tea.Cmd {
 }
 
 // Update implements CommandItem.
-func (c *completionItemCmp[T]) Update(tea.Msg) (tea.Model, tea.Cmd) {
+func (c *completionItemCmp[T]) Update(tea.Msg) (util.Model, tea.Cmd) {
 	return c, nil
 }
 
@@ -348,7 +349,7 @@ func (m *itemSectionModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m *itemSectionModel) Update(tea.Msg) (tea.Model, tea.Cmd) {
+func (m *itemSectionModel) Update(tea.Msg) (util.Model, tea.Cmd) {
 	return m, nil
 }
 

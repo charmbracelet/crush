@@ -92,7 +92,7 @@ func (c *commandArgumentsDialogCmp) Init() tea.Cmd {
 }
 
 // Update implements CommandArgumentsDialog.
-func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width

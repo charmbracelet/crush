@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"testing"
 	"testing/fstest"
 
@@ -303,6 +304,83 @@ func TestEditor_OnCompletionPathToNonImageEmitsAttachFileMessage(t *testing.T) {
 	_, cmd := onCompletionItemSelect(fsys, modelHasImageSupport, FileCompletionItem{Path: "random.txt"}, true, testEditor)
 
 	assert.Nil(t, cmd)
+}
+
+func TestEditor_StepForwardOverHistoryDoesNotTouchExistingInputValue(t *testing.T) {
+	mEditor := editorCmp{}
+	fakeHistory := []string{
+		"First message user sent",
+		"Second message user sent",
+		"Third message user sent",
+		"Current value in the input field",
+	}
+
+	history := func(ctx context.Context) ([]string, error) {
+		return fakeHistory, nil
+	}
+	forwardDir := func() direction {
+		return next
+	}
+	previousDir := func() direction {
+		return previous
+	}
+
+	// NOTE(tauraamui): if forward is the first direction the user goes in, the current message should be left alone/the same
+	assert.Equal(t, "Current value in the input field", mEditor.stepOverHistory(history, forwardDir))
+	assert.Equal(t, "Current value in the input field", mEditor.stepOverHistory(history, forwardDir))
+	assert.Equal(t, "Third message user sent", mEditor.stepOverHistory(history, previousDir))
+}
+
+func TestEditor_StepBackwardOverHistoryScrollsUpTilBottom(t *testing.T) {
+	mEditor := editorCmp{}
+	fakeHistory := []string{
+		"First message user sent",
+		"Second message user sent",
+		"Third message user sent",
+		"Current value in the input field",
+	}
+
+	history := func(ctx context.Context) ([]string, error) {
+		return fakeHistory, nil
+	}
+	previousDir := func() direction {
+		return previous
+	}
+
+	// NOTE(tauraamui): if forward is the first direction the user goes in, the current message should be left alone/the same
+	assert.Equal(t, "Third message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "Second message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "First message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "First message user sent", mEditor.stepOverHistory(history, previousDir))
+}
+
+func TestEditor_StepBackToBoundAndThenForward(t *testing.T) {
+	mEditor := editorCmp{}
+	fakeHistory := []string{
+		"First message user sent",
+		"Second message user sent",
+		"Third message user sent",
+		"Current value in the input field",
+	}
+
+	history := func(ctx context.Context) ([]string, error) {
+		return fakeHistory, nil
+	}
+	forwardDir := func() direction {
+		return next
+	}
+	previousDir := func() direction {
+		return previous
+	}
+
+	// NOTE(tauraamui): current message should not be re-reachable whilst in scrolling mode
+	assert.Equal(t, "Third message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "Second message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "First message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "First message user sent", mEditor.stepOverHistory(history, previousDir))
+	assert.Equal(t, "Second message user sent", mEditor.stepOverHistory(history, forwardDir))
+	assert.Equal(t, "Third message user sent", mEditor.stepOverHistory(history, forwardDir))
+	assert.Equal(t, "Current value in the input field", mEditor.stepOverHistory(history, forwardDir))
 }
 
 // TestHelperFunctions demonstrates how to use the batch message helpers

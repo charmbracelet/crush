@@ -34,6 +34,7 @@ type InfoType int
 
 const (
 	InfoTypeInfo InfoType = iota
+	InfoTypeSuccess
 	InfoTypeWarn
 	InfoTypeError
 )

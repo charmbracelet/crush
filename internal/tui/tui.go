@@ -284,6 +284,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return a, tea.Batch(cmds...)
+	// Update Available
+	case pubsub.UpdateAvailableMsg:
+		// Show update notification in status bar
+		statusMsg := fmt.Sprintf("🎉 New Crush version available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		s, statusCmd := a.status.Update(util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  statusMsg,
+			TTL:  30 * time.Second,
+		})
+		a.status = s.(status.StatusCmp)
+		return a, statusCmd
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]
 		if !ok {

@@ -176,9 +176,20 @@ func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
-		parsed, err := openai.ParseOptions(mergedOptions)
-		if err == nil {
-			options[openai.Name] = parsed
+		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+				mergedOptions["reasoning_summary"] = "auto"
+				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+			}
+			parsed, err := openai.ParseResponsesOptions(mergedOptions)
+			if err == nil {
+				options[openai.Name] = parsed
+			}
+		} else {
+			parsed, err := openai.ParseOptions(mergedOptions)
+			if err == nil {
+				options[openai.Name] = parsed
+			}
 		}
 	case anthropic.Name:
 		_, hasThink := mergedOptions["thinking"]
@@ -433,6 +444,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) fantasy.Provider {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
+		openai.WithUseResponsesAPI(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()

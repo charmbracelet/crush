@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
 
@@ -40,10 +41,11 @@ type ContentPart interface {
 }
 
 type ReasoningContent struct {
-	Thinking   string `json:"thinking"`
-	Signature  string `json:"signature"`
-	StartedAt  int64  `json:"started_at,omitempty"`
-	FinishedAt int64  `json:"finished_at,omitempty"`
+	Thinking      string                             `json:"thinking"`
+	Signature     string                             `json:"signature"`
+	ResponsesData *openai.ResponsesReasoningMetadata `json:"responses_data"`
+	StartedAt     int64                              `json:"started_at,omitempty"`
+	FinishedAt    int64                              `json:"finished_at,omitempty"`
 }
 
 func (tc ReasoningContent) String() string {
@@ -272,6 +274,20 @@ func (m *Message) AppendReasoningSignature(signature string) {
 	m.Parts = append(m.Parts, ReasoningContent{Signature: signature})
 }
 
+func (m *Message) SetReasoningResponsesData(data *openai.ResponsesReasoningMetadata) {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			m.Parts[i] = ReasoningContent{
+				Thinking:      c.Thinking,
+				ResponsesData: data,
+				StartedAt:     c.StartedAt,
+				FinishedAt:    c.FinishedAt,
+			}
+			return
+		}
+	}
+}
+
 func (m *Message) FinishThinking() {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
@@ -420,9 +436,12 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		if reasoning.Thinking != "" {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
-				reasoningPart.ProviderOptions["anthropic"] = &anthropic.ReasoningOptionMetadata{
+				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
 					Signature: reasoning.Signature,
 				}
+			}
+			if reasoning.ResponsesData != nil {
+				reasoningPart.ProviderOptions[openai.Name] = reasoning.ResponsesData
 			}
 			parts = append(parts, reasoningPart)
 		}

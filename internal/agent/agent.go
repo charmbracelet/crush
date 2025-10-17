@@ -12,6 +12,7 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -239,6 +240,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
 				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
 					currentAssistant.AppendReasoningSignature(reasoning.Signature)
+				}
+			}
+			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
+				if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
+					currentAssistant.SetReasoningResponsesData(reasoning)
 				}
 			}
 			currentAssistant.FinishThinking()

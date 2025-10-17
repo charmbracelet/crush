@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/fantasy/ai"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -49,17 +49,17 @@ type WriteResponseMetadata struct {
 
 const WriteToolName = "write"
 
-func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		WriteToolName,
 		string(writeDescription),
-		func(ctx context.Context, params WriteParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params WriteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return ai.NewTextErrorResponse("file_path is required"), nil
+				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
 			if params.Content == "" {
-				return ai.NewTextErrorResponse("content is required"), nil
+				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
 			filePath := params.FilePath
@@ -70,27 +70,27 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 			fileInfo, err := os.Stat(filePath)
 			if err == nil {
 				if fileInfo.IsDir() {
-					return ai.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
 				modTime := fileInfo.ModTime()
 				lastRead := getLastReadTime(filePath)
 				if modTime.After(lastRead) {
-					return ai.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
 						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
 				}
 
 				oldContent, readErr := os.ReadFile(filePath)
 				if readErr == nil && string(oldContent) == params.Content {
-					return ai.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
 				}
 			} else if !os.IsNotExist(err) {
-				return ai.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
 			dir := filepath.Dir(filePath)
 			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
 			}
 
 			oldContent := ""
@@ -103,7 +103,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return ai.ToolResponse{}, fmt.Errorf("session_id is required")
+				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
 			}
 
 			diff, additions, removals := diff.GenerateDiff(
@@ -128,12 +128,12 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				},
 			)
 			if !p {
-				return ai.ToolResponse{}, permission.ErrorPermissionDenied
+				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
 			}
 
 			// Check if file exists in history
@@ -142,7 +142,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				_, err = files.Create(ctx, sessionID, filePath, oldContent)
 				if err != nil {
 					// Log error but don't fail the operation
-					return ai.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 				}
 			}
 			if file.Content != oldContent {
@@ -166,7 +166,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += getDiagnostics(filePath, lspClients)
-			return ai.WithResponseMetadata(ai.NewTextResponse(result),
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,

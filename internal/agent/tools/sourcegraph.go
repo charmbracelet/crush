@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/fantasy/ai"
+	"charm.land/fantasy"
 )
 
 type SourcegraphParams struct {
@@ -31,7 +31,7 @@ const SourcegraphToolName = "sourcegraph"
 //go:embed sourcegraph.md
 var sourcegraphDescription []byte
 
-func NewSourcegraphTool(client *http.Client) ai.AgentTool {
+func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		client = &http.Client{
 			Timeout: 30 * time.Second,
@@ -42,12 +42,12 @@ func NewSourcegraphTool(client *http.Client) ai.AgentTool {
 			},
 		}
 	}
-	return ai.NewAgentTool(
+	return fantasy.NewAgentTool(
 		SourcegraphToolName,
 		string(sourcegraphDescription),
-		func(ctx context.Context, params SourcegraphParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
-				return ai.NewTextErrorResponse("Query parameter is required"), nil
+				return fantasy.NewTextErrorResponse("Query parameter is required"), nil
 			}
 
 			if params.Count <= 0 {
@@ -86,7 +86,7 @@ func NewSourcegraphTool(client *http.Client) ai.AgentTool {
 
 			graphqlQueryBytes, err := json.Marshal(request)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("failed to marshal GraphQL request: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to marshal GraphQL request: %w", err)
 			}
 			graphqlQuery := string(graphqlQueryBytes)
 
@@ -97,7 +97,7 @@ func NewSourcegraphTool(client *http.Client) ai.AgentTool {
 				bytes.NewBuffer([]byte(graphqlQuery)),
 			)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 			}
 
 			req.Header.Set("Content-Type", "application/json")
@@ -105,34 +105,34 @@ func NewSourcegraphTool(client *http.Client) ai.AgentTool {
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
 			}
 			defer resp.Body.Close()
 
 			if resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				if len(body) > 0 {
-					return ai.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d, response: %s", resp.StatusCode, string(body))), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d, response: %s", resp.StatusCode, string(body))), nil
 				}
 
-				return ai.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("failed to read response body: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to read response body: %w", err)
 			}
 
 			var result map[string]any
 			if err = json.Unmarshal(body, &result); err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 
 			formattedResults, err := formatSourcegraphResults(result, params.ContextWindow)
 			if err != nil {
-				return ai.NewTextErrorResponse("Failed to format results: " + err.Error()), nil
+				return fantasy.NewTextErrorResponse("Failed to format results: " + err.Error()), nil
 			}
 
-			return ai.NewTextResponse(formattedResults), nil
+			return fantasy.NewTextResponse(formattedResults), nil
 		})
 }
 

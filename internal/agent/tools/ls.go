@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 type LSParams struct {
@@ -47,14 +47,14 @@ const (
 //go:embed ls.md
 var lsDescription []byte
 
-func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		LSToolName,
 		string(lsDescription),
-		func(ctx context.Context, params LSParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params LSParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error expanding path: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error expanding path: %w", err)
 			}
 
 			if !filepath.IsAbs(searchPath) {
@@ -64,12 +64,12 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			// Check if directory is outside working directory and request permission if needed
 			absWorkingDir, err := filepath.Abs(workingDir)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 			}
 
 			absSearchPath, err := filepath.Abs(searchPath)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error resolving search path: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving search path: %w", err)
 			}
 
 			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
@@ -77,7 +77,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 				// Directory is outside working directory, request permission
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
-					return ai.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
+					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
 				}
 
 				granted := permissions.Request(
@@ -93,17 +93,17 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 				)
 
 				if !granted {
-					return ai.ToolResponse{}, permission.ErrorPermissionDenied
+					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
 
 			output, metadata, err := ListDirectoryTree(searchPath, params, lsConfig)
 			if err != nil {
-				return ai.ToolResponse{}, err
+				return fantasy.ToolResponse{}, err
 			}
 
-			return ai.WithResponseMetadata(
-				ai.NewTextResponse(output),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(output),
 				metadata,
 			), nil
 		})

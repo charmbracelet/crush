@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -17,8 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/fantasy/ai"
-	"github.com/charmbracelet/fantasy/anthropic"
 )
 
 //go:embed templates/title.md
@@ -30,7 +30,7 @@ var summaryPrompt []byte
 type SessionAgentCall struct {
 	SessionID        string
 	Prompt           string
-	ProviderOptions  ai.ProviderOptions
+	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
 	Temperature      *float64
@@ -41,9 +41,9 @@ type SessionAgentCall struct {
 }
 
 type SessionAgent interface {
-	Run(context.Context, SessionAgentCall) (*ai.AgentResult, error)
+	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	SetModels(large Model, small Model)
-	SetTools(tools []ai.AgentTool)
+	SetTools(tools []fantasy.AgentTool)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -55,7 +55,7 @@ type SessionAgent interface {
 }
 
 type Model struct {
-	Model      ai.LanguageModel
+	Model      fantasy.LanguageModel
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 }
@@ -64,7 +64,7 @@ type sessionAgent struct {
 	largeModel           Model
 	smallModel           Model
 	systemPrompt         string
-	tools                []ai.AgentTool
+	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -80,7 +80,7 @@ type SessionAgentOptions struct {
 	DisableAutoSummarize bool
 	Sessions             session.Service
 	Messages             message.Service
-	Tools                []ai.AgentTool
+	Tools                []fantasy.AgentTool
 }
 
 func NewSessionAgent(
@@ -99,7 +99,7 @@ func NewSessionAgent(
 	}
 }
 
-func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.AgentResult, error) {
+func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	if call.Prompt == "" {
 		return nil, ErrEmptyPrompt
 	}
@@ -123,10 +123,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
-	agent := ai.NewAgent(
+	agent := fantasy.NewAgent(
 		a.largeModel.Model,
-		ai.WithSystemPrompt(a.systemPrompt),
-		ai.WithTools(a.tools...),
+		fantasy.WithSystemPrompt(a.systemPrompt),
+		fantasy.WithTools(a.tools...),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -169,7 +169,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
-	result, err := agent.Stream(genCtx, ai.AgentStreamCall{
+	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           call.Prompt,
 		Files:            files,
 		Messages:         history,
@@ -181,7 +181,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
 		// Before each step create the new assistant message
-		PrepareStep: func(callContext context.Context, options ai.PrepareStepFunctionOptions) (_ context.Context, prepared ai.PrepareStepResult, err error) {
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -217,7 +217,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			systemMessageUpdated := false
 			for i, msg := range prepared.Messages {
 				// only add cache control to the last message
-				if msg.Role == ai.MessageRoleSystem {
+				if msg.Role == fantasy.MessageRoleSystem {
 					lastSystemRoleInx = i
 				} else if !systemMessageUpdated {
 					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
@@ -234,7 +234,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			currentAssistant.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnReasoningEnd: func(id string, reasoning ai.ReasoningContent) error {
+		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
 			// handle anthropic signature
 			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
 				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
@@ -258,10 +258,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnRetry: func(err *ai.APICallError, delay time.Duration) {
+		OnRetry: func(err *fantasy.APICallError, delay time.Duration) {
 			// TODO: implement
 		},
-		OnToolCall: func(tc ai.ToolCallContent) error {
+		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
@@ -272,22 +272,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnToolResult: func(result ai.ToolResultContent) error {
+		OnToolResult: func(result fantasy.ToolResultContent) error {
 			var resultContent string
 			isError := false
 			switch result.Result.GetType() {
-			case ai.ToolResultContentTypeText:
-				r, ok := ai.AsToolResultOutputType[ai.ToolResultOutputContentText](result.Result)
+			case fantasy.ToolResultContentTypeText:
+				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result)
 				if ok {
 					resultContent = r.Text
 				}
-			case ai.ToolResultContentTypeError:
-				r, ok := ai.AsToolResultOutputType[ai.ToolResultOutputContentError](result.Result)
+			case fantasy.ToolResultContentTypeError:
+				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result)
 				if ok {
 					isError = true
 					resultContent = r.Error.Error()
 				}
-			case ai.ToolResultContentTypeMedia:
+			case fantasy.ToolResultContentTypeMedia:
 				// TODO: handle this message type
 			}
 			toolResult := message.ToolResult{
@@ -308,14 +308,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			}
 			return nil
 		},
-		OnStepFinish: func(stepResult ai.StepResult) error {
+		OnStepFinish: func(stepResult fantasy.StepResult) error {
 			finishReason := message.FinishReasonUnknown
 			switch stepResult.FinishReason {
-			case ai.FinishReasonLength:
+			case fantasy.FinishReasonLength:
 				finishReason = message.FinishReasonMaxTokens
-			case ai.FinishReasonStop:
+			case fantasy.FinishReasonStop:
 				finishReason = message.FinishReasonEndTurn
-			case ai.FinishReasonToolCalls:
+			case fantasy.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
@@ -328,8 +328,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*ai.Agen
 			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		StopWhen: []ai.StopCondition{
-			func(_ []ai.StepResult) bool {
+		StopWhen: []fantasy.StopCondition{
+			func(_ []fantasy.StepResult) bool {
 				contextWindow := a.largeModel.CatwalkCfg.ContextWindow
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				percentage := (float64(tokens) / float64(contextWindow)) * 100
@@ -461,8 +461,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := ai.NewAgent(a.largeModel.Model,
-		ai.WithSystemPrompt(string(summaryPrompt)),
+	agent := fantasy.NewAgent(a.largeModel.Model,
+		fantasy.WithSystemPrompt(string(summaryPrompt)),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
@@ -474,14 +474,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 		return err
 	}
 
-	resp, err := agent.Stream(genCtx, ai.AgentStreamCall{
+	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:   "Provide a detailed summary of our conversation above.",
 		Messages: aiMsgs,
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
 		},
-		OnReasoningEnd: func(id string, reasoning ai.ReasoningContent) error {
+		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
 			// handle anthropic signature
 			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
 				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
@@ -523,8 +523,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	return err
 }
 
-func (a *sessionAgent) getCacheControlOptions() ai.ProviderOptions {
-	return ai.ProviderOptions{
+func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
+	return fantasy.ProviderOptions{
 		anthropic.Name: &anthropic.ProviderCacheControlOptions{
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
@@ -548,8 +548,8 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]ai.Message, []ai.FilePart) {
-	var history []ai.Message
+func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+	var history []fantasy.Message
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
@@ -561,9 +561,9 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...mess
 		history = append(history, m.ToAIMessage()...)
 	}
 
-	var files []ai.FilePart
+	var files []fantasy.FilePart
 	for _, attachment := range attachments {
-		files = append(files, ai.FilePart{
+		files = append(files, fantasy.FilePart{
 			Filename:  attachment.FileName,
 			Data:      attachment.Content,
 			MediaType: attachment.MimeType,
@@ -605,12 +605,12 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		maxOutput = a.smallModel.CatwalkCfg.DefaultMaxTokens
 	}
 
-	agent := ai.NewAgent(a.smallModel.Model,
-		ai.WithSystemPrompt(string(titlePrompt)+"\n /no_think"),
-		ai.WithMaxOutputTokens(maxOutput),
+	agent := fantasy.NewAgent(a.smallModel.Model,
+		fantasy.WithSystemPrompt(string(titlePrompt)+"\n /no_think"),
+		fantasy.WithMaxOutputTokens(maxOutput),
 	)
 
-	resp, err := agent.Stream(ctx, ai.AgentStreamCall{
+	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", prompt),
 	})
 	if err != nil {
@@ -642,7 +642,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 	}
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage ai.Usage) {
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage) {
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
@@ -727,7 +727,7 @@ func (a *sessionAgent) SetModels(large Model, small Model) {
 	a.smallModel = small
 }
 
-func (a *sessionAgent) SetTools(tools []ai.AgentTool) {
+func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.tools = tools
 }
 

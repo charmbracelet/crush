@@ -7,6 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
+	"charm.land/fantasy/providers/openrouter"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -18,11 +23,6 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/fantasy/ai"
-	"github.com/charmbracelet/fantasy/anthropic"
-	"github.com/charmbracelet/fantasy/openai"
-	"github.com/charmbracelet/fantasy/openaicompat"
-	"github.com/charmbracelet/fantasy/openrouter"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
@@ -38,7 +38,7 @@ type env struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
-type builderFunc func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error)
+type builderFunc func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error)
 
 type modelPair struct {
 	name       string
@@ -47,7 +47,7 @@ type modelPair struct {
 }
 
 func anthropicBuilder(model string) builderFunc {
-	return func(_ *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
+	return func(_ *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
 		provider := anthropic.New(
 			anthropic.WithAPIKey(os.Getenv("CRUSH_ANTHROPIC_API_KEY")),
 			anthropic.WithHTTPClient(&http.Client{Transport: r}),
@@ -57,7 +57,7 @@ func anthropicBuilder(model string) builderFunc {
 }
 
 func openaiBuilder(model string) builderFunc {
-	return func(_ *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
+	return func(_ *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
 		provider := openai.New(
 			openai.WithAPIKey(os.Getenv("CRUSH_OPENAI_API_KEY")),
 			openai.WithHTTPClient(&http.Client{Transport: r}),
@@ -67,7 +67,7 @@ func openaiBuilder(model string) builderFunc {
 }
 
 func openRouterBuilder(model string) builderFunc {
-	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
+	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
 		provider := openrouter.New(
 			openrouter.WithAPIKey(os.Getenv("CRUSH_OPENROUTER_API_KEY")),
 			openrouter.WithHTTPClient(&http.Client{Transport: r}),
@@ -77,7 +77,7 @@ func openRouterBuilder(model string) builderFunc {
 }
 
 func zAIBuilder(model string) builderFunc {
-	return func(t *testing.T, r *recorder.Recorder) (ai.LanguageModel, error) {
+	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
 		provider := openaicompat.New(
 			openaicompat.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
@@ -114,7 +114,7 @@ func testEnv(t *testing.T) env {
 	}
 }
 
-func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt string, tools ...ai.AgentTool) SessionAgent {
+func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
 		CatwalkCfg: catwalk.Model{
@@ -133,7 +133,7 @@ func testSessionAgent(env env, large, small ai.LanguageModel, systemPrompt strin
 	return agent
 }
 
-func coderAgent(r *recorder.Recorder, env env, large, small ai.LanguageModel) (SessionAgent, error) {
+func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -155,7 +155,7 @@ func coderAgent(r *recorder.Recorder, env env, large, small ai.LanguageModel) (S
 	if err != nil {
 		return nil, err
 	}
-	allTools := []ai.AgentTool{
+	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewEditTool(env.lspClients, env.permissions, env.history, env.workingDir),

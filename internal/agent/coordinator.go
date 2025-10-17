@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -22,20 +23,20 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/fantasy/ai"
-	"github.com/charmbracelet/fantasy/anthropic"
-	"github.com/charmbracelet/fantasy/azure"
-	"github.com/charmbracelet/fantasy/google"
-	"github.com/charmbracelet/fantasy/openai"
-	"github.com/charmbracelet/fantasy/openaicompat"
-	"github.com/charmbracelet/fantasy/openrouter"
+
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/azure"
+	"charm.land/fantasy/providers/google"
+	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
+	"charm.land/fantasy/providers/openrouter"
 	"github.com/qjebbs/go-jsons"
 )
 
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
-	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*ai.AgentResult, error)
+	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -98,7 +99,7 @@ func NewCoordinator(
 }
 
 // Run implements Coordinator.
-func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*ai.AgentResult, error) {
+func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	model := c.currentAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -130,8 +131,8 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	})
 }
 
-func getProviderOptions(model Model, tp catwalk.Type) ai.ProviderOptions {
-	options := ai.ProviderOptions{}
+func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
+	options := fantasy.ProviderOptions{}
 
 	cfgOpts := []byte("{}")
 	catwalkOpts := []byte("{}")
@@ -233,7 +234,7 @@ func getProviderOptions(model Model, tp catwalk.Type) ai.ProviderOptions {
 	return options
 }
 
-func mergeCallOptions(model Model, tp catwalk.Type) (ai.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
+func mergeCallOptions(model Model, tp catwalk.Type) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
 	modelOptions := getProviderOptions(model, tp)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
 	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
@@ -261,8 +262,8 @@ func (c *coordinator) buildAgent(prompt *prompt.Prompt, agent config.Agent) (Ses
 	return NewSessionAgent(SessionAgentOptions{large, small, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.sessions, c.messages, tools}), nil
 }
 
-func (c *coordinator) buildTools(agent config.Agent) ([]ai.AgentTool, error) {
-	var allTools []ai.AgentTool
+func (c *coordinator) buildTools(agent config.Agent) ([]fantasy.AgentTool, error) {
+	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool()
 		if err != nil {
@@ -285,7 +286,7 @@ func (c *coordinator) buildTools(agent config.Agent) ([]ai.AgentTool, error) {
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
 	)
 
-	var filteredTools []ai.AgentTool
+	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
 			filteredTools = append(filteredTools, tool)
@@ -394,7 +395,7 @@ func (c *coordinator) buildAgentModels() (Model, Model, error) {
 		}, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) fantasy.Provider {
 	hasBearerAuth := false
 	for key := range headers {
 		if strings.ToLower(key) == "authorization" {
@@ -429,7 +430,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) fantasy.Provider {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 	}
@@ -446,7 +447,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	return openai.New(opts...)
 }
 
-func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) ai.Provider {
+func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) fantasy.Provider {
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
@@ -460,7 +461,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string) fantasy.Provider {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -476,7 +477,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	return openaicompat.New(opts...)
 }
 
-func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) ai.Provider {
+func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) fantasy.Provider {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
@@ -498,7 +499,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) ai.Provider {
+func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) fantasy.Provider {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
@@ -513,7 +514,7 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) ai.Provider {
+func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) fantasy.Provider {
 	opts := []google.Option{}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -550,7 +551,7 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return false
 }
 
-func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (ai.Provider, error) {
+func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
 	headers := providerCfg.ExtraHeaders
 
 	// handle special headers for anthropic
@@ -561,7 +562,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	// TODO: make sure we have
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
-	var provider ai.Provider
+	var provider fantasy.Provider
 	switch providerCfg.Type {
 	case openai.Name:
 		provider = c.buildOpenaiProvider(baseURL, apiKey, headers)

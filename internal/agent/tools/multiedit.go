@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 type MultiEditOperation struct {
@@ -49,17 +49,17 @@ const MultiEditToolName = "multiedit"
 //go:embed multiedit.md
 var multieditDescription []byte
 
-func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		MultiEditToolName,
 		string(multieditDescription),
-		func(ctx context.Context, params MultiEditParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return ai.NewTextErrorResponse("file_path is required"), nil
+				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
 			if len(params.Edits) == 0 {
-				return ai.NewTextErrorResponse("at least one edit operation is required"), nil
+				return fantasy.NewTextErrorResponse("at least one edit operation is required"), nil
 			}
 
 			if !filepath.IsAbs(params.FilePath) {
@@ -68,10 +68,10 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
-				return ai.NewTextErrorResponse(err.Error()), nil
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			var response ai.ToolResponse
+			var response fantasy.ToolResponse
 			var err error
 
 			editCtx := editContext{ctx, permissions, files, workingDir}
@@ -114,24 +114,24 @@ func validateEdits(edits []MultiEditOperation) error {
 	return nil
 }
 
-func processMultiEditWithCreation(edit editContext, params MultiEditParams, call ai.ToolCall) (ai.ToolResponse, error) {
+func processMultiEditWithCreation(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	// First edit creates the file
 	firstEdit := params.Edits[0]
 	if firstEdit.OldString != "" {
-		return ai.NewTextErrorResponse("first edit must have empty old_string for file creation"), nil
+		return fantasy.NewTextErrorResponse("first edit must have empty old_string for file creation"), nil
 	}
 
 	// Check if file already exists
 	if _, err := os.Stat(params.FilePath); err == nil {
-		return ai.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", params.FilePath)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", params.FilePath)), nil
 	} else if !os.IsNotExist(err) {
-		return ai.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	// Create parent directories
 	dir := filepath.Dir(params.FilePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return ai.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
 	// Start with the content from the first edit
@@ -142,7 +142,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		edit := params.Edits[i]
 		newContent, err := applyEditToContent(currentContent, edit)
 		if err != nil {
-			return ai.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
 		}
 		currentContent = newContent
 	}
@@ -150,7 +150,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return ai.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
 
 	// Check permissions
@@ -170,19 +170,19 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		},
 	})
 	if !p {
-		return ai.ToolResponse{}, permission.ErrorPermissionDenied
+		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
 	// Write the file
 	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
-		return ai.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// Update file history
 	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "")
 	if err != nil {
-		return ai.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 	}
 
 	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
@@ -193,8 +193,8 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
-	return ai.WithResponseMetadata(
-		ai.NewTextResponse(fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)),
+	return fantasy.WithResponseMetadata(
+		fantasy.NewTextResponse(fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
 			OldContent:   "",
 			NewContent:   currentContent,
@@ -205,30 +205,30 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	), nil
 }
 
-func processMultiEditExistingFile(edit editContext, params MultiEditParams, call ai.ToolCall) (ai.ToolResponse, error) {
+func processMultiEditExistingFile(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	// Validate file exists and is readable
 	fileInfo, err := os.Stat(params.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ai.NewTextErrorResponse(fmt.Sprintf("file not found: %s", params.FilePath)), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", params.FilePath)), nil
 		}
-		return ai.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
-		return ai.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", params.FilePath)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", params.FilePath)), nil
 	}
 
 	// Check if file was read before editing
 	if getLastReadTime(params.FilePath).IsZero() {
-		return ai.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	// Check if file was modified since last read
 	modTime := fileInfo.ModTime()
 	lastRead := getLastReadTime(params.FilePath)
 	if modTime.After(lastRead) {
-		return ai.NewTextErrorResponse(
+		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
 			)), nil
@@ -237,7 +237,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Read current file content
 	content, err := os.ReadFile(params.FilePath)
 	if err != nil {
-		return ai.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
@@ -247,20 +247,20 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	for i, edit := range params.Edits {
 		newContent, err := applyEditToContent(currentContent, edit)
 		if err != nil {
-			return ai.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
 		}
 		currentContent = newContent
 	}
 
 	// Check if content actually changed
 	if oldContent == currentContent {
-		return ai.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
+		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return ai.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
 	}
 
 	// Generate diff and check permissions
@@ -279,7 +279,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		},
 	})
 	if !p {
-		return ai.ToolResponse{}, permission.ErrorPermissionDenied
+		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
 	if isCrlf {
@@ -289,7 +289,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Write the updated content
 	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
-		return ai.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// Update file history
@@ -297,7 +297,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	if err != nil {
 		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent)
 		if err != nil {
-			return ai.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 		}
 	}
 	if file.Content != oldContent {
@@ -317,8 +317,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
-	return ai.WithResponseMetadata(
-		ai.NewTextResponse(fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)),
+	return fantasy.WithResponseMetadata(
+		fantasy.NewTextResponse(fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
 			OldContent:   oldContent,
 			NewContent:   currentContent,

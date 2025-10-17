@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charmbracelet/fantasy/ai"
+	"charm.land/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -25,7 +25,7 @@ const (
 	AgentToolName = "agent"
 )
 
-func (c *coordinator) agentTool() (ai.AgentTool, error) {
+func (c *coordinator) agentTool() (fantasy.AgentTool, error) {
 	agentCfg, ok := c.cfg.Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
@@ -39,31 +39,31 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ai.NewAgentTool(
+	return fantasy.NewAgentTool(
 		AgentToolName,
 		string(agentToolDescription),
-		func(ctx context.Context, params AgentParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-				return ai.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 			}
 			if params.Prompt == "" {
-				return ai.NewTextErrorResponse("prompt is required"), nil
+				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
 
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return ai.ToolResponse{}, errors.New("session id missing from context")
+				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
 
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
-				return ai.ToolResponse{}, errors.New("agent message id missing from context")
+				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
 			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
 			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "New Agent Session")
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
 			model := agent.Model()
 			maxTokens := model.CatwalkCfg.DefaultMaxTokens
@@ -73,7 +73,7 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 
 			providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
 			if !ok {
-				return ai.ToolResponse{}, errors.New("model provider not configured")
+				return fantasy.ToolResponse{}, errors.New("model provider not configured")
 			}
 			result, err := agent.Run(ctx, SessionAgentCall{
 				SessionID:        session.ID,
@@ -87,23 +87,23 @@ func (c *coordinator) agentTool() (ai.AgentTool, error) {
 				PresencePenalty:  model.ModelCfg.PresencePenalty,
 			})
 			if err != nil {
-				return ai.NewTextErrorResponse("error generating response"), nil
+				return fantasy.NewTextErrorResponse("error generating response"), nil
 			}
 			updatedSession, err := c.sessions.Get(ctx, session.ID)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
 			}
 			parentSession, err := c.sessions.Get(ctx, sessionID)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
 			}
 
 			parentSession.Cost += updatedSession.Cost
 
 			_, err = c.sessions.Save(ctx, parentSession)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
 			}
-			return ai.NewTextResponse(result.Response.Content.Text()), nil
+			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
 		}), nil
 }

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -97,13 +97,13 @@ const (
 //go:embed grep.md
 var grepDescription []byte
 
-func NewGrepTool(workingDir string) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewGrepTool(workingDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		GrepToolName,
 		string(grepDescription),
-		func(ctx context.Context, params GrepParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
-				return ai.NewTextErrorResponse("pattern is required"), nil
+				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
 			// If literal_text is true, escape the pattern
@@ -119,7 +119,7 @@ func NewGrepTool(workingDir string) ai.AgentTool {
 
 			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error searching files: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error searching files: %w", err)
 			}
 
 			var output strings.Builder
@@ -153,8 +153,8 @@ func NewGrepTool(workingDir string) ai.AgentTool {
 				}
 			}
 
-			return ai.WithResponseMetadata(
-				ai.NewTextResponse(output.String()),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(output.String()),
 				GrepResponseMetadata{
 					NumberOfMatches: len(matches),
 					Truncated:       truncated,

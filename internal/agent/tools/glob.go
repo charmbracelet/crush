@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 const GlobToolName = "glob"
@@ -30,13 +30,13 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-func NewGlobTool(workingDir string) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewGlobTool(workingDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		GlobToolName,
 		string(globDescription),
-		func(ctx context.Context, params GlobParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
-				return ai.NewTextErrorResponse("pattern is required"), nil
+				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
 			searchPath := params.Path
@@ -46,7 +46,7 @@ func NewGlobTool(workingDir string) ai.AgentTool {
 
 			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error finding files: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error finding files: %w", err)
 			}
 
 			var output string
@@ -59,8 +59,8 @@ func NewGlobTool(workingDir string) ai.AgentTool {
 				}
 			}
 
-			return ai.WithResponseMetadata(
-				ai.NewTextResponse(output),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(output),
 				GlobResponseMetadata{
 					NumberOfFiles: len(files),
 					Truncated:     truncated,

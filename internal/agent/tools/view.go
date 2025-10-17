@@ -11,10 +11,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 //go:embed view.md
@@ -50,13 +50,13 @@ const (
 	MaxLineLength    = 2000
 )
 
-func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		ViewToolName,
 		string(viewDescription),
-		func(ctx context.Context, params ViewParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return ai.NewTextErrorResponse("file_path is required"), nil
+				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
 			// Handle relative paths
@@ -68,12 +68,12 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			// Check if file is outside working directory and request permission if needed
 			absWorkingDir, err := filepath.Abs(workingDir)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 			}
 
 			absFilePath, err := filepath.Abs(filePath)
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
 			}
 
 			relPath, err := filepath.Rel(absWorkingDir, absFilePath)
@@ -81,7 +81,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				// File is outside working directory, request permission
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
-					return ai.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
+					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 				}
 
 				granted := permissions.Request(
@@ -97,7 +97,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				)
 
 				if !granted {
-					return ai.ToolResponse{}, permission.ErrorPermissionDenied
+					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
 
@@ -123,24 +123,24 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 						}
 
 						if len(suggestions) > 0 {
-							return ai.NewTextErrorResponse(fmt.Sprintf("File not found: %s\n\nDid you mean one of these?\n%s",
+							return fantasy.NewTextErrorResponse(fmt.Sprintf("File not found: %s\n\nDid you mean one of these?\n%s",
 								filePath, strings.Join(suggestions, "\n"))), nil
 						}
 					}
 
-					return ai.NewTextErrorResponse(fmt.Sprintf("File not found: %s", filePath)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File not found: %s", filePath)), nil
 				}
-				return ai.ToolResponse{}, fmt.Errorf("error accessing file: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error accessing file: %w", err)
 			}
 
 			// Check if it's a directory
 			if fileInfo.IsDir() {
-				return ai.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 			}
 
 			// Check file size
 			if fileInfo.Size() > MaxReadSize {
-				return ai.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
 					fileInfo.Size(), MaxReadSize)), nil
 			}
 
@@ -153,17 +153,17 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			isImage, imageType := isImageFile(filePath)
 			// TODO: handle images
 			if isImage {
-				return ai.NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
 			}
 
 			// Read the file content
 			content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
 			isValidUt8 := utf8.ValidString(content)
 			if !isValidUt8 {
-				return ai.NewTextErrorResponse("File content is not valid UTF-8"), nil
+				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
 			}
 			if err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 
 			notifyLSPs(ctx, lspClients, filePath)
@@ -179,8 +179,8 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspClients)
 			recordFileRead(filePath)
-			return ai.WithResponseMetadata(
-				ai.NewTextResponse(output),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(output),
 				ViewResponseMetadata{
 					FilePath: filePath,
 					Content:  content,

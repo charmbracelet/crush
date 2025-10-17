@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/fantasy/ai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
@@ -24,7 +24,7 @@ var modelPairs = []modelPair{
 	{"zai-glm4.6", zAIBuilder("glm-4.6"), zAIBuilder("glm-4.5-air")},
 }
 
-func getModels(t *testing.T, r *recorder.Recorder, pair modelPair) (ai.LanguageModel, ai.LanguageModel) {
+func getModels(t *testing.T, r *recorder.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
 	large, err := pair.largeModel(t, r)
 	require.NoError(t, err)
 	small, err := pair.smallModel(t, r)

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -23,7 +24,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/fantasy/ai"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -145,7 +145,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	app.Permissions.AutoApproveSession(sess.ID)
 
 	type response struct {
-		result *ai.AgentResult
+		result *fantasy.AgentResult
 		err    error
 	}
 	done := make(chan response, 1)

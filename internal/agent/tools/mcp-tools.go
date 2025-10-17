@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/fantasy/ai"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -92,14 +92,14 @@ type McpTool struct {
 	tool            *mcp.Tool
 	permissions     permission.Service
 	workingDir      string
-	providerOptions ai.ProviderOptions
+	providerOptions fantasy.ProviderOptions
 }
 
-func (m *McpTool) SetProviderOptions(opts ai.ProviderOptions) {
+func (m *McpTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 	m.providerOptions = opts
 }
 
-func (m *McpTool) ProviderOptions() ai.ProviderOptions {
+func (m *McpTool) ProviderOptions() fantasy.ProviderOptions {
 	return m.providerOptions
 }
 
@@ -115,7 +115,7 @@ func (m *McpTool) MCPToolName() string {
 	return m.tool.Name
 }
 
-func (b *McpTool) Info() ai.ToolInfo {
+func (b *McpTool) Info() fantasy.ToolInfo {
 	input := b.tool.InputSchema.(map[string]any)
 	required, _ := input["required"].([]string)
 	if required == nil {
@@ -125,7 +125,7 @@ func (b *McpTool) Info() ai.ToolInfo {
 	if parameters == nil {
 		parameters = make(map[string]any)
 	}
-	return ai.ToolInfo{
+	return fantasy.ToolInfo{
 		Name:        fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
 		Parameters:  parameters,
@@ -133,22 +133,22 @@ func (b *McpTool) Info() ai.ToolInfo {
 	}
 }
 
-func runTool(ctx context.Context, name, toolName string, input string) (ai.ToolResponse, error) {
+func runTool(ctx context.Context, name, toolName string, input string) (fantasy.ToolResponse, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
-		return ai.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
 
 	c, err := getOrRenewClient(ctx, name)
 	if err != nil {
-		return ai.NewTextErrorResponse(err.Error()), nil
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 	result, err := c.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
-		return ai.NewTextErrorResponse(err.Error()), nil
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	output := make([]string, 0, len(result.Content))
@@ -159,7 +159,7 @@ func runTool(ctx context.Context, name, toolName string, input string) (ai.ToolR
 			output = append(output, fmt.Sprintf("%v", v))
 		}
 	}
-	return ai.NewTextResponse(strings.Join(output, "\n")), nil
+	return fantasy.NewTextResponse(strings.Join(output, "\n")), nil
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {
@@ -191,10 +191,10 @@ func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, err
 	return sess, nil
 }
 
-func (m *McpTool) Run(ctx context.Context, params ai.ToolCall) (ai.ToolResponse, error) {
+func (m *McpTool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := GetSessionFromContext(ctx)
 	if sessionID == "" {
-		return ai.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
 	permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
 	p := m.permissions.Request(
@@ -209,7 +209,7 @@ func (m *McpTool) Run(ctx context.Context, params ai.ToolCall) (ai.ToolResponse,
 		},
 	)
 	if !p {
-		return ai.ToolResponse{}, permission.ErrorPermissionDenied
+		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
 	return runTool(ctx, m.mcpName, m.tool.Name, params.Input)

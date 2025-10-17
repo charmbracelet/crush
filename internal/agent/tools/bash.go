@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/fantasy/ai"
 )
 
 type BashParams struct {
@@ -177,14 +177,14 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution) ai.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution) fantasy.AgentTool {
 	// Set up command blocking on the persistent shell
 	persistentShell := shell.GetPersistentShell(workingDir)
 	persistentShell.SetBlockFuncs(blockFuncs())
-	return ai.NewAgentTool(
+	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution)),
-		func(ctx context.Context, params BashParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Timeout > MaxTimeout {
 				params.Timeout = MaxTimeout
 			} else if params.Timeout <= 0 {
@@ -192,7 +192,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			if params.Command == "" {
-				return ai.NewTextErrorResponse("missing command"), nil
+				return fantasy.NewTextErrorResponse("missing command"), nil
 			}
 
 			isSafeReadOnly := false
@@ -209,7 +209,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return ai.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
+				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
 			if !isSafeReadOnly {
 				shell := shell.GetPersistentShell(workingDir)
@@ -228,7 +228,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					},
 				)
 				if !p {
-					return ai.ToolResponse{}, permission.ErrorPermissionDenied
+					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
 			startTime := time.Now()
@@ -246,7 +246,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			interrupted := shell.IsInterrupt(err)
 			exitCode := shell.ExitCode(err)
 			if exitCode == 0 && !interrupted && err != nil {
-				return ai.ToolResponse{}, fmt.Errorf("error executing command: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error executing command: %w", err)
 			}
 
 			stdout = truncateOutput(stdout)
@@ -287,10 +287,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				WorkingDirectory: currentWorkingDir,
 			}
 			if stdout == "" {
-				return ai.WithResponseMetadata(ai.NewTextResponse(BashNoOutput), metadata), nil
+				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
 			}
 			stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
-			return ai.WithResponseMetadata(ai.NewTextResponse(stdout), metadata), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 		})
 }
 

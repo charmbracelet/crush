@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/fantasy/ai"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -24,17 +24,17 @@ const DiagnosticsToolName = "diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription []byte
 
-func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) ai.AgentTool {
-	return ai.NewAgentTool(
+func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
 		string(diagnosticsDescription),
-		func(ctx context.Context, params DiagnosticsParams, call ai.ToolCall) (ai.ToolResponse, error) {
+		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if lspClients.Len() == 0 {
-				return ai.NewTextErrorResponse("no LSP clients available"), nil
+				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
 			notifyLSPs(ctx, lspClients, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspClients)
-			return ai.NewTextResponse(output), nil
+			return fantasy.NewTextResponse(output), nil
 		})
 }
 

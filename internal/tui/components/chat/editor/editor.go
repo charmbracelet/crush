@@ -11,12 +11,14 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/commandhistory"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -67,6 +69,12 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// Command history fields
+	history         []commandhistory.CommandHistory
+	historyIndex    int
+	tempInput       string
+	isInHistoryMode bool
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -141,29 +149,38 @@ func (m *editorCmp) send() tea.Cmd {
 	value := m.textarea.Value()
 	value = strings.TrimSpace(value)
 
+	// Add to history before processing
+	cmds := []tea.Cmd{m.addToHistory(value)}
+
 	switch value {
 	case "exit", "quit":
 		m.textarea.Reset()
-		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+		m.historyIndex = len(m.history)
+		m.isInHistoryMode = false
+		cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()}))
+		return tea.Batch(cmds...)
 	}
 
 	m.textarea.Reset()
+	m.historyIndex = len(m.history)
+	m.isInHistoryMode = false
 	attachments := m.attachments
 
 	m.attachments = nil
 	if value == "" {
-		return nil
+		return tea.Batch(cmds...)
 	}
 
 	// Change the placeholder when sending a new message.
 	m.randomizePlaceholders()
 
-	return tea.Batch(
+	cmds = append(cmds,
 		util.CmdHandler(chat.SendMsg{
 			Text:        value,
 			Attachments: attachments,
 		}),
 	)
+	return tea.Batch(cmds...)
 }
 
 func (m *editorCmp) repositionCompletions() tea.Msg {
@@ -296,6 +313,15 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Handle history navigation before other keys
+		if m.textarea.Focused() && !m.isCompletionsOpen {
+			if key.Matches(msg, m.keyMap.HistoryUp) {
+				return m, m.navigateHistory(-1)
+			}
+			if key.Matches(msg, m.keyMap.HistoryDown) {
+				return m, m.navigateHistory(1)
+			}
+		}
 		if key.Matches(msg, m.keyMap.OpenEditor) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
@@ -389,6 +415,85 @@ func (m *editorCmp) Cursor() *tea.Cursor {
 		cursor.Y = cursor.Y + m.y + 1 // adjust for padding
 	}
 	return cursor
+}
+
+// Add method to load history for session
+func (m *editorCmp) loadHistory(ctx context.Context) error {
+	if m.session.ID == "" {
+		return nil
+	}
+
+	history, err := m.app.CommandHistory.ListBySession(ctx, m.session.ID, 0) // 0 = no limit
+	if err != nil {
+		return err
+	}
+
+	m.history = history
+	m.historyIndex = len(m.history)
+	return nil
+}
+
+// Add method to navigate history
+func (m *editorCmp) navigateHistory(direction int) tea.Cmd {
+	if len(m.history) == 0 {
+		return nil
+	}
+
+	// Save current input when first entering history mode
+	if !m.isInHistoryMode {
+		m.tempInput = m.textarea.Value()
+		m.isInHistoryMode = true
+	}
+
+	newIndex := m.historyIndex + direction
+
+	if direction < 0 { // Up arrow
+		if newIndex >= 0 {
+			m.historyIndex = newIndex
+			// Since history is in descending order (latest first), 
+			// we can access directly by index
+			m.textarea.SetValue(m.history[m.historyIndex].Command)
+			m.textarea.CursorEnd()
+		}
+	} else { // Down arrow
+		if newIndex < len(m.history) {
+			m.historyIndex = newIndex
+			m.textarea.SetValue(m.history[m.historyIndex].Command)
+			m.textarea.CursorEnd()
+		} else {
+			// Return to saved input
+			m.textarea.SetValue(m.tempInput)
+			m.textarea.CursorEnd()
+			m.isInHistoryMode = false
+			m.historyIndex = len(m.history)
+		}
+	}
+
+	return nil
+}
+
+// Add method to add command to history
+func (m *editorCmp) addToHistory(command string) tea.Cmd {
+	if m.session.ID == "" || strings.TrimSpace(command) == "" {
+		return nil
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := m.app.CommandHistory.Add(ctx, m.session.ID, command)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		// Reload history to include the new command
+		if err := m.loadHistory(ctx); err != nil {
+			return util.ReportError(err)
+		}
+
+		return nil
+	}
 }
 
 var readyPlaceholders = [...]string{
@@ -528,7 +633,17 @@ func (c *editorCmp) Bindings() []key.Binding {
 // we need to move some functionality to the page level
 func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 	c.session = session
-	return nil
+	c.history = []commandhistory.CommandHistory{}
+	c.historyIndex = 0
+	c.isInHistoryMode = false
+	c.tempInput = ""
+
+	return func() tea.Msg {
+		if err := c.loadHistory(context.Background()); err != nil {
+			return util.ReportError(err)
+		}
+		return nil
+	}
 }
 
 func (c *editorCmp) IsCompletionsOpen() bool {
@@ -575,9 +690,13 @@ func New(app *app.App) Editor {
 	ta.Focus()
 	e := &editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:             app,
+		textarea:        ta,
+		keyMap:          DefaultEditorKeyMap(),
+		history:         []commandhistory.CommandHistory{},
+		historyIndex:    0,
+		tempInput:       "",
+		isInHistoryMode: false,
 	}
 	e.setEditorPrompt()
 

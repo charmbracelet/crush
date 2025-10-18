@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/commandhistory"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
@@ -26,10 +27,11 @@ import (
 )
 
 type App struct {
-	Sessions    session.Service
-	Messages    message.Service
-	History     history.Service
-	Permissions permission.Service
+	Sessions      session.Service
+	Messages      message.Service
+	History       history.Service
+	CommandHistory commandhistory.Service
+	Permissions   permission.Service
 
 	CoderAgent agent.Service
 
@@ -53,6 +55,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	commandHistory := commandhistory.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	allowedTools := []string{}
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
@@ -60,11 +63,12 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	app := &App{
-		Sessions:    sessions,
-		Messages:    messages,
-		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		LSPClients:  csync.NewMap[string, *lsp.Client](),
+		Sessions:      sessions,
+		Messages:      messages,
+		History:       files,
+		CommandHistory: commandHistory,
+		Permissions:   permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		LSPClients:    csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
 

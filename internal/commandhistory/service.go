@@ -69,7 +69,9 @@ func (s *service) Add(ctx context.Context, sessionID, command string) (CommandHi
 		for i := 0; i < toRemove && i < len(history); i++ {
 			// Simple deletion - in a more sophisticated implementation,
 			// we might want to batch delete
-			s.db.ExecContext(ctx, "DELETE FROM command_history WHERE id = ?", history[i].ID)
+			if _, err := s.db.ExecContext(ctx, "DELETE FROM command_history WHERE id = ?", history[i].ID); err != nil {
+				return CommandHistory{}, err
+			}
 		}
 	}
 
@@ -109,7 +111,8 @@ func (s *service) ListBySession(ctx context.Context, sessionID string, limit int
 
 	history := make([]CommandHistory, len(dbHistory))
 	for i, dbItem := range dbHistory {
-		history[i] = CommandHistory{
+		// Reverse the slice so callers see commands in chronological order.
+		history[len(dbHistory)-1-i] = CommandHistory{
 			ID:        dbItem.ID,
 			SessionID: dbItem.SessionID,
 			Command:   dbItem.Command,

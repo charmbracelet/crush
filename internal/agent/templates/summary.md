@@ -6,6 +6,8 @@ Focus on information that would be helpful for continuing the conversation, incl
 - What was done
 - What is currently being worked on
 - Which files are being modified
+- Helpful commands that helped you implement this task so far
+- Any context that would be needed to continue working on the task
 - What needs to be done next
 
 Your summary should be comprehensive enough to provide context but concise enough to be quickly understood.

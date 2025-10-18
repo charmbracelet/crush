@@ -1,6 +1,9 @@
 package sessions
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -22,6 +25,31 @@ type SessionDialog interface {
 	dialogs.DialogModel
 }
 
+// DeleteSessionMsg is sent to delete the selected session
+type DeleteSessionMsg struct{}
+
+// DeleteSessionConfirmedMsg is sent when the user confirms session deletion
+type DeleteSessionConfirmedMsg struct {
+	SessionID string
+}
+
+// deleteSelectedSession deletes the currently selected session
+func (s *sessionDialogCmp) deleteSelectedSession() tea.Cmd {
+	selectedItem := s.sessionsList.SelectedItem()
+	if selectedItem == nil {
+		return nil
+	}
+
+	selectedSession := selectedItem.Value()
+
+	// Send confirmation dialog request
+	return func() tea.Msg {
+		return dialogs.OpenDialogMsg{
+			Model: NewDeleteConfirmationDialog(selectedSession.ID, selectedSession.Title),
+		}
+	}
+}
+
 type SessionsList = list.FilterableList[list.CompletionItem[session.Session]]
 
 type sessionDialogCmp struct {
@@ -33,10 +61,11 @@ type sessionDialogCmp struct {
 	keyMap            KeyMap
 	sessionsList      SessionsList
 	help              help.Model
+	onDelete          func(sessionID string) // Callback for session deletion
 }
 
 // NewSessionDialogCmp creates a new session switching dialog
-func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionDialog {
+func NewSessionDialogCmp(sessions []session.Session, selectedID string, onDelete func(sessionID string)) SessionDialog {
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultKeyMap()
@@ -69,6 +98,7 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 		keyMap:            DefaultKeyMap(),
 		sessionsList:      sessionsList,
 		help:              help,
+		onDelete:          onDelete,
 	}
 
 	return s
@@ -94,6 +124,21 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, s.sessionsList.SetSelected(s.selectedSessionID))
 		}
 		return s, tea.Batch(cmds...)
+	case DeleteSessionMsg:
+		return s, s.deleteSelectedSession()
+	case DeleteSessionConfirmedMsg:
+		// Close confirmation dialog and execute delete callback
+		cmds := []tea.Cmd{
+			util.CmdHandler(dialogs.CloseDialogMsg{}),
+		}
+		if s.onDelete != nil {
+			// Execute the delete callback
+			cmds = append(cmds, func() tea.Msg {
+				s.onDelete(msg.SessionID)
+				return nil
+			})
+		}
+		return s, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Select):
@@ -108,6 +153,8 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					),
 				)
 			}
+		case key.Matches(msg, s.keyMap.Delete):
+			return s, util.CmdHandler(DeleteSessionMsg{})
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:

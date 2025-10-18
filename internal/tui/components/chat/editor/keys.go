@@ -9,6 +9,8 @@ type EditorKeyMap struct {
 	SendMessage key.Binding
 	OpenEditor  key.Binding
 	Newline     key.Binding
+	HistoryUp   key.Binding
+	HistoryDown key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -32,6 +34,14 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			// to reflect that.
 			key.WithHelp("ctrl+j", "newline"),
 		),
+		HistoryUp: key.NewBinding(
+			key.WithKeys("up"),
+			key.WithHelp("↑", "previous command"),
+		),
+		HistoryDown: key.NewBinding(
+			key.WithKeys("down"),
+			key.WithHelp("↓", "next command"),
+		),
 	}
 }
 
@@ -42,6 +52,8 @@ func (k EditorKeyMap) KeyBindings() []key.Binding {
 		k.SendMessage,
 		k.OpenEditor,
 		k.Newline,
+		k.HistoryUp,
+		k.HistoryDown,
 		AttachmentsKeyMaps.AttachmentDeleteMode,
 		AttachmentsKeyMaps.DeleteAllAttachments,
 		AttachmentsKeyMaps.Escape,

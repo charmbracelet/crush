@@ -42,3 +42,38 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 }
+
+type CommandHistory struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+type CreateCommandHistoryParams struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+}
+
+type DeleteSessionCommandHistoryParams struct {
+	SessionID string `json:"session_id"`
+}
+
+type GetCommandHistoryCountParams struct {
+	SessionID string `json:"session_id"`
+}
+
+type ListCommandHistoryBySessionParams struct {
+	SessionID string `json:"session_id"`
+}
+
+type ListLatestCommandHistoryBySessionParams struct {
+	SessionID string `json:"session_id"`
+	Limit     int64  `json:"limit"`
+}
+
+type GetCommandHistoryCountRow struct {
+	Count int64 `json:"count"`
+}

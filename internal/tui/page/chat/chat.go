@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -359,6 +360,28 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 		}
 		return p, p.newSession()
+	case commands.DeleteCurrentSessionMsg:
+		if p.app.CoderAgent.IsBusy() {
+			return p, util.ReportWarn("Agent is busy, please wait before deleting a session...")
+		}
+		return p, func() tea.Msg {
+			allSessions, _ := p.app.Sessions.List(context.Background())
+			return dialogs.OpenDialogMsg{
+				Model: sessions.NewSessionDialogCmp(allSessions, p.selectedSessionID, func(sessionID string) {
+					// This callback will be called when a session is deleted
+					// The actual deletion will be handled by the session service
+					_, err := p.app.Sessions.Delete(context.Background(), sessionID)
+					if err != nil {
+						// TODO: Show error message
+						return
+					}
+					// If the deleted session was the current one, clear the selection
+					if p.selectedSessionID == sessionID {
+						p.selectedSessionID = ""
+					}
+				}),
+			}
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):

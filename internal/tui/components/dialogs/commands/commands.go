@@ -60,18 +60,19 @@ type commandDialogCmp struct {
 }
 
 type (
-	SwitchSessionsMsg      struct{}
-	NewSessionsMsg         struct{}
-	SwitchModelMsg         struct{}
-	QuitMsg                struct{}
-	OpenFilePickerMsg      struct{}
-	ToggleHelpMsg          struct{}
-	ToggleCompactModeMsg   struct{}
-	ToggleThinkingMsg      struct{}
-	OpenReasoningDialogMsg struct{}
-	OpenExternalEditorMsg  struct{}
-	ToggleYoloModeMsg      struct{}
-	CompactMsg             struct {
+	SwitchSessionsMsg       struct{}
+	NewSessionsMsg          struct{}
+	DeleteCurrentSessionMsg struct{}
+	SwitchModelMsg          struct{}
+	QuitMsg                 struct{}
+	OpenFilePickerMsg       struct{}
+	ToggleHelpMsg           struct{}
+	ToggleCompactModeMsg    struct{}
+	ToggleThinkingMsg       struct{}
+	OpenReasoningDialogMsg  struct{}
+	OpenExternalEditorMsg   struct{}
+	ToggleYoloModeMsg       struct{}
+	CompactMsg              struct {
 		SessionID string
 	}
 )
@@ -275,6 +276,15 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Shortcut:    "ctrl+s",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchSessionsMsg{})
+			},
+		},
+		{
+			ID:          "delete_session",
+			Title:       "Delete Current Session",
+			Description: "Delete the current session",
+			Shortcut:    "ctrl+d",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(DeleteCurrentSessionMsg{})
 			},
 		},
 		{

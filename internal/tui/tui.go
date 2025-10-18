@@ -168,7 +168,39 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, func() tea.Msg {
 			allSessions, _ := a.app.Sessions.List(context.Background())
 			return dialogs.OpenDialogMsg{
-				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, func(sessionID string) {
+					// This callback will be called when a session is deleted
+					// The actual deletion will be handled by the session service
+					_, err := a.app.Sessions.Delete(context.Background(), sessionID)
+					if err != nil {
+						// TODO: Show error message
+						return
+					}
+					// If the deleted session was the current one, clear the selection
+					if a.selectedSessionID == sessionID {
+						a.selectedSessionID = ""
+					}
+				}),
+			}
+		}
+
+	case commands.DeleteCurrentSessionMsg:
+		return a, func() tea.Msg {
+			allSessions, _ := a.app.Sessions.List(context.Background())
+			return dialogs.OpenDialogMsg{
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, func(sessionID string) {
+					// This callback will be called when a session is deleted
+					// The actual deletion will be handled by the session service
+					_, err := a.app.Sessions.Delete(context.Background(), sessionID)
+					if err != nil {
+						// TODO: Show error message
+						return
+					}
+					// If the deleted session was the current one, clear the selection
+					if a.selectedSessionID == sessionID {
+						a.selectedSessionID = ""
+					}
+				}),
 			}
 		}
 

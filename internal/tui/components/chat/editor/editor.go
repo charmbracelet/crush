@@ -86,6 +86,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 
 const (
 	maxAttachments = 5
+	maxFileResults = 25
 )
 
 type OpenEditorMsg struct {
@@ -500,6 +501,7 @@ func (m *editorCmp) startCompletions() tea.Msg {
 		Completions: completionItems,
 		X:           x,
 		Y:           y,
+		MaxResults:  maxFileResults,
 	}
 }
 

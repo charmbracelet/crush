@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch origin pull/1/head:pr-1)",
+      "Bash(git checkout pr-1)",
+      "WebFetch(domain:github.com)",
+      "Bash(mkdir -p plan/lm_studio_config plan/powershell_wrappers plan/crush_scripts)",
+      "Bash(tree plan -L 2)",
+      "Bash(powershell.exe -File plan/test_setup.ps1)",
+      "Bash(powershell.exe -File plan/powershell_wrappers/list_models.ps1)",
+      "Bash(powershell.exe -File plan/powershell_wrappers/send_prompt.ps1 -Prompt \"Write a hello world program in Python\" -Pretty)",
+      "Bash(powershell.exe -File plan/test_reasoning_layer.ps1)",
+      "Bash(powershell.exe -File plan/powershell_wrappers/send_prompt.ps1 -Prompt \"Create a complete Python script using Tkinter that displays a GUI window with the message ''Thanks Chase!'' in large, styled text. Include proper imports, window configuration, styling, and comments.\" -Temperature 0.3 -MaxTokens 2048)",
+      "Bash(git add .claude/ plan/ IMPLEMENTATION_SUMMARY.md TEST_RESULTS.md thanks_chase.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

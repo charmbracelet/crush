@@ -46,6 +46,9 @@ Thumbs.db
 
 /crush
 
+# Task management data (user-specific)
+.crush_tasks.json
+
 manpages/
 completions/
 !internal/tui/components/completions/

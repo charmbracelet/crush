@@ -1,0 +1,36 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:1234/v1/",
+      "type": "openai",
+      "models": [
+        {
+          "name": "Qwen3 8B (Local)",
+          "id": "qwen3-8b",
+          "context_window": 8192,
+          "default_max_tokens": 4096
+        },
+        {
+          "name": "Qwen2.5 Coder 8B (Local)",
+          "id": "qwen2.5-coder-8b",
+          "context_window": 8192,
+          "default_max_tokens": 4096
+        }
+      ]
+    }
+  },
+  "options": {
+    "debug": false,
+    "debug_lsp": false
+  },
+  "permissions": {
+    "allowed_tools": [
+      "view",
+      "ls",
+      "grep",
+      "edit"
+    ]
+  }
+}

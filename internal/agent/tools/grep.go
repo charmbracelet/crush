@@ -119,7 +119,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 
 			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error searching files: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
 
 			var output strings.Builder

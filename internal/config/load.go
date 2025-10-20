@@ -589,6 +589,10 @@ func hasVertexCredentials(env env.Env) bool {
 }
 
 func hasAWSCredentials(env env.Env) bool {
+	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return true
+	}
+
 	if env.Get("AWS_ACCESS_KEY_ID") != "" && env.Get("AWS_SECRET_ACCESS_KEY") != "" {
 		return true
 	}

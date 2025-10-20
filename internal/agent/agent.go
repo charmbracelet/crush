@@ -351,6 +351,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if currentAssistant == nil {
 			return result, err
 		}
+		// Ensure we finish thinking on error to close the reasoning state
+		currentAssistant.FinishThinking()
 		toolCalls := currentAssistant.ToolCalls()
 		// INFO: we use the parent context here because the genCtx has been cancelled
 		msgs, createErr := a.messages.List(ctx, currentAssistant.SessionID)

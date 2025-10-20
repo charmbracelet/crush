@@ -647,5 +647,9 @@ func (c *coordinator) QueuedPrompts(sessionID string) int {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	return c.currentAgent.Summarize(ctx, sessionID)
+	providerCfg, ok := c.cfg.Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	if !ok {
+		return errors.New("model provider not configured")
+	}
+	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg.Type))
 }

@@ -51,7 +51,7 @@ type SessionAgent interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string) error
+	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
 }
 
@@ -427,7 +427,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID); summarizeErr != nil {
+		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 	}
@@ -442,7 +442,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	return a.Run(genCtx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -481,8 +481,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:   "Provide a detailed summary of our conversation above.",
-		Messages: aiMsgs,
+		Prompt:          "Provide a detailed summary of our conversation above.",
+		Messages:        aiMsgs,
+		ProviderOptions: opts,
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)

@@ -10,4 +10,8 @@ Focus on information that would be helpful for continuing the conversation, incl
 - Any context that would be needed to continue working on the task
 - What needs to be done next
 
-Your summary should be comprehensive enough to provide context but concise enough to be quickly understood.
+Your summary should be comprehensive enough to provide context to be quickly understood.
+
+It is very important to keep context of files that are important and strategy you are following.
+
+It is very important to have the next steps clearly defined.

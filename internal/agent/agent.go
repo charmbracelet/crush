@@ -430,6 +430,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
+		// if the agent was not done...
+		if len(currentAssistant.ToolCalls()) > 0 {
+			existing, ok := a.messageQueue.Get(call.SessionID)
+			if !ok {
+				existing = []SessionAgentCall{}
+			}
+			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			existing = append(existing, call)
+			a.messageQueue.Set(call.SessionID, existing)
+		}
 	}
 
 	// release active request before processing queued messages

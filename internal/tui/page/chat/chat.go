@@ -581,7 +581,12 @@ func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 
 		// Update the model configuration
 		currentModel.ReasoningEffort = effort
-		cfg.Models[agentCfg.Model] = currentModel
+		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update reasoning effort: " + err.Error(),
+			}
+		}
 
 		// Update the agent with the new configuration
 		if err := p.app.UpdateAgentModel(); err != nil {

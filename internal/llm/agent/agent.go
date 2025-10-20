@@ -535,6 +535,10 @@ func (a *agent) getAllTools() ([]tools.BaseTool, error) {
 		}
 		allTools = append(allTools, agentTool)
 	}
+
+	slices.SortFunc(allTools, func(a, b tools.BaseTool) int {
+		return strings.Compare(a.Name(), b.Name())
+	})
 	return allTools, nil
 }
 

@@ -312,7 +312,7 @@ func (m *messageCmp) shouldSpin() bool {
 		return false
 	}
 
-	if m.message.Content().Text != "" {
+	if strings.TrimSpace(m.message.Content().Text) != "" {
 		return false
 	}
 	if len(m.message.ToolCalls()) > 0 {

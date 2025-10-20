@@ -161,3 +161,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )
+
+// NOTE(@andreynering): Temporarily pinning branch with fixes:
+// https://github.com/charmbracelet/anthropic-sdk-go/commits/fantasy/
+replace github.com/anthropics/anthropic-sdk-go => github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251020200929-fdb68318b7af

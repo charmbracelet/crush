@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/PuerkitoBio/goquery v1.10.3
-	github.com/anthropics/anthropic-sdk-go v1.12.0
+	github.com/anthropics/anthropic-sdk-go v1.14.0
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14

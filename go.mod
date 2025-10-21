@@ -12,7 +12,9 @@ require (
 	github.com/charmbracelet/catwalk v0.6.1
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/google/uuid v1.6.0
-	github.com/mark3labs/mcp-go v0.41.0
+	github.com/invopop/jsonschema v0.13.0
+	github.com/joho/godotenv v1.5.1
+	github.com/modelcontextprotocol/go-sdk v1.0.0
 	github.com/openai/openai-go v1.12.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06

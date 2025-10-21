@@ -1,0 +1,70 @@
+# Crush Commits to Review for Cliffy Integration
+# Generated: 2025-10-21
+# Last sync: fccc49f4cb9ba90027b6eda64ae7257b633def66
+# Current Crush: 74270e2e (v0.12.0)
+
+## CRITICAL BUG FIXES (High Priority - Apply First)
+
+# MCP Stability & Error Handling
+23e0fd44  fix(mcp): add type assertion guards (#1239)
+ce72a483  fix(mcp): append to os.Environ() (#1242)
+b896a258  fix(mcp): avoid nil errors for tool parameters (#1245)
+3a995429  fix(mcp): improve STDIO error handling (#1244)
+015632a1  fix(mcp): make sure to cancel context on error (#1246)
+4519e198  fix(mcp): improve cache hits when using MCPs (#1271)
+
+# Tool Fixes
+1a40fbab  fix(grep): check mime type (#1228)
+9ffa5872  fix(ls): properly handle limits (#1230)
+
+# Provider Fixes
+7ac96ef0  fix(vertex): small fix for anthropic models via google vertex (#1214)
+69be8c20  fix(bedrock): detect credentials set by `aws configure` (#1232)
+
+# Logging
+a4300436  fix: move some logs to debug
+
+## IMPORTANT IMPROVEMENTS (Medium Priority)
+
+# MCP Library Migration (Breaking Change)
+ca66a11a  refactor(mcp): use the new mcp library (#1208)
+# NOTE: Migrates from mark3labs/mcp-go to official modelcontextprotocol/go-sdk v1.0.0
+
+# Dependencies
+5e315538  chore(deps): pin `anthropic-sdk-go` to our branch with fixes
+# Updates anthropic-sdk-go from v1.12.0 to v1.14.0
+
+## NEW FEATURES (Low Priority)
+
+a64a4def  feat(lsp): find references tool (#1233)
+2708121a  feat(bedrock): add support for `AWS_BEARER_TOKEN_BEDROCK` for bedrock
+
+## NOT RELEVANT (TUI-Specific - Ignore)
+
+beb3bc0d  fix(tui): remove ctrl+d deny keybind (#1269)
+4b1001cf  fix(tui): paste on arguments input (#1240)
+a824240d  fix(tui): fix progress not cleaning up some times (#1219)
+4969c34d  fix(tui): panic (#1220)
+8c9ce8e7  feat: paste/close bindings in user cmd dialog (#1221)
+04210801  fix(lsp): small UI improvements (#1211)
+886bb7c7  fix(mcp): fix ui description, double spaces (#1210)
+d0724b16  feat(tui): progress bar (#1162)
+
+---
+
+## Quick Apply Commands
+
+# Apply all critical MCP fixes (in order):
+git cherry-pick 23e0fd44 ce72a483 b896a258 3a995429 015632a1 4519e198
+
+# Apply tool fixes:
+git cherry-pick 1a40fbab 9ffa5872
+
+# Apply provider fixes:
+git cherry-pick 7ac96ef0 69be8c20
+
+# Apply logging fix:
+git cherry-pick a4300436
+
+## After applying, update sync marker:
+# echo "74270e2e" > .crush-sync/last-sync.txt

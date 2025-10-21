@@ -7,11 +7,11 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/alecthomas/chroma/v2 v2.20.0
-	github.com/anthropics/anthropic-sdk-go v1.14.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14
+	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20251011205917-3b687ffc1619
 	github.com/charmbracelet/catwalk v0.7.0
@@ -161,7 +161,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )
-
-// NOTE(@andreynering): Temporarily pinning branch with fixes:
-// https://github.com/charmbracelet/anthropic-sdk-go/commits/fantasy/
-replace github.com/anthropics/anthropic-sdk-go => github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251020200929-fdb68318b7af

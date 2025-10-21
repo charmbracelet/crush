@@ -74,8 +74,8 @@ github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMU
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
 github.com/charlievieth/fastwalk v1.0.14 h1:3Eh5uaFGwHZd8EGwTjJnSpBkfwfsak9h6ICgnWlhAyg=
 github.com/charlievieth/fastwalk v1.0.14/go.mod h1:diVcUreiU1aQ4/Wu3NbxxH4/KYdKpLDojrQ1Bb2KgNY=
-github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251020200929-fdb68318b7af h1:iPwFVe5v46OfhqxKXSJ4J0YWf8XzthTnWyrim2yGFnU=
-github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251020200929-fdb68318b7af/go.mod h1:WTz31rIUHUHqai2UslPpw5CwXrQP3geYBioRV4WOLvE=
+github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf h1:toCE1GpniOr8JPJII2GH1AffivFVOzq8Rs2S0FUrkNU=
+github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf/go.mod h1:8TIYxZxsuCqqeJ0lga/b91tBwrbjoHDC66Sq5t8N2R4=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2 h1:973OHYuq2Jx9deyuPwe/6lsuQrDCatOsjP8uCd02URE=
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20251011205917-3b687ffc1619 h1:hjOhtqsxa+LVuCAkzhfA43wtusOaUPyQdSTg/wbRscw=

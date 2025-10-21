@@ -39,12 +39,14 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, err
 	}
 
-	slog.Debug(
-		"HTTP Request",
-		"method", req.Method,
-		"url", req.URL,
-		"body", bodyToString(save),
-	)
+	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+		slog.Debug(
+			"HTTP Request",
+			"method", req.Method,
+			"url", req.URL,
+			"body", bodyToString(save),
+		)
+	}
 
 	start := time.Now()
 	resp, err := h.Transport.RoundTrip(req)
@@ -61,16 +63,18 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 
 	save, resp.Body, err = drainBody(resp.Body)
-	slog.Debug(
-		"HTTP Response",
-		"status_code", resp.StatusCode,
-		"status", resp.Status,
-		"headers", formatHeaders(resp.Header),
-		"body", bodyToString(save),
-		"content_length", resp.ContentLength,
-		"duration_ms", duration.Milliseconds(),
-		"error", err,
-	)
+	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+		slog.Debug(
+			"HTTP Response",
+			"status_code", resp.StatusCode,
+			"status", resp.Status,
+			"headers", formatHeaders(resp.Header),
+			"body", bodyToString(save),
+			"content_length", resp.ContentLength,
+			"duration_ms", duration.Milliseconds(),
+			"error", err,
+		)
+	}
 	return resp, err
 }
 
@@ -84,7 +88,7 @@ func bodyToString(body io.ReadCloser) string {
 		return ""
 	}
 	var b bytes.Buffer
-	if json.Compact(&b, bytes.TrimSpace(src)) != nil {
+	if json.Indent(&b, bytes.TrimSpace(src), "", "  ") != nil {
 		// not json probably
 		return string(src)
 	}

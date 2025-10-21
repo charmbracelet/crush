@@ -303,6 +303,7 @@ changelog:
       - "^docs: update$"
       - "^test:"
       - "^test\\("
+      - "^v\\d.*"
       - "merge conflict"
       - "merge conflict"
       - Merge branch

@@ -260,6 +260,11 @@ func executeVolley(cmd *cobra.Command, args []string, verbosity config.Verbosity
 		agentCfg.Model = config.SelectedModelTypeLarge
 	}
 
+	// Validate that the selected model exists before creating agent
+	if err := validateModelExists(cfg, agentCfg.Model); err != nil {
+		return err
+	}
+
 	// Create agent
 	ag, err := agent.NewAgent(ctx, agentCfg, messageStore, lspClients)
 	if err != nil {
@@ -325,6 +330,20 @@ func executeSingleTask(cmd *cobra.Command, prompt string, verbosity config.Verbo
 
 	// Update the agent in config
 	cfg.Agents["coder"] = agentCfg
+
+	// Override model selection (takes precedence over preset)
+	if fast {
+		agentCfg.Model = config.SelectedModelTypeSmall
+	} else if smart {
+		agentCfg.Model = config.SelectedModelTypeLarge
+	} else if model != "" {
+		agentCfg.Model = config.SelectedModelType(model)
+	}
+
+	// Validate that the selected model exists before execution
+	if err := validateModelExists(cfg, agentCfg.Model); err != nil {
+		return err
+	}
 
 	// Load context from file if specified
 	taskContext := sharedContext
@@ -626,6 +645,40 @@ func formatTokenCount(tokens int64) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
+// validateModelExists checks that the configured model exists in the provider
+func validateModelExists(cfg *config.Config, modelType config.SelectedModelType) error {
+	// Get the selected model configuration
+	selectedModel, ok := cfg.Models[modelType]
+	if !ok {
+		return fmt.Errorf("model type '%s' not configured in config (check ~/.config/cliffy/cliffy.json)", modelType)
+	}
+
+	// Get the provider configuration
+	providerCfg, ok := cfg.Providers.Get(selectedModel.Provider)
+	if !ok {
+		return fmt.Errorf("provider '%s' not found for model type '%s' (check ~/.config/cliffy/cliffy.json)", selectedModel.Provider, modelType)
+	}
+
+	if providerCfg.Disable {
+		return fmt.Errorf("provider '%s' is disabled (check ~/.config/cliffy/cliffy.json)", selectedModel.Provider)
+	}
+
+	// Check if the model exists in the provider's model list
+	modelFound := false
+	for _, m := range providerCfg.Models {
+		if m.ID == selectedModel.Model {
+			modelFound = true
+			break
+		}
+	}
+
+	if !modelFound {
+		return fmt.Errorf("model '%s' not found in provider '%s'\nAvailable models: run 'cliffy doctor' to see available models", selectedModel.Model, selectedModel.Provider)
+	}
+
+	return nil
+}
+
 // applyPresetToConfig applies a preset to the agent configuration and selected model
 func applyPresetToConfig(cfg *config.Config, agentCfg *config.Agent, presetID string) error {
 	if presetID == "" {
@@ -655,6 +708,11 @@ func applyPresetToConfig(cfg *config.Config, agentCfg *config.Agent, presetID st
 	if model, ok := cfg.Models[p.Model]; ok {
 		p.ApplyToSelectedModel(&model)
 		cfg.Models[p.Model] = model
+
+		// Validate that the preset's model exists in the provider
+		if err := validateModelExists(cfg, p.Model); err != nil {
+			return fmt.Errorf("preset '%s' specifies invalid model: %w", presetID, err)
+		}
 	}
 
 	return nil

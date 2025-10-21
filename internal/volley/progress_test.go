@@ -1043,3 +1043,192 @@ func TestProgressTracker_ComplexScenario(t *testing.T) {
 	assert.Contains(t, output, "3/3 tasks succeeded")
 	assert.Contains(t, output, "6.0s")
 }
+
+func TestProgressTracker_TaskProviderError(t *testing.T) {
+	tests := []struct {
+		name           string
+		errors         []ProviderError
+		expectContains []string
+	}{
+		{
+			name: "single error",
+			errors: []ProviderError{
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    0,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassRateLimit,
+					HTTPStatus: 429,
+					Message:    "rate limit exceeded",
+					IsRetrying: true,
+				},
+			},
+			expectContains: []string{"rate limit exceeded", "⚠"},
+		},
+		{
+			name: "repeated identical errors should collapse",
+			errors: []ProviderError{
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    0,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassRateLimit,
+					HTTPStatus: 429,
+					Message:    "rate limit exceeded",
+					IsRetrying: true,
+				},
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    1,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassRateLimit,
+					HTTPStatus: 429,
+					Message:    "rate limit exceeded",
+					IsRetrying: true,
+				},
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    2,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassRateLimit,
+					HTTPStatus: 429,
+					Message:    "rate limit exceeded",
+					IsRetrying: true,
+				},
+			},
+			expectContains: []string{"×3"}, // Error count should show
+		},
+		{
+			name: "auth error is fatal",
+			errors: []ProviderError{
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    0,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassAuth,
+					HTTPStatus: 401,
+					Message:    "authentication failed",
+					IsRetrying: false,
+				},
+			},
+			expectContains: []string{"authentication failed", "✗"},
+		},
+		{
+			name: "different error types reset counter",
+			errors: []ProviderError{
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    0,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassRateLimit,
+					HTTPStatus: 429,
+					Message:    "rate limit exceeded",
+					IsRetrying: true,
+				},
+				{
+					Task:       Task{Index: 1, Prompt: "test task"},
+					Attempt:    1,
+					Error:      assert.AnError,
+					ErrorClass: ErrorClassTimeout,
+					HTTPStatus: 0,
+					Message:    "request timed out",
+					IsRetrying: true,
+				},
+			},
+			expectContains: []string{"request timed out"}, // Should show latest error
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			tracker := &ProgressTracker{
+				enabled:    true,
+				out:        &buf,
+				taskStates: make(map[int]*taskState),
+				taskOrder:  []int{},
+				totalTasks: 1,
+			}
+
+			// Initialize task
+			tracker.taskStates[1] = &taskState{
+				task:   Task{Index: 1, Prompt: "test task"},
+				status: "running",
+			}
+			tracker.taskOrder = []int{1}
+
+			// Report errors
+			for _, err := range tt.errors {
+				tracker.TaskProviderError(err)
+			}
+
+			output := buf.String()
+
+			// Verify expected content
+			for _, expected := range tt.expectContains {
+				assert.Contains(t, output, expected, "Expected to find '%s' in output", expected)
+			}
+
+			// Verify error state is tracked
+			state := tracker.taskStates[1]
+			require.NotNil(t, state.lastError)
+			// Error count is the count for the current error class, not total errors
+			// When error class changes, counter resets to 1
+			if len(tt.errors) > 1 {
+				// Check if last two errors have the same class
+				lastErr := tt.errors[len(tt.errors)-1]
+				prevErr := tt.errors[len(tt.errors)-2]
+				if lastErr.ErrorClass == prevErr.ErrorClass && lastErr.Message == prevErr.Message {
+					// Same error class, counter should increment
+					assert.Equal(t, len(tt.errors), state.errorCount)
+				} else {
+					// Different error class, counter should be 1
+					assert.Equal(t, 1, state.errorCount)
+				}
+			} else {
+				assert.Equal(t, 1, state.errorCount)
+			}
+		})
+	}
+}
+
+func TestProgressTracker_ErrorCollapsing(t *testing.T) {
+	var buf bytes.Buffer
+
+	tracker := &ProgressTracker{
+		enabled:    true,
+		out:        &buf,
+		taskStates: make(map[int]*taskState),
+		taskOrder:  []int{},
+		totalTasks: 1,
+	}
+
+	task := Task{Index: 1, Prompt: "test task"}
+
+	// Initialize task
+	tracker.taskStates[1] = &taskState{
+		task:   task,
+		status: "running",
+	}
+	tracker.taskOrder = []int{1}
+
+	// Report the same error 10 times
+	for i := 0; i < 10; i++ {
+		err := ProviderError{
+			Task:       task,
+			Attempt:    i,
+			Error:      assert.AnError,
+			ErrorClass: ErrorClassRateLimit,
+			HTTPStatus: 429,
+			Message:    "rate limit exceeded",
+			IsRetrying: true,
+		}
+		buf.Reset() // Clear buffer for each iteration
+		tracker.TaskProviderError(err)
+	}
+
+	state := tracker.taskStates[1]
+	assert.Equal(t, 10, state.errorCount, "Error count should track all occurrences")
+	assert.Equal(t, ErrorClassRateLimit, state.lastErrorClass)
+}

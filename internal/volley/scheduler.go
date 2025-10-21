@@ -234,11 +234,23 @@ func (s *Scheduler) executeTask(ctx context.Context, workerID int, task Task) Ta
 		if err != nil {
 			lastErr = err
 
-			// Always log errors for debugging
-			s.progress.TaskError(task, attempt, err)
+			// Create structured provider error
+			errClass := classifyError(err)
+			providerErr := ProviderError{
+				Task:       task,
+				Attempt:    attempt,
+				Error:      err,
+				ErrorClass: errClass,
+				HTTPStatus: extractHTTPStatus(err),
+				Message:    simplifyErrorMessage(err, errClass),
+				IsRetrying: shouldRetry(err, attempt, s.options.MaxRetries),
+			}
+
+			// Report structured error to progress tracker
+			s.progress.TaskProviderError(providerErr)
 
 			// Check if we should retry
-			if shouldRetry(err, attempt, s.options.MaxRetries) {
+			if providerErr.IsRetrying {
 				s.mu.Lock()
 				s.failureCount++
 				s.mu.Unlock()
@@ -515,6 +527,69 @@ func classifyError(err error) ErrorClass {
 	}
 
 	return ErrorClassUnknown
+}
+
+// extractHTTPStatus attempts to extract HTTP status code from error message
+func extractHTTPStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	errStr := err.Error()
+
+	// Try to extract common HTTP status codes
+	if contains(errStr, "400") {
+		return 400
+	}
+	if contains(errStr, "401") {
+		return 401
+	}
+	if contains(errStr, "403") {
+		return 403
+	}
+	if contains(errStr, "429") {
+		return 429
+	}
+	if contains(errStr, "500") {
+		return 500
+	}
+	if contains(errStr, "502") {
+		return 502
+	}
+	if contains(errStr, "503") {
+		return 503
+	}
+
+	return 0
+}
+
+// simplifyErrorMessage creates a human-friendly error message
+func simplifyErrorMessage(err error, errClass ErrorClass) string {
+	if err == nil {
+		return "unknown error"
+	}
+
+	errStr := err.Error()
+
+	// Provide friendly messages based on error class
+	switch errClass {
+	case ErrorClassRateLimit:
+		return "rate limit exceeded"
+	case ErrorClassAuth:
+		return "authentication failed"
+	case ErrorClassValidation:
+		return "invalid request"
+	case ErrorClassTimeout:
+		return "request timed out"
+	case ErrorClassNetwork:
+		return "network error"
+	default:
+		// Truncate long error messages
+		if len(errStr) > 100 {
+			return errStr[:97] + "..."
+		}
+		return errStr
+	}
 }
 
 // retryDelayForError calculates backoff based on error type and attempt

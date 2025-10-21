@@ -6,6 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/bwl/cliffy/internal/config"
+	"github.com/bwl/cliffy/internal/csync"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -757,6 +760,138 @@ func TestMultipleTasksParsing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// The args slice itself represents the tasks
 			assert.Equal(t, tt.expectedTasks, len(tt.args))
+		})
+	}
+}
+
+func TestValidateModelExists(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupConfig func() *config.Config
+		modelType   config.SelectedModelType
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid model configuration",
+			setupConfig: func() *config.Config {
+				cfg := &config.Config{
+					Models: map[config.SelectedModelType]config.SelectedModel{
+						config.SelectedModelTypeLarge: {
+							Model:    "gpt-4o",
+							Provider: "openai",
+						},
+					},
+					Providers: csync.NewMap[string, config.ProviderConfig](),
+				}
+				cfg.Providers.Set("openai", config.ProviderConfig{
+					ID:      "openai",
+					Disable: false,
+					Models: []catwalk.Model{
+						{ID: "gpt-4o", Name: "GPT-4o"},
+					},
+				})
+				return cfg
+			},
+			modelType:   config.SelectedModelTypeLarge,
+			expectError: false,
+		},
+		{
+			name: "model type not configured",
+			setupConfig: func() *config.Config {
+				return &config.Config{
+					Models:    map[config.SelectedModelType]config.SelectedModel{},
+					Providers: csync.NewMap[string, config.ProviderConfig](),
+				}
+			},
+			modelType:   config.SelectedModelTypeLarge,
+			expectError: true,
+			errorMsg:    "not configured",
+		},
+		{
+			name: "provider not found",
+			setupConfig: func() *config.Config {
+				cfg := &config.Config{
+					Models: map[config.SelectedModelType]config.SelectedModel{
+						config.SelectedModelTypeLarge: {
+							Model:    "gpt-4o",
+							Provider: "nonexistent",
+						},
+					},
+					Providers: csync.NewMap[string, config.ProviderConfig](),
+				}
+				return cfg
+			},
+			modelType:   config.SelectedModelTypeLarge,
+			expectError: true,
+			errorMsg:    "not found",
+		},
+		{
+			name: "provider disabled",
+			setupConfig: func() *config.Config {
+				cfg := &config.Config{
+					Models: map[config.SelectedModelType]config.SelectedModel{
+						config.SelectedModelTypeLarge: {
+							Model:    "gpt-4o",
+							Provider: "openai",
+						},
+					},
+					Providers: csync.NewMap[string, config.ProviderConfig](),
+				}
+				cfg.Providers.Set("openai", config.ProviderConfig{
+					ID:      "openai",
+					Disable: true, // Provider disabled
+					Models: []catwalk.Model{
+						{ID: "gpt-4o"},
+					},
+				})
+				return cfg
+			},
+			modelType:   config.SelectedModelTypeLarge,
+			expectError: true,
+			errorMsg:    "disabled",
+		},
+		{
+			name: "model not in provider's model list",
+			setupConfig: func() *config.Config {
+				cfg := &config.Config{
+					Models: map[config.SelectedModelType]config.SelectedModel{
+						config.SelectedModelTypeLarge: {
+							Model:    "gpt-5", // Non-existent model
+							Provider: "openai",
+						},
+					},
+					Providers: csync.NewMap[string, config.ProviderConfig](),
+				}
+				cfg.Providers.Set("openai", config.ProviderConfig{
+					ID:      "openai",
+					Disable: false,
+					Models: []catwalk.Model{
+						{ID: "gpt-4o"},
+						{ID: "gpt-4"},
+					},
+				})
+				return cfg
+			},
+			modelType:   config.SelectedModelTypeLarge,
+			expectError: true,
+			errorMsg:    "not found in provider",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.setupConfig()
+			err := validateModelExists(cfg, tt.modelType)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

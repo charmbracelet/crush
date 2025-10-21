@@ -130,13 +130,17 @@ Results (TaskResult[])
 
 ### Provider Configuration
 
-Default uses OpenRouter with free Grok models:
+Default uses OpenRouter with free models (DeepSeek R1):
 ```json
 {
   "models": {
     "large": {
       "provider": "openrouter",
-      "model": "x-ai/grok-4-fast:free"
+      "model": "deepseek/deepseek-r1:free"
+    },
+    "small": {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-r1-distill-qwen-14b:free"
     }
   },
   "providers": {
@@ -147,6 +151,8 @@ Default uses OpenRouter with free Grok models:
   }
 }
 ```
+
+Other available free models include `google/gemini-2.0-flash-exp:free`.
 
 ### Environment Variables
 

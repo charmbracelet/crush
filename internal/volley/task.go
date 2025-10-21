@@ -131,3 +131,14 @@ func FromProviderUsage(pu provider.TokenUsage) Usage {
 		TotalTokens:  pu.InputTokens + pu.CacheReadTokens + pu.OutputTokens,
 	}
 }
+
+// ProviderError represents a structured provider error for better reporting
+type ProviderError struct {
+	Task       Task
+	Attempt    int
+	Error      error
+	ErrorClass ErrorClass
+	HTTPStatus int
+	Message    string
+	IsRetrying bool
+}

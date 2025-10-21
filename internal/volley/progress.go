@@ -24,6 +24,11 @@ type taskState struct {
 	lineCount    int  // Number of lines this task occupies (1 for task + N for tools)
 	spinnerFrame int  // Current spinner animation frame (0-3)
 	collapsed    bool // Whether completed task tools are hidden
+
+	// Error tracking for collapsing repeated errors
+	lastError      *ProviderError
+	errorCount     int
+	lastErrorClass ErrorClass
 }
 
 // ProgressTracker tracks and displays volley execution progress
@@ -196,7 +201,7 @@ func (p *ProgressTracker) TaskRetrying(task Task, attempt int, delay time.Durati
 		task.Index, p.totalTasks, truncate(task.Prompt, 60), delay.Seconds(), attempt)
 }
 
-// TaskError reports an error during task execution
+// TaskError reports an error during task execution (deprecated - use TaskProviderError)
 func (p *ProgressTracker) TaskError(task Task, attempt int, err error) {
 	if !p.enabled {
 		return
@@ -207,6 +212,53 @@ func (p *ProgressTracker) TaskError(task Task, attempt int, err error) {
 
 	fmt.Fprintf(p.out, "[%d/%d] ✗ %s error (attempt %d): %v\n",
 		task.Index, p.totalTasks, truncate(task.Prompt, 40), attempt, err)
+}
+
+// TaskProviderError reports a structured provider error with error collapsing
+func (p *ProgressTracker) TaskProviderError(providerErr ProviderError) {
+	if !p.enabled {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	state := p.taskStates[providerErr.Task.Index]
+	if state == nil {
+		return
+	}
+
+	// Check if this is the same error as last time
+	isSameError := false
+	if state.lastError != nil &&
+		state.lastErrorClass == providerErr.ErrorClass &&
+		state.lastError.Message == providerErr.Message {
+		isSameError = true
+		state.errorCount++
+	} else {
+		// New error type, reset counter
+		state.errorCount = 1
+		state.lastErrorClass = providerErr.ErrorClass
+	}
+
+	// Store the error
+	state.lastError = &providerErr
+
+	// Update task status
+	if providerErr.IsRetrying {
+		state.status = "retrying"
+	} else {
+		state.status = "failed"
+	}
+
+	// Don't spam the display with identical errors
+	// Only show the first occurrence and updates every 3rd repeat
+	if isSameError && state.errorCount > 1 && state.errorCount%3 != 0 {
+		return
+	}
+
+	// Re-render to show updated status
+	p.renderAll()
 }
 
 // Finish displays the final summary
@@ -342,7 +394,9 @@ func (p *ProgressTracker) formatTaskLine(displayNum int, state *taskState) strin
 	case "completed":
 		icon = tools.AsciiTaskComplete
 	case "failed":
-		icon = tools.AsciiTaskComplete // Use same icon for now
+		icon = "✗" // Failed icon
+	case "retrying":
+		icon = "⚠" // Warning icon for retrying
 	default:
 		icon = tools.AsciiTaskQueued
 	}
@@ -352,6 +406,28 @@ func (p *ProgressTracker) formatTaskLine(displayNum int, state *taskState) strin
 
 	// Determine if task has tools (will show branching)
 	hasBranch := len(state.tools) > 0
+
+	// Show error information for retrying/failed tasks
+	if state.status == "retrying" && state.lastError != nil {
+		errorSuffix := state.lastError.Message
+		if state.errorCount > 1 {
+			errorSuffix = fmt.Sprintf("%s (×%d)", errorSuffix, state.errorCount)
+		}
+		if state.lastError.IsRetrying {
+			errorSuffix = fmt.Sprintf("%s - retrying", errorSuffix)
+		}
+		return fmt.Sprintf("%d   %s %s - %s",
+			displayNum, icon, taskDesc, errorSuffix)
+	}
+
+	if state.status == "failed" && state.lastError != nil {
+		errorSuffix := state.lastError.Message
+		if state.errorCount > 1 {
+			errorSuffix = fmt.Sprintf("%s (×%d)", errorSuffix, state.errorCount)
+		}
+		return fmt.Sprintf("%d   %s %s - %s",
+			displayNum, icon, taskDesc, errorSuffix)
+	}
 
 	if state.status == "running" {
 		// Running task: show worker label

@@ -6,7 +6,10 @@
       "Bash(go list:*)",
       "Bash(./bin/cliffy:*)",
       "Bash(go test:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(task:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

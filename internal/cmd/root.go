@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/tui"
+	"github.com/charmbracelet/crush/internal/ui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -81,8 +82,10 @@ crush -y
 		event.AppInitialized()
 
 		// Set up the TUI.
+		// ui := tui.New(app)
+		ui := ui.New(app)
 		program := tea.NewProgram(
-			tui.New(app),
+			ui,
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
 

@@ -75,7 +75,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf // indirect
+	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251022202715-ec1499142678 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2
 	github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef

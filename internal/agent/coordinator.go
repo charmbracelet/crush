@@ -587,7 +587,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case google.Name:
 		provider = c.buildGoogleProvider(baseURL, apiKey, headers)
 	// this is not in fantasy since its just the google provider with extra stuff
-	case "google-vertex":
+	case "vertexai":
 		provider = c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		provider = c.buildOpenaiCompatProvider(baseURL, apiKey, headers)

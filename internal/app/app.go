@@ -87,7 +87,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
-		if err := app.InitCoderAgent(); err != nil {
+		if err := app.InitCoderAgent(ctx); err != nil {
 			return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 		}
 	} else {
@@ -207,8 +207,8 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 }
 
-func (app *App) UpdateAgentModel() error {
-	return app.AgentCoordinator.UpdateModels()
+func (app *App) UpdateAgentModel(ctx context.Context) error {
+	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
 func (app *App) setupEvents() {
@@ -262,13 +262,14 @@ func setupSubscriber[T any](
 	})
 }
 
-func (app *App) InitCoderAgent() error {
+func (app *App) InitCoderAgent(ctx context.Context) error {
 	coderAgentCfg := app.config.Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
+		ctx,
 		app.config,
 		app.Sessions,
 		app.Messages,

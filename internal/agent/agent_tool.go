@@ -25,7 +25,7 @@ const (
 	AgentToolName = "agent"
 )
 
-func (c *coordinator) agentTool() (fantasy.AgentTool, error) {
+func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
 	agentCfg, ok := c.cfg.Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
@@ -35,7 +35,7 @@ func (c *coordinator) agentTool() (fantasy.AgentTool, error) {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(prompt, agentCfg)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg)
 	if err != nil {
 		return nil, err
 	}

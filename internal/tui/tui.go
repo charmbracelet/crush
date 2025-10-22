@@ -204,7 +204,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
 
 		// Update the agent with the new model/provider configuration
-		if err := a.app.UpdateAgentModel(); err != nil {
+		if err := a.app.UpdateAgentModel(context.TODO()); err != nil {
 			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.Model, err))
 		}
 

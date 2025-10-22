@@ -47,43 +47,55 @@ type modelPair struct {
 }
 
 func anthropicBuilder(model string) builderFunc {
-	return func(_ *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
-		provider := anthropic.New(
+	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
+		provider, err := anthropic.New(
 			anthropic.WithAPIKey(os.Getenv("CRUSH_ANTHROPIC_API_KEY")),
 			anthropic.WithHTTPClient(&http.Client{Transport: r}),
 		)
-		return provider.LanguageModel(model)
+		if err != nil {
+			return nil, err
+		}
+		return provider.LanguageModel(t.Context(), model)
 	}
 }
 
 func openaiBuilder(model string) builderFunc {
-	return func(_ *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
-		provider := openai.New(
+	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
+		provider, err := openai.New(
 			openai.WithAPIKey(os.Getenv("CRUSH_OPENAI_API_KEY")),
 			openai.WithHTTPClient(&http.Client{Transport: r}),
 		)
-		return provider.LanguageModel(model)
+		if err != nil {
+			return nil, err
+		}
+		return provider.LanguageModel(t.Context(), model)
 	}
 }
 
 func openRouterBuilder(model string) builderFunc {
 	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
-		provider := openrouter.New(
+		provider, err := openrouter.New(
 			openrouter.WithAPIKey(os.Getenv("CRUSH_OPENROUTER_API_KEY")),
 			openrouter.WithHTTPClient(&http.Client{Transport: r}),
 		)
-		return provider.LanguageModel(model)
+		if err != nil {
+			return nil, err
+		}
+		return provider.LanguageModel(t.Context(), model)
 	}
 }
 
 func zAIBuilder(model string) builderFunc {
 	return func(t *testing.T, r *recorder.Recorder) (fantasy.LanguageModel, error) {
-		provider := openaicompat.New(
+		provider, err := openaicompat.New(
 			openaicompat.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)
-		return provider.LanguageModel(model)
+		if err != nil {
+			return nil, err
+		}
+		return provider.LanguageModel(t.Context(), model)
 	}
 }
 

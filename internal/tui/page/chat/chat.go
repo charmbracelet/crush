@@ -346,7 +346,7 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.splashFullScreen = true
 			return p, p.SetSize(p.width, p.height)
 		}
-		err := p.app.InitCoderAgent()
+		err := p.app.InitCoderAgent(context.TODO())
 		if err != nil {
 			return p, util.ReportError(err)
 		}
@@ -538,7 +538,7 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 		cfg.Models[agentCfg.Model] = currentModel
 
 		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(); err != nil {
+		if err := p.app.UpdateAgentModel(context.TODO()); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  "Failed to update thinking mode: " + err.Error(),
@@ -589,7 +589,7 @@ func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 		}
 
 		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(); err != nil {
+		if err := p.app.UpdateAgentModel(context.TODO()); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  "Failed to update reasoning effort: " + err.Error(),

@@ -650,8 +650,8 @@ See the [contributing guide](https://github.com/charmbracelet/crush?tab=contribu
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
 
 - [Twitter](https://twitter.com/charmcli)
-- [Discord][discord]
 - [Slack](https://charm.land/slack)
+- [Discord][discord]
 - [The Fediverse](https://mastodon.social/@charmcli)
 - [Bluesky](https://bsky.app/profile/charm.land)
 

@@ -3,8 +3,6 @@ package list
 import (
 	"regexp"
 	"slices"
-	"sort"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/textinput"
@@ -28,7 +26,9 @@ type FilterableList[T FilterableItem] interface {
 	Cursor() *tea.Cursor
 	SetInputWidth(int)
 	SetInputPlaceholder(string)
+	SetResultsSize(int)
 	Filter(q string) tea.Cmd
+	fuzzy.Source
 }
 
 type HasMatchIndexes interface {
@@ -47,10 +47,11 @@ type filterableList[T FilterableItem] struct {
 	*filterableOptions
 	width, height int
 	// stores all available items
-	items      []T
-	input      textinput.Model
-	inputWidth int
-	query      string
+	items       []T
+	resultsSize int
+	input       textinput.Model
+	inputWidth  int
+	query       string
 }
 
 type filterableListOption func(*filterableOptions)
@@ -246,22 +247,18 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		return f.list.SetItems(f.items)
 	}
 
-	words := make([]string, len(f.items))
-	for i, item := range f.items {
-		words[i] = strings.ToLower(item.FilterValue())
-	}
-
-	matches := fuzzy.Find(query, words)
-
-	sort.SliceStable(matches, func(i, j int) bool {
-		return matches[i].Score > matches[j].Score
-	})
+	matches := fuzzy.FindFrom(query, f)
 
 	var matchedItems []T
-	for _, match := range matches {
+	resultSize := len(matches)
+	if f.resultsSize > 0 && resultSize > f.resultsSize {
+		resultSize = f.resultsSize
+	}
+	for i := range resultSize {
+		match := matches[i]
 		item := f.items[match.Index]
-		if i, ok := any(item).(HasMatchIndexes); ok {
-			i.MatchIndexes(match.MatchedIndexes)
+		if it, ok := any(item).(HasMatchIndexes); ok {
+			it.MatchIndexes(match.MatchedIndexes)
 		}
 		matchedItems = append(matchedItems, item)
 	}
@@ -306,4 +303,16 @@ func (f *filterableList[T]) SetInputWidth(w int) {
 
 func (f *filterableList[T]) SetInputPlaceholder(ph string) {
 	f.placeholder = ph
+}
+
+func (f *filterableList[T]) SetResultsSize(size int) {
+	f.resultsSize = size
+}
+
+func (f *filterableList[T]) String(i int) string {
+	return f.items[i].FilterValue()
+}
+
+func (f *filterableList[T]) Len() int {
+	return len(f.items)
 }

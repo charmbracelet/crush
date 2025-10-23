@@ -172,6 +172,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
+	startTime := time.Now()
+	a.eventPromptSent(call.SessionID)
+
 	var currentAssistant *message.Message
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -354,6 +357,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 		},
 	})
+
+	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
+
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
@@ -684,6 +690,9 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+
+	a.eventTokensUsed(session.ID, model, usage, cost)
+
 	session.Cost += cost
 	session.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens
 	session.PromptTokens = usage.InputTokens + usage.CacheCreationTokens

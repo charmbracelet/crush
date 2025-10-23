@@ -126,7 +126,7 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 }
 
 func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
-	cacheIsStale, cacheExists := isCacheStale(path)
+	_, cacheExists := isCacheStale(path)
 
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
 		providers, err := client.GetProviders()
@@ -140,25 +140,6 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 			return nil, err
 		}
 		return providers, nil
-	}
-
-	backgroundCacheUpdate := func() {
-		go func() {
-			slog.Info("Updating providers cache in background", "path", path)
-
-			providers, err := client.GetProviders()
-			if err != nil {
-				slog.Error("Failed to fetch providers in background from Catwalk", "error", err)
-				return
-			}
-			if len(providers) == 0 {
-				slog.Error("Empty providers list from Catwalk")
-				return
-			}
-			if err := saveProvidersInCache(path, providers); err != nil {
-				slog.Error("Failed to update providers.json in background", "error", err)
-			}
-		}()
 	}
 
 	switch {
@@ -175,19 +156,6 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		if err := saveProvidersInCache(path, providers); err != nil {
 			return nil, err
 		}
-		return providers, nil
-
-	case cacheExists && !cacheIsStale:
-		slog.Info("Recent providers cache is available.", "path", path)
-
-		providers, err := loadProvidersFromCache(path)
-		if err != nil {
-			return nil, err
-		}
-		if len(providers) == 0 {
-			return catwalkGetAndSave()
-		}
-		backgroundCacheUpdate()
 		return providers, nil
 
 	default:

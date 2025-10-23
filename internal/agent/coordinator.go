@@ -305,6 +305,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
 	)
 
+	if len(c.cfg.LSP) > 0 {
+		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients))
+	}
+
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
@@ -337,7 +341,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			}
 		}
 	}
-
+	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
+		return strings.Compare(a.Info().Name, b.Info().Name)
+	})
 	return filteredTools, nil
 }
 

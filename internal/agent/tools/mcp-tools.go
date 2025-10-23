@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -116,15 +117,26 @@ func (m *McpTool) MCPToolName() string {
 }
 
 func (b *McpTool) Info() fantasy.ToolInfo {
-	input := b.tool.InputSchema.(map[string]any)
-	required, _ := input["required"].([]string)
-	if required == nil {
-		required = make([]string, 0)
+	parameters := make(map[string]any)
+	required := make([]string, 0)
+
+	if input, ok := b.tool.InputSchema.(map[string]any); ok {
+		if props, ok := input["properties"].(map[string]any); ok {
+			parameters = props
+		}
+		if req, ok := input["required"].([]any); ok {
+			// Convert []any -> []string when elements are strings
+			for _, v := range req {
+				if s, ok := v.(string); ok {
+					required = append(required, s)
+				}
+			}
+		} else if reqStr, ok := input["required"].([]string); ok {
+			// Handle case where it's already []string
+			required = reqStr
+		}
 	}
-	parameters, _ := input["properties"].(map[string]any)
-	if parameters == nil {
-		parameters = make(map[string]any)
-	}
+
 	return fantasy.ToolInfo{
 		Name:        fmt.Sprintf("mcp_%s_%s", b.mcpName, b.tool.Name),
 		Description: b.tool.Description,
@@ -322,6 +334,10 @@ func GetMCPTools(ctx context.Context, permissions permission.Service, cfg *confi
 						slog.Error("panic in mcp client initialization", "error", err, "name", name)
 					}
 				}()
+
+				ctx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
+				defer cancel()
+
 				c, err := createMCPSession(ctx, name, m, cfg.Resolver())
 				if err != nil {
 					return
@@ -370,6 +386,8 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 	if err != nil {
 		updateMCPState(name, MCPStateError, err, nil, 0)
 		slog.Error("error creating mcp client", "error", err, "name", name)
+		cancel()
+		cancelTimer.Stop()
 		return nil, err
 	}
 
@@ -392,15 +410,38 @@ func createMCPSession(ctx context.Context, name string, m config.MCPConfig, reso
 
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
+		err = maybeStdioErr(err, transport)
 		updateMCPState(name, MCPStateError, maybeTimeoutErr(err, timeout), nil, 0)
 		slog.Error("error starting mcp client", "error", err, "name", name)
 		cancel()
+		cancelTimer.Stop()
 		return nil, err
 	}
 
 	cancelTimer.Stop()
 	slog.Info("Initialized mcp client", "name", name)
 	return session, nil
+}
+
+// maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
+// to parse, and the cli will then close it, causing the EOF error.
+// so, if we got an EOF err, and the transport is STDIO, we try to exec it
+// again with a timeout and collect the output so we can add details to the
+// error.
+// this happens particularly when starting things with npx, e.g. if node can't
+// be found or some other error like that.
+func maybeStdioErr(err error, transport mcp.Transport) error {
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	ct, ok := transport.(*mcp.CommandTransport)
+	if !ok {
+		return err
+	}
+	if err2 := stdioMCPCheck(ct.Command); err2 != nil {
+		err = errors.Join(err, err2)
+	}
+	return err
 }
 
 func maybeTimeoutErr(err error, timeout time.Duration) error {
@@ -421,7 +462,7 @@ func createMCPTransport(ctx context.Context, m config.MCPConfig, resolver config
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
-		cmd.Env = m.ResolvedEnv()
+		cmd.Env = append(os.Environ(), m.ResolvedEnv()...)
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil
@@ -469,4 +510,16 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 
 func mcpTimeout(m config.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+}
+
+func stdioMCPCheck(old *exec.Cmd) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, old.Path, old.Args...)
+	cmd.Env = old.Env
+	out, err := cmd.CombinedOutput()
+	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", err, string(out))
 }

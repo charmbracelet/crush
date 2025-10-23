@@ -54,7 +54,7 @@ func TestYourFunction(t *testing.T) {
 ## Formatting
 
 - ALWAYS format any Go code you write.
-  - First, try `goftumpt -w .`.
+  - First, try `gofumpt -w .`.
   - If `gofumpt` is not available, use `goimports`.
   - If `goimports` is not available, use `gofmt`.
   - You can also use `task fmt` to run `gofumpt -w .` on the entire project,

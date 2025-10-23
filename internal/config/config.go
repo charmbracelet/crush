@@ -156,7 +156,7 @@ type Completions struct {
 }
 
 func (c Completions) Limits() (depth, items int) {
-	return ptrValOr(c.MaxDepth, -1), ptrValOr(c.MaxItems, -1)
+	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
 
 type Permissions struct {
@@ -278,7 +278,7 @@ type ToolLs struct {
 }
 
 func (t ToolLs) Limits() (depth, items int) {
-	return ptrValOr(t.MaxDepth, -1), ptrValOr(t.MaxItems, -1)
+	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
 }
 
 // Config holds the configuration for crush.
@@ -301,10 +301,10 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
+	Agents map[string]Agent `json:"-"`
+
 	// Internal
 	workingDir string `json:"-"`
-	// TODO: most likely remove this concept when I come back to it
-	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
 	dataConfigDir  string             `json:"-"`
@@ -470,6 +470,8 @@ func allToolNames() []string {
 		"download",
 		"edit",
 		"multiedit",
+		"lsp_diagnostics",
+		"lsp_references",
 		"fetch",
 		"glob",
 		"grep",

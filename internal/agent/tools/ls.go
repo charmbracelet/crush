@@ -115,7 +115,7 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 	}
 
 	depth, limit := lsConfig.Limits()
-	maxFiles := min(limit, maxLSFiles)
+	maxFiles := cmp.Or(limit, maxLSFiles)
 	files, truncated, err := fsext.ListDirectory(
 		searchPath,
 		params.Ignore,

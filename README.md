@@ -189,8 +189,8 @@ That said, you can also set environment variables for preferred providers.
 | `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
 | `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
 | `AWS_REGION`                | AWS Bedrock (Claude)                               |
-| `AWS_PROFILE`               | Custom AWS Profile                                 |
-| `AWS_REGION`                | AWS Region                                         |
+| `AWS_PROFILE`               | AWS Bedrock (Custom Profile)                       |
+| `AWS_BEARER_TOKEN_BEDROCK`  | AWS Bedrock                                        |
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
@@ -479,6 +479,7 @@ Crush currently supports running Anthropic models through Bedrock, with caching 
 - A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
 - Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
 - To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- Alternatively to `aws configure`, you can also just set `AWS_BEARER_TOKEN_BEDROCK`
 
 ### Vertex AI Platform
 
@@ -649,8 +650,8 @@ See the [contributing guide](https://github.com/charmbracelet/crush?tab=contribu
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
 
 - [Twitter](https://twitter.com/charmcli)
-- [Discord][discord]
 - [Slack](https://charm.land/slack)
+- [Discord][discord]
 - [The Fediverse](https://mastodon.social/@charmcli)
 - [Bluesky](https://bsky.app/profile/charm.land)
 

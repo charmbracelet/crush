@@ -2,16 +2,18 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +83,7 @@ type grepMatch struct {
 	path     string
 	modTime  time.Time
 	lineNum  int
+	charNum  int
 	lineText string
 }
 
@@ -96,6 +99,18 @@ const (
 
 //go:embed grep.md
 var grepDescription []byte
+
+// escapeRegexPattern escapes special regex characters so they're treated as literal characters
+func escapeRegexPattern(pattern string) string {
+	specialChars := []string{"\\", ".", "+", "*", "?", "(", ")", "[", "]", "{", "}", "^", "$", "|"}
+	escaped := pattern
+
+	for _, char := range specialChars {
+		escaped = strings.ReplaceAll(escaped, char, "\\"+char)
+	}
+
+	return escaped
+}
 
 func NewGrepTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -142,7 +157,11 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 						if len(lineText) > maxGrepContentWidth {
 							lineText = lineText[:maxGrepContentWidth] + "..."
 						}
-						fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
+						if match.charNum > 0 {
+							fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
+						} else {
+							fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
+						}
 					} else {
 						fmt.Fprintf(&output, "  %s\n", match.path)
 					}
@@ -161,18 +180,6 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				},
 			), nil
 		})
-}
-
-// escapeRegexPattern escapes special regex characters so they're treated as literal characters
-func escapeRegexPattern(pattern string) string {
-	specialChars := []string{"\\", ".", "+", "*", "?", "(", ")", "[", "]", "{", "}", "^", "$", "|"}
-	escaped := pattern
-
-	for _, char := range specialChars {
-		escaped = strings.ReplaceAll(escaped, char, "\\"+char)
-	}
-
-	return escaped
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
@@ -218,66 +225,51 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		return nil, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	matches := make([]grepMatch, 0, len(lines))
-
-	for _, line := range lines {
-		if line == "" {
+	var matches []grepMatch
+	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
+		if len(line) == 0 {
 			continue
 		}
-
-		// Parse ripgrep output using null separation
-		filePath, lineNumStr, lineText, ok := parseRipgrepLine(line)
-		if !ok {
+		var match ripgrepMatch
+		if err := json.Unmarshal(line, &match); err != nil {
 			continue
 		}
-
-		lineNum, err := strconv.Atoi(lineNumStr)
-		if err != nil {
+		if match.Type != "match" {
 			continue
 		}
-
-		fileInfo, err := os.Stat(filePath)
-		if err != nil {
-			continue // Skip files we can't access
+		for _, m := range match.Data.Submatches {
+			fi, err := os.Stat(match.Data.Path.Text)
+			if err != nil {
+				continue // Skip files we can't access
+			}
+			matches = append(matches, grepMatch{
+				path:     match.Data.Path.Text,
+				modTime:  fi.ModTime(),
+				lineNum:  match.Data.LineNumber,
+				charNum:  m.Start + 1, // ensure 1-based
+				lineText: strings.TrimSpace(match.Data.Lines.Text),
+			})
+			// only get the first match of each line
+			break
 		}
-
-		matches = append(matches, grepMatch{
-			path:     filePath,
-			modTime:  fileInfo.ModTime(),
-			lineNum:  lineNum,
-			lineText: lineText,
-		})
 	}
-
 	return matches, nil
 }
 
-// parseRipgrepLine parses ripgrep output with null separation to handle Windows paths
-func parseRipgrepLine(line string) (filePath, lineNum, lineText string, ok bool) {
-	// Split on null byte first to separate filename from rest
-	parts := strings.SplitN(line, "\x00", 2)
-	if len(parts) != 2 {
-		return "", "", "", false
-	}
-
-	filePath = parts[0]
-	remainder := parts[1]
-
-	// Now split the remainder on first colon: "linenum:content"
-	colonIndex := strings.Index(remainder, ":")
-	if colonIndex == -1 {
-		return "", "", "", false
-	}
-
-	lineNumStr := remainder[:colonIndex]
-	lineText = remainder[colonIndex+1:]
-
-	if _, err := strconv.Atoi(lineNumStr); err != nil {
-		return "", "", "", false
-	}
-
-	return filePath, lineNumStr, lineText, true
+type ripgrepMatch struct {
+	Type string `json:"type"`
+	Data struct {
+		Path struct {
+			Text string `json:"text"`
+		} `json:"path"`
+		Lines struct {
+			Text string `json:"text"`
+		} `json:"lines"`
+		LineNumber int `json:"line_number"`
+		Submatches []struct {
+			Start int `json:"start"`
+		} `json:"submatches"`
+	} `json:"data"`
 }
 
 func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
@@ -329,7 +321,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
-		match, lineNum, lineText, err := fileContainsPattern(path, regex)
+		match, lineNum, charNum, lineText, err := fileContainsPattern(path, regex)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -339,6 +331,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 				path:     path,
 				modTime:  info.ModTime(),
 				lineNum:  lineNum,
+				charNum:  charNum,
 				lineText: lineText,
 			})
 
@@ -356,15 +349,15 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	return matches, nil
 }
 
-func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, string, error) {
-	// Quick binary file detection
-	if isBinaryFile(filePath) {
-		return false, 0, "", nil
+func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+	// Only search text files.
+	if !isTextFile(filePath) {
+		return false, 0, 0, "", nil
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return false, 0, "", err
+		return false, 0, 0, "", err
 	}
 	defer file.Close()
 
@@ -373,53 +366,39 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, st
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		if pattern.MatchString(line) {
-			return true, lineNum, line, nil
+		if loc := pattern.FindStringIndex(line); loc != nil {
+			charNum := loc[0] + 1
+			return true, lineNum, charNum, line, nil
 		}
 	}
 
-	return false, 0, "", scanner.Err()
+	return false, 0, 0, "", scanner.Err()
 }
 
-var binaryExts = map[string]struct{}{
-	".exe": {}, ".dll": {}, ".so": {}, ".dylib": {},
-	".bin": {}, ".obj": {}, ".o": {}, ".a": {},
-	".zip": {}, ".tar": {}, ".gz": {}, ".bz2": {},
-	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {},
-	".pdf": {}, ".doc": {}, ".docx": {}, ".xls": {},
-	".mp3": {}, ".mp4": {}, ".avi": {}, ".mov": {},
-}
-
-// isBinaryFile performs a quick check to determine if a file is binary
-func isBinaryFile(filePath string) bool {
-	// Check file extension first (fastest)
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if _, isBinary := binaryExts[ext]; isBinary {
-		return true
-	}
-
-	// Quick content check for files without clear extensions
+// isTextFile checks if a file is a text file by examining its MIME type.
+func isTextFile(filePath string) bool {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return false // If we can't open it, let the caller handle the error
+		return false
 	}
 	defer file.Close()
 
-	// Read first 512 bytes to check for null bytes
+	// Read first 512 bytes for MIME type detection.
 	buffer := make([]byte, 512)
 	n, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
 		return false
 	}
 
-	// Check for null bytes (common in binary files)
-	for i := range n {
-		if buffer[i] == 0 {
-			return true
-		}
-	}
+	// Detect content type.
+	contentType := http.DetectContentType(buffer[:n])
 
-	return false
+	// Check if it's a text MIME type.
+	return strings.HasPrefix(contentType, "text/") ||
+		contentType == "application/json" ||
+		contentType == "application/xml" ||
+		contentType == "application/javascript" ||
+		contentType == "application/x-sh"
 }
 
 func globToRegex(glob string) string {

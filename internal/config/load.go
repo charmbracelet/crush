@@ -607,6 +607,10 @@ func hasVertexCredentials(env env.Env) bool {
 }
 
 func hasAWSCredentials(env env.Env) bool {
+	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return true
+	}
+
 	if env.Get("AWS_ACCESS_KEY_ID") != "" && env.Get("AWS_SECRET_ACCESS_KEY") != "" {
 		return true
 	}
@@ -623,6 +627,11 @@ func hasAWSCredentials(env env.Env) bool {
 		env.Get("AWS_CONTAINER_CREDENTIALS_FULL_URI") != "" {
 		return true
 	}
+
+	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/credentials")); err == nil {
+		return true
+	}
+
 	return false
 }
 

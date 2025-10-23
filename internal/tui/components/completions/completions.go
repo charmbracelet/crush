@@ -22,6 +22,7 @@ type OpenCompletionsMsg struct {
 	Completions []Completion
 	X           int // X position for the completions popup
 	Y           int // Y position for the completions popup
+	MaxResults  int // Maximum number of results to render, 0 for no limit
 }
 
 type FilterCompletionsMsg struct {
@@ -192,6 +193,7 @@ func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		c.width = width
 		c.height = max(min(maxCompletionsHeight, len(items)), 1) // Ensure at least 1 item height
+		c.list.SetResultsSize(msg.MaxResults)
 		return c, tea.Batch(
 			c.list.SetItems(items),
 			c.list.SetSize(c.width, c.height),

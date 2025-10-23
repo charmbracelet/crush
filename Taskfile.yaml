@@ -2,6 +2,10 @@
 
 version: "3"
 
+vars:
+  VERSION:
+    sh: git describe --long 2>/dev/null || echo ""
+
 env:
   CGO_ENABLED: 0
   GOEXPERIMENT: greenteagc
@@ -30,8 +34,10 @@ tasks:
 
   build:
     desc: Run build
+    vars:
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - go build .
+      - go build {{.LDFLAGS}} .
     generates:
       - crush
 
@@ -59,8 +65,10 @@ tasks:
 
   install:
     desc: Install the application
+    vars:
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - go install -v .
+      - go install {{.LDFLAGS}} -v .
 
   profile:cpu:
     desc: 10s CPU profile
@@ -99,9 +107,9 @@ tasks:
     cmds:
       - task: fetch-tags
       - git commit --allow-empty -m "{{.NEXT}}"
-      - git tag --annotate --sign {{.NEXT}} {{.CLI_ARGS}}
+      - git tag --annotate --sign -m "{{.NEXT}}" {{.NEXT}} {{.CLI_ARGS}}
       - echo "Pushing {{.NEXT}}..."
-      - git push origin --tags
+      - git push origin main --follow-tags
 
   fetch-tags:
     cmds:

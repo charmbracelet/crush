@@ -73,6 +73,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	isYolo               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -83,6 +84,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPrompt         string
 	DisableAutoSummarize bool
+	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -99,6 +101,7 @@ func NewSessionAgent(
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                opts.Tools,
+		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}

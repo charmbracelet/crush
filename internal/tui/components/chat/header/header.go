@@ -44,7 +44,7 @@ func (h *header) Init() tea.Cmd {
 	return nil
 }
 
-func (h *header) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (h *header) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {

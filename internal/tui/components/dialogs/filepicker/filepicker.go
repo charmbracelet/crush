@@ -88,7 +88,7 @@ func (m *model) Init() tea.Cmd {
 	return m.filePicker.Init()
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.wWidth = msg.Width

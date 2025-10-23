@@ -12,8 +12,9 @@ type Cursor interface {
 }
 
 type Model interface {
-	tea.Model
-	tea.ViewModel
+	Init() tea.Cmd
+	Update(tea.Msg) (Model, tea.Cmd)
+	View() string
 }
 
 func CmdHandler(msg tea.Msg) tea.Cmd {

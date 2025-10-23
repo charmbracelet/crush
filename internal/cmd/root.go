@@ -83,11 +83,8 @@ crush -y
 		// Set up the TUI.
 		program := tea.NewProgram(
 			tui.New(app),
-			tea.WithAltScreen(),
 			tea.WithContext(cmd.Context()),
-			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
-			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
-		)
+			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
 
 		go app.Subscribe(program)
 

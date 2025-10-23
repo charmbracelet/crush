@@ -81,7 +81,7 @@ func (s *sessionDialogCmp) Init() tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func (s *sessionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (s *sessionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		var cmds []tea.Cmd

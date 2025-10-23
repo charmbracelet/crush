@@ -172,7 +172,7 @@ func (r *reasoningDialogCmp) populateEffortOptions() tea.Cmd {
 	return nil
 }
 
-func (r *reasoningDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (r *reasoningDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		r.wWidth = msg.Width

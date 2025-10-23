@@ -16,6 +16,7 @@ import (
 	"github.com/lucasb-eyer/go-colorful"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
 const (
@@ -318,7 +319,7 @@ func (a *Anim) Init() tea.Cmd {
 }
 
 // Update processes animation steps (or not).
-func (a *Anim) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (a *Anim) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case StepMsg:
 		if msg.id != a.id {

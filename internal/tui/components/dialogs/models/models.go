@@ -98,7 +98,7 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 	return tea.Batch(m.modelList.Init(), m.apiKeyInput.Init())
 }
 
-func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.wWidth = msg.Width

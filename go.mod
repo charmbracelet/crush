@@ -13,7 +13,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4.0.20251011205917-3b687ffc1619
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5
 	github.com/charmbracelet/catwalk v0.7.0
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
@@ -74,7 +74,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2
-	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef
+	github.com/charmbracelet/ultraviolet v0.0.0-20251017140847-d4ace4d6e731
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250829135019-44e44e21330d
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
@@ -148,7 +148,7 @@ require (
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/term v0.35.0 // indirect
 	golang.org/x/text v0.30.0
 	golang.org/x/time v0.8.0 // indirect

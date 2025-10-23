@@ -209,7 +209,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "download the file from https://httpbin.org/robots.txt and save it as robots.txt",
+					Prompt:          "download the file from https://example-files.online-convert.com/document/txt/example.txt and save it as example.txt",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})
@@ -241,9 +241,9 @@ func TestCoderAgent(t *testing.T) {
 
 				require.True(t, foundDownload, "Expected to find a download operation")
 
-				robotsPath := filepath.Join(env.workingDir, "robots.txt")
-				_, err = os.Stat(robotsPath)
-				require.NoError(t, err, "Expected robots.txt file to exist")
+				examplePath := filepath.Join(env.workingDir, "example.txt")
+				_, err = os.Stat(examplePath)
+				require.NoError(t, err, "Expected example.txt file to exist")
 			})
 			t.Run("fetch tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)
@@ -252,7 +252,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "fetch the content from https://httpbin.org/html and tell me if it contains the word 'Herman'",
+					Prompt:          "fetch the content from https://example-files.online-convert.com/website/html/example.html and tell me if it contains the word 'John Doe'",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})

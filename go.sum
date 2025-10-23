@@ -1,3 +1,5 @@
+charm.land/fantasy v0.1.0 h1:F+k1zmmqMllM/VpVFy+BY6lDmE0SsJ3LUWGQm+o20Bg=
+charm.land/fantasy v0.1.0/go.mod h1:lR8tV9VQlH/HOHs9ilSzBkcN9I+o639jpVPs4MI/Jyk=
 cloud.google.com/go v0.116.0 h1:B3fRrSDkLRt5qSHWe40ERJvhvnQwdZiHu0bJOpldweE=
 cloud.google.com/go v0.116.0/go.mod h1:cEPSRWPzZEswwdr9BxE6ChEn01dWlTaF05LiC2Xs70U=
 cloud.google.com/go/auth v0.17.0 h1:74yCm7hCj2rUyyAocqnFzsAYXgJhrG26XCFimrc/Kz4=

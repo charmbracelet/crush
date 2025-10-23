@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // Prompt represents a template-based prompt generator.
@@ -30,6 +32,7 @@ type PromptDat struct {
 	IsGitRepo    bool
 	Platform     string
 	Date         string
+	GitStatus    string
 	ContextFiles []ContextFile
 }
 
@@ -70,13 +73,17 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-func (p *Prompt) Build(provider, model string, cfg config.Config) (string, error) {
+func (p *Prompt) Build(ctx context.Context, provider, model string, cfg config.Config) (string, error) {
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	if err := t.Execute(&sb, p.promptData(provider, model, cfg)); err != nil {
+	d, err := p.promptData(ctx, provider, model, cfg)
+	if err != nil {
+		return "", err
+	}
+	if err := t.Execute(&sb, d); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
 
@@ -138,7 +145,7 @@ func expandPath(path string, cfg config.Config) string {
 	return path
 }
 
-func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat {
+func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg config.Config) (PromptDat, error) {
 	workingDir := cfg.WorkingDir()
 	if p.workingDir != "" {
 		workingDir = p.workingDir
@@ -160,25 +167,85 @@ func (p *Prompt) promptData(provider, model string, cfg config.Config) PromptDat
 		files[pathKey] = content
 	}
 
+	isGit := isGitRepo(cfg.WorkingDir())
 	data := PromptDat{
 		Provider:   provider,
 		Model:      model,
 		Config:     cfg,
 		WorkingDir: workingDir,
-		IsGitRepo:  isGitRepo(cfg.WorkingDir()),
+		IsGitRepo:  isGit,
 		Platform:   platform,
 		Date:       p.now().Format("1/2/2006"),
+	}
+	if isGit {
+		var err error
+		data.GitStatus, err = getGitStatus(ctx, cfg.WorkingDir())
+		if err != nil {
+			return PromptDat{}, err
+		}
 	}
 
 	for _, contextFiles := range files {
 		data.ContextFiles = append(data.ContextFiles, contextFiles...)
 	}
-	return data
+	return data, nil
 }
 
 func isGitRepo(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))
 	return err == nil
+}
+
+func getGitStatus(ctx context.Context, dir string) (string, error) {
+	sh := shell.NewShell(&shell.Options{
+		WorkingDir: dir,
+	})
+	branch, err := getGitBranch(ctx, sh)
+	if err != nil {
+		return "", err
+	}
+	status, err := getGitStatusSummary(ctx, sh)
+	if err != nil {
+		return "", err
+	}
+	commits, err := getGitRecentCommits(ctx, sh)
+	if err != nil {
+		return "", err
+	}
+	return branch + status + commits, nil
+}
+
+func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
+	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
+	if err != nil {
+		return "", nil
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "", nil
+	}
+	return fmt.Sprintf("Current branch: %s\n", out), nil
+}
+
+func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {
+	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null | head -20")
+	if err != nil {
+		return "", nil
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "Status: clean\n", nil
+	}
+	return fmt.Sprintf("Status:\n%s\n", out), nil
+}
+
+func getGitRecentCommits(ctx context.Context, sh *shell.Shell) (string, error) {
+	out, _, err := sh.Exec(ctx, "git log --oneline -n 3 2>/dev/null")
+	if err != nil || out == "" {
+		return "", nil
+	}
+	out = strings.TrimSpace(out)
+	return fmt.Sprintf("Recent commits:\n%s\n", out), nil
 }
 
 func (p *Prompt) Name() string {

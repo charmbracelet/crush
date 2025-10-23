@@ -270,7 +270,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	systemPrompt, err := prompt.Build(large.Model.Provider(), large.Model.Model(), *c.cfg)
+	systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -163,7 +164,7 @@ func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageMode
 		return nil, err
 	}
 
-	systemPrompt, err := prompt.Build(large.Provider(), large.Model(), *cfg)
+	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -405,6 +405,14 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 	largeModelID := largeModelCfg.Model
 	smallModelID := smallModelCfg.Model
 
+	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
+		largeModelID += ":exacto"
+	}
+
+	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
+		smallModelID += ":exacto"
+	}
+
 	// FIXME(@andreynering): Temporary fix to get it working.
 	// We need to prefix the model with with `{region}.`
 	if largeModelCfg.Provider == bedrock.Name {
@@ -635,6 +643,17 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
+}
+
+func isExactoSupported(modelID string) bool {
+	supportedModels := []string{
+		"moonshotai/kimi-k2-0905",
+		"deepseek/deepseek-v3.1-terminus",
+		"z-ai/glm-4.6",
+		"openai/gpt-oss-120b",
+		"qwen/qwen3-coder",
+	}
+	return slices.Contains(supportedModels, modelID)
 }
 
 func (c *coordinator) Cancel(sessionID string) {

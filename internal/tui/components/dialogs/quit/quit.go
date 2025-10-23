@@ -40,7 +40,7 @@ func (q *quitDialogCmp) Init() tea.Cmd {
 }
 
 // Update handles keyboard input for the quit dialog.
-func (q *quitDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (q *quitDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		q.wWidth = msg.Width

@@ -112,7 +112,7 @@ func (c *completionsCmp) Init() tea.Cmd {
 }
 
 // Update implements Completions.
-func (c *completionsCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (c *completionsCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		c.wWidth, c.wHeight = msg.Width, msg.Height

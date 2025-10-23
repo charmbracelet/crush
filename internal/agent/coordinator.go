@@ -27,6 +27,7 @@ import (
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
+	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
@@ -401,11 +402,23 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		return Model{}, Model{}, errors.New("snall model not found in provider config")
 	}
 
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelCfg.Model)
+	largeModelID := largeModelCfg.Model
+	smallModelID := smallModelCfg.Model
+
+	// FIXME(@andreynering): Temporary fix to get it working.
+	// We need to prefix the model with with `{region}.`
+	if largeModelCfg.Provider == bedrock.Name {
+		largeModelID = fmt.Sprintf("us.%s", largeModelID)
+	}
+	if smallModelCfg.Provider == bedrock.Name {
+		smallModelID = fmt.Sprintf("us.%s", smallModelID)
+	}
+
+	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelCfg.Model)
+	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
@@ -526,6 +539,18 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
+func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.Provider, error) {
+	var opts []bedrock.Option
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, bedrock.WithHTTPClient(httpClient))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, bedrock.WithHeaders(headers))
+	}
+	return bedrock.New(opts...)
+}
+
 func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{
 		google.WithBaseURL(baseURL),
@@ -599,6 +624,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
+	case bedrock.Name:
+		return c.buildBedrockProvider(headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex", "vertexai":

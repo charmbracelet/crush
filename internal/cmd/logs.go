@@ -10,8 +10,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/log/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +47,9 @@ var logsCmd = &cobra.Command{
 
 		log.SetLevel(log.DebugLevel)
 		log.SetOutput(os.Stdout)
+		if !term.IsTerminal(os.Stdout.Fd()) {
+			log.SetColorProfile(colorprofile.NoTTY)
+		}
 
 		cfg, err := config.Load(cwd, dataDir, false)
 		if err != nil {

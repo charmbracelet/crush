@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -605,7 +606,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openaicompat.Name:
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers)
 	default:
-		return nil, errors.New("provider type not supported")
+		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
 }
 

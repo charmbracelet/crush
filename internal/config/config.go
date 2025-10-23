@@ -89,7 +89,10 @@ type ProviderConfig struct {
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
 
 	// Used to pass extra parameters to the provider.
-	ExtraParams map[string]string `json:"-"`
+	// Special parameters:
+	// - "disable_tools": "true" - Disables sending the tools array (for providers that don't support function calling)
+	// - "disable_stream_options": "true" - Disables sending stream_options (for providers that don't support usage in streams)
+	ExtraParams map[string]string `json:"extra_params,omitempty" jsonschema:"description=Extra parameters for provider configuration,example={\"disable_tools\":\"true\"}"`
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`

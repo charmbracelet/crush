@@ -601,7 +601,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
-	case "vertexai":
+	case "google-vertex", "vertexai":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers)

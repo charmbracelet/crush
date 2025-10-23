@@ -130,8 +130,7 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	Theme       string `json:"theme,omitempty" jsonschema:"description=Theme name for the TUI interface,example=charmtone,example=nord,example=dracula,example=monokai"`
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 }
@@ -157,16 +156,25 @@ type Attribution struct {
 }
 
 type Options struct {
-	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
-	DisabledTools             []string     `json:"disabled_tools" jsonschema:"description=Tools to disable"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	ContextPaths              []string        `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	TUI                       *TUIOptions     `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                     bool            `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP                  bool            `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize      bool            `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	DataDirectory             string          `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisabledTools             []string        `json:"disabled_tools" jsonschema:"description=Tools to disable"`
+	DisableProviderAutoUpdate bool            `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	Attribution               *Attribution    `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool            `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	Narrator                  *NarratorConfig `json:"narrator,omitempty" jsonschema:"description=AI narrator configuration for Ollama integration"`
+}
+
+// NarratorConfig represents configuration for the AI narrator
+type NarratorConfig struct {
+	Enabled   bool   `json:"enabled,omitempty" jsonschema:"description=Enable AI narrator functionality,default=true"`
+	OllamaURL string `json:"ollama_url,omitempty" jsonschema:"description=Ollama API endpoint,default=http://localhost:11434"`
+	Model     string `json:"model,omitempty" jsonschema:"description=Ollama model to use for explanations,default=llama2"`
+	Timeout   int    `json:"timeout_seconds,omitempty" jsonschema:"description=Timeout for Ollama requests in seconds,default=30"`
 }
 
 type MCPs map[string]MCPConfig

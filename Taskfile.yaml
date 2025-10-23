@@ -62,6 +62,12 @@ tasks:
     cmds:
       - go install -v .
 
+  install-windows:
+    desc: Install on Windows with proper binary placement
+    cmds:
+      - go build -o crush.exe .
+      - echo "Built updated crush.exe - ready for installation or manual placement"
+
   profile:cpu:
     desc: 10s CPU profile
     cmds:

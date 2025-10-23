@@ -13,9 +13,11 @@ import (
 func main() {
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
-			slog.Info("Serving pprof at localhost:6060")
+			slog.Info("Starting pprof server", "address", "http://localhost:6060/debug/pprof/")
+			slog.Warn("pprof server is enabled - disable in production by unsetting CRUSH_PROFILE")
+
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {
-				slog.Error("Failed to pprof listen", "error", httpErr)
+				slog.Error("Failed to start pprof server", "error", httpErr)
 			}
 		}()
 	}

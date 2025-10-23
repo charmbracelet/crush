@@ -722,7 +722,7 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.result.IsError:
 		message = v.renderToolError()
 	case v.cancelled:
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
+		message = t.S().Base.Foreground(t.FgSubtle).Render("Request cancelled")
 	case v.result.ToolCallID == "":
 		if v.permissionRequested && !v.permissionGranted {
 			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting for permission...")

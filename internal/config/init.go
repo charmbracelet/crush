@@ -2,11 +2,14 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	"github.com/charmbracelet/crush/internal/startup"
 )
 
 const (
@@ -25,6 +28,18 @@ func Init(workingDir, dataDir string, debug bool) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Run startup manager to initialize configuration
+	if err := runStartupTasks(workingDir, cfg); err != nil {
+		slog.Warn("Startup tasks failed", "error", err)
+	}
+
+	// Reload config after startup tasks potentially modified it
+	cfg, err = Load(workingDir, dataDir, debug)
+	if err != nil {
+		return nil, err
+	}
+
 	instance.Store(cfg)
 	return instance.Load(), nil
 }
@@ -112,4 +127,10 @@ func HasInitialDataConfig() bool {
 		return false
 	}
 	return Get().IsConfigured()
+}
+
+// runStartupTasks initializes configuration using the startup manager
+func runStartupTasks(workingDir string, cfg *Config) error {
+	manager := startup.NewManager(workingDir)
+	return manager.RunStartupTasks()
 }

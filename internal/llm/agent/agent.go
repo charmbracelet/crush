@@ -492,11 +492,12 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 				continue
 			}
 		}
-		if agentMessage.FinishReason() == "" {
-			// Kujtim: could not track down where this is happening but this means its cancelled
-			agentMessage.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
+		// Only treat empty FinishReason as an error if we actually have content but no finish
+		if agentMessage.FinishReason() == "" && agentMessage.Content().String() != "" {
+			slog.Warn("Agent message has content but no finish reason, marking as error", "sessionID", sessionID)
+			agentMessage.AddFinish(message.FinishReasonError, "Request processing incomplete", "No finish reason provided")
 			_ = a.messages.Update(context.Background(), agentMessage)
-			return a.err(ErrRequestCancelled)
+			return a.err(fmt.Errorf("request processing incomplete: no finish reason"))
 		}
 		return AgentEvent{
 			Type:    AgentEventTypeResponse,

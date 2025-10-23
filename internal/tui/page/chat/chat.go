@@ -520,7 +520,7 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  "Failed to update compact mode configuration: " + err.Error(),
+				Msg:  "failed to update compact mode configuration: " + err.Error(),
 			}
 		}
 		return nil
@@ -541,7 +541,7 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 		if err := p.app.UpdateAgentModel(); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  "Failed to update thinking mode: " + err.Error(),
+				Msg:  "failed to update thinking mode: " + err.Error(),
 			}
 		}
 
@@ -588,7 +588,7 @@ func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 		if err := p.app.UpdateAgentModel(); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  "Failed to update reasoning effort: " + err.Error(),
+				Msg:  "failed to update reasoning effort: " + err.Error(),
 			}
 		}
 

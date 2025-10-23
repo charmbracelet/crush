@@ -162,6 +162,39 @@ Or just install it with Go:
 go install github.com/charmbracelet/crush@latest
 ```
 
+### Updating Existing Installation
+
+If you have an existing installation and want to apply the latest fixes (particularly for startup configuration and agent cancellation issues), reinstall with Go:
+
+#### Windows
+
+```batch
+# Update to latest version
+go install github.com/charmbracelet/crush@latest
+
+# Or build from source if you have local changes
+go build .
+
+# Update desktop shortcut - run from project directory
+.\scripts\create-desktop-shortcut.bat
+
+# Or use PowerShell directly
+powershell -ExecutionPolicy Bypass -File .\scripts\create-desktop-shortcut.ps1
+
+# Create launcher shortcut (recommended - better environment setup)
+powershell -ExecutionPolicy Bypass -File .\scripts\create-desktop-shortcut.ps1 -UseLauncher
+```
+
+#### Linux/macOS
+
+```bash
+# Update to latest version
+go install github.com/charmbracelet/crush@latest
+
+# Or build from source if you have local changes
+task install
+```
+
 > [!WARNING]
 > Productivity may increase when using Crush and you may find yourself nerd
 > sniped when first using the application. If the symptoms persist, join the

@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -29,6 +29,9 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/theme"
+	"github.com/charmbracelet/crush/internal/tui/components/explorer"
+	tuiLayout "github.com/charmbracelet/crush/internal/tui/layout"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -61,6 +64,9 @@ type appModel struct {
 	previousPage page.PageID
 	pages        map[page.PageID]util.Model
 	loadedPages  map[page.PageID]bool
+
+	// Enhanced layout manager
+	layoutManager *tuiLayout.Model
 
 	// Status
 	status          status.StatusCmp
@@ -253,6 +259,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Deny(msg.Permission)
 		}
 		return a, nil
+	// Theme Events
+	case theme.ThemeSelectedMsg:
+		// Force UI refresh when theme changes
+		return a, tea.Sequence(
+			func() tea.Msg {
+				// Trigger a window resize to force UI redraw with new theme
+				return tea.WindowSizeMsg{Width: a.wWidth, Height: a.wHeight}
+			},
+		)
 	// Agent Events
 	case pubsub.Event[agent.AgentEvent]:
 		payload := msg.Payload
@@ -484,6 +499,17 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			},
 		)
 		return tea.Sequence(cmds...)
+	case key.Matches(msg, a.keyMap.Theme):
+		// Open theme dialog
+		if a.dialog.ActiveDialogID() == theme.ThemeDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: theme.NewThemeDialogCmp(a.app.Config()),
+		})
 	case key.Matches(msg, a.keyMap.Suspend):
 		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")
@@ -605,7 +631,7 @@ func (a *appModel) View() tea.View {
 	if a.app != nil && a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
-		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
+		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.IntN(100))
 	}
 	return view
 }
@@ -616,17 +642,41 @@ func New(app *app.App) tea.Model {
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()
 
-	model := &appModel{
-		currentPage: chat.ChatPageID,
-		app:         app,
-		status:      status.NewStatusCmp(),
-		loadedPages: make(map[page.PageID]bool),
-		keyMap:      keyMap,
+	// Create enhanced layout manager
+	layoutManager := tuiLayout.New(120, 30) // Default size
 
+	// Create file explorer component
+	explorerComponent, err := explorer.New(app.Config(), app.Config().WorkingDir(), 30, 25)
+	if err != nil {
+		// Fallback to basic model if explorer fails
+		model := &appModel{
+			currentPage: chat.ChatPageID,
+			app:         app,
+			status:      status.NewStatusCmp(),
+			loadedPages: make(map[page.PageID]bool),
+			keyMap:      keyMap,
+			pages: map[page.PageID]util.Model{
+				chat.ChatPageID: chatPage,
+			},
+			dialog:      dialogs.NewDialogCmp(),
+			completions: completions.New(),
+		}
+		return model
+	}
+
+	// Set up layout with explorer in left pane
+	layoutManager.SetPane(tuiLayout.LeftPane, explorerComponent)
+
+	model := &appModel{
+		currentPage:   chat.ChatPageID,
+		app:           app,
+		status:        status.NewStatusCmp(),
+		loadedPages:   make(map[page.PageID]bool),
+		keyMap:        keyMap,
+		layoutManager: layoutManager,
 		pages: map[page.PageID]util.Model{
 			chat.ChatPageID: chatPage,
 		},
-
 		dialog:      dialogs.NewDialogCmp(),
 		completions: completions.New(),
 	}

@@ -3,7 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/exec"
@@ -408,8 +408,8 @@ var workingPlaceholders = [...]string{
 }
 
 func (m *editorCmp) randomizePlaceholders() {
-	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
-	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+	m.workingPlaceholder = workingPlaceholders[rand.IntN(len(workingPlaceholders))]
+	m.readyPlaceholder = readyPlaceholders[rand.IntN(len(readyPlaceholders))]
 }
 
 func (m *editorCmp) View() string {

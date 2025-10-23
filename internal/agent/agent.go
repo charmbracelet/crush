@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -240,6 +241,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// handle anthropic signature
 			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
 				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
+					currentAssistant.AppendReasoningSignature(reasoning.Signature)
+				}
+			}
+			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
+				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
 					currentAssistant.AppendReasoningSignature(reasoning.Signature)
 				}
 			}

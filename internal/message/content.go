@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
@@ -41,11 +42,12 @@ type ContentPart interface {
 }
 
 type ReasoningContent struct {
-	Thinking      string                             `json:"thinking"`
-	Signature     string                             `json:"signature"`
-	ResponsesData *openai.ResponsesReasoningMetadata `json:"responses_data"`
-	StartedAt     int64                              `json:"started_at,omitempty"`
-	FinishedAt    int64                              `json:"finished_at,omitempty"`
+	Thinking         string                             `json:"thinking"`
+	Signature        string                             `json:"signature"`
+	ThoughtSignature string                             `json:"thought_signature"` // Used for google
+	ResponsesData    *openai.ResponsesReasoningMetadata `json:"responses_data"`
+	StartedAt        int64                              `json:"started_at,omitempty"`
+	FinishedAt       int64                              `json:"finished_at,omitempty"`
 }
 
 func (tc ReasoningContent) String() string {
@@ -259,6 +261,22 @@ func (m *Message) AppendReasoningContent(delta string) {
 	}
 }
 
+func (m *Message) AppendThoughtSignature(signature string) {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			m.Parts[i] = ReasoningContent{
+				Thinking:         c.Thinking,
+				ThoughtSignature: c.ThoughtSignature + signature,
+				Signature:        c.Signature,
+				StartedAt:        c.StartedAt,
+				FinishedAt:       c.FinishedAt,
+			}
+			return
+		}
+	}
+	m.Parts = append(m.Parts, ReasoningContent{ThoughtSignature: signature})
+}
+
 func (m *Message) AppendReasoningSignature(signature string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
@@ -442,6 +460,11 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			}
 			if reasoning.ResponsesData != nil {
 				reasoningPart.ProviderOptions[openai.Name] = reasoning.ResponsesData
+			}
+			if reasoning.ThoughtSignature != "" {
+				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
+					Signature: reasoning.ThoughtSignature,
+				}
 			}
 			parts = append(parts, reasoningPart)
 		}

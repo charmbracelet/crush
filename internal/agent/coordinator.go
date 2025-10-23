@@ -218,6 +218,13 @@ func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
 			options[openrouter.Name] = parsed
 		}
 	case google.Name:
+		_, hasReasoning := mergedOptions["thinking_config"]
+		if !hasReasoning {
+			mergedOptions["thinking_config"] = map[string]any{
+				"thinking_budget":  2000,
+				"include_thoughts": true,
+			}
+		}
 		parsed, err := google.ParseOptions(mergedOptions)
 		if err == nil {
 			options[google.Name] = parsed

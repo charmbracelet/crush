@@ -437,10 +437,41 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
 				if len(acc.Choices) == 0 {
-					eventChan <- ProviderEvent{
-						Type:  EventError,
-						Error: fmt.Errorf("received empty streaming response from OpenAI API - check endpoint configuration"),
+					// Some OpenAI-compatible APIs (e.g., Z.AI GLM models with stream=false)
+					// return complete responses instead of streaming chunks.
+					// Fall back to non-streaming API call to handle this case.
+					slog.Warn("Empty streaming response, falling back to non-streaming call")
+					response, sendErr := o.send(ctx, messages, tools)
+					if sendErr != nil {
+						eventChan <- ProviderEvent{
+							Type:  EventError,
+							Error: fmt.Errorf("streaming and non-streaming calls both failed: %w", sendErr),
+						}
+						return
 					}
+					// Emit the complete response as streaming events
+					if response.Content != "" {
+						eventChan <- ProviderEvent{
+							Type:    EventContentDelta,
+							Content: response.Content,
+						}
+					}
+					// Emit tool call start events if present
+					for _, toolCall := range response.ToolCalls {
+						eventChan <- ProviderEvent{
+							Type: EventToolUseStart,
+							ToolCall: &message.ToolCall{
+								ID:       toolCall.ID,
+								Name:     toolCall.Name,
+								Finished: false,
+							},
+						}
+					}
+					eventChan <- ProviderEvent{
+						Type:     EventComplete,
+						Response: response,
+					}
+					close(eventChan)
 					return
 				}
 

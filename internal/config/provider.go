@@ -141,6 +141,10 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		}
 		return providers, nil
 	}
+	// TODO: remove this after beta testing
+	// Always load embedded for now
+	autoUpdateDisabled = true
+	cacheExists = false
 
 	switch {
 	case autoUpdateDisabled:

@@ -172,7 +172,7 @@ aurs:
       install -Dm644 README* "${pkgdir}/usr/share/doc/crush/"
 
 furies:
-  - disable: "{{ or .Prerelease .IsNightly }}"
+  - disable: "{{ if (or .Prerelease .IsNightly) }}true{{ end }}"
     account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
     secret_name: FURY_TOKEN
 

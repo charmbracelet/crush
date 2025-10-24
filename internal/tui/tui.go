@@ -180,6 +180,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
 		})
 	case commands.QuitMsg:
+		if a.app.Config().Options.DisableExitConfirmation {
+			return a, tea.Quit
+		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
@@ -398,6 +401,9 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Check this first as the user should be able to quit no matter what.
 	if key.Matches(msg, a.keyMap.Quit) {
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
+			return tea.Quit
+		}
+		if a.app.Config().Options.DisableExitConfirmation {
 			return tea.Quit
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{

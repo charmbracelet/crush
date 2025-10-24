@@ -34,7 +34,6 @@ require (
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go v1.12.0
 	github.com/pressly/goose/v3 v3.26.0
-	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.10.1

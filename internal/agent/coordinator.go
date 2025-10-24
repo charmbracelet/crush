@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 
@@ -424,15 +425,6 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		smallModelID += ":exacto"
 	}
 
-	// FIXME(@andreynering): Temporary fix to get it working.
-	// We need to prefix the model with with `{region}.`
-	if largeModelCfg.Provider == bedrock.Name {
-		largeModelID = fmt.Sprintf("us.%s", largeModelID)
-	}
-	if smallModelCfg.Provider == bedrock.Name {
-		smallModelID = fmt.Sprintf("us.%s", smallModelID)
-	}
-
 	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
 	if err != nil {
 		return Model{}, Model{}, err
@@ -577,6 +569,10 @@ func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.P
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
 	}
+	bearerToken := os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
+	if bearerToken != "" {
+		opts = append(opts, bedrock.WithAPIKey(bearerToken))
+	}
 	return bedrock.New(opts...)
 }
 
@@ -657,7 +653,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildBedrockProvider(headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
-	case "google-vertex", "vertexai":
+	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)

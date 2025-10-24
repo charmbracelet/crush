@@ -3,7 +3,7 @@ module github.com/charmbracelet/crush
 go 1.25.0
 
 require (
-	charm.land/fantasy v0.1.0
+	charm.land/fantasy v0.1.1-0.20251024115258-bc777ca882e2
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.10.3
@@ -14,7 +14,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5
-	github.com/charmbracelet/catwalk v0.7.1-0.20251023112313-048e47f1399c
+	github.com/charmbracelet/catwalk v0.7.1-0.20251024112336-5ba234a3a372
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
@@ -58,6 +58,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.14.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.39.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.27.27 // indirect
@@ -76,9 +77,7 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251022202715-ec1499142678 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2
-	github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20251017140847-d4ace4d6e731
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
@@ -121,7 +120,7 @@ require (
 	github.com/muesli/mango-pflag v0.1.0 // indirect
 	github.com/muesli/roff v0.1.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/openai/openai-go/v2 v2.7.1 // indirect
+	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/posthog/posthog-go v1.6.11
@@ -159,6 +158,7 @@ require (
 	golang.org/x/text v0.30.0
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
+	google.golang.org/genai v1.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

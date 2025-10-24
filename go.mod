@@ -11,7 +11,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14
-	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251021163913-d29170d047bf
+	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5
 	github.com/charmbracelet/catwalk v0.7.0

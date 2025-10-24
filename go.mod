@@ -51,8 +51,8 @@ require (
 )
 
 require (
-	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251022202715-ec1499142678 // indirect
-	github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.14.0 // indirect
+	google.golang.org/genai v1.32.0 // indirect
 )
 
 require (
@@ -169,6 +169,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )
-
-// Use Jess's Fantasy fork with provider_options.extra_fields support
-replace charm.land/fantasy => github.com/Jesssullivan/fantasy v0.0.0-20251024030914-17cbc171a710

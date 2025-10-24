@@ -74,6 +74,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}
 
+	if isSSH() {
+		slog.Warn("Running over SSH, will enable reduce animations")
+		assignIfNil(&cfg.Options.TUI.ReduceAnimations, true)
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
@@ -674,3 +679,5 @@ func isInsideWorktree() bool {
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
+
+func isSSH() bool { return os.Getenv("SSH_TTY") != "" }

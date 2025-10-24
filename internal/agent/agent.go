@@ -239,6 +239,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
+		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
+			currentAssistant.AppendReasoningContent(reasoning.Text)
+			return a.messages.Update(genCtx, *currentAssistant)
+		},
 		OnReasoningDelta: func(id string, text string) error {
 			currentAssistant.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)

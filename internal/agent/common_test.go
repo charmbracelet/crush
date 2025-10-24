@@ -157,7 +157,7 @@ func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageMode
 	prompt, err := coderPrompt(
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
-		prompt.WithWorkingDir(env.workingDir),
+		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
 	)
 	if err != nil {
 		return nil, err

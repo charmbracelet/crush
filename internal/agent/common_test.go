@@ -104,9 +104,6 @@ func testEnv(t *testing.T) env {
 	testDir := filepath.Join("/tmp/crush-test/", t.Name())
 	os.RemoveAll(testDir)
 	err := os.MkdirAll(testDir, 0o755)
-	t.Cleanup(func() {
-		os.RemoveAll(testDir)
-	})
 	require.NoError(t, err)
 	workingDir := testDir
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -117,6 +114,12 @@ func testEnv(t *testing.T) env {
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
 	lspClients := csync.NewMap[string, *lsp.Client]()
+
+	t.Cleanup(func() {
+		conn.Close()
+		os.RemoveAll(testDir)
+	})
+
 	return env{
 		workingDir,
 		sessions,
@@ -142,7 +145,7 @@ func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt 
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, systemPrompt, false, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, true, env.sessions, env.messages, tools})
 	return agent
 }
 
@@ -154,7 +157,7 @@ func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageMode
 	prompt, err := coderPrompt(
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
-		prompt.WithWorkingDir(env.workingDir),
+		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
 	)
 	if err != nil {
 		return nil, err

@@ -79,7 +79,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,
-				ProviderOptions:  getProviderOptions(model, providerCfg.Type),
+				ProviderOptions:  getProviderOptions(model, providerCfg),
 				Temperature:      model.ModelCfg.Temperature,
 				TopP:             model.ModelCfg.TopP,
 				TopK:             model.ModelCfg.TopK,

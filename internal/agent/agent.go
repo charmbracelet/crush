@@ -17,6 +17,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openrouter"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -68,11 +69,13 @@ type Model struct {
 type sessionAgent struct {
 	largeModel           Model
 	smallModel           Model
+	systemPromptPrefix   string
 	systemPrompt         string
 	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	isYolo               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -81,8 +84,10 @@ type sessionAgent struct {
 type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
+	SystemPromptPrefix   string
 	SystemPrompt         string
 	DisableAutoSummarize bool
+	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -94,11 +99,13 @@ func NewSessionAgent(
 	return &sessionAgent{
 		largeModel:           opts.LargeModel,
 		smallModel:           opts.SmallModel,
+		systemPromptPrefix:   opts.SystemPromptPrefix,
 		systemPrompt:         opts.SystemPrompt,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                opts.Tools,
+		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -172,6 +179,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
+	startTime := time.Now()
+	a.eventPromptSent(call.SessionID)
+
 	var currentAssistant *message.Message
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -219,6 +229,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
+			if a.systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			}
+
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -232,6 +246,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
+		},
+		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
+			currentAssistant.AppendReasoningContent(reasoning.Text)
+			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			currentAssistant.AppendReasoningContent(text)
@@ -332,7 +350,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				finishReason = message.FinishReasonToolUse
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
-			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage)
+			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			sessionLock.Lock()
 			_, sessionErr := a.sessions.Save(genCtx, currentSession)
 			sessionLock.Unlock()
@@ -354,6 +372,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 		},
 	})
+
+	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
+
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
@@ -542,7 +563,19 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	a.updateSessionUsage(a.largeModel, &currentSession, resp.TotalUsage)
+	var openrouterCost *float64
+	for _, step := range resp.Steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost != nil {
+			newCost := *stepCost
+			if openrouterCost != nil {
+				newCost += *openrouterCost
+			}
+			openrouterCost = &newCost
+		}
+	}
+
+	a.updateSessionUsage(a.largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
 	// just in case get just the last usage
 	usage := resp.Response.Usage
@@ -670,7 +703,20 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 	}
 
 	session.Title = title
-	a.updateSessionUsage(a.smallModel, session, resp.TotalUsage)
+
+	var openrouterCost *float64
+	for _, step := range resp.Steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost != nil {
+			newCost := *stepCost
+			if openrouterCost != nil {
+				newCost += *openrouterCost
+			}
+			openrouterCost = &newCost
+		}
+	}
+
+	a.updateSessionUsage(a.smallModel, session, resp.TotalUsage, openrouterCost)
 	_, saveErr := a.sessions.Save(ctx, *session)
 	if saveErr != nil {
 		slog.Error("failed to save session title & usage", "error", saveErr)
@@ -678,13 +724,34 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 	}
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage) {
+func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {
+	openrouterMetadata, ok := metadata[openrouter.Name]
+	if !ok {
+		return nil
+	}
+
+	opts, ok := openrouterMetadata.(*openrouter.ProviderMetadata)
+	if !ok {
+		return nil
+	}
+	return &opts.Usage.Cost
+}
+
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
-	session.Cost += cost
+
+	a.eventTokensUsed(session.ID, model, usage, cost)
+
+	if overrideCost != nil {
+		session.Cost += *overrideCost
+	} else {
+		session.Cost += cost
+	}
+
 	session.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens
 	session.PromptTokens = usage.InputTokens + usage.CacheCreationTokens
 }

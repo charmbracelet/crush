@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 
@@ -32,6 +33,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -118,7 +120,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		return nil, errors.New("model provider not configured")
 	}
 
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg.Type)
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	return c.currentAgent.Run(ctx, SessionAgentCall{
 		SessionID:        sessionID,
@@ -134,16 +136,24 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	})
 }
 
-func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
+func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
 	cfgOpts := []byte("{}")
+	providerCfgOpts := []byte("{}")
 	catwalkOpts := []byte("{}")
 
 	if model.ModelCfg.ProviderOptions != nil {
 		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
 		if err == nil {
 			cfgOpts = data
+		}
+	}
+
+	if providerCfg.ProviderOptions != nil {
+		data, err := json.Marshal(providerCfg.ProviderOptions)
+		if err == nil {
+			providerCfgOpts = data
 		}
 	}
 
@@ -156,6 +166,7 @@ func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
 
 	readers := []io.Reader{
 		bytes.NewReader(catwalkOpts),
+		bytes.NewReader(providerCfgOpts),
 		bytes.NewReader(cfgOpts),
 	}
 
@@ -173,7 +184,7 @@ func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
 		return options
 	}
 
-	switch tp {
+	switch providerCfg.Type {
 	case openai.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
@@ -255,8 +266,8 @@ func getProviderOptions(model Model, tp catwalk.Type) fantasy.ProviderOptions {
 	return options
 }
 
-func mergeCallOptions(model Model, tp catwalk.Type) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
-	modelOptions := getProviderOptions(model, tp)
+func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
+	modelOptions := getProviderOptions(model, cfg)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
 	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
 	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
@@ -276,11 +287,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
+	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	tools, err := c.buildTools(ctx, agent)
 	if err != nil {
 		return nil, err
 	}
-	return NewSessionAgent(SessionAgentOptions{large, small, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.sessions, c.messages, tools}), nil
+	return NewSessionAgent(SessionAgentOptions{large, small, largeProviderCfg.SystemPromptPrefix, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.permissions.SkipRequests(), c.sessions, c.messages, tools}), nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
@@ -405,13 +417,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 	largeModelID := largeModelCfg.Model
 	smallModelID := smallModelCfg.Model
 
-	// FIXME(@andreynering): Temporary fix to get it working.
-	// We need to prefix the model with with `{region}.`
-	if largeModelCfg.Provider == bedrock.Name {
-		largeModelID = fmt.Sprintf("us.%s", largeModelID)
+	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
+		largeModelID += ":exacto"
 	}
-	if smallModelCfg.Provider == bedrock.Name {
-		smallModelID = fmt.Sprintf("us.%s", smallModelID)
+
+	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
+		smallModelID += ":exacto"
 	}
 
 	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
@@ -442,11 +453,17 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 			break
 		}
 	}
-	if hasBearerAuth {
-		apiKey = "" // clear apiKey to avoid using X-Api-Key header
-	}
+
+	isBearerToken := strings.HasPrefix(apiKey, "Bearer ")
 
 	var opts []anthropic.Option
+	if apiKey != "" && !hasBearerAuth {
+		if isBearerToken {
+			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
+			headers["Authorization"] = apiKey
+			apiKey = "" // clear apiKey to avoid using X-Api-Key header
+		}
+	}
 
 	if apiKey != "" {
 		// Use standard X-Api-Key header
@@ -501,7 +518,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -512,6 +529,10 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	}
 	if len(headers) > 0 {
 		opts = append(opts, openaicompat.WithHeaders(headers))
+	}
+
+	for extraKey, extraValue := range extraBody {
+		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
 	}
 
 	return openaicompat.New(opts...)
@@ -547,6 +568,10 @@ func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.P
 	}
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
+	}
+	bearerToken := os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
+	if bearerToken != "" {
+		opts = append(opts, bedrock.WithAPIKey(bearerToken))
 	}
 	return bedrock.New(opts...)
 }
@@ -628,13 +653,24 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildBedrockProvider(headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
-	case "google-vertex", "vertexai":
+	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
+}
+
+func isExactoSupported(modelID string) bool {
+	supportedModels := []string{
+		"moonshotai/kimi-k2-0905",
+		"deepseek/deepseek-v3.1-terminus",
+		"z-ai/glm-4.6",
+		"openai/gpt-oss-120b",
+		"qwen/qwen3-coder",
+	}
+	return slices.Contains(supportedModels, modelID)
 }
 
 func (c *coordinator) Cancel(sessionID string) {
@@ -691,5 +727,5 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	if !ok {
 		return errors.New("model provider not configured")
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg.Type))
+	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
 }

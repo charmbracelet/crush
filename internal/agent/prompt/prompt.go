@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -146,14 +147,8 @@ func expandPath(path string, cfg config.Config) string {
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg config.Config) (PromptDat, error) {
-	workingDir := cfg.WorkingDir()
-	if p.workingDir != "" {
-		workingDir = p.workingDir
-	}
-	platform := runtime.GOOS
-	if p.platform != "" {
-		platform = p.platform
-	}
+	workingDir := cmp.Or(p.workingDir, cfg.WorkingDir())
+	platform := cmp.Or(p.platform, runtime.GOOS)
 
 	files := map[string][]ContextFile{}
 

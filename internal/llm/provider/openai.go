@@ -350,10 +350,23 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				}
 				acc.AddChunk(chunk)
 				for i, choice := range chunk.Choices {
+					// Handle standard "reasoning" field
 					reasoning, ok := choice.Delta.JSON.ExtraFields["reasoning"]
 					if ok && reasoning.Raw() != "" {
 						reasoningStr := ""
 						json.Unmarshal([]byte(reasoning.Raw()), &reasoningStr)
+						if reasoningStr != "" {
+							eventChan <- ProviderEvent{
+								Type:     EventThinkingDelta,
+								Thinking: reasoningStr,
+							}
+						}
+					}
+					// Handle custom "reasoning_content" field from custom OSS servers
+					reasoningContent, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
+					if ok && reasoningContent.Raw() != "" {
+						reasoningStr := ""
+						json.Unmarshal([]byte(reasoningContent.Raw()), &reasoningStr)
 						if reasoningStr != "" {
 							eventChan <- ProviderEvent{
 								Type:     EventThinkingDelta,

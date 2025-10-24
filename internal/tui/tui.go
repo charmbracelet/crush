@@ -102,6 +102,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
+		if msg.SupportsKeyDisambiguation() {
+			a.keyMap.Models.SetHelp("ctrl+m", "models")
+		}
 		for id, page := range a.pages {
 			m, pageCmd := page.Update(msg)
 			a.pages[id] = m
@@ -443,6 +446,21 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
+	case key.Matches(msg, a.keyMap.Models):
+		// if the app is not configured show no commands
+		if !a.isConfigured {
+			return nil
+		}
+		if a.dialog.ActiveDialogID() == models.ModelsDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: models.NewModelDialogCmp(),
+		})
+
 	case key.Matches(msg, a.keyMap.Sessions):
 		// if the app is not configured show no sessions
 		if !a.isConfigured {
@@ -455,10 +473,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		var cmds []tea.Cmd
-		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
-			// If the commands dialog is open, close it first
-			cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
-		}
 		cmds = append(cmds,
 			func() tea.Msg {
 				allSessions, _ := a.app.Sessions.List(context.Background())

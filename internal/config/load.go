@@ -500,6 +500,21 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			}
 			large.Think = largeModelSelected.Think
+			if largeModelSelected.Temperature != nil {
+				large.Temperature = largeModelSelected.Temperature
+			}
+			if largeModelSelected.TopP != nil {
+				large.TopP = largeModelSelected.TopP
+			}
+			if largeModelSelected.TopK != nil {
+				large.TopK = largeModelSelected.TopK
+			}
+			if largeModelSelected.FrequencyPenalty != nil {
+				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
+			}
+			if largeModelSelected.PresencePenalty != nil {
+				large.PresencePenalty = largeModelSelected.PresencePenalty
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := c.Models[SelectedModelTypeSmall]
@@ -525,7 +540,24 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
-			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			if smallModelSelected.ReasoningEffort != "" {
+				small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			}
+			if smallModelSelected.Temperature != nil {
+				small.Temperature = smallModelSelected.Temperature
+			}
+			if smallModelSelected.TopP != nil {
+				small.TopP = smallModelSelected.TopP
+			}
+			if smallModelSelected.TopK != nil {
+				small.TopK = smallModelSelected.TopK
+			}
+			if smallModelSelected.FrequencyPenalty != nil {
+				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
+			}
+			if smallModelSelected.PresencePenalty != nil {
+				small.PresencePenalty = smallModelSelected.PresencePenalty
+			}
 			small.Think = smallModelSelected.Think
 		}
 	}

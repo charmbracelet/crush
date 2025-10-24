@@ -262,9 +262,20 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		params.MaxTokens = openai.Int(maxTokens)
 	}
 
-	// Apply extra_body parameters to request params
+	// Apply extra_body parameters to request params (SDK-level defaults)
 	if len(o.providerOptions.extraBody) > 0 {
 		params.SetExtraFields(o.providerOptions.extraBody)
+	}
+
+	// Apply extra_fields from provider_options (Fantasy-level per-call parameters)
+	// This complements the SDK-level extra_body approach
+	if o.providerOptions.providerOptions != nil {
+		if extraFieldsRaw, hasExtraFields := o.providerOptions.providerOptions["extra_fields"]; hasExtraFields {
+			if extraFieldsMap, ok := extraFieldsRaw.(map[string]any); ok && len(extraFieldsMap) > 0 {
+				slog.Debug("Applying extra_fields from provider_options", "fields", extraFieldsMap)
+				params.SetExtraFields(extraFieldsMap)
+			}
+		}
 	}
 
 	return params

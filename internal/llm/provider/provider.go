@@ -76,6 +76,7 @@ type providerClientOptions struct {
 	extraHeaders       map[string]string
 	extraBody          map[string]any
 	extraParams        map[string]string
+	providerOptions    map[string]any
 }
 
 type ProviderClientOption func(*providerClientOptions)
@@ -166,12 +167,13 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		extraHeaders:       resolvedExtraHeaders,
 		extraBody:          cfg.ExtraBody,
 		extraParams:        cfg.ExtraParams,
+		providerOptions:    cfg.ProviderOptions,
 		systemPromptPrefix: cfg.SystemPromptPrefix,
 		model: func(tp config.SelectedModelType) catwalk.Model {
 			return *config.Get().GetModelByType(tp)
 		},
 	}
-	slog.Debug("Creating provider", "id", cfg.ID, "type", cfg.Type, "extra_body_count", len(cfg.ExtraBody), "extra_body", cfg.ExtraBody)
+	slog.Debug("Creating provider", "id", cfg.ID, "type", cfg.Type, "extra_body_count", len(cfg.ExtraBody), "extra_body", cfg.ExtraBody, "provider_options", cfg.ProviderOptions)
 	for _, o := range opts {
 		o(&clientOptions)
 	}

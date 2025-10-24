@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 
@@ -37,10 +38,11 @@ type TokenUsage struct {
 }
 
 type ProviderResponse struct {
-	Content      string
-	ToolCalls    []message.ToolCall
-	Usage        TokenUsage
-	FinishReason message.FinishReason
+	Content          string
+	ReasoningContent string // For thinking/reasoning from o-series, GLM, etc.
+	ToolCalls        []message.ToolCall
+	Usage            TokenUsage
+	FinishReason     message.FinishReason
 }
 
 type ProviderEvent struct {
@@ -169,6 +171,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 			return *config.Get().GetModelByType(tp)
 		},
 	}
+	slog.Debug("Creating provider", "id", cfg.ID, "type", cfg.Type, "extra_body_count", len(cfg.ExtraBody), "extra_body", cfg.ExtraBody)
 	for _, o := range opts {
 		o(&clientOptions)
 	}

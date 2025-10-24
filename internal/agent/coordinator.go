@@ -303,6 +303,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {
 			slog.Error("could not init agent tools", "err", err)
+			return
 		}
 		result.SetTools(tools)
 	}()

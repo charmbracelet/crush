@@ -67,6 +67,10 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// History
+	history     []string
+	historyIndex int
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -146,6 +150,12 @@ func (m *editorCmp) send() tea.Cmd {
 	case "exit", "quit":
 		m.textarea.Reset()
 		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+	}
+
+	// Add to history
+	if value != "" {
+		m.history = append(m.history, value)
+		m.historyIndex = len(m.history)
 	}
 
 	m.textarea.Reset()
@@ -274,8 +284,44 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			cmds = append(cmds, m.startCompletions)
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		}
-		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
+		case key.Matches(msg, m.keyMap.ClearLine):
+			m.textarea.SetValue("")
+			m.textarea.SetCursorColumn(0)
+			return m, nil
+		case key.Matches(msg, m.keyMap.WordBackward):
+			// Handle word backward navigation
+			// Send the same key event to the textarea to trigger word backward navigation
+			// The textarea already has the customized keymap that maps Ctrl+Left to WordBackward
+			return m, nil
+		case key.Matches(msg, m.keyMap.WordForward):
+			// Handle word forward navigation
+			// Send the same key event to the textarea to trigger word forward navigation
+			// The textarea already has the customized keymap that maps Ctrl+Right to WordForward
+			return m, nil
+		case key.Matches(msg, m.keyMap.PreviousPrompt):
+			if len(m.history) > 0 && m.historyIndex > 0 {
+				if m.historyIndex == len(m.history) { // If currently typing, save it before navigating
+					currentValue := m.textarea.Value()
+					if currentValue != "" {
+						m.history = append(m.history, currentValue)
+					}
+				}
+				m.historyIndex--
+				m.textarea.SetValue(m.history[m.historyIndex])
+				m.textarea.MoveToEnd()
+			}
+			return m, nil
+		case key.Matches(msg, m.keyMap.NextPrompt):
+			if len(m.history) > 0 && m.historyIndex < len(m.history)-1 {
+				m.historyIndex++
+				m.textarea.SetValue(m.history[m.historyIndex])
+				m.textarea.MoveToEnd()
+			} else if m.historyIndex == len(m.history)-1 { // If at the last history item, clear the input
+				m.historyIndex++
+				m.textarea.SetValue("")
+				m.textarea.SetCursorColumn(0)
+			}
+			return m, nil
 			m.deleteMode = true
 			return m, nil
 		}
@@ -570,6 +616,17 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
+
+	// Customize the textarea keymap to use Ctrl+Left/Right for word navigation
+	ta.KeyMap.WordBackward = key.NewBinding(
+		key.WithKeys("ctrl+left", "alt+left", "alt+b"),
+		key.WithHelp("ctrl+←", "word backward"),
+	)
+	ta.KeyMap.WordForward = key.NewBinding(
+		key.WithKeys("ctrl+right", "alt+right", "alt+f"),
+		key.WithHelp("ctrl+→", "word forward"),
+	)
+
 	ta.SetStyles(t.S().TextArea)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
@@ -580,6 +637,8 @@ func New(app *app.App) Editor {
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
+		history:  []string{},
+		historyIndex: 0,
 	}
 	e.setEditorPrompt()
 

@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -17,29 +16,33 @@ const (
 	uiStateMain uiState = iota
 )
 
-type Model struct {
-	app           *app.App
+type UI struct {
+	app *app.App
+	com *Common
+
 	width, height int
 	state         uiState
 
 	keyMap KeyMap
+	styles Styles
 
-	dialog *dialog.Overlay
+	dialog *Overlay
 }
 
-func New(app *app.App) *Model {
-	return &Model{
+func New(com *Common, app *app.App) *UI {
+	return &UI{
 		app:    app,
-		dialog: dialog.NewOverlay(),
+		com:    com,
+		dialog: NewDialogOverlay(),
 		keyMap: DefaultKeyMap(),
 	}
 }
 
-func (m *Model) Init() tea.Cmd {
+func (m *UI) Init() tea.Cmd {
 	return nil
 }
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -50,7 +53,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case uiStateMain:
 			switch {
 			case key.Matches(msg, m.keyMap.Quit):
-				quitDialog := dialog.NewQuit()
+				quitDialog := NewQuitDialog(m.com)
 				if !m.dialog.ContainsDialog(quitDialog.ID()) {
 					m.dialog.AddDialog(quitDialog)
 					return m, nil
@@ -68,7 +71,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) View() tea.View {
+func (m *UI) View() tea.View {
 	var v tea.View
 
 	// The screen area we're working with

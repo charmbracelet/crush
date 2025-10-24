@@ -1,29 +1,42 @@
-package dialog
+package ui
 
 import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
-// Model is a component that can be displayed on top of the UI.
-type Model interface {
-	common.Model[Model]
+// DialogOverlayKeyMap defines key bindings for dialogs.
+type DialogOverlayKeyMap struct {
+	Close key.Binding
+}
+
+// DefaultDialogOverlayKeyMap returns the default key bindings for dialogs.
+func DefaultDialogOverlayKeyMap() DialogOverlayKeyMap {
+	return DialogOverlayKeyMap{
+		Close: key.NewBinding(
+			key.WithKeys("esc", "alt+esc"),
+		),
+	}
+}
+
+// Dialog is a component that can be displayed on top of the UI.
+type Dialog interface {
+	Model[Dialog]
 	ID() string
 }
 
 // Overlay manages multiple dialogs as an overlay.
 type Overlay struct {
-	dialogs []Model
-	keyMap  KeyMap
+	dialogs []Dialog
+	keyMap  DialogOverlayKeyMap
 }
 
-// NewOverlay creates a new [Overlay] instance.
-func NewOverlay(dialogs ...Model) *Overlay {
+// NewDialogOverlay creates a new [Overlay] instance.
+func NewDialogOverlay(dialogs ...Dialog) *Overlay {
 	return &Overlay{
 		dialogs: dialogs,
-		keyMap:  DefaultKeyMap(),
+		keyMap:  DefaultDialogOverlayKeyMap(),
 	}
 }
 
@@ -38,7 +51,7 @@ func (d *Overlay) ContainsDialog(dialogID string) bool {
 }
 
 // AddDialog adds a new dialog to the stack.
-func (d *Overlay) AddDialog(dialog Model) {
+func (d *Overlay) AddDialog(dialog Dialog) {
 	d.dialogs = append(d.dialogs, dialog)
 }
 

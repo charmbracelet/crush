@@ -58,14 +58,16 @@ func customMatcher(t *testing.T) recorder.MatcherFunc {
 		// Some providers can sometimes generate JSON requests with keys in
 		// a different order, which means a direct string comparison will fail.
 		// Falling back to deserializing the content if we don't have a match.
-		if string(reqBody) == i.Body { // hot path
+		requestContent := normalizeLineEndings(reqBody)
+		cassetteContent := normalizeLineEndings(i.Body)
+		if requestContent == cassetteContent {
 			return true
 		}
 		var content1, content2 any
-		if err := json.Unmarshal(reqBody, &content1); err != nil {
+		if err := json.Unmarshal([]byte(requestContent), &content1); err != nil {
 			return false
 		}
-		if err := json.Unmarshal([]byte(i.Body), &content2); err != nil {
+		if err := json.Unmarshal([]byte(cassetteContent), &content2); err != nil {
 			return false
 		}
 		return reflect.DeepEqual(content1, content2)
@@ -101,4 +103,14 @@ func hookRemoveHeaders(i *cassette.Interaction) error {
 		}
 	}
 	return nil
+}
+
+// normalizeLineEndings does not only replace `\r\n` into `\n`,
+// but also replaces `\\r\\n` into `\\n`. That's because we want the content
+// inside JSON string to be replaces as well.
+func normalizeLineEndings[T string | []byte](s T) string {
+	str := string(s)
+	str = strings.ReplaceAll(str, "\r\n", "\n")
+	str = strings.ReplaceAll(str, `\r\n`, `\n`)
+	return str
 }

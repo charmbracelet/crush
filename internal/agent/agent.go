@@ -68,6 +68,7 @@ type Model struct {
 type sessionAgent struct {
 	largeModel           Model
 	smallModel           Model
+	systemPromptPrefix   string
 	systemPrompt         string
 	tools                []fantasy.AgentTool
 	sessions             session.Service
@@ -82,6 +83,7 @@ type sessionAgent struct {
 type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
+	SystemPromptPrefix   string
 	SystemPrompt         string
 	DisableAutoSummarize bool
 	IsYolo               bool
@@ -96,6 +98,7 @@ func NewSessionAgent(
 	return &sessionAgent{
 		largeModel:           opts.LargeModel,
 		smallModel:           opts.SmallModel,
+		systemPromptPrefix:   opts.SystemPromptPrefix,
 		systemPrompt:         opts.SystemPrompt,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
@@ -223,6 +226,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if i > len(prepared.Messages)-3 {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
+			}
+
+			if a.systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
 			}
 
 			var assistantMsg message.Message

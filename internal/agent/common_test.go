@@ -145,7 +145,7 @@ func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt 
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, systemPrompt, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, true, env.sessions, env.messages, tools})
 	return agent
 }
 

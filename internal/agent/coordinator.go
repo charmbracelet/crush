@@ -276,11 +276,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
+	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	tools, err := c.buildTools(ctx, agent)
 	if err != nil {
 		return nil, err
 	}
-	return NewSessionAgent(SessionAgentOptions{large, small, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.permissions.SkipRequests(), c.sessions, c.messages, tools}), nil
+	return NewSessionAgent(SessionAgentOptions{large, small, largeProviderCfg.SystemPromptPrefix, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.permissions.SkipRequests(), c.sessions, c.messages, tools}), nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
@@ -450,11 +451,17 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 			break
 		}
 	}
-	if hasBearerAuth {
-		apiKey = "" // clear apiKey to avoid using X-Api-Key header
-	}
+
+	isBearerToken := strings.HasPrefix(apiKey, "Bearer ")
 
 	var opts []anthropic.Option
+	if apiKey != "" && !hasBearerAuth {
+		if isBearerToken {
+			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
+			headers["Authorization"] = apiKey
+			apiKey = "" // clear apiKey to avoid using X-Api-Key header
+		}
+	}
 
 	if apiKey != "" {
 		// Use standard X-Api-Key header

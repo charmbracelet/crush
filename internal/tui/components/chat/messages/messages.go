@@ -187,7 +187,7 @@ func (m *messageCmp) renderAssistantMessage() string {
 	finishedData := m.message.FinishPart()
 	thinkingContent := ""
 
-	if thinking || m.message.ReasoningContent().Thinking != "" {
+	if thinking || strings.TrimSpace(m.message.ReasoningContent().Thinking) != "" {
 		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
 	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
@@ -259,7 +259,7 @@ func (m *messageCmp) toMarkdown(content string) string {
 func (m *messageCmp) renderThinkingContent() string {
 	t := styles.CurrentTheme()
 	reasoningContent := m.message.ReasoningContent()
-	if reasoningContent.Thinking == "" {
+	if strings.TrimSpace(reasoningContent.Thinking) == "" {
 		return ""
 	}
 	lines := strings.Split(reasoningContent.Thinking, "\n")

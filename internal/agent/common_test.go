@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -155,15 +154,10 @@ func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageMode
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
 	}
-	path := filepath.ToSlash(env.workingDir)
-	// try fixing windows
-	if strings.Contains(path, ":") {
-		path = strings.Split(path, ":")[1]
-	}
 	prompt, err := coderPrompt(
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
-		prompt.WithWorkingDir(path),
+		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
 	)
 	if err != nil {
 		return nil, err

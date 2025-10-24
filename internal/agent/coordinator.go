@@ -142,6 +142,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	cfgOpts := []byte("{}")
 	providerCfgOpts := []byte("{}")
 	catwalkOpts := []byte("{}")
+	extraBodyOpts := []byte("{}")
 
 	if model.ModelCfg.ProviderOptions != nil {
 		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
@@ -164,9 +165,29 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
+	// Extract extra_fields from provider_options and apply via Fantasy's ExtraFields mechanism
+	// This is separate from extra_body (which applies at SDK level via WithJSONSet)
+	// Use provider_options.extra_fields for per-call customization (e.g., Z.AI GLM thinking mode)
+	if providerCfg.ProviderOptions != nil {
+		if extraFieldsRaw, hasExtraFields := providerCfg.ProviderOptions["extra_fields"]; hasExtraFields {
+			if extraFieldsMap, ok := extraFieldsRaw.(map[string]any); ok && len(extraFieldsMap) > 0 {
+				extraBodyData := map[string]any{
+					"extra_fields": extraFieldsMap,
+				}
+				data, err := json.Marshal(extraBodyData)
+				if err == nil {
+					extraBodyOpts = data
+				} else {
+					slog.Warn("Failed to marshal extra_fields from provider_options", "error", err)
+				}
+			}
+		}
+	}
+
 	readers := []io.Reader{
 		bytes.NewReader(catwalkOpts),
 		bytes.NewReader(providerCfgOpts),
+		bytes.NewReader(extraBodyOpts),
 		bytes.NewReader(cfgOpts),
 	}
 

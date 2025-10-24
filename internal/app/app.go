@@ -87,11 +87,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// TODO: remove the concept of agent config, most likely.
 	if cfg.IsConfigured() {
-		go func() {
-			if err := app.InitCoderAgent(ctx); err != nil {
-				slog.Error("Failed to initialize coder agent in background", "error", err)
-			}
-		}()
+		if err := app.InitCoderAgent(ctx); err != nil {
+			slog.Error("Failed to initialize coder agent in background", "error", err)
+		}
 	} else {
 		slog.Warn("No agent configuration found")
 	}

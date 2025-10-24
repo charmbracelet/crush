@@ -74,6 +74,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}
 
+	if isAppleTerminal() {
+		slog.Warn("Detected Apple Terminal, enabling transparent mode")
+		assignIfNil(&cfg.Options.TUI.Transparent, true)
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
@@ -674,3 +679,5 @@ func isInsideWorktree() bool {
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
+
+func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

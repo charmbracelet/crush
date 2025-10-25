@@ -31,7 +31,7 @@ var (
 func providerCacheFileData() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, "providers.json")
+		return filepath.Join(xdgDataHome, AppName, "providers.json")
 	}
 
 	// return the path to the main data directory
@@ -42,10 +42,10 @@ func providerCacheFileData() string {
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		return filepath.Join(localAppData, appName, "providers.json")
+		return filepath.Join(localAppData, AppName, "providers.json")
 	}
 
-	return filepath.Join(home.Dir(), ".local", "share", appName, "providers.json")
+	return filepath.Join(home.Dir(), ".local", "share", AppName, "providers.json")
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {

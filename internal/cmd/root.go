@@ -4,17 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/cwd"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/tui"
@@ -40,6 +39,7 @@ func init() {
 		updateProvidersCmd,
 		logsCmd,
 		schemaCmd,
+		acpCmd,
 	)
 }
 
@@ -72,21 +72,21 @@ crush run "Explain the use of context in Go"
 crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app, err := setupApp(cmd)
+		appInstance, err := setupApp(cmd)
 		if err != nil {
 			return err
 		}
-		defer app.Shutdown()
+		defer appInstance.Shutdown()
 
 		event.AppInitialized()
 
 		// Set up the TUI.
 		program := tea.NewProgram(
-			tui.New(app),
+			tui.New(appInstance),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
 
-		go app.Subscribe(program)
+		go app.Subscribe[tea.Msg](appInstance, program)
 
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
@@ -151,12 +151,13 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cwd, err := ResolveCwd(cmd)
+	cwDir, _ := cmd.Flags().GetString("cwd")
+	cwDir, err := cwd.Resolve(cwDir)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	cfg, err := config.Init(cwDir, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +167,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 	cfg.Permissions.SkipRequests = yolo
 
-	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+	if err := cwd.CreateDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err
 	}
 
@@ -182,21 +183,21 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	if shouldEnableMetrics() {
+	if shouldEnableMetrics(true) {
 		event.Init()
 	}
 
 	return appInstance, nil
 }
 
-func shouldEnableMetrics() bool {
+func shouldEnableMetrics(useConfig bool) bool {
 	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
 		return false
 	}
 	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
 		return false
 	}
-	if config.Get().Options.DisableMetrics {
+	if useConfig && config.Get().Options.DisableMetrics {
 		return false
 	}
 	return true
@@ -218,35 +219,4 @@ func MaybePrependStdin(prompt string) (string, error) {
 		return prompt, err
 	}
 	return string(bts) + "\n\n" + prompt, nil
-}
-
-func ResolveCwd(cmd *cobra.Command) (string, error) {
-	cwd, _ := cmd.Flags().GetString("cwd")
-	if cwd != "" {
-		err := os.Chdir(cwd)
-		if err != nil {
-			return "", fmt.Errorf("failed to change directory: %v", err)
-		}
-		return cwd, nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current working directory: %v", err)
-	}
-	return cwd, nil
-}
-
-func createDotCrushDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
-	}
-
-	gitIgnorePath := filepath.Join(dir, ".gitignore")
-	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
-			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
-		}
-	}
-
-	return nil
 }

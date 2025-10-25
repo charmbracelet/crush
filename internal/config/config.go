@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	appName              = "crush"
+	AppName              = "crush"
 	defaultDataDirectory = ".crush"
 )
 

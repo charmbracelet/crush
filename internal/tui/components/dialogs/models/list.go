@@ -151,7 +151,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 					ContextWindow:          model.ContextWindow,
 					DefaultMaxTokens:       model.DefaultMaxTokens,
 					CanReason:              model.CanReason,
-					HasReasoningEffort:     model.HasReasoningEffort,
+					ReasoningLevels:        model.ReasoningLevels,
 					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					SupportsImages:         model.SupportsImages,
 				}

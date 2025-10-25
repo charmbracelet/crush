@@ -25,7 +25,7 @@ tasks:
     env:
       GOEXPERIMENT: null
 
-  lint-fix:
+  lint:fix:
     desc: Run base linters and fix issues
     cmds:
       - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix

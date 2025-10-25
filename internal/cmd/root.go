@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -77,6 +78,7 @@ crush -y
 			return err
 		}
 		defer app.Shutdown()
+		defer restoreCursor()
 
 		event.AppInitialized()
 
@@ -249,4 +251,13 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
+}
+
+func restoreCursor() {
+	if !term.IsTerminal(os.Stdout.Fd()) {
+		return
+	}
+
+	fmt.Print(ansi.SetCursorStyle(0))
+	fmt.Print(ansi.ShowCursor)
 }

@@ -31,6 +31,7 @@ crush run -q "Generate a README for this project"
 			return err
 		}
 		defer app.Shutdown()
+		defer restoreCursor()
 
 		if !app.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")

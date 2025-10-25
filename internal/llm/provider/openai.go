@@ -59,9 +59,11 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 	}
 
 	for extraKey, extraValue := range opts.extraBody {
+		slog.Debug("Setting extra_body parameter", "key", extraKey, "value", extraValue)
 		openaiClientOptions = append(openaiClientOptions, option.WithJSONSet(extraKey, extraValue))
 	}
 
+	slog.Debug("Creating OpenAI client", "base_url", opts.baseURL, "extra_body_count", len(opts.extraBody))
 	return openai.NewClient(openaiClientOptions...)
 }
 
@@ -260,11 +262,29 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		params.MaxTokens = openai.Int(maxTokens)
 	}
 
+	// Apply extra_body parameters to request params (SDK-level defaults)
+	if len(o.providerOptions.extraBody) > 0 {
+		params.SetExtraFields(o.providerOptions.extraBody)
+	}
+
+	// Apply extra_fields from provider_options (Fantasy-level per-call parameters)
+	// This complements the SDK-level extra_body approach
+	if o.providerOptions.providerOptions != nil {
+		if extraFieldsRaw, hasExtraFields := o.providerOptions.providerOptions["extra_fields"]; hasExtraFields {
+			if extraFieldsMap, ok := extraFieldsRaw.(map[string]any); ok && len(extraFieldsMap) > 0 {
+				slog.Debug("Applying extra_fields from provider_options", "fields", extraFieldsMap)
+				params.SetExtraFields(extraFieldsMap)
+			}
+		}
+	}
+
 	return params
 }
 
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
 	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
+	slog.Debug("Sending non-streaming request", "model", params.Model, "messages_count", len(params.Messages))
+
 	attempts := 0
 	for {
 		attempts++
@@ -299,6 +319,16 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 			content = openaiResponse.Choices[0].Message.Content
 		}
 
+		// Extract reasoning content (for GLM thinking mode, OpenAI o-series, etc.)
+		reasoning := ""
+		if reasoningField, ok := openaiResponse.Choices[0].Message.JSON.ExtraFields["reasoning_content"]; ok {
+			if reasoningField.Raw() != "" {
+				if err := json.Unmarshal([]byte(reasoningField.Raw()), &reasoning); err != nil {
+					slog.Warn("Failed to unmarshal reasoning content from non-streaming response", "error", err)
+				}
+			}
+		}
+
 		toolCalls := o.toolCalls(*openaiResponse)
 		finishReason := o.finishReason(string(openaiResponse.Choices[0].FinishReason))
 
@@ -307,10 +337,11 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 		}
 
 		return &ProviderResponse{
-			Content:      content,
-			ToolCalls:    toolCalls,
-			Usage:        o.usage(*openaiResponse),
-			FinishReason: finishReason,
+			Content:          content,
+			ReasoningContent: reasoning,
+			ToolCalls:        toolCalls,
+			Usage:            o.usage(*openaiResponse),
+			FinishReason:     finishReason,
 		}, nil
 	}
 }
@@ -320,6 +351,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 		IncludeUsage: openai.Bool(true),
 	}
+	slog.Debug("Sending streaming request", "model", params.Model, "messages_count", len(params.Messages))
 
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
@@ -350,10 +382,14 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				}
 				acc.AddChunk(chunk)
 				for i, choice := range chunk.Choices {
+				// Handle standard "reasoning" field (OpenAI o1 models)
 					reasoning, ok := choice.Delta.JSON.ExtraFields["reasoning"]
 					if ok && reasoning.Raw() != "" {
 						reasoningStr := ""
-						json.Unmarshal([]byte(reasoning.Raw()), &reasoningStr)
+						if err := json.Unmarshal([]byte(reasoning.Raw()), &reasoningStr); err != nil {
+							slog.Warn("Failed to unmarshal reasoning content from streaming chunk", "error", err, "raw", reasoning.Raw())
+							continue
+						}
 						if reasoningStr != "" {
 							eventChan <- ProviderEvent{
 								Type:     EventThinkingDelta,
@@ -361,6 +397,21 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 							}
 						}
 					}
+				// Handle custom "reasoning_content" field from custom OSS servers (Z.AI GLM, etc.)
+				reasoningContent, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
+				if ok && reasoningContent.Raw() != "" {
+					reasoningStr := ""
+					if err := json.Unmarshal([]byte(reasoningContent.Raw()), &reasoningStr); err != nil {
+						slog.Warn("Failed to unmarshal reasoning_content from streaming chunk", "error", err, "raw", reasoningContent.Raw())
+						continue
+					}
+					if reasoningStr != "" {
+						eventChan <- ProviderEvent{
+							Type:     EventThinkingDelta,
+							Thinking: reasoningStr,
+						}
+					}
+				}
 					if choice.Delta.Content != "" {
 						eventChan <- ProviderEvent{
 							Type:    EventContentDelta,
@@ -436,11 +487,51 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
+				slog.Debug("Stream completed", "choices_count", len(acc.Choices), "error", err)
 				if len(acc.Choices) == 0 {
-					eventChan <- ProviderEvent{
-						Type:  EventError,
-						Error: fmt.Errorf("received empty streaming response from OpenAI API - check endpoint configuration"),
+					// Some OpenAI-compatible APIs (e.g., Z.AI GLM models with stream=false)
+					// return complete responses instead of streaming chunks.
+					// Fall back to non-streaming API call to handle this case.
+					slog.Warn("Empty streaming response, falling back to non-streaming call")
+					response, sendErr := o.send(ctx, messages, tools)
+					if sendErr != nil {
+						eventChan <- ProviderEvent{
+							Type:  EventError,
+							Error: fmt.Errorf("streaming and non-streaming calls both failed: %w", sendErr),
+						}
+						return
 					}
+					// Emit the complete response as streaming events
+					// Emit reasoning first if present
+					if response.ReasoningContent != "" {
+						eventChan <- ProviderEvent{
+							Type:     EventThinkingDelta,
+							Thinking: response.ReasoningContent,
+						}
+					}
+					// Then emit content if present
+					if response.Content != "" {
+						eventChan <- ProviderEvent{
+							Type:    EventContentDelta,
+							Content: response.Content,
+						}
+					}
+					// Emit tool call start events if present
+					for _, toolCall := range response.ToolCalls {
+						eventChan <- ProviderEvent{
+							Type: EventToolUseStart,
+							ToolCall: &message.ToolCall{
+								ID:       toolCall.ID,
+								Name:     toolCall.Name,
+								Finished: false,
+							},
+						}
+					}
+					eventChan <- ProviderEvent{
+						Type:     EventComplete,
+						Response: response,
+					}
+					close(eventChan)
 					return
 				}
 
@@ -448,6 +539,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 				if resultFinishReason == "" {
 					// If the finish reason is empty, we assume it was a successful completion
 					// INFO: this is happening for openrouter for some reason
+					slog.Warn("Received empty finish reason from provider, assuming 'stop'")
 					resultFinishReason = "stop"
 				}
 				// Stream completed successfully

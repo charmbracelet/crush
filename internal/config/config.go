@@ -85,8 +85,11 @@ type ProviderConfig struct {
 
 	// Extra headers to send with each request to the provider.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
-	// Extra body
-	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
+	// Extra body - SDK-level parameters applied at client creation via WithJSONSet()
+	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=SDK-level parameters applied at provider creation time (provider-wide defaults)"`
+
+	// Provider options for per-call customization
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Per-call provider options (e.g., extra_fields for custom API parameters)"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`

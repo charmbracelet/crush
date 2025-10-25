@@ -268,10 +268,11 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 		}
 
 		return &ProviderResponse{
-			Content:      content,
-			ToolCalls:    toolCalls,
-			Usage:        g.usage(resp),
-			FinishReason: finishReason,
+			Content:          content,
+			ReasoningContent: "", // Gemini reasoning support can be added in future
+			ToolCalls:        toolCalls,
+			Usage:            g.usage(resp),
+			FinishReason:     finishReason,
 		}, nil
 	}
 }
@@ -404,10 +405,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 				eventChan <- ProviderEvent{
 					Type: EventComplete,
 					Response: &ProviderResponse{
-						Content:      currentContent,
-						ToolCalls:    toolCalls,
-						Usage:        g.usage(finalResp),
-						FinishReason: finishReason,
+						Content:          currentContent,
+						ReasoningContent: "", // Gemini reasoning support can be added in future
+						ToolCalls:        toolCalls,
+						Usage:            g.usage(finalResp),
+						FinishReason:     finishReason,
 					},
 				}
 				return

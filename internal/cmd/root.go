@@ -152,7 +152,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	ctx := cmd.Context()
 
 	cwDir, _ := cmd.Flags().GetString("cwd")
-	cwDir, err := cwd.ResolveCwd(cwDir)
+	cwDir, err := cwd.Resolve(cwDir)
 	if err != nil {
 		return nil, err
 	}

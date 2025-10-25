@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func ResolveCwd(cwd string) (string, error) {
+func Resolve(cwd string) (string, error) {
 	if cwd != "" {
 		err := os.Chdir(cwd)
 		if err != nil {

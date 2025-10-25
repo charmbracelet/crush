@@ -2,16 +2,15 @@ package acp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/cwd"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/coder/acp-go-sdk"
 	"log/slog"
+	"strings"
+	"time"
 )
 
 type Agent struct {
@@ -82,16 +81,50 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 		return acp.NewSessionResponse{}, err
 	}
 
-	//TODO: should https://agentclientprotocol.com/protocol/slash-commands#availablecommand after creating a session
-
-	models := a.app.Config().Models
-	print(models)
-
-	return acp.NewSessionResponse{
+	// TODO: send models/modes
+	//models := a.app.Config().Models
+	resp := acp.NewSessionResponse{
 		Models:    nil,
 		Modes:     nil,
 		SessionId: acp.SessionId(s.ID),
-	}, nil
+	}
+
+	go func() {
+		a.NotifySlashCommands(ctx, resp.SessionId)
+	}()
+	return resp, nil
+}
+
+func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId) {
+	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := a.conn.SessionUpdate(notifyCtx, acp.SessionNotification{
+		SessionId: sessionId,
+		Update: acp.SessionUpdate{
+			AvailableCommandsUpdate: &acp.SessionUpdateAvailableCommandsUpdate{
+				AvailableCommands: a.availableCommands(),
+			},
+		},
+	}); err != nil {
+		slog.Error("failed to send available-commands update", "error", err)
+	}
+}
+
+func (a *Agent) availableCommands() []acp.AvailableCommand {
+	out := make([]acp.AvailableCommand, 0, len(slashRegistry))
+	for name := range slashRegistry {
+		out = append(out, acp.AvailableCommand{
+			Name: name,
+			Input: &acp.AvailableCommandInput{
+				&acp.UnstructuredCommandInput{
+					Hint: slashRegistry[name].Help(),
+				},
+			},
+		})
+	}
+
+	return out
 }
 
 func (a *Agent) Authenticate(ctx context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
@@ -125,111 +158,41 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 		return acp.PromptResponse{}, fmt.Errorf("session %s not found", string(params.SessionId))
 	}
 
-	content := ""
-	for _, cont := range params.Prompt {
-		if cont.Text != nil {
-			content += cont.Text.Text + " "
+	// handle slash command
+	cmd, txt := parseTextPrompt(params.Prompt)
+	if cmd != "" {
+		if err = a.handleSlash(ctx, cmd, txt, params); err != nil {
+			return acp.PromptResponse{}, err
 		}
+
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 
-	done, err := a.app.CoderAgent.Run(context.Background(), string(params.SessionId), content)
-	if err != nil {
-		return acp.PromptResponse{}, err
+	// handle common prompt
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (a *Agent) handleSlash(ctx context.Context, name, text string, params acp.PromptRequest) error {
+	slog.Info("Handle slash command", "name", name)
+
+	cmd, ok := slashRegistry[name]
+	if !ok {
+		return fmt.Errorf("unknown command: %s", cmd)
 	}
 
-	messageEvents := a.app.Messages.Subscribe(ctx)
+	// TODO: handle error
+	//if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
+	//	slog.Info("agent processing cancelled", "session_id", params.SessionId)
+	//	return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	//}
+	//return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	//
 
-	// Track sent content to only send deltas
-	var lastTextSent string
-	var lastThinkingSent string
-
-	for {
-		select {
-		case result := <-done:
-			if result.Error != nil {
-				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
-					slog.Info("agent processing cancelled", "session_id", params.SessionId)
-					return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
-				}
-				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
-			}
-		case event, ok := <-messageEvents:
-			if !ok {
-				// Stream closed, agent finished
-				return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-			}
-
-			switch event.Payload.Role {
-			case message.Assistant:
-				for _, part := range event.Payload.Parts {
-					switch part := part.(type) {
-					case message.ReasoningContent:
-						// Only send the delta (new thinking content)
-						if len(part.Thinking) > len(lastThinkingSent) {
-							delta := part.Thinking[len(lastThinkingSent):]
-							if a.conn != nil && delta != "" {
-								if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
-									SessionId: params.SessionId,
-									Update: acp.SessionUpdate{
-										AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-											SessionUpdate: "agent_thought_chunk",
-											Content: acp.ContentBlock{
-												Text: &acp.ContentBlockText{
-													Text: delta,
-													Type: "text",
-												},
-											},
-										},
-									},
-								}); err != nil {
-									slog.Error("error sending agent thought chunk", err)
-									continue
-								}
-							}
-							lastThinkingSent = part.Thinking
-						}
-					case message.BinaryContent:
-					case message.ImageURLContent:
-					case message.Finish:
-					case message.TextContent:
-						// Only send the delta (new text content)
-						if len(part.Text) > len(lastTextSent) {
-							delta := part.Text[len(lastTextSent):]
-							if a.conn != nil && delta != "" {
-								if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
-									SessionId: params.SessionId,
-									Update: acp.SessionUpdate{
-										AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-											SessionUpdate: "agent_message_chunk",
-											Content: acp.ContentBlock{
-												Text: &acp.ContentBlockText{
-													Text: delta,
-													Type: "text",
-												},
-											},
-										},
-									},
-								}); err != nil {
-									slog.Error("error sending agent text chunk", err)
-									continue
-								}
-							}
-							lastTextSent = part.Text
-						}
-					case message.ToolCall:
-					case message.ToolResult:
-					}
-				}
-			case message.System:
-			case message.Tool:
-			case message.User:
-			}
-		}
-	}
+	return cmd.Exec(ctx, a, text, params)
 }
 
 func (a *Agent) setupApp(ctx context.Context, params acp.NewSessionRequest) (*app.App, error) {
-	cwDir, err := cwd.ResolveCwd(params.Cwd)
+	cwDir, err := cwd.Resolve(params.Cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -261,4 +224,28 @@ func (a *Agent) setupApp(ctx context.Context, params acp.NewSessionRequest) (*ap
 	}
 
 	return appInstance, nil
+}
+
+// supposedly only one Text block from user?
+func parseTextPrompt(prompt []acp.ContentBlock) (cmd, rest string) {
+	for _, b := range prompt {
+		if b.Text == nil {
+			continue
+		}
+		txt := strings.TrimSpace(b.Text.Text)
+		if txt == "" || txt[0] != '/' {
+			return "", txt // normal message
+		}
+
+		// slash command
+		afterSlash := txt[1:]
+		i := strings.IndexByte(afterSlash, ' ')
+		if i == -1 {
+			return afterSlash, "" // "/cmd"
+		}
+
+		return afterSlash[:i], strings.TrimSpace(afterSlash[i:])
+	}
+
+	return "", ""
 }

@@ -633,7 +633,11 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
-		headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+		if v, ok := headers["anthropic-beta"]; ok {
+			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
+		} else {
+			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+		}
 	}
 
 	// TODO: make sure we have

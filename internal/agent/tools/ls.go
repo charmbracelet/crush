@@ -99,7 +99,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 
 			output, metadata, err := ListDirectoryTree(searchPath, params, lsConfig)
 			if err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(err.Error()), err
 			}
 
 			return fantasy.WithResponseMetadata(

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -629,7 +630,7 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
-	headers := providerCfg.ExtraHeaders
+	headers := maps.Clone(providerCfg.ExtraHeaders)
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
@@ -639,6 +640,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
 		}
 	}
+	slog.Info("Headers", "headers", headers)
 
 	// TODO: make sure we have
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)

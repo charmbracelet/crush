@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -62,10 +63,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
-			filePath := params.FilePath
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(workingDir, filePath)
-			}
+			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
 			fileInfo, err := os.Stat(filePath)
 			if err == nil {

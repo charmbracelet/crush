@@ -655,7 +655,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
 		}
 	}
-	slog.Info("Headers", "headers", headers)
 
 	// TODO: make sure we have
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)

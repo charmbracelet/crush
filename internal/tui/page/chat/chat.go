@@ -543,12 +543,7 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 		}
 
 		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(context.TODO()); err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "Failed to update thinking mode: " + err.Error(),
-			}
-		}
+		go p.app.UpdateAgentModel(context.TODO())
 
 		status := "disabled"
 		if currentModel.Think {

@@ -289,11 +289,26 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
-	tools, err := c.buildTools(ctx, agent)
-	if err != nil {
-		return nil, err
-	}
-	return NewSessionAgent(SessionAgentOptions{large, small, largeProviderCfg.SystemPromptPrefix, systemPrompt, c.cfg.Options.DisableAutoSummarize, c.permissions.SkipRequests(), c.sessions, c.messages, tools}), nil
+	result := NewSessionAgent(SessionAgentOptions{
+		large,
+		small,
+		largeProviderCfg.SystemPromptPrefix,
+		systemPrompt,
+		c.cfg.Options.DisableAutoSummarize,
+		c.permissions.SkipRequests(),
+		c.sessions,
+		c.messages,
+		nil,
+	})
+	go func() {
+		tools, err := c.buildTools(ctx, agent)
+		if err != nil {
+			slog.Error("could not init agent tools", "err", err)
+			return
+		}
+		result.SetTools(tools)
+	}()
+	return result, nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {

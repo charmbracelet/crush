@@ -22,6 +22,8 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/update"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -79,6 +81,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
+
+	// Check for updates in the background.
+	go app.checkForUpdates(ctx)
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
@@ -341,5 +346,19 @@ func (app *App) Shutdown() {
 				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
 			}
 		}
+	}
+}
+
+// checkForUpdates checks for available updates.
+func (app *App) checkForUpdates(ctx context.Context) {
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	info, err := update.Check(checkCtx, version.Version, update.Default)
+	if err != nil || !info.Available() {
+		return
+	}
+	app.events <- pubsub.UpdateAvailableMsg{
+		CurrentVersion: info.Current,
+		LatestVersion:  info.Latest,
 	}
 }

@@ -408,6 +408,12 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
+> [!NOTE]
+> Note that we support two "types" for OpenAI. Make sure to choose the right one
+> to ensure the best experience!
+> * `openai` should be used when proxying or routing requests through OpenAI.
+> * `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+
 #### OpenAI-Compatible APIs
 
 Here’s an example configuration for Deepseek, which uses an OpenAI-compatible

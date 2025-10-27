@@ -43,7 +43,6 @@ func (it *updateIterator) getContentBlock(role message.MessageRole, part message
 		if delta != "" {
 			return &acp.ContentBlock{
 				Text: &acp.ContentBlockText{
-					Type: "text",
 					Text: delta,
 				},
 			}
@@ -59,7 +58,6 @@ func (it *updateIterator) getContentBlock(role message.MessageRole, part message
 		if delta != "" {
 			return &acp.ContentBlock{
 				Text: &acp.ContentBlockText{
-					Type: "text",
 					Text: delta,
 				},
 			}
@@ -85,16 +83,14 @@ func (it *updateIterator) getUpdate(role message.MessageRole, part message.Conte
 		case message.ReasoningContent:
 			return &acp.SessionUpdate{
 				AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{
-					SessionUpdate: "agent_thought_chunk",
-					Content:       *content,
+					Content: *content,
 				},
 			}, true
 
 		case message.TextContent:
 			return &acp.SessionUpdate{
 				AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-					SessionUpdate: "agent_message_chunk",
-					Content:       *content,
+					Content: *content,
 				},
 			}, true
 		}
@@ -102,8 +98,7 @@ func (it *updateIterator) getUpdate(role message.MessageRole, part message.Conte
 		if content.Text == nil || content.Text.Text != it.prompt {
 			return &acp.SessionUpdate{
 				UserMessageChunk: &acp.SessionUpdateUserMessageChunk{
-					SessionUpdate: "user_message_chunk",
-					Content:       *content,
+					Content: *content,
 				},
 			}, true
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/charmbracelet/crush/internal/acp/terminal"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/cwd"
@@ -16,12 +17,13 @@ import (
 )
 
 type Agent struct {
-	app     *app.App
-	conn    *acp.AgentSideConnection
-	client  acp.ClientCapabilities
-	debug   bool
-	yolo    bool
-	dataDir string
+	app       *app.App
+	conn      *acp.AgentSideConnection
+	terminals *terminal.Service
+	client    acp.ClientCapabilities
+	debug     bool
+	yolo      bool
+	dataDir   string
 }
 
 var (
@@ -51,8 +53,10 @@ func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelR
 func (a *Agent) SetAgentConnection(conn *acp.AgentSideConnection) { a.conn = conn }
 
 func (a *Agent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
-	slog.Info("Initialize")
+	slog.Info("Initialize", "params", params)
 	a.client = params.ClientCapabilities
+	a.terminals = terminal.NewService(a.conn, a.client.Terminal)
+
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
@@ -92,12 +96,21 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	}
 
 	go func() {
-		a.NotifySlashCommands(ctx, resp.SessionId)
+		_ = a.NotifySlashCommands(ctx, resp.SessionId, defaultSlashCommands)
 	}()
+
+	// E.g. we can call terminal command on client side like this
+	//go func() {
+	//	if t, err := a.terminals.Create(ctx, resp.SessionId, "ls", terminal.WithArgs("-la")); err == nil {
+	//		_ = t.EmbedInToolCalls(ctx, a.conn)
+	//	}
+	//
+	//}()
+
 	return resp, nil
 }
 
-func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId) {
+func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId, commands []SlashCommand) error {
 	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -105,28 +118,15 @@ func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId
 		SessionId: sessionId,
 		Update: acp.SessionUpdate{
 			AvailableCommandsUpdate: &acp.SessionUpdateAvailableCommandsUpdate{
-				AvailableCommands: a.availableCommands(),
+				AvailableCommands: AvailableCommands(commands),
 			},
 		},
 	}); err != nil {
 		slog.Error("failed to send available-commands update", "error", err)
-	}
-}
-
-func (a *Agent) availableCommands() []acp.AvailableCommand {
-	out := make([]acp.AvailableCommand, 0, len(slashRegistry))
-	for name := range slashRegistry {
-		out = append(out, acp.AvailableCommand{
-			Name: name,
-			Input: &acp.AvailableCommandInput{
-				&acp.UnstructuredCommandInput{
-					Hint: slashRegistry[name].Help(),
-				},
-			},
-		})
+		return err
 	}
 
-	return out
+	return nil
 }
 
 func (a *Agent) Authenticate(ctx context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
@@ -182,12 +182,13 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 func (a *Agent) handleSlash(ctx context.Context, name, text string, params acp.PromptRequest) error {
 	slog.Info("Handle slash command", "name", name)
 
-	cmd, ok := slashRegistry[name]
-	if !ok {
-		return fmt.Errorf("unknown command: %s", cmd)
+	for _, cmd := range defaultSlashCommands {
+		if cmd.Name() == name {
+			return cmd.Exec(ctx, a, text, params)
+		}
 	}
 
-	return cmd.Exec(ctx, a, text, params)
+	return fmt.Errorf("unknown command: %s", name)
 }
 
 func (a *Agent) setupApp(ctx context.Context, params acp.NewSessionRequest) (*app.App, error) {

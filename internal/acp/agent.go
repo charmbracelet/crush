@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/cwd"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/llm/agent"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/coder/acp-go-sdk"
 	"log/slog"
 	"strings"
@@ -17,13 +18,15 @@ import (
 )
 
 type Agent struct {
-	app       *app.App
-	conn      *acp.AgentSideConnection
-	terminals *terminal.Service
-	client    acp.ClientCapabilities
-	debug     bool
-	yolo      bool
-	dataDir   string
+	app        *app.App
+	conn       *acp.AgentSideConnection
+	terminals  *terminal.Service
+	sink       *agentEventSink
+	promptDone chan any
+	client     acp.ClientCapabilities
+	debug      bool
+	yolo       bool
+	dataDir    string
 }
 
 var (
@@ -53,7 +56,7 @@ func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelR
 func (a *Agent) SetAgentConnection(conn *acp.AgentSideConnection) { a.conn = conn }
 
 func (a *Agent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
-	slog.Info("Initialize", "params", params)
+	slog.Debug("Initialize", "params", params)
 	a.client = params.ClientCapabilities
 	a.terminals = terminal.NewService(a.conn, a.client.Terminal)
 
@@ -81,6 +84,11 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 		return acp.NewSessionResponse{}, err
 	}
 	a.app = appInstance
+	a.sink = newAgentSink(ctx, a)
+	a.promptDone = make(chan any)
+	close(a.promptDone) // first prompt may run straight away
+
+	go app.Subscribe[any](appInstance, a.sink)
 
 	s, err := a.app.Sessions.Create(ctx, "New ACP Session")
 	if err != nil {
@@ -99,6 +107,16 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 		_ = a.NotifySlashCommands(ctx, resp.SessionId, defaultSlashCommands)
 	}()
 
+	// E.g. we can read remote file like this
+	//go func() {
+	//	r, _ := a.ReadTextFile(ctx, resp.SessionId, "/Users/andrei/Projects/cache-decorator/src/cache_decorator/storages/memory.py", 0, 0)
+	//}()
+
+	// E.g. we can write remote file like this
+	//go func() {
+	//	_ = a.WriteTextFile(ctx, resp.SessionId, "/Users/andrei/Projects/cache-decorator/src/cache_decorator/storages/memory1.py", "Hello here")
+	//}()
+
 	// E.g. we can call terminal command on client side like this
 	//go func() {
 	//	if t, err := a.terminals.Create(ctx, resp.SessionId, "ls", terminal.WithArgs("-la")); err == nil {
@@ -110,7 +128,7 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	return resp, nil
 }
 
-func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId, commands []SlashCommand) error {
+func (a *Agent) NotifySlashCommands(ctx context.Context, sessionId acp.SessionId, commands SlashCommandRegistry) error {
 	notifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -153,19 +171,51 @@ func (a *Agent) Cancel(ctx context.Context, params acp.CancelNotification) error
 	return nil
 }
 
+func (a *Agent) RunPrompt(ctx context.Context, prompt string, params acp.PromptRequest) error {
+	sid := string(params.SessionId)
+	if a.app.CoderAgent.IsSessionBusy(sid) {
+		slog.Info("Cancel previous prompt.")
+		a.app.CoderAgent.Cancel(sid)
+		<-a.promptDone // wait until previous turn canceled
+	}
+
+	slog.Info("Process a new prompt.")
+	done, err := a.app.CoderAgent.Run(ctx, string(params.SessionId), prompt)
+	if err != nil {
+		slog.Error("Cant run coder agent", "err", err)
+		return err
+	}
+
+	a.promptDone = make(chan any)
+	defer close(a.promptDone)
+	for {
+		select {
+		case result := <-done:
+			// nil, context.Canceled, or agent.ErrRequestCancelled
+			return result.Error
+		}
+	}
+}
+
 func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
-	slog.Info("Prompt")
 	var err error
 
-	if _, err = a.app.Sessions.Get(ctx, string(params.SessionId)); err != nil {
+	sid := string(params.SessionId)
+	if _, err = a.app.Sessions.Get(ctx, sid); err != nil {
 		err = fmt.Errorf("session %s not found", params.SessionId)
 	} else {
+		prompt := Prompt(params.Prompt).String()
+		a.sink.LastUserPrompt(prompt)
+
 		// FIXME: Add support for different types of content (image, audio and etc)
-		cmd, txt := parseTextPrompt(params.Prompt)
-		if cmd != "" { // slash-command
-			err = a.handleSlash(ctx, cmd, txt, params)
+		name, text := parseSlash(prompt)
+		if name != "" { // slash-command
+			if cmd := defaultSlashCommands.Get(name); cmd != nil {
+				slog.Info("Slash command requested", "cmd", name)
+				err = cmd.Exec(ctx, a, text, params)
+			}
 		} else { // normal LLM turn
-			err = a.streamAgentRun(ctx, params.SessionId, txt, false)
+			err = a.RunPrompt(ctx, prompt, params)
 		}
 	}
 
@@ -179,16 +229,50 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	}
 }
 
-func (a *Agent) handleSlash(ctx context.Context, name, text string, params acp.PromptRequest) error {
-	slog.Info("Handle slash command", "name", name)
-
-	for _, cmd := range defaultSlashCommands {
-		if cmd.Name() == name {
-			return cmd.Exec(ctx, a, text, params)
-		}
+// ReadTextFile allows Agents to read text file contents from the Client’s filesystem, including unsaved changes in the editor.
+func (a *Agent) ReadTextFile(ctx context.Context, sessionId acp.SessionId, path string, line int, limit int) (string, error) {
+	if !a.client.Fs.ReadTextFile {
+		return "", errors.New("client does not support reading of text files")
 	}
 
-	return fmt.Errorf("unknown command: %s", name)
+	var pLine, pLimit *int
+	if line > 0 {
+		pLine = acp.Ptr(line)
+	}
+
+	if limit > 0 {
+		pLimit = acp.Ptr(limit)
+	}
+
+	if resp, err := a.conn.ReadTextFile(ctx, acp.ReadTextFileRequest{
+		SessionId: sessionId,
+		Path:      path,
+		Line:      pLine,
+		Limit:     pLimit,
+	}); err != nil {
+		slog.Error("could not read remote file", "error", err)
+		return "", err
+	} else {
+		return resp.Content, nil
+	}
+}
+
+// WriteTextFile allows Agents to write or update text files in the Client’s filesystem.
+func (a *Agent) WriteTextFile(ctx context.Context, sessionId acp.SessionId, path string, content string) error {
+	if !a.client.Fs.WriteTextFile {
+		return errors.New("client does not support writing of text files")
+	}
+
+	if _, err := a.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
+		SessionId: sessionId,
+		Path:      path,
+		Content:   content,
+	}); err != nil {
+		slog.Error("could not write to remote file", "error", err)
+		return err
+	}
+
+	return nil
 }
 
 func (a *Agent) setupApp(ctx context.Context, params acp.NewSessionRequest) (*app.App, error) {
@@ -226,66 +310,60 @@ func (a *Agent) setupApp(ctx context.Context, params acp.NewSessionRequest) (*ap
 	return appInstance, nil
 }
 
-// streamAgentRun streams whatever CoderAgent produces for the given prompt
-// and returns only when the run finishes (or context is cancelled).
-func (a *Agent) streamAgentRun(ctx context.Context, sessionId acp.SessionId, prompt string, modified bool) error {
-	slog.Debug("Stream agent's run.")
-	done, err := a.app.CoderAgent.Run(ctx, string(sessionId), prompt)
+func (a *Agent) RequestPermission(ctx context.Context, req permission.PermissionRequest) {
+	slog.Info("RequestPermission", "req", req)
+	payload := acp.RequestPermissionRequest{
+		SessionId: acp.SessionId(req.SessionID),
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId(req.ToolCallID),
+			Title:      acp.Ptr(req.Description),
+			Kind:       acp.Ptr(acp.ToolKindEdit),
+			Status:     acp.Ptr(acp.ToolCallStatusPending),
+			Locations:  []acp.ToolCallLocation{{Path: req.Path}},
+			RawInput:   req.Params,
+		}, Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow this change", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Skip this change", OptionId: acp.PermissionOptionId("reject")},
+		}}
+
+	result, err := a.conn.RequestPermission(ctx, payload)
 	if err != nil {
-		return err
+		slog.Error("error sending permission request", err)
+		return
 	}
 
-	events := a.app.Messages.Subscribe(ctx)
-	if modified {
-		// in case if prompt was modified (e.g. slash command), we do not need to worry about duplicates
-		prompt = ""
-	}
-	updatesIter := newUpdatesIterator(prompt)
-
-	for {
-		select {
-		case result := <-done: // agent finished
-			// nil, context.Canceled, or agent.ErrRequestCancelled
-			return result.Error
-		case ev, ok := <-events:
-			if !ok {
-				// channel closed → agent finished cleanly
-				return nil
-			}
-
-			for update := range updatesIter.next(&ev.Payload) {
-				if err = a.conn.SessionUpdate(ctx, acp.SessionNotification{
-					SessionId: sessionId,
-					Update:    *update,
-				}); err != nil {
-					slog.Error("error sending update", err)
-					continue
-				}
-			}
-		}
+	if result.Outcome.Selected != nil {
+		a.app.Permissions.Grant(req)
+	} else {
+		a.app.Permissions.Deny(req)
 	}
 }
 
-// supposedly only one Text block from user?
-func parseTextPrompt(prompt []acp.ContentBlock) (cmd, rest string) {
-	for _, b := range prompt {
-		if b.Text == nil {
-			continue
-		}
-		txt := strings.TrimSpace(b.Text.Text)
-		if txt == "" || txt[0] != '/' {
-			return "", txt // normal message
-		}
-
-		// slash command
-		afterSlash := txt[1:]
-		i := strings.IndexByte(afterSlash, ' ')
-		if i == -1 {
-			return afterSlash, "" // "/cmd"
-		}
-
-		return afterSlash[:i], strings.TrimSpace(afterSlash[i:])
+// parseSlash parses "input" and returns:
+//
+//	("", input)            – not a slash command
+//	("cmd", "rest")        – "/cmd rest"
+func parseSlash(input string) (cmd, rest string) {
+	input = strings.TrimSpace(input)
+	if input == "" || input[0] != '/' {
+		return "", input
 	}
+	after := input[1:]
+	if i := strings.IndexByte(after, ' '); i == -1 {
+		return after, ""
+	} else {
+		return after[:i], strings.TrimSpace(after[i:])
+	}
+}
 
-	return "", ""
+type Prompt []acp.ContentBlock
+
+func (p Prompt) String() string {
+	var sb strings.Builder
+	for _, b := range p {
+		if b.Text != nil {
+			sb.WriteString(b.Text.Text)
+		}
+	}
+	return sb.String()
 }

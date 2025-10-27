@@ -13,8 +13,20 @@ type SlashCommand interface {
 	Exec(ctx context.Context, agent *Agent, text string, params acp.PromptRequest) error
 }
 
+type SlashCommandRegistry []SlashCommand
+
+func (r SlashCommandRegistry) Get(name string) SlashCommand {
+	for _, cmd := range defaultSlashCommands {
+		if cmd.Name() == name {
+			return cmd
+		}
+	}
+
+	return nil
+}
+
 // AvailableCommands generates a slice of acp.AvailableCommand from a slice of SlashCommand
-func AvailableCommands(commands []SlashCommand) []acp.AvailableCommand {
+func AvailableCommands(commands SlashCommandRegistry) []acp.AvailableCommand {
 	out := make([]acp.AvailableCommand, 0, len(commands))
 	for _, cmd := range commands {
 		out = append(out, acp.AvailableCommand{
@@ -29,7 +41,7 @@ func AvailableCommands(commands []SlashCommand) []acp.AvailableCommand {
 	return out
 }
 
-var defaultSlashCommands = []SlashCommand{
+var defaultSlashCommands = SlashCommandRegistry{
 	yoloCmd{},
 	initCmd{},
 }
@@ -44,20 +56,15 @@ func (yoloCmd) Exec(ctx context.Context, agent *Agent, text string, params acp.P
 
 	return agent.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: params.SessionId,
-		Update: acp.SessionUpdate{
-			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-				SessionUpdate: "agent_message_chunk", // TODO: double check this type for such cases - no LLM runs or tools
-				Content: acp.ContentBlock{
-					Text: &acp.ContentBlockText{
-						Text: fmt.Sprintf("YOLO mode is now **%s**.", map[bool]string{
-							true:  "ON",
-							false: "OFF",
-						}[status]),
-						Type: "text",
-					},
-				},
+		Update: acp.UpdateAgentMessage(acp.ContentBlock{
+			Text: &acp.ContentBlockText{
+				Text: fmt.Sprintf("YOLO mode is now **%s**.", map[bool]string{
+					true:  "ON",
+					false: "OFF",
+				}[status]),
+				Type: "text",
 			},
-		},
+		}),
 	})
 }
 
@@ -66,5 +73,5 @@ type initCmd struct{}
 func (initCmd) Name() string { return "init" }
 func (initCmd) Help() string { return "Initialize Project" }
 func (initCmd) Exec(ctx context.Context, agent *Agent, text string, params acp.PromptRequest) error {
-	return agent.streamAgentRun(ctx, params.SessionId, prompt.Initialize(), true)
+	return agent.RunPrompt(ctx, prompt.Initialize(), params)
 }

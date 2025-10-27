@@ -24,8 +24,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-type EventConsumer[T any] interface {
-	Send(m T)
+type EventSink[T any] interface {
+	Send(e T)
 	Quit()
 }
 
@@ -290,11 +290,11 @@ func (app *App) InitCoderAgent() error {
 	return nil
 }
 
-// Subscribe sends events to the TUI as tea.Msgs.
-func Subscribe[M any](app *App, consumer EventConsumer[M]) {
+// Subscribe sends events to the EventSink as M
+func Subscribe[M any](app *App, target EventSink[M]) {
 	defer log.RecoverPanic("app.Subscribe", func() {
 		slog.Info("Consumer subscription panic: attempting graceful shutdown")
-		consumer.Quit()
+		target.Quit()
 	})
 
 	app.consumerWg.Add(1)
@@ -317,7 +317,7 @@ func Subscribe[M any](app *App, consumer EventConsumer[M]) {
 				slog.Debug("Consumer message channel closed")
 				return
 			}
-			consumer.Send(msg.(M))
+			target.Send(msg.(M))
 		}
 	}
 }

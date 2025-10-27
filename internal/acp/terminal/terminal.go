@@ -99,9 +99,9 @@ func (t *Terminal) EmbedInToolCalls(ctx context.Context, conn *acp.AgentSideConn
 				ToolCallId: acp.ToolCallId("terminal_call_" + uuid.New().String()),
 				Kind:       acp.ToolKindExecute,
 				Status:     acp.ToolCallStatusInProgress,
-				Content: []acp.ToolCallContent{{
-					Terminal: &acp.ToolCallContentTerminal{TerminalId: string(t.ID)},
-				}},
+				Content: []acp.ToolCallContent{
+					acp.ToolTerminalRef(string(t.ID)),
+				},
 			},
 		},
 	})

@@ -4,25 +4,24 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/coder/acp-go-sdk"
 	"iter"
+	"log/slog"
 )
 
 type updateIterator struct {
-	lastT  map[message.MessageRole]int
-	lastR  int
-	prompt string
+	lastT map[message.MessageRole]int
+	lastR int
 }
 
-func newUpdatesIterator(prompt string) *updateIterator {
-	return &updateIterator{
-		lastT:  make(map[message.MessageRole]int),
-		prompt: prompt,
-	}
+func newUpdatesIterator() *updateIterator {
+	i := &updateIterator{}
+	i.reset()
+	return i
 }
 
-func (it *updateIterator) next(msg *message.Message) iter.Seq[*acp.SessionUpdate] {
-	return func(yield func(*acp.SessionUpdate) bool) {
+func (it *updateIterator) next(msg *message.Message) iter.Seq[acp.SessionUpdate] {
+	return func(yield func(acp.SessionUpdate) bool) {
 		for _, p := range msg.Parts {
-			if n, ok := it.getUpdate(msg.Role, p); ok && !yield(n) {
+			if n := it.getUpdate(msg.Role, p); n != (acp.SessionUpdate{}) && !yield(n) {
 				return
 			}
 		}
@@ -30,18 +29,18 @@ func (it *updateIterator) next(msg *message.Message) iter.Seq[*acp.SessionUpdate
 }
 
 // FIXME: Add support for different types of content (image, audio and etc)
-func (it *updateIterator) getContentBlock(role message.MessageRole, part message.ContentPart) *acp.ContentBlock {
+func (it *updateIterator) getContentBlock(role message.MessageRole, part message.ContentPart) (result acp.ContentBlock) {
 	switch v := part.(type) {
 	case message.TextContent:
 		lastLen := it.lastT[role]
 		nextLen := len(v.Text)
 		if nextLen <= lastLen {
-			return nil
+			return
 		}
 		delta := v.Text[lastLen:]
 		it.lastT[role] = nextLen
 		if delta != "" {
-			return &acp.ContentBlock{
+			return acp.ContentBlock{
 				Text: &acp.ContentBlockText{
 					Text: delta,
 				},
@@ -50,13 +49,13 @@ func (it *updateIterator) getContentBlock(role message.MessageRole, part message
 
 	case message.ReasoningContent:
 		if len(v.Thinking) <= it.lastR {
-			return nil
+			return
 		}
 
 		delta := v.Thinking[it.lastR:]
 		it.lastR = len(v.Thinking)
 		if delta != "" {
-			return &acp.ContentBlock{
+			return acp.ContentBlock{
 				Text: &acp.ContentBlockText{
 					Text: delta,
 				},
@@ -66,48 +65,72 @@ func (it *updateIterator) getContentBlock(role message.MessageRole, part message
 	case message.BinaryContent:
 	case message.ImageURLContent:
 	case message.Finish:
+		it.reset()
 	}
 
-	return nil
+	return
 }
 
-func (it *updateIterator) getUpdate(role message.MessageRole, part message.ContentPart) (*acp.SessionUpdate, bool) {
+func (it *updateIterator) reset() {
+	it.lastT = make(map[message.MessageRole]int)
+	it.lastR = 0
+}
+
+func (it *updateIterator) getUpdate(role message.MessageRole, part message.ContentPart) (result acp.SessionUpdate) {
 	content := it.getContentBlock(role, part)
-	if content == nil {
-		return nil, false
+	hasContent := content != (acp.ContentBlock{})
+
+	switch t := part.(type) {
+	case message.ToolCall:
+		{
+			slog.Info("ToolCall", "t", t)
+			tool := ToolCall(t)
+			if !t.Finished {
+				return acp.SessionUpdate{ToolCall: tool.StartToolCall()}
+			}
+			return acp.SessionUpdate{ToolCallUpdate: tool.UpdateToolCall()}
+		}
+	case message.ToolResult:
+		{
+			slog.Info("ToolResult")
+			status := acp.ToolCallStatusCompleted
+			if t.IsError {
+				status = acp.ToolCallStatusFailed
+			}
+
+			// FIXME: refactor it in the same way as ToolCall
+			// TODO: add support for images?
+			return acp.UpdateToolCall(
+				acp.ToolCallId(t.ToolCallID),
+				acp.WithUpdateStatus(status),
+				acp.WithUpdateContent([]acp.ToolCallContent{
+					acp.ToolContent(acp.ContentBlock{
+						Text: &acp.ContentBlockText{
+							Text: t.Content,
+							Meta: t.Metadata,
+						},
+					}),
+				}),
+			)
+		}
+	case message.ReasoningContent:
+		if hasContent {
+			return acp.UpdateAgentThought(content)
+		}
+	default:
+		{
+			switch role {
+			case message.Assistant:
+				if hasContent {
+					return acp.UpdateAgentMessage(content)
+				}
+			case message.User:
+				if hasContent {
+					return acp.UpdateUserMessage(content)
+				}
+			}
+		}
 	}
 
-	switch role {
-	case message.Assistant:
-		switch part.(type) {
-		case message.ReasoningContent:
-			return &acp.SessionUpdate{
-				AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{
-					Content: *content,
-				},
-			}, true
-
-		case message.TextContent:
-			return &acp.SessionUpdate{
-				AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-					Content: *content,
-				},
-			}, true
-		}
-	case message.User:
-		if content.Text == nil || content.Text.Text != it.prompt {
-			return &acp.SessionUpdate{
-				UserMessageChunk: &acp.SessionUpdateUserMessageChunk{
-					Content: *content,
-				},
-			}, true
-		}
-
-	case message.Tool:
-		//kind = "tool_result_chunk"
-	case message.System:
-		//kind = "agent_message_chunk"
-	}
-
-	return nil, false
+	return
 }

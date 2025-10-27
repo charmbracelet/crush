@@ -329,9 +329,10 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 		}
 
 		return &ProviderResponse{
-			Content:   content,
-			ToolCalls: a.toolCalls(*anthropicResponse),
-			Usage:     a.usage(*anthropicResponse),
+			Content:          content,
+			ReasoningContent: "", // Anthropic reasoning support can be added in future
+			ToolCalls:        a.toolCalls(*anthropicResponse),
+			Usage:            a.usage(*anthropicResponse),
 		}, nil
 	}
 }
@@ -435,10 +436,11 @@ func (a *anthropicClient) stream(ctx context.Context, messages []message.Message
 					eventChan <- ProviderEvent{
 						Type: EventComplete,
 						Response: &ProviderResponse{
-							Content:      content,
-							ToolCalls:    a.toolCalls(accumulatedMessage),
-							Usage:        a.usage(accumulatedMessage),
-							FinishReason: a.finishReason(string(accumulatedMessage.StopReason)),
+							Content:          content,
+							ReasoningContent: "", // Anthropic reasoning support can be added in future
+							ToolCalls:        a.toolCalls(accumulatedMessage),
+							Usage:            a.usage(accumulatedMessage),
+							FinishReason:     a.finishReason(string(accumulatedMessage.StopReason)),
 						},
 						Content: content,
 					}

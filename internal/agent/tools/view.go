@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -60,10 +61,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			}
 
 			// Handle relative paths
-			filePath := params.FilePath
-			if !filepath.IsAbs(filePath) {
-				filePath = filepath.Join(workingDir, filePath)
-			}
+			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
 			// Check if file is outside working directory and request permission if needed
 			absWorkingDir, err := filepath.Abs(workingDir)

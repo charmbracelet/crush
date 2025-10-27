@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -59,13 +60,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
 			}
 
-			// Convert relative path to absolute path
-			var filePath string
-			if filepath.IsAbs(params.FilePath) {
-				filePath = params.FilePath
-			} else {
-				filePath = filepath.Join(workingDir, params.FilePath)
-			}
+			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

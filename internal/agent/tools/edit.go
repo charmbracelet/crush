@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -61,9 +62,7 @@ func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			if !filepath.IsAbs(params.FilePath) {
-				params.FilePath = filepath.Join(workingDir, params.FilePath)
-			}
+			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
 			var response fantasy.ToolResponse
 			var err error

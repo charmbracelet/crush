@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -62,9 +63,7 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 				return fantasy.NewTextErrorResponse("at least one edit operation is required"), nil
 			}
 
-			if !filepath.IsAbs(params.FilePath) {
-				params.FilePath = filepath.Join(workingDir, params.FilePath)
-			}
+			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {

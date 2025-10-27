@@ -150,7 +150,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 							output.WriteString("\n")
 						}
 						currentFile = match.path
-						fmt.Fprintf(&output, "%s:\n", match.path)
+						fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
 					}
 					if match.lineNum > 0 {
 						lineText := match.lineText

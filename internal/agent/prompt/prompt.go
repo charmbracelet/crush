@@ -167,7 +167,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 		Provider:   provider,
 		Model:      model,
 		Config:     cfg,
-		WorkingDir: workingDir,
+		WorkingDir: filepath.ToSlash(workingDir),
 		IsGitRepo:  isGit,
 		Platform:   platform,
 		Date:       p.now().Format("1/2/2006"),

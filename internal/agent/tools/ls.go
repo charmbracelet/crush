@@ -210,9 +210,9 @@ func printTree(tree []*TreeNode, rootPath string) string {
 	var result strings.Builder
 
 	result.WriteString("- ")
-	result.WriteString(rootPath)
+	result.WriteString(filepath.ToSlash(rootPath))
 	if rootPath[len(rootPath)-1] != '/' {
-		result.WriteByte(filepath.Separator)
+		result.WriteByte('/')
 	}
 	result.WriteByte('\n')
 
@@ -228,7 +228,7 @@ func printNode(builder *strings.Builder, node *TreeNode, level int) {
 
 	nodeName := node.Name
 	if node.Type == "directory" {
-		nodeName = nodeName + string(filepath.Separator)
+		nodeName = nodeName + "/"
 	}
 
 	fmt.Fprintf(builder, "%s- %s\n", indent, nodeName)

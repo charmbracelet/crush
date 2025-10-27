@@ -6,6 +6,9 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -289,7 +292,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if stdout == "" {
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
 			}
-			stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", currentWorkingDir)
+			stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(currentWorkingDir))
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 		})
 }
@@ -312,4 +315,16 @@ func countLines(s string) int {
 		return 0
 	}
 	return len(strings.Split(s, "\n"))
+}
+
+func normalizeWorkingDir(path string) string {
+	if runtime.GOOS == "windows" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = "C:"
+		}
+		path = strings.ReplaceAll(path, filepath.VolumeName(cwd), "")
+	}
+
+	return filepath.ToSlash(path)
 }

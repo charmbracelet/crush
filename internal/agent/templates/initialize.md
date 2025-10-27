@@ -1,9 +1,27 @@
-Please analyze this codebase and create a **CRUSH.md** file containing:
+Analyze this codebase and create/update **CRUSH.md** to help future agents work effectively in this repository.
 
-- Build/lint/test commands - especially for running a single test
-- Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
+**First**: Check if directory is empty or contains only config files. If so, stop and say "Directory appears empty or only contains config. Add source code first, then run this command to generate CRUSH.md."
 
-The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20-30 lines long.
-If there's already a **CRUSH.md**, improve it.
+**Goal**: Document what an agent needs to know to work in this codebase - commands, patterns, conventions, gotchas.
 
-If there are Cursor rules (in `.cursor/rules/` or `.cursorrules`) or Copilot rules (in `.github/copilot-instructions.md`), make sure to include them.
+**Discovery process**:
+
+1. Check directory contents with `ls`
+2. Look for existing rule files (`.cursor/rules/*.md`, `.cursorrules`, `.github/copilot-instructions.md`, `claude.md`, `agents.md`) - only read if they exist
+3. Identify project type from config files and directory structure
+4. Find build/test/lint commands from config files, scripts, Makefiles, or CI configs
+5. Read representative source files to understand code patterns
+6. If CRUSH.md exists, read and improve it
+
+**Content to include**:
+
+- Essential commands (build, test, run, deploy, etc.) - whatever is relevant for this project
+- Code organization and structure
+- Naming conventions and style patterns
+- Testing approach and patterns
+- Important gotchas or non-obvious patterns
+- Any project-specific context from existing rule files
+
+**Format**: Clear markdown sections. Use your judgment on structure based on what you find. Aim for completeness over brevity - include everything an agent would need to know.
+
+**Critical**: Only document what you actually observe. Never invent commands, patterns, or conventions. If you can't find something, don't include it.

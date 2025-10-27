@@ -367,7 +367,7 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
     "ollama": {
       "name": "Ollama",
       "base_url": "http://localhost:11434/v1/",
-      "type": "openai",
+      "type": "openai-compat",
       "models": [
         {
           "name": "Qwen 3 30B",
@@ -389,7 +389,7 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
     "lmstudio": {
       "name": "LM Studio",
       "base_url": "http://localhost:1234/v1/",
-      "type": "openai",
+      "type": "openai-compat",
       "models": [
         {
           "name": "Qwen 3 30B",
@@ -418,7 +418,7 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
   "$schema": "https://charm.land/crush.json",
   "providers": {
     "deepseek": {
-      "type": "openai",
+      "type": "openai-compat",
       "base_url": "https://api.deepseek.com/v1",
       "api_key": "$DEEPSEEK_API_KEY",
       "models": [

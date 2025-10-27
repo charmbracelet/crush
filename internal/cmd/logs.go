@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/crush/internal/acp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/log/v2"
 	"github.com/charmbracelet/x/term"
@@ -45,17 +46,29 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("failed to get tail flag: %v", err)
 		}
 
+		acpLogs, err := cmd.Flags().GetBool("acp")
+		if err != nil {
+			return fmt.Errorf("failed to get acp flag: %v", err)
+		}
+
 		log.SetLevel(log.DebugLevel)
 		log.SetOutput(os.Stdout)
 		if !term.IsTerminal(os.Stdout.Fd()) {
 			log.SetColorProfile(colorprofile.NoTTY)
 		}
 
-		cfg, err := config.Load(cwd, dataDir, false)
-		if err != nil {
-			return fmt.Errorf("failed to load configuration: %v", err)
+		var logsFile string
+		if acpLogs {
+			logsFile = acp.LogsDir()
+		} else {
+			cfg, err := config.Load(cwd, dataDir, false)
+			if err != nil {
+				return fmt.Errorf("failed to load configuration: %v", err)
+			}
+			logsFile = cfg.Options.DataDirectory
 		}
-		logsFile := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
+
+		logsFile = filepath.Join(logsFile, "logs", fmt.Sprintf("%s.log", config.AppName))
 		_, err = os.Stat(logsFile)
 		if os.IsNotExist(err) {
 			log.Warn("Looks like you are not in a crush project. No logs found.")
@@ -73,6 +86,7 @@ var logsCmd = &cobra.Command{
 func init() {
 	logsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	logsCmd.Flags().IntP("tail", "t", defaultTailLines, "Show only the last N lines default: 1000 for performance")
+	logsCmd.Flags().BoolP("acp", "", false, "Show logs for ACP server")
 }
 
 func followLogs(ctx context.Context, logsFile string, tailLines int) error {

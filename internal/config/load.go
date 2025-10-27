@@ -60,7 +60,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	// Setup logs
 	log.Setup(
-		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", AppName)),
 		cfg.Options.Debug,
 	)
 
@@ -536,7 +536,7 @@ func lookupConfigs(cwd string) []string {
 		GlobalConfigData(),
 	}
 
-	configNames := []string{appName + ".json", "." + appName + ".json"}
+	configNames := []string{AppName + ".json", "." + AppName + ".json"}
 
 	foundConfigs, err := fsext.Lookup(cwd, configNames...)
 	if err != nil {
@@ -621,7 +621,7 @@ func hasAWSCredentials(env env.Env) bool {
 func GlobalConfig() string {
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome != "" {
-		return filepath.Join(xdgConfigHome, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(xdgConfigHome, AppName, fmt.Sprintf("%s.json", AppName))
 	}
 
 	// return the path to the main config directory
@@ -632,10 +632,10 @@ func GlobalConfig() string {
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(localAppData, AppName, fmt.Sprintf("%s.json", AppName))
 	}
 
-	return filepath.Join(home.Dir(), ".config", appName, fmt.Sprintf("%s.json", appName))
+	return filepath.Join(home.Dir(), ".config", AppName, fmt.Sprintf("%s.json", AppName))
 }
 
 // GlobalConfigData returns the path to the main data directory for the application.
@@ -643,7 +643,7 @@ func GlobalConfig() string {
 func GlobalConfigData() string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(xdgDataHome, AppName, fmt.Sprintf("%s.json", AppName))
 	}
 
 	// return the path to the main data directory
@@ -654,10 +654,10 @@ func GlobalConfigData() string {
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(localAppData, AppName, fmt.Sprintf("%s.json", AppName))
 	}
 
-	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+	return filepath.Join(home.Dir(), ".local", "share", AppName, fmt.Sprintf("%s.json", AppName))
 }
 
 func assignIfNil[T any](ptr **T, val T) {

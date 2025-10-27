@@ -410,7 +410,7 @@ Anthropic-compatible APIs.
 
 #### OpenAI-Compatible APIs
 
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
+Here's an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```json
@@ -437,6 +437,39 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
   }
 }
 ```
+
+##### Limited OpenAI Compatibility
+
+Some OpenAI-compatible providers (like vLLM, Ollama, or LocalAI) may not support all OpenAI features. You can disable unsupported features using `extra_params`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "vllm": {
+      "type": "openai",
+      "base_url": "http://localhost:8080/v1",
+      "api_key": "not-needed",
+      "extra_params": {
+        "disable_tools": "true",
+        "disable_stream_options": "true"
+      },
+      "models": [
+        {
+          "id": "your-model",
+          "name": "Your Model Name",
+          "context_window": 32768,
+          "default_max_tokens": 4096
+        }
+      ]
+    }
+  }
+}
+```
+
+Available `extra_params` options:
+- `"disable_tools": "true"` - Disables function calling (tools array)
+- `"disable_stream_options": "true"` - Disables streaming usage information
 
 #### Anthropic-Compatible APIs
 

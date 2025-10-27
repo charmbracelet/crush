@@ -3,7 +3,6 @@ package agent
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -46,10 +45,6 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, env) {
 }
 
 func TestCoderAgent(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("We're having VCR matching issues on Windows. Skipping for now.")
-	}
-
 	for _, pair := range modelPairs {
 		t.Run(pair.name, func(t *testing.T) {
 			t.Run("simple test", func(t *testing.T) {

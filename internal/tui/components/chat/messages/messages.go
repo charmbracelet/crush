@@ -122,6 +122,9 @@ func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
 	if m.spinning && m.message.ReasoningContent().Thinking == "" {
+		if m.message.IsSummaryMessage {
+			m.anim.SetLabel("Summarizing")
+		}
 		return m.style().PaddingLeft(1).Render(m.anim.View())
 	}
 	if m.message.ID != "" {
@@ -184,7 +187,7 @@ func (m *messageCmp) renderAssistantMessage() string {
 	finishedData := m.message.FinishPart()
 	thinkingContent := ""
 
-	if thinking || m.message.ReasoningContent().Thinking != "" {
+	if thinking || strings.TrimSpace(m.message.ReasoningContent().Thinking) != "" {
 		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
 	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
@@ -256,7 +259,7 @@ func (m *messageCmp) toMarkdown(content string) string {
 func (m *messageCmp) renderThinkingContent() string {
 	t := styles.CurrentTheme()
 	reasoningContent := m.message.ReasoningContent()
-	if reasoningContent.Thinking == "" {
+	if strings.TrimSpace(reasoningContent.Thinking) == "" {
 		return ""
 	}
 	lines := strings.Split(reasoningContent.Thinking, "\n")
@@ -310,7 +313,7 @@ func (m *messageCmp) shouldSpin() bool {
 		return false
 	}
 
-	if m.message.Content().Text != "" {
+	if strings.TrimSpace(m.message.Content().Text) != "" {
 		return false
 	}
 	if len(m.message.ToolCalls()) > 0 {

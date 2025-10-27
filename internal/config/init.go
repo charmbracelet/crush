@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 const (
@@ -59,6 +61,15 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, nil
 	}
 
+	// If the working directory has no non-ignored files, skip initialization step
+	empty, err := dirHasNoVisibleFiles(cfg.WorkingDir())
+	if err != nil {
+		return false, fmt.Errorf("failed to check if directory is empty: %w", err)
+	}
+	if empty {
+		return false, nil
+	}
+
 	return true, nil
 }
 
@@ -88,6 +99,15 @@ func contextPathsExist(dir string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules
+func dirHasNoVisibleFiles(dir string) (bool, error) {
+	files, _, err := fsext.ListDirectory(dir, nil, 1, 1)
+	if err != nil {
+		return false, err
+	}
+	return len(files) == 0, nil
 }
 
 func MarkProjectInitialized() error {

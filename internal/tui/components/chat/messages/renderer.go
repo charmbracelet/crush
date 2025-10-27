@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/llm/agent"
-	"github.com/charmbracelet/crush/internal/llm/tools"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"

@@ -261,7 +261,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		}
 		// default to OpenAI if not set
 		if providerConfig.Type == "" {
-			providerConfig.Type = catwalk.TypeOpenAI
+			providerConfig.Type = catwalk.TypeOpenAICompat
+		}
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) {
+			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
+			c.Providers.Del(id)
+			continue
 		}
 
 		if providerConfig.Disable {
@@ -282,12 +287,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.Type != catwalk.TypeOpenAI && providerConfig.Type != catwalk.TypeAnthropic && providerConfig.Type != catwalk.TypeGemini {
-			slog.Warn("Skipping custom provider because the provider type is not supported", "provider", id, "type", providerConfig.Type)
-			c.Providers.Del(id)
-			continue
-		}
-
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
@@ -347,6 +346,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
+	}
+
+	if c.Options.Attribution == nil {
+		c.Options.Attribution = &Attribution{
+			CoAuthoredBy:  true,
+			GeneratedWith: true,
+		}
 	}
 }
 
@@ -494,6 +500,21 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			}
 			large.Think = largeModelSelected.Think
+			if largeModelSelected.Temperature != nil {
+				large.Temperature = largeModelSelected.Temperature
+			}
+			if largeModelSelected.TopP != nil {
+				large.TopP = largeModelSelected.TopP
+			}
+			if largeModelSelected.TopK != nil {
+				large.TopK = largeModelSelected.TopK
+			}
+			if largeModelSelected.FrequencyPenalty != nil {
+				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
+			}
+			if largeModelSelected.PresencePenalty != nil {
+				large.PresencePenalty = largeModelSelected.PresencePenalty
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := c.Models[SelectedModelTypeSmall]
@@ -519,7 +540,24 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
-			small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			if smallModelSelected.ReasoningEffort != "" {
+				small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			}
+			if smallModelSelected.Temperature != nil {
+				small.Temperature = smallModelSelected.Temperature
+			}
+			if smallModelSelected.TopP != nil {
+				small.TopP = smallModelSelected.TopP
+			}
+			if smallModelSelected.TopK != nil {
+				small.TopK = smallModelSelected.TopK
+			}
+			if smallModelSelected.FrequencyPenalty != nil {
+				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
+			}
+			if smallModelSelected.PresencePenalty != nil {
+				small.PresencePenalty = smallModelSelected.PresencePenalty
+			}
 			small.Think = smallModelSelected.Think
 		}
 	}

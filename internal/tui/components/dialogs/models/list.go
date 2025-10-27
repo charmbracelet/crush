@@ -1,6 +1,7 @@
 package models
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -151,7 +152,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 					ContextWindow:          model.ContextWindow,
 					DefaultMaxTokens:       model.DefaultMaxTokens,
 					CanReason:              model.CanReason,
-					HasReasoningEffort:     model.HasReasoningEffort,
+					ReasoningLevels:        model.ReasoningLevels,
 					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					SupportsImages:         model.SupportsImages,
 				}
@@ -195,34 +196,59 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			continue
 		}
 
-		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
+		providerConfig, providerConfigured := cfg.Providers.Get(string(provider.ID))
+		if providerConfigured && providerConfig.Disable {
 			continue
 		}
 
-		name := provider.Name
+		displayProvider := provider
+		if providerConfigured {
+			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
+			modelIndex := make(map[string]int, len(displayProvider.Models))
+			for i, model := range displayProvider.Models {
+				modelIndex[model.ID] = i
+			}
+			for _, model := range providerConfig.Models {
+				if model.ID == "" {
+					continue
+				}
+				if idx, ok := modelIndex[model.ID]; ok {
+					if model.Name != "" {
+						displayProvider.Models[idx].Name = model.Name
+					}
+					continue
+				}
+				if model.Name == "" {
+					model.Name = model.ID
+				}
+				displayProvider.Models = append(displayProvider.Models, model)
+				modelIndex[model.ID] = len(displayProvider.Models) - 1
+			}
+		}
+
+		name := displayProvider.Name
 		if name == "" {
-			name = string(provider.ID)
+			name = string(displayProvider.ID)
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
+		if providerConfigured {
 			section.SetInfo(configured)
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,
 		}
-		for _, model := range provider.Models {
+		for _, model := range displayProvider.Models {
 			item := list.NewCompletionItem(model.Name, ModelOption{
-				Provider: provider,
+				Provider: displayProvider,
 				Model:    model,
 			},
 				list.WithCompletionID(
-					fmt.Sprintf("%s:%s", provider.ID, model.ID),
+					fmt.Sprintf("%s:%s", displayProvider.ID, model.ID),
 				),
 			)
 			group.Items = append(group.Items, item)
-			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+			if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
 				selectedItemID = item.ID()
 			}
 		}

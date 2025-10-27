@@ -16,8 +16,6 @@ func (m *emptyProviderClient) GetProviders() ([]catwalk.Provider, error) {
 }
 
 func TestProvider_loadProvidersEmptyResult(t *testing.T) {
-	// TODO: revert this test when beta is done
-	t.Skip("skip until beta is done")
 	client := &emptyProviderClient{}
 	tmpPath := t.TempDir() + "/providers.json"
 
@@ -31,7 +29,6 @@ func TestProvider_loadProvidersEmptyResult(t *testing.T) {
 }
 
 func TestProvider_loadProvidersEmptyCache(t *testing.T) {
-	t.Skip("skip until beta is done")
 	client := &mockProviderClient{shouldFail: false}
 	tmpPath := t.TempDir() + "/providers.json"
 

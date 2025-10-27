@@ -125,8 +125,8 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	return providerList, providerErr
 }
 
-func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) { //nolint:staticcheck
-	_, cacheExists := isCacheStale(path) //nolint:staticcheck
+func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
+	_, cacheExists := isCacheStale(path)
 
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
 		providers, err := client.GetProviders()
@@ -141,11 +141,6 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		}
 		return providers, nil
 	}
-	// TODO: remove this after beta testing
-	// Always load embedded for now
-	autoUpdateDisabled = true //nolint:staticcheck
-	cacheExists = false
-
 	switch {
 	case autoUpdateDisabled:
 		slog.Warn("Providers auto-update is disabled")

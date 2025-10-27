@@ -53,6 +53,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 			if len(files) == 0 {
 				output = "No files found"
 			} else {
+				normalizeFilePaths(files)
 				output = strings.Join(files, "\n")
 				if truncated {
 					output += "\n\n(Results are truncated. Consider using a more specific path or pattern.)"
@@ -115,4 +116,10 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 		matches = matches[:limit]
 	}
 	return matches, nil
+}
+
+func normalizeFilePaths(paths []string) {
+	for i, p := range paths {
+		paths[i] = filepath.ToSlash(p)
+	}
 }

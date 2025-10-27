@@ -101,23 +101,26 @@ func zAIBuilder(model string) builderFunc {
 }
 
 func testEnv(t *testing.T) env {
-	testDir := filepath.Join("/tmp/crush-test/", t.Name())
-	os.RemoveAll(testDir)
-	err := os.MkdirAll(testDir, 0o755)
+	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
+	os.RemoveAll(workingDir)
+
+	err := os.MkdirAll(workingDir, 0o755)
 	require.NoError(t, err)
-	workingDir := testDir
+
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
+
 	q := db.New(conn)
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
+
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
 		conn.Close()
-		os.RemoveAll(testDir)
+		os.RemoveAll(workingDir)
 	})
 
 	return env{

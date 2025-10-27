@@ -361,10 +361,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				contextWindow := a.largeModel.CatwalkCfg.ContextWindow
+				cw := int64(a.largeModel.CatwalkCfg.ContextWindow)
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				percentage := (float64(tokens) / float64(contextWindow)) * 100
-				if (percentage > 80) && !a.disableAutoSummarize {
+				remaining := cw - tokens
+				var threshold int64
+				if cw > 200_000 {
+					threshold = 20_000
+				} else {
+					threshold = int64(float64(cw) * 0.2)
+				}
+				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
 					return true
 				}

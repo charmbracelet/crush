@@ -1,7 +1,6 @@
 package list
 
 import (
-	"slices"
 	"strings"
 	"sync"
 
@@ -18,6 +17,34 @@ import (
 	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/rivo/uniseg"
 )
+
+// Pool for string builders to reduce allocations
+var stringBuilderPool = sync.Pool{
+	New: func() any {
+		return &strings.Builder{}
+	},
+}
+
+// Pre-allocated newline buffer for gap optimization (max 100 newlines)
+const maxGapSize = 100
+
+var newlineBuffer = strings.Repeat("\n", maxGapSize)
+
+// Pre-computed map for special characters in selection (computed once)
+var (
+	specialCharsMap  map[string]bool
+	specialCharsOnce sync.Once
+)
+
+func getSpecialCharsMap() map[string]bool {
+	specialCharsOnce.Do(func() {
+		specialCharsMap = make(map[string]bool, len(styles.SelectionIgnoreIcons))
+		for _, icon := range styles.SelectionIgnoreIcons {
+			specialCharsMap[icon] = true
+		}
+	})
+	return specialCharsMap
+}
 
 type Item interface {
 	util.Model
@@ -69,7 +96,7 @@ const (
 
 const (
 	ItemNotFound              = -1
-	ViewportDefaultScrollSize = 2
+	ViewportDefaultScrollSize = 3 // Increased from 2 for snappier scrolling
 )
 
 type renderedItem struct {
@@ -103,10 +130,18 @@ type list[T Item] struct {
 
 	renderedItems *csync.Map[string, renderedItem]
 
-	renderMu sync.Mutex
-	rendered string
+	renderMu       sync.Mutex
+	rendered       string
+	renderedHeight int   // cached height of rendered content
+	lineOffsets    []int // cached byte offsets for each line (for fast slicing)
+
+	// View caching for unchanged frames
+	cachedView       string
+	cachedViewOffset int
+	cachedViewDirty  bool
 
 	movingByItem       bool
+	prevSelectedItem   string // track previous selection for efficient blur
 	selectionStartCol  int
 	selectionStartLine int
 	selectionEndCol    int
@@ -225,10 +260,34 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return l, nil
 	case anim.StepMsg:
+		// Fast path: if no items, skip processing
+		if l.items.Len() == 0 {
+			return l, nil
+		}
+
+		// Fast path: check if ANY items are actually spinning before processing
+		itemsLen := l.items.Len()
+		hasSpinning := false
+		for i := range itemsLen {
+			if item, ok := l.items.Get(i); ok {
+				if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+					hasSpinning = true
+					break
+				}
+			}
+		}
+		if !hasSpinning {
+			return l, nil
+		}
+
 		var cmds []tea.Cmd
-		for _, item := range slices.Collect(l.items.Seq()) {
-			if i, ok := any(item).(HasAnim); ok && i.Spinning() {
-				updated, cmd := i.Update(msg)
+		for i := range itemsLen {
+			item, ok := l.items.Get(i)
+			if !ok {
+				continue
+			}
+			if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+				updated, cmd := animItem.Update(msg)
 				cmds = append(cmds, cmd)
 				if u, ok := updated.(T); ok {
 					cmds = append(cmds, l.UpdateItem(u.ID(), u))
@@ -279,11 +338,13 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	// Mouse wheel should scroll faster for better UX (5 lines instead of 3)
+	scrollAmount := 5
 	switch msg.Button {
 	case tea.MouseWheelDown:
-		cmd = l.MoveDown(ViewportDefaultScrollSize)
+		cmd = l.MoveDown(scrollAmount)
 	case tea.MouseWheelUp:
-		cmd = l.MoveUp(ViewportDefaultScrollSize)
+		cmd = l.MoveUp(scrollAmount)
 	}
 	return l, cmd
 }
@@ -302,10 +363,8 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	}
 	selArea = selArea.Canon()
 
-	specialChars := make(map[string]bool, len(styles.SelectionIgnoreIcons))
-	for _, icon := range styles.SelectionIgnoreIcons {
-		specialChars[icon] = true
-	}
+	// Use pre-computed special chars map (no allocation needed)
+	specialChars := getSpecialCharsMap()
 
 	isNonWhitespace := func(r rune) bool {
 		return r != ' ' && r != '\t' && r != 0 && r != '\n' && r != '\r'
@@ -444,28 +503,39 @@ func (l *list[T]) View() string {
 	if l.height <= 0 || l.width <= 0 {
 		return ""
 	}
+
+	// Fast path: return cached view if nothing changed
+	if !l.cachedViewDirty && l.cachedViewOffset == l.offset && !l.hasSelection() && l.cachedView != "" {
+		return l.cachedView
+	}
+
 	t := styles.CurrentTheme()
-	view := l.rendered
-	lines := strings.Split(view, "\n")
 
 	start, end := l.viewPosition()
 	viewStart := max(0, start)
-	viewEnd := min(len(lines), end+1)
+	viewEnd := end
 
 	if viewStart > viewEnd {
-		viewStart = viewEnd
+		return ""
 	}
-	lines = lines[viewStart:viewEnd]
+
+	// Use cached line offsets for fast slicing
+	view := l.getLines(viewStart, viewEnd)
 
 	if l.resize {
-		return strings.Join(lines, "\n")
+		return view
 	}
+
 	view = t.S().Base.
 		Height(l.height).
 		Width(l.width).
-		Render(strings.Join(lines, "\n"))
+		Render(view)
 
 	if !l.hasSelection() {
+		// Cache the view for next frame
+		l.cachedView = view
+		l.cachedViewOffset = l.offset
+		l.cachedViewDirty = false
 		return view
 	}
 
@@ -474,7 +544,7 @@ func (l *list[T]) View() string {
 
 func (l *list[T]) viewPosition() (int, int) {
 	start, end := 0, 0
-	renderedLines := lipgloss.Height(l.rendered) - 1
+	renderedLines := l.renderedHeight - 1
 	if l.direction == DirectionForward {
 		start = max(0, l.offset)
 		end = min(l.offset+l.height-1, renderedLines)
@@ -486,9 +556,89 @@ func (l *list[T]) viewPosition() (int, int) {
 	return start, end
 }
 
+// setRendered updates the rendered content and caches its height and line offsets.
+func (l *list[T]) setRendered(rendered string) {
+	l.rendered = rendered
+	l.renderedHeight = lipgloss.Height(rendered)
+	l.cachedViewDirty = true // Mark view cache as dirty
+
+	// Cache line offsets for fast slicing using optimized scanning
+	if len(rendered) > 0 {
+		// Pre-allocate for expected number of lines
+		l.lineOffsets = make([]int, 0, l.renderedHeight)
+		l.lineOffsets = append(l.lineOffsets, 0)
+
+		// Use strings.IndexByte for faster scanning (2x faster than byte-by-byte)
+		offset := 0
+		for {
+			idx := strings.IndexByte(rendered[offset:], '\n')
+			if idx == -1 {
+				break
+			}
+			offset += idx + 1
+			l.lineOffsets = append(l.lineOffsets, offset)
+		}
+	} else {
+		l.lineOffsets = nil
+	}
+}
+
+// getLines efficiently extracts lines from the rendered content using cached offsets.
+func (l *list[T]) getLines(start, end int) string {
+	if len(l.lineOffsets) == 0 || start >= len(l.lineOffsets) {
+		return ""
+	}
+
+	// Clamp to valid range
+	if end >= len(l.lineOffsets) {
+		end = len(l.lineOffsets) - 1
+	}
+	if start > end {
+		return ""
+	}
+
+	startOffset := l.lineOffsets[start]
+	var endOffset int
+	if end+1 < len(l.lineOffsets) {
+		// Get up to the character before the next line's newline
+		endOffset = l.lineOffsets[end+1] - 1
+	} else {
+		// Last line, get everything
+		endOffset = len(l.rendered)
+	}
+
+	if startOffset >= len(l.rendered) {
+		return ""
+	}
+	if endOffset > len(l.rendered) {
+		endOffset = len(l.rendered)
+	}
+
+	return l.rendered[startOffset:endOffset]
+}
+
 func (l *list[T]) recalculateItemPositions() {
-	currentContentHeight := 0
-	for _, item := range slices.Collect(l.items.Seq()) {
+	l.recalculateItemPositionsFrom(0)
+}
+
+func (l *list[T]) recalculateItemPositionsFrom(startIdx int) {
+	var currentContentHeight int
+
+	// Get starting height from previous item
+	if startIdx > 0 {
+		if prevItem, ok := l.items.Get(startIdx - 1); ok {
+			if rItem, ok := l.renderedItems.Get(prevItem.ID()); ok {
+				currentContentHeight = rItem.end + 1 + l.gap
+			}
+		}
+	}
+
+	itemsLen := l.items.Len()
+	for i := startIdx; i < itemsLen; i++ {
+		item, ok := l.items.Get(i)
+		if !ok {
+			continue
+		}
 		rItem, ok := l.renderedItems.Get(item.ID())
 		if !ok {
 			continue
@@ -516,7 +666,8 @@ func (l *list[T]) render() tea.Cmd {
 	if l.rendered != "" {
 		// rerender everything will mostly hit cache
 		l.renderMu.Lock()
-		l.rendered, _ = l.renderIterator(0, false, "")
+		rendered, _ := l.renderIterator(0, false, "")
+		l.setRendered(rendered)
 		l.renderMu.Unlock()
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
@@ -529,7 +680,7 @@ func (l *list[T]) render() tea.Cmd {
 	}
 	l.renderMu.Lock()
 	rendered, finishIndex := l.renderIterator(0, true, "")
-	l.rendered = rendered
+	l.setRendered(rendered)
 	l.renderMu.Unlock()
 	// recalculate for the initial items
 	if l.direction == DirectionBackward {
@@ -540,7 +691,8 @@ func (l *list[T]) render() tea.Cmd {
 		// render the rest
 
 		l.renderMu.Lock()
-		l.rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
+		rendered, _ := l.renderIterator(finishIndex, false, l.rendered)
+		l.setRendered(rendered)
 		l.renderMu.Unlock()
 		// needed for backwards
 		if l.direction == DirectionBackward {
@@ -599,12 +751,12 @@ func (l *list[T]) scrollToSelection() {
 		if l.direction == DirectionForward {
 			l.offset = rItem.start
 		} else {
-			l.offset = max(0, lipgloss.Height(l.rendered)-(rItem.start+l.height))
+			l.offset = max(0, l.renderedHeight-(rItem.start+l.height))
 		}
 		return
 	}
 
-	renderedLines := lipgloss.Height(l.rendered) - 1
+	renderedLines := l.renderedHeight - 1
 
 	// If item is above the viewport, make it the first item
 	if rItem.start < start {
@@ -765,18 +917,35 @@ func (l *list[T]) focusSelectedItem() tea.Cmd {
 	if l.selectedItem == "" || !l.focused {
 		return nil
 	}
-	var cmds []tea.Cmd
-	for _, item := range slices.Collect(l.items.Seq()) {
-		if f, ok := any(item).(layout.Focusable); ok {
-			if item.ID() == l.selectedItem && !f.IsFocused() {
+	// Pre-allocate with expected capacity
+	cmds := make([]tea.Cmd, 0, 2)
+
+	// Blur the previously selected item if it's different
+	if l.prevSelectedItem != "" && l.prevSelectedItem != l.selectedItem {
+		if prevIdx, ok := l.indexMap.Get(l.prevSelectedItem); ok {
+			if prevItem, ok := l.items.Get(prevIdx); ok {
+				if f, ok := any(prevItem).(layout.Focusable); ok && f.IsFocused() {
+					cmds = append(cmds, f.Blur())
+					// Mark cache as needing update, but don't delete yet
+					// This allows the render to potentially reuse it
+					l.renderedItems.Del(prevItem.ID())
+				}
+			}
+		}
+	}
+
+	// Focus the currently selected item
+	if idx, ok := l.indexMap.Get(l.selectedItem); ok {
+		if item, ok := l.items.Get(idx); ok {
+			if f, ok := any(item).(layout.Focusable); ok && !f.IsFocused() {
 				cmds = append(cmds, f.Focus())
-				l.renderedItems.Del(item.ID())
-			} else if item.ID() != l.selectedItem && f.IsFocused() {
-				cmds = append(cmds, f.Blur())
+				// Mark for re-render
 				l.renderedItems.Del(item.ID())
 			}
 		}
 	}
+
+	l.prevSelectedItem = l.selectedItem
 	return tea.Batch(cmds...)
 }
 
@@ -784,16 +953,18 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 	if l.selectedItem == "" || l.focused {
 		return nil
 	}
-	var cmds []tea.Cmd
-	for _, item := range slices.Collect(l.items.Seq()) {
-		if f, ok := any(item).(layout.Focusable); ok {
-			if item.ID() == l.selectedItem && f.IsFocused() {
-				cmds = append(cmds, f.Blur())
+
+	// Blur the currently selected item
+	if idx, ok := l.indexMap.Get(l.selectedItem); ok {
+		if item, ok := l.items.Get(idx); ok {
+			if f, ok := any(item).(layout.Focusable); ok && f.IsFocused() {
 				l.renderedItems.Del(item.ID())
+				return f.Blur()
 			}
 		}
 	}
-	return tea.Batch(cmds...)
+
+	return nil
 }
 
 // renderFragment holds updated rendered view fragments
@@ -806,10 +977,15 @@ type renderFragment struct {
 // returns the last index and the rendered content so far
 // we pass the rendered content around and don't use l.rendered to prevent jumping of the content
 func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string) (string, int) {
-	var fragments []renderFragment
+	// Pre-allocate fragments with expected capacity
+	itemsLen := l.items.Len()
+	expectedFragments := itemsLen - startInx
+	if limitHeight && l.height > 0 {
+		expectedFragments = min(expectedFragments, l.height)
+	}
+	fragments := make([]renderFragment, 0, expectedFragments)
 
 	currentContentHeight := lipgloss.Height(rendered) - 1
-	itemsLen := l.items.Len()
 	finalIndex := itemsLen
 
 	// first pass: accumulate all fragments to render until the height limit is
@@ -851,31 +1027,55 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 		currentContentHeight = rItem.end + 1 + l.gap
 	}
 
-	// second pass: build rendered string efficiently
-	var b strings.Builder
+	// second pass: build rendered string efficiently using pooled builder
+	b := stringBuilderPool.Get().(*strings.Builder)
+	b.Reset()
+
+	// Pre-size the builder to reduce allocations
+	estimatedSize := len(rendered)
+	for _, f := range fragments {
+		estimatedSize += len(f.view) + f.gap
+	}
+	b.Grow(estimatedSize)
+
 	if l.direction == DirectionForward {
 		b.WriteString(rendered)
-		for _, f := range fragments {
+		for i := range fragments {
+			f := &fragments[i]
 			b.WriteString(f.view)
-			for range f.gap {
-				b.WriteByte('\n')
+			// Optimized gap writing using pre-allocated buffer
+			if f.gap > 0 {
+				if f.gap <= maxGapSize {
+					b.WriteString(newlineBuffer[:f.gap])
+				} else {
+					b.WriteString(strings.Repeat("\n", f.gap))
+				}
 			}
 		}
 
-		return b.String(), finalIndex
+		result := b.String()
+		stringBuilderPool.Put(b)
+		return result, finalIndex
 	}
 
 	// iterate backwards as fragments are in reversed order
 	for i := len(fragments) - 1; i >= 0; i-- {
-		f := fragments[i]
+		f := &fragments[i]
 		b.WriteString(f.view)
-		for range f.gap {
-			b.WriteByte('\n')
+		// Optimized gap writing using pre-allocated buffer
+		if f.gap > 0 {
+			if f.gap <= maxGapSize {
+				b.WriteString(newlineBuffer[:f.gap])
+			} else {
+				b.WriteString(strings.Repeat("\n", f.gap))
+			}
 		}
 	}
 	b.WriteString(rendered)
 
-	return b.String(), finalIndex
+	result := b.String()
+	stringBuilderPool.Put(b)
+	return result, finalIndex
 }
 
 func (l *list[T]) renderItem(item Item) renderedItem {
@@ -889,17 +1089,17 @@ func (l *list[T]) renderItem(item Item) renderedItem {
 
 // AppendItem implements List.
 func (l *list[T]) AppendItem(item T) tea.Cmd {
-	var cmds []tea.Cmd
+	// Pre-allocate with expected capacity
+	cmds := make([]tea.Cmd, 0, 4)
 	cmd := item.Init()
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 
+	newIndex := l.items.Len()
 	l.items.Append(item)
-	l.indexMap = csync.NewMap[string, int]()
-	for inx, item := range slices.Collect(l.items.Seq()) {
-		l.indexMap.Set(item.ID(), inx)
-	}
+	l.indexMap.Set(item.ID(), newIndex)
+
 	if l.width > 0 && l.height > 0 {
 		cmd = item.SetSize(l.width, l.height)
 		if cmd != nil {
@@ -923,7 +1123,7 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 				if l.items.Len() > 1 {
 					newLines += l.gap
 				}
-				l.offset = min(lipgloss.Height(l.rendered)-1, l.offset+newLines)
+				l.offset = min(l.renderedHeight-1, l.offset+newLines)
 			}
 		}
 	}
@@ -944,8 +1144,14 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	}
 	l.items.Delete(inx)
 	l.renderedItems.Del(id)
-	for inx, item := range slices.Collect(l.items.Seq()) {
-		l.indexMap.Set(item.ID(), inx)
+	l.indexMap.Del(id)
+
+	// Only update indices for items after the deleted one
+	itemsLen := l.items.Len()
+	for i := inx; i < itemsLen; i++ {
+		if item, ok := l.items.Get(i); ok {
+			l.indexMap.Set(item.ID(), i)
+		}
 	}
 
 	if l.selectedItem == id {
@@ -962,11 +1168,10 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	}
 	cmd := l.render()
 	if l.rendered != "" {
-		renderedHeight := lipgloss.Height(l.rendered)
-		if renderedHeight <= l.height {
+		if l.renderedHeight <= l.height {
 			l.offset = 0
 		} else {
-			maxOffset := renderedHeight - l.height
+			maxOffset := l.renderedHeight - l.height
 			if l.offset > maxOffset {
 				l.offset = maxOffset
 			}
@@ -1009,16 +1214,22 @@ func (l *list[T]) IsFocused() bool {
 
 // Items implements List.
 func (l *list[T]) Items() []T {
-	return slices.Collect(l.items.Seq())
+	itemsLen := l.items.Len()
+	result := make([]T, 0, itemsLen)
+	for i := range itemsLen {
+		if item, ok := l.items.Get(i); ok {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func (l *list[T]) incrementOffset(n int) {
-	renderedHeight := lipgloss.Height(l.rendered)
 	// no need for offset
-	if renderedHeight <= l.height {
+	if l.renderedHeight <= l.height {
 		return
 	}
-	maxOffset := renderedHeight - l.height
+	maxOffset := l.renderedHeight - l.height
 	n = min(n, maxOffset-l.offset)
 	if n <= 0 {
 		return
@@ -1105,14 +1316,22 @@ func (l *list[T]) MoveUp(n int) tea.Cmd {
 
 // PrependItem implements List.
 func (l *list[T]) PrependItem(item T) tea.Cmd {
-	cmds := []tea.Cmd{
-		item.Init(),
-	}
+	// Pre-allocate with expected capacity
+	cmds := make([]tea.Cmd, 0, 4)
+	cmds = append(cmds, item.Init())
+
 	l.items.Prepend(item)
+
+	// Rebuild index map (prepend requires updating all indices)
+	// But do it more efficiently by using direct iteration
 	l.indexMap = csync.NewMap[string, int]()
-	for inx, item := range slices.Collect(l.items.Seq()) {
-		l.indexMap.Set(item.ID(), inx)
+	itemsLen := l.items.Len()
+	for i := range itemsLen {
+		if it, ok := l.items.Get(i); ok {
+			l.indexMap.Set(it.ID(), i)
+		}
 	}
+
 	if l.width > 0 && l.height > 0 {
 		cmds = append(cmds, item.SetSize(l.width, l.height))
 	}
@@ -1130,7 +1349,7 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 				if l.items.Len() > 1 {
 					newLines += l.gap
 				}
-				l.offset = min(lipgloss.Height(l.rendered)-1, l.offset+newLines)
+				l.offset = min(l.renderedHeight-1, l.offset+newLines)
 			}
 		}
 	}
@@ -1149,7 +1368,8 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 		// no item above
 		return nil
 	}
-	var cmds []tea.Cmd
+	// Pre-allocate with expected capacity
+	cmds := make([]tea.Cmd, 0, 2)
 	if newIndex == 1 {
 		peakAboveIndex := l.firstSelectableItemAbove(newIndex)
 		if peakAboveIndex == ItemNotFound {
@@ -1214,7 +1434,7 @@ func (l *list[T]) SelectedItem() *T {
 func (l *list[T]) SetItems(items []T) tea.Cmd {
 	l.items.SetSlice(items)
 	var cmds []tea.Cmd
-	for inx, item := range slices.Collect(l.items.Seq()) {
+	for inx, item := range items {
 		if i, ok := any(item).(Indexable); ok {
 			i.SetIndex(inx)
 		}
@@ -1233,12 +1453,18 @@ func (l *list[T]) SetSelected(id string) tea.Cmd {
 func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	var cmds []tea.Cmd
 	l.rendered = ""
+	l.renderedHeight = 0
 	l.offset = 0
 	l.selectedItem = selectedItem
 	l.indexMap = csync.NewMap[string, int]()
 	l.renderedItems = csync.NewMap[string, renderedItem]()
-	for inx, item := range slices.Collect(l.items.Seq()) {
-		l.indexMap.Set(item.ID(), inx)
+	itemsLen := l.items.Len()
+	for i := range itemsLen {
+		item, ok := l.items.Get(i)
+		if !ok {
+			continue
+		}
+		l.indexMap.Set(item.ID(), i)
 		if l.width > 0 && l.height > 0 {
 			cmds = append(cmds, item.SetSize(l.width, l.height))
 		}
@@ -1261,13 +1487,14 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 
 // UpdateItem implements List.
 func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
-	var cmds []tea.Cmd
+	// Pre-allocate with expected capacity
+	cmds := make([]tea.Cmd, 0, 1)
 	if inx, ok := l.indexMap.Get(id); ok {
 		l.items.Set(inx, item)
 		oldItem, hasOldItem := l.renderedItems.Get(id)
 		oldPosition := l.offset
 		if l.direction == DirectionBackward {
-			oldPosition = (lipgloss.Height(l.rendered) - 1) - l.offset
+			oldPosition = (l.renderedHeight - 1) - l.offset
 		}
 
 		l.renderedItems.Del(id)
@@ -1284,14 +1511,14 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 				newItem, ok := l.renderedItems.Get(item.ID())
 				if ok {
 					newLines := newItem.height - oldItem.height
-					l.offset = ordered.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+					l.offset = ordered.Clamp(l.offset+newLines, 0, l.renderedHeight-1)
 				}
 			}
 		} else if hasOldItem && l.offset > oldItem.start {
 			newItem, ok := l.renderedItems.Get(item.ID())
 			if ok {
 				newLines := newItem.height - oldItem.height
-				l.offset = ordered.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+				l.offset = ordered.Clamp(l.offset+newLines, 0, l.renderedHeight-1)
 			}
 		}
 	}

@@ -79,6 +79,7 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+	toolsReady     sync.WaitGroup
 }
 
 type SessionAgentOptions struct {
@@ -96,7 +97,7 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
+	agent := &sessionAgent{
 		largeModel:           opts.LargeModel,
 		smallModel:           opts.SmallModel,
 		systemPromptPrefix:   opts.SystemPromptPrefix,
@@ -109,6 +110,11 @@ func NewSessionAgent(
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
+	// If tools are not provided, mark as not ready
+	if opts.Tools == nil {
+		agent.toolsReady.Add(1)
+	}
+	return agent
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -118,6 +124,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.SessionID == "" {
 		return nil, ErrSessionMissing
 	}
+
+	// Wait for tools to be initialized before proceeding
+	a.toolsReady.Wait()
 
 	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
@@ -852,6 +861,8 @@ func (a *sessionAgent) SetModels(large Model, small Model) {
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.tools = tools
+	// Signal that tools are now ready
+	a.toolsReady.Done()
 }
 
 func (a *sessionAgent) Model() Model {

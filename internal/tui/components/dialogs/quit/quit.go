@@ -80,16 +80,26 @@ func (q *quitDialogCmp) View() string {
 	}
 
 	const horizontalPadding = 3
-	yesButton := yesStyle.PaddingLeft(horizontalPadding).Underline(true).Render("Y") +
-		yesStyle.PaddingRight(horizontalPadding).Render("ep!")
-	noButton := noStyle.PaddingLeft(horizontalPadding).Underline(true).Render("N") +
-		noStyle.PaddingRight(horizontalPadding).Render("ope")
+	// Render complete button text with brackets in one go
+	yesButton := yesStyle.PaddingLeft(horizontalPadding).Render("[Y]es, quit Crush") +
+		yesStyle.PaddingRight(horizontalPadding).Render("")
+	noButton := noStyle.PaddingLeft(horizontalPadding).Render("[N]o, continue") +
+		noStyle.PaddingRight(horizontalPadding).Render("")
 
-	buttons := baseStyle.Width(lipgloss.Width(question)).Align(lipgloss.Right).Render(
-		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, "  ", noButton),
+	// Calculate the total width needed for centered layout
+	yesButtonWidth := lipgloss.Width(yesButton)
+	noButtonWidth := lipgloss.Width(noButton)
+	totalButtonsWidth := yesButtonWidth + noButtonWidth + 6 // 6 for spacing
+
+	// Create a centered container for the buttons
+	buttons := baseStyle.Width(totalButtonsWidth).Align(lipgloss.Center).Render(
+		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, "   ", noButton),
 	)
 
-	content := baseStyle.Render(
+	// Calculate the maximum width for proper centering
+	maxWidth := max(lipgloss.Width(question), totalButtonsWidth)
+
+	content := baseStyle.Width(maxWidth).Align(lipgloss.Center).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Center,
 			question,
@@ -110,7 +120,15 @@ func (q *quitDialogCmp) Position() (int, int) {
 	row := q.wHeight / 2
 	row -= 7 / 2
 	col := q.wWidth / 2
-	col -= (lipgloss.Width(question) + 4) / 2
+
+	// Calculate dialog width more accurately
+	const horizontalPadding = 3
+	yesButtonWidth := lipgloss.Width("[Y]es, quit Crush") + horizontalPadding
+	noButtonWidth := lipgloss.Width("[N]o, continue") + horizontalPadding
+	totalButtonsWidth := yesButtonWidth + noButtonWidth + 6
+	dialogWidth := max(lipgloss.Width(question), totalButtonsWidth) + 4 // +4 for padding
+
+	col -= dialogWidth / 2
 
 	return row, col
 }

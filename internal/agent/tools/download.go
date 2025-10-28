@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -61,6 +62,8 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			}
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			relPath, _ := filepath.Rel(workingDir, filePath)
+			relPath = filepath.ToSlash(cmp.Or(relPath, filePath))
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
@@ -144,7 +147,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			}
 
 			contentType := resp.Header.Get("Content-Type")
-			responseMsg := fmt.Sprintf("Successfully downloaded %d bytes to %s", bytesWritten, filePath)
+			responseMsg := fmt.Sprintf("Successfully downloaded %d bytes to %s", bytesWritten, relPath)
 			if contentType != "" {
 				responseMsg += fmt.Sprintf(" (Content-Type: %s)", contentType)
 			}

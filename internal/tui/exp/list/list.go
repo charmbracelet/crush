@@ -83,7 +83,8 @@ type renderedItem struct {
 type confOptions struct {
 	width, height int
 	gap           int
-	// if you are at the last item and go down it will wrap to the top
+	// if you are at the last item and go down it will wrap to the top,
+	// or go up from the first item it will wrap to the last item.
 	wrap         bool
 	keyMap       KeyMap
 	direction    direction
@@ -729,6 +730,7 @@ func (l *list[T]) selectLastItem() {
 }
 
 func (l *list[T]) firstSelectableItemAbove(inx int) int {
+	unfocusableCount := 0
 	for i := inx - 1; i >= 0; i-- {
 		item, ok := l.items.Get(i)
 		if !ok {
@@ -737,14 +739,16 @@ func (l *list[T]) firstSelectableItemAbove(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == 0 && l.wrap {
+	if unfocusableCount == inx && l.wrap {
 		return l.firstSelectableItemAbove(l.items.Len())
 	}
 	return ItemNotFound
 }
 
 func (l *list[T]) firstSelectableItemBelow(inx int) int {
+	unfocusableCount := 0
 	itemsLen := l.items.Len()
 	for i := inx + 1; i < itemsLen; i++ {
 		item, ok := l.items.Get(i)
@@ -754,8 +758,9 @@ func (l *list[T]) firstSelectableItemBelow(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == itemsLen-1 && l.wrap {
+	if unfocusableCount == itemsLen-inx-1 && l.wrap {
 		return l.firstSelectableItemBelow(-1)
 	}
 	return ItemNotFound

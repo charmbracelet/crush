@@ -165,7 +165,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use bash to create a file named test.txt with content 'hello bash'",
+					Prompt:          "use bash to create a file named test.txt with content 'hello bash'. do not print its timestamp",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})

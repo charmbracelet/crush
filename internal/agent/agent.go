@@ -534,6 +534,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          "Provide a detailed summary of our conversation above.",
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			prepared.Messages = options.Messages
+			if a.systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			}
+			return callContext, prepared, nil
+		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
@@ -687,6 +694,13 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 
 	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", prompt),
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			prepared.Messages = options.Messages
+			if a.systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			}
+			return callContext, prepared, nil
+		},
 	})
 	if err != nil {
 		slog.Error("error generating title", "err", err)

@@ -1,5 +1,5 @@
-charm.land/fantasy v0.1.3 h1:MFQPlmP9h/JAvSI1Yq7A0jAyMEl0t1rXNv3DYNmCM8Q=
-charm.land/fantasy v0.1.3/go.mod h1:GT1Y8uYNmmu7OkUxWEiOyzdAf1jYopPJfpWvoDRzGiM=
+charm.land/fantasy v0.1.4 h1:H/l2GfMy6Pon0GcXoj4/kuHKZ0jm//xDe2Got0eF3AU=
+charm.land/fantasy v0.1.4/go.mod h1:GT1Y8uYNmmu7OkUxWEiOyzdAf1jYopPJfpWvoDRzGiM=
 cloud.google.com/go v0.116.0 h1:B3fRrSDkLRt5qSHWe40ERJvhvnQwdZiHu0bJOpldweE=
 cloud.google.com/go v0.116.0/go.mod h1:cEPSRWPzZEswwdr9BxE6ChEn01dWlTaF05LiC2Xs70U=
 cloud.google.com/go/auth v0.17.0 h1:74yCm7hCj2rUyyAocqnFzsAYXgJhrG26XCFimrc/Kz4=
@@ -82,8 +82,8 @@ github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2 
 github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2/go.mod h1:6HamsBKWqEC/FVHuQMHgQL+knPyvHH55HwJDHl/adMw=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5 h1:oAChAeh730gtLKK/BpaTeJHzmj3KFuEfQ7AZgf2VGHM=
 github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5/go.mod h1:SUTLq+/pGQ5qntHgt0JswfVJFfgJgWDqyvyiSLVlmbo=
-github.com/charmbracelet/catwalk v0.7.1-0.20251026125030-34dd898c1f9a h1:O3NMgyqjDzxZhsp1ODDdo6VXQJ0fxq2tH1WCxuU0ymk=
-github.com/charmbracelet/catwalk v0.7.1-0.20251026125030-34dd898c1f9a/go.mod h1:ReU4SdrLfe63jkEjWMdX2wlZMV3k9r11oQAmzN0m+KY=
+github.com/charmbracelet/catwalk v0.8.1 h1:Okn6EgMSHlNCYQrSQkyAjLuLiSzDmReGLc0MPcG2F9g=
+github.com/charmbracelet/catwalk v0.8.1/go.mod h1:ReU4SdrLfe63jkEjWMdX2wlZMV3k9r11oQAmzN0m+KY=
 github.com/charmbracelet/colorprofile v0.3.2 h1:9J27WdztfJQVAQKX2WOlSSRB+5gaKqqITmrvb1uTIiI=
 github.com/charmbracelet/colorprofile v0.3.2/go.mod h1:mTD5XzNeWHj8oqHb+S1bssQb7vIHbepiebQ2kPKVKbI=
 github.com/charmbracelet/fang v0.4.3 h1:qXeMxnL4H6mSKBUhDefHu8NfikFbP/MBNTfqTrXvzmY=

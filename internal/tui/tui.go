@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,9 +111,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case tea.EnvMsg:
+		// Is this Windows Terminal?
+		if !a.sendProgressBar {
+			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
+		}
 	case tea.TerminalVersionMsg:
-		termVersion := string(msg)
-		a.sendProgressBar = !strings.Contains(termVersion, "iTerm2")
+		termVersion := strings.ToLower(string(msg))
+		// Only enable progress bar for the following terminals.
+		if !a.sendProgressBar {
+			a.sendProgressBar = strings.Contains(termVersion, "ghostty")
+		}
 		return a, nil
 	case tea.KeyboardEnhancementsMsg:
 		for id, page := range a.pages {

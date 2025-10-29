@@ -546,7 +546,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	headers := make(map[string]string)
 	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat:
+	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"

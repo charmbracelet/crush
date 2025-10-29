@@ -96,7 +96,7 @@ const (
 
 const (
 	ItemNotFound              = -1
-	ViewportDefaultScrollSize = 3 // Increased from 2 for snappier scrolling
+	ViewportDefaultScrollSize = 5
 )
 
 type renderedItem struct {
@@ -339,12 +339,11 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	// Mouse wheel should scroll faster for better UX (5 lines instead of 3)
-	scrollAmount := 5
 	switch msg.Button {
 	case tea.MouseWheelDown:
-		cmd = l.MoveDown(scrollAmount)
+		cmd = l.MoveDown(ViewportDefaultScrollSize)
 	case tea.MouseWheelUp:
-		cmd = l.MoveUp(scrollAmount)
+		cmd = l.MoveUp(ViewportDefaultScrollSize)
 	}
 	return l, cmd
 }

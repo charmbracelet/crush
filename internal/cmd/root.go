@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	"github.com/charmbracelet/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -81,8 +83,13 @@ crush -y
 		event.AppInitialized()
 
 		// Set up the TUI.
+		var env uv.Environ = os.Environ()
+		ui := tui.New(app)
+		ui.QueryVersion = shouldQueryTerminalVersion(env)
+
 		program := tea.NewProgram(
-			tui.New(app),
+			ui,
+			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
 
@@ -249,4 +256,18 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
+}
+
+func shouldQueryTerminalVersion(env uv.Environ) bool {
+	termType := env.Getenv("TERM")
+	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
+	_, okSSHTTY := env.LookupEnv("SSH_TTY")
+	return (!okTermProg && !okSSHTTY) ||
+		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
+		// Terminals that do support XTVERSION.
+		strings.Contains(termType, "ghostty") ||
+		strings.Contains(termType, "wezterm") ||
+		strings.Contains(termType, "alacritty") ||
+		strings.Contains(termType, "kitty") ||
+		strings.Contains(termType, "rio")
 }

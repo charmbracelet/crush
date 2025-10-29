@@ -364,6 +364,17 @@ func (mer multiEditRenderer) Render(v *toolCallCmp) string {
 				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
 			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
 		}
+
+		// Add failed edits warning if any exist
+		if len(meta.EditsFailed) > 0 {
+			warningTag := t.S().Base.Padding(0, 1).Background(t.Yellow).Foreground(t.BgOverlay).Render("WARNING")
+			warningMsg := fmt.Sprintf("%d of %d edits failed", len(meta.EditsFailed), len(params.Edits))
+			warning := t.S().Base.
+				Width(v.textWidth() - 2).
+				Render(fmt.Sprintf("%s %s", warningTag, t.S().Muted.Render(warningMsg)))
+			formatted = lipgloss.JoinVertical(lipgloss.Left, formatted, "", warning)
+		}
+
 		return formatted
 	})
 }

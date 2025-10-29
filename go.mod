@@ -15,27 +15,35 @@ require (
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.5
 	github.com/charmbracelet/catwalk v0.8.1
+	github.com/charmbracelet/colorprofile v0.3.2
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
+	github.com/charmbracelet/ultraviolet v0.0.0-20251017140847-d4ace4d6e731
 	github.com/charmbracelet/x/ansi v0.10.2
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
 	github.com/charmbracelet/x/exp/ordered v0.1.0
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
 	github.com/charmbracelet/x/term v0.2.1
+	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lucasb-eyer/go-colorful v1.3.0
 	github.com/modelcontextprotocol/go-sdk v1.0.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.29.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/nxadm/tail v1.4.11
+	github.com/openai/openai-go/v2 v2.7.1
+	github.com/posthog/posthog-go v1.6.12
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
+	github.com/rivo/uniseg v0.4.7
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/spf13/cobra v1.10.1
@@ -45,8 +53,11 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	go.yaml.in/yaml/v4 v4.0.0-rc.2
+	golang.org/x/sync v0.17.0
+	golang.org/x/text v0.30.0
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.6-0.20250923044825-7b4892dd3117
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
 )
 
@@ -77,16 +88,12 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 // indirect
-	github.com/charmbracelet/colorprofile v0.3.2
 	github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20251017140847-d4ace4d6e731
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/gift v1.1.2 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -108,7 +115,6 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
-	github.com/lucasb-eyer/go-colorful v1.3.0
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.17 // indirect
@@ -121,11 +127,8 @@ require (
 	github.com/muesli/mango-pflag v0.1.0 // indirect
 	github.com/muesli/roff v0.1.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/posthog/posthog-go v1.6.12
-	github.com/rivo/uniseg v0.4.7
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/sourcegraph/jsonrpc2 v0.2.1 // indirect
@@ -153,10 +156,8 @@ require (
 	golang.org/x/image v0.27.0 // indirect
 	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/oauth2 v0.32.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/term v0.35.0 // indirect
-	golang.org/x/text v0.30.0
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
@@ -164,5 +165,4 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 )

@@ -18,19 +18,16 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-// Pool for string builders to reduce allocations
 var stringBuilderPool = sync.Pool{
 	New: func() any {
 		return &strings.Builder{}
 	},
 }
 
-// Pre-allocated newline buffer for gap optimization (max 100 newlines)
 const maxGapSize = 100
 
 var newlineBuffer = strings.Repeat("\n", maxGapSize)
 
-// Pre-computed map for special characters in selection (computed once)
 var (
 	specialCharsMap  map[string]bool
 	specialCharsOnce sync.Once
@@ -62,7 +59,6 @@ type List[T Item] interface {
 	layout.Sizeable
 	layout.Focusable
 
-	// Just change state
 	MoveUp(int) tea.Cmd
 	MoveDown(int) tea.Cmd
 	GoToTop() tea.Cmd
@@ -110,14 +106,13 @@ type renderedItem struct {
 type confOptions struct {
 	width, height int
 	gap           int
-	// if you are at the last item and go down it will wrap to the top
-	wrap         bool
-	keyMap       KeyMap
-	direction    direction
-	selectedItem string
-	focused      bool
-	resize       bool
-	enableMouse  bool
+	wrap          bool
+	keyMap        KeyMap
+	direction     direction
+	selectedItem  string
+	focused       bool
+	resize        bool
+	enableMouse   bool
 }
 
 type list[T Item] struct {
@@ -135,13 +130,12 @@ type list[T Item] struct {
 	renderedHeight int   // cached height of rendered content
 	lineOffsets    []int // cached byte offsets for each line (for fast slicing)
 
-	// View caching for unchanged frames
 	cachedView       string
 	cachedViewOffset int
 	cachedViewDirty  bool
 
 	movingByItem       bool
-	prevSelectedItem   string // track previous selection for efficient blur
+	prevSelectedItem   string
 	selectionStartCol  int
 	selectionStartLine int
 	selectionEndCol    int
@@ -338,7 +332,6 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	// Mouse wheel should scroll faster for better UX (5 lines instead of 3)
 	switch msg.Button {
 	case tea.MouseWheelDown:
 		cmd = l.MoveDown(ViewportDefaultScrollSize)
@@ -348,8 +341,6 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) 
 	return l, cmd
 }
 
-// selectionView renders the highlighted selection in the view and returns it
-// as a string. If textOnly is true, it won't render any styles.
 func (l *list[T]) selectionView(view string, textOnly bool) string {
 	t := styles.CurrentTheme()
 	area := uv.Rect(0, 0, l.width, l.height)
@@ -362,7 +353,6 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	}
 	selArea = selArea.Canon()
 
-	// Use pre-computed special chars map (no allocation needed)
 	specialChars := getSpecialCharsMap()
 
 	isNonWhitespace := func(r rune) bool {
@@ -497,13 +487,11 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	return scr.Render()
 }
 
-// View implements List.
 func (l *list[T]) View() string {
 	if l.height <= 0 || l.width <= 0 {
 		return ""
 	}
 
-	// Fast path: return cached view if nothing changed
 	if !l.cachedViewDirty && l.cachedViewOffset == l.offset && !l.hasSelection() && l.cachedView != "" {
 		return l.cachedView
 	}
@@ -518,7 +506,6 @@ func (l *list[T]) View() string {
 		return ""
 	}
 
-	// Use cached line offsets for fast slicing
 	view := l.getLines(viewStart, viewEnd)
 
 	if l.resize {
@@ -531,7 +518,6 @@ func (l *list[T]) View() string {
 		Render(view)
 
 	if !l.hasSelection() {
-		// Cache the view for next frame
 		l.cachedView = view
 		l.cachedViewOffset = l.offset
 		l.cachedViewDirty = false
@@ -555,19 +541,15 @@ func (l *list[T]) viewPosition() (int, int) {
 	return start, end
 }
 
-// setRendered updates the rendered content and caches its height and line offsets.
 func (l *list[T]) setRendered(rendered string) {
 	l.rendered = rendered
 	l.renderedHeight = lipgloss.Height(rendered)
 	l.cachedViewDirty = true // Mark view cache as dirty
 
-	// Cache line offsets for fast slicing using optimized scanning
 	if len(rendered) > 0 {
-		// Pre-allocate for expected number of lines
 		l.lineOffsets = make([]int, 0, l.renderedHeight)
 		l.lineOffsets = append(l.lineOffsets, 0)
 
-		// Use strings.IndexByte for faster scanning (2x faster than byte-by-byte)
 		offset := 0
 		for {
 			idx := strings.IndexByte(rendered[offset:], '\n')
@@ -582,13 +564,11 @@ func (l *list[T]) setRendered(rendered string) {
 	}
 }
 
-// getLines efficiently extracts lines from the rendered content using cached offsets.
 func (l *list[T]) getLines(start, end int) string {
 	if len(l.lineOffsets) == 0 || start >= len(l.lineOffsets) {
 		return ""
 	}
 
-	// Clamp to valid range
 	if end >= len(l.lineOffsets) {
 		end = len(l.lineOffsets) - 1
 	}
@@ -599,10 +579,8 @@ func (l *list[T]) getLines(start, end int) string {
 	startOffset := l.lineOffsets[start]
 	var endOffset int
 	if end+1 < len(l.lineOffsets) {
-		// Get up to the character before the next line's newline
 		endOffset = l.lineOffsets[end+1] - 1
 	} else {
-		// Last line, get everything
 		endOffset = len(l.rendered)
 	}
 
@@ -623,7 +601,6 @@ func (l *list[T]) recalculateItemPositions() {
 func (l *list[T]) recalculateItemPositionsFrom(startIdx int) {
 	var currentContentHeight int
 
-	// Get starting height from previous item
 	if startIdx > 0 {
 		if prevItem, ok := l.items.Get(startIdx - 1); ok {
 			if rItem, ok := l.renderedItems.Get(prevItem.ID()); ok {
@@ -661,9 +638,7 @@ func (l *list[T]) render() tea.Cmd {
 	} else {
 		focusChangeCmd = l.blurSelectedItem()
 	}
-	// we are not rendering the first time
 	if l.rendered != "" {
-		// rerender everything will mostly hit cache
 		l.renderMu.Lock()
 		rendered, _ := l.renderIterator(0, false, "")
 		l.setRendered(rendered)
@@ -671,7 +646,6 @@ func (l *list[T]) render() tea.Cmd {
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
 		}
-		// in the end scroll to the selected item
 		if l.focused {
 			l.scrollToSelection()
 		}
@@ -681,23 +655,19 @@ func (l *list[T]) render() tea.Cmd {
 	rendered, finishIndex := l.renderIterator(0, true, "")
 	l.setRendered(rendered)
 	l.renderMu.Unlock()
-	// recalculate for the initial items
 	if l.direction == DirectionBackward {
 		l.recalculateItemPositions()
 	}
 	renderCmd := func() tea.Msg {
 		l.offset = 0
-		// render the rest
 
 		l.renderMu.Lock()
 		rendered, _ := l.renderIterator(finishIndex, false, l.rendered)
 		l.setRendered(rendered)
 		l.renderMu.Unlock()
-		// needed for backwards
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
 		}
-		// in the end scroll to the selected item
 		if l.focused {
 			l.scrollToSelection()
 		}
@@ -725,19 +695,15 @@ func (l *list[T]) scrollToSelection() {
 	}
 
 	start, end := l.viewPosition()
-	// item bigger or equal to the viewport do nothing
 	if rItem.start <= start && rItem.end >= end {
 		return
 	}
-	// if we are moving by item we want to move the offset so that the
-	// whole item is visible not just portions of it
 	if l.movingByItem {
 		if rItem.start >= start && rItem.end <= end {
 			return
 		}
 		defer func() { l.movingByItem = false }()
 	} else {
-		// item already in view do nothing
 		if rItem.start >= start && rItem.start <= end {
 			return
 		}
@@ -757,7 +723,6 @@ func (l *list[T]) scrollToSelection() {
 
 	renderedLines := l.renderedHeight - 1
 
-	// If item is above the viewport, make it the first item
 	if rItem.start < start {
 		if l.direction == DirectionForward {
 			l.offset = rItem.start
@@ -765,7 +730,6 @@ func (l *list[T]) scrollToSelection() {
 			l.offset = max(0, renderedLines-rItem.start-l.height+1)
 		}
 	} else if rItem.end > end {
-		// If item is below the viewport, make it the last item
 		if l.direction == DirectionForward {
 			l.offset = max(0, rItem.end-l.height+1)
 		} else {
@@ -1234,6 +1198,7 @@ func (l *list[T]) incrementOffset(n int) {
 		return
 	}
 	l.offset += n
+	l.cachedViewDirty = true
 }
 
 func (l *list[T]) decrementOffset(n int) {
@@ -1245,6 +1210,7 @@ func (l *list[T]) decrementOffset(n int) {
 	if l.offset < 0 {
 		l.offset = 0
 	}
+	l.cachedViewDirty = true
 }
 
 // MoveDown implements List.
@@ -1383,6 +1349,7 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	l.prevSelectedItem = l.selectedItem
 	l.selectedItem = item.ID()
 	l.movingByItem = true
 	renderCmd := l.render()
@@ -1408,6 +1375,7 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	l.prevSelectedItem = l.selectedItem
 	l.selectedItem = item.ID()
 	l.movingByItem = true
 	return l.render()
@@ -1445,6 +1413,7 @@ func (l *list[T]) SetItems(items []T) tea.Cmd {
 
 // SetSelected implements List.
 func (l *list[T]) SetSelected(id string) tea.Cmd {
+	l.prevSelectedItem = l.selectedItem
 	l.selectedItem = id
 	return l.render()
 }

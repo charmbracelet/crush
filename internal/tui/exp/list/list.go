@@ -29,15 +29,15 @@ const maxGapSize = 100
 var newlineBuffer = strings.Repeat("\n", maxGapSize)
 
 var (
-	specialCharsMap  map[string]bool
+	specialCharsMap  map[string]struct{}
 	specialCharsOnce sync.Once
 )
 
-func getSpecialCharsMap() map[string]bool {
+func getSpecialCharsMap() map[string]struct{} {
 	specialCharsOnce.Do(func() {
-		specialCharsMap = make(map[string]bool, len(styles.SelectionIgnoreIcons))
+		specialCharsMap = make(map[string]struct{}, len(styles.SelectionIgnoreIcons))
 		for _, icon := range styles.SelectionIgnoreIcons {
-			specialCharsMap[icon] = true
+			specialCharsMap[icon] = struct{}{}
 		}
 	})
 	return specialCharsMap
@@ -260,21 +260,12 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 
 		// Fast path: check if ANY items are actually spinning before processing
-		itemsLen := l.items.Len()
-		hasSpinning := false
-		for i := range itemsLen {
-			if item, ok := l.items.Get(i); ok {
-				if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
-					hasSpinning = true
-					break
-				}
-			}
-		}
-		if !hasSpinning {
+		if !l.hasSpinningItems() {
 			return l, nil
 		}
 
 		var cmds []tea.Cmd
+		itemsLen := l.items.Len()
 		for i := range itemsLen {
 			item, ok := l.items.Get(i)
 			if !ok {
@@ -339,6 +330,18 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) 
 		cmd = l.MoveUp(ViewportDefaultScrollSize)
 	}
 	return l, cmd
+}
+
+func (l *list[T]) hasSpinningItems() bool {
+	itemsLen := l.items.Len()
+	for i := range itemsLen {
+		if item, ok := l.items.Get(i); ok {
+			if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (l *list[T]) selectionView(view string, textOnly bool) string {
@@ -414,7 +417,7 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				}
 
 				char := rune(cellStr[0])
-				isSpecial := specialChars[cellStr]
+				_, isSpecial := specialChars[cellStr]
 
 				if (isNonWhitespace(char) && !isSpecial) || cell.Style.Bg != nil {
 					if bounds.start == -1 {
@@ -457,7 +460,10 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 			}
 
 			cellStr := cell.String()
-			if len(cellStr) > 0 && !specialChars[cellStr] {
+			if len(cellStr) > 0 {
+				if _, isSpecial := specialChars[cellStr]; isSpecial {
+					continue
+				}
 				if textOnly {
 					// Collect selected text without styles
 					selectedText.WriteString(cell.String())
@@ -587,9 +593,7 @@ func (l *list[T]) getLines(start, end int) string {
 	if startOffset >= len(l.rendered) {
 		return ""
 	}
-	if endOffset > len(l.rendered) {
-		endOffset = len(l.rendered)
-	}
+	endOffset = min(endOffset, len(l.rendered))
 
 	return l.rendered[startOffset:endOffset]
 }

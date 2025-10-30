@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -100,7 +101,15 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.execPOSIX(ctx, command)
+	return s.execPOSIX(ctx, command, nil)
+}
+
+// ExecWithStdin executes a command in the shell with the given stdin
+func (s *Shell) ExecWithStdin(ctx context.Context, command string, stdin string) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.execPOSIX(ctx, command, strings.NewReader(stdin))
 }
 
 // GetWorkingDir returns the current working directory
@@ -229,15 +238,19 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 }
 
 // execPOSIX executes commands using POSIX shell emulation (cross-platform)
-func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, error) {
+func (s *Shell) execPOSIX(ctx context.Context, command string, stdin *strings.Reader) (string, string, error) {
 	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		return "", "", fmt.Errorf("could not parse command: %w", err)
 	}
 
 	var stdout, stderr bytes.Buffer
+	var stdinReader io.Reader
+	if stdin != nil {
+		stdinReader = stdin
+	}
 	runner, err := interp.New(
-		interp.StdIO(nil, &stdout, &stderr),
+		interp.StdIO(stdinReader, &stdout, &stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),

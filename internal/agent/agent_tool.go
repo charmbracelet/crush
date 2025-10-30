@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"charm.land/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/hooks"
 )
 
 //go:embed templates/agent_tool.md
@@ -104,6 +106,21 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
 			}
+
+			// Execute SubagentStop hook
+			if c.hooks != nil {
+				if err := c.hooks.Execute(ctx, hooks.HookContext{
+					EventType: config.SubagentStop,
+					SessionID: sessionID,
+					ToolName:  AgentToolName,
+					MessageID: agentMessageID,
+					Provider:  model.ModelCfg.Provider,
+					Model:     model.ModelCfg.Model,
+				}); err != nil {
+					slog.Debug("subagent_stop hook execution failed", "error", err)
+				}
+			}
+
 			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
 		}), nil
 }

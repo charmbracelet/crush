@@ -114,7 +114,7 @@ func testEnv(t *testing.T) env {
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 
-	permissions := permission.NewPermissionService(workingDir, true, []string{})
+	permissions := permission.NewPermissionService(workingDir, true, []string{}, nil)
 	history := history.NewService(q, conn)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
@@ -148,7 +148,18 @@ func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt 
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           largeModel,
+		SmallModel:           smallModel,
+		SystemPromptPrefix:   "",
+		SystemPrompt:         systemPrompt,
+		DisableAutoSummarize: false,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		Tools:                tools,
+		Hooks:                nil,
+	})
 	return agent
 }
 

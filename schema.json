@@ -79,12 +79,82 @@
         "tools": {
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
+        },
+        "hooks": {
+          "$ref": "#/$defs/HookConfig",
+          "description": "Hook configurations for lifecycle events"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "tools"
+      ]
+    },
+    "Hook": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "command"
+          ],
+          "description": "Hook type",
+          "default": "command"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute for this hook",
+          "examples": [
+            "echo 'Hook executed'"
+          ]
+        },
+        "timeout": {
+          "type": "integer",
+          "maximum": 300,
+          "minimum": 1,
+          "description": "Maximum time in seconds to wait for hook completion",
+          "default": 30
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "command"
+      ]
+    },
+    "HookConfig": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/HookMatcher"
+        },
+        "type": "array"
+      },
+      "type": "object"
+    },
+    "HookMatcher": {
+      "properties": {
+        "matcher": {
+          "type": "string",
+          "description": "Tool name or pattern to match (e.g. 'bash' 'edit|write' for multiple or '*' for all)",
+          "examples": [
+            "bash",
+            "edit|write|multiedit",
+            "*"
+          ]
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/Hook"
+          },
+          "type": "array",
+          "description": "List of hooks to execute when matcher matches"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "hooks"
       ]
     },
     "LSPConfig": {

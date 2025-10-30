@@ -30,16 +30,16 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 5, l.indexMap.Len())
-		require.Equal(t, 5, l.items.Len())
-		require.Equal(t, 5, l.renderedItems.Len())
+		require.Equal(t, 5, len(l.indexMap))
+		require.Equal(t, 5, len(l.items))
+		require.Equal(t, 5, len(l.renderedItems))
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 4, end)
 		for i := range 5 {
-			item, ok := l.renderedItems.Get(items[i].ID())
+			item, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
@@ -60,16 +60,16 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 4, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 5, l.indexMap.Len())
-		require.Equal(t, 5, l.items.Len())
-		require.Equal(t, 5, l.renderedItems.Len())
+		require.Equal(t, 5, len(l.indexMap))
+		require.Equal(t, 5, len(l.items))
+		require.Equal(t, 5, len(l.renderedItems))
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 4, end)
 		for i := range 5 {
-			item, ok := l.renderedItems.Get(items[i].ID())
+			item, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
@@ -91,16 +91,16 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, l.indexMap.Len())
-		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.indexMap))
+		require.Equal(t, 30, len(l.items))
+		require.Equal(t, 30, len(l.renderedItems))
 		assert.Equal(t, 30, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 9, end)
 		for i := range 30 {
-			item, ok := l.renderedItems.Get(items[i].ID())
+			item, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
@@ -121,16 +121,16 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 29, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, l.indexMap.Len())
-		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.indexMap))
+		require.Equal(t, 30, len(l.items))
+		require.Equal(t, 30, len(l.renderedItems))
 		assert.Equal(t, 30, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 20, start)
 		assert.Equal(t, 29, end)
 		for i := range 30 {
-			item, ok := l.renderedItems.Get(items[i].ID())
+			item, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
@@ -154,9 +154,9 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, l.indexMap.Len())
-		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.indexMap))
+		require.Equal(t, 30, len(l.items))
+		require.Equal(t, 30, len(l.renderedItems))
 		expectedLines := 0
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
@@ -168,7 +168,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, 9, end)
 		currentPosition := 0
 		for i := range 30 {
-			rItem, ok := l.renderedItems.Get(items[i].ID())
+			rItem, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, currentPosition, rItem.start)
 			assert.Equal(t, currentPosition+i, rItem.end)
@@ -192,9 +192,9 @@ func TestList(t *testing.T) {
 		// should select the last item
 		assert.Equal(t, 29, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, l.indexMap.Len())
-		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.indexMap))
+		require.Equal(t, 30, len(l.items))
+		require.Equal(t, 30, len(l.renderedItems))
 		expectedLines := 0
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
@@ -206,7 +206,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, expectedLines-1, end)
 		currentPosition := 0
 		for i := range 30 {
-			rItem, ok := l.renderedItems.Get(items[i].ID())
+			rItem, ok := l.renderedItems[items[i].ID()]
 			require.True(t, ok)
 			assert.Equal(t, currentPosition, rItem.start)
 			assert.Equal(t, currentPosition+i, rItem.end)

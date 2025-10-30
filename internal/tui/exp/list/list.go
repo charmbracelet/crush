@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -114,10 +113,9 @@ type list[T Item] struct {
 
 	offset int
 
-	indexMap *csync.Map[string, int]
-	items    *csync.Slice[T]
-
-	renderedItems *csync.Map[string, renderedItem]
+	indexMap      map[string]int
+	items         []T
+	renderedItems map[string]renderedItem
 
 	renderMu       sync.Mutex
 	rendered       string
@@ -214,9 +212,9 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 			focused:         true,
 			selectedItemIdx: -1,
 		},
-		items:               csync.NewSliceFrom(items),
-		indexMap:            csync.NewMap[string, int](),
-		renderedItems:       csync.NewMap[string, renderedItem](),
+		items:               items,
+		indexMap:            make(map[string]int, len(items)),
+		renderedItems:       make(map[string]renderedItem),
 		prevSelectedItemIdx: -1,
 		selectionStartCol:   -1,
 		selectionStartLine:  -1,
@@ -231,12 +229,12 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 		if i, ok := any(item).(Indexable); ok {
 			i.SetIndex(inx)
 		}
-		list.indexMap.Set(item.ID(), inx)
+		list.indexMap[item.ID()] = inx
 	}
 
 	// Resolve selectedItemID to selectedItemIdx if specified
 	if list.selectedItemID != "" {
-		if idx, ok := list.indexMap.Get(list.selectedItemID); ok {
+		if idx, ok := list.indexMap[list.selectedItemID]; ok {
 			list.selectedItemIdx = idx
 		}
 		list.selectedItemID = "" // Clear temporary storage
@@ -260,7 +258,7 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return l, nil
 	case anim.StepMsg:
 		// Fast path: if no items, skip processing
-		if l.items.Len() == 0 {
+		if len(l.items) == 0 {
 			return l, nil
 		}
 
@@ -270,12 +268,12 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 
 		var cmds []tea.Cmd
-		itemsLen := l.items.Len()
+		itemsLen := len(l.items)
 		for i := range itemsLen {
-			item, ok := l.items.Get(i)
-			if !ok {
+			if i >= len(l.items) {
 				continue
 			}
+			item := l.items[i]
 			if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
 				updated, cmd := animItem.Update(msg)
 				cmds = append(cmds, cmd)
@@ -338,12 +336,10 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) 
 }
 
 func (l *list[T]) hasSpinningItems() bool {
-	itemsLen := l.items.Len()
-	for i := range itemsLen {
-		if item, ok := l.items.Get(i); ok {
-			if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
-				return true
-			}
+	for i := range l.items {
+		item := l.items[i]
+		if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+			return true
 		}
 	}
 	return false
@@ -610,33 +606,28 @@ func (l *list[T]) recalculateItemPositions() {
 func (l *list[T]) recalculateItemPositionsFrom(startIdx int) {
 	var currentContentHeight int
 
-	if startIdx > 0 {
-		if prevItem, ok := l.items.Get(startIdx - 1); ok {
-			if rItem, ok := l.renderedItems.Get(prevItem.ID()); ok {
-				currentContentHeight = rItem.end + 1 + l.gap
-			}
+	if startIdx > 0 && startIdx <= len(l.items) {
+		prevItem := l.items[startIdx-1]
+		if rItem, ok := l.renderedItems[prevItem.ID()]; ok {
+			currentContentHeight = rItem.end + 1 + l.gap
 		}
 	}
 
-	itemsLen := l.items.Len()
-	for i := startIdx; i < itemsLen; i++ {
-		item, ok := l.items.Get(i)
-		if !ok {
-			continue
-		}
-		rItem, ok := l.renderedItems.Get(item.ID())
+	for i := startIdx; i < len(l.items); i++ {
+		item := l.items[i]
+		rItem, ok := l.renderedItems[item.ID()]
 		if !ok {
 			continue
 		}
 		rItem.start = currentContentHeight
 		rItem.end = currentContentHeight + rItem.height - 1
-		l.renderedItems.Set(item.ID(), rItem)
+		l.renderedItems[item.ID()] = rItem
 		currentContentHeight = rItem.end + 1 + l.gap
 	}
 }
 
 func (l *list[T]) render() tea.Cmd {
-	if l.width <= 0 || l.height <= 0 || l.items.Len() == 0 {
+	if l.width <= 0 || l.height <= 0 || len(l.items) == 0 {
 		return nil
 	}
 	l.setDefaultSelected()
@@ -696,18 +687,13 @@ func (l *list[T]) setDefaultSelected() {
 }
 
 func (l *list[T]) scrollToSelection() {
-	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= len(l.items) {
 		l.selectedItemIdx = -1
 		l.setDefaultSelected()
 		return
 	}
-	item, ok := l.items.Get(l.selectedItemIdx)
-	if !ok {
-		l.selectedItemIdx = -1
-		l.setDefaultSelected()
-		return
-	}
-	rItem, ok := l.renderedItems.Get(item.ID())
+	item := l.items[l.selectedItemIdx]
+	rItem, ok := l.renderedItems[item.ID()]
 	if !ok {
 		l.selectedItemIdx = -1
 		l.setDefaultSelected()
@@ -759,14 +745,11 @@ func (l *list[T]) scrollToSelection() {
 }
 
 func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
-	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= len(l.items) {
 		return nil
 	}
-	item, ok := l.items.Get(l.selectedItemIdx)
-	if !ok {
-		return nil
-	}
-	rItem, ok := l.renderedItems.Get(item.ID())
+	item := l.items[l.selectedItemIdx]
+	rItem, ok := l.renderedItems[item.ID()]
 	if !ok {
 		return nil
 	}
@@ -791,11 +774,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 			if inx == ItemNotFound {
 				return nil
 			}
-			item, ok := l.items.Get(inx)
-			if !ok {
-				continue
+			if inx < 0 || inx >= len(l.items) {
+			continue
 			}
-			renderedItem, ok := l.renderedItems.Get(item.ID())
+
+			item := l.items[inx]
+			renderedItem, ok := l.renderedItems[item.ID()]
 			if !ok {
 				continue
 			}
@@ -820,11 +804,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 			if inx == ItemNotFound {
 				return nil
 			}
-			item, ok := l.items.Get(inx)
-			if !ok {
-				continue
+			if inx < 0 || inx >= len(l.items) {
+			continue
 			}
-			renderedItem, ok := l.renderedItems.Get(item.ID())
+
+			item := l.items[inx]
+			renderedItem, ok := l.renderedItems[item.ID()]
 			if !ok {
 				continue
 			}
@@ -852,7 +837,7 @@ func (l *list[T]) selectFirstItem() {
 }
 
 func (l *list[T]) selectLastItem() {
-	inx := l.firstSelectableItemAbove(l.items.Len())
+	inx := l.firstSelectableItemAbove(len(l.items))
 	if inx != ItemNotFound {
 		l.selectedItemIdx = inx
 	}
@@ -860,27 +845,29 @@ func (l *list[T]) selectLastItem() {
 
 func (l *list[T]) firstSelectableItemAbove(inx int) int {
 	for i := inx - 1; i >= 0; i-- {
-		item, ok := l.items.Get(i)
-		if !ok {
-			continue
+		if i < 0 || i >= len(l.items) {
+		continue
 		}
+
+		item := l.items[i]
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
 	}
 	if inx == 0 && l.wrap {
-		return l.firstSelectableItemAbove(l.items.Len())
+		return l.firstSelectableItemAbove(len(l.items))
 	}
 	return ItemNotFound
 }
 
 func (l *list[T]) firstSelectableItemBelow(inx int) int {
-	itemsLen := l.items.Len()
+	itemsLen := len(l.items)
 	for i := inx + 1; i < itemsLen; i++ {
-		item, ok := l.items.Get(i)
-		if !ok {
-			continue
+		if i < 0 || i >= len(l.items) {
+		continue
 		}
+
+		item := l.items[i]
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
@@ -899,25 +886,23 @@ func (l *list[T]) focusSelectedItem() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 2)
 
 	// Blur the previously selected item if it's different
-	if l.prevSelectedItemIdx >= 0 && l.prevSelectedItemIdx != l.selectedItemIdx {
-		if prevItem, ok := l.items.Get(l.prevSelectedItemIdx); ok {
-			if f, ok := any(prevItem).(layout.Focusable); ok && f.IsFocused() {
-				cmds = append(cmds, f.Blur())
-				// Mark cache as needing update, but don't delete yet
-				// This allows the render to potentially reuse it
-				l.renderedItems.Del(prevItem.ID())
-			}
+	if l.prevSelectedItemIdx >= 0 && l.prevSelectedItemIdx != l.selectedItemIdx && l.prevSelectedItemIdx < len(l.items) {
+		prevItem := l.items[l.prevSelectedItemIdx]
+		if f, ok := any(prevItem).(layout.Focusable); ok && f.IsFocused() {
+			cmds = append(cmds, f.Blur())
+			// Mark cache as needing update, but don't delete yet
+			// This allows the render to potentially reuse it
+			delete(l.renderedItems, prevItem.ID())
 		}
 	}
 
 	// Focus the currently selected item
-	if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
-		if item, ok := l.items.Get(l.selectedItemIdx); ok {
-			if f, ok := any(item).(layout.Focusable); ok && !f.IsFocused() {
-				cmds = append(cmds, f.Focus())
-				// Mark for re-render
-				l.renderedItems.Del(item.ID())
-			}
+	if l.selectedItemIdx >= 0 && l.selectedItemIdx < len(l.items) {
+		item := l.items[l.selectedItemIdx]
+		if f, ok := any(item).(layout.Focusable); ok && !f.IsFocused() {
+			cmds = append(cmds, f.Focus())
+			// Mark for re-render
+			delete(l.renderedItems, item.ID())
 		}
 	}
 
@@ -931,12 +916,11 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 	}
 
 	// Blur the currently selected item
-	if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
-		if item, ok := l.items.Get(l.selectedItemIdx); ok {
-			if f, ok := any(item).(layout.Focusable); ok && f.IsFocused() {
-				l.renderedItems.Del(item.ID())
-				return f.Blur()
-			}
+	if l.selectedItemIdx >= 0 && l.selectedItemIdx < len(l.items) {
+		item := l.items[l.selectedItemIdx]
+		if f, ok := any(item).(layout.Focusable); ok && f.IsFocused() {
+			delete(l.renderedItems, item.ID())
+			return f.Blur()
 		}
 	}
 
@@ -954,7 +938,7 @@ type renderFragment struct {
 // we pass the rendered content around and don't use l.rendered to prevent jumping of the content
 func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string) (string, int) {
 	// Pre-allocate fragments with expected capacity
-	itemsLen := l.items.Len()
+	itemsLen := len(l.items)
 	expectedFragments := itemsLen - startInx
 	if limitHeight && l.height > 0 {
 		expectedFragments = min(expectedFragments, l.height)
@@ -978,19 +962,21 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 			inx = (itemsLen - 1) - i
 		}
 
-		item, ok := l.items.Get(inx)
-		if !ok {
-			continue
+		if inx < 0 || inx >= len(l.items) {
+		continue
 		}
 
+
+		item := l.items[inx]
+
 		var rItem renderedItem
-		if cache, ok := l.renderedItems.Get(item.ID()); ok {
+		if cache, ok := l.renderedItems[item.ID()]; ok {
 			rItem = cache
 		} else {
 			rItem = l.renderItem(item)
 			rItem.start = currentContentHeight
 			rItem.end = currentContentHeight + rItem.height - 1
-			l.renderedItems.Set(item.ID(), rItem)
+			l.renderedItems[item.ID()] = rItem
 		}
 
 		gap := l.gap + 1
@@ -1066,9 +1052,9 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 
-	newIndex := l.items.Len()
-	l.items.Append(item)
-	l.indexMap.Set(item.ID(), newIndex)
+	newIndex := len(l.items)
+	l.items = append(l.items, item)
+	l.indexMap[item.ID()] = newIndex
 
 	if l.width > 0 && l.height > 0 {
 		cmd = item.SetSize(l.width, l.height)
@@ -1087,10 +1073,10 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			newItem, ok := l.renderedItems.Get(item.ID())
+			newItem, ok := l.renderedItems[item.ID()]
 			if ok {
 				newLines := newItem.height
-				if l.items.Len() > 1 {
+				if len(l.items) > 1 {
 					newLines += l.gap
 				}
 				l.offset = min(l.renderedHeight-1, l.offset+newLines)
@@ -1108,19 +1094,20 @@ func (l *list[T]) Blur() tea.Cmd {
 
 // DeleteItem implements List.
 func (l *list[T]) DeleteItem(id string) tea.Cmd {
-	inx, ok := l.indexMap.Get(id)
+	inx, ok := l.indexMap[id]
 	if !ok {
 		return nil
 	}
-	l.items.Delete(inx)
-	l.renderedItems.Del(id)
-	l.indexMap.Del(id)
+	l.items = append(l.items[:inx], l.items[inx+1:]...)
+	delete(l.renderedItems, id)
+	delete(l.indexMap, id)
 
 	// Only update indices for items after the deleted one
-	itemsLen := l.items.Len()
+	itemsLen := len(l.items)
 	for i := inx; i < itemsLen; i++ {
-		if item, ok := l.items.Get(i); ok {
-			l.indexMap.Set(item.ID(), i)
+		if i >= 0 && i < len(l.items) {
+			item := l.items[i]
+			l.indexMap[item.ID()] = i
 		}
 	}
 
@@ -1184,10 +1171,11 @@ func (l *list[T]) IsFocused() bool {
 
 // Items implements List.
 func (l *list[T]) Items() []T {
-	itemsLen := l.items.Len()
+	itemsLen := len(l.items)
 	result := make([]T, 0, itemsLen)
 	for i := range itemsLen {
-		if item, ok := l.items.Get(i); ok {
+		if i >= 0 && i < len(l.items) {
+			item := l.items[i]
 			result = append(result, item)
 		}
 	}
@@ -1292,22 +1280,21 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 4)
 	cmds = append(cmds, item.Init())
 
-	l.items.Prepend(item)
+	l.items = append([]T{item}, l.items...)
 
 	// Shift selectedItemIdx since all items moved down by 1
 	if l.selectedItemIdx >= 0 {
 		l.selectedItemIdx++
 	}
 
-	// Rebuild index map (prepend requires updating all indices)
-	// But do it more efficiently by using direct iteration
-	l.indexMap = csync.NewMap[string, int]()
-	itemsLen := l.items.Len()
-	for i := range itemsLen {
-		if it, ok := l.items.Get(i); ok {
-			l.indexMap.Set(it.ID(), i)
-		}
+	// Update index map incrementally: shift all existing indices up by 1
+	// This is more efficient than rebuilding from scratch
+	newIndexMap := make(map[string]int, len(l.indexMap)+1)
+	for id, idx := range l.indexMap {
+		newIndexMap[id] = idx + 1 // All existing items shift down by 1
 	}
+	newIndexMap[item.ID()] = 0 // New item is at index 0
+	l.indexMap = newIndexMap
 
 	if l.width > 0 && l.height > 0 {
 		cmds = append(cmds, item.SetSize(l.width, l.height))
@@ -1320,10 +1307,10 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			newItem, ok := l.renderedItems.Get(item.ID())
+			newItem, ok := l.renderedItems[item.ID()]
 			if ok {
 				newLines := newItem.height
-				if l.items.Len() > 1 {
+				if len(l.items) > 1 {
 					newLines += l.gap
 				}
 				l.offset = min(l.renderedHeight-1, l.offset+newLines)
@@ -1356,7 +1343,7 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 			}
 		}
 	}
-	if newIndex < 0 || newIndex >= l.items.Len() {
+	if newIndex < 0 || newIndex >= len(l.items) {
 		return nil
 	}
 	l.prevSelectedItemIdx = l.selectedItemIdx
@@ -1380,7 +1367,7 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 		// no item above
 		return nil
 	}
-	if newIndex < 0 || newIndex >= l.items.Len() {
+	if newIndex < 0 || newIndex >= len(l.items) {
 		return nil
 	}
 	l.prevSelectedItemIdx = l.selectedItemIdx
@@ -1391,19 +1378,16 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 
 // SelectedItem implements List.
 func (l *list[T]) SelectedItem() *T {
-	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= len(l.items) {
 		return nil
 	}
-	item, ok := l.items.Get(l.selectedItemIdx)
-	if !ok {
-		return nil
-	}
+ item := l.items[l.selectedItemIdx]
 	return &item
 }
 
 // SetItems implements List.
 func (l *list[T]) SetItems(items []T) tea.Cmd {
-	l.items.SetSlice(items)
+	l.items = items
 	var cmds []tea.Cmd
 	for inx, item := range items {
 		if i, ok := any(item).(Indexable); ok {
@@ -1418,7 +1402,7 @@ func (l *list[T]) SetItems(items []T) tea.Cmd {
 // SetSelected implements List.
 func (l *list[T]) SetSelected(id string) tea.Cmd {
 	l.prevSelectedItemIdx = l.selectedItemIdx
-	if idx, ok := l.indexMap.Get(id); ok {
+	if idx, ok := l.indexMap[id]; ok {
 		l.selectedItemIdx = idx
 	} else {
 		l.selectedItemIdx = -1
@@ -1431,22 +1415,23 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 	l.rendered = ""
 	l.renderedHeight = 0
 	l.offset = 0
-	l.indexMap = csync.NewMap[string, int]()
-	l.renderedItems = csync.NewMap[string, renderedItem]()
-	itemsLen := l.items.Len()
+	l.indexMap = make(map[string]int)
+	l.renderedItems = make(map[string]renderedItem)
+	itemsLen := len(l.items)
 	for i := range itemsLen {
-		item, ok := l.items.Get(i)
-		if !ok {
-			continue
+		if i < 0 || i >= len(l.items) {
+		continue
 		}
-		l.indexMap.Set(item.ID(), i)
+
+		item := l.items[i]
+		l.indexMap[item.ID()] = i
 		if l.width > 0 && l.height > 0 {
 			cmds = append(cmds, item.SetSize(l.width, l.height))
 		}
 	}
 	// Convert selectedItemID to index after rebuilding indexMap
 	if selectedItemID != "" {
-		if idx, ok := l.indexMap.Get(selectedItemID); ok {
+		if idx, ok := l.indexMap[selectedItemID]; ok {
 			l.selectedItemIdx = idx
 		} else {
 			l.selectedItemIdx = -1
@@ -1466,10 +1451,9 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 	if oldWidth != width {
 		// Get current selected item ID before reset
 		selectedID := ""
-		if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
-			if item, ok := l.items.Get(l.selectedItemIdx); ok {
-				selectedID = item.ID()
-			}
+		if l.selectedItemIdx >= 0 && l.selectedItemIdx < len(l.items) {
+			item := l.items[l.selectedItemIdx]
+			selectedID = item.ID()
 		}
 		cmd := l.reset(selectedID)
 		return cmd
@@ -1481,15 +1465,15 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 	// Pre-allocate with expected capacity
 	cmds := make([]tea.Cmd, 0, 1)
-	if inx, ok := l.indexMap.Get(id); ok {
-		l.items.Set(inx, item)
-		oldItem, hasOldItem := l.renderedItems.Get(id)
+	if inx, ok := l.indexMap[id]; ok {
+		l.items[inx] = item
+		oldItem, hasOldItem := l.renderedItems[id]
 		oldPosition := l.offset
 		if l.direction == DirectionBackward {
 			oldPosition = (l.renderedHeight - 1) - l.offset
 		}
 
-		l.renderedItems.Del(id)
+		delete(l.renderedItems, id)
 		cmd := l.render()
 
 		// need to check for nil because of sequence not handling nil
@@ -1500,14 +1484,14 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 			// if we are the last item and there is no offset
 			// make sure to go to the bottom
 			if oldPosition < oldItem.end {
-				newItem, ok := l.renderedItems.Get(item.ID())
+				newItem, ok := l.renderedItems[item.ID()]
 				if ok {
 					newLines := newItem.height - oldItem.height
 					l.offset = ordered.Clamp(l.offset+newLines, 0, l.renderedHeight-1)
 				}
 			}
 		} else if hasOldItem && l.offset > oldItem.start {
-			newItem, ok := l.renderedItems.Get(item.ID())
+			newItem, ok := l.renderedItems[item.ID()]
 			if ok {
 				newLines := newItem.height - oldItem.height
 				l.offset = ordered.Clamp(l.offset+newLines, 0, l.renderedHeight-1)

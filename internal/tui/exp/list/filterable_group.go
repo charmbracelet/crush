@@ -2,7 +2,6 @@ package list
 
 import (
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
@@ -183,7 +182,7 @@ func (f *filterableGroupList[T]) inputHeight() int {
 
 func (f *filterableGroupList[T]) clearItemState() []tea.Cmd {
 	var cmds []tea.Cmd
-	for _, item := range slices.Collect(f.items.Seq()) {
+	for _, item := range f.items {
 		if i, ok := any(item).(layout.Focusable); ok {
 			cmds = append(cmds, i.Blur())
 		}

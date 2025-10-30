@@ -10,6 +10,7 @@ type KeyMap struct {
 	Cancel        key.Binding
 	Tab           key.Binding
 	Details       key.Binding
+	ToggleYolo    key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -33,6 +34,10 @@ func DefaultKeyMap() KeyMap {
 		Details: key.NewBinding(
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "toggle details"),
+		),
+		ToggleYolo: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "yolo mode"),
 		),
 	}
 }

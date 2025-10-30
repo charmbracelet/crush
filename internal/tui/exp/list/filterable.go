@@ -243,7 +243,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		}
 	}
 
-	f.selectedItem = ""
+	f.selectedItemIdx = -1
 	if query == "" || len(f.items) == 0 {
 		return f.list.SetItems(f.items)
 	}

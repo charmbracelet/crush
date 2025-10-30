@@ -97,15 +97,16 @@ type renderedItem struct {
 }
 
 type confOptions struct {
-	width, height int
-	gap           int
-	wrap          bool
-	keyMap        KeyMap
-	direction     direction
-	selectedItem  string
-	focused       bool
-	resize        bool
-	enableMouse   bool
+	width, height   int
+	gap             int
+	wrap            bool
+	keyMap          KeyMap
+	direction       direction
+	selectedItemIdx int    // Index of selected item (-1 if none)
+	selectedItemID  string // Temporary storage for WithSelectedItem (resolved in New())
+	focused         bool
+	resize          bool
+	enableMouse     bool
 }
 
 type list[T Item] struct {
@@ -127,9 +128,9 @@ type list[T Item] struct {
 	cachedViewOffset int
 	cachedViewDirty  bool
 
-	movingByItem       bool
-	prevSelectedItem   string
-	selectionStartCol  int
+	movingByItem        bool
+	prevSelectedItemIdx int // Index of previously selected item (-1 if none)
+	selectionStartCol   int
 	selectionStartLine int
 	selectionEndCol    int
 	selectionEndLine   int
@@ -171,7 +172,7 @@ func WithDirectionBackward() ListOption {
 // WithSelectedItem sets the initially selected item in the list.
 func WithSelectedItem(id string) ListOption {
 	return func(l *confOptions) {
-		l.selectedItem = id
+		l.selectedItemID = id // Will be resolved to index in New()
 	}
 }
 
@@ -208,17 +209,19 @@ func WithEnableMouse() ListOption {
 func New[T Item](items []T, opts ...ListOption) List[T] {
 	list := &list[T]{
 		confOptions: &confOptions{
-			direction: DirectionForward,
-			keyMap:    DefaultKeyMap(),
-			focused:   true,
+			direction:       DirectionForward,
+			keyMap:          DefaultKeyMap(),
+			focused:         true,
+			selectedItemIdx: -1,
 		},
-		items:              csync.NewSliceFrom(items),
-		indexMap:           csync.NewMap[string, int](),
-		renderedItems:      csync.NewMap[string, renderedItem](),
-		selectionStartCol:  -1,
-		selectionStartLine: -1,
-		selectionEndLine:   -1,
-		selectionEndCol:    -1,
+		items:               csync.NewSliceFrom(items),
+		indexMap:            csync.NewMap[string, int](),
+		renderedItems:       csync.NewMap[string, renderedItem](),
+		prevSelectedItemIdx: -1,
+		selectionStartCol:   -1,
+		selectionStartLine:  -1,
+		selectionEndLine:    -1,
+		selectionEndCol:     -1,
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)
@@ -230,6 +233,15 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 		}
 		list.indexMap.Set(item.ID(), inx)
 	}
+
+	// Resolve selectedItemID to selectedItemIdx if specified
+	if list.selectedItemID != "" {
+		if idx, ok := list.indexMap.Get(list.selectedItemID); ok {
+			list.selectedItemIdx = idx
+		}
+		list.selectedItemID = "" // Clear temporary storage
+	}
+
 	return list
 }
 
@@ -674,7 +686,7 @@ func (l *list[T]) render() tea.Cmd {
 }
 
 func (l *list[T]) setDefaultSelected() {
-	if l.selectedItem == "" {
+	if l.selectedItemIdx < 0 {
 		if l.direction == DirectionForward {
 			l.selectFirstItem()
 		} else {
@@ -684,9 +696,20 @@ func (l *list[T]) setDefaultSelected() {
 }
 
 func (l *list[T]) scrollToSelection() {
-	rItem, ok := l.renderedItems.Get(l.selectedItem)
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
+		l.selectedItemIdx = -1
+		l.setDefaultSelected()
+		return
+	}
+	item, ok := l.items.Get(l.selectedItemIdx)
 	if !ok {
-		l.selectedItem = ""
+		l.selectedItemIdx = -1
+		l.setDefaultSelected()
+		return
+	}
+	rItem, ok := l.renderedItems.Get(item.ID())
+	if !ok {
+		l.selectedItemIdx = -1
 		l.setDefaultSelected()
 		return
 	}
@@ -736,7 +759,14 @@ func (l *list[T]) scrollToSelection() {
 }
 
 func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
-	rItem, ok := l.renderedItems.Get(l.selectedItem)
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
+		return nil
+	}
+	item, ok := l.items.Get(l.selectedItemIdx)
+	if !ok {
+		return nil
+	}
+	rItem, ok := l.renderedItems.Get(item.ID())
 	if !ok {
 		return nil
 	}
@@ -755,10 +785,7 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 	if itemMiddle < start {
 		// select the first item in the viewport
 		// the item is most likely an item coming after this item
-		inx, ok := l.indexMap.Get(l.selectedItem)
-		if !ok {
-			return nil
-		}
+		inx := l.selectedItemIdx
 		for {
 			inx = l.firstSelectableItemBelow(inx)
 			if inx == ItemNotFound {
@@ -775,22 +802,19 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
-				l.selectedItem = item.ID()
+				l.selectedItemIdx = inx
 				return l.render()
 			}
 			// item is in the view
 			if renderedItem.start >= start && renderedItem.start <= end {
-				l.selectedItem = item.ID()
+				l.selectedItemIdx = inx
 				return l.render()
 			}
 		}
 	} else if itemMiddle > end {
 		// select the first item in the viewport
 		// the item is most likely an item coming after this item
-		inx, ok := l.indexMap.Get(l.selectedItem)
-		if !ok {
-			return nil
-		}
+		inx := l.selectedItemIdx
 		for {
 			inx = l.firstSelectableItemAbove(inx)
 			if inx == ItemNotFound {
@@ -807,12 +831,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
-				l.selectedItem = item.ID()
+				l.selectedItemIdx = inx
 				return l.render()
 			}
 			// item is in the view
 			if renderedItem.end >= start && renderedItem.end <= end {
-				l.selectedItem = item.ID()
+				l.selectedItemIdx = inx
 				return l.render()
 			}
 		}
@@ -823,20 +847,14 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 func (l *list[T]) selectFirstItem() {
 	inx := l.firstSelectableItemBelow(-1)
 	if inx != ItemNotFound {
-		item, ok := l.items.Get(inx)
-		if ok {
-			l.selectedItem = item.ID()
-		}
+		l.selectedItemIdx = inx
 	}
 }
 
 func (l *list[T]) selectLastItem() {
 	inx := l.firstSelectableItemAbove(l.items.Len())
 	if inx != ItemNotFound {
-		item, ok := l.items.Get(inx)
-		if ok {
-			l.selectedItem = item.ID()
-		}
+		l.selectedItemIdx = inx
 	}
 }
 
@@ -874,29 +892,27 @@ func (l *list[T]) firstSelectableItemBelow(inx int) int {
 }
 
 func (l *list[T]) focusSelectedItem() tea.Cmd {
-	if l.selectedItem == "" || !l.focused {
+	if l.selectedItemIdx < 0 || !l.focused {
 		return nil
 	}
 	// Pre-allocate with expected capacity
 	cmds := make([]tea.Cmd, 0, 2)
 
 	// Blur the previously selected item if it's different
-	if l.prevSelectedItem != "" && l.prevSelectedItem != l.selectedItem {
-		if prevIdx, ok := l.indexMap.Get(l.prevSelectedItem); ok {
-			if prevItem, ok := l.items.Get(prevIdx); ok {
-				if f, ok := any(prevItem).(layout.Focusable); ok && f.IsFocused() {
-					cmds = append(cmds, f.Blur())
-					// Mark cache as needing update, but don't delete yet
-					// This allows the render to potentially reuse it
-					l.renderedItems.Del(prevItem.ID())
-				}
+	if l.prevSelectedItemIdx >= 0 && l.prevSelectedItemIdx != l.selectedItemIdx {
+		if prevItem, ok := l.items.Get(l.prevSelectedItemIdx); ok {
+			if f, ok := any(prevItem).(layout.Focusable); ok && f.IsFocused() {
+				cmds = append(cmds, f.Blur())
+				// Mark cache as needing update, but don't delete yet
+				// This allows the render to potentially reuse it
+				l.renderedItems.Del(prevItem.ID())
 			}
 		}
 	}
 
 	// Focus the currently selected item
-	if idx, ok := l.indexMap.Get(l.selectedItem); ok {
-		if item, ok := l.items.Get(idx); ok {
+	if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
+		if item, ok := l.items.Get(l.selectedItemIdx); ok {
 			if f, ok := any(item).(layout.Focusable); ok && !f.IsFocused() {
 				cmds = append(cmds, f.Focus())
 				// Mark for re-render
@@ -905,18 +921,18 @@ func (l *list[T]) focusSelectedItem() tea.Cmd {
 		}
 	}
 
-	l.prevSelectedItem = l.selectedItem
+	l.prevSelectedItemIdx = l.selectedItemIdx
 	return tea.Batch(cmds...)
 }
 
 func (l *list[T]) blurSelectedItem() tea.Cmd {
-	if l.selectedItem == "" || l.focused {
+	if l.selectedItemIdx < 0 || l.focused {
 		return nil
 	}
 
 	// Blur the currently selected item
-	if idx, ok := l.indexMap.Get(l.selectedItem); ok {
-		if item, ok := l.items.Get(idx); ok {
+	if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
+		if item, ok := l.items.Get(l.selectedItemIdx); ok {
 			if f, ok := any(item).(layout.Focusable); ok && f.IsFocused() {
 				l.renderedItems.Del(item.ID())
 				return f.Blur()
@@ -1108,17 +1124,17 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 		}
 	}
 
-	if l.selectedItem == id {
+	// Adjust selectedItemIdx if the deleted item was selected or before it
+	if l.selectedItemIdx == inx {
+		// Deleted item was selected, select the previous item if possible
 		if inx > 0 {
-			item, ok := l.items.Get(inx - 1)
-			if ok {
-				l.selectedItem = item.ID()
-			} else {
-				l.selectedItem = ""
-			}
+			l.selectedItemIdx = inx - 1
 		} else {
-			l.selectedItem = ""
+			l.selectedItemIdx = -1
 		}
+	} else if l.selectedItemIdx > inx {
+		// Selected item is after the deleted one, shift index down
+		l.selectedItemIdx--
 	}
 	cmd := l.render()
 	if l.rendered != "" {
@@ -1148,7 +1164,7 @@ func (l *list[T]) GetSize() (int, int) {
 // GoToBottom implements List.
 func (l *list[T]) GoToBottom() tea.Cmd {
 	l.offset = 0
-	l.selectedItem = ""
+	l.selectedItemIdx = -1
 	l.direction = DirectionBackward
 	return l.render()
 }
@@ -1156,7 +1172,7 @@ func (l *list[T]) GoToBottom() tea.Cmd {
 // GoToTop implements List.
 func (l *list[T]) GoToTop() tea.Cmd {
 	l.offset = 0
-	l.selectedItem = ""
+	l.selectedItemIdx = -1
 	l.direction = DirectionForward
 	return l.render()
 }
@@ -1278,6 +1294,11 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 
 	l.items.Prepend(item)
 
+	// Shift selectedItemIdx since all items moved down by 1
+	if l.selectedItemIdx >= 0 {
+		l.selectedItemIdx++
+	}
+
 	// Rebuild index map (prepend requires updating all indices)
 	// But do it more efficiently by using direct iteration
 	l.indexMap = csync.NewMap[string, int]()
@@ -1314,12 +1335,11 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 
 // SelectItemAbove implements List.
 func (l *list[T]) SelectItemAbove() tea.Cmd {
-	inx, ok := l.indexMap.Get(l.selectedItem)
-	if !ok {
+	if l.selectedItemIdx < 0 {
 		return nil
 	}
 
-	newIndex := l.firstSelectableItemAbove(inx)
+	newIndex := l.firstSelectableItemAbove(l.selectedItemIdx)
 	if newIndex == ItemNotFound {
 		// no item above
 		return nil
@@ -1336,12 +1356,11 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 			}
 		}
 	}
-	item, ok := l.items.Get(newIndex)
-	if !ok {
+	if newIndex < 0 || newIndex >= l.items.Len() {
 		return nil
 	}
-	l.prevSelectedItem = l.selectedItem
-	l.selectedItem = item.ID()
+	l.prevSelectedItemIdx = l.selectedItemIdx
+	l.selectedItemIdx = newIndex
 	l.movingByItem = true
 	renderCmd := l.render()
 	if renderCmd != nil {
@@ -1352,36 +1371,30 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 
 // SelectItemBelow implements List.
 func (l *list[T]) SelectItemBelow() tea.Cmd {
-	inx, ok := l.indexMap.Get(l.selectedItem)
-	if !ok {
+	if l.selectedItemIdx < 0 {
 		return nil
 	}
 
-	newIndex := l.firstSelectableItemBelow(inx)
+	newIndex := l.firstSelectableItemBelow(l.selectedItemIdx)
 	if newIndex == ItemNotFound {
 		// no item above
 		return nil
 	}
-	item, ok := l.items.Get(newIndex)
-	if !ok {
+	if newIndex < 0 || newIndex >= l.items.Len() {
 		return nil
 	}
-	l.prevSelectedItem = l.selectedItem
-	l.selectedItem = item.ID()
+	l.prevSelectedItemIdx = l.selectedItemIdx
+	l.selectedItemIdx = newIndex
 	l.movingByItem = true
 	return l.render()
 }
 
 // SelectedItem implements List.
 func (l *list[T]) SelectedItem() *T {
-	inx, ok := l.indexMap.Get(l.selectedItem)
-	if !ok {
+	if l.selectedItemIdx < 0 || l.selectedItemIdx >= l.items.Len() {
 		return nil
 	}
-	if inx > l.items.Len()-1 {
-		return nil
-	}
-	item, ok := l.items.Get(inx)
+	item, ok := l.items.Get(l.selectedItemIdx)
 	if !ok {
 		return nil
 	}
@@ -1404,17 +1417,20 @@ func (l *list[T]) SetItems(items []T) tea.Cmd {
 
 // SetSelected implements List.
 func (l *list[T]) SetSelected(id string) tea.Cmd {
-	l.prevSelectedItem = l.selectedItem
-	l.selectedItem = id
+	l.prevSelectedItemIdx = l.selectedItemIdx
+	if idx, ok := l.indexMap.Get(id); ok {
+		l.selectedItemIdx = idx
+	} else {
+		l.selectedItemIdx = -1
+	}
 	return l.render()
 }
 
-func (l *list[T]) reset(selectedItem string) tea.Cmd {
+func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 	var cmds []tea.Cmd
 	l.rendered = ""
 	l.renderedHeight = 0
 	l.offset = 0
-	l.selectedItem = selectedItem
 	l.indexMap = csync.NewMap[string, int]()
 	l.renderedItems = csync.NewMap[string, renderedItem]()
 	itemsLen := l.items.Len()
@@ -1428,6 +1444,16 @@ func (l *list[T]) reset(selectedItem string) tea.Cmd {
 			cmds = append(cmds, item.SetSize(l.width, l.height))
 		}
 	}
+	// Convert selectedItemID to index after rebuilding indexMap
+	if selectedItemID != "" {
+		if idx, ok := l.indexMap.Get(selectedItemID); ok {
+			l.selectedItemIdx = idx
+		} else {
+			l.selectedItemIdx = -1
+		}
+	} else {
+		l.selectedItemIdx = -1
+	}
 	cmds = append(cmds, l.render())
 	return tea.Batch(cmds...)
 }
@@ -1438,7 +1464,14 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 	l.width = width
 	l.height = height
 	if oldWidth != width {
-		cmd := l.reset(l.selectedItem)
+		// Get current selected item ID before reset
+		selectedID := ""
+		if l.selectedItemIdx >= 0 && l.selectedItemIdx < l.items.Len() {
+			if item, ok := l.items.Get(l.selectedItemIdx); ok {
+				selectedID = item.ID()
+			}
+		}
+		cmd := l.reset(selectedID)
 		return cmd
 	}
 	return nil

@@ -28,7 +28,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
@@ -58,7 +58,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[4].ID(), l.selectedItem)
+		assert.Equal(t, 4, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
@@ -89,7 +89,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -119,7 +119,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[29].ID(), l.selectedItem)
+		assert.Equal(t, 29, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -152,7 +152,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, 0, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -190,7 +190,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[29].ID(), l.selectedItem)
+		assert.Equal(t, 29, l.selectedItemIdx)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -229,7 +229,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[10].ID(), l.selectedItem)
+		assert.Equal(t, 10, l.selectedItemIdx)
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})
@@ -247,7 +247,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select the last item
-		assert.Equal(t, items[10].ID(), l.selectedItem)
+		assert.Equal(t, 10, l.selectedItemIdx)
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})

@@ -503,6 +503,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	var view tea.View
+	view.AltScreen = true
 	t := styles.CurrentTheme()
 	view.BackgroundColor = t.BgBase
 	if a.wWidth < 25 || a.wHeight < 15 {
@@ -577,7 +578,6 @@ func (a *appModel) View() tea.View {
 	view.Layer = canvas
 	view.Cursor = cursor
 	view.MouseMode = tea.MouseModeCellMotion
-	view.AltScreen = true
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it

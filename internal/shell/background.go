@@ -1,0 +1,160 @@
+package shell
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/charmbracelet/hotdiva2000"
+
+	"github.com/charmbracelet/crush/internal/csync"
+)
+
+// BackgroundShell represents a shell running in the background.
+type BackgroundShell struct {
+	ID      string
+	Shell   *Shell
+	ctx     context.Context
+	cancel  context.CancelFunc
+	stdout  *bytes.Buffer
+	stderr  *bytes.Buffer
+	done    chan struct{}
+	exitErr error
+}
+
+// BackgroundShellManager manages background shell instances.
+type BackgroundShellManager struct {
+	shells *csync.Map[string, *BackgroundShell]
+}
+
+var (
+	backgroundManager     *BackgroundShellManager
+	backgroundManagerOnce sync.Once
+)
+
+// GetBackgroundShellManager returns the singleton background shell manager.
+func GetBackgroundShellManager() *BackgroundShellManager {
+	backgroundManagerOnce.Do(func() {
+		backgroundManager = &BackgroundShellManager{
+			shells: csync.NewMap[string, *BackgroundShell](),
+		}
+	})
+	return backgroundManager
+}
+
+// Start creates and starts a new background shell with the given command.
+func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string) (*BackgroundShell, error) {
+	id := hotdiva2000.Generate()
+
+	shell := NewShell(&Options{
+		WorkingDir: workingDir,
+		BlockFuncs: blockFuncs,
+	})
+
+	shellCtx, cancel := context.WithCancel(ctx)
+
+	bgShell := &BackgroundShell{
+		ID:     id,
+		Shell:  shell,
+		ctx:    shellCtx,
+		cancel: cancel,
+		stdout: &bytes.Buffer{},
+		stderr: &bytes.Buffer{},
+		done:   make(chan struct{}),
+	}
+
+	m.shells.Set(id, bgShell)
+
+	go func() {
+		defer close(bgShell.done)
+
+		stdout, stderr, err := shell.Exec(shellCtx, command)
+
+		bgShell.stdout.WriteString(stdout)
+		bgShell.stderr.WriteString(stderr)
+		bgShell.exitErr = err
+	}()
+
+	return bgShell, nil
+}
+
+// Get retrieves a background shell by ID.
+func (m *BackgroundShellManager) Get(id string) (*BackgroundShell, bool) {
+	return m.shells.Get(id)
+}
+
+// Remove removes a background shell from the manager without terminating it.
+// This is useful when a shell has already completed and you just want to clean up tracking.
+func (m *BackgroundShellManager) Remove(id string) error {
+	_, ok := m.shells.Take(id)
+	if !ok {
+		return fmt.Errorf("background shell not found: %s", id)
+	}
+	return nil
+}
+
+// Kill terminates a background shell by ID.
+func (m *BackgroundShellManager) Kill(id string) error {
+	shell, ok := m.shells.Take(id)
+	if !ok {
+		return fmt.Errorf("background shell not found: %s", id)
+	}
+
+	shell.cancel()
+	<-shell.done
+	return nil
+}
+
+// List returns all background shell IDs.
+func (m *BackgroundShellManager) List() []string {
+	ids := make([]string, 0, m.shells.Len())
+	for id := range m.shells.Seq2() {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// KillAll terminates all background shells.
+func (m *BackgroundShellManager) KillAll() {
+	shells := make([]*BackgroundShell, 0, m.shells.Len())
+	for shell := range m.shells.Seq() {
+		shells = append(shells, shell)
+	}
+	m.shells.Reset(map[string]*BackgroundShell{})
+
+	for _, shell := range shells {
+		shell.cancel()
+		<-shell.done
+	}
+}
+
+// GetOutput returns the current output of a background shell.
+func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool, err error) {
+	select {
+	case <-bs.done:
+		return bs.stdout.String(), bs.stderr.String(), true, bs.exitErr
+	default:
+		return bs.stdout.String(), bs.stderr.String(), false, nil
+	}
+}
+
+// IsDone checks if the background shell has finished execution.
+func (bs *BackgroundShell) IsDone() bool {
+	select {
+	case <-bs.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// Wait blocks until the background shell completes.
+func (bs *BackgroundShell) Wait() {
+	<-bs.done
+}
+
+// GetWorkingDir returns the current working directory of the background shell.
+func (bs *BackgroundShell) GetWorkingDir() string {
+	return bs.Shell.GetWorkingDir()
+}

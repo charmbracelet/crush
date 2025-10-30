@@ -163,6 +163,8 @@ func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 // Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
+	registry.register(tools.BashOutputToolName, func() renderer { return bashOutputRenderer{} })
+	registry.register(tools.BashKillToolName, func() renderer { return bashKillRenderer{} })
 	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
@@ -213,7 +215,10 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 	cmd := strings.ReplaceAll(params.Command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
-	args := newParamBuilder().addMain(cmd).build()
+	args := newParamBuilder().
+		addMain(cmd).
+		addFlag("background", params.RunInBackground).
+		build()
 
 	return br.renderWithParams(v, "Bash", args, func() string {
 		var meta tools.BashResponseMetadata
@@ -229,6 +234,52 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 			return ""
 		}
 		return renderPlainContent(v, meta.Output)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Bash Output renderer
+// -----------------------------------------------------------------------------
+
+// bashOutputRenderer handles bash output retrieval display
+type bashOutputRenderer struct {
+	baseRenderer
+}
+
+// Render displays the shell ID and output from a background shell
+func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
+	var params tools.BashOutputParams
+	if err := bor.unmarshalParams(v.call.Input, &params); err != nil {
+		return bor.renderError(v, "Invalid bash_output parameters")
+	}
+
+	args := newParamBuilder().addMain(params.ShellID).build()
+
+	return bor.renderWithParams(v, "Bash Output", args, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Bash Kill renderer
+// -----------------------------------------------------------------------------
+
+// bashKillRenderer handles bash process termination display
+type bashKillRenderer struct {
+	baseRenderer
+}
+
+// Render displays the shell ID being terminated
+func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
+	var params tools.BashKillParams
+	if err := bkr.unmarshalParams(v.call.Input, &params); err != nil {
+		return bkr.renderError(v, "Invalid bash_kill parameters")
+	}
+
+	args := newParamBuilder().addMain(params.ShellID).build()
+
+	return bkr.renderWithParams(v, "Bash Kill", args, func() string {
+		return renderPlainContent(v, v.result.Content)
 	})
 }
 
@@ -1002,6 +1053,10 @@ func prettifyToolName(name string) string {
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
+	case tools.BashOutputToolName:
+		return "Bash Output"
+	case tools.BashKillToolName:
+		return "Bash Kill"
 	case tools.DownloadToolName:
 		return "Download"
 	case tools.EditToolName:

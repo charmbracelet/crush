@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -324,6 +325,9 @@ func (app *App) Shutdown() {
 	if app.AgentCoordinator != nil {
 		app.AgentCoordinator.CancelAll()
 	}
+
+	// Kill all background shells.
+	shell.GetBackgroundShellManager().KillAll()
 
 	// Shutdown all LSP clients.
 	for name, client := range app.LSPClients.Seq2() {

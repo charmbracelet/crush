@@ -599,6 +599,34 @@ func (l *list[T]) getLines(start, end int) string {
 	return l.rendered[startOffset:endOffset]
 }
 
+// getLine returns a single line from the rendered content using lineOffsets.
+// This avoids allocating a new string for each line like strings.Split does.
+func (l *list[T]) getLine(index int) string {
+	if len(l.lineOffsets) == 0 || index < 0 || index >= len(l.lineOffsets) {
+		return ""
+	}
+
+	startOffset := l.lineOffsets[index]
+	var endOffset int
+	if index+1 < len(l.lineOffsets) {
+		endOffset = l.lineOffsets[index+1] - 1 // -1 to exclude the newline
+	} else {
+		endOffset = len(l.rendered)
+	}
+
+	if startOffset >= len(l.rendered) {
+		return ""
+	}
+	endOffset = min(endOffset, len(l.rendered))
+
+	return l.rendered[startOffset:endOffset]
+}
+
+// lineCount returns the number of lines in the rendered content.
+func (l *list[T]) lineCount() int {
+	return len(l.lineOffsets)
+}
+
 func (l *list[T]) recalculateItemPositions() {
 	l.recalculateItemPositionsFrom(0)
 }
@@ -1536,13 +1564,10 @@ func (l *list[T]) SelectionClear() {
 }
 
 func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
-	lines := strings.Split(l.rendered, "\n")
-	for i, l := range lines {
-		lines[i] = ansi.Strip(l)
-	}
+	numLines := l.lineCount()
 
-	if l.direction == DirectionBackward && len(lines) > l.height {
-		line = ((len(lines) - 1) - l.height) + line + 1
+	if l.direction == DirectionBackward && numLines > l.height {
+		line = ((numLines - 1) - l.height) + line + 1
 	}
 
 	if l.offset > 0 {
@@ -1553,11 +1578,11 @@ func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
 		}
 	}
 
-	if line < 0 || line >= len(lines) {
+	if line < 0 || line >= numLines {
 		return 0, 0
 	}
 
-	currentLine := lines[line]
+	currentLine := ansi.Strip(l.getLine(line))
 	gr := uniseg.NewGraphemes(currentLine)
 	startCol = -1
 	upTo := col
@@ -1580,15 +1605,19 @@ func (l *list[T]) findWordBoundaries(col, line int) (startCol, endCol int) {
 }
 
 func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, found bool) {
-	lines := strings.Split(l.rendered, "\n")
-	for i, l := range lines {
-		lines[i] = ansi.Strip(l)
+	// Helper function to get a line with ANSI stripped and icons replaced
+	getCleanLine := func(index int) string {
+		rawLine := l.getLine(index)
+		cleanLine := ansi.Strip(rawLine)
 		for _, icon := range styles.SelectionIgnoreIcons {
-			lines[i] = strings.ReplaceAll(lines[i], icon, " ")
+			cleanLine = strings.ReplaceAll(cleanLine, icon, " ")
 		}
+		return cleanLine
 	}
-	if l.direction == DirectionBackward && len(lines) > l.height {
-		line = (len(lines) - 1) - l.height + line + 1
+
+	numLines := l.lineCount()
+	if l.direction == DirectionBackward && numLines > l.height {
+		line = (numLines - 1) - l.height + line + 1
 	}
 
 	if l.offset > 0 {
@@ -1600,30 +1629,30 @@ func (l *list[T]) findParagraphBoundaries(line int) (startLine, endLine int, fou
 	}
 
 	// Ensure line is within bounds
-	if line < 0 || line >= len(lines) {
+	if line < 0 || line >= numLines {
 		return 0, 0, false
 	}
 
-	if strings.TrimSpace(lines[line]) == "" {
+	if strings.TrimSpace(getCleanLine(line)) == "" {
 		return 0, 0, false
 	}
 
 	// Find start of paragraph (search backwards for empty line or start of text)
 	startLine = line
-	for startLine > 0 && strings.TrimSpace(lines[startLine-1]) != "" {
+	for startLine > 0 && strings.TrimSpace(getCleanLine(startLine-1)) != "" {
 		startLine--
 	}
 
 	// Find end of paragraph (search forwards for empty line or end of text)
 	endLine = line
-	for endLine < len(lines)-1 && strings.TrimSpace(lines[endLine+1]) != "" {
+	for endLine < numLines-1 && strings.TrimSpace(getCleanLine(endLine+1)) != "" {
 		endLine++
 	}
 
 	// revert the line numbers if we are in backward direction
-	if l.direction == DirectionBackward && len(lines) > l.height {
-		startLine = startLine - (len(lines) - 1) + l.height - 1
-		endLine = endLine - (len(lines) - 1) + l.height - 1
+	if l.direction == DirectionBackward && numLines > l.height {
+		startLine = startLine - (numLines - 1) + l.height - 1
+		endLine = endLine - (numLines - 1) + l.height - 1
 	}
 	if l.offset > 0 {
 		if l.direction == DirectionBackward {

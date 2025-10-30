@@ -129,9 +129,9 @@ type list[T Item] struct {
 	movingByItem        bool
 	prevSelectedItemIdx int // Index of previously selected item (-1 if none)
 	selectionStartCol   int
-	selectionStartLine int
-	selectionEndCol    int
-	selectionEndLine   int
+	selectionStartLine  int
+	selectionEndCol     int
+	selectionEndLine    int
 
 	selectionActive bool
 }
@@ -803,7 +803,7 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 				return nil
 			}
 			if inx < 0 || inx >= len(l.items) {
-			continue
+				continue
 			}
 
 			item := l.items[inx]
@@ -833,7 +833,7 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 				return nil
 			}
 			if inx < 0 || inx >= len(l.items) {
-			continue
+				continue
 			}
 
 			item := l.items[inx]
@@ -874,7 +874,7 @@ func (l *list[T]) selectLastItem() {
 func (l *list[T]) firstSelectableItemAbove(inx int) int {
 	for i := inx - 1; i >= 0; i-- {
 		if i < 0 || i >= len(l.items) {
-		continue
+			continue
 		}
 
 		item := l.items[i]
@@ -892,7 +892,7 @@ func (l *list[T]) firstSelectableItemBelow(inx int) int {
 	itemsLen := len(l.items)
 	for i := inx + 1; i < itemsLen; i++ {
 		if i < 0 || i >= len(l.items) {
-		continue
+			continue
 		}
 
 		item := l.items[i]
@@ -991,9 +991,8 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 		}
 
 		if inx < 0 || inx >= len(l.items) {
-		continue
+			continue
 		}
-
 
 		item := l.items[inx]
 
@@ -1409,7 +1408,7 @@ func (l *list[T]) SelectedItem() *T {
 	if l.selectedItemIdx < 0 || l.selectedItemIdx >= len(l.items) {
 		return nil
 	}
- item := l.items[l.selectedItemIdx]
+	item := l.items[l.selectedItemIdx]
 	return &item
 }
 
@@ -1448,7 +1447,7 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 	itemsLen := len(l.items)
 	for i := range itemsLen {
 		if i < 0 || i >= len(l.items) {
-		continue
+			continue
 		}
 
 		item := l.items[i]

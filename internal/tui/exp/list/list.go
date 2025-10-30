@@ -90,7 +90,6 @@ const (
 )
 
 type renderedItem struct {
-	id     string
 	view   string
 	height int
 	start  int
@@ -756,7 +755,7 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 	if itemMiddle < start {
 		// select the first item in the viewport
 		// the item is most likely an item coming after this item
-		inx, ok := l.indexMap.Get(rItem.id)
+		inx, ok := l.indexMap.Get(l.selectedItem)
 		if !ok {
 			return nil
 		}
@@ -776,19 +775,19 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
-				l.selectedItem = renderedItem.id
+				l.selectedItem = item.ID()
 				return l.render()
 			}
 			// item is in the view
 			if renderedItem.start >= start && renderedItem.start <= end {
-				l.selectedItem = renderedItem.id
+				l.selectedItem = item.ID()
 				return l.render()
 			}
 		}
 	} else if itemMiddle > end {
 		// select the first item in the viewport
 		// the item is most likely an item coming after this item
-		inx, ok := l.indexMap.Get(rItem.id)
+		inx, ok := l.indexMap.Get(l.selectedItem)
 		if !ok {
 			return nil
 		}
@@ -808,12 +807,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
-				l.selectedItem = renderedItem.id
+				l.selectedItem = item.ID()
 				return l.render()
 			}
 			// item is in the view
 			if renderedItem.end >= start && renderedItem.end <= end {
-				l.selectedItem = renderedItem.id
+				l.selectedItem = item.ID()
 				return l.render()
 			}
 		}
@@ -1037,7 +1036,6 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 func (l *list[T]) renderItem(item Item) renderedItem {
 	view := item.View()
 	return renderedItem{
-		id:     item.ID(),
 		view:   view,
 		height: lipgloss.Height(view),
 	}

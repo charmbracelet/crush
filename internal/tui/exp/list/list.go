@@ -18,12 +18,6 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-var stringBuilderPool = sync.Pool{
-	New: func() any {
-		return &strings.Builder{}
-	},
-}
-
 const maxGapSize = 100
 
 var newlineBuffer = strings.Repeat("\n", maxGapSize)
@@ -994,9 +988,8 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 		currentContentHeight = rItem.end + 1 + l.gap
 	}
 
-	// second pass: build rendered string efficiently using pooled builder
-	b := stringBuilderPool.Get().(*strings.Builder)
-	b.Reset()
+	// second pass: build rendered string efficiently
+	var b strings.Builder
 
 	// Pre-size the builder to reduce allocations
 	estimatedSize := len(rendered)
@@ -1020,9 +1013,7 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 			}
 		}
 
-		result := b.String()
-		stringBuilderPool.Put(b)
-		return result, finalIndex
+		return b.String(), finalIndex
 	}
 
 	// iterate backwards as fragments are in reversed order
@@ -1040,9 +1031,7 @@ func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string
 	}
 	b.WriteString(rendered)
 
-	result := b.String()
-	stringBuilderPool.Put(b)
-	return result, finalIndex
+	return b.String(), finalIndex
 }
 
 func (l *list[T]) renderItem(item Item) renderedItem {

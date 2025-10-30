@@ -241,7 +241,7 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
+		interp.ExecHandlers(s.execHandlers()...),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("could not run command: %w", err)
@@ -255,6 +255,16 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 	}
 	s.logger.InfoPersist("POSIX command finished", "command", command, "err", err)
 	return stdout.String(), stderr.String(), err
+}
+
+func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
+		s.blockHandler(),
+	}
+	if useGoCoreUtils {
+		handlers = append(handlers, coreutils.ExecHandler)
+	}
+	return handlers
 }
 
 // IsInterrupt checks if an error is due to interruption

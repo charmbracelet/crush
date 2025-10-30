@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 type Editor interface {
@@ -67,6 +68,15 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	// Text selection
+	selectionStartX   int
+	selectionStartY   int
+	selectionEndX     int
+	selectionEndY     int
+	selectionActive   bool
+	hasSelection      bool
+	lastSelectionText string
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -219,6 +229,30 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			x, y := m.toLocalCoords(msg.X, msg.Y)
+			if x >= 0 && y >= 0 {
+				m.startSelection(x, y)
+			}
+		}
+	case tea.MouseMotionMsg:
+		if m.selectionActive {
+			x, y := m.toLocalCoords(msg.X, msg.Y)
+			m.updateSelection(x, y)
+		}
+	case tea.MouseReleaseMsg:
+		if msg.Button == tea.MouseLeft && m.selectionActive {
+			x, y := m.toLocalCoords(msg.X, msg.Y)
+			m.endSelection(x, y)
+
+			if m.hasSelection && m.lastSelectionText != "" {
+				return m, tea.Sequence(
+					tea.SetClipboard(m.lastSelectionText),
+					util.ReportInfo("Selection copied to clipboard"),
+				)
+			}
+		}
 	case tea.PasteMsg:
 		path := strings.ReplaceAll(string(msg), "\\ ", " ")
 		// try to get an image
@@ -304,6 +338,10 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, m.openEditor(m.textarea.Value())
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {
+			if m.hasSelection {
+				m.clearSelection()
+				return m, nil
+			}
 			m.deleteMode = false
 			return m, nil
 		}
@@ -330,6 +368,11 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
 		if ok {
+			// Clear selection when user types
+			if m.hasSelection {
+				m.clearSelection()
+			}
+
 			if kp.String() == "space" || m.textarea.Value() == "" {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""
@@ -424,16 +467,20 @@ func (m *editorCmp) View() string {
 	if m.app.Permissions.SkipRequests() {
 		m.textarea.Placeholder = "Yolo mode!"
 	}
+
+	textareaView := m.textarea.View()
+	if m.hasSelection {
+		textareaView = m.applySelection(textareaView)
+	}
+
 	if len(m.attachments) == 0 {
-		content := t.S().Base.Padding(1).Render(
-			m.textarea.View(),
-		)
+		content := t.S().Base.Padding(1).Render(textareaView)
 		return content
 	}
 	content := t.S().Base.Padding(0, 1, 1, 1).Render(
 		lipgloss.JoinVertical(lipgloss.Top,
 			m.attachmentsContent(),
-			m.textarea.View(),
+			textareaView,
 		),
 	)
 	return content
@@ -539,6 +586,217 @@ func (c *editorCmp) IsCompletionsOpen() bool {
 
 func (c *editorCmp) HasAttachments() bool {
 	return len(c.attachments) > 0
+}
+
+// Selection methods
+func (m *editorCmp) startSelection(x, y int) {
+	m.selectionStartX = x
+	m.selectionStartY = y
+	m.selectionEndX = x
+	m.selectionEndY = y
+	m.selectionActive = true
+	m.hasSelection = false
+}
+
+func (m *editorCmp) updateSelection(x, y int) {
+	m.selectionEndX = x
+	m.selectionEndY = y
+	m.hasSelection = m.selectionStartX != m.selectionEndX || m.selectionStartY != m.selectionEndY
+}
+
+func (m *editorCmp) endSelection(x, y int) {
+	m.selectionEndX = x
+	m.selectionEndY = y
+	m.selectionActive = false
+	m.hasSelection = m.selectionStartX != m.selectionEndX || m.selectionStartY != m.selectionEndY
+}
+
+func (m *editorCmp) clearSelection() {
+	m.selectionStartX = -1
+	m.selectionStartY = -1
+	m.selectionEndX = -1
+	m.selectionEndY = -1
+	m.selectionActive = false
+	m.hasSelection = false
+}
+
+// toLocalCoords converts screen coordinates to local textarea coordinates
+func (m *editorCmp) toLocalCoords(x, y int) (int, int) {
+	return x - m.x - 1, y - m.y // -1 for padding
+}
+
+func (m *editorCmp) applySelection(view string) string {
+	if !m.hasSelection {
+		return view
+	}
+
+	t := styles.CurrentTheme()
+	lines := strings.Split(view, "\n")
+	if len(lines) == 0 {
+		return view
+	}
+
+	// Calculate screen buffer dimensions
+	width := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > width {
+			width = w
+		}
+	}
+
+	// Create and populate screen buffer
+	area := uv.Rect(0, 0, width, len(lines))
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	uv.NewStyledString(view).Draw(scr, area)
+
+	// Normalize selection bounds
+	startX, startY, endX, endY := m.normalizeSelection()
+	startY, endY = m.clampY(startY, endY, scr.Height())
+	startX, endX = m.clampX(startX, endX, scr.Width())
+
+	const promptWidth = 4
+	var extractedText strings.Builder
+
+	// Apply highlighting and extract text
+	for y := startY; y <= endY; y++ {
+		lineStartX, lineEndX := m.getLineRange(y, startY, endY, startX, endX, promptWidth, scr.Width())
+
+		var lineText strings.Builder
+		for x := lineStartX; x < lineEndX; x++ {
+			cell := scr.CellAt(x, y)
+			if cell == nil {
+				lineText.WriteRune(' ')
+				continue
+			}
+
+			if cellStr := cell.String(); len(cellStr) > 0 {
+				lineText.WriteString(cellStr)
+				cell = cell.Clone()
+				cell.Style = cell.Style.
+					Background(t.TextSelection.GetBackground()).
+					Foreground(t.TextSelection.GetForeground())
+				scr.SetCell(x, y, cell)
+			} else {
+				lineText.WriteRune(' ')
+			}
+		}
+
+		if lineText.Len() > 0 {
+			if extractedText.Len() > 0 {
+				extractedText.WriteRune(' ')
+			}
+			extractedText.WriteString(lineText.String())
+		}
+	}
+
+	// Match extracted text with actual content to restore whitespace
+	m.lastSelectionText = m.matchToActualText(extractedText.String(), startX-promptWidth)
+	return scr.Render()
+}
+
+// normalizeSelection ensures start comes before end
+func (m *editorCmp) normalizeSelection() (startX, startY, endX, endY int) {
+	startX, startY = m.selectionStartX, m.selectionStartY
+	endX, endY = m.selectionEndX, m.selectionEndY
+	if startY > endY || (startY == endY && startX > endX) {
+		startX, endX = endX, startX
+		startY, endY = endY, startY
+	}
+	return
+}
+
+// clampY clamps Y coordinates to valid screen buffer range
+func (m *editorCmp) clampY(startY, endY, height int) (int, int) {
+	if startY < 0 {
+		startY = 0
+	}
+	if endY >= height {
+		endY = height - 1
+	}
+	return startY, endY
+}
+
+// clampX clamps X coordinates to valid screen buffer range
+func (m *editorCmp) clampX(startX, endX, width int) (int, int) {
+	if startX < 0 {
+		startX = 0
+	}
+	if endX >= width {
+		endX = width - 1
+	}
+	return startX, endX
+}
+
+// getLineRange calculates the X range for a given line in the selection
+func (m *editorCmp) getLineRange(y, startY, endY, startX, endX, promptWidth, screenWidth int) (int, int) {
+	if y == startY && y == endY {
+		return max(promptWidth, startX), endX + 1
+	}
+	if y == startY {
+		return max(promptWidth, startX), screenWidth
+	}
+	if y == endY {
+		return promptWidth, endX + 1
+	}
+	return promptWidth, screenWidth
+}
+
+// matchToActualText matches extracted text to actual textarea content
+func (m *editorCmp) matchToActualText(extracted string, estimatedStartPos int) string {
+	actualText := m.textarea.Value()
+
+	// Strip whitespace for matching
+	stripWS := func(s string) string {
+		s = strings.ReplaceAll(s, " ", "")
+		s = strings.ReplaceAll(s, "\n", "")
+		return strings.ReplaceAll(s, "\t", "")
+	}
+
+	extractedPlain := stripWS(extracted)
+	actualTextNoSpaces := stripWS(actualText)
+
+	// Find search start position
+	searchStartPos := 0
+	charCount := 0
+	for i, r := range actualText {
+		if r == ' ' || r == '\n' || r == '\t' {
+			continue
+		}
+		if charCount >= estimatedStartPos {
+			searchStartPos = i
+			break
+		}
+		charCount++
+	}
+
+	// Search for match
+	searchFrom := max(0, searchStartPos-50)
+	if startIdx := strings.Index(actualTextNoSpaces[searchFrom:], extractedPlain); startIdx >= 0 {
+		startIdx += searchFrom
+
+		// Map back to original text with whitespace
+		charCount = 0
+		actualStartIdx, actualEndIdx := -1, -1
+		for i, r := range actualText {
+			if r == ' ' || r == '\n' || r == '\t' {
+				continue
+			}
+			if charCount == startIdx && actualStartIdx == -1 {
+				actualStartIdx = i
+			}
+			charCount++
+			if charCount == startIdx+len(extractedPlain) {
+				actualEndIdx = i + 1
+				break
+			}
+		}
+
+		if actualStartIdx >= 0 && actualEndIdx > actualStartIdx {
+			return actualText[actualStartIdx:actualEndIdx]
+		}
+	}
+
+	return extracted
 }
 
 func normalPromptFunc(info textarea.PromptInfo) string {

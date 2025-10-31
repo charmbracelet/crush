@@ -654,6 +654,9 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {

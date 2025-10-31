@@ -373,6 +373,8 @@ func (p *permissionDialogCmp) renderHeader() string {
 		)
 	case tools.FetchToolName:
 		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+	case tools.AgenticFetchToolName:
+		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
 	case tools.ViewToolName:
 		params := p.permission.Params.(tools.ViewPermissionsParams)
 		fileKey := t.S().Muted.Render("File")
@@ -427,6 +429,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateMultiEditContent()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
+	case tools.AgenticFetchToolName:
+		content = p.generateAgenticFetchContent()
 	case tools.ViewToolName:
 		content = p.generateViewContent()
 	case tools.LSToolName:
@@ -565,6 +569,20 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 			Padding(1, 2).
 			Width(p.contentViewPort.Width()).
 			Render(pr.URL)
+		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateAgenticFetchContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams); ok {
+		content := fmt.Sprintf("URL: %s\n\nPrompt: %s", pr.URL, pr.Prompt)
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
 		return finalContent
 	}
 	return ""
@@ -775,6 +793,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	case tools.FetchToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
+	case tools.AgenticFetchToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.4)
 	case tools.ViewToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.4)

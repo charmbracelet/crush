@@ -319,6 +319,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, agentTool)
 	}
 
+	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
+		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, agenticFetchTool)
+	}
+
 	allTools = append(allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -658,7 +666,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	// TODO: make sure we have
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 

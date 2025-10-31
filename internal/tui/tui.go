@@ -270,6 +270,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Deny(msg.Permission)
 		}
 		return a, nil
+	case permissions.PermissionInteractionMsg:
+		// Notify that the user interacted with the permission dialog.
+		a.app.Permissions.NotifyInteraction(msg.ToolCallID)
+		return a, nil
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]
 		if !ok {

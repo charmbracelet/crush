@@ -384,6 +384,11 @@
           "type": "boolean",
           "description": "Disable sending metrics",
           "default": false
+        },
+        "disable_notifications": {
+          "type": "boolean",
+          "description": "Disable desktop notifications",
+          "default": false
         }
       },
       "additionalProperties": false,

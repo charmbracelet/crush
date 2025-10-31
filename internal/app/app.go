@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -34,6 +35,7 @@ type App struct {
 	Permissions permission.Service
 
 	AgentCoordinator agent.Coordinator
+	Notifier         *notification.Notifier
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -61,11 +63,18 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	// Enable notifications by default, disable if configured.
+	notificationsEnabled := cfg.Options == nil || !cfg.Options.DisableNotifications
+
+	notifier := notification.New(notificationsEnabled)
+	permissions := permission.NewPermissionService(ctx, cfg.WorkingDir(), skipPermissionsRequests, allowedTools, notifier)
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permissions,
+		Notifier:    notifier,
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
@@ -276,6 +285,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		app.Notifier,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

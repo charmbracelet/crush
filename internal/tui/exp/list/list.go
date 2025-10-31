@@ -117,7 +117,6 @@ type list[T Item] struct {
 	items         []T
 	renderedItems map[string]renderedItem
 
-	renderMu       sync.Mutex
 	rendered       string
 	renderedHeight int   // cached height of rendered content
 	lineOffsets    []int // cached byte offsets for each line (for fast slicing)
@@ -667,10 +666,8 @@ func (l *list[T]) render() tea.Cmd {
 		focusChangeCmd = l.blurSelectedItem()
 	}
 	if l.rendered != "" {
-		l.renderMu.Lock()
 		rendered, _ := l.renderIterator(0, false, "")
 		l.setRendered(rendered)
-		l.renderMu.Unlock()
 		if l.direction == DirectionBackward {
 			l.recalculateItemPositions()
 		}
@@ -679,29 +676,23 @@ func (l *list[T]) render() tea.Cmd {
 		}
 		return focusChangeCmd
 	}
-	l.renderMu.Lock()
 	rendered, finishIndex := l.renderIterator(0, true, "")
 	l.setRendered(rendered)
-	l.renderMu.Unlock()
 	if l.direction == DirectionBackward {
 		l.recalculateItemPositions()
 	}
-	renderCmd := func() tea.Msg {
-		l.offset = 0
 
-		l.renderMu.Lock()
-		rendered, _ := l.renderIterator(finishIndex, false, l.rendered)
-		l.setRendered(rendered)
-		l.renderMu.Unlock()
-		if l.direction == DirectionBackward {
-			l.recalculateItemPositions()
-		}
-		if l.focused {
-			l.scrollToSelection()
-		}
-		return nil
+	l.offset = 0
+	rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
+	l.setRendered(rendered)
+	if l.direction == DirectionBackward {
+		l.recalculateItemPositions()
 	}
-	return tea.Batch(focusChangeCmd, renderCmd)
+	if l.focused {
+		l.scrollToSelection()
+	}
+
+	return focusChangeCmd
 }
 
 func (l *list[T]) setDefaultSelected() {

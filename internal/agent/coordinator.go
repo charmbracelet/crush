@@ -193,7 +193,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	switch providerCfg.Type {
-	case openai.Name:
+	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
@@ -249,16 +249,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := google.ParseOptions(mergedOptions)
 		if err == nil {
 			options[google.Name] = parsed
-		}
-	case azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		}
-		// azure uses the same options as openaicompat
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
-		if err == nil {
-			options[azure.Name] = parsed
 		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
@@ -566,6 +556,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
+		azure.WithUseResponsesAPI(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()

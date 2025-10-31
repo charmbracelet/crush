@@ -37,12 +37,19 @@ type MultiEditPermissionsParams struct {
 	NewContent string `json:"new_content,omitempty"`
 }
 
+type FailedEdit struct {
+	Index int                `json:"index"`
+	Error string             `json:"error"`
+	Edit  MultiEditOperation `json:"edit"`
+}
+
 type MultiEditResponseMetadata struct {
-	Additions    int    `json:"additions"`
-	Removals     int    `json:"removals"`
-	OldContent   string `json:"old_content,omitempty"`
-	NewContent   string `json:"new_content,omitempty"`
-	EditsApplied int    `json:"edits_applied"`
+	Additions    int          `json:"additions"`
+	Removals     int          `json:"removals"`
+	OldContent   string       `json:"old_content,omitempty"`
+	NewContent   string       `json:"new_content,omitempty"`
+	EditsApplied int          `json:"edits_applied"`
+	EditsFailed  []FailedEdit `json:"edits_failed,omitempty"`
 }
 
 const MultiEditToolName = "multiedit"
@@ -102,9 +109,6 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 
 func validateEdits(edits []MultiEditOperation) error {
 	for i, edit := range edits {
-		if edit.OldString == edit.NewString {
-			return fmt.Errorf("edit %d: old_string and new_string are identical", i+1)
-		}
 		// Only the first edit can have empty old_string (for file creation)
 		if i > 0 && edit.OldString == "" {
 			return fmt.Errorf("edit %d: only the first edit can have empty old_string (for file creation)", i+1)
@@ -136,12 +140,18 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Start with the content from the first edit
 	currentContent := firstEdit.NewString
 
-	// Apply remaining edits to the content
+	// Apply remaining edits to the content, tracking failures
+	var failedEdits []FailedEdit
 	for i := 1; i < len(params.Edits); i++ {
 		edit := params.Edits[i]
 		newContent, err := applyEditToContent(currentContent, edit)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
+			failedEdits = append(failedEdits, FailedEdit{
+				Index: i + 1,
+				Error: err.Error(),
+				Edit:  edit,
+			})
+			continue
 		}
 		currentContent = newContent
 	}
@@ -192,14 +202,23 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
+	editsApplied := len(params.Edits) - len(failedEdits)
+	var message string
+	if len(failedEdits) > 0 {
+		message = fmt.Sprintf("File created with %d of %d edits: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
+	} else {
+		message = fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)
+	}
+
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)),
+		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
 			OldContent:   "",
 			NewContent:   currentContent,
 			Additions:    additions,
 			Removals:     removals,
-			EditsApplied: len(params.Edits),
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
 		},
 	), nil
 }
@@ -242,17 +261,33 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 	currentContent := oldContent
 
-	// Apply all edits sequentially
+	// Apply all edits sequentially, tracking failures
+	var failedEdits []FailedEdit
 	for i, edit := range params.Edits {
 		newContent, err := applyEditToContent(currentContent, edit)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("edit %d failed: %s", i+1, err.Error())), nil
+			failedEdits = append(failedEdits, FailedEdit{
+				Index: i + 1,
+				Error: err.Error(),
+				Edit:  edit,
+			})
+			continue
 		}
 		currentContent = newContent
 	}
 
 	// Check if content actually changed
 	if oldContent == currentContent {
+		// If we have failed edits, report them
+		if len(failedEdits) > 0 {
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextErrorResponse(fmt.Sprintf("no changes made - all %d edit(s) failed", len(failedEdits))),
+				MultiEditResponseMetadata{
+					EditsApplied: 0,
+					EditsFailed:  failedEdits,
+				},
+			), nil
+		}
 		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
@@ -316,14 +351,23 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
+	editsApplied := len(params.Edits) - len(failedEdits)
+	var message string
+	if len(failedEdits) > 0 {
+		message = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
+	} else {
+		message = fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)
+	}
+
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)),
+		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
 			OldContent:   oldContent,
 			NewContent:   currentContent,
 			Additions:    additions,
 			Removals:     removals,
-			EditsApplied: len(params.Edits),
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
 		},
 	), nil
 }

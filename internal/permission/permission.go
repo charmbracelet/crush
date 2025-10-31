@@ -3,10 +3,12 @@ package permission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -29,6 +31,7 @@ type PermissionNotification struct {
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`
+	Interacted bool   `json:"interacted"` // true when user scrolls or navigates the dialog
 }
 
 type PermissionRequest struct {
@@ -52,12 +55,22 @@ type Service interface {
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	NotifyInteraction(toolCallID string)
 }
+
+type permissionNotifier interface {
+	NotifyPermissionRequest(ctx context.Context, title, message string, delay time.Duration) context.CancelFunc
+}
+
+const permissionNotificationDelay = 5 * time.Second
 
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
 	notificationBroker    *pubsub.Broker[PermissionNotification]
+	notifier              permissionNotifier
+	notificationCtx       context.Context
+	notificationCancels   *csync.Map[string, context.CancelFunc]
 	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
@@ -73,6 +86,7 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
+	s.cancelPermissionNotification(permission.ToolCallID)
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
@@ -92,6 +106,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
+	s.cancelPermissionNotification(permission.ToolCallID)
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
@@ -107,6 +122,7 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
+	s.cancelPermissionNotification(permission.ToolCallID)
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    false,
@@ -198,6 +214,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
+	s.schedulePermissionNotification(permission)
 
 	return <-respCh
 }
@@ -212,6 +229,14 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 	return s.notificationBroker.Subscribe(ctx)
 }
 
+func (s *permissionService) NotifyInteraction(toolCallID string) {
+	s.cancelPermissionNotification(toolCallID)
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: toolCallID,
+		Interacted: true,
+	})
+}
+
 func (s *permissionService) SetSkipRequests(skip bool) {
 	s.skip = skip
 }
@@ -220,15 +245,49 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+func NewPermissionService(ctx context.Context, workingDir string, skip bool, allowedTools []string, notifier permissionNotifier) Service {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		notifier:            notifier,
+		notificationCtx:     ctx,
+		notificationCancels: csync.NewMap[string, context.CancelFunc](),
 		workingDir:          workingDir,
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
+	}
+}
+
+func (s *permissionService) schedulePermissionNotification(permission PermissionRequest) {
+	if s.notifier == nil {
+		return
+	}
+
+	if cancel, ok := s.notificationCancels.Take(permission.ToolCallID); ok && cancel != nil {
+		cancel()
+	}
+
+	title := "💘 Crush is waiting"
+	message := fmt.Sprintf("Permission required to execute \"%s\"", permission.ToolName)
+	cancel := s.notifier.NotifyPermissionRequest(s.notificationCtx, title, message, permissionNotificationDelay)
+	if cancel == nil {
+		cancel = func() {}
+	}
+	s.notificationCancels.Set(permission.ToolCallID, cancel)
+}
+
+func (s *permissionService) cancelPermissionNotification(toolCallID string) {
+	if s.notifier == nil {
+		return
+	}
+
+	if cancel, ok := s.notificationCancels.Take(toolCallID); ok && cancel != nil {
+		cancel()
 	}
 }

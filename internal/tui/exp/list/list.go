@@ -681,20 +681,18 @@ func (l *list[T]) render() tea.Cmd {
 	if l.direction == DirectionBackward {
 		l.recalculateItemPositions()
 	}
-	renderCmd := func() tea.Msg {
-		l.offset = 0
 
-		rendered, _ := l.renderIterator(finishIndex, false, l.rendered)
-		l.setRendered(rendered)
-		if l.direction == DirectionBackward {
-			l.recalculateItemPositions()
-		}
-		if l.focused {
-			l.scrollToSelection()
-		}
-		return nil
+	l.offset = 0
+	rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
+	l.setRendered(rendered)
+	if l.direction == DirectionBackward {
+		l.recalculateItemPositions()
 	}
-	return tea.Batch(focusChangeCmd, renderCmd)
+	if l.focused {
+		l.scrollToSelection()
+	}
+
+	return focusChangeCmd
 }
 
 func (l *list[T]) setDefaultSelected() {

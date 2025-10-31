@@ -45,6 +45,7 @@ Thumbs.db
 **/.crush/**
 
 /crush
+/tmp/
 
 manpages/
 completions/

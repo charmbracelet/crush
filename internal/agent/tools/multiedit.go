@@ -109,9 +109,6 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 
 func validateEdits(edits []MultiEditOperation) error {
 	for i, edit := range edits {
-		if edit.OldString == edit.NewString {
-			return fmt.Errorf("edit %d: old_string and new_string are identical", i+1)
-		}
 		// Only the first edit can have empty old_string (for file creation)
 		if i > 0 && edit.OldString == "" {
 			return fmt.Errorf("edit %d: only the first edit can have empty old_string (for file creation)", i+1)

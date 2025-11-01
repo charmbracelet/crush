@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
+	cmdregistry "github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -67,6 +68,7 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+	closedViaEscape       bool // Track if completions were closed via Escape key
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -156,6 +158,17 @@ func (m *editorCmp) send() tea.Cmd {
 		return nil
 	}
 
+	// Check if input starts with backslash (command execution)
+	if strings.HasPrefix(value, "\\") {
+		// Parse command name and arguments
+		commandName, args := cmdregistry.ParseCommandInput(value)
+		if commandName != "" {
+			// Execute command
+			return m.executeCommand(commandName, args)
+		}
+		// If backslash but no valid command, fall through to regular message send
+	}
+
 	// Change the placeholder when sending a new message.
 	m.randomizePlaceholders()
 
@@ -165,6 +178,87 @@ func (m *editorCmp) send() tea.Cmd {
 			Attachments: attachments,
 		}),
 	)
+}
+
+// executeCommand executes a slash command using the command executor.
+//
+// It validates prerequisites (session, agent coordinator) and handles errors gracefully.
+// If execution fails, an error message is displayed to the user via the status system.
+// If no session exists, it creates one automatically (similar to sendMessage).
+//
+// Parameters:
+//   - commandName: The full command name (e.g., "help" or "frontend:review-pr")
+//   - args: Command arguments provided by the user
+//
+// Returns a tea.Cmd that executes the command asynchronously and handles errors.
+func (m *editorCmp) executeCommand(commandName string, args []string) tea.Cmd {
+	// Check if agent coordinator is available
+	if m.app.AgentCoordinator == nil {
+		return util.ReportError(fmt.Errorf("agent coordinator is not initialized"))
+	}
+
+	// Get working directory
+	workingDir := m.app.Config().WorkingDir()
+
+	// Create command registry and executor
+	registry := cmdregistry.NewRegistry(workingDir)
+	_, err := registry.LoadCommands()
+	if err != nil {
+		// Logging is handled by registry, but we should still report to user
+		return util.ReportError(fmt.Errorf("failed to load commands: %w", err))
+	}
+
+	executor := cmdregistry.NewExecutor(registry, m.app.AgentCoordinator, m.app.Messages, workingDir)
+
+	// Handle session creation if needed (similar to sendMessage)
+	session := m.session
+	if session.ID == "" {
+		// Create a new session if one doesn't exist, then execute command
+		return func() tea.Msg {
+			newSession, err := m.app.Sessions.Create(context.Background(), "New Session")
+			if err != nil {
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  fmt.Sprintf("failed to create session: %s", err.Error()),
+				}
+			}
+			session = newSession
+			
+			// Execute command with the new session
+			execErr := executor.Execute(context.Background(), session.ID, commandName, args)
+			
+			// Always notify page about new session first (updates editor's session)
+			// Then handle command execution result
+			// Note: We can only return one message, so we prioritize session notification
+			// The command execution error is logged by the executor
+			if execErr != nil {
+				// Return error, but session was created so next attempt will work
+				// The session will be persisted in the database even if we don't notify here
+				// User can manually refresh or the next command will use the existing session
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  execErr.Error(),
+				}
+			}
+			
+			// Command executed successfully, notify page about new session
+			return chat.SessionSelectedMsg(session)
+		}
+	}
+
+	// Execute command asynchronously (session already exists)
+	return func() tea.Msg {
+		err := executor.Execute(context.Background(), session.ID, commandName, args)
+		if err != nil {
+			// Return error message to be displayed
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  err.Error(),
+			}
+		}
+		// Command executed successfully
+		return nil
+	}
 }
 
 func (m *editorCmp) repositionCompletions() tea.Msg {
@@ -186,10 +280,16 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, nil
 	case completions.CompletionsOpenedMsg:
 		m.isCompletionsOpen = true
+		m.closedViaEscape = false // Reset flag when completions are opened
 	case completions.CompletionsClosedMsg:
 		m.isCompletionsOpen = false
 		m.currentQuery = ""
-		m.completionsStartIndex = 0
+		// If closed via Escape, preserve completionsStartIndex so user can continue typing or delete \
+		// Otherwise, reset it (e.g., when closing via space or other means)
+		if !m.closedViaEscape {
+			m.completionsStartIndex = 0
+		}
+		m.closedViaEscape = false // Reset flag
 	case completions.SelectCompletionMsg:
 		if !m.isCompletionsOpen {
 			return m, nil
@@ -203,6 +303,24 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				value[m.completionsStartIndex+len(word):] // Append the rest of the value
 			// XXX: This will always move the cursor to the end of the textarea.
 			m.textarea.SetValue(value)
+			m.textarea.MoveToEnd()
+			if !msg.Insert {
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.completionsStartIndex = 0
+			}
+		} else if cmd, ok := msg.Value.(cmdregistry.Command); ok {
+			// Handle command selection
+			word := m.textarea.Word()
+			value := m.textarea.Value()
+			// Replace the query (e.g., `\hel` → `\help` or `\frontend:rev` → `\frontend:review-pr`)
+			commandName := cmd.Name // Includes namespace if applicable
+			value = value[:m.completionsStartIndex] + // Keep text before backslash
+				"\\" + commandName + // Insert backslash and command name
+				value[m.completionsStartIndex+len(word):] // Append the rest of the value
+			m.textarea.SetValue(value)
+			// XXX: This will always move the cursor to the end of the textarea.
+			// TODO: Improve cursor positioning to place cursor after command name
 			m.textarea.MoveToEnd()
 			if !msg.Insert {
 				m.isCompletionsOpen = false
@@ -264,16 +382,41 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
-		// Completions
+		// File path completions (forward slash)
 		case msg.String() == "/" && !m.isCompletionsOpen &&
 			// only show if beginning of prompt, or if previous char is a space or newline:
 			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
 			m.isCompletionsOpen = true
 			m.currentQuery = ""
 			m.completionsStartIndex = curIdx
+			m.closedViaEscape = false // Reset flag when opening new completions
 			cmds = append(cmds, m.startCompletions)
+		// Command completions (backslash)
+		// Only trigger if backslash is the first character of the input
+		case msg.String() == "\\" && !m.isCompletionsOpen &&
+			len(m.textarea.Value()) == 0:
+			m.isCompletionsOpen = true
+			m.currentQuery = ""
+			m.completionsStartIndex = curIdx
+			m.closedViaEscape = false // Reset flag when opening new completions
+			cmds = append(cmds, m.startCommandCompletions)
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+		}
+		// Handle Escape key to close completions
+		if key.Matches(msg, DeleteKeyMaps.Escape) {
+			if m.isCompletionsOpen {
+				// Close completions but keep the \ prefix in editor
+				m.isCompletionsOpen = false
+				m.currentQuery = ""
+				m.closedViaEscape = true // Mark that we closed via Escape
+				// Don't reset completionsStartIndex - keep it so user can continue typing or delete \
+				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+				return m, tea.Batch(cmds...)
+			}
+			// If not in completions, handle escape for delete mode
+			m.deleteMode = false
+			return m, nil
 		}
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
@@ -302,10 +445,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
 			return m, m.openEditor(m.textarea.Value())
-		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
-			m.deleteMode = false
-			return m, nil
 		}
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
@@ -338,9 +477,26 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			} else {
 				word := m.textarea.Word()
 				if strings.HasPrefix(word, "/") {
+					// File path completions
 					// XXX: wont' work if editing in the middle of the field.
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
+					x, y := m.completionsPosition()
+					x -= len(m.currentQuery)
+					m.isCompletionsOpen = true
+					cmds = append(cmds,
+						util.CmdHandler(completions.FilterCompletionsMsg{
+							Query:  m.currentQuery,
+							Reopen: m.isCompletionsOpen,
+							X:      x,
+							Y:      y,
+						}),
+					)
+				} else if strings.HasPrefix(word, "\\") && strings.HasPrefix(m.textarea.Value(), "\\") {
+					// Command completions - only if backslash is at the start of input
+					// XXX: wont' work if editing in the middle of the field.
+					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
+					m.currentQuery = m.extractCommandQuery(m.textarea.Value(), m.completionsStartIndex)
 					x, y := m.completionsPosition()
 					x -= len(m.currentQuery)
 					m.isCompletionsOpen = true
@@ -502,6 +658,117 @@ func (m *editorCmp) startCompletions() tea.Msg {
 		X:           x,
 		Y:           y,
 		MaxResults:  maxFileResults,
+	}
+}
+
+// extractCommandQuery extracts the command query from the editor input after a backslash.
+//
+// It extracts text after `\` up to the cursor position or the next whitespace/end of input.
+// This is used for filtering command completions as the user types.
+//
+// Examples:
+//   - `\hel` → `hel` (matches "help")
+//   - `\cbut` → `cbut` (matches "frontend:components:button" via fuzzy matching)
+//   - `\frontend:rev` → `frontend:rev` (matches "frontend:review-pr")
+//   - `\` → `""` (empty query - shows all commands)
+//
+// Parameters:
+//   - value: The full textarea value
+//   - startIndex: The index where `\` was typed
+//
+// Returns the extracted query string (without the leading backslash).
+func (m *editorCmp) extractCommandQuery(value string, startIndex int) string {
+	if startIndex < 0 || startIndex >= len(value) {
+		return ""
+	}
+
+	// Get the current word starting from startIndex
+	// Find the end of the word (whitespace or end of string)
+	endIndex := startIndex + 1 // Skip the backslash
+	for endIndex < len(value) && !unicode.IsSpace(rune(value[endIndex])) {
+		endIndex++
+	}
+
+	// Extract the query (text after backslash)
+	if endIndex > startIndex+1 {
+		return value[startIndex+1 : endIndex]
+	}
+
+	// Empty query (just backslash)
+	return ""
+}
+
+// startCommandCompletions opens the command completions popup when the user types `\`.
+//
+// It loads all commands from the registry, sorts them alphabetically, and displays them
+// in the completion popup. Commands are displayed with their descriptions if available.
+//
+// **Reload Integration**: This function creates a new registry instance each time it's called,
+// ensuring that command completions always reflect the latest state of command files. This means
+// that after a reload (via Ctrl+P → Reload Commands), the next time completions are opened,
+// they will automatically include newly added commands and exclude removed ones. The completion
+// provider effectively refreshes its command list by creating a fresh registry and calling
+// ListCommands() each time completions are opened, satisfying the requirement that completions
+// reflect reloaded commands.
+//
+// Returns OpenCompletionsMsg with all available commands, positioned at the cursor.
+func (m *editorCmp) startCommandCompletions() tea.Msg {
+	// Get working directory from config
+	workingDir := m.app.Config().WorkingDir()
+
+	// Create command registry and load commands
+	// NOTE: We create a new registry each time to ensure completions always reflect
+	// the latest command state, including after reloads. This satisfies the requirement
+	// that the completion provider refreshes its command list after reload.
+	registry := cmdregistry.NewRegistry(workingDir)
+	_, err := registry.LoadCommands()
+	if err != nil {
+		// If loading fails, return empty completions (errors are logged by registry)
+		return completions.OpenCompletionsMsg{
+			Completions: []completions.Completion{},
+			X:           0,
+			Y:           0,
+			MaxResults:  0,
+		}
+	}
+
+	// Load all commands and convert to completion items
+	// This calls registry.ListCommands() which returns the latest command list,
+	// ensuring that after a reload, new commands are available and removed commands
+	// are no longer present in completions.
+	allCommands := registry.ListCommands()
+	
+	// Add built-in help command to the list
+	helpCommand := cmdregistry.Command{
+		Name:        "help",
+		Description: "Show help listing all available commands",
+	}
+	allCommands = append(allCommands, helpCommand)
+	
+	// Sort commands alphabetically by name (includes namespace, e.g., "frontend:review-pr")
+	slices.SortFunc(allCommands, func(a, b cmdregistry.Command) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	
+	completionItems := make([]completions.Completion, 0, len(allCommands))
+	for _, cmd := range allCommands {
+		// Convert command to completion item
+		displayText := cmd.Name
+		if cmd.Description != "" {
+			displayText = fmt.Sprintf("%s - %s", cmd.Name, cmd.Description)
+		}
+		completionItems = append(completionItems, completions.Completion{
+			Title: displayText,
+			Value: cmd, // Store the Command struct as the value
+		})
+	}
+
+	x, y := m.completionsPosition()
+	return completions.OpenCompletionsMsg{
+		Completions: completionItems,
+		X:           x,
+		Y:           y,
+		MaxResults:  0, // No limit for command completions - empty query shows all commands
 	}
 }
 

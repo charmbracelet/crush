@@ -463,7 +463,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Models):
-		// if the app is not configured show no commands
+		// if the app is not configured show no models
 		if !a.isConfigured {
 			return nil
 		}

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -22,11 +23,27 @@ echo "What is this code doing?" | crush run
 
 # Run with quiet mode (no spinner)
 crush run -q "Generate a README for this project"
+
+# Override provider and model
+crush run --provider anthropic --model claude-sonnet-4-0 "Explain this code"
+
+# Override only the model
+crush run --model gpt-4 "Write a hello world program"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		provider, _ := cmd.Flags().GetString("provider")
+		model, _ := cmd.Flags().GetString("model")
 
-		app, err := setupApp(cmd)
+		// Apply provider/model overrides if specified
+		var configModifier func(*config.Config) error
+		if provider != "" || model != "" {
+			configModifier = func(cfg *config.Config) error {
+				return cfg.ApplyRuntimeOverrides(provider, model)
+			}
+		}
+
+		app, err := setupAppWithConfigModifier(cmd, configModifier)
 		if err != nil {
 			return err
 		}
@@ -55,4 +72,6 @@ crush run -q "Generate a README for this project"
 
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	runCmd.Flags().String("provider", "", "Override the LLM provider (e.g., openai, anthropic)")
+	runCmd.Flags().String("model", "", "Override the LLM model (e.g., gpt-4, claude-sonnet-4-0)")
 }

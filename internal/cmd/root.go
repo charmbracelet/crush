@@ -196,6 +196,60 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	return appInstance, nil
 }
 
+// setupAppWithConfigModifier is a variant of setupApp that allows modifying config before agent initialization.
+// Only use this when you need to apply runtime config changes (like CLI flag overrides).
+func setupAppWithConfigModifier(cmd *cobra.Command, configModifier func(*config.Config) error) (*app.App, error) {
+	debug, _ := cmd.Flags().GetBool("debug")
+	yolo, _ := cmd.Flags().GetBool("yolo")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	ctx := cmd.Context()
+
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := config.Init(cwd, dataDir, debug)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply config modifications and rebuild agents with modified config
+	if configModifier != nil {
+		if err := configModifier(cfg); err != nil {
+			return nil, err
+		}
+		cfg.SetupAgents()
+	}
+
+	if cfg.Permissions == nil {
+		cfg.Permissions = &config.Permissions{}
+	}
+	cfg.Permissions.SkipRequests = yolo
+
+	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+		return nil, err
+	}
+
+	// Connect to DB; this will also run migrations.
+	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	appInstance, err := app.New(ctx, conn, cfg)
+	if err != nil {
+		slog.Error("Failed to create app instance", "error", err)
+		return nil, err
+	}
+
+	if shouldEnableMetrics() {
+		event.Init()
+	}
+
+	return appInstance, nil
+}
+
 func shouldEnableMetrics() bool {
 	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
 		return false

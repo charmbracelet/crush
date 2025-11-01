@@ -401,6 +401,94 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	return nil
 }
 
+// ApplyRuntimeOverrides modifies the config to use the specified provider and/or model.
+// This is a transient override (not persisted to disk) intended for CLI flag overrides.
+// It must be called before SetupAgents() to ensure agents are built with the correct config.
+func (c *Config) ApplyRuntimeOverrides(provider, model string) error {
+	if provider == "" && model == "" {
+		return nil
+	}
+
+	// Initialize Models map if it doesn't exist
+	if c.Models == nil {
+		c.Models = make(map[SelectedModelType]SelectedModel)
+	}
+
+	// Get the current large model config (create if doesn't exist)
+	largeModel, ok := c.Models[SelectedModelTypeLarge]
+	if !ok {
+		largeModel = SelectedModel{}
+	}
+
+	// Override provider if specified
+	if provider != "" {
+		if _, exists := c.Providers.Get(provider); !exists {
+			return fmt.Errorf("provider '%s' not found in configuration - please configure it first or use an existing provider", provider)
+		}
+		slog.Info("Overriding provider", "from", largeModel.Provider, "to", provider)
+		largeModel.Provider = provider
+	}
+
+	// Override model if specified
+	if model != "" {
+		slog.Info("Overriding model", "from", largeModel.Model, "to", model)
+		largeModel.Model = model
+
+		// Ensure the model exists in the provider's model list
+		if err := c.ensureModelInProvider(largeModel.Provider, model); err != nil {
+			return err
+		}
+	}
+
+	// Update the config with modified model
+	c.Models[SelectedModelTypeLarge] = largeModel
+	slog.Info("Applied model overrides",
+		"provider", largeModel.Provider,
+		"model", largeModel.Model)
+
+	return nil
+}
+
+// ensureModelInProvider adds the model to the provider's model list if it doesn't exist.
+// This allows using any model ID even if it's not in Catwalk's database.
+func (c *Config) ensureModelInProvider(provider, modelID string) error {
+	providerCfg, ok := c.Providers.Get(provider)
+	if !ok {
+		return fmt.Errorf("provider '%s' not found", provider)
+	}
+
+	// Check if model already exists
+	for _, m := range providerCfg.Models {
+		if m.ID == modelID {
+			return nil // Model already exists
+		}
+	}
+
+	// Model doesn't exist - add it with defaults
+	slog.Info("Adding model to provider config", "model", modelID, "provider", provider)
+
+	newModel := catwalk.Model{
+		ID:   modelID,
+		Name: modelID,
+	}
+
+	// Copy properties from an existing model if available (better defaults than hardcoded values)
+	if len(providerCfg.Models) > 0 {
+		referenceModel := providerCfg.Models[0]
+		newModel.ContextWindow = referenceModel.ContextWindow
+		newModel.DefaultMaxTokens = referenceModel.DefaultMaxTokens
+	} else {
+		// Fallback defaults if provider has no models
+		newModel.ContextWindow = 128000
+		newModel.DefaultMaxTokens = 4096
+	}
+
+	providerCfg.Models = append(providerCfg.Models, newModel)
+	c.Providers.Set(provider, providerCfg)
+
+	return nil
+}
+
 func (c *Config) SetConfigField(key string, value any) error {
 	// read the data
 	data, err := os.ReadFile(c.dataConfigDir)

@@ -37,6 +37,11 @@ type PermissionResponseMsg struct {
 	Action     PermissionAction
 }
 
+// PermissionInteractionMsg signals that the user has interacted with the permission dialog
+type PermissionInteractionMsg struct {
+	ToolCallID string
+}
+
 // PermissionDialogCmp interface for permission dialog component
 type PermissionDialogCmp interface {
 	dialogs.DialogModel
@@ -68,6 +73,11 @@ type permissionDialogCmp struct {
 	finalDialogHeight int
 
 	keyMap KeyMap
+
+	// hasInteracted prevents a stream of redundant interaction events for every scroll
+	// when we only care about the first event for notification purposes. If we later care
+	// about all interaction events, maybe the flag should be removed.
+	hasInteracted bool
 }
 
 func NewPermissionDialogCmp(permission permission.PermissionRequest, opts *Options) PermissionDialogCmp {
@@ -97,6 +107,7 @@ func (p *permissionDialogCmp) supportsDiffView() bool {
 
 func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	var interactionCmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -106,29 +117,29 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
+		interactionCmd = p.emitInteraction()
 		switch {
 		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab):
 			p.selectedOption = (p.selectedOption + 1) % 3
-			return p, nil
 		case key.Matches(msg, p.keyMap.Left):
 			p.selectedOption = (p.selectedOption + 2) % 3
 		case key.Matches(msg, p.keyMap.Select):
-			return p, p.selectCurrentOption()
+			cmds = append(cmds, p.selectCurrentOption())
 		case key.Matches(msg, p.keyMap.Allow):
-			return p, tea.Batch(
+			cmds = append(cmds, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllow, Permission: p.permission}),
-			)
+			))
 		case key.Matches(msg, p.keyMap.AllowSession):
-			return p, tea.Batch(
+			cmds = append(cmds, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllowForSession, Permission: p.permission}),
-			)
+			))
 		case key.Matches(msg, p.keyMap.Deny):
-			return p, tea.Batch(
+			cmds = append(cmds, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionDeny, Permission: p.permission}),
-			)
+			))
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.supportsDiffView() {
 				if p.diffSplitMode == nil {
@@ -138,27 +149,22 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					*p.diffSplitMode = !*p.diffSplitMode
 				}
 				p.contentDirty = true // Mark content as dirty when diff mode changes
-				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			if p.supportsDiffView() {
 				p.scrollDown()
-				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			if p.supportsDiffView() {
 				p.scrollUp()
-				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
 			if p.supportsDiffView() {
 				p.scrollLeft()
-				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
 			if p.supportsDiffView() {
 				p.scrollRight()
-				return p, nil
 			}
 		default:
 			// Pass other keys to viewport
@@ -168,6 +174,7 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 	case tea.MouseWheelMsg:
 		if p.supportsDiffView() && p.isMouseOverDialog(msg.Mouse().X, msg.Mouse().Y) {
+			interactionCmd = p.emitInteraction()
 			switch msg.Button {
 			case tea.MouseWheelDown:
 				p.scrollDown()
@@ -179,6 +186,10 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				p.scrollRight()
 			}
 		}
+	}
+
+	if interactionCmd != nil {
+		cmds = append(cmds, interactionCmd)
 	}
 
 	return p, tea.Batch(cmds...)
@@ -202,6 +213,16 @@ func (p *permissionDialogCmp) scrollLeft() {
 func (p *permissionDialogCmp) scrollRight() {
 	p.diffXOffset += 5
 	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) emitInteraction() tea.Cmd {
+	if p.hasInteracted {
+		return nil
+	}
+	p.hasInteracted = true
+	return util.CmdHandler(PermissionInteractionMsg{
+		ToolCallID: p.permission.ToolCallID,
+	})
 }
 
 // isMouseOverDialog checks if the given mouse coordinates are within the dialog bounds.

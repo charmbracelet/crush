@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"golang.org/x/sync/errgroup"
@@ -52,6 +53,12 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	// CancelCompletionNotification cancels any scheduled "turn ended"
+	// notification for the provided sessionID.
+	CancelCompletionNotification(sessionID string)
+	// HasPendingCompletionNotification reports whether there is a pending
+	// turn-end notification for the given session.
+	HasPendingCompletionNotification(sessionID string) bool
 }
 
 type coordinator struct {
@@ -61,6 +68,8 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
+	notifier    *notification.Notifier
+	notifyCtx   context.Context
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -76,7 +85,11 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	notifier *notification.Notifier,
 ) (Coordinator, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c := &coordinator{
 		cfg:         cfg,
 		sessions:    sessions,
@@ -84,6 +97,8 @@ func NewCoordinator(
 		permissions: permissions,
 		history:     history,
 		lspClients:  lspClients,
+		notifier:    notifier,
+		notifyCtx:   ctx,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -142,6 +157,22 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		FrequencyPenalty: freqPenalty,
 		PresencePenalty:  presPenalty,
 	})
+}
+
+// CancelCompletionNotification implements Coordinator.
+func (c *coordinator) CancelCompletionNotification(sessionID string) {
+	if c.currentAgent == nil || sessionID == "" {
+		return
+	}
+	c.currentAgent.CancelCompletionNotification(sessionID)
+}
+
+// HasPendingCompletionNotification implements Coordinator.
+func (c *coordinator) HasPendingCompletionNotification(sessionID string) bool {
+	if c.currentAgent == nil || sessionID == "" {
+		return false
+	}
+	return c.currentAgent.HasPendingCompletionNotification(sessionID)
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
@@ -287,15 +318,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		systemPrompt,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         systemPrompt,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Notifier:             c.notifier,
+		NotificationCtx:      c.notifyCtx,
 	})
 	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)

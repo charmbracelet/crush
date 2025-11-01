@@ -361,6 +361,8 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
 
 #### Ollama
 
+You can use local AI with `ollama` but take good care that the model you use supports tools.
+
 ```json
 {
   "providers": {

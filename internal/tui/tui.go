@@ -191,6 +191,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case commands.SwitchModelMsg:
+		// Opening model dialog is interaction; cancel pending turn-end notif.
+		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.HasPendingCompletionNotification(a.selectedSessionID) {
+			a.app.AgentCoordinator.CancelCompletionNotification(a.selectedSessionID)
+		}
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
 				Model: models.NewModelDialogCmp(),
@@ -424,8 +428,13 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
 		return a.handleWindowResize(a.wWidth, a.wHeight)
-	// dialogs
+		// dialogs
 	case key.Matches(msg, a.keyMap.Commands):
+		// Opening the command palette counts as interaction; cancel pending
+		// turn-end notification for the selected session if any.
+		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.HasPendingCompletionNotification(a.selectedSessionID) {
+			a.app.AgentCoordinator.CancelCompletionNotification(a.selectedSessionID)
+		}
 		// if the app is not configured show no commands
 		if !a.isConfigured {
 			return nil
@@ -443,6 +452,10 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		// if the app is not configured show no sessions
 		if !a.isConfigured {
 			return nil
+		}
+		// Opening sessions dialog is interaction; cancel pending turn-end notif.
+		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.HasPendingCompletionNotification(a.selectedSessionID) {
+			a.app.AgentCoordinator.CancelCompletionNotification(a.selectedSessionID)
 		}
 		if a.dialog.ActiveDialogID() == sessions.SessionsDialogID {
 			return util.CmdHandler(dialogs.CloseDialogMsg{})

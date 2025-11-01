@@ -129,6 +129,9 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, nil // Ignore clicks outside the component
 		}
 		if msg.Button == tea.MouseLeft {
+			if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+				m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+			}
 			cmds = append(cmds, m.handleMouseClick(x, y))
 			return m, tea.Batch(cmds...)
 		}
@@ -148,6 +151,9 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, nil // Ignore clicks outside the component
 		}
 		if msg.Button == tea.MouseLeft {
+			if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+				m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+			}
 			m.listCmp.EndSelection(x, y)
 		}
 		return m, tea.Batch(cmds...)
@@ -185,6 +191,9 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if msg.endSelection {
 				m.listCmp.EndSelection(msg.x, msg.y)
 			}
+			if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+				m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+			}
 			m.listCmp.SelectionStop()
 			cmds = append(cmds, m.CopySelectedText(true))
 			return m, tea.Batch(cmds...)
@@ -207,6 +216,9 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.MouseWheelMsg:
+		if m.app != nil && m.app.AgentCoordinator != nil && m.session.ID != "" && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+			m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+		}
 		u, cmd := m.listCmp.Update(msg)
 		m.listCmp = u.(list.List[list.Item])
 		cmds = append(cmds, cmd)

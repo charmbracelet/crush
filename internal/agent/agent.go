@@ -59,6 +59,12 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+	// CancelCompletionNotification cancels any scheduled "turn ended"
+	// notification for the provided sessionID.
+	CancelCompletionNotification(sessionID string)
+	// HasPendingCompletionNotification returns true if a turn-end
+	// notification has been scheduled and not yet cancelled/shown.
+	HasPendingCompletionNotification(sessionID string) bool
 }
 
 const completionNotificationDelay = 5 * time.Second
@@ -544,6 +550,20 @@ func (a *sessionAgent) cancelCompletionNotification(sessionID string) {
 	if cancel, ok := a.completionCancels.Take(sessionID); ok && cancel != nil {
 		cancel()
 	}
+}
+
+// CancelCompletionNotification implements SessionAgent.
+func (a *sessionAgent) CancelCompletionNotification(sessionID string) {
+	a.cancelCompletionNotification(sessionID)
+}
+
+// HasPendingCompletionNotification implements SessionAgent.
+func (a *sessionAgent) HasPendingCompletionNotification(sessionID string) bool {
+	if a.IsSessionBusy(sessionID) {
+		return false
+	}
+	_, ok := a.completionCancels.Get(sessionID)
+	return ok
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {

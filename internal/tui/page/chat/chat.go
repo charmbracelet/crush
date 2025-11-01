@@ -174,6 +174,10 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			msg.Y -= 1
 		}
 		if p.isMouseOverChat(msg.X, msg.Y) {
+			// Interaction: cancel any pending turn-end notification for this session.
+			if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+				p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+			}
 			u, cmd := p.chat.Update(msg)
 			p.chat = u.(chat.MessageListCmp)
 			return p, cmd
@@ -246,6 +250,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 	case commands.ToggleCompactModeMsg:
+		if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+			p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+		}
 		p.forceCompact = !p.forceCompact
 		var cmd tea.Cmd
 		if p.forceCompact {
@@ -257,8 +264,14 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, tea.Batch(p.SetSize(p.width, p.height), cmd)
 	case commands.ToggleThinkingMsg:
+		if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+			p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+		}
 		return p, p.toggleThinking()
 	case commands.OpenReasoningDialogMsg:
+		if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+			p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+		}
 		return p, p.openReasoningDialog()
 	case reasoning.ReasoningEffortSelectedMsg:
 		return p, p.handleReasoningEffortSelected(msg.Effort)
@@ -316,6 +329,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, tea.Batch(cmds...)
 	case commands.ToggleYoloModeMsg:
 		// update the editor style
+		if p.app != nil && p.app.AgentCoordinator != nil && p.session.ID != "" && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+			p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+		}
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
 		return p, cmd
@@ -360,6 +376,11 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, p.newSession()
 	case tea.KeyPressMsg:
+		// If the chat pane is focused, any key-based navigation in chat counts
+		// as interaction; cancel any pending turn-end notification.
+		if p.focusedPane == PanelTypeChat && p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+			p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+		}
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
 			// if we have no agent do nothing
@@ -374,6 +395,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			agentCfg := config.Get().Agents[config.AgentCoder]
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
+				if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+					p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+				}
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
 			} else {
 				return p, util.ReportWarn("File attachments are not supported by the current model: " + model.Name)
@@ -384,6 +408,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				p.splash = u.(splash.Splash)
 				return p, cmd
 			}
+			if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+				p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+			}
 			p.changeFocus()
 			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
@@ -391,6 +418,10 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
+			// Opening/closing the sidebar counts as interaction; cancel pending notification.
+			if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.HasPendingCompletionNotification(p.session.ID) {
+				p.app.AgentCoordinator.CancelCompletionNotification(p.session.ID)
+			}
 			p.toggleDetails()
 			return p, nil
 		}

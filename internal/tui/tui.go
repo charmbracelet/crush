@@ -476,7 +476,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: models.NewModelDialogCmp(),
 		})
-
 	case key.Matches(msg, a.keyMap.Sessions):
 		// if the app is not configured show no sessions
 		if !a.isConfigured {

@@ -71,6 +71,7 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	ReloadCommandsMsg      struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -394,6 +395,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(ToggleHelpMsg{})
+			},
+		},
+		{
+			ID:          "reload_commands",
+			Title:       "Reload Commands",
+			Description: "Reload commands from all locations",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ReloadCommandsMsg{})
 			},
 		},
 		{

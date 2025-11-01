@@ -313,7 +313,7 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix:          " ",
 					Suffix:          " ",
-					Color:           stringPtr(charmtone.Coral.Hex()),
+					Color:           stringPtr(charmtone.Charple.Hex()),
 					BackgroundColor: stringPtr(charmtone.Charcoal.Hex()),
 				},
 			},

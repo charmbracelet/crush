@@ -311,6 +311,231 @@ control but don't want Crush to consider when providing context.
 The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
+### Slash Commands
+
+Crush supports custom slash commands similar to Claude Code. Commands allow you
+to create reusable prompts and workflows that can be executed quickly from the
+chat editor.
+
+#### Using Slash Commands
+
+Type `\` in the chat editor to see available commands. Commands use the syntax:
+
+```
+\command-name [arguments]
+```
+
+Examples:
+- `\help` - List all available commands
+- `\review-pr 123 high` - Execute a command with arguments
+- `\frontend:components:button` - Execute a namespaced command
+
+#### Command Locations
+
+Commands are loaded from three locations in order of precedence (highest to lowest):
+
+1. **Project directory**: `.crush/commands/**/*.md`
+   - Project-specific commands that are version-controlled with the codebase
+   - Highest precedence - overwrites user/XDG commands with same name
+
+2. **User home directory**: `~/.crush/commands/**/*.md`
+   - User-specific commands available across all projects
+   - Medium precedence
+
+3. **XDG config directory**: `$XDG_CONFIG_HOME/crush/commands/**/*.md` or `~/.config/crush/commands/**/*.md`
+   - System-wide user commands following XDG Base Directory specification
+   - Lowest precedence
+
+#### Command File Format
+
+Commands are Markdown files with optional YAML frontmatter:
+
+```markdown
+---
+description: Review a pull request
+argument-hint: "[pr-number] [priority]"
+allowed-tools:
+  - view
+  - edit
+  - grep
+---
+# Review PR
+
+Please review pull request $1 with priority $2.
+
+Check @file.txt for context.
+```
+
+**Frontmatter fields:**
+
+All frontmatter fields are optional. Commands work without any frontmatter, but adding frontmatter improves discoverability and user experience.
+
+##### `description`
+
+**Purpose:** Provides a brief, human-readable description of what the command does.
+
+**Format:** A single-line string.
+
+**Default:** If not specified, the command appears in completions and help without a description.
+
+**Usage:** Shown in command completions when typing `\`, in the `\help` output, and helps users understand what each command does.
+
+**Examples:**
+```yaml
+description: Review a pull request
+description: Create a new React component
+description: Search the codebase for patterns
+```
+
+##### `argument-hint`
+
+**Purpose:** Provides guidance to users about what arguments the command expects.
+
+**Format:** A single-line string, typically showing argument placeholders in square brackets.
+
+**Default:** If not specified, no hint is shown in completions or help output.
+
+**Usage:** Shown in command completions and `\help` output to guide users on how to use the command.
+
+**Best Practices:**
+- Use square brackets `[]` to indicate optional arguments
+- Use descriptive placeholder names (e.g., `[pr-number]` instead of `[arg1]`)
+- Separate multiple arguments with spaces
+- Include quotes around hints that represent strings: `"[filename]" "[pattern]"`
+
+**Examples:**
+```yaml
+argument-hint: "[pr-number] [priority]"
+argument-hint: "[component-name] [type]"
+argument-hint: "[filename]"
+argument-hint: "[query]"
+```
+
+##### `allowed-tools`
+
+**Purpose:** Restricts which Crush tools are available when executing the command. This provides security and control over what the AI agent can do.
+
+**Format:** A YAML list of tool names (strings). Can also be specified as a comma-separated string in the frontmatter.
+
+**Default:** If not specified, **all tools are available** to the command. This gives the agent full access to read, edit, execute commands, and perform all operations.
+
+**Usage:** Use tool restrictions to:
+- Create read-only commands (analysis, reviews without changes)
+- Prevent dangerous operations (e.g., disable `bash` for safe commands)
+- Limit scope (e.g., only file editing tools for refactoring commands)
+- Ensure safety (e.g., view-only for sensitive code review)
+
+**Valid Tool Names:**
+- `agent` - Agent coordination and management
+- `bash` - Execute shell commands (use with caution)
+- `download` - Download files from URLs
+- `edit` - Edit files
+- `multiedit` - Edit multiple files in one operation
+- `lsp_diagnostics` - Get LSP diagnostics for files
+- `lsp_references` - Find references using LSP
+- `fetch` - Fetch content from URLs
+- `glob` - Match files using glob patterns
+- `grep` - Search files using regex
+- `ls` - List directory contents
+- `sourcegraph` - Search using Sourcegraph
+- `view` - Read file contents
+- `write` - Write new files
+
+**Important Notes:**
+- Tool names are **case-sensitive** - use lowercase
+- Invalid tool names are logged as warnings and ignored
+- The command executor validates tool names against Crush's available tools
+- If no tools are specified in `allowed-tools`, all tools are available
+
+**Examples:**
+
+Read-only command (safe analysis):
+```yaml
+allowed-tools:
+  - view
+  - grep
+  - ls
+```
+
+Editing command (no bash execution):
+```yaml
+allowed-tools:
+  - view
+  - edit
+  - grep
+  - lsp_diagnostics
+```
+
+Full access (no restrictions):
+```yaml
+# Omit allowed-tools entirely, or specify all needed tools
+allowed-tools:
+  - view
+  - edit
+  - bash
+  - grep
+  - ls
+  - glob
+  - lsp_diagnostics
+  - lsp_references
+```
+
+Comma-separated format (also supported):
+```yaml
+allowed-tools: "view, edit, grep"
+```
+
+**Command content:**
+
+The content after the frontmatter is the actual prompt sent to the AI agent. It supports:
+
+- **Argument substitution**: Use `$ARGS` or `$ARGUMENTS` for all arguments, or `$1`, `$2`, etc. for positional arguments
+- **File references**: Use `@filename` to include file contents in the command execution context
+
+#### Namespacing
+
+Commands are automatically namespaced based on their directory structure. This prevents
+naming conflicts and allows organizing commands into logical groups.
+
+Examples:
+- `.crush/commands/review-pr.md` → Command name: `review-pr` (no namespace)
+- `.crush/commands/frontend/review-pr.md` → Command name: `frontend:review-pr`
+- `.crush/commands/frontend/components/button.md` → Command name: `frontend:components:button`
+
+Directory separators (`/` or `\`) are converted to colons (`:`) in command names.
+
+#### Help Command
+
+The built-in `\help` command lists all available commands grouped by namespace:
+
+```
+Available Commands:
+
+Root Commands:
+  \help - Show help
+  \review-pr [pr-number] (project)
+
+Frontend Commands:
+  \frontend:review-pr [pr-number] [priority] (project:frontend)
+  \frontend:components:button (project:frontend)
+```
+
+#### Reloading Commands
+
+After adding, modifying, or removing command files, reload commands without restarting Crush:
+
+1. Press `Ctrl+P` to open the command dialog
+2. Type "reload" or navigate to "Reload Commands"
+3. Press Enter to execute
+
+The next time you open command completions or execute `\help`, the updated command list will be available.
+
+#### Backward Compatibility
+
+Existing custom commands from the `Ctrl+P` dialog continue to work unchanged. Slash commands
+and custom commands coexist peacefully - they use the same directories but different loaders
+and formats, so there are no conflicts.
+
 ### Allowing Tools
 
 By default, Crush will ask you for permission before running tool calls. If

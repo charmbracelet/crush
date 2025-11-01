@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	cmdregistry "github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -215,6 +217,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
+	case commands.ReloadCommandsMsg:
+		return a, a.handleReloadCommands()
 	// Model Switch
 	case models.ModelSelectedMsg:
 		if a.app.AgentCoordinator.IsBusy() {
@@ -383,6 +387,31 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	cmds = append(cmds, cmd)
 
 	return tea.Batch(cmds...)
+}
+
+// handleReloadCommands reloads the command registry from all configured locations.
+// It creates a new registry instance, calls Reload(), and handles errors gracefully.
+// Returns a tea.Cmd that sends an InfoMsg with success or error status.
+func (a *appModel) handleReloadCommands() tea.Cmd {
+	return func() tea.Msg {
+		workingDir := a.app.Config().WorkingDir()
+		registry := cmdregistry.NewRegistry(workingDir)
+		err := registry.Reload()
+		if err != nil {
+			// Log error (registry.Reload() already logs internally, but we log here too for context)
+			slog.Error("Failed to reload commands", "error", err, "working_dir", workingDir)
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Failed to reload commands: %s", err.Error()),
+			}
+		}
+		// Log success
+		slog.Info("Commands reloaded successfully", "working_dir", workingDir)
+		return util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  "Commands reloaded successfully",
+		}
+	}
 }
 
 // handleKeyPressMsg processes keyboard input and routes to appropriate handlers.

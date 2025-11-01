@@ -53,6 +53,12 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	// CancelCompletionNotification cancels any scheduled "turn ended"
+	// notification for the provided sessionID.
+	CancelCompletionNotification(sessionID string)
+	// HasPendingCompletionNotification reports whether there is a pending
+	// turn-end notification for the given session.
+	HasPendingCompletionNotification(sessionID string) bool
 }
 
 type coordinator struct {
@@ -151,6 +157,22 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		FrequencyPenalty: freqPenalty,
 		PresencePenalty:  presPenalty,
 	})
+}
+
+// CancelCompletionNotification implements Coordinator.
+func (c *coordinator) CancelCompletionNotification(sessionID string) {
+	if c.currentAgent == nil || sessionID == "" {
+		return
+	}
+	c.currentAgent.CancelCompletionNotification(sessionID)
+}
+
+// HasPendingCompletionNotification implements Coordinator.
+func (c *coordinator) HasPendingCompletionNotification(sessionID string) bool {
+	if c.currentAgent == nil || sessionID == "" {
+		return false
+	}
+	return c.currentAgent.HasPendingCompletionNotification(sessionID)
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {

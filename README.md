@@ -581,8 +581,8 @@ config:
 
 Crush defaults to sending desktop notifications that let you know:
 
-- When its turn is finished (automatically cancelled when you send a new
-  message)
+- When its turn is finished (automatically cancelled when you interact with the
+  chat interface)
 - When it's waiting for permission to execute a tool (automatically cancelled
   when you interact with the permission dialog)
 

@@ -215,11 +215,18 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if m.app.AgentCoordinator.IsSessionBusy(m.session.ID) {
 			return m, util.ReportWarn("Agent is working, please wait...")
 		}
+		if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+			m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+		}
 		return m, m.openEditor(m.textarea.Value())
 	case OpenEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
+		// Interaction: cancel any pending turn-end notification for this session.
+		if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+			m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+		}
 		path := strings.ReplaceAll(msg.Content, "\\ ", " ")
 		// try to get an image
 		path, err := filepath.Abs(strings.TrimSpace(path))
@@ -261,6 +268,10 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.setEditorPrompt()
 		return m, nil
 	case tea.KeyPressMsg:
+		// Interaction: cancel any pending turn-end notification for this session.
+		if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.HasPendingCompletionNotification(m.session.ID) {
+			m.app.AgentCoordinator.CancelCompletionNotification(m.session.ID)
+		}
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {

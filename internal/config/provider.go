@@ -126,7 +126,7 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 }
 
 func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
-	_, cacheExists := isCacheStale(path)
+	stale, cacheExists := isCacheStale(path)
 
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
 		providers, err := client.GetProviders()
@@ -158,14 +158,18 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		return providers, nil
 
 	default:
-		slog.Info("Cache is not available or is stale. Fetching providers from Catwalk.", "path", path)
-
-		providers, err := catwalkGetAndSave()
-		if err != nil {
-			catwalkUrl := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-			return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
+		if !cacheExists || stale {
+			slog.Info("Cache is not available or is stale. Fetching providers from Catwalk.", "path", path)
+			providers, err := catwalkGetAndSave()
+			if err != nil {
+				catwalkUrl := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
+				return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
+			}
+			return providers, nil
 		}
-		return providers, nil
+
+		// Cache exists and is fresh, load from cache
+		return loadProvidersFromCache(path)
 	}
 }
 

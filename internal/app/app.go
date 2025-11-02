@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -103,7 +104,7 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -170,7 +171,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 		// Always print a newline at the end. If output is a TTY this will
 		// prevent the prompt from overwriting the last line of output.
-		_, _ = fmt.Print('\n')
+		_, _ = fmt.Fprintln(output)
 	}()
 
 	for {
@@ -204,7 +205,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 				}
 
 				part := content[readBytes:]
-				fmt.Print(part)
+				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}
 

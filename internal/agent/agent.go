@@ -276,6 +276,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnTextDelta: func(id string, text string) error {
+			// Strip leading newline from initial text content. This is is
+			// particularly important in non-interactive mode where leading
+			// newlines are very visible.
+			if len(currentAssistant.Parts) == 0 && strings.HasPrefix(text, "\n") {
+				text = strings.TrimPrefix(text, "\n")
+			}
+
 			currentAssistant.AppendContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},

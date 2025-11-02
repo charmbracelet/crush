@@ -142,7 +142,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}
 	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
-	// Automatically approve all permission requests for this non-interactive session
+	// Automatically approve all permission requests for this non-interactive
+	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
 
 	type response struct {

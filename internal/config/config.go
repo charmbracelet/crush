@@ -289,6 +289,8 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+	// Recently used models stored in the data directory config.
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -398,6 +400,9 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
+	if err := c.recordRecentModel(modelType, model); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -462,6 +467,49 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	}
 	// Store the updated provider config
 	c.Providers.Set(providerID, providerConfig)
+	return nil
+}
+
+const maxRecentModelsPerType = 5
+
+func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
+	if model.Provider == "" || model.Model == "" {
+		return nil
+	}
+
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
+
+	entry := SelectedModel{
+		Provider: model.Provider,
+		Model:    model.Model,
+	}
+
+	current := c.RecentModels[modelType]
+	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
+		return eq(existing, entry)
+	})
+
+	updated := append([]SelectedModel{entry}, withoutCurrent...)
+	if len(updated) > maxRecentModelsPerType {
+		updated = updated[:maxRecentModelsPerType]
+	}
+
+	if slices.EqualFunc(current, updated, eq) {
+		return nil
+	}
+
+	c.RecentModels[modelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
 	return nil
 }
 

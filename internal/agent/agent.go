@@ -1,3 +1,10 @@
+// Package agent is the core orchestration layer for Crush AI agents.
+//
+// It provides session-based AI agent functionality for managing
+// conversations, tool execution, and message handling. It coordinates
+// interactions between language models, messages, sessions, and tools while
+// handling features like automatic summarization, queuing, and token
+// management.
 package agent
 
 import (
@@ -131,7 +138,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	if len(a.tools) > 0 {
-		// Add anthropic caching to the last tool.
+		// Add Anthropic caching to the last tool.
 		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 

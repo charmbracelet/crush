@@ -101,8 +101,8 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
-// RunNonInteractive handles the execution flow when a prompt is provided via
-// CLI flag.
+// RunNonInteractive runs the application in non-interactive mode with the
+// given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
@@ -125,7 +125,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
-	titlePrefix := "Non-interactive: "
+	const titlePrefix = "Non-interactive: "
 	var titleSuffix string
 
 	if len(prompt) > maxPromptLengthForTitle {
@@ -165,11 +165,19 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 
-	defer fmt.Printf(ansi.ResetProgressBar)
+	defer func() {
+		_, _ = fmt.Printf(ansi.ResetProgressBar)
+
+		// Always print a newline at the end. If output is a TTY this will
+		// prevent the prompt from overwriting the last line of output.
+		_, _ = fmt.Print('\n')
+	}()
+
 	for {
-		// HACK: add it again on every iteration so it doesn't get hidden by
-		// the terminal due to inactivity.
-		fmt.Printf(ansi.SetIndeterminateProgressBar)
+		// HACK: Reinitialize the terminal progress bar on every iteration so
+		// it doesn't get hidden by the terminal due to inactivity.
+		_, _ = fmt.Printf(ansi.SetIndeterminateProgressBar)
+
 		select {
 		case result := <-done:
 			stopSpinner()

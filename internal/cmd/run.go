@@ -48,7 +48,12 @@ crush run -q "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		// Run non-interactive flow using the App method
+		// TODO: Make this work when redirected to something other than stdout.
+		// For example:
+		//     crush run "Do something fancy" > output.txt
+		//     echo "Do something fancy" | crush run > output.txt
+		//
+		// TODO: We currently need to press ^c twice to cancel. Fix that.
 		return app.RunNonInteractive(cmd.Context(), prompt, quiet)
 	},
 }

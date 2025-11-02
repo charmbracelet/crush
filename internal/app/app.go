@@ -1,3 +1,5 @@
+// Package app wires together services, coordinates agents, and manages
+// application lifecycle.
 package app
 
 import (

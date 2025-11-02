@@ -62,7 +62,7 @@ func TestYourFunction(t *testing.T) {
 
 ## Comments
 
-- Comments that live one their own lines should start with capital letters and
+- Comments that live on their own lines should start with capital letters and
   end with periods. Wrap comments at 78 columns.
 
 ## Committing

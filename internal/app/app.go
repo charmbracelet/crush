@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -27,7 +28,11 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
+	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 type App struct {
@@ -114,7 +119,25 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner(ctx, cancel, "Generating")
+		t := styles.CurrentTheme()
+
+		// Detect background color to set the appropriate color for the
+		// spinner's 'Generating...' text. Without this, that text would be
+		// unreadable in light terminals.
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
 		spinner.Start()
 	}
 

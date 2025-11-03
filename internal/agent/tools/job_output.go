@@ -79,7 +79,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 				output = BashNoOutput
 			}
 
-			result := fmt.Sprintf("Shell ID: %s\nStatus: %s\n\nOutput:\n%s", params.ShellID, status, output)
+			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		})
 }

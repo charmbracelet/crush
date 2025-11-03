@@ -1,10 +1,10 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -223,32 +223,30 @@ type CommandRunCustomMsg struct {
 
 func loadMCPPrompts() []Command {
 	var commands []Command
-	for key, prompt := range mcp.Prompts() {
-		clientName, promptName, ok := strings.Cut(key, ":")
-		if !ok {
-			slog.Warn("prompt not found", "key", key)
-			continue
+	for mcpName, prompts := range mcp.Prompts() {
+		for _, prompt := range prompts {
+			key := mcpName + ":" + prompt.Name
+			commands = append(commands, Command{
+				ID:          key,
+				Title:       cmp.Or(prompt.Title, prompt.Name),
+				Description: prompt.Description,
+				Handler:     createMCPPromptHandler(mcpName, prompt.Name, prompt),
+			})
 		}
-		commands = append(commands, Command{
-			ID:          key,
-			Title:       clientName + ":" + promptName,
-			Description: prompt.Description,
-			Handler:     createMCPPromptHandler(clientName, promptName, prompt),
-		})
 	}
 
 	return commands
 }
 
-func createMCPPromptHandler(clientName, promptName string, prompt *mcp.Prompt) func(Command) tea.Cmd {
+func createMCPPromptHandler(mcpName, promptName string, prompt *mcp.Prompt) func(Command) tea.Cmd {
 	return func(cmd Command) tea.Cmd {
 		if len(prompt.Arguments) == 0 {
-			return execMCPPrompt(clientName, promptName, nil)
+			return execMCPPrompt(mcpName, promptName, nil)
 		}
 		return util.CmdHandler(ShowMCPPromptArgumentsDialogMsg{
 			Prompt: prompt,
 			OnSubmit: func(args map[string]string) tea.Cmd {
-				return execMCPPrompt(clientName, promptName, args)
+				return execMCPPrompt(mcpName, promptName, args)
 			},
 		})
 	}

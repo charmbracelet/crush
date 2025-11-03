@@ -12,13 +12,15 @@ import (
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, wd string) []*Tool {
 	var result []*Tool
-	for name, tool := range mcp.Tools() {
-		result = append(result, &Tool{
-			mcpName:     name,
-			tool:        tool,
-			permissions: permissions,
-			workingDir:  wd,
-		})
+	for mcpName, tools := range mcp.Tools() {
+		for _, tool := range tools {
+			result = append(result, &Tool{
+				mcpName:     mcpName,
+				tool:        tool,
+				permissions: permissions,
+				workingDir:  wd,
+			})
+		}
 	}
 	return result
 }
@@ -74,7 +76,7 @@ func (m *Tool) Info() fantasy.ToolInfo {
 	}
 
 	return fantasy.ToolInfo{
-		Name:        fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name),
+		Name:        m.Name(),
 		Description: m.tool.Description,
 		Parameters:  parameters,
 		Required:    required,

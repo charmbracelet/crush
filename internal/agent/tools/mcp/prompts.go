@@ -11,13 +11,10 @@ import (
 
 type Prompt = mcp.Prompt
 
-var (
-	allPrompts    = csync.NewMap[string, *Prompt]()
-	clientPrompts = csync.NewMap[string, []*Prompt]()
-)
+var allPrompts = csync.NewMap[string, []*Prompt]()
 
 // Prompts returns all available MCP prompts.
-func Prompts() iter.Seq2[string, *Prompt] {
+func Prompts() iter.Seq2[string, []*Prompt] {
 	return allPrompts.Seq2()
 }
 
@@ -65,10 +62,8 @@ func RefreshPrompts(ctx context.Context, name string) {
 	updatePrompts(name, prompts)
 
 	prev, _ := states.Get(name)
-	updateState(name, StateConnected, nil, session, Counts{
-		Prompts: len(prompts),
-		Tools:   prev.Counts.Tools,
-	})
+	prev.Counts.Prompts = len(prompts)
+	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
 func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
@@ -85,14 +80,8 @@ func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
 // updatePrompts updates the global mcpPrompts and mcpClient2Prompts maps
 func updatePrompts(mcpName string, prompts []*Prompt) {
 	if len(prompts) == 0 {
-		clientPrompts.Del(mcpName)
-	} else {
-		clientPrompts.Set(mcpName, prompts)
+		allPrompts.Del(mcpName)
+		return
 	}
-	for mcpName, prompts := range clientPrompts.Seq2() {
-		for _, p := range prompts {
-			key := mcpName + ":" + p.Name
-			allPrompts.Set(key, p)
-		}
-	}
+	allPrompts.Set(mcpName, prompts)
 }

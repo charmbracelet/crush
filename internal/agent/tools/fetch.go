@@ -28,12 +28,6 @@ type FetchPermissionsParams struct {
 	Timeout int    `json:"timeout,omitempty"`
 }
 
-type fetchTool struct {
-	client      *http.Client
-	permissions permission.Service
-	workingDir  string
-}
-
 const FetchToolName = "fetch"
 
 //go:embed fetch.md

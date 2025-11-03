@@ -58,12 +58,12 @@ func (s State) String() string {
 }
 
 // EventType represents the type of MCP event
-type EventType string
+type EventType uint
 
 const (
-	EventStateChanged       EventType = "state_changed"
-	EventToolsListChanged   EventType = "tools_list_changed"
-	EventPromptsListChanged EventType = "prompts_list_changed"
+	EventStateChanged EventType = iota
+	EventToolsListChanged
+	EventPromptsListChanged
 )
 
 // Event represents an event in the MCP system

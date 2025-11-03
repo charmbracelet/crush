@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"iter"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -11,23 +12,13 @@ import (
 type Prompt = mcp.Prompt
 
 var (
-	allPrompts     = csync.NewMap[string, *Prompt]()
-	client2Prompts = csync.NewMap[string, []*Prompt]()
+	allPrompts    = csync.NewMap[string, *Prompt]()
+	clientPrompts = csync.NewMap[string, []*Prompt]()
 )
 
-// GetPrompts returns all available MCP prompts.
-func GetPrompts() iter.Seq2[string, *Prompt] {
+// Prompts returns all available MCP prompts.
+func Prompts() iter.Seq2[string, *Prompt] {
 	return allPrompts.Seq2()
-}
-
-// GetPrompt returns a specific MCP prompt by name.
-func GetPrompt(name string) (*Prompt, bool) {
-	return allPrompts.Get(name)
-}
-
-// GetPromptsByClient returns all prompts for a specific MCP client.
-func GetPromptsByClient(clientName string) ([]*Prompt, bool) {
-	return client2Prompts.Get(clientName)
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
@@ -56,6 +47,30 @@ func GetPromptMessages(ctx context.Context, clientName, promptName string, args 
 	return messages, nil
 }
 
+// RefreshPrompts gets the updated list of prompts from the MCP and updates the
+// global state.
+func RefreshPrompts(ctx context.Context, name string) {
+	session, ok := sessions.Get(name)
+	if !ok {
+		slog.Warn("refresh prompts: no session", "name", name)
+		return
+	}
+
+	prompts, err := getPrompts(ctx, session)
+	if err != nil {
+		updateState(name, StateError, err, nil, Counts{})
+		return
+	}
+
+	updatePrompts(name, prompts)
+
+	prev, _ := states.Get(name)
+	updateState(name, StateConnected, nil, session, Counts{
+		Prompts: len(prompts),
+		Tools:   prev.Counts.Tools,
+	})
+}
+
 func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
 	if c.InitializeResult().Capabilities.Prompts == nil {
 		return nil, nil
@@ -70,11 +85,11 @@ func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
 // updatePrompts updates the global mcpPrompts and mcpClient2Prompts maps
 func updatePrompts(mcpName string, prompts []*Prompt) {
 	if len(prompts) == 0 {
-		client2Prompts.Del(mcpName)
+		clientPrompts.Del(mcpName)
 	} else {
-		client2Prompts.Set(mcpName, prompts)
+		clientPrompts.Set(mcpName, prompts)
 	}
-	for mcpName, prompts := range client2Prompts.Seq2() {
+	for mcpName, prompts := range clientPrompts.Seq2() {
 		for _, p := range prompts {
 			key := mcpName + ":" + p.Name
 			allPrompts.Set(key, p)

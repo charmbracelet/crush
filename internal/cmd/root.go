@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	termutil "github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
@@ -150,9 +151,7 @@ func Execute() {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	program := os.Getenv("TERM_PROGRAM")
-
-	if program == "ghostty" {
+	if termutil.SupportsProgressBar() {
 		fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 	}

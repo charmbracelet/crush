@@ -446,7 +446,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		}
 		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
+			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else {

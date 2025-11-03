@@ -144,7 +144,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventPromptsListChanged:
-
+			return a, a.handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
 		case mcp.EventToolsListChanged:
 			return a, a.handleMCPToolsEvent(context.Background(), msg.Payload.Name)
 		}

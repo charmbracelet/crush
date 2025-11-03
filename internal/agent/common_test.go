@@ -30,7 +30,8 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 )
 
-type env struct {
+// fakeEnv is an environment for testing.
+type fakeEnv struct {
 	workingDir  string
 	sessions    session.Service
 	messages    message.Service
@@ -100,7 +101,7 @@ func zAIBuilder(model string) builderFunc {
 	}
 }
 
-func testEnv(t *testing.T) env {
+func testEnv(t *testing.T) fakeEnv {
 	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
 	os.RemoveAll(workingDir)
 
@@ -123,7 +124,7 @@ func testEnv(t *testing.T) env {
 		os.RemoveAll(workingDir)
 	})
 
-	return env{
+	return fakeEnv{
 		workingDir,
 		sessions,
 		messages,
@@ -133,7 +134,7 @@ func testEnv(t *testing.T) env {
 	}
 }
 
-func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
+func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
 		CatwalkCfg: catwalk.Model{
@@ -152,7 +153,7 @@ func testSessionAgent(env env, large, small fantasy.LanguageModel, systemPrompt 
 	return agent
 }
 
-func coderAgent(r *recorder.Recorder, env env, large, small fantasy.LanguageModel) (SessionAgent, error) {
+func coderAgent(r *recorder.Recorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t

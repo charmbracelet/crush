@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -32,7 +33,6 @@ func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
-
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
@@ -74,7 +74,7 @@ crush run "Explain the use of context in Go"
 crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app, err := setupApp(cmd)
+		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,6 @@ crush -y
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
-
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
@@ -148,6 +147,17 @@ func Execute() {
 	); err != nil {
 		os.Exit(1)
 	}
+}
+
+func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
+	program := os.Getenv("TERM_PROGRAM")
+
+	if program == "ghostty" {
+		fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		defer fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+	}
+
+	return setupApp(cmd)
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.

@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
@@ -126,8 +125,6 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 }
 
 func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
-	_, cacheExists := isCacheStale(path)
-
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
 		providers, err := client.GetProviders()
 		if err != nil {
@@ -141,11 +138,12 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		}
 		return providers, nil
 	}
+
 	switch {
 	case autoUpdateDisabled:
 		slog.Warn("Providers auto-update is disabled")
 
-		if cacheExists {
+		if _, err := os.Stat(path); err == nil {
 			slog.Warn("Using locally cached providers")
 			return loadProvidersFromCache(path)
 		}
@@ -167,12 +165,4 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		}
 		return providers, nil
 	}
-}
-
-func isCacheStale(path string) (stale, exists bool) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return true, false
-	}
-	return time.Since(info.ModTime()) > 24*time.Hour, true
 }

@@ -427,7 +427,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if isCancelErr {
 				content = "Tool execution canceled by user"
 			} else if isPermissionErr {
-				content = "Permission denied"
+				content = "User denied permission"
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -446,9 +446,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		}
 		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
+			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "Permission denied", "")
+			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, "API Error", err.Error())
 		}

@@ -1,3 +1,5 @@
+// Package mcp provides functionality for managing Model Context Protocol (MCP)
+// clients within the Crush application.
 package mcp
 
 import (
@@ -160,7 +162,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			tools, err := getTools(ctx, name, permissions, session, cfg.WorkingDir())
+			tools, err := getTools(ctx, session)
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
 				updateState(name, StateError, err, nil, Counts{})

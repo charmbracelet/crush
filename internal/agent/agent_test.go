@@ -33,7 +33,7 @@ func getModels(t *testing.T, r *recorder.Recorder, pair modelPair) (fantasy.Lang
 	return large, small
 }
 
-func setupAgent(t *testing.T, pair modelPair) (SessionAgent, env) {
+func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 	r := newRecorder(t)
 	large, small := getModels(t, r, pair)
 	env := testEnv(t)

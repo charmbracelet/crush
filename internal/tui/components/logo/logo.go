@@ -4,7 +4,6 @@ package logo
 import (
 	"fmt"
 	"image/color"
-	"math/rand/v2"
 	"strings"
 
 	"github.com/MakeNowJust/heredoc"
@@ -53,7 +52,7 @@ func Render(version string, compact bool, o Opts) string {
 	}
 	stretchIndex := -1 // -1 means no stretching.
 	if !compact {
-		stretchIndex = rand.IntN(len(letterforms))
+		stretchIndex = cachedRandN(len(letterforms))
 	}
 
 	crush := renderWord(spacing, stretchIndex, letterforms...)
@@ -337,7 +336,7 @@ func stretchLetterformPart(s string, p letterformProps) string {
 	}
 	n := p.width
 	if p.stretch {
-		n = rand.IntN(p.maxStretch-p.minStretch) + p.minStretch //nolint:gosec
+		n = cachedRandN(p.maxStretch-p.minStretch) + p.minStretch //nolint:gosec
 	}
 	parts := make([]string, n)
 	for i := range parts {

@@ -499,6 +499,17 @@ func (mer multiEditRenderer) Render(v *toolCallCmp) string {
 				Render(fmt.Sprintf("… (%d lines)", len(contentLines)-responseContextHeight))
 			formatted = strings.Join(contentLines[:responseContextHeight], "\n") + "\n" + truncateMessage
 		}
+
+		// Add failed edits warning if any exist
+		if len(meta.EditsFailed) > 0 {
+			noteTag := t.S().Base.Padding(0, 2).Background(t.Info).Foreground(t.White).Render("Note")
+			noteMsg := fmt.Sprintf("%d of %d edits succeeded", meta.EditsApplied, len(params.Edits))
+			note := t.S().Base.
+				Width(v.textWidth() - 2).
+				Render(fmt.Sprintf("%s %s", noteTag, t.S().Muted.Render(noteMsg)))
+			formatted = lipgloss.JoinVertical(lipgloss.Left, formatted, "", note)
+		}
+
 		return formatted
 	})
 }
@@ -589,7 +600,7 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := fr.makeHeader(v, "Agent Fetch", v.textWidth(), args...)
+	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
 	if res, done := earlyState(header, v); v.cancelled && done {
 		return res
 	}

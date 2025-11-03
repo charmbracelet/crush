@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
@@ -63,6 +64,8 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	readyWg errgroup.Group
 }
 
 func NewCoordinator(
@@ -106,6 +109,10 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	if err := c.readyWg.Wait(); err != nil {
+		return nil, err
+	}
+
 	model := c.currentAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -300,14 +307,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.messages,
 		nil,
 	})
-	go func() {
+	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {
-			slog.Error("could not init agent tools", "err", err)
-			return
+			return err
 		}
 		result.SetTools(tools)
-	}()
+		return nil
+	})
+
 	return result, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,6 +73,14 @@ type appModel struct {
 
 	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
+
+	// sendProgressBar instructs the TUI to send progress bar updates to the
+	// terminal.
+	sendProgressBar bool
+
+	// QueryVersion instructs the TUI to query for the terminal version when it
+	// starts.
+	QueryVersion bool
 }
 
 // Init initializes the application model and returns initial commands.
@@ -88,6 +97,9 @@ func (a appModel) Init() tea.Cmd {
 
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
+	if a.QueryVersion {
+		cmds = append(cmds, tea.RequestTerminalVersion)
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -99,6 +111,18 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case tea.EnvMsg:
+		// Is this Windows Terminal?
+		if !a.sendProgressBar {
+			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
+		}
+	case tea.TerminalVersionMsg:
+		termVersion := strings.ToLower(string(msg))
+		// Only enable progress bar for the following terminals.
+		if !a.sendProgressBar {
+			a.sendProgressBar = strings.Contains(termVersion, "ghostty")
+		}
+		return a, nil
 	case tea.KeyboardEnhancementsMsg:
 		for id, page := range a.pages {
 			m, pageCmd := page.Update(msg)
@@ -479,6 +503,7 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	var view tea.View
+	view.AltScreen = true
 	t := styles.CurrentTheme()
 	view.BackgroundColor = t.BgBase
 	if a.wWidth < 25 || a.wHeight < 15 {
@@ -553,9 +578,8 @@ func (a *appModel) View() tea.View {
 	view.Layer = canvas
 	view.Cursor = cursor
 	view.MouseMode = tea.MouseModeCellMotion
-	view.AltScreen = true
 
-	if a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
+	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
 		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
@@ -564,7 +588,7 @@ func (a *appModel) View() tea.View {
 }
 
 // New creates and initializes a new TUI application model.
-func New(app *app.App) tea.Model {
+func New(app *app.App) *appModel {
 	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()

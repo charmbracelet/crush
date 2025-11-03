@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -191,9 +192,12 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
+	supportsProgressBar := term.SupportsProgressBar()
 
 	defer func() {
-		_, _ = fmt.Printf(ansi.ResetProgressBar)
+		if supportsProgressBar {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+		}
 
 		// Always print a newline at the end. If output is a TTY this will
 		// prevent the prompt from overwriting the last line of output.
@@ -201,9 +205,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}()
 
 	for {
-		// HACK: Reinitialize the terminal progress bar on every iteration so
-		// it doesn't get hidden by the terminal due to inactivity.
-		_, _ = fmt.Printf(ansi.SetIndeterminateProgressBar)
+		if supportsProgressBar {
+			// HACK: Reinitialize the terminal progress bar on every iteration so
+			// it doesn't get hidden by the terminal due to inactivity.
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		}
 
 		select {
 		case result := <-done:

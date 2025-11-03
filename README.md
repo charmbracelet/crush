@@ -211,7 +211,7 @@ or globally, with the following priority:
 
 1. `.crush.json`
 2. `crush.json`
-3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
+3. `$HOME/.config/crush/crush.json`
 
 Configuration itself is stored as a JSON object:
 

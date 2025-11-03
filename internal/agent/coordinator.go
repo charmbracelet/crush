@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
@@ -344,25 +345,23 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	mcpTools := tools.GetMCPTools(context.Background(), c.permissions, c.cfg)
-
-	for _, mcpTool := range mcpTools {
+	for tool := range mcp.GetMCPTools() {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
-			filteredTools = append(filteredTools, mcpTool)
+			filteredTools = append(filteredTools, tool)
 		} else if len(agent.AllowedMCP) == 0 {
 			// no mcps allowed
 			break
 		}
 
 		for mcp, tools := range agent.AllowedMCP {
-			if mcp == mcpTool.MCP() {
+			if mcp == tool.MCP() {
 				if len(tools) == 0 {
-					filteredTools = append(filteredTools, mcpTool)
+					filteredTools = append(filteredTools, tool)
 				}
 				for _, t := range tools {
-					if t == mcpTool.MCPToolName() {
-						filteredTools = append(filteredTools, mcpTool)
+					if t == tool.MCPToolName() {
+						filteredTools = append(filteredTools, tool)
 					}
 				}
 				break

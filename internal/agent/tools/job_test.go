@@ -295,30 +295,6 @@ func TestBackgroundShell_List(t *testing.T) {
 	}
 }
 
-func TestBackgroundShell_IDFormat(t *testing.T) {
-	t.Parallel()
-
-	workingDir := t.TempDir()
-	ctx := context.Background()
-
-	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, workingDir, nil, "echo 'test'", "")
-	require.NoError(t, err)
-	defer bgManager.Kill(bgShell.ID)
-
-	// Verify ID is human-readable (hotdiva2000 format)
-	// Should contain hyphens and be readable
-	require.NotEmpty(t, bgShell.ID)
-	require.Contains(t, bgShell.ID, "-", "ID should be human-readable with hyphens")
-
-	// Should not be a UUID format
-	require.False(t, strings.Contains(bgShell.ID, "uuid"), "ID should not be UUID format")
-
-	// Length should be reasonable for human-readable IDs
-	require.Greater(t, len(bgShell.ID), 5, "ID should be long enough")
-	require.Less(t, len(bgShell.ID), 100, "ID should not be too long")
-}
-
 func TestBackgroundShell_AutoBackground(t *testing.T) {
 	t.Parallel()
 

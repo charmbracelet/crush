@@ -281,6 +281,9 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 					Name: name,
 				})
 			},
+			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
+				slog.Info("mcp log", "name", name, "data", req.Params.Data)
+			},
 			KeepAlive: time.Minute * 10,
 		},
 	)

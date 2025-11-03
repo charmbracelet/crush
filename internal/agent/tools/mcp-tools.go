@@ -12,7 +12,7 @@ import (
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, wd string) []*Tool {
 	var result []*Tool
-	for name, tool := range mcp.GetMCPTools() {
+	for name, tool := range mcp.Tools() {
 		result = append(result, &Tool{
 			mcpName:     name,
 			tool:        tool,

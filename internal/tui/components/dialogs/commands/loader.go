@@ -223,7 +223,7 @@ type CommandRunCustomMsg struct {
 
 func loadMCPPrompts() []Command {
 	var commands []Command
-	for key, prompt := range mcp.GetPrompts() {
+	for key, prompt := range mcp.Prompts() {
 		clientName, promptName, ok := strings.Cut(key, ":")
 		if !ok {
 			slog.Warn("prompt not found", "key", key)

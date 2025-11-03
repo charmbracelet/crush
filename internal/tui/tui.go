@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
@@ -139,6 +140,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.wWidth, a.wHeight = msg.Width, msg.Height
 		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
+
+	case pubsub.Event[mcp.Event]:
+		switch msg.Payload.Type {
+		case mcp.EventPromptsListChanged:
+
+		case mcp.EventToolsListChanged:
+			return a, a.handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+		}
 
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
@@ -616,6 +625,20 @@ func (a *appModel) View() tea.View {
 		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
 	}
 	return view
+}
+
+func (a *appModel) handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshPrompts(ctx, name)
+		return nil
+	}
+}
+
+func (a *appModel) handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshTools(ctx, name)
+		return nil
+	}
 }
 
 // New creates and initializes a new TUI application model.

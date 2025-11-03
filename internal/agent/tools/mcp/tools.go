@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -14,12 +15,12 @@ import (
 type Tool = mcp.Tool
 
 var (
-	allTools     = csync.NewMap[string, *Tool]()
-	client2Tools = csync.NewMap[string, []*Tool]()
+	allTools    = csync.NewMap[string, *Tool]()
+	clientTools = csync.NewMap[string, []*Tool]()
 )
 
-// GetTools returns all available MCP tools.
-func GetTools() iter.Seq2[string, *Tool] {
+// Tools returns all available MCP tools.
+func Tools() iter.Seq2[string, *Tool] {
 	return allTools.Seq2()
 }
 
@@ -53,6 +54,30 @@ func RunTool(ctx context.Context, name, toolName string, input string) (string, 
 	return strings.Join(output, "\n"), nil
 }
 
+// RefreshTools gets the updated list of tools from the MCP and updates the
+// global state.
+func RefreshTools(ctx context.Context, name string) {
+	session, ok := sessions.Get(name)
+	if !ok {
+		slog.Warn("refresh tools: no session", "name", name)
+		return
+	}
+
+	tools, err := getTools(ctx, session)
+	if err != nil {
+		updateState(name, StateError, err, nil, Counts{})
+		return
+	}
+
+	updateTools(name, tools)
+
+	prev, _ := states.Get(name)
+	updateState(name, StateConnected, nil, session, Counts{
+		Tools:   len(tools),
+		Prompts: prev.Counts.Prompts,
+	})
+}
+
 func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) {
 	if session.InitializeResult().Capabilities.Tools == nil {
 		return nil, nil
@@ -65,13 +90,13 @@ func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) 
 }
 
 // updateTools updates the global mcpTools and mcpClient2Tools maps
-func updateTools(mcpName string, tools []*Tool) {
+func updateTools(name string, tools []*Tool) {
 	if len(tools) == 0 {
-		client2Tools.Del(mcpName)
+		clientTools.Del(name)
 	} else {
-		client2Tools.Set(mcpName, tools)
+		clientTools.Set(name, tools)
 	}
-	for name, tools := range client2Tools.Seq2() {
+	for name, tools := range clientTools.Seq2() {
 		for _, t := range tools {
 			allTools.Set(name, t)
 		}

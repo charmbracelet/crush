@@ -88,7 +88,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}()
 
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -286,9 +286,6 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
-
-	// Add MCP client cleanup to shutdown process
-	app.cleanupFuncs = append(app.cleanupFuncs, mcp.Close)
 	return nil
 }
 

@@ -14,13 +14,10 @@ import (
 
 type Tool = mcp.Tool
 
-var (
-	allTools    = csync.NewMap[string, *Tool]()
-	clientTools = csync.NewMap[string, []*Tool]()
-)
+var allTools = csync.NewMap[string, []*Tool]()
 
 // Tools returns all available MCP tools.
-func Tools() iter.Seq2[string, *Tool] {
+func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
 }
 
@@ -72,10 +69,8 @@ func RefreshTools(ctx context.Context, name string) {
 	updateTools(name, tools)
 
 	prev, _ := states.Get(name)
-	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   len(tools),
-		Prompts: prev.Counts.Prompts,
-	})
+	prev.Counts.Tools = len(tools)
+	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
 func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) {
@@ -89,16 +84,10 @@ func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) 
 	return result.Tools, nil
 }
 
-// updateTools updates the global mcpTools and mcpClient2Tools maps
 func updateTools(name string, tools []*Tool) {
 	if len(tools) == 0 {
-		clientTools.Del(name)
-	} else {
-		clientTools.Set(name, tools)
+		allTools.Del(name)
+		return
 	}
-	for name, tools := range clientTools.Seq2() {
-		for _, t := range tools {
-			allTools.Set(name, t)
-		}
-	}
+	allTools.Set(name, tools)
 }

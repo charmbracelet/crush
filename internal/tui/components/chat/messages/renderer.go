@@ -254,11 +254,8 @@ func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width in
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 
-	// "Job:" in Sardine color (BlueLight)
-	jobPart := t.S().Base.Foreground(t.Blue).Render("Job:")
-	// Subcommand in Blue color
-	subcommandPart := t.S().Base.Foreground(t.BlueLight).Render(subcommand)
-	// PID and description in muted color
+	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
+	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
 	pidPart := t.S().Muted.Render(pid)
 	descPart := ""
 	if description != "" {

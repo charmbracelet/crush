@@ -286,7 +286,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// Strip leading newline from initial text content. This is is
 			// particularly important in non-interactive mode where leading
 			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 && strings.HasPrefix(text, "\n") {
+			if len(currentAssistant.Parts) == 0 {
 				text = strings.TrimPrefix(text, "\n")
 			}
 

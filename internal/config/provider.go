@@ -49,7 +49,7 @@ func providerCacheFileData() string {
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {
-	slog.Info("Saving cached provider data", "path", path)
+	slog.Info("Saving provider data to disk", "path", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
@@ -158,7 +158,7 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		return providers, nil
 
 	default:
-		slog.Info("Cache is not available or is stale. Fetching providers from Catwalk.", "path", path)
+		slog.Info("Fetching providers from Catwalk.", "path", path)
 
 		providers, err := catwalkGetAndSave()
 		if err != nil {

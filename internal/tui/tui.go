@@ -33,6 +33,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var lastMouseEvent time.Time
@@ -156,13 +158,42 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dialog = u.(dialogs.DialogCmp)
 		return a, tea.Batch(completionCmd, dialogCmd)
 	case commands.ShowArgumentsDialogMsg:
+		var args []commands.Argument
+		for _, arg := range msg.ArgNames {
+			args = append(args, commands.Argument{
+				Name:     arg,
+				Title:    cases.Title(language.English).String(arg),
+				Required: true,
+			})
+		}
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
 				Model: commands.NewCommandArgumentsDialog(
 					msg.CommandID,
-					msg.Content,
-					msg.ArgNames,
+					msg.CommandID,
+					msg.CommandID,
+					msg.Description,
+					args,
+					msg.OnSubmit,
 				),
+			},
+		)
+	case commands.ShowMCPPromptArgumentsDialogMsg:
+		args := make([]commands.Argument, 0, len(msg.Prompt.Arguments))
+		for _, arg := range msg.Prompt.Arguments {
+			args = append(args, commands.Argument(*arg))
+		}
+		dialog := commands.NewCommandArgumentsDialog(
+			msg.Prompt.Name,
+			msg.Prompt.Title,
+			msg.Prompt.Name,
+			msg.Prompt.Description,
+			args,
+			msg.OnSubmit,
+		)
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: dialog,
 			},
 		)
 	// Page change messages

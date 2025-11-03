@@ -1,22 +1,26 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
 const (
-	UserCommandPrefix    = "user:"
-	ProjectCommandPrefix = "project:"
+	userCommandPrefix    = "user:"
+	projectCommandPrefix = "project:"
 )
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
@@ -50,7 +54,7 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 	if dir := getXDGCommandsDir(); dir != "" {
 		sources = append(sources, commandSource{
 			path:   dir,
-			prefix: UserCommandPrefix,
+			prefix: userCommandPrefix,
 		})
 	}
 
@@ -58,14 +62,14 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 	if home := home.Dir(); home != "" {
 		sources = append(sources, commandSource{
 			path:   filepath.Join(home, ".crush", "commands"),
-			prefix: UserCommandPrefix,
+			prefix: userCommandPrefix,
 		})
 	}
 
 	// Project directory
 	sources = append(sources, commandSource{
 		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
-		prefix: ProjectCommandPrefix,
+		prefix: projectCommandPrefix,
 	})
 
 	return sources
@@ -127,12 +131,13 @@ func (l *commandLoader) loadCommand(path, baseDir, prefix string) (Command, erro
 	}
 
 	id := buildCommandID(path, baseDir, prefix)
+	desc := fmt.Sprintf("Custom command from %s", filepath.Base(path))
 
 	return Command{
 		ID:          id,
 		Title:       id,
-		Description: fmt.Sprintf("Custom command from %s", filepath.Base(path)),
-		Handler:     createCommandHandler(id, string(content)),
+		Description: desc,
+		Handler:     createCommandHandler(id, desc, string(content)),
 	}, nil
 }
 
@@ -149,21 +154,35 @@ func buildCommandID(path, baseDir, prefix string) string {
 	return prefix + strings.Join(parts, ":")
 }
 
-func createCommandHandler(id string, content string) func(Command) tea.Cmd {
+func createCommandHandler(id, desc, content string) func(Command) tea.Cmd {
 	return func(cmd Command) tea.Cmd {
 		args := extractArgNames(content)
 
-		if len(args) > 0 {
-			return util.CmdHandler(ShowArgumentsDialogMsg{
-				CommandID: id,
-				Content:   content,
-				ArgNames:  args,
+		if len(args) == 0 {
+			return util.CmdHandler(CommandRunCustomMsg{
+				Content: content,
 			})
 		}
-
-		return util.CmdHandler(CommandRunCustomMsg{
-			Content: content,
+		return util.CmdHandler(ShowArgumentsDialogMsg{
+			CommandID:   id,
+			Description: desc,
+			ArgNames:    args,
+			OnSubmit: func(args map[string]string) tea.Cmd {
+				return execUserPrompt(content, args)
+			},
 		})
+	}
+}
+
+func execUserPrompt(content string, args map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		for name, value := range args {
+			placeholder := "$" + name
+			content = strings.ReplaceAll(content, placeholder, value)
+		}
+		return CommandRunCustomMsg{
+			Content: content,
+		}
 	}
 }
 
@@ -200,4 +219,56 @@ func isMarkdownFile(name string) bool {
 
 type CommandRunCustomMsg struct {
 	Content string
+}
+
+func loadMCPPrompts() []Command {
+	var commands []Command
+	for key, prompt := range mcp.GetPrompts() {
+		clientName, promptName, ok := strings.Cut(key, ":")
+		if !ok {
+			slog.Warn("prompt not found", "key", key)
+			continue
+		}
+		commands = append(commands, Command{
+			ID:          key,
+			Title:       clientName + ":" + promptName,
+			Description: prompt.Description,
+			Handler:     createMCPPromptHandler(clientName, promptName, prompt),
+		})
+	}
+
+	return commands
+}
+
+func createMCPPromptHandler(clientName, promptName string, prompt *mcp.Prompt) func(Command) tea.Cmd {
+	return func(cmd Command) tea.Cmd {
+		if len(prompt.Arguments) == 0 {
+			return execMCPPrompt(clientName, promptName, nil)
+		}
+		return util.CmdHandler(ShowMCPPromptArgumentsDialogMsg{
+			Prompt: prompt,
+			OnSubmit: func(args map[string]string) tea.Cmd {
+				return execMCPPrompt(clientName, promptName, args)
+			},
+		})
+	}
+}
+
+func execMCPPrompt(clientName, promptName string, args map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		result, err := mcp.GetPromptMessages(ctx, clientName, promptName, args)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		return chat.SendMsg{
+			Text: strings.Join(result, " "),
+		}
+	}
+}
+
+type ShowMCPPromptArgumentsDialogMsg struct {
+	Prompt   *mcp.Prompt
+	OnSubmit func(arg map[string]string) tea.Cmd
 }

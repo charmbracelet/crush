@@ -9,8 +9,7 @@ import (
 // progress bars by looking into environment variables.
 func SupportsProgressBar() bool {
 	termProg := os.Getenv("TERM_PROGRAM")
-	_, wtSessionOk := os.LookupEnv("WT_SESSION")
+	_, isWindowsTerminal := os.LookupEnv("WT_SESSION")
 
-	return strings.Contains(strings.ToLower(termProg), "ghostty") ||
-		wtSessionOk
+	return isWindowsTerminal || strings.Contains(strings.ToLower(termProg), "ghostty")
 }

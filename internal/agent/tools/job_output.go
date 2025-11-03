@@ -11,27 +11,29 @@ import (
 )
 
 const (
-	BashOutputToolName = "bash_output"
+	JobOutputToolName = "job_output"
 )
 
-//go:embed bash_output.md
-var bashOutputDescription []byte
+//go:embed job_output.md
+var jobOutputDescription []byte
 
-type BashOutputParams struct {
+type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
 }
 
-type BashOutputResponseMetadata struct {
+type JobOutputResponseMetadata struct {
 	ShellID          string `json:"shell_id"`
+	Command          string `json:"command"`
+	Description      string `json:"description"`
 	Done             bool   `json:"done"`
 	WorkingDirectory string `json:"working_directory"`
 }
 
-func NewBashOutputTool() fantasy.AgentTool {
+func NewJobOutputTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		BashOutputToolName,
-		string(bashOutputDescription),
-		func(ctx context.Context, params BashOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		JobOutputToolName,
+		string(jobOutputDescription),
+		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil
 			}
@@ -65,10 +67,12 @@ func NewBashOutputTool() fantasy.AgentTool {
 
 			output := strings.Join(outputParts, "\n")
 
-			metadata := BashOutputResponseMetadata{
+			metadata := JobOutputResponseMetadata{
 				ShellID:          params.ShellID,
+				Command:          bgShell.Command,
+				Description:      bgShell.Description,
 				Done:             done,
-				WorkingDirectory: bgShell.GetWorkingDir(),
+				WorkingDirectory: bgShell.WorkingDir,
 			}
 
 			if output == "" {

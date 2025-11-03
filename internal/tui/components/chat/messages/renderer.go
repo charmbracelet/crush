@@ -163,8 +163,8 @@ func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 // Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
-	registry.register(tools.BashOutputToolName, func() renderer { return bashOutputRenderer{} })
-	registry.register(tools.BashKillToolName, func() renderer { return bashKillRenderer{} })
+	registry.register(tools.JobOutputToolName, func() renderer { return bashOutputRenderer{} })
+	registry.register(tools.JobKillToolName, func() renderer { return bashKillRenderer{} })
 	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
@@ -241,6 +241,48 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 //  Bash Output renderer
 // -----------------------------------------------------------------------------
 
+func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
+	t := styles.CurrentTheme()
+	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	if v.result.ToolCallID != "" {
+		if v.result.IsError {
+			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
+		} else {
+			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
+		}
+	} else if v.cancelled {
+		icon = t.S().Muted.Render(styles.ToolPending)
+	}
+
+	// "Job:" in Sardine color (BlueLight)
+	jobPart := t.S().Base.Foreground(t.Blue).Render("Job:")
+	// Subcommand in Blue color
+	subcommandPart := t.S().Base.Foreground(t.BlueLight).Render(subcommand)
+	// PID and description in muted color
+	pidPart := t.S().Muted.Render(pid)
+	descPart := ""
+	if description != "" {
+		descPart = " " + t.S().Subtle.Render(description)
+	}
+
+	// Build the complete header
+	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, subcommandPart, pidPart)
+	fullHeader := prefix + descPart
+
+	// Truncate if needed
+	if lipgloss.Width(fullHeader) > width {
+		availableWidth := width - lipgloss.Width(prefix) - 1 // -1 for space
+		if availableWidth < 10 {
+			// Not enough space for description, just show prefix
+			return prefix
+		}
+		descPart = " " + t.S().Subtle.Render(ansi.Truncate(description, availableWidth, "…"))
+		fullHeader = prefix + descPart
+	}
+
+	return fullHeader
+}
+
 // bashOutputRenderer handles bash output retrieval display
 type bashOutputRenderer struct {
 	baseRenderer
@@ -248,16 +290,36 @@ type bashOutputRenderer struct {
 
 // Render displays the shell ID and output from a background shell
 func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
-	var params tools.BashOutputParams
+	var params tools.JobOutputParams
 	if err := bor.unmarshalParams(v.call.Input, &params); err != nil {
-		return bor.renderError(v, "Invalid bash_output parameters")
+		return bor.renderError(v, "Invalid job_output parameters")
 	}
 
-	args := newParamBuilder().addMain(params.ShellID).build()
+	var meta tools.JobOutputResponseMetadata
+	var description string
+	if v.result.Metadata != "" {
+		if err := bor.unmarshalParams(v.result.Metadata, &meta); err == nil {
+			if meta.Description != "" {
+				description = meta.Description
+			} else {
+				description = meta.Command
+			}
+		}
+	}
 
-	return bor.renderWithParams(v, "Bash Output", args, func() string {
-		return renderPlainContent(v, v.result.Content)
-	})
+	width := v.textWidth()
+	if v.isNested {
+		width -= 4 // Adjust for nested tool call indentation
+	}
+	header := makeJobHeader(v, "Output", fmt.Sprintf("PID %s", params.ShellID), description, width)
+	if v.isNested {
+		return v.style().Render(header)
+	}
+	if res, done := earlyState(header, v); done {
+		return res
+	}
+	body := renderPlainContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
 }
 
 // -----------------------------------------------------------------------------
@@ -271,16 +333,36 @@ type bashKillRenderer struct {
 
 // Render displays the shell ID being terminated
 func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
-	var params tools.BashKillParams
+	var params tools.JobKillParams
 	if err := bkr.unmarshalParams(v.call.Input, &params); err != nil {
-		return bkr.renderError(v, "Invalid bash_kill parameters")
+		return bkr.renderError(v, "Invalid job_kill parameters")
 	}
 
-	args := newParamBuilder().addMain(params.ShellID).build()
+	var meta tools.JobKillResponseMetadata
+	var description string
+	if v.result.Metadata != "" {
+		if err := bkr.unmarshalParams(v.result.Metadata, &meta); err == nil {
+			if meta.Description != "" {
+				description = meta.Description
+			} else {
+				description = meta.Command
+			}
+		}
+	}
 
-	return bkr.renderWithParams(v, "Bash Kill", args, func() string {
-		return renderPlainContent(v, v.result.Content)
-	})
+	width := v.textWidth()
+	if v.isNested {
+		width -= 4 // Adjust for nested tool call indentation
+	}
+	header := makeJobHeader(v, "Kill", fmt.Sprintf("PID %s", params.ShellID), description, width)
+	if v.isNested {
+		return v.style().Render(header)
+	}
+	if res, done := earlyState(header, v); done {
+		return res
+	}
+	body := renderPlainContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
 }
 
 // -----------------------------------------------------------------------------
@@ -1053,10 +1135,10 @@ func prettifyToolName(name string) string {
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
-	case tools.BashOutputToolName:
-		return "Bash Output"
-	case tools.BashKillToolName:
-		return "Bash Kill"
+	case tools.JobOutputToolName:
+		return "Job: Output"
+	case tools.JobKillToolName:
+		return "Job: Kill"
 	case tools.DownloadToolName:
 		return "Download"
 	case tools.EditToolName:

@@ -92,8 +92,6 @@ github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018 h1:PU4Zvp
 github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018/go.mod h1:Z/GLmp9fzaqX4ze3nXG7StgWez5uBM5XtlLHK8V/qSk=
 github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 h1:HK7B5Q+0FidxjQD5CovniMw7axkUeMHwgVkxkbmiW/s=
 github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97/go.mod h1:ZagL2esO4qxlOJBj0d4PVvLM82akQFtne8s3ivxBnTQ=
-github.com/charmbracelet/hotdiva2000 v0.0.0-20250826160440-48bbea31f5a8 h1:w1J++lBA+XTqFHvpoG2Vb3sMEfqw3yTxnAOmLVmcPio=
-github.com/charmbracelet/hotdiva2000 v0.0.0-20250826160440-48bbea31f5a8/go.mod h1:9KGSzLBb3ARFkllODp0IGQBleFii+Awgzz9zT99tLQc=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea h1:g1HfUgSMvye8mgecMD1mPscpt+pzJoDEiSA+p2QXzdQ=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea/go.mod h1:ngHerf1JLJXBrDXdphn5gFrBPriCL437uwukd5c93pM=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=

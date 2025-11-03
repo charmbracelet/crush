@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -100,6 +101,14 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	defer s.mu.Unlock()
 
 	return s.execPOSIX(ctx, command)
+}
+
+// ExecStream executes a command in the shell with streaming output to provided writers
+func (s *Shell) ExecStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.execPOSIXStream(ctx, command, stdout, stderr)
 }
 
 // GetWorkingDir returns the current working directory
@@ -254,6 +263,34 @@ func (s *Shell) execPOSIX(ctx context.Context, command string) (string, string, 
 	}
 	s.logger.InfoPersist("POSIX command finished", "command", command, "err", err)
 	return stdout.String(), stderr.String(), err
+}
+
+// execPOSIXStream executes commands using POSIX shell emulation with streaming output
+func (s *Shell) execPOSIXStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return fmt.Errorf("could not parse command: %w", err)
+	}
+
+	runner, err := interp.New(
+		interp.StdIO(nil, stdout, stderr),
+		interp.Interactive(false),
+		interp.Env(expand.ListEnviron(s.env...)),
+		interp.Dir(s.cwd),
+		interp.ExecHandlers(s.blockHandler(), coreutils.ExecHandler),
+	)
+	if err != nil {
+		return fmt.Errorf("could not run command: %w", err)
+	}
+
+	err = runner.Run(ctx, line)
+	s.cwd = runner.Dir
+	s.env = []string{}
+	for name, vr := range runner.Vars {
+		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
+	}
+	s.logger.InfoPersist("POSIX command finished", "command", command, "err", err)
+	return err
 }
 
 // IsInterrupt checks if an error is due to interruption

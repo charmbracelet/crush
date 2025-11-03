@@ -19,15 +19,15 @@ import (
 )
 
 type BashParams struct {
+	Description     string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
 	Command         string `json:"command" description:"The command to execute"`
-	Description     string `json:"description,omitempty" description:"A brief description of what the command does"`
 	WorkingDir      string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
-	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use bash_output to read the output later."`
+	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
 }
 
 type BashPermissionsParams struct {
-	Command         string `json:"command"`
 	Description     string `json:"description"`
+	Command         string `json:"command"`
 	WorkingDir      string `json:"working_dir"`
 	RunInBackground bool   `json:"run_in_background"`
 }
@@ -236,7 +236,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -245,11 +245,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),
 					Description:      params.Description,
-					WorkingDirectory: bgShell.GetWorkingDir(),
+					WorkingDirectory: bgShell.WorkingDir,
 					Background:       true,
 					ShellID:          bgShell.ID,
 				}
-				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse bash_output tool to view output or bash_kill to terminate.", bgShell.ID)
+				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
 
@@ -258,7 +258,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
@@ -338,12 +338,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					EndTime:          time.Now().UnixMilli(),
 					Output:           stdout,
 					Description:      params.Description,
-					WorkingDirectory: bgShell.GetWorkingDir(),
+					WorkingDirectory: bgShell.WorkingDir,
 				}
 				if stdout == "" {
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
 				}
-				stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.GetWorkingDir()))
+				stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 			}
 
@@ -352,11 +352,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				StartTime:        startTime.UnixMilli(),
 				EndTime:          time.Now().UnixMilli(),
 				Description:      params.Description,
-				WorkingDirectory: bgShell.GetWorkingDir(),
+				WorkingDirectory: bgShell.WorkingDir,
 				Background:       true,
 				ShellID:          bgShell.ID,
 			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse bash_output tool to view output or bash_kill to terminate.", bgShell.ID)
+			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		})
 }

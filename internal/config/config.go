@@ -469,8 +469,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
-		"bash_output",
-		"bash_kill",
+		"job_output",
+		"job_kill",
 		"download",
 		"edit",
 		"multiedit",

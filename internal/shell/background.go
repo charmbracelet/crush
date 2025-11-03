@@ -5,22 +5,24 @@ import (
 	"context"
 	"fmt"
 	"sync"
-
-	"github.com/charmbracelet/hotdiva2000"
+	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/csync"
 )
 
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
-	ID      string
-	Shell   *Shell
-	ctx     context.Context
-	cancel  context.CancelFunc
-	stdout  *bytes.Buffer
-	stderr  *bytes.Buffer
-	done    chan struct{}
-	exitErr error
+	ID          string
+	Command     string
+	Description string
+	Shell       *Shell
+	WorkingDir  string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	stdout      *bytes.Buffer
+	stderr      *bytes.Buffer
+	done        chan struct{}
+	exitErr     error
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -31,6 +33,7 @@ type BackgroundShellManager struct {
 var (
 	backgroundManager     *BackgroundShellManager
 	backgroundManagerOnce sync.Once
+	idCounter             atomic.Uint64
 )
 
 // GetBackgroundShellManager returns the singleton background shell manager.
@@ -44,8 +47,8 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 }
 
 // Start creates and starts a new background shell with the given command.
-func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string) (*BackgroundShell, error) {
-	id := hotdiva2000.Generate()
+func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+	id := fmt.Sprintf("%03X", idCounter.Add(1))
 
 	shell := NewShell(&Options{
 		WorkingDir: workingDir,
@@ -55,13 +58,16 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 	shellCtx, cancel := context.WithCancel(ctx)
 
 	bgShell := &BackgroundShell{
-		ID:     id,
-		Shell:  shell,
-		ctx:    shellCtx,
-		cancel: cancel,
-		stdout: &bytes.Buffer{},
-		stderr: &bytes.Buffer{},
-		done:   make(chan struct{}),
+		ID:          id,
+		Command:     command,
+		Description: description,
+		WorkingDir:  workingDir,
+		Shell:       shell,
+		ctx:         shellCtx,
+		cancel:      cancel,
+		stdout:      &bytes.Buffer{},
+		stderr:      &bytes.Buffer{},
+		done:        make(chan struct{}),
 	}
 
 	m.shells.Set(id, bgShell)
@@ -69,10 +75,8 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 	go func() {
 		defer close(bgShell.done)
 
-		stdout, stderr, err := shell.Exec(shellCtx, command)
+		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
 
-		bgShell.stdout.WriteString(stdout)
-		bgShell.stderr.WriteString(stderr)
 		bgShell.exitErr = err
 	}()
 
@@ -104,6 +108,13 @@ func (m *BackgroundShellManager) Kill(id string) error {
 	shell.cancel()
 	<-shell.done
 	return nil
+}
+
+// BackgroundShellInfo contains information about a background shell.
+type BackgroundShellInfo struct {
+	ID          string
+	Command     string
+	Description string
 }
 
 // List returns all background shell IDs.
@@ -152,9 +163,4 @@ func (bs *BackgroundShell) IsDone() bool {
 // Wait blocks until the background shell completes.
 func (bs *BackgroundShell) Wait() {
 	<-bs.done
-}
-
-// GetWorkingDir returns the current working directory of the background shell.
-func (bs *BackgroundShell) GetWorkingDir() string {
-	return bs.Shell.GetWorkingDir()
 }

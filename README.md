@@ -281,11 +281,11 @@ using `$(echo $VAR)` syntax.
     },
     "github": {
       "type": "http",
-      "url": "https://example.com/mcp/",
+      "url": "https://api.githubcopilot.com/mcp/",
       "timeout": 120,
       "disabled": false,
       "headers": {
-        "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
+        "Authorization": "Bearer $GH_PAT"
       }
     },
     "streaming-service": {

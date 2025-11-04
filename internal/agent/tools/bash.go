@@ -241,6 +241,65 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
 
+				// Wait a short time to detect fast failures (blocked commands, syntax errors, etc.)
+				time.Sleep(1 * time.Second)
+				stdout, stderr, done, execErr := bgShell.GetOutput()
+
+				if done {
+					// Command failed or completed very quickly
+					bgManager.Remove(bgShell.ID)
+
+					interrupted := shell.IsInterrupt(execErr)
+					exitCode := shell.ExitCode(execErr)
+					if exitCode == 0 && !interrupted && execErr != nil {
+						return fantasy.ToolResponse{}, fmt.Errorf("error executing command: %w", execErr)
+					}
+
+					stdout = truncateOutput(stdout)
+					stderr = truncateOutput(stderr)
+
+					errorMessage := stderr
+					if errorMessage == "" && execErr != nil {
+						errorMessage = execErr.Error()
+					}
+
+					if interrupted {
+						if errorMessage != "" {
+							errorMessage += "\n"
+						}
+						errorMessage += "Command was aborted before completion"
+					} else if exitCode != 0 {
+						if errorMessage != "" {
+							errorMessage += "\n"
+						}
+						errorMessage += fmt.Sprintf("Exit code %d", exitCode)
+					}
+
+					hasBothOutputs := stdout != "" && stderr != ""
+
+					if hasBothOutputs {
+						stdout += "\n"
+					}
+
+					if errorMessage != "" {
+						stdout += "\n" + errorMessage
+					}
+
+					metadata := BashResponseMetadata{
+						StartTime:        startTime.UnixMilli(),
+						EndTime:          time.Now().UnixMilli(),
+						Output:           stdout,
+						Description:      params.Description,
+						WorkingDirectory: bgShell.WorkingDir,
+					}
+					if stdout == "" {
+						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+					}
+					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+				}
+
+				// Still running after fast-failure check - return as background job
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),

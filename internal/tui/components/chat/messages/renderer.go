@@ -219,6 +219,32 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		addMain(cmd).
 		addFlag("background", params.RunInBackground).
 		build()
+	if v.call.Finished {
+		var meta tools.BashResponseMetadata
+		_ = br.unmarshalParams(v.result.Metadata, &meta)
+		if meta.Background {
+			var description string
+			if meta.Description != "" {
+				description = meta.Description
+			} else {
+				description = params.Command
+			}
+			width := v.textWidth()
+			if v.isNested {
+				width -= 4 // Adjust for nested tool call indentation
+			}
+			header := makeJobHeader(v, "Start", fmt.Sprintf("PID %s", meta.ShellID), description, width)
+			if v.isNested {
+				return v.style().Render(header)
+			}
+			if res, done := earlyState(header, v); done {
+				return res
+			}
+			content := "Command: " + params.Command + "\n" + v.result.Content
+			body := renderPlainContent(v, content)
+			return joinHeaderBody(header, body)
+		}
+	}
 
 	return br.renderWithParams(v, "Bash", args, func() string {
 		var meta tools.BashResponseMetadata

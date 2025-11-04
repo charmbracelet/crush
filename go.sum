@@ -1,5 +1,5 @@
-charm.land/fantasy v0.1.5 h1:7sta5yC+cSU32Kb+cNQb4b/3fyn13tYOgXsnXhdMlX0=
-charm.land/fantasy v0.1.5/go.mod h1:GT1Y8uYNmmu7OkUxWEiOyzdAf1jYopPJfpWvoDRzGiM=
+charm.land/fantasy v0.1.6 h1:laomMUqUaniQoLx7UOb+MLUpIGJPoNwsXvw1PbzgnB8=
+charm.land/fantasy v0.1.6/go.mod h1:JpFcJ5zs/1CjmYYGAZ7GaFmeBv0mPaTzEPRG6Eic5pc=
 cloud.google.com/go v0.116.0 h1:B3fRrSDkLRt5qSHWe40ERJvhvnQwdZiHu0bJOpldweE=
 cloud.google.com/go v0.116.0/go.mod h1:cEPSRWPzZEswwdr9BxE6ChEn01dWlTaF05LiC2Xs70U=
 cloud.google.com/go/auth v0.17.0 h1:74yCm7hCj2rUyyAocqnFzsAYXgJhrG26XCFimrc/Kz4=
@@ -34,8 +34,8 @@ github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kk
 github.com/andybalholm/cascadia v1.3.3/go.mod h1:xNd9bqTn98Ln4DwST8/nG+H0yuB8Hmgu1YHNnWw0GeA=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
-github.com/aws/aws-sdk-go-v2 v1.39.4 h1:qTsQKcdQPHnfGYBBs+Btl8QwxJeoWcOcPcixK90mRhg=
-github.com/aws/aws-sdk-go-v2 v1.39.4/go.mod h1:yWSxrnioGUZ4WVv9TgMrNUeLV3PFESn/v+6T/Su8gnM=
+github.com/aws/aws-sdk-go-v2 v1.39.5 h1:e/SXuia3rkFtapghJROrydtQpfQaaUgd1cUvyO1mp2w=
+github.com/aws/aws-sdk-go-v2 v1.39.5/go.mod h1:yWSxrnioGUZ4WVv9TgMrNUeLV3PFESn/v+6T/Su8gnM=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 h1:tW1/Rkad38LA15X4UQtjXZXNKsCgkshC3EbmcUmghTg=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3/go.mod h1:UbnqO+zjqk3uIt9yCACHJ9IVNhyhOCnYk8yA19SAWrM=
 github.com/aws/aws-sdk-go-v2/config v1.27.27 h1:HdqgGt1OAP0HkEDDShEl0oSYa9ZZBSOmKpdpsDMdO90=
@@ -90,8 +90,6 @@ github.com/charmbracelet/fang v0.4.3 h1:qXeMxnL4H6mSKBUhDefHu8NfikFbP/MBNTfqTrXv
 github.com/charmbracelet/fang v0.4.3/go.mod h1:wHJKQYO5ReYsxx+yZl+skDtrlKO/4LLEQ6EXsdHhRhg=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018 h1:PU4Zvpagsk5sgaDxn5W4sxHuLp9QRMBZB3bFSk40A4w=
 github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018/go.mod h1:Z/GLmp9fzaqX4ze3nXG7StgWez5uBM5XtlLHK8V/qSk=
-github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 h1:HK7B5Q+0FidxjQD5CovniMw7axkUeMHwgVkxkbmiW/s=
-github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97/go.mod h1:ZagL2esO4qxlOJBj0d4PVvLM82akQFtne8s3ivxBnTQ=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea h1:g1HfUgSMvye8mgecMD1mPscpt+pzJoDEiSA+p2QXzdQ=
 github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea/go.mod h1:ngHerf1JLJXBrDXdphn5gFrBPriCL437uwukd5c93pM=
 github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706 h1:WkwO6Ks3mSIGnGuSdKl9qDSyfbYK50z2wc2gGMggegE=
@@ -437,6 +435,8 @@ golang.org/x/tools v0.37.0/go.mod h1:MBN5QPQtLMHVdvsbtarmTNukZDdgwdwlO5qGacAzF0w
 golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 google.golang.org/api v0.239.0 h1:2hZKUnFZEy81eugPs4e2XzIJ5SOwQg0G82bpXD65Puo=
 google.golang.org/api v0.239.0/go.mod h1:cOVEm2TpdAGHL2z+UwyS+kmlGr3bVWQQ6sYEqkKje50=
+google.golang.org/genai v1.33.1-0.20251103191629-d15baab4f79e h1:pGBT6ptC4ENtN9wA4dGhvjwrYpVZ6X9Lnpwu4Y+jozk=
+google.golang.org/genai v1.33.1-0.20251103191629-d15baab4f79e/go.mod h1:7pAilaICJlQBonjKKJNhftDFv3SREhZcTe9F6nRcjbg=
 google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 h1:fc6jSaCT0vBduLYZHYrBBNY4dsWuvgyff9noRNDdBeE=
 google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822/go.mod h1:qQ0YXyHHx3XkvlzUtpXDkS29lDSafHMZBAZDc03LQ3A=
 google.golang.org/grpc v1.74.2 h1:WoosgB65DlWVC9FqI82dGsZhWFNBSLjQ84bjROOpMu4=

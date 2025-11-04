@@ -64,6 +64,7 @@ const (
 	EventStateChanged EventType = iota
 	EventToolsListChanged
 	EventPromptsListChanged
+	EventResourcesListChanged
 )
 
 // Event represents an event in the MCP system
@@ -77,8 +78,9 @@ type Event struct {
 
 // Counts number of available tools, prompts, etc.
 type Counts struct {
-	Tools   int
-	Prompts int
+	Tools     int
+	Prompts   int
+	Resources int
 }
 
 // ClientInfo holds information about an MCP client's state
@@ -178,13 +180,23 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
+			resources, err := getResources(ctx, session)
+			if err != nil {
+				slog.Error("error listing resources", "error", err)
+				updateState(name, StateError, err, nil, Counts{})
+				session.Close()
+				return
+			}
+
 			updateTools(name, tools)
 			updatePrompts(name, prompts)
+			updateResources(name, resources)
 			sessions.Set(name, session)
 
 			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   len(tools),
-				Prompts: len(prompts),
+				Tools:     len(tools),
+				Prompts:   len(prompts),
+				Resources: len(resources),
 			})
 		}(name, m)
 	}
@@ -281,8 +293,14 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 					Name: name,
 				})
 			},
+			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
+				broker.Publish(pubsub.UpdatedEvent, Event{
+					Type: EventResourcesListChanged,
+					Name: name,
+				})
+			},
 			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
-				slog.Info("mcp log", "name", name, "data", req.Params.Data)
+				slog.Log(ctx, parseLevel(req.Params.Level), "mcp server log", "data", req.Params.Data)
 			},
 			KeepAlive: time.Minute * 10,
 		},
@@ -301,6 +319,21 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	cancelTimer.Stop()
 	slog.Info("Initialized mcp client", "name", name)
 	return session, nil
+}
+
+func parseLevel(level mcp.LoggingLevel) slog.Level {
+	switch level {
+	case "debug":
+		return slog.LevelDebug
+	case "info", "notice":
+		return slog.LevelInfo
+	case "warning", "warn":
+		return slog.LevelWarn
+	case "error", "emergency", "alert", "fatal":
+		fallthrough
+	default:
+		return slog.LevelError
+	}
 }
 
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail

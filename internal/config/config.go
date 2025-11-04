@@ -481,6 +481,8 @@ func allToolNames() []string {
 		"sourcegraph",
 		"view",
 		"write",
+		"read_mcp_resource",
+		"list_mcp_resources",
 	}
 }
 

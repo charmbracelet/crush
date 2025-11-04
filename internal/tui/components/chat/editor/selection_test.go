@@ -369,3 +369,59 @@ func TestSelectionManager_Integration(t *testing.T) {
 	sm.SelectAll()
 	require.Equal(t, "new content", sm.GetSelectedText())
 }
+
+func TestSelectionManagerBoundsValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		input    struct{ start, end int }
+		expected struct{ start, end int }
+	}{
+		{
+			name:    "valid bounds",
+			content: "hello world",
+			input:   struct{ start, end int }{start: 2, end: 7},
+			expected: struct{ start, end int }{start: 2, end: 7},
+		},
+		{
+			name:    "negative start",
+			content: "hello world",
+			input:   struct{ start, end int }{start: -5, end: 7},
+			expected: struct{ start, end int }{start: 0, end: 7},
+		},
+		{
+			name:    "negative end",
+			content: "hello world",
+			input:   struct{ start, end int }{start: 2, end: -5},
+			expected: struct{ start, end int }{start: 2, end: 0},
+		},
+		{
+			name:    "start beyond content",
+			content: "hello world",
+			input:   struct{ start, end int }{start: 20, end: 25},
+			expected: struct{ start, end int }{start: 11, end: 11},
+		},
+		{
+			name:    "end beyond content",
+			content: "hello world",
+			input:   struct{ start, end int }{start: 2, end: 25},
+			expected: struct{ start, end int }{start: 2, end: 11},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ta := textarea.New()
+			ta.SetValue(test.content)
+			sm := NewSelectionManager(ta)
+
+			sm.SetSelection(test.input.start, test.input.end)
+			selection := sm.GetSelection()
+			
+			require.Equal(t, test.expected.start, selection.Start, "Start should be clamped")
+			require.Equal(t, test.expected.end, selection.End, "End should be clamped")
+		})
+	}
+}

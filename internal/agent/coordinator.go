@@ -330,7 +330,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	// Get the model name for the agent
 	modelName := ""
 	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {
-		modelName = modelCfg.Model
+		if model := c.cfg.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+			modelName = model.Name
+		}
 	}
 
 	allTools = append(allTools,

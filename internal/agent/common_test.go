@@ -175,8 +175,15 @@ func coderAgent(r *recorder.Recorder, env fakeEnv, large, small fantasy.Language
 	if err != nil {
 		return nil, err
 	}
+
+	// Get the model name for the bash tool
+	modelName := large.Model() // fallback to ID if Name not available
+	if model := cfg.GetModel(large.Provider(), large.Model()); model != nil {
+		modelName = model.Name
+	}
+
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution, large.Model()),
+		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution, modelName),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewEditTool(env.lspClients, env.permissions, env.history, env.workingDir),
 		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, env.workingDir),

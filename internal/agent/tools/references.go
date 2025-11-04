@@ -25,9 +25,7 @@ type ReferencesParams struct {
 	Path   string `json:"path,omitempty" description:"The directory to search in. Use a directory/file to narrow down the symbol search. Defaults to the current working directory."`
 }
 
-type referencesTool struct {
-	lspClients *csync.Map[string, *lsp.Client]
-}
+
 
 const ReferencesToolName = "lsp_references"
 
@@ -87,9 +85,7 @@ func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 		})
 }
 
-func (r *referencesTool) Name() string {
-	return ReferencesToolName
-}
+
 
 func find(ctx context.Context, lspClients *csync.Map[string, *lsp.Client], symbol string, match grepMatch) ([]protocol.Location, error) {
 	absPath, err := filepath.Abs(match.path)

@@ -33,11 +33,7 @@ type ViewPermissionsParams struct {
 	Limit    int    `json:"limit"`
 }
 
-type viewTool struct {
-	lspClients  *csync.Map[string, *lsp.Client]
-	workingDir  string
-	permissions permission.Service
-}
+
 
 type ViewResponseMetadata struct {
 	FilePath string `json:"file_path"`

@@ -35,12 +35,7 @@ type WritePermissionsParams struct {
 	NewContent string `json:"new_content,omitempty"`
 }
 
-type writeTool struct {
-	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
-	workingDir  string
-}
+
 
 type WriteResponseMetadata struct {
 	Diff      string `json:"diff"`

@@ -9,6 +9,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testEditorHelper provides common test setup and assertion patterns
+type testEditorHelper struct {
+	t      *testing.T
+	editor *editorCmp
+}
+
+// newTestEditor creates a test editor with given content
+func newTestEditor(t *testing.T, content string) *testEditorHelper {
+	ta := textarea.New()
+	ta.SetValue(content)
+	
+	editor := &editorCmp{
+		textarea:  ta,
+		selection: NewSelectionManager(ta),
+	}
+	
+	return &testEditorHelper{
+		t:      t,
+		editor: editor,
+	}
+}
+
+// withAttachments adds attachments to the test editor
+func (h *testEditorHelper) withAttachments(attachments []message.Attachment) *testEditorHelper {
+	h.editor.attachments = attachments
+	return h
+}
+
+// assertSelectionState validates selection state with given expectations
+func (h *testEditorHelper) assertSelectionState(hasSelection bool, expectedText string) {
+	require.Equal(h.t, hasSelection, h.editor.HasSelection(), "Selection state should match")
+	require.Equal(h.t, expectedText, h.editor.GetSelectedText(), "Selected text should match")
+}
+
 // TestSelectionKeyBindings tests all selection-related key bindings
 func TestSelectionKeyBindings(t *testing.T) {
 	t.Parallel()
@@ -90,28 +124,21 @@ func TestSelectionVisualRendering(t *testing.T) {
 func TestSelectionWithAttachments(t *testing.T) {
 	t.Parallel()
 
-	ta := textarea.New()
-	ta.SetValue("test with attachments")
-	
-	editor := &editorCmp{
-		textarea:    ta,
-		selection:   NewSelectionManager(ta),
-		attachments: []message.Attachment{
+	helper := newTestEditor(t, "test with attachments").
+		withAttachments([]message.Attachment{
 			{FileName: "test.txt"},
-		},
-	}
+		})
 
 	// Test that selection works even with attachments present
-	editor.SelectAll()
-	require.True(t, editor.HasSelection(), "Should have selection with attachments")
-	require.Equal(t, "test with attachments", editor.GetSelectedText())
+	helper.editor.SelectAll()
+	helper.assertSelectionState(true, "test with attachments")
 
 	// Test that attachments and selection coexist without issues
-	require.NotEmpty(t, editor.attachments, "Should have attachments")
-	require.True(t, editor.HasSelection(), "Should still have selection")
+	require.NotEmpty(t, helper.editor.attachments, "Should have attachments")
+	require.True(t, helper.editor.HasSelection(), "Should still have selection")
 	
 	// Test renderSelectedText method without calling full View()
-	viewText := editor.renderSelectedText()
+	viewText := helper.editor.renderSelectedText()
 	require.Contains(t, viewText, "test with attachments", "Should render selected text")
 }
 
@@ -353,20 +380,9 @@ func TestSelectionStateTransitions(t *testing.T) {
 		t.Run(state.name, func(t *testing.T) {
 			t.Parallel()
 			
-			// Reset textarea for each state
-			ta := textarea.New()
-			ta.SetValue("state transition test")
-			editor := &editorCmp{
-				textarea:  ta,
-				selection: NewSelectionManager(ta),
-			}
-
-			state.action(editor)
-			
-			require.Equal(t, state.expectedHasSel, editor.HasSelection(), 
-				"Selection state should match expected")
-			require.Equal(t, state.expectedText, editor.GetSelectedText(), 
-				"Selected text should match expected")
+			helper := newTestEditor(t, "state transition test")
+			state.action(helper.editor)
+			helper.assertSelectionState(state.expectedHasSel, state.expectedText)
 		})
 	}
 }

@@ -165,14 +165,7 @@ func TestEditorKeyBindings(t *testing.T) {
 	require.Contains(t, keyMap.LineStart.Keys(), "ctrl+home")
 }
 
-// Test that editor can be created without panics
-func TestNewEditor(t *testing.T) {
-	t.Parallel()
 
-	// Skip this test for now as it requires full app setup
-	// In a real environment, you'd need to properly initialize the app
-	t.Skip("Skipping New editor test - requires full app setup")
-}
 
 // Integration tests for the complete selection system
 func TestEditorSelectionIntegration(t *testing.T) {

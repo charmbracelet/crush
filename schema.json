@@ -5,10 +5,15 @@
   "$defs": {
     "Attribution": {
       "properties": {
-        "co_authored_by": {
-          "type": "boolean",
-          "description": "Add Co-Authored-By trailer to commit messages",
-          "default": true
+        "trailer_style": {
+          "type": "string",
+          "enum": [
+            "none",
+            "co-authored-by",
+            "assisted-by"
+          ],
+          "description": "Style of attribution trailer to add to commits",
+          "default": "co-authored-by"
         },
         "generated_with": {
           "type": "boolean",

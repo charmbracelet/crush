@@ -66,7 +66,9 @@ When user asks to create git commit:
 {{ if .Attribution.GeneratedWith}}
    💘 Generated with Crush
 {{ end }}
-{{ if .Attribution.CoAuthoredBy}}
+{{ if eq .Attribution.TrailerStyle "assisted-by"}}
+   Assisted-by: {{ .ModelName }} via Crush
+{{ else if eq .Attribution.TrailerStyle "co-authored-by"}}
    Co-Authored-By: Crush <crush@charm.land>
 {{ end }}
    EOF

@@ -166,9 +166,17 @@ type Permissions struct {
 	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
 }
 
+type TrailerStyle string
+
+const (
+	TrailerStyleNone         TrailerStyle = "none"
+	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
+	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
+)
+
 type Attribution struct {
-	CoAuthoredBy  bool `json:"co_authored_by,omitempty" jsonschema:"description=Add Co-Authored-By trailer to commit messages,default=true"`
-	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=co-authored-by"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
 }
 
 type Options struct {

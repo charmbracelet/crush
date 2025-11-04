@@ -9,6 +9,9 @@ type EditorKeyMap struct {
 	SendMessage key.Binding
 	OpenEditor  key.Binding
 	Newline     key.Binding
+	SelectAll   key.Binding
+	Copy        key.Binding
+	LineStart   key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -32,6 +35,18 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			// to reflect that.
 			key.WithHelp("ctrl+j", "newline"),
 		),
+		SelectAll: key.NewBinding(
+			key.WithKeys("ctrl+a", "cmd+a"),
+			key.WithHelp("ctrl+a", "select all"),
+		),
+		Copy: key.NewBinding(
+			key.WithKeys("ctrl+c", "cmd+c"),
+			key.WithHelp("ctrl+c", "copy selection"),
+		),
+		LineStart: key.NewBinding(
+			key.WithKeys("home", "ctrl+home"),
+			key.WithHelp("home", "cursor to start of line"),
+		),
 	}
 }
 
@@ -42,6 +57,9 @@ func (k EditorKeyMap) KeyBindings() []key.Binding {
 		k.SendMessage,
 		k.OpenEditor,
 		k.Newline,
+		k.SelectAll,
+		k.Copy,
+		k.LineStart,
 		AttachmentsKeyMaps.AttachmentDeleteMode,
 		AttachmentsKeyMaps.DeleteAllAttachments,
 		AttachmentsKeyMaps.Escape,

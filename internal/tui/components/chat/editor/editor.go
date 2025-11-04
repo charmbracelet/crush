@@ -43,6 +43,12 @@ type Editor interface {
 	IsCompletionsOpen() bool
 	HasAttachments() bool
 	Cursor() *tea.Cursor
+
+	// Text selection methods
+	SelectAll()
+	ClearSelection()
+	GetSelectedText() string
+	HasSelection() bool
 }
 
 type FileCompletionItem struct {
@@ -62,6 +68,9 @@ type editorCmp struct {
 	workingPlaceholder string
 
 	keyMap EditorKeyMap
+
+	// Text selection manager
+	selection *SelectionManager
 
 	// File path completions
 	currentQuery          string
@@ -327,6 +336,36 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, m.send()
 			}
 		}
+		
+		// Handle selection and navigation keys
+		if key.Matches(msg, m.keyMap.SelectAll) {
+			m.SelectAll()
+			return m, nil
+		}
+		
+		if key.Matches(msg, m.keyMap.Copy) {
+			if m.HasSelection() {
+				// Copy selected text to clipboard
+				selectedText := m.GetSelectedText()
+				return m, func() tea.Msg {
+					tea.SetClipboard(selectedText)
+					return nil
+				}
+			}
+			// Fall through to textarea's default copy behavior
+		}
+		
+		if key.Matches(msg, m.keyMap.LineStart) {
+			m.textarea.CursorStart()
+			return m, nil
+		}
+		
+		// Clear selection when typing or moving cursor
+		if !key.Matches(msg, m.keyMap.Copy) && !key.Matches(msg, m.keyMap.SelectAll) {
+			if m.HasSelection() {
+				m.ClearSelection()
+			}
+		}
 	}
 
 	m.textarea, cmd = m.textarea.Update(msg)
@@ -418,6 +457,37 @@ func (m *editorCmp) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
+// renderSelectedText renders the textarea with selection highlighting.
+func (m *editorCmp) renderSelectedText() string {
+	t := styles.CurrentTheme()
+	value := m.textarea.Value()
+	
+	if !m.HasSelection() {
+		return m.textarea.View()
+	}
+	
+	// Get selection bounds
+	selection := m.selection.GetSelection()
+	start, end := selection.Bounds()
+	
+	// Render with selection highlighting
+	before := value[:start]
+	selected := value[start:end]
+	after := value[end:]
+	
+	// Apply selection style to the selected part
+	selectedStyled := t.TextSelection.Render(selected)
+	
+	// Combine the parts and set back to textarea
+	fullContent := before + selectedStyled + after
+	
+	// Create a temporary textarea to render the styled content
+	tempTextarea := *m.textarea
+	tempTextarea.SetValue(fullContent)
+	
+	return tempTextarea.View()
+}
+
 func (m *editorCmp) View() string {
 	t := styles.CurrentTheme()
 	// Update placeholder
@@ -431,14 +501,14 @@ func (m *editorCmp) View() string {
 	}
 	if len(m.attachments) == 0 {
 		content := t.S().Base.Padding(1).Render(
-			m.textarea.View(),
+			m.renderSelectedText(),
 		)
 		return content
 	}
 	content := t.S().Base.Padding(0, 1, 1, 1).Render(
 		lipgloss.JoinVertical(lipgloss.Top,
 			m.attachmentsContent(),
-			m.textarea.View(),
+			m.renderSelectedText(),
 		),
 	)
 	return content
@@ -572,6 +642,26 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
 }
 
+// SelectAll selects all text in the textarea.
+func (c *editorCmp) SelectAll() {
+	c.selection.SelectAll()
+}
+
+// ClearSelection clears any text selection.
+func (c *editorCmp) ClearSelection() {
+	c.selection.Clear()
+}
+
+// GetSelectedText returns the currently selected text.
+func (c *editorCmp) GetSelectedText() string {
+	return c.selection.GetSelectedText()
+}
+
+// HasSelection returns whether there is any text selected.
+func (c *editorCmp) HasSelection() bool {
+	return c.selection.HasSelection()
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
@@ -585,6 +675,7 @@ func New(app *app.App) Editor {
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
+		selection: NewSelectionManager(ta),
 	}
 	e.setEditorPrompt()
 

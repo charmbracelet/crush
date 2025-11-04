@@ -269,6 +269,13 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.setEditorPrompt()
 		return m, nil
 	case tea.KeyPressMsg:
+		// CRITICAL: Handle SelectAll (Ctrl+A/Cmd+A) FIRST to override terminal behavior
+		// This prevents terminal-wide selection and selects only input field content
+		if key.Matches(msg, m.keyMap.SelectAll) {
+			m.SelectAll()
+			return m, nil
+		}
+		
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
@@ -336,12 +343,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		}
 		
-		// Handle selection and navigation keys
-		if key.Matches(msg, m.keyMap.SelectAll) {
-			m.SelectAll()
-			return m, nil
-		}
-		
+		// Handle copy key (after selection handling above)
 		if key.Matches(msg, m.keyMap.Copy) {
 			if m.HasSelection() {
 				// Copy selected text to clipboard

@@ -103,7 +103,7 @@ func TestSelectionBehavior(t *testing.T) {
 				return NewSelectionManager(ta)
 			},
 			when: func(sm *SelectionManager) {
-				sm.SetSelection(3, 9) // "Hello"
+				sm.SetSelection(2, 7) // "Hello" - 🌟(rune 0) space(1) H(2) e(3) l(4) l(5) o(6)
 			},
 			then: func(sm *SelectionManager, t *testing.T) {
 				assert.True(t, sm.HasSelection(), "Should have selection in unicode text")

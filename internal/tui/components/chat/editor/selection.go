@@ -102,10 +102,10 @@ func (s *Selection) Clear() {
 	s.Active = false
 }
 
-// SelectAll creates a selection that encompasses all text.
+// SelectAll creates a selection that encompasses all text using rune count.
 func (s *Selection) SelectAll(text string) {
 	s.Start = 0
-	s.End = len(text)
+	s.End = len([]rune(text)) // Use rune count for Unicode compatibility
 	s.Active = false // Not actively selecting, just selected
 }
 
@@ -115,10 +115,13 @@ func (s Selection) GetText(text string) string {
 		return ""
 	}
 	start, end := s.Bounds()
-	if start < 0 || end > len(text) || start >= end {
+	
+	// Convert byte indices to rune indices for proper Unicode handling
+	runes := []rune(text)
+	if start < 0 || end > len(runes) || start >= end {
 		return ""
 	}
-	return text[start:end]
+	return string(runes[start:end])
 }
 
 // SelectionManager manages text selection for a textarea.

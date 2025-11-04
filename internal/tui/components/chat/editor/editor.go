@@ -265,7 +265,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
-		case msg.String() == "/" && len(m.textarea.Value()) == 0:
+		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
 			return m, util.CmdHandler(dialogs.OpenDialogMsg{
 				Model: commands.NewCommandDialog(m.session.ID),
 			})

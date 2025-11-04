@@ -165,8 +165,6 @@ func TestEditorKeyBindings(t *testing.T) {
 	require.Contains(t, keyMap.LineStart.Keys(), "ctrl+home")
 }
 
-
-
 // Integration tests for the complete selection system
 func TestEditorSelectionIntegration(t *testing.T) {
 	t.Parallel()

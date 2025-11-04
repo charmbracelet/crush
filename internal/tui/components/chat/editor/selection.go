@@ -156,15 +156,16 @@ func (sm *SelectionManager) HasSelection() bool {
 }
 
 // SetSelection sets the selection to the specified bounds.
+// SetSelection sets selection to specified bounds with validation.
+// Validates bounds against textarea content and clears selection if invalid.
 func (sm *SelectionManager) SetSelection(start, end int) {
-	// Validate and clamp bounds to textarea content
 	textLength := len(sm.textarea.Value())
 	
-	// Clamp start and end to valid range
-	start = int(math.Max(0, float64(start)))
-	end = int(math.Max(0, float64(end)))
-	start = int(math.Min(float64(start), float64(textLength)))
-	end = int(math.Min(float64(end), float64(textLength)))
+	// If selection is invalid (out of bounds), clear it
+	if start < 0 || end < 0 || start > textLength || end > textLength {
+		sm.selection.Clear()
+		return
+	}
 	
 	sm.selection.Start = start
 	sm.selection.End = end

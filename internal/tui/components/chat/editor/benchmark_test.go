@@ -25,7 +25,7 @@ func BenchmarkSelectAll(b *testing.B) {
 			esm := NewSelectionManager(ta)
 			
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				esm.SelectAll()
 			}
 		})
@@ -48,7 +48,7 @@ func BenchmarkGetSelectedText(b *testing.B) {
 			esm.SetSelection(0, selSize)
 			
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = esm.GetSelectedText()
 			}
 		})
@@ -66,7 +66,7 @@ func BenchmarkPerformanceComparison(b *testing.B) {
 		esm := NewSelectionManager(ta)
 		
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			esm.SelectAll()
 		}
 	})
@@ -79,7 +79,7 @@ func BenchmarkPerformanceComparison(b *testing.B) {
 		esm.SelectAll()
 		
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = esm.GetSelectedText()
 		}
 	})
@@ -91,7 +91,7 @@ func BenchmarkPerformanceComparison(b *testing.B) {
 		esm := NewSelectionManager(ta)
 		
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			esm.SelectAll()
 			_ = esm.GetSelectedText()
 			esm.Clear()

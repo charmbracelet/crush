@@ -389,25 +389,25 @@ func TestSelectionManagerBoundsValidation(t *testing.T) {
 			name:    "negative start",
 			content: "hello world",
 			input:   struct{ start, end int }{start: -5, end: 7},
-			expected: struct{ start, end int }{start: 0, end: 7},
+			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
 			name:    "negative end",
 			content: "hello world",
 			input:   struct{ start, end int }{start: 2, end: -5},
-			expected: struct{ start, end int }{start: 2, end: 0},
+			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
 			name:    "start beyond content",
 			content: "hello world",
 			input:   struct{ start, end int }{start: 20, end: 25},
-			expected: struct{ start, end int }{start: 11, end: 11},
+			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
 			name:    "end beyond content",
 			content: "hello world",
 			input:   struct{ start, end int }{start: 2, end: 25},
-			expected: struct{ start, end int }{start: 2, end: 11},
+			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 	}
 

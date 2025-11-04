@@ -3,6 +3,7 @@ package editor
 import (
 	"testing"
 
+	"github.com/charmbracelet/bubbles/v2/textarea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -142,21 +143,10 @@ func TestSelectionBehavior(t *testing.T) {
 }
 
 // mockTextarea creates a mock textarea for testing
-func mockTextarea(content string) *mockTextareaModel {
-	return &mockTextareaModel{content: content}
-}
-
-// mockTextareaModel implements a minimal textarea interface for testing
-type mockTextareaModel struct {
-	content string
-}
-
-func (m *mockTextareaModel) Value() string {
-	return m.content
-}
-
-func (m *mockTextareaModel) SetValue(value string) {
-	m.content = value
+func mockTextarea(content string) *textarea.Model {
+	ta := textarea.New()
+	ta.SetValue(content)
+	return ta
 }
 
 // TestSelectionStateTransitionsBDD tests selection state transitions with BDD approach

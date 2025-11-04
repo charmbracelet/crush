@@ -291,13 +291,11 @@ func (p *permissionDialogCmp) renderHeader() string {
 			toolKey,
 			toolValue,
 		),
-		baseStyle.Render(strings.Repeat(" ", p.width)),
 		lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			pathKey,
 			pathValue,
 		),
-		baseStyle.Render(strings.Repeat(" ", p.width)),
 	}
 
 	// Add tool-specific header information
@@ -333,7 +331,6 @@ func (p *permissionDialogCmp) renderHeader() string {
 				urlKey,
 				urlValue,
 			),
-			baseStyle.Render(strings.Repeat(" ", p.width)),
 			lipgloss.JoinHorizontal(
 				lipgloss.Left,
 				fileKey,
@@ -385,9 +382,15 @@ func (p *permissionDialogCmp) renderHeader() string {
 			baseStyle.Render(strings.Repeat(" ", p.width)),
 		)
 	case tools.FetchToolName:
-		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+		headerParts = append(headerParts,
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			t.S().Muted.Width(p.width).Bold(true).Render("URL"),
+		)
 	case tools.AgenticFetchToolName:
-		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+		headerParts = append(headerParts,
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			t.S().Muted.Width(p.width).Bold(true).Render("URL"),
+		)
 	case tools.ViewToolName:
 		params := p.permission.Params.(tools.ViewPermissionsParams)
 		fileKey := t.S().Muted.Render("File")

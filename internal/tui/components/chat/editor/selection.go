@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"math"
+
 	"github.com/charmbracelet/bubbles/v2/textarea"
 )
 
@@ -30,7 +32,7 @@ func (s Selection) Length() int {
 	if !s.IsActive() {
 		return 0
 	}
-	return abs(s.End - s.Start)
+	return int(math.Abs(float64(s.End - s.Start)))
 }
 
 // Bounds returns the selection bounds normalized (start <= end).
@@ -38,8 +40,8 @@ func (s Selection) Bounds() (start, end int) {
 	if !s.IsActive() {
 		return 0, 0
 	}
-	start = min(s.Start, s.End)
-	end = max(s.Start, s.End)
+	start = int(math.Min(float64(s.Start), float64(s.End)))
+	end = int(math.Max(float64(s.Start), float64(s.End)))
 	return start, end
 }
 
@@ -122,26 +124,4 @@ func (sm *SelectionManager) SetSelection(start, end int) {
 // GetSelection returns the current selection.
 func (sm *SelectionManager) GetSelection() Selection {
 	return sm.selection
-}
-
-// Helper functions
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }

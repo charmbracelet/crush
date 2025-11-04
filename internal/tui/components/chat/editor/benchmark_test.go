@@ -55,22 +55,11 @@ func BenchmarkGetSelectedText(b *testing.B) {
 	}
 }
 
-// BenchmarkPositionConversion measures performance of position<->char conversion
-func BenchmarkPositionConversion(b *testing.B) {
-	text := strings.Repeat("line\n", 10000) // ~50k chars
-	
-	for i := 0; i < b.N; i++ {
-		charPos := i % 50000
-		pos := FromCharPosition(text, charPos)
-		_ = pos.CharPosition(text)
-	}
-}
-
-// BenchmarkEnhancedVsOriginal compares enhanced selection with original
-func BenchmarkEnhancedVsOriginal(b *testing.B) {
+// BenchmarkPerformanceComparison measures selection performance across different scenarios
+func BenchmarkPerformanceComparison(b *testing.B) {
 	text := strings.Repeat("a", 10000)
 	
-	b.Run("Original", func(b *testing.B) {
+	b.Run("SelectAll", func(b *testing.B) {
 		ta := textarea.New()
 		ta.SetValue(text)
 		
@@ -79,16 +68,27 @@ func BenchmarkEnhancedVsOriginal(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			esm.SelectAll()
-			_ = esm.GetSelectedText()
-			esm.Clear()
 		}
 	})
 	
-	b.Run("Enhanced", func(b *testing.B) {
+	b.Run("GetSelectedText", func(b *testing.B) {
 		ta := textarea.New()
 		ta.SetValue(text)
 		
-		esm := NewEnhancedSelectionManager(ta)
+		esm := NewSelectionManager(ta)
+		esm.SelectAll()
+		
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = esm.GetSelectedText()
+		}
+	})
+	
+	b.Run("CompleteWorkflow", func(b *testing.B) {
+		ta := textarea.New()
+		ta.SetValue(text)
+		
+		esm := NewSelectionManager(ta)
 		
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

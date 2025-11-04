@@ -47,6 +47,27 @@ type ClipboardCapabilities struct {
 	AsyncOperations bool
 }
 
+// Predefined capability sets
+var (
+	// OSC52Capabilities represents the limited capabilities of terminal-based OSC52
+	OSC52Capabilities = ClipboardCapabilities{
+		MultipleFormats: false,
+		LargeContent:    false, // Limited by terminal escape sequence length
+		RichContent:     false,
+		URISupport:      false,
+		AsyncOperations: false,
+	}
+
+	// NativeCapabilities represents the full capabilities of native clipboard
+	NativeCapabilities = ClipboardCapabilities{
+		MultipleFormats: true,
+		LargeContent:    true,
+		RichContent:     true,
+		URISupport:      true,
+		AsyncOperations: false,
+	}
+)
+
 // OSC52ClipboardService implements clipboard using OSC 52 escape sequences
 // Works in most terminals but limited to text content
 type OSC52ClipboardService struct{}
@@ -99,13 +120,7 @@ func (oscs *OSC52ClipboardService) SupportedTypes() []string {
 }
 
 func (oscs *OSC52ClipboardService) Capabilities() ClipboardCapabilities {
-	return ClipboardCapabilities{
-		MultipleFormats: false,
-		LargeContent:    false, // Limited by terminal escape sequence length
-		RichContent:     false,
-		URISupport:      false,
-		AsyncOperations: false,
-	}
+	return OSC52Capabilities
 }
 
 // NativeClipboardService implements clipboard using native OS clipboard
@@ -168,13 +183,7 @@ func (ncs *NativeClipboardService) SupportedTypes() []string {
 }
 
 func (ncs *NativeClipboardService) Capabilities() ClipboardCapabilities {
-	return ClipboardCapabilities{
-		MultipleFormats: true,
-		LargeContent:    true,
-		RichContent:     true,
-		URISupport:      true,
-		AsyncOperations: false,
-	}
+	return NativeCapabilities
 }
 
 // CompositeClipboardService combines multiple clipboard services

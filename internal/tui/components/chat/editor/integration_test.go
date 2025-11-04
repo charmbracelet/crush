@@ -43,6 +43,12 @@ func (h *testEditorHelper) assertSelectionState(hasSelection bool, expectedText 
 	require.Equal(h.t, expectedText, h.editor.GetSelectedText(), "Selected text should match")
 }
 
+// expectSelection is a helper function for test expectations
+func expectSelection(t *testing.T, e *editorCmp, expectedContent string) {
+	require.True(t, e.HasSelection(), "Should have selection")
+	require.Equal(t, expectedContent, e.GetSelectedText(), "Selected text should match")
+}
+
 // TestSelectionKeyBindings tests all selection-related key bindings
 func TestSelectionKeyBindings(t *testing.T) {
 	t.Parallel()
@@ -201,8 +207,7 @@ func TestSelectionEdgeCasesInContext(t *testing.T) {
 				e.SelectAll()
 			},
 			expectFunc: func(t *testing.T, e *editorCmp) {
-				require.True(t, e.HasSelection(), "Single char should have selection")
-				require.Equal(t, "a", e.GetSelectedText())
+				expectSelection(t, e, "a")
 			},
 		},
 		{

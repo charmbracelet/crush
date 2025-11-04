@@ -20,6 +20,17 @@ type GivenAndWhenScenarios struct {
 }
 
 // TestSelectionBehavior implements comprehensive BDD scenarios
+// assertSelectionState is a helper for testing selection state
+func assertSelectionState(t *testing.T, sm *SelectionManager, hasSelection bool, expectedText string) {
+	if hasSelection {
+		require.True(t, sm.HasSelection(), "Should have selection")
+		require.Equal(t, expectedText, sm.GetSelectedText(), "Selected text should match")
+	} else {
+		require.False(t, sm.HasSelection(), "Should have no selection")
+		require.Empty(t, sm.GetSelectedText(), "Selected text should be empty")
+	}
+}
+
 func TestSelectionBehavior(t *testing.T) {
 	t.Parallel()
 
@@ -48,8 +59,7 @@ func TestSelectionBehavior(t *testing.T) {
 				sm.SelectAll()
 			},
 			then: func(sm *SelectionManager, t *testing.T) {
-				assert.True(t, sm.HasSelection(), "Should have selection after SelectAll")
-				assert.Equal(t, "hello world", sm.GetSelectedText(), "Should select entire content")
+				assertSelectionState(t, sm, true, "hello world")
 			},
 		},
 		{
@@ -78,8 +88,7 @@ func TestSelectionBehavior(t *testing.T) {
 				sm.SetSelection(6, 11) // "world"
 			},
 			then: func(sm *SelectionManager, t *testing.T) {
-				assert.True(t, sm.HasSelection(), "Should have selection")
-				assert.Equal(t, "world", sm.GetSelectedText(), "Should select 'world'")
+				assertSelectionState(t, sm, true, "world")
 			},
 		},
 		{
@@ -92,8 +101,7 @@ func TestSelectionBehavior(t *testing.T) {
 				sm.SetSelection(-5, 10) // Invalid bounds
 			},
 			then: func(sm *SelectionManager, t *testing.T) {
-				assert.False(t, sm.HasSelection(), "Should have no selection for invalid bounds")
-				assert.Empty(t, sm.GetSelectedText(), "Selected text should be empty")
+				assertSelectionState(t, sm, false, "")
 			},
 		},
 		{
@@ -106,8 +114,7 @@ func TestSelectionBehavior(t *testing.T) {
 				sm.SetSelection(2, 7) // "Hello" - 🌟(rune 0) space(1) H(2) e(3) l(4) l(5) o(6)
 			},
 			then: func(sm *SelectionManager, t *testing.T) {
-				assert.True(t, sm.HasSelection(), "Should have selection in unicode text")
-				assert.Equal(t, "Hello", sm.GetSelectedText(), "Should select 'Hello' correctly")
+				assertSelectionState(t, sm, true, "Hello")
 			},
 		},
 		{

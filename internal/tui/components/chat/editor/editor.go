@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -343,17 +344,28 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		}
 		
-		// Handle copy key (after selection handling above)
+		// Handle copy key using established clipboard pattern
 		if key.Matches(msg, m.keyMap.Copy) {
 			if m.HasSelection() {
-				// Copy selected text to clipboard
 				selectedText := m.GetSelectedText()
-				return m, func() tea.Msg {
-					tea.SetClipboard(selectedText)
-					return nil
+				if selectedText == "" {
+					return m, util.ReportWarn("No text selected")
 				}
+				
+				// Clear selection after copying (established pattern)
+				m.ClearSelection()
+				
+				return m, tea.Sequence(
+					// Use both OSC 52 and native clipboard for compatibility
+					tea.SetClipboard(selectedText),
+					func() tea.Msg {
+						_ = clipboard.WriteAll(selectedText)
+						return nil
+					},
+					util.ReportInfo("Selected text copied to clipboard"),
+				)
 			}
-			// Fall through to textarea's default copy behavior
+			return m, util.ReportWarn("No text selected")
 		}
 		
 		if key.Matches(msg, m.keyMap.LineStart) {

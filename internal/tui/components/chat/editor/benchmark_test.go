@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -125,4 +126,46 @@ func TestPerformanceRegression(t *testing.T) {
 	
 	require.Less(t, getTextTime, 5*time.Millisecond, "GetSelectedText should be fast")
 	require.Equal(t, text, selectedText, "Should select all text correctly")
+}
+
+// BenchmarkMemoryAllocation tracks memory usage during selection operations
+func BenchmarkMemoryAllocation(b *testing.B) {
+	text := strings.Repeat("a", 10000)
+	
+	b.Run("SelectAll", func(b *testing.B) {
+		ta := textarea.New()
+		ta.SetValue(text)
+		esm := NewSelectionManager(ta)
+		
+		var m1, m2 runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&m1)
+		
+		b.ResetTimer()
+		for b.Loop() {
+			esm.SelectAll()
+		}
+		
+		runtime.ReadMemStats(&m2)
+		b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/float64(b.N), "bytes/op")
+	})
+	
+	b.Run("GetSelectedText", func(b *testing.B) {
+		ta := textarea.New()
+		ta.SetValue(text)
+		esm := NewSelectionManager(ta)
+		esm.SelectAll()
+		
+		var m1, m2 runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&m1)
+		
+		b.ResetTimer()
+		for b.Loop() {
+			_ = esm.GetSelectedText()
+		}
+		
+		runtime.ReadMemStats(&m2)
+		b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/float64(b.N), "bytes/op")
+	})
 }

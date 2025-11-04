@@ -345,14 +345,17 @@ it creates. You can customize this behavior with the `attribution` option:
   "$schema": "https://charm.land/crush.json",
   "options": {
     "attribution": {
-      "co_authored_by": true,
+      "trailer_style": "co-authored-by",
       "generated_with": true
     }
   }
 }
 ```
 
-- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
+- `trailer_style`: Controls the attribution trailer added to commit messages (default: `co-authored-by`)
+  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush` (includes the model name)
+  - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
 
 ### Custom Providers

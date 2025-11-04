@@ -353,7 +353,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
-			CoAuthoredBy:  true,
+			TrailerStyle:  TrailerStyleCoAuthoredBy,
 			GeneratedWith: true,
 		}
 	}

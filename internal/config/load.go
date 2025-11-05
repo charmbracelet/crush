@@ -356,6 +356,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			TrailerStyle:  TrailerStyleCoAuthoredBy,
 			GeneratedWith: true,
 		}
+	} else if c.Options.Attribution.TrailerStyle == "" {
+		// Migrate deprecated co_authored_by or apply default
+		if c.Options.Attribution.CoAuthoredBy != nil && !*c.Options.Attribution.CoAuthoredBy {
+			c.Options.Attribution.TrailerStyle = TrailerStyleNone
+		} else {
+			c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+		}
 	}
 }
 

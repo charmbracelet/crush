@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -821,25 +820,22 @@ func (m *messageListCmp) SelectAll() tea.Cmd {
 	// Get list dimensions for proper viewport coordinates
 	width, height := m.listCmp.GetSize()
 	
-	// Debug: Log the dimensions and item count
-	itemCount := len(m.listCmp.Items())
+
 	
-	// Start selection at top-left of viewport (after padding)
-	m.listCmp.StartSelection(3, 0)  // Start after left padding (same as GetSelectedText padding)
+	// Start selection at top-left of content (like mouse click at origin)
+	m.listCmp.StartSelection(0, 0)
 	
 	// End selection at bottom-right of content, not viewport
 	// Use content height instead of viewport height for "select all"
 	// We need to account for the total rendered content height
-	endLine := height - 1
-	if itemCount > 0 {
-		// If we have items, try to select past viewport to cover all content
-		// Use a large number that should exceed content height
-		endLine = max(height-1, itemCount*2)  // Estimate content height
-	}
+	// For "select all", use a large end coordinate that exceeds content boundaries
+	// The list component will clamp to actual content bounds automatically
+	// This works for both DirectionForward and DirectionBackward
+	endLine := height * 10  // Large enough to cover all scrollable content
 	
 	m.listCmp.EndSelection(width-1, endLine)
 	
-	return util.ReportInfo(fmt.Sprintf("Selected %d messages (viewport: %dx%d, endLine: %d)", itemCount, width, height, endLine))
+	return nil  // Return nil for cleaner user experience
 }
 
 // abs returns the absolute value of an integer.

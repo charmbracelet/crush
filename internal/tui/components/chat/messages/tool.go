@@ -41,8 +41,9 @@ type ToolCallCmp interface {
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
 	ID() string
-	SetPermissionRequested() // Mark permission request
-	SetPermissionGranted()   // Mark permission granted
+	SetPermissionStatus(status permission.PermissionStatus) // Set permission status directly
+	SetPermissionRequested() // Mark permission request [deprecated: use SetPermissionStatus]
+	SetPermissionGranted()   // Mark permission granted [deprecated: use SetPermissionStatus]
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -57,8 +58,7 @@ type toolCallCmp struct {
 	call                message.ToolCall   // The tool call being executed
 	result              message.ToolResult // The result of the tool execution
 	cancelled           bool               // Whether the tool call was cancelled
-	permissionRequested bool
-	permissionGranted   bool
+	permissionStatus    permission.PermissionStatus
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -98,13 +98,13 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 
 func WithToolPermissionRequested() ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.permissionRequested = true
+		m.SetPermissionStatus(permission.PermissionPending)
 	}
 }
 
 func WithToolPermissionGranted() ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.permissionGranted = true
+		m.SetPermissionStatus(permission.PermissionApproved)
 	}
 }
 
@@ -801,12 +801,19 @@ func (m *toolCallCmp) ID() string {
 	return m.call.ID
 }
 
+// SetPermissionStatus sets the permission status for this tool call
+func (m *toolCallCmp) SetPermissionStatus(status permission.PermissionStatus) {
+	m.permissionStatus = status
+}
+
 // SetPermissionRequested marks that a permission request was made for this tool call
+// Deprecated: Use SetPermissionStatus(permission.PermissionPending) instead.
 func (m *toolCallCmp) SetPermissionRequested() {
-	m.permissionRequested = true
+	m.SetPermissionStatus(permission.PermissionPending)
 }
 
 // SetPermissionGranted marks that permission was granted for this tool call
+// Deprecated: Use SetPermissionStatus(permission.PermissionApproved) instead.
 func (m *toolCallCmp) SetPermissionGranted() {
-	m.permissionGranted = true
+	m.SetPermissionStatus(permission.PermissionApproved)
 }

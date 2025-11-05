@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -735,7 +736,7 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.cancelled:
 		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
 	case v.result.ToolCallID == "":
-		if v.permissionRequested && !v.permissionGranted {
+		if v.permissionStatus == permission.PermissionPending {
 			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting permission...")
 		} else {
 			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -33,7 +34,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -120,7 +120,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 	case tea.TerminalVersionMsg:
-		termVersion := strings.ToLower(string(msg))
+		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
 		if !a.sendProgressBar {
 			a.sendProgressBar = strings.Contains(termVersion, "ghostty")

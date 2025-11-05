@@ -67,6 +67,8 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	history History
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -88,6 +90,10 @@ const (
 	maxAttachments = 5
 	maxFileResults = 25
 )
+
+type loadHistoryMsg struct{}
+
+type closeHistoryMsg struct{}
 
 type OpenEditorMsg struct {
 	Text string
@@ -170,6 +176,10 @@ func (m *editorCmp) send() tea.Cmd {
 func (m *editorCmp) repositionCompletions() tea.Msg {
 	x, y := m.completionsPosition()
 	return completions.RepositionCompletionsMsg{X: x, Y: y}
+}
+
+func (m *editorCmp) inHistoryMode() bool {
+	return m.history != nil
 }
 
 func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
@@ -260,6 +270,10 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case commands.ToggleYoloModeMsg:
 		m.setEditorPrompt()
 		return m, nil
+	case loadHistoryMsg:
+		m.history = InitialiseHistory([]string{})
+	case closeHistoryMsg:
+		m.history = nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -288,6 +302,16 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.deleteMode = false
 			m.attachments = nil
 			return m, nil
+		}
+		// history
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			// m.textarea.SetValue(m.stepOverHistory(m.getUserMessagesAsText, m.getDirectionFromKey(msg)))
+			if m.history == nil {
+				return m, util.CmdHandler(loadHistoryMsg{})
+			}
+		}
+		if key.Matches(msg, DeleteKeyMaps.Escape) && m.inHistoryMode() {
+			return m, util.CmdHandler(closeHistoryMsg{})
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -443,6 +467,95 @@ func (m *editorCmp) View() string {
 	)
 	return content
 }
+
+/*
+func (m *editorCmp) getUserMessagesAsText(ctx context.Context) ([]string, error) {
+	if len(m.historyCache) > 0 {
+		return m.historyCache, nil
+	}
+	allMessages, err := m.app.Messages.List(ctx, m.session.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var userMessages []string
+	for _, msg := range allMessages {
+		if msg.Role == message.User {
+			userMessages = append(userMessages, msg.Content().Text)
+		}
+	}
+
+	userMessages = append(userMessages, m.textarea.Value())
+	m.historyCache = userMessages
+	return userMessages, nil
+}
+
+type direction int
+
+const (
+	previous = iota
+	next
+)
+
+func (m *editorCmp) getDirectionFromKey(msg tea.KeyPressMsg) func() direction {
+	return func() direction {
+		if key.Matches(msg, m.keyMap.Previous) {
+			return previous
+		}
+		return next
+	}
+}
+
+func (m *editorCmp) stepOverHistory(resolveHistoricMessages func(context.Context) ([]string, error), resolveDirection func() direction) string {
+	// NOTE(tauraamui): the last entry in this list will be the current contents of the input field/box
+	messageHistory, err := resolveHistoricMessages(context.Background())
+	if err != nil {
+		return ""
+	}
+
+	// the list will/should always have at least the current message in the input in the list
+	if len(messageHistory) == 1 {
+		return messageHistory[0]
+	}
+
+	// the first time we invoke scroll we need to start from top of the list
+	if !m.previouslyScrollingPromptHistory {
+		m.promptHistoryIndex = len(messageHistory) - 1
+		m.previouslyScrollingPromptHistory = true
+	}
+
+	switch resolveDirection() {
+	case previous:
+		return m.stepBack(messageHistory)
+	case next:
+		return m.stepForward(messageHistory)
+	}
+	return ""
+}
+
+func (m *editorCmp) stepBack(history []string) string {
+	m.promptHistoryIndex -= 1
+	if m.promptHistoryIndex < 0 {
+		m.promptHistoryIndex = 0
+	}
+	return history[m.promptHistoryIndex]
+}
+
+func (m *editorCmp) stepForward(history []string) string {
+	m.promptHistoryIndex += 1
+	maxIndex := len(history) - 1
+	if m.promptHistoryIndex > maxIndex {
+		m.promptHistoryIndex = maxIndex
+	}
+	return history[m.promptHistoryIndex]
+}
+
+func (m *editorCmp) resetHistory() {
+	m.historyCache = nil
+	m.promptHistoryIndex = 0
+	m.previouslyScrollingPromptHistory = false
+}
+*/
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width

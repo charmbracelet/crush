@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +49,9 @@ func readRecentModels(t *testing.T, path string) map[string]any {
 }
 
 func TestModelList_RecentlyUsedSectionAndPrunesInvalid(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Isolate config/data paths
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
@@ -154,6 +158,9 @@ func TestModelList_RecentlyUsedSectionAndPrunesInvalid(t *testing.T) {
 }
 
 func TestModelList_PrunesInvalidModelWithinValidProvider(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Isolate config/data paths
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()
@@ -266,6 +273,9 @@ func TestModelKey_EmptyInputs(t *testing.T) {
 }
 
 func TestModelList_AllRecentsInvalid(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Isolate config/data paths
 	cfgDir := t.TempDir()
 	dataDir := t.TempDir()

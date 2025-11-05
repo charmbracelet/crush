@@ -337,6 +337,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients))
 	}
 
+	if len(c.cfg.MCP) > 0 {
+		allTools = append(allTools, tools.NewReadMCPResourceTool(), tools.NewListMCPResourceTool())
+	}
+
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {

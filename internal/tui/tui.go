@@ -149,6 +149,8 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
 		case mcp.EventToolsListChanged:
 			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+		case mcp.EventResourcesListChanged:
+			return a, handleMCPResourcesEvent(context.Background(), msg.Payload.Name)
 		}
 
 	// Completions messages
@@ -646,6 +648,13 @@ func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
 func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
 	return func() tea.Msg {
 		mcp.RefreshTools(ctx, name)
+		return nil
+	}
+}
+
+func handleMCPResourcesEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshResources(ctx, name)
 		return nil
 	}
 }

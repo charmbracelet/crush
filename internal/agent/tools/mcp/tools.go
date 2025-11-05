@@ -84,10 +84,10 @@ func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) 
 	return result.Tools, nil
 }
 
-func updateTools(name string, tools []*Tool) {
+func updateTools(mcpName string, tools []*Tool) {
 	if len(tools) == 0 {
-		allTools.Del(name)
+		allTools.Del(mcpName)
 		return
 	}
-	allTools.Set(name, tools)
+	allTools.Set(mcpName, tools)
 }

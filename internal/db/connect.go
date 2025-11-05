@@ -23,7 +23,7 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	// Set pragmas for better performance
 	pragmas := []string{
 		"PRAGMA foreign_keys = ON;",
-		"PRAGMA journal_mode = WAL;",
+		"PRAGMA journal_mode = DELETE;",
 		"PRAGMA page_size = 4096;",
 		"PRAGMA cache_size = -8000;",
 		"PRAGMA synchronous = NORMAL;",

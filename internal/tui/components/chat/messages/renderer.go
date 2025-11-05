@@ -745,8 +745,8 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 		case permission.PermissionDenied:
 			message = messageBaseStyle.Render("Permission denied.")
 
-			// Note: I did not add a default here, to make sure a developer will notice,
-			//       if a new PermissionStatus is added and therefore add a proper new message.
+			// Note: I did not add a default case here, to make sure other developer will notice,
+			//       if a new PermissionStatus is added and add a proper message here.
 
 		}
 	default:

@@ -1,18 +1,18 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/crush/internal/message"
-	"slices"
+	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
 // handleSelectionKeyBindings processes selection-related key presses
@@ -23,7 +23,7 @@ func (m *editorCmp) handleSelectionKeyBindings(msg tea.KeyPressMsg) (util.Model,
 		m.SelectAll()
 		return m, nil
 	}
-	
+
 	// Handle copy key using established clipboard pattern
 	if key.Matches(msg, m.keyMap.Copy) {
 		if m.HasSelection() {
@@ -31,10 +31,10 @@ func (m *editorCmp) handleSelectionKeyBindings(msg tea.KeyPressMsg) (util.Model,
 			if selectedText == "" {
 				return m, util.ReportWarn("No text selected")
 			}
-			
+
 			// Clear selection after copying (established pattern)
 			m.ClearSelection()
-			
+
 			return m, tea.Sequence(
 				// Use both OSC 52 and native clipboard for compatibility
 				tea.SetClipboard(selectedText),
@@ -47,20 +47,20 @@ func (m *editorCmp) handleSelectionKeyBindings(msg tea.KeyPressMsg) (util.Model,
 		}
 		return m, util.ReportWarn("No text selected")
 	}
-	
+
 	// Handle line start navigation
 	if key.Matches(msg, m.keyMap.LineStart) {
 		m.textarea.CursorStart()
 		return m, nil
 	}
-	
+
 	// Clear selection when typing or moving cursor (except for copy/select all)
 	if !key.Matches(msg, m.keyMap.Copy) && !key.Matches(msg, m.keyMap.SelectAll) {
 		if m.HasSelection() {
 			m.ClearSelection()
 		}
 	}
-	
+
 	return m, nil
 }
 
@@ -81,11 +81,11 @@ func (m *editorCmp) handleCompletionsKeyBindings(msg tea.KeyPressMsg, curIdx int
 		m.currentQuery = ""
 		m.completionsStartIndex = curIdx
 		return m.startCompletions, true
-		
+
 	case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 		return util.CmdHandler(completions.CloseCompletionsMsg{}), true
 	}
-	
+
 	return nil, false
 }
 
@@ -96,20 +96,20 @@ func (m *editorCmp) handleAttachmentKeyBindings(msg tea.KeyPressMsg) (util.Model
 		m.deleteMode = true
 		return m, nil
 	}
-	
+
 	// Handle delete all attachments
 	if key.Matches(msg, DeleteKeyMaps.DeleteAllAttachments) && m.deleteMode {
 		m.deleteMode = false
 		m.attachments = nil
 		return m, nil
 	}
-	
+
 	// Handle escape from delete mode
 	if key.Matches(msg, DeleteKeyMaps.Escape) {
 		m.deleteMode = false
 		return m, nil
 	}
-	
+
 	// Handle digit-based attachment deletion
 	rune := msg.Code
 	if m.deleteMode && unicode.IsDigit(rune) {
@@ -124,7 +124,7 @@ func (m *editorCmp) handleAttachmentKeyBindings(msg tea.KeyPressMsg) (util.Model
 			return m, nil
 		}
 	}
-	
+
 	return m, nil
 }
 
@@ -145,13 +145,13 @@ func (m *editorCmp) handleEditorKeyBindings(msg tea.KeyPressMsg) (util.Model, te
 		}
 		return m, m.openEditor(m.textarea.Value())
 	}
-	
+
 	// Handle newline insertion
 	if key.Matches(msg, m.keyMap.Newline) {
 		m.textarea.InsertRune('\n')
 		return m, util.CmdHandler(completions.CloseCompletionsMsg{})
 	}
-	
+
 	// Handle enter key for message sending
 	if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 		value := m.textarea.Value()
@@ -163,6 +163,6 @@ func (m *editorCmp) handleEditorKeyBindings(msg tea.KeyPressMsg) (util.Model, te
 			return m, m.send()
 		}
 	}
-	
+
 	return m, nil
 }

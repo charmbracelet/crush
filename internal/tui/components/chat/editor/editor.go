@@ -274,23 +274,23 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return model, cmd
 		}
 		m = model.(*editorCmp)
-		
+
 		// Get cursor position for other handlers
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
-		
+
 		// Process completions key bindings
 		if cmd, handled := m.handleCompletionsKeyBindings(msg, curIdx); handled {
 			cmds = append(cmds, cmd)
 		}
-		
+
 		// Process attachment key bindings
 		model, cmd = m.handleAttachmentKeyBindings(msg)
 		if cmd != nil {
 			return model, cmd
 		}
 		m = model.(*editorCmp)
-		
+
 		// Process editor key bindings
 		model, cmd = m.handleEditorKeyBindings(msg)
 		if cmd != nil {
@@ -400,7 +400,6 @@ func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 func (m *editorCmp) GetSize() (int, int) {
 	return m.textarea.Width(), m.textarea.Height()
 }
-
 
 func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 	m.x = x
@@ -525,9 +524,9 @@ func New(app *app.App) Editor {
 	ta.Focus()
 	e := &editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:       app,
+		textarea:  ta,
+		keyMap:    DefaultEditorKeyMap(),
 		selection: NewSelectionManager(ta),
 	}
 	e.setEditorPrompt()

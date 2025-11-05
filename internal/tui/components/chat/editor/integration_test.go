@@ -19,12 +19,12 @@ type testEditorHelper struct {
 func newTestEditor(t *testing.T, content string) *testEditorHelper {
 	ta := textarea.New()
 	ta.SetValue(content)
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
 	}
-	
+
 	return &testEditorHelper{
 		t:      t,
 		editor: editor,
@@ -71,7 +71,7 @@ func TestSelectionClearingBehavior(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("sample text")
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
@@ -98,7 +98,7 @@ func TestSelectionVisualRendering(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("hello world")
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
@@ -112,7 +112,7 @@ func TestSelectionVisualRendering(t *testing.T) {
 	editor.selection.SetSelection(6, 11) // "world"
 	viewWithSelection := editor.renderSelectedText()
 	require.Contains(t, viewWithSelection, "world", "Should render text with selection")
-	
+
 	// Test that renderSelectedText works with large content
 	ta.SetValue(strings.Repeat("test line\n", 100))
 	editor.SelectAll()
@@ -136,7 +136,7 @@ func TestSelectionWithAttachments(t *testing.T) {
 	// Test that attachments and selection coexist without issues
 	require.NotEmpty(t, helper.editor.attachments, "Should have attachments")
 	require.True(t, helper.editor.HasSelection(), "Should still have selection")
-	
+
 	// Test renderSelectedText method without calling full View()
 	viewText := helper.editor.renderSelectedText()
 	require.Contains(t, viewText, "test with attachments", "Should render selected text")
@@ -155,7 +155,7 @@ And a final line to complete the test.`
 
 	ta := textarea.New()
 	ta.SetValue(content)
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
@@ -179,10 +179,10 @@ func TestSelectionEdgeCasesInContext(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		content     string
-		setupFunc   func(*editorCmp)
-		expectFunc  func(*testing.T, *editorCmp)
+		name       string
+		content    string
+		setupFunc  func(*editorCmp)
+		expectFunc func(*testing.T, *editorCmp)
 	}{
 		{
 			name:    "empty content",
@@ -246,7 +246,7 @@ func TestSelectionEdgeCasesInContext(t *testing.T) {
 
 			ta := textarea.New()
 			ta.SetValue(tt.content)
-			
+
 			editor := &editorCmp{
 				textarea:  ta,
 				selection: NewSelectionManager(ta),
@@ -297,7 +297,7 @@ func TestSelectionWorkflowIntegration(t *testing.T) {
 	// Test the typical user workflow
 	ta := textarea.New()
 	ta.SetValue("Hello, World!\nThis is a test message.\nMultiple lines.")
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
@@ -345,32 +345,32 @@ func TestSelectionStateTransitions(t *testing.T) {
 		expectedText   string
 	}{
 		{
-			name: "initial state",
-			action: func(e *editorCmp) {},
+			name:           "initial state",
+			action:         func(e *editorCmp) {},
 			expectedHasSel: false,
 			expectedText:   "",
 		},
 		{
-			name: "select all",
-			action: func(e *editorCmp) { e.SelectAll() },
+			name:           "select all",
+			action:         func(e *editorCmp) { e.SelectAll() },
 			expectedHasSel: true,
 			expectedText:   "state transition test",
 		},
 		{
-			name: "clear selection",
-			action: func(e *editorCmp) { e.ClearSelection() },
+			name:           "clear selection",
+			action:         func(e *editorCmp) { e.ClearSelection() },
 			expectedHasSel: false,
 			expectedText:   "",
 		},
 		{
-			name: "partial selection",
-			action: func(e *editorCmp) { e.selection.SetSelection(6, 16) },
+			name:           "partial selection",
+			action:         func(e *editorCmp) { e.selection.SetSelection(6, 16) },
 			expectedHasSel: true,
 			expectedText:   "transition",
 		},
 		{
-			name: "clear after partial",
-			action: func(e *editorCmp) { e.ClearSelection() },
+			name:           "clear after partial",
+			action:         func(e *editorCmp) { e.ClearSelection() },
 			expectedHasSel: false,
 			expectedText:   "",
 		},
@@ -379,7 +379,7 @@ func TestSelectionStateTransitions(t *testing.T) {
 	for _, state := range states {
 		t.Run(state.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			helper := newTestEditor(t, "state transition test")
 			state.action(helper.editor)
 			helper.assertSelectionState(state.expectedHasSel, state.expectedText)

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 // ClipboardContentWrapper wraps existing ContentPart with clipboard functionality
@@ -85,7 +85,7 @@ func CreateImageClipboardContent(url string, data []byte, format string) Clipboa
 	if format == "" {
 		mimeType = "image/png"
 	}
-	
+
 	return ClipboardContentWrapper{
 		Content:      content,
 		MimeType:     mimeType,
@@ -101,7 +101,7 @@ func CreateFileClipboardContent(path string, filename string, data []byte, mimeT
 		MIMEType: mimeType,
 		Data:     data,
 	}
-	
+
 	if mimeType == "" {
 		if strings.HasSuffix(strings.ToLower(filename), ".txt") {
 			mimeType = "text/plain"
@@ -109,7 +109,7 @@ func CreateFileClipboardContent(path string, filename string, data []byte, mimeT
 			mimeType = "application/octet-stream"
 		}
 	}
-	
+
 	return ClipboardContentWrapper{
 		Content:      content,
 		MimeType:     mimeType,
@@ -121,7 +121,7 @@ func CreateFileClipboardContent(path string, filename string, data []byte, mimeT
 // CreateHTMLClipboardContent creates clipboard wrapper for HTML content
 func CreateHTMLClipboardContent(html string, fallbackText string) ClipboardContentWrapper {
 	content := message.TextContent{Text: fallbackText} // Use fallback text for string representation
-	
+
 	return ClipboardContentWrapper{
 		Content:      content,
 		MimeType:     "text/html",
@@ -135,9 +135,9 @@ func CreateURIClipboardContent(uris []string) ClipboardContentWrapper {
 	// Create a text content representation
 	textRepresentation := strings.Join(uris, "\n")
 	content := message.TextContent{Text: textRepresentation}
-	
+
 	uriListData := []byte(strings.Join(uris, "\n"))
-	
+
 	return ClipboardContentWrapper{
 		Content:      content,
 		MimeType:     "text/uri-list",
@@ -156,7 +156,7 @@ func GetClipboardContentForFile(path string, filename string, data []byte, mimeT
 	if data == nil {
 		return ClipboardContentWrapper{}, errors.New("file data cannot be nil")
 	}
-	
+
 	// Determine MIME type if not provided
 	if mimeType == "" {
 		if strings.HasSuffix(strings.ToLower(filename), ".txt") {
@@ -165,12 +165,12 @@ func GetClipboardContentForFile(path string, filename string, data []byte, mimeT
 			mimeType = "application/octet-stream"
 		}
 	}
-	
+
 	// For text files, create text content
 	if strings.HasPrefix(mimeType, "text/") {
 		return CreateTextClipboardContent(string(data)), nil
 	}
-	
+
 	// For other files, create file content
 	return CreateFileClipboardContent(path, filename, data, mimeType), nil
 }

@@ -96,10 +96,10 @@ func TestSelection_Bounds(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		s          Selection
-		wantStart  int
-		wantEnd    int
+		name      string
+		s         Selection
+		wantStart int
+		wantEnd   int
 	}{
 		{"forward selection", Selection{Start: 2, End: 5, Active: false}, 2, 5},
 		{"backward selection", Selection{Start: 5, End: 2, Active: false}, 2, 5},
@@ -231,7 +231,7 @@ func TestSelectionManager_SelectAll(t *testing.T) {
 
 	require.True(t, sm.HasSelection())
 	require.Equal(t, "test content", sm.GetSelectedText())
-	
+
 	selection := sm.GetSelection()
 	require.Equal(t, 0, selection.Start)
 	require.Equal(t, len("test content"), selection.End)
@@ -265,7 +265,7 @@ func TestSelectionManager_SetSelection(t *testing.T) {
 
 	require.True(t, sm.HasSelection())
 	require.Equal(t, "llo", sm.GetSelectedText())
-	
+
 	selection := sm.GetSelection()
 	require.Equal(t, 2, selection.Start)
 	require.Equal(t, 5, selection.End)
@@ -359,7 +359,7 @@ func TestSelectionManager_Integration(t *testing.T) {
 	// Test clearing and reselecting
 	sm.Clear()
 	require.False(t, sm.HasSelection())
-	
+
 	sm.SelectAll()
 	require.True(t, sm.HasSelection())
 	require.Equal(t, "line1\nline2\nline3", sm.GetSelectedText())
@@ -380,46 +380,47 @@ func TestSelectionManagerBoundsValidation(t *testing.T) {
 		expected struct{ start, end int }
 	}{
 		{
-			name:    "valid bounds",
-			content: "hello world",
-			input:   struct{ start, end int }{start: 2, end: 7},
+			name:     "valid bounds",
+			content:  "hello world",
+			input:    struct{ start, end int }{start: 2, end: 7},
 			expected: struct{ start, end int }{start: 2, end: 7},
 		},
 		{
-			name:    "negative start",
-			content: "hello world",
-			input:   struct{ start, end int }{start: -5, end: 7},
+			name:     "negative start",
+			content:  "hello world",
+			input:    struct{ start, end int }{start: -5, end: 7},
 			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
-			name:    "negative end",
-			content: "hello world",
-			input:   struct{ start, end int }{start: 2, end: -5},
+			name:     "negative end",
+			content:  "hello world",
+			input:    struct{ start, end int }{start: 2, end: -5},
 			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
-			name:    "start beyond content",
-			content: "hello world",
-			input:   struct{ start, end int }{start: 20, end: 25},
+			name:     "start beyond content",
+			content:  "hello world",
+			input:    struct{ start, end int }{start: 20, end: 25},
 			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 		{
-			name:    "end beyond content",
-			content: "hello world",
-			input:   struct{ start, end int }{start: 2, end: 25},
+			name:     "end beyond content",
+			content:  "hello world",
+			input:    struct{ start, end int }{start: 2, end: 25},
 			expected: struct{ start, end int }{start: -1, end: -1}, // Should be cleared
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			ta := textarea.New()
 			ta.SetValue(test.content)
 			sm := NewSelectionManager(ta)
 
 			sm.SetSelection(test.input.start, test.input.end)
 			selection := sm.GetSelection()
-			
+
 			require.Equal(t, test.expected.start, selection.Start, "Start should be clamped")
 			require.Equal(t, test.expected.end, selection.End, "End should be clamped")
 		})

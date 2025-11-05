@@ -116,7 +116,7 @@ func (s *Selection) Clear() {
 func (s *Selection) SelectAll(text string) {
 	s.Start = 0
 	s.End = len([]rune(text)) // Use rune count for Unicode compatibility
-	s.Active = false // Not actively selecting, just selected
+	s.Active = false          // Not actively selecting, just selected
 }
 
 // GetText returns the selected portion of the given text.
@@ -125,7 +125,7 @@ func (s Selection) GetText(text string) string {
 		return ""
 	}
 	start, end := s.Bounds()
-	
+
 	// Convert byte indices to rune indices for proper Unicode handling
 	runes := []rune(text)
 	if start < 0 || end > len(runes) || start >= end {
@@ -156,7 +156,7 @@ func (sm *SelectionManager) SelectAll() {
 		sm.selection.Clear()
 		return
 	}
-	
+
 	sm.selection.SelectAll(content)
 }
 
@@ -170,12 +170,12 @@ func (sm *SelectionManager) GetSelectedText() string {
 	if !sm.selection.IsActive() {
 		return ""
 	}
-	
+
 	content := sm.textarea.Value()
 	if len(content) == 0 {
 		return ""
 	}
-	
+
 	return sm.selection.GetText(content)
 }
 
@@ -194,7 +194,7 @@ func (sm *SelectionManager) SetSelection(start, end int) {
 		sm.selection.Clear()
 		return
 	}
-	
+
 	sm.selection.Start = start
 	sm.selection.End = end
 	sm.selection.Active = false
@@ -205,12 +205,12 @@ func validateSelectionBounds(start, end int, content string) error {
 	if start < 0 || end < 0 {
 		return fmt.Errorf("selection bounds cannot be negative: start=%d, end=%d", start, end)
 	}
-	
+
 	contentLength := len(content)
 	if start > contentLength || end > contentLength {
 		return fmt.Errorf("selection bounds exceed content length: start=%d, end=%d, contentLength=%d", start, end, contentLength)
 	}
-	
+
 	return nil
 }
 

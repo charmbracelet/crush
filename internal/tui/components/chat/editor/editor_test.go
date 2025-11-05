@@ -11,10 +11,10 @@ func TestEditorSelection(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
-		initialValue   string
-		expectedAfter  string
-		operation      func(*editorCmp)
+		name          string
+		initialValue  string
+		expectedAfter string
+		operation     func(*editorCmp)
 	}{
 		{
 			name:          "select all empty text",
@@ -29,7 +29,7 @@ func TestEditorSelection(t *testing.T) {
 			expectedAfter: "hello world",
 		},
 		{
-			name:          "clear selection after select all",
+			name:         "clear selection after select all",
 			initialValue: "test content",
 			operation: func(e *editorCmp) {
 				e.SelectAll()
@@ -42,11 +42,11 @@ func TestEditorSelection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			// Create real textarea model
 			ta := textarea.New()
 			ta.SetValue(tt.initialValue)
-			
+
 			// Create editor instance with real textarea
 			editor := &editorCmp{
 				textarea:  ta,
@@ -72,58 +72,58 @@ func TestEditorGetSelectedText(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		initialValue  string
+		name           string
+		initialValue   string
 		selectionStart int
 		selectionEnd   int
-		expectedText  string
+		expectedText   string
 	}{
 		{
-			name:          "no selection (start=end)",
-			initialValue:  "hello",
+			name:           "no selection (start=end)",
+			initialValue:   "hello",
 			selectionStart: 2,
-			selectionEnd:  2,
-			expectedText:  "",
+			selectionEnd:   2,
+			expectedText:   "",
 		},
 		{
-			name:          "no selection (negative values)",
-			initialValue:  "hello",
+			name:           "no selection (negative values)",
+			initialValue:   "hello",
 			selectionStart: -1,
-			selectionEnd:  -1,
-			expectedText:  "",
+			selectionEnd:   -1,
+			expectedText:   "",
 		},
 		{
-			name:          "partial selection forward",
-			initialValue:  "hello world",
+			name:           "partial selection forward",
+			initialValue:   "hello world",
 			selectionStart: 2,
-			selectionEnd:  7,
-			expectedText:  "llo w",
+			selectionEnd:   7,
+			expectedText:   "llo w",
 		},
 		{
-			name:          "partial selection backward",
-			initialValue:  "hello world",
+			name:           "partial selection backward",
+			initialValue:   "hello world",
 			selectionStart: 7,
-			selectionEnd:  2,
-			expectedText:  "llo w",
+			selectionEnd:   2,
+			expectedText:   "llo w",
 		},
 		{
-			name:          "select all",
-			initialValue:  "test content",
+			name:           "select all",
+			initialValue:   "test content",
 			selectionStart: 0,
-			selectionEnd:  12,
-			expectedText:  "test content",
+			selectionEnd:   12,
+			expectedText:   "test content",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			// Create real textarea model
 			ta := textarea.New()
 			ta.SetValue(tt.initialValue)
 			sm := NewSelectionManager(ta)
-			
+
 			editor := &editorCmp{
 				textarea:  ta,
 				selection: sm,
@@ -137,8 +137,6 @@ func TestEditorGetSelectedText(t *testing.T) {
 		})
 	}
 }
-
-
 
 // Test that editorCmp implements Editor interface properly
 func TestEditorInterfaceImplementation(t *testing.T) {
@@ -183,7 +181,7 @@ func TestEditorSelectionIntegration(t *testing.T) {
 	// Test the full selection workflow
 	ta := textarea.New()
 	ta.SetValue("Hello, world!\nThis is a test.\nMultiple lines.")
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),
@@ -218,13 +216,14 @@ func TestEditorSelectionIntegration(t *testing.T) {
 	editor.SelectAll()
 	require.Equal(t, "New content", editor.GetSelectedText(), "Selection should update with new content")
 }
+
 // Test key handling integration
 func TestEditorKeyHandling(t *testing.T) {
 	t.Parallel()
 
 	ta := textarea.New()
 	ta.SetValue("Sample text for testing.")
-	
+
 	editor := &editorCmp{
 		textarea:  ta,
 		selection: NewSelectionManager(ta),

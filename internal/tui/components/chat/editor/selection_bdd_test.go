@@ -14,7 +14,7 @@ import (
 // GivenAndWhenScenarios encapsulates BDD test scenarios
 type GivenAndWhenScenarios struct {
 	description string
-	given      func() *SelectionManager
+	given       func() *SelectionManager
 	when        func(*SelectionManager)
 	then        func(*SelectionManager, *testing.T)
 }
@@ -129,13 +129,13 @@ func TestSelectionBehavior(t *testing.T) {
 	for _, scenario := range scenarios {
 		t.Run(scenario.description, func(t *testing.T) {
 			t.Parallel()
-			
+
 			// Given
 			sm := scenario.given()
-			
+
 			// When
 			scenario.when(sm)
-			
+
 			// Then
 			scenario.then(sm, t)
 		})
@@ -154,15 +154,16 @@ func TestSelectionStateTransitionsBDD(t *testing.T) {
 	t.Parallel()
 
 	t.Run("selection lifecycle should follow expected transitions", func(t *testing.T) {
+		t.Parallel()
 		// Given: Empty textarea
 		ta := mockTextarea("test content")
 		sm := NewSelectionManager(ta)
-		
+
 		// When: Select all
 		sm.SelectAll()
 		// Then: Should have selection
 		require.True(t, sm.HasSelection(), "Should have selection after SelectAll")
-		
+
 		// When: Clear selection
 		sm.Clear()
 		// Then: Should have no selection
@@ -174,13 +175,13 @@ func TestSelectionStateTransitionsBDD(t *testing.T) {
 		// Given: Textarea with content
 		ta := mockTextarea("0123456789")
 		sm := NewSelectionManager(ta)
-		
+
 		// When: Set selection in middle
 		sm.SetSelection(3, 7) // "3456"
 		// Then: Should have correct selection
 		require.True(t, sm.HasSelection())
 		require.Equal(t, "3456", sm.GetSelectedText())
-		
+
 		// When: Set selection to same position
 		sm.SetSelection(3, 3)
 		// Then: Should have no selection (zero length)

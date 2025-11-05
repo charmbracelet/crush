@@ -11,30 +11,30 @@ import (
 func (m *editorCmp) renderSelectedText() string {
 	t := styles.CurrentTheme()
 	value := m.textarea.Value()
-	
+
 	if !m.HasSelection() {
 		return m.textarea.View()
 	}
-	
+
 	// Get selection bounds
 	selection := m.selection.GetSelection()
 	start, end := selection.Bounds()
-	
+
 	// Render with selection highlighting
 	before := value[:start]
 	selected := value[start:end]
 	after := value[end:]
-	
+
 	// Apply selection style to selected part
 	selectedStyled := t.TextSelection.Render(selected)
-	
+
 	// Combine parts and set back to textarea
 	fullContent := before + selectedStyled + after
-	
+
 	// Create a temporary textarea to render styled content
 	tempTextarea := *m.textarea
 	tempTextarea.SetValue(fullContent)
-	
+
 	return tempTextarea.View()
 }
 

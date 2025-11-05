@@ -88,12 +88,12 @@ func (p Position) CharPosition(text string) int {
 	if p.Line >= len(lines) {
 		return len(text)
 	}
-	
+
 	charPos := 0
 	for i := 0; i < p.Line && i < len(lines); i++ {
 		charPos += len(lines[i]) + 1 // +1 for \n
 	}
-	
+
 	if p.Line < len(lines) {
 		line := lines[p.Line]
 		if p.Col > len(line) {
@@ -102,7 +102,7 @@ func (p Position) CharPosition(text string) int {
 			charPos += p.Col
 		}
 	}
-	
+
 	return charPos
 }
 
@@ -112,7 +112,7 @@ func FromCharPosition(text string, charPos int) Position {
 	currentPos := 0
 	line := 0
 	col := 0
-	
+
 	for i, lineContent := range lines {
 		if currentPos+len(lineContent) >= charPos {
 			line = i
@@ -121,7 +121,7 @@ func FromCharPosition(text string, charPos int) Position {
 		}
 		currentPos += len(lineContent) + 1 // +1 for \n
 	}
-	
+
 	return Position{Line: line, Col: col}
 }
 
@@ -152,7 +152,7 @@ func (esm *EnhancedSelectionManager) SelectAll() {
 		esm.text = text
 		return
 	}
-	
+
 	esm.selection = SelectionRange{
 		Start: Position{Line: 0, Col: 0},
 		End:   FromCharPosition(text, len(text)),
@@ -170,23 +170,23 @@ func (esm *EnhancedSelectionManager) GetSelectedText() string {
 	if esm.selection.IsEmpty() {
 		return ""
 	}
-	
+
 	text := esm.textarea.Value()
 	start := esm.selection.Start.CharPosition(text)
 	end := esm.selection.End.CharPosition(text)
-	
+
 	if start < 0 || end > len(text) || start >= end {
 		return ""
 	}
-	
+
 	return text[start:end]
 }
 
 // HasSelection returns true if there is an active selection
 func (esm *EnhancedSelectionManager) HasSelection() bool {
-	return !esm.selection.IsEmpty() && 
-		   esm.selection.Start.CharPosition(esm.text) >= 0 && 
-		   esm.selection.End.CharPosition(esm.text) >= 0
+	return !esm.selection.IsEmpty() &&
+		esm.selection.Start.CharPosition(esm.text) >= 0 &&
+		esm.selection.End.CharPosition(esm.text) >= 0
 }
 
 // SetSelection sets selection using character positions (converted to position-based)

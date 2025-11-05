@@ -11,9 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"unicode"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/textarea"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -270,115 +268,35 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.setEditorPrompt()
 		return m, nil
 	case tea.KeyPressMsg:
-		// CRITICAL: Handle SelectAll (Ctrl+A/Cmd+A) FIRST to override terminal behavior
-		// This prevents terminal-wide selection and selects only input field content
-		if key.Matches(msg, m.keyMap.SelectAll) {
-			m.SelectAll()
-			return m, nil
+		// Process selection-related key bindings first
+		model, cmd := m.handleSelectionKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
 		}
+		m = model.(*editorCmp)
 		
+		// Get cursor position for other handlers
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
-		switch {
-		// Open command palette when "/" is pressed on empty prompt
-		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
-			return m, util.CmdHandler(dialogs.OpenDialogMsg{
-				Model: commands.NewCommandDialog(m.session.ID),
-			})
-		// Completions
-		case msg.String() == "@" && !m.isCompletionsOpen &&
-			// only show if beginning of prompt, or if previous char is a space or newline:
-			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
-			m.isCompletionsOpen = true
-			m.currentQuery = ""
-			m.completionsStartIndex = curIdx
-			cmds = append(cmds, m.startCompletions)
-		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		}
-		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
-			m.deleteMode = true
-			return m, nil
-		}
-		if key.Matches(msg, DeleteKeyMaps.DeleteAllAttachments) && m.deleteMode {
-			m.deleteMode = false
-			m.attachments = nil
-			return m, nil
-		}
-		rune := msg.Code
-		if m.deleteMode && unicode.IsDigit(rune) {
-			num := int(rune - '0')
-			m.deleteMode = false
-			if num < 10 && len(m.attachments) > num {
-				if num == 0 {
-					m.attachments = m.attachments[num+1:]
-				} else {
-					m.attachments = slices.Delete(m.attachments, num, num+1)
-				}
-				return m, nil
-			}
-		}
-		if key.Matches(msg, m.keyMap.OpenEditor) {
-			if m.app.AgentCoordinator.IsSessionBusy(m.session.ID) {
-				return m, util.ReportWarn("Agent is working, please wait...")
-			}
-			return m, m.openEditor(m.textarea.Value())
-		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
-			m.deleteMode = false
-			return m, nil
-		}
-		if key.Matches(msg, m.keyMap.Newline) {
-			m.textarea.InsertRune('\n')
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		}
-		// Handle Enter key
-		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
-			value := m.textarea.Value()
-			if strings.HasSuffix(value, "\\") {
-				// If the last character is a backslash, remove it and add a newline.
-				m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
-			} else {
-				// Otherwise, send the message
-				return m, m.send()
-			}
+		
+		// Process completions key bindings
+		if cmd, handled := m.handleCompletionsKeyBindings(msg, curIdx); handled {
+			cmds = append(cmds, cmd)
 		}
 		
-		// Handle copy key using established clipboard pattern
-		if key.Matches(msg, m.keyMap.Copy) {
-			if m.HasSelection() {
-				selectedText := m.GetSelectedText()
-				if selectedText == "" {
-					return m, util.ReportWarn("No text selected")
-				}
-				
-				// Clear selection after copying (established pattern)
-				m.ClearSelection()
-				
-				return m, tea.Sequence(
-					// Use both OSC 52 and native clipboard for compatibility
-					tea.SetClipboard(selectedText),
-					func() tea.Msg {
-						_ = clipboard.WriteAll(selectedText)
-						return nil
-					},
-					util.ReportInfo("Selected text copied to clipboard"),
-				)
-			}
-			return m, util.ReportWarn("No text selected")
+		// Process attachment key bindings
+		model, cmd = m.handleAttachmentKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
 		}
+		m = model.(*editorCmp)
 		
-		if key.Matches(msg, m.keyMap.LineStart) {
-			m.textarea.CursorStart()
-			return m, nil
+		// Process editor key bindings
+		model, cmd = m.handleEditorKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
 		}
-		
-		// Clear selection when typing or moving cursor
-		if !key.Matches(msg, m.keyMap.Copy) && !key.Matches(msg, m.keyMap.SelectAll) {
-			if m.HasSelection() {
-				m.ClearSelection()
-			}
-		}
+		m = model.(*editorCmp)
 	}
 
 	m.textarea, cmd = m.textarea.Update(msg)

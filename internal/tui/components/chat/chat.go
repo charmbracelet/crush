@@ -242,11 +242,11 @@ func (m *messageListCmp) View() string {
 	return strings.Join(view, "\n")
 }
 
-func (m *messageListCmp) handlePermissionRequest(notification permission.PermissionNotification) tea.Cmd {
+func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
 	items := m.listCmp.Items()
-	if toolCallIndex := m.findToolCallByID(items, notification.ToolCallID); toolCallIndex != NotFound {
+	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
-		toolCall.SetPermissionStatus(notification.Status)
+		toolCall.SetPermissionStatus(permission.Status)
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}
 	return nil

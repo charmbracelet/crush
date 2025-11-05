@@ -609,30 +609,11 @@ func (p *permissionDialogCmp) generateLSContent() string {
 	return ""
 }
 
-// createStatusBadge creates a visual status indicator for permission state
-func (p *permissionDialogCmp) createStatusBadge() string {
-	t := styles.CurrentTheme()
-
-	// Since this is a new permission request, always show as pending
-	// In the future, this could show current status for existing permissions
-	statusBadge := t.S().Base.
-		Background(t.Warning).
-		Foreground(t.FgBase).
-		Padding(0, 2).
-		Bold(true).
-		Render("⏳ PENDING PERMISSION")
-
-	return statusBadge
-}
-
 func (p *permissionDialogCmp) generateDefaultContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 
-	// Add status indicator at the top
-	statusBadge := p.createStatusBadge()
-
-	content := statusBadge + "\n\n" + p.permission.Description
+	content := p.permission.Description
 
 	// Add pretty-printed JSON parameters for MCP tools
 	if p.permission.Params != nil {

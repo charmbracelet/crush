@@ -246,14 +246,7 @@ func (m *messageListCmp) handlePermissionRequest(notification permission.Permiss
 	items := m.listCmp.Items()
 	if toolCallIndex := m.findToolCallByID(items, notification.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
-		switch notification.Status {
-		case permission.PermissionPending:
-			toolCall.SetPermissionStatus(permission.PermissionPending)
-		case permission.PermissionApproved:
-			toolCall.SetPermissionStatus(permission.PermissionApproved)
-		case permission.PermissionDenied:
-			toolCall.SetPermissionStatus(permission.PermissionDenied)
-		}
+		toolCall.SetPermissionStatus(notification.Status)
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}
 	return nil

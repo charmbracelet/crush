@@ -35,6 +35,9 @@ const (
 	
 	// TypeTool represents tool execution errors
 	TypeTool ErrorType = "tool"
+	
+	// TypeBDDTest represents BDD test errors
+	TypeBDDTest ErrorType = "bdd_test"
 )
 
 // CrushError represents a structured error with type and context
@@ -228,6 +231,16 @@ func ToolErrorWithCause(message string, cause error) *CrushError {
 	return NewErrorWithCause(TypeTool, message, cause)
 }
 
+// BDDTestError creates BDD test errors
+func BDDTestError(message string) *CrushError {
+	return NewError(TypeBDDTest, message)
+}
+
+// BDDTestErrorWithCause creates BDD test error with cause
+func BDDTestErrorWithCause(message string, cause error) *CrushError {
+	return NewErrorWithCause(TypeBDDTest, message, cause)
+}
+
 // HTTP Status code helpers
 func (e *CrushError) HTTPStatusCode() int {
 	switch e.Type {
@@ -314,6 +327,13 @@ func IsUIError(err error) bool {
 func IsToolError(err error) bool {
 	if crushErr, ok := err.(*CrushError); ok {
 		return crushErr.IsType(TypeTool)
+	}
+	return false
+}
+
+func IsBDDTestError(err error) bool {
+	if crushErr, ok := err.(*CrushError); ok {
+		return crushErr.IsType(TypeBDDTest)
 	}
 	return false
 }

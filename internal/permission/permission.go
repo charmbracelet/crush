@@ -31,12 +31,12 @@ type PermissionStatus string
 
 const (
 	PermissionPending  PermissionStatus = "pending"
-	PermissionApproved PermissionStatus = "approved" 
+	PermissionApproved PermissionStatus = "approved"
 	PermissionDenied   PermissionStatus = "denied"
 )
 
 type PermissionNotification struct {
-	ToolCallID string          `json:"tool_call_id"`
+	ToolCallID string           `json:"tool_call_id"`
 	Status     PermissionStatus `json:"status"`
 }
 

@@ -42,8 +42,8 @@ type ToolCallCmp interface {
 	SetIsNested(bool)                  // Set whether this tool call is nested
 	ID() string
 	SetPermissionStatus(status permission.PermissionStatus) // Set permission status directly
-	SetPermissionRequested() // Mark permission request [deprecated: use SetPermissionStatus]
-	SetPermissionGranted()   // Mark permission granted [deprecated: use SetPermissionStatus]
+	SetPermissionRequested()                                // Mark permission request [deprecated: use SetPermissionStatus]
+	SetPermissionGranted()                                  // Mark permission granted [deprecated: use SetPermissionStatus]
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -54,11 +54,11 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID     string             // ID of the message that initiated this tool call
-	call                message.ToolCall   // The tool call being executed
-	result              message.ToolResult // The result of the tool execution
-	cancelled           bool               // Whether the tool call was cancelled
-	permissionStatus    permission.PermissionStatus
+	parentMessageID  string             // ID of the message that initiated this tool call
+	call             message.ToolCall   // The tool call being executed
+	result           message.ToolResult // The result of the tool execution
+	cancelled        bool               // Whether the tool call was cancelled
+	permissionStatus permission.PermissionStatus
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -96,16 +96,20 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	}
 }
 
-func WithToolPermissionRequested() ToolCallOption {
+func WithToolPermissionStatus(status permission.PermissionStatus) ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.SetPermissionStatus(permission.PermissionPending)
+		m.SetPermissionStatus(status)
 	}
 }
 
+// Deprecated: Use WithToolPermissionStatus(permission.PermissionPending) instead.
+func WithToolPermissionRequested() ToolCallOption {
+	return WithToolPermissionStatus(permission.PermissionPending)
+}
+
+// Deprecated: Use WithToolPermissionStatus(permission.PermissionApproved) instead.
 func WithToolPermissionGranted() ToolCallOption {
-	return func(m *toolCallCmp) {
-		m.SetPermissionStatus(permission.PermissionApproved)
-	}
+	return WithToolPermissionStatus(permission.PermissionApproved)
 }
 
 // NewToolCallCmp creates a new tool call component with the given parent message ID,

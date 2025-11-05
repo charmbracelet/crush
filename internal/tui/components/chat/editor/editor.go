@@ -299,8 +299,12 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m = model.(*editorCmp)
 	}
 
-	m.textarea, cmd = m.textarea.Update(msg)
-	cmds = append(cmds, cmd)
+	// IMPORTANT: Only update textarea if key wasn't handled by our handlers
+	// This prevents textarea from overriding our SelectAll/Copy behavior
+	if !m.isHandledKey(msg) {
+		m.textarea, cmd = m.textarea.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
@@ -512,6 +516,27 @@ func (c *editorCmp) GetSelectedText() string {
 // HasSelection returns whether there is any text selected.
 func (c *editorCmp) HasSelection() bool {
 	return c.selection.HasSelection()
+}
+
+// isHandledKey checks if key was handled by our custom handlers
+func (c *editorCmp) isHandledKey(msg tea.Msg) bool {
+	kp, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return false
+	}
+	
+	// Check if this key matches any of our custom bindings
+	if key.Matches(kp, c.keyMap.SelectAll) {
+		return true
+	}
+	if key.Matches(kp, c.keyMap.Copy) {
+		return true
+	}
+	if key.Matches(kp, c.keyMap.LineStart) {
+		return true
+	}
+	
+	return false
 }
 
 func New(app *app.App) Editor {

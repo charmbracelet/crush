@@ -339,5 +339,3 @@ func assertLineWidth(t *testing.T, expected int, output string) {
 		t.Errorf("expected output width to be == %d, got %d", expected, lineWidth)
 	}
 }
-
-

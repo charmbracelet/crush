@@ -35,8 +35,6 @@ type WritePermissionsParams struct {
 	NewContent string `json:"new_content,omitempty"`
 }
 
-
-
 type WriteResponseMetadata struct {
 	Diff      string `json:"diff"`
 	Additions int    `json:"additions"`

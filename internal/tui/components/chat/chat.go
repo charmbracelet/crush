@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -52,6 +53,9 @@ type MessageListCmp interface {
 	GoToBottom() tea.Cmd
 	GetSelectedText() string
 	CopySelectedText(bool) tea.Cmd
+	HasSelection() bool
+	SelectAll() tea.Cmd
+	SelectionClear() tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -112,14 +116,21 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	}
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
+		if m.listCmp.IsFocused() {
 			switch {
 			case key.Matches(msg, messages.CopyKey):
-				cmds = append(cmds, m.CopySelectedText(true))
+				if m.listCmp.HasSelection() {
+					cmds = append(cmds, m.CopySelectedText(true))
+					return m, tea.Batch(cmds...)
+				}
+			case key.Matches(msg, messages.SelectAllKey):
+				cmds = append(cmds, m.SelectAll())
 				return m, tea.Batch(cmds...)
 			case key.Matches(msg, messages.ClearSelectionKey):
-				cmds = append(cmds, m.SelectionClear())
-				return m, tea.Batch(cmds...)
+				if m.listCmp.HasSelection() {
+					cmds = append(cmds, m.SelectionClear())
+					return m, tea.Batch(cmds...)
+				}
 			}
 		}
 	case tea.MouseClickMsg:
@@ -796,6 +807,39 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		},
 		util.ReportInfo("Selected text copied to clipboard"),
 	)
+}
+
+// SelectAll selects all messages in the chat list.
+func (m *messageListCmp) SelectAll() tea.Cmd {
+	if len(m.listCmp.Items()) == 0 {
+		return util.ReportWarn("No messages to select")
+	}
+	
+	// Select the first item for navigation focus
+	m.listCmp.SetSelected(m.listCmp.Items()[0].ID())
+	
+	// Get list dimensions for proper viewport coordinates
+	width, height := m.listCmp.GetSize()
+	
+	// Debug: Log the dimensions and item count
+	itemCount := len(m.listCmp.Items())
+	
+	// Start selection at top-left of viewport (after padding)
+	m.listCmp.StartSelection(3, 0)  // Start after left padding (same as GetSelectedText padding)
+	
+	// End selection at bottom-right of content, not viewport
+	// Use content height instead of viewport height for "select all"
+	// We need to account for the total rendered content height
+	endLine := height - 1
+	if itemCount > 0 {
+		// If we have items, try to select past viewport to cover all content
+		// Use a large number that should exceed content height
+		endLine = max(height-1, itemCount*2)  // Estimate content height
+	}
+	
+	m.listCmp.EndSelection(width-1, endLine)
+	
+	return util.ReportInfo(fmt.Sprintf("Selected %d messages (viewport: %dx%d, endLine: %d)", itemCount, width, height, endLine))
 }
 
 // abs returns the absolute value of an integer.

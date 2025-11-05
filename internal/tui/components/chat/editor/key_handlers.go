@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
+	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -71,7 +71,7 @@ func (m *editorCmp) handleCompletionsKeyBindings(msg tea.KeyPressMsg, curIdx int
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(m.session.ID),
 		}), true
-		
+
 	// Completions
 	case msg.String() == "@" && !m.isCompletionsOpen &&
 		// only show if beginning of prompt, or if previous char is a space or newline:

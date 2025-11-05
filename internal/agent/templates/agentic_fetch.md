@@ -29,7 +29,7 @@ DO NOT use this tool when:
 - HTTP URLs will be automatically upgraded to HTTPS
 - The prompt should describe what information you want to extract from the page
 - This tool is read-only and does not modify any files
-- Results may be summarized if the content is very large
+- Results will be summarized if the content is very large
 - For very large pages, the content will be saved to a temporary file and the agent will have access to grep/view tools to analyze it
 - When a URL redirects to a different host, the tool will inform you and provide the redirect URL. You should then make a new fetch request with the redirect URL to fetch the content.
 - This tool uses AI processing and costs more tokens than the simple fetch tool

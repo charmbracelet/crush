@@ -1,10 +1,7 @@
 package list
 
 import (
-	"slices"
-
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -40,9 +37,9 @@ func NewGroupedList[T Item](groups []Group[T], opts ...ListOption) GroupedList[T
 			keyMap:    DefaultKeyMap(),
 			focused:   true,
 		},
-		items:         csync.NewSlice[Item](),
-		indexMap:      csync.NewMap[string, int](),
-		renderedItems: csync.NewMap[string, renderedItem](),
+		items:         []Item{},
+		indexMap:      make(map[string]int),
+		renderedItems: make(map[string]renderedItem),
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)
@@ -85,13 +82,13 @@ func (g *groupedList[T]) convertItems() {
 			items = append(items, g)
 		}
 	}
-	g.items.SetSlice(items)
+	g.items = items
 }
 
 func (g *groupedList[T]) SetGroups(groups []Group[T]) tea.Cmd {
 	g.groups = groups
 	g.convertItems()
-	return g.SetItems(slices.Collect(g.items.Seq()))
+	return g.SetItems(g.items)
 }
 
 func (g *groupedList[T]) Groups() []Group[T] {

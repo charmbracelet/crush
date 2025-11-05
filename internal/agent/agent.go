@@ -1,3 +1,10 @@
+// Package agent is the core orchestration layer for Crush AI agents.
+//
+// It provides session-based AI agent functionality for managing
+// conversations, tool execution, and message handling. It coordinates
+// interactions between language models, messages, sessions, and tools while
+// handling features like automatic summarization, queuing, and token
+// management.
 package agent
 
 import (
@@ -131,7 +138,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	if len(a.tools) > 0 {
-		// add anthropic caching to the last tool
+		// Add Anthropic caching to the last tool.
 		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
@@ -153,7 +160,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	var wg sync.WaitGroup
-	// Generate title if first message
+	// Generate title if first message.
 	if len(msgs) == 0 {
 		wg.Go(func() {
 			sessionLock.Lock()
@@ -162,13 +169,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		})
 	}
 
-	// Add the user message to the session
+	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
 	}
 
-	// add the session to the context
+	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -195,10 +202,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
-		// Before each step create the new assistant message
+		// Before each step create a new assistant message.
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
-			// reset all cached items
+			// Reset all cached items.
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}
@@ -216,14 +223,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
 			for i, msg := range prepared.Messages {
-				// only add cache control to the last message
+				// Only add cache control to the last message.
 				if msg.Role == fantasy.MessageRoleSystem {
 					lastSystemRoleInx = i
 				} else if !systemMessageUpdated {
 					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
 					systemMessageUpdated = true
 				}
-				// than add cache control to the last 2 messages
+				// Than add cache control to the last 2 messages.
 				if i > len(prepared.Messages)-3 {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
@@ -276,6 +283,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnTextDelta: func(id string, text string) error {
+			// Strip leading newline from initial text content. This is is
+			// particularly important in non-interactive mode where leading
+			// newlines are very visible.
+			if len(currentAssistant.Parts) == 0 {
+				text = strings.TrimPrefix(text, "\n")
+			}
+
 			currentAssistant.AppendContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
@@ -387,10 +401,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if currentAssistant == nil {
 			return result, err
 		}
-		// Ensure we finish thinking on error to close the reasoning state
+		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
 		toolCalls := currentAssistant.ToolCalls()
-		// INFO: we use the parent context here because the genCtx has been cancelled
+		// INFO: we use the parent context here because the genCtx has been cancelled.
 		msgs, createErr := a.messages.List(ctx, currentAssistant.SessionID)
 		if createErr != nil {
 			return nil, createErr
@@ -427,7 +441,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if isCancelErr {
 				content = "Tool execution canceled by user"
 			} else if isPermissionErr {
-				content = "Permission denied"
+				content = "User denied permission"
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -446,13 +460,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		}
 		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "Request cancelled", "")
+			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "Permission denied", "")
+			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, "API Error", err.Error())
 		}
-		// INFO: we use the parent context here because the genCtx has been cancelled
+		// Note: we use the parent context here because the genCtx has been
+		// cancelled.
 		updateErr := a.messages.Update(ctx, *currentAssistant)
 		if updateErr != nil {
 			return nil, updateErr
@@ -466,7 +481,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// if the agent was not done...
+		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
 			existing, ok := a.messageQueue.Get(call.SessionID)
 			if !ok {
@@ -478,7 +493,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 	}
 
-	// release active request before processing queued messages
+	// Release active request before processing queued messages.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
 
@@ -486,7 +501,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if !ok || len(queuedMessages) == 0 {
 		return result, err
 	}
-	// there are queued messages restart the loop
+	// There are queued messages restart the loop.
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
@@ -506,7 +521,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 	if len(msgs) == 0 {
-		// nothing to summarize
+		// Nothing to summarize.
 		return nil
 	}
 
@@ -546,7 +561,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// handle anthropic signature
+			// Handle anthropic signature.
 			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
 				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
 					summaryMessage.AppendReasoningSignature(signature.Signature)
@@ -563,7 +578,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message
+			// User cancelled summarize we need to remove the summary message.
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			return deleteErr
 		}
@@ -590,7 +605,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	a.updateSessionUsage(a.largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
-	// just in case get just the last usage
+	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
 	currentSession.CompletionTokens = usage.OutputTokens
@@ -636,7 +651,8 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...mess
 		if len(m.Parts) == 0 {
 			continue
 		}
-		// Assistant message without content or tool calls (cancelled before it returned anything)
+		// Assistant message without content or tool calls (cancelled before it
+		// returned anything).
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
@@ -711,7 +727,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 
 	title = strings.ReplaceAll(title, "\n", " ")
 
-	// remove thinking tags if present
+	// Remove thinking tags if present.
 	if idx := strings.Index(title, "</think>"); idx > 0 {
 		title = title[idx+len("</think>"):]
 	}
@@ -777,13 +793,13 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Cancel regular requests
+	// Cancel regular requests.
 	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
-	// Also check for summarize requests
+	// Also check for summarize requests.
 	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()

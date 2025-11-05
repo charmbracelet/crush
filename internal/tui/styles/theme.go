@@ -180,7 +180,7 @@ func (t *Theme) buildStyles() *Styles {
 			},
 			Cursor: textinput.CursorStyle{
 				Color: t.Secondary,
-				Shape: tea.CursorBar,
+				Shape: tea.CursorBlock,
 				Blink: true,
 			},
 		},
@@ -205,7 +205,7 @@ func (t *Theme) buildStyles() *Styles {
 			},
 			Cursor: textarea.CursorStyle{
 				Color: t.Secondary,
-				Shape: tea.CursorBar,
+				Shape: tea.CursorBlock,
 				Blink: true,
 			},
 		},

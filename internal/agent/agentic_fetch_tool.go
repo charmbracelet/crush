@@ -19,6 +19,38 @@ import (
 //go:embed templates/agentic_fetch.md
 var agenticFetchToolDescription []byte
 
+// agenticFetchValidationResult holds the validated parameters from the tool call context.
+type agenticFetchValidationResult struct {
+	SessionID      string
+	AgentMessageID string
+}
+
+// validateAgenticFetchParams validates the tool call parameters and extracts required context values.
+func validateAgenticFetchParams(ctx context.Context, params tools.AgenticFetchParams) (agenticFetchValidationResult, error) {
+	if params.URL == "" {
+		return agenticFetchValidationResult{}, errors.New("url is required")
+	}
+
+	if params.Prompt == "" {
+		return agenticFetchValidationResult{}, errors.New("prompt is required")
+	}
+
+	sessionID := tools.GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return agenticFetchValidationResult{}, errors.New("session id missing from context")
+	}
+
+	agentMessageID := tools.GetMessageFromContext(ctx)
+	if agentMessageID == "" {
+		return agenticFetchValidationResult{}, errors.New("agent message id missing from context")
+	}
+
+	return agenticFetchValidationResult{
+		SessionID:      sessionID,
+		AgentMessageID: agentMessageID,
+	}, nil
+}
+
 //go:embed templates/agentic_fetch_prompt.md.tpl
 var agenticFetchPromptTmpl []byte
 
@@ -38,27 +70,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 		tools.AgenticFetchToolName,
 		string(agenticFetchToolDescription),
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.URL == "" {
-				return fantasy.NewTextErrorResponse("url is required"), nil
-			}
-
-			if params.Prompt == "" {
-				return fantasy.NewTextErrorResponse("prompt is required"), nil
-			}
-
-			sessionID := tools.GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, errors.New("session id missing from context")
-			}
-
-			agentMessageID := tools.GetMessageFromContext(ctx)
-			if agentMessageID == "" {
-				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+			validationResult, err := validateAgenticFetchParams(ctx, params)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			p := c.permissions.Request(
 				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
+					SessionID:   validationResult.SessionID,
 					Path:        c.cfg.WorkingDir(),
 					ToolCallID:  call.ID,
 					ToolName:    tools.AgenticFetchToolName,
@@ -148,8 +167,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "Fetch Analysis")
+			agentToolSessionID := c.sessions.CreateAgentToolSessionID(validationResult.AgentMessageID, call.ID)
+			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, validationResult.SessionID, "Fetch Analysis")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
@@ -181,7 +200,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
 			}
-			parentSession, err := c.sessions.Get(ctx, sessionID)
+			parentSession, err := c.sessions.Get(ctx, validationResult.SessionID)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
 			}

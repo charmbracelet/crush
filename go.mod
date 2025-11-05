@@ -3,7 +3,7 @@ module github.com/charmbracelet/crush
 go 1.25.0
 
 require (
-	charm.land/fantasy v0.1.4
+	charm.land/fantasy v0.1.6
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.10.3
@@ -14,7 +14,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
 	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.6
-	github.com/charmbracelet/catwalk v0.8.1
+	github.com/charmbracelet/catwalk v0.8.2
 	github.com/charmbracelet/colorprofile v0.3.2
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
@@ -27,21 +27,21 @@ require (
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
-	github.com/charmbracelet/x/term v0.2.1
+	github.com/charmbracelet/x/term v0.2.2
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/joho/godotenv v1.5.1
 	github.com/lucasb-eyer/go-colorful v1.3.0
-	github.com/modelcontextprotocol/go-sdk v1.0.0
+	github.com/modelcontextprotocol/go-sdk v1.1.0
 	github.com/muesli/termenv v0.16.0
 	github.com/ncruces/go-sqlite3 v0.29.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/posthog/posthog-go v1.6.12
-	github.com/pressly/goose/v3 v3.25.0
+	github.com/pressly/goose/v3 v3.26.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/rivo/uniseg v0.4.7
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
@@ -69,7 +69,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.39.4 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.39.5 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.27.27 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.27 // indirect
@@ -88,7 +88,6 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 // indirect
-	github.com/charmbracelet/go-genai v0.0.0-20251021165952-9befde14ce97 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -160,6 +159,7 @@ require (
 	golang.org/x/term v0.35.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
+	google.golang.org/genai v1.33.1-0.20251103191629-d15baab4f79e // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

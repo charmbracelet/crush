@@ -1,3 +1,5 @@
+// Package app wires together services, coordinates agents, and manages
+// application lifecycle.
 package app
 
 import (
@@ -5,14 +7,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"charm.land/fantasy"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
@@ -25,7 +29,12 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/term"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
+	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 type App struct {
@@ -83,8 +92,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
 
+	go func() {
+		slog.Info("Initializing MCP clients")
+		mcp.Initialize(ctx, app.Permissions, cfg)
+	}()
+
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -102,9 +116,9 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
-// RunNonInteractive handles the execution flow when a prompt is provided via
-// CLI flag.
-func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
+// RunNonInteractive runs the application in non-interactive mode with the
+// given prompt, printing to stdout.
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -112,7 +126,25 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner(ctx, cancel, "Generating")
+		t := styles.CurrentTheme()
+
+		// Detect background color to set the appropriate color for the
+		// spinner's 'Generating...' text. Without this, that text would be
+		// unreadable in light terminals.
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
 		spinner.Start()
 	}
 
@@ -126,7 +158,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
-	titlePrefix := "Non-interactive: "
+	const titlePrefix = "Non-interactive: "
 	var titleSuffix string
 
 	if len(prompt) > maxPromptLengthForTitle {
@@ -142,7 +174,8 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
-	// Automatically approve all permission requests for this non-interactive session
+	// Automatically approve all permission requests for this non-interactive
+	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
 
 	type response struct {
@@ -165,12 +198,25 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
+	supportsProgressBar := term.SupportsProgressBar()
 
-	defer fmt.Printf(ansi.ResetProgressBar)
+	defer func() {
+		if supportsProgressBar {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+		}
+
+		// Always print a newline at the end. If output is a TTY this will
+		// prevent the prompt from overwriting the last line of output.
+		_, _ = fmt.Fprintln(output)
+	}()
+
 	for {
-		// HACK: add it again on every iteration so it doesn't get hidden by
-		// the terminal due to inactivity.
-		fmt.Printf(ansi.SetIndeterminateProgressBar)
+		if supportsProgressBar {
+			// HACK: Reinitialize the terminal progress bar on every iteration so
+			// it doesn't get hidden by the terminal due to inactivity.
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		}
+
 		select {
 		case result := <-done:
 			stopSpinner()
@@ -197,7 +243,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 				}
 
 				part := content[readBytes:]
-				fmt.Print(part)
+				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}
 
@@ -220,7 +266,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", tools.SubscribeMCPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func() error {
 		cancel()
@@ -282,9 +328,6 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
-
-	// Add MCP client cleanup to shutdown process
-	app.cleanupFuncs = append(app.cleanupFuncs, tools.CloseMCPClients)
 	return nil
 }
 

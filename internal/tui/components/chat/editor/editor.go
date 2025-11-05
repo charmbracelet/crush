@@ -264,8 +264,13 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
+		// Open command palette when "/" is pressed on empty prompt
+		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
+			return m, util.CmdHandler(dialogs.OpenDialogMsg{
+				Model: commands.NewCommandDialog(m.session.ID),
+			})
 		// Completions
-		case msg.String() == "/" && !m.isCompletionsOpen &&
+		case msg.String() == "@" && !m.isCompletionsOpen &&
 			// only show if beginning of prompt, or if previous char is a space or newline:
 			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
 			m.isCompletionsOpen = true
@@ -337,7 +342,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 			} else {
 				word := m.textarea.Word()
-				if strings.HasPrefix(word, "/") {
+				if strings.HasPrefix(word, "@") {
 					// XXX: wont' work if editing in the middle of the field.
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]

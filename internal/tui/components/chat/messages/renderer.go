@@ -730,21 +730,24 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 func earlyState(header string, v *toolCallCmp) (string, bool) {
 	t := styles.CurrentTheme()
 	message := ""
+	messageBaseStyle := t.S().Base.Foreground(t.FgSubtle)
 	switch {
 	case v.result.IsError:
 		message = v.renderToolError()
 	case v.cancelled:
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
+		message = messageBaseStyle.Render("Canceled.")
 	case v.result.ToolCallID == "":
 		switch v.permissionStatus {
 		case permission.PermissionPending:
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting permission...")
+			message = messageBaseStyle.Render("Requesting permission...")
 		case permission.PermissionApproved:
-			message = t.S().Base.Foreground(t.Success).Render("✅ Permission approved. Executing command...")
+			message = messageBaseStyle.Render("Permission approved. Executing command...")
 		case permission.PermissionDenied:
-			message = t.S().Base.Foreground(t.Error).Render("❌ Permission denied.")
-		default:
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
+			message = messageBaseStyle.Render("Permission denied.")
+
+			// Note: I did not add a default here, to make sure a developer will notice,
+			//       if a new PermissionStatus is added and therefore add a proper new message.
+
 		}
 	default:
 		return "", false

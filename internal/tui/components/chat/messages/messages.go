@@ -262,19 +262,29 @@ func (m *messageCmp) renderThinkingContent() string {
 	if strings.TrimSpace(reasoningContent.Thinking) == "" {
 		return ""
 	}
-	lines := strings.Split(reasoningContent.Thinking, "\n")
-	var content strings.Builder
-	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
-	for i, line := range lines {
-		if line == "" {
-			continue
+
+	width := m.textWidth() - 2
+	width = min(width, 120)
+
+	renderer := styles.GetPlainMarkdownRenderer(width - 1)
+	rendered, err := renderer.Render(reasoningContent.Thinking)
+	if err != nil {
+		lines := strings.Split(reasoningContent.Thinking, "\n")
+		var content strings.Builder
+		lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
+		for i, line := range lines {
+			if line == "" {
+				continue
+			}
+			content.WriteString(lineStyle.Width(width).Render(line))
+			if i < len(lines)-1 {
+				content.WriteString("\n")
+			}
 		}
-		content.WriteString(lineStyle.Width(m.textWidth() - 2).Render(line))
-		if i < len(lines)-1 {
-			content.WriteString("\n")
-		}
+		rendered = content.String()
 	}
-	fullContent := content.String()
+
+	fullContent := strings.TrimSpace(rendered)
 	height := ordered.Clamp(lipgloss.Height(fullContent), 1, 10)
 	m.thinkingViewport.SetHeight(height)
 	m.thinkingViewport.SetWidth(m.textWidth())
@@ -299,6 +309,7 @@ func (m *messageCmp) renderThinkingContent() string {
 			footer = m.anim.View()
 		}
 	}
+	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
 	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }
 

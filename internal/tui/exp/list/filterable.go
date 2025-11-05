@@ -102,7 +102,7 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	f.list = New(items, f.listOptions...).(*list[T])
 
 	f.updateKeyMaps()
-	f.items = slices.Collect(f.list.items.Seq())
+	f.items = f.list.items
 
 	if f.inputHidden {
 		return f
@@ -243,7 +243,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		}
 	}
 
-	f.selectedItem = ""
+	f.selectedItemIdx = -1
 	if query == "" || len(f.items) == 0 {
 		return f.list.SetItems(f.items)
 	}

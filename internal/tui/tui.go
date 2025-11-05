@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
@@ -33,6 +34,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/lipgloss/v2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var lastMouseEvent time.Time
@@ -138,6 +141,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
 
+	case pubsub.Event[mcp.Event]:
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return a, a.handleStateChanged(context.Background())
+		case mcp.EventPromptsListChanged:
+			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+		}
+
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
 		completions.CloseCompletionsMsg, completions.RepositionCompletionsMsg:
@@ -156,13 +169,42 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dialog = u.(dialogs.DialogCmp)
 		return a, tea.Batch(completionCmd, dialogCmd)
 	case commands.ShowArgumentsDialogMsg:
+		var args []commands.Argument
+		for _, arg := range msg.ArgNames {
+			args = append(args, commands.Argument{
+				Name:     arg,
+				Title:    cases.Title(language.English).String(arg),
+				Required: true,
+			})
+		}
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
 				Model: commands.NewCommandArgumentsDialog(
 					msg.CommandID,
-					msg.Content,
-					msg.ArgNames,
+					msg.CommandID,
+					msg.CommandID,
+					msg.Description,
+					args,
+					msg.OnSubmit,
 				),
+			},
+		)
+	case commands.ShowMCPPromptArgumentsDialogMsg:
+		args := make([]commands.Argument, 0, len(msg.Prompt.Arguments))
+		for _, arg := range msg.Prompt.Arguments {
+			args = append(args, commands.Argument(*arg))
+		}
+		dialog := commands.NewCommandArgumentsDialog(
+			msg.Prompt.Name,
+			msg.Prompt.Title,
+			msg.Prompt.Name,
+			msg.Prompt.Description,
+			args,
+			msg.OnSubmit,
+		)
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: dialog,
 			},
 		)
 	// Page change messages
@@ -585,6 +627,27 @@ func (a *appModel) View() tea.View {
 		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
 	}
 	return view
+}
+
+func (a *appModel) handleStateChanged(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		a.app.UpdateAgentModel(ctx)
+		return nil
+	}
+}
+
+func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshPrompts(ctx, name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshTools(ctx, name)
+		return nil
+	}
 }
 
 // New creates and initializes a new TUI application model.

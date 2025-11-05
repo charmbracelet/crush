@@ -29,7 +29,7 @@ func TestFilterableList(t *testing.T) {
 			cmd()
 		}
 
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, 0, l.selectedItemIdx)
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 }

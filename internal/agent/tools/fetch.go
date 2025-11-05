@@ -16,12 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
-type fetchTool struct {
-	client      *http.Client
-	permissions permission.Service
-	workingDir  string
-}
-
 const FetchToolName = "fetch"
 
 //go:embed fetch.md

@@ -1037,8 +1037,8 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("ctrl+f", "add image"),
 					),
 					key.NewBinding(
-						key.WithKeys("/"),
-						key.WithHelp("/", "add file"),
+						key.WithKeys("@"),
+						key.WithHelp("@", "mention file"),
 					),
 					key.NewBinding(
 						key.WithKeys("ctrl+o"),

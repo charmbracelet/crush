@@ -60,6 +60,13 @@ func TestYourFunction(t *testing.T) {
   - You can also use `task fmt` to run `gofumpt -w .` on the entire project,
     as long as `gofumpt` is on the `PATH`.
 
+## Comments
+
+- Comments that live on their own lines should start with capital letters and
+  end with periods. Wrap comments at 78 columns.
+
 ## Committing
 
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
+- Try to keep commits to one line, not including your attribution. Only use
+  multi-line commits when additional context is truly necessary.

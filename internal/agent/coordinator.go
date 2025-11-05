@@ -193,7 +193,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	switch providerCfg.Type {
-	case openai.Name:
+	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
@@ -249,16 +249,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := google.ParseOptions(mergedOptions)
 		if err == nil {
 			options[google.Name] = parsed
-		}
-	case azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		}
-		// azure uses the same options as openaicompat
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
-		if err == nil {
-			options[azure.Name] = parsed
 		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
@@ -362,28 +352,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	mcpTools := tools.GetMCPTools(context.Background(), c.permissions, c.cfg)
-
-	for _, mcpTool := range mcpTools {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
-			filteredTools = append(filteredTools, mcpTool)
-		} else if len(agent.AllowedMCP) == 0 {
-			// no mcps allowed
+			filteredTools = append(filteredTools, tool)
+			continue
+		}
+		if len(agent.AllowedMCP) == 0 {
+			// No MCPs allowed
+			slog.Warn("MCPs not allowed")
 			break
 		}
 
 		for mcp, tools := range agent.AllowedMCP {
-			if mcp == mcpTool.MCP() {
-				if len(tools) == 0 {
-					filteredTools = append(filteredTools, mcpTool)
-				}
-				for _, t := range tools {
-					if t == mcpTool.MCPToolName() {
-						filteredTools = append(filteredTools, mcpTool)
-					}
-				}
-				break
+			if mcp != tool.MCP() {
+				continue
+			}
+			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
+				filteredTools = append(filteredTools, tool)
 			}
 		}
 	}
@@ -574,6 +560,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
+		azure.WithUseResponsesAPI(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -662,6 +649,9 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {

@@ -736,9 +736,14 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	case v.cancelled:
 		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
 	case v.result.ToolCallID == "":
-		if v.permissionStatus == permission.PermissionPending {
+		switch v.permissionStatus {
+		case permission.PermissionPending:
 			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting permission...")
-		} else {
+		case permission.PermissionApproved:
+			message = t.S().Base.Foreground(t.Success).Render("✅ Permission approved. Executing command...")
+		case permission.PermissionDenied:
+			message = t.S().Base.Foreground(t.Error).Render("❌ Permission denied.")
+		default:
 			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
 		}
 	default:

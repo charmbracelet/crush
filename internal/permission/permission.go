@@ -25,10 +25,19 @@ type CreatePermissionRequest struct {
 	Path        string `json:"path"`
 }
 
+// PermissionStatus represents the state of a permission request
+// This eliminates split-brain states like {granted: true, denied: true}
+type PermissionStatus string
+
+const (
+	PermissionPending   PermissionStatus = "pending"
+	PermissionApproved PermissionStatus = "approved"
+	PermissionDenied   PermissionStatus = "denied"
+)
+
 type PermissionNotification struct {
-	ToolCallID string `json:"tool_call_id"`
-	Granted    bool   `json:"granted"`
-	Denied     bool   `json:"denied"`
+	ToolCallID string          `json:"tool_call_id"`
+	Status     PermissionStatus `json:"status"`
 }
 
 type PermissionRequest struct {
@@ -75,7 +84,7 @@ type permissionService struct {
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
-		Granted:    true,
+		Status:     PermissionApproved,
 	})
 	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
@@ -94,7 +103,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 func (s *permissionService) Grant(permission PermissionRequest) {
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
-		Granted:    true,
+		Status:     PermissionApproved,
 	})
 	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
@@ -109,8 +118,7 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 func (s *permissionService) Deny(permission PermissionRequest) {
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
-		Granted:    false,
-		Denied:     true,
+		Status:     PermissionDenied,
 	})
 	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {

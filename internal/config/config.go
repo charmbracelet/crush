@@ -524,7 +524,7 @@ func (c *Config) SetupAgents() {
 		},
 
 		AgentTask: {
-			ID:           AgentCoder,
+			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,

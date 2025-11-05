@@ -257,7 +257,7 @@ func (m *messageListCmp) handlePermissionRequest(permission permission.Permissio
 	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 		toolCall.SetPermissionRequested()
-		if permission.Granted {
+		if permission.Status == "approved" {
 			toolCall.SetPermissionGranted()
 		}
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)

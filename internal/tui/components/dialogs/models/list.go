@@ -287,10 +287,16 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			}
 			validRecentItems = append(validRecentItems, recent)
 			recentID := fmt.Sprintf("recent::%s", key)
+			modelOption := option.Value()
+			providerName := modelOption.Provider.Name
+			if providerName == "" {
+				providerName = string(modelOption.Provider.ID)
+			}
 			item := list.NewCompletionItem(
-				option.Text(),
+				modelOption.Model.Name,
 				option.Value(),
 				list.WithCompletionID(recentID),
+				list.WithCompletionShortcut(providerName),
 			)
 			recentGroup.Items = append(recentGroup.Items, item)
 			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {

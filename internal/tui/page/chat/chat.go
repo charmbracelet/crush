@@ -190,22 +190,22 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.focusedPane = PanelTypeChat
 			p.chat.Focus()
 			p.editor.Blur()
-		} else {
-			p.focusedPane = PanelTypeEditor
-			p.editor.Focus()
-			p.chat.Blur()
+			u, cmd := p.chat.Update(msg)
+			p.chat = u.(chat.MessageListCmp)
+			return p, cmd
 		}
-		u, cmd := p.chat.Update(msg)
-		p.chat = u.(chat.MessageListCmp)
+		p.focusedPane = PanelTypeEditor
+		p.editor.Focus()
+		p.chat.Blur()
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
 		return p, cmd
 	case tea.MouseMotionMsg:
 		if p.compact {
 			msg.Y -= 1
 		}
 		if msg.Button == tea.MouseLeft {
-			u, cmd := p.chat.Update(msg)
-			p.chat = u.(chat.MessageListCmp)
-			return p, cmd
+			return p.forwardToFocusedPane(msg)
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
@@ -216,9 +216,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			msg.Y -= 1
 		}
 		if msg.Button == tea.MouseLeft {
-			u, cmd := p.chat.Update(msg)
-			p.chat = u.(chat.MessageListCmp)
-			return p, cmd
+			return p.forwardToFocusedPane(msg)
 		}
 		return p, nil
 	case chat.SelectionCopyMsg:
@@ -1085,6 +1083,18 @@ func (p *chatPage) Help() help.KeyMap {
 
 func (p *chatPage) IsChatFocused() bool {
 	return p.focusedPane == PanelTypeChat
+}
+
+// forwardToFocusedPane forwards a message to either editor or chat based on focus
+func (p *chatPage) forwardToFocusedPane(msg tea.Msg) (*chatPage, tea.Cmd) {
+	if p.focusedPane == PanelTypeEditor {
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
+	}
+	u, cmd := p.chat.Update(msg)
+	p.chat = u.(chat.MessageListCmp)
+	return p, cmd
 }
 
 // isMouseOverChat checks if the given mouse coordinates are within the chat area bounds.

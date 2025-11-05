@@ -828,10 +828,10 @@ func (m *messageListCmp) SelectAll() tea.Cmd {
 	// End selection at bottom-right of content, not viewport
 	// Use content height instead of viewport height for "select all"
 	// We need to account for the total rendered content height
-	// For "select all", use a large end coordinate that exceeds content boundaries
+	// For "select all", use large end coordinate that exceeds content boundaries
 	// The list component will clamp to actual content bounds automatically
 	// This works for both DirectionForward and DirectionBackward
-	endLine := height - 1  // Bottom of visible viewport
+	endLine := height * 10  // Large enough to include all scrollable content
 	
 	m.listCmp.EndSelection(width-1, endLine)
 	

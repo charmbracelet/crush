@@ -8,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
@@ -126,14 +125,6 @@ func (m *editorCmp) handleAttachmentKeyBindings(msg tea.KeyPressMsg) (util.Model
 	}
 
 	return m, nil
-}
-
-// deleteAttachment helper function to remove attachment by index
-func deleteAttachment(attachments []message.Attachment, index int) []message.Attachment {
-	if index < 0 || index >= len(attachments) {
-		return attachments
-	}
-	return append(attachments[:index], attachments[index+1:]...)
 }
 
 // handleEditorKeyBindings processes editor-related key presses

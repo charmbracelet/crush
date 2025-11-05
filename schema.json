@@ -15,6 +15,11 @@
           "description": "Style of attribution trailer to add to commits",
           "default": "co-authored-by"
         },
+        "co_authored_by": {
+          "type": "boolean",
+          "description": "Deprecated: use trailer_style instead",
+          "deprecated": true
+        },
         "generated_with": {
           "type": "boolean",
           "description": "Add Generated with Crush line to commit messages and issues and PRs",

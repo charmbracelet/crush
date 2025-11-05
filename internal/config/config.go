@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
@@ -176,7 +177,17 @@ const (
 
 type Attribution struct {
 	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=co-authored-by"`
+	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
 	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+}
+
+// JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
+func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		if prop, ok := schema.Properties.Get("co_authored_by"); ok {
+			prop.Deprecated = true
+		}
+	}
 }
 
 type Options struct {

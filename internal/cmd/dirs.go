@@ -4,9 +4,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/lipgloss/v2/table"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )

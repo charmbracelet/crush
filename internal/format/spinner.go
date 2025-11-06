@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -42,28 +41,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, cancel context.CancelFunc, message string) *Spinner {
-	t := styles.CurrentTheme()
-	model := model{
-		anim: anim.New(anim.Settings{
-			Size:        10,
-			Label:       message,
-			LabelColor:  t.FgBase,
-			GradColorA:  t.Primary,
-			GradColorB:  t.Secondary,
-			CycleColors: true,
-		}),
+func NewSpinner(ctx context.Context, cancel context.CancelFunc, animSettings anim.Settings) *Spinner {
+	m := model{
+		anim:   anim.New(animSettings),
 		cancel: cancel,
 	}
 
-	prog := tea.NewProgram(
-		model,
-		tea.WithOutput(os.Stderr),
-		tea.WithContext(ctx),
-	)
+	p := tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithContext(ctx))
 
 	return &Spinner{
-		prog: prog,
+		prog: p,
 		done: make(chan struct{}, 1),
 	}
 }

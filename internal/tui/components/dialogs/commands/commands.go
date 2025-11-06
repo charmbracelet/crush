@@ -2,15 +2,20 @@ package commands
 
 import (
 	"os"
+	"slices"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/llm/prompt"
+	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -25,9 +30,14 @@ const (
 	defaultWidth int = 70
 )
 
+type commandType uint
+
+func (c commandType) String() string { return []string{"System", "User", "MCP"}[c] }
+
 const (
-	SystemCommands int = iota
+	SystemCommands commandType = iota
 	UserCommands
+	MCPPrompts
 )
 
 type listModel = list.FilterableList[list.CompletionItem[Command]]
@@ -54,9 +64,10 @@ type commandDialogCmp struct {
 	commandList  listModel
 	keyMap       CommandsDialogKeyMap
 	help         help.Model
-	commandType  int       // SystemCommands or UserCommands
-	userCommands []Command // User-defined commands
-	sessionID    string    // Current session ID
+	selected     commandType           // Selected SystemCommands, UserCommands, or MCPPrompts
+	userCommands []Command             // User-defined commands
+	mcpPrompts   *csync.Slice[Command] // MCP prompts
+	sessionID    string                // Current session ID
 }
 
 type (
@@ -102,8 +113,9 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 		width:       defaultWidth,
 		keyMap:      DefaultCommandsDialogKeyMap(),
 		help:        help,
-		commandType: SystemCommands,
+		selected:    SystemCommands,
 		sessionID:   sessionID,
+		mcpPrompts:  csync.NewSlice[Command](),
 	}
 }
 
@@ -113,7 +125,8 @@ func (c *commandDialogCmp) Init() tea.Cmd {
 		return util.ReportError(err)
 	}
 	c.userCommands = commands
-	return c.SetCommandType(c.commandType)
+	c.mcpPrompts.SetSlice(loadMCPPrompts())
+	return c.setCommandType(c.selected)
 }
 
 func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
@@ -122,9 +135,19 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
 		return c, tea.Batch(
-			c.SetCommandType(c.commandType),
+			c.setCommandType(c.selected),
 			c.commandList.SetSize(c.listWidth(), c.listHeight()),
 		)
+	case pubsub.Event[mcp.Event]:
+		// Reload MCP prompts when MCP state changes
+		if msg.Type == pubsub.UpdatedEvent {
+			c.mcpPrompts.SetSlice(loadMCPPrompts())
+			// If we're currently viewing MCP prompts, refresh the list
+			if c.selected == MCPPrompts {
+				return c, c.setCommandType(MCPPrompts)
+			}
+			return c, nil
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Select):
@@ -138,15 +161,10 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				command.Handler(command),
 			)
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.userCommands) == 0 {
+			if len(c.userCommands) == 0 && c.mcpPrompts.Len() == 0 {
 				return c, nil
 			}
-			// Toggle command type between System and User commands
-			if c.commandType == SystemCommands {
-				return c, c.SetCommandType(UserCommands)
-			} else {
-				return c, c.SetCommandType(SystemCommands)
-			}
+			return c, c.setCommandType(c.next())
 		case key.Matches(msg, c.keyMap.Close):
 			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
@@ -158,13 +176,35 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	return c, nil
 }
 
+func (c *commandDialogCmp) next() commandType {
+	switch c.selected {
+	case SystemCommands:
+		if len(c.userCommands) > 0 {
+			return UserCommands
+		}
+		if c.mcpPrompts.Len() > 0 {
+			return MCPPrompts
+		}
+		fallthrough
+	case UserCommands:
+		if c.mcpPrompts.Len() > 0 {
+			return MCPPrompts
+		}
+		fallthrough
+	case MCPPrompts:
+		return SystemCommands
+	default:
+		return SystemCommands
+	}
+}
+
 func (c *commandDialogCmp) View() string {
 	t := styles.CurrentTheme()
 	listView := c.commandList
 	radio := c.commandTypeRadio()
 
 	header := t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-lipgloss.Width(radio)-5) + " " + radio)
-	if len(c.userCommands) == 0 {
+	if len(c.userCommands) == 0 && c.mcpPrompts.Len() == 0 {
 		header = t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Commands", c.width-4))
 	}
 	content := lipgloss.JoinVertical(
@@ -190,27 +230,41 @@ func (c *commandDialogCmp) Cursor() *tea.Cursor {
 
 func (c *commandDialogCmp) commandTypeRadio() string {
 	t := styles.CurrentTheme()
-	choices := []string{"System", "User"}
-	iconSelected := "◉"
-	iconUnselected := "○"
-	if c.commandType == SystemCommands {
-		return t.S().Base.Foreground(t.FgHalfMuted).Render(iconSelected + " " + choices[0] + " " + iconUnselected + " " + choices[1])
+
+	fn := func(i commandType) string {
+		if i == c.selected {
+			return "◉ " + i.String()
+		}
+		return "○ " + i.String()
 	}
-	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + " " + iconSelected + " " + choices[1])
+
+	parts := []string{
+		fn(SystemCommands),
+	}
+	if len(c.userCommands) > 0 {
+		parts = append(parts, fn(UserCommands))
+	}
+	if c.mcpPrompts.Len() > 0 {
+		parts = append(parts, fn(MCPPrompts))
+	}
+	return t.S().Base.Foreground(t.FgHalfMuted).Render(strings.Join(parts, " "))
 }
 
 func (c *commandDialogCmp) listWidth() int {
 	return defaultWidth - 2 // 4 for padding
 }
 
-func (c *commandDialogCmp) SetCommandType(commandType int) tea.Cmd {
-	c.commandType = commandType
+func (c *commandDialogCmp) setCommandType(commandType commandType) tea.Cmd {
+	c.selected = commandType
 
 	var commands []Command
-	if c.commandType == SystemCommands {
+	switch c.selected {
+	case SystemCommands:
 		commands = c.defaultCommands()
-	} else {
+	case UserCommands:
 		commands = c.userCommands
+	case MCPPrompts:
+		commands = slices.Collect(c.mcpPrompts.Seq())
 	}
 
 	commandItems := []list.CompletionItem[Command]{}
@@ -281,6 +335,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
+			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},
@@ -303,7 +358,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 
 	// Add reasoning toggle for models that support it
 	cfg := config.Get()
-	if agentCfg, ok := cfg.Agents["coder"]; ok {
+	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 		model := cfg.GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil && model.CanReason {
@@ -326,7 +381,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			}
 
 			// OpenAI models: reasoning effort dialog
-			if providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+			if len(model.ReasoningLevels) > 0 {
 				commands = append(commands, Command{
 					ID:          "select_reasoning_effort",
 					Title:       "Select Reasoning Effort",
@@ -350,7 +405,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 	if c.sessionID != "" {
-		agentCfg := config.Get().Agents["coder"]
+		agentCfg := config.Get().Agents[config.AgentCoder]
 		model := config.Get().GetModelByType(agentCfg.Model)
 		if model.SupportsImages {
 			commands = append(commands, Command{
@@ -402,7 +457,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Create/Update the CRUSH.md memory file",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(chat.SendMsg{
-					Text: prompt.Initialize(),
+					Text: agent.InitializePrompt(),
 				})
 			},
 		},

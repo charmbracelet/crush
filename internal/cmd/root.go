@@ -10,17 +10,21 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	termutil "github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
-	"github.com/charmbracelet/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -30,7 +34,6 @@ func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
-
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
@@ -72,7 +75,7 @@ crush run "Explain the use of context in Go"
 crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app, err := setupApp(cmd)
+		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
@@ -81,11 +84,15 @@ crush -y
 		event.AppInitialized()
 
 		// Set up the TUI.
+		var env uv.Environ = os.Environ()
+		ui := tui.New(app)
+		ui.QueryVersion = shouldQueryTerminalVersion(env)
+
 		program := tea.NewProgram(
-			tui.New(app),
+			ui,
+			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
-
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
@@ -141,6 +148,15 @@ func Execute() {
 	); err != nil {
 		os.Exit(1)
 	}
+}
+
+func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
+	if termutil.SupportsProgressBar() {
+		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
+	}
+
+	return setupApp(cmd)
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
@@ -249,4 +265,18 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
+}
+
+func shouldQueryTerminalVersion(env uv.Environ) bool {
+	termType := env.Getenv("TERM")
+	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
+	_, okSSHTTY := env.LookupEnv("SSH_TTY")
+	return (!okTermProg && !okSSHTTY) ||
+		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
+		// Terminals that do support XTVERSION.
+		strings.Contains(termType, "ghostty") ||
+		strings.Contains(termType, "wezterm") ||
+		strings.Contains(termType, "alacritty") ||
+		strings.Contains(termType, "kitty") ||
+		strings.Contains(termType, "rio")
 }

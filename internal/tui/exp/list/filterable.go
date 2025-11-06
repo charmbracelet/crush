@@ -4,13 +4,13 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/textinput"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -102,7 +102,7 @@ func NewFilterableList[T FilterableItem](items []T, opts ...filterableListOption
 	f.list = New(items, f.listOptions...).(*list[T])
 
 	f.updateKeyMaps()
-	f.items = slices.Collect(f.list.items.Seq())
+	f.items = f.list.items
 
 	if f.inputHidden {
 		return f
@@ -243,7 +243,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 		}
 	}
 
-	f.selectedItem = ""
+	f.selectedItemIdx = -1
 	if query == "" || len(f.items) == 0 {
 		return f.list.SetItems(f.items)
 	}

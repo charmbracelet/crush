@@ -78,6 +78,9 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		slog.Warn("Running over SSH, will enable reduce animations")
 		assignIfNil(&cfg.Options.TUI.ReduceAnimations, true)
 	}
+	if b, _ := strconv.ParseBool(os.Getenv("CRUSH_REDUCE_ANIMATIONS")); b {
+		assignIfNil(&cfg.Options.TUI.ReduceAnimations, true)
+	}
 
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)

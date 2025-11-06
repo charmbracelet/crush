@@ -108,7 +108,7 @@ func (s *Shell) ExecStream(ctx context.Context, command string, stdout, stderr i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.execPOSIXStream(ctx, command, stdout, stderr)
+	return s.execStream(ctx, command, stdout, stderr)
 }
 
 // GetWorkingDir returns the current working directory
@@ -281,7 +281,7 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 	return stdout.String(), stderr.String(), err
 }
 
-// execPOSIXStream executes commands using POSIX shell emulation with streaming output
+// execStream executes commands using POSIX shell emulation with streaming output
 func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	return s.execCommon(ctx, command, stdout, stderr)
 }

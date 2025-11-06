@@ -5,14 +5,14 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/filepicker"
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/textarea"
-	"github.com/charmbracelet/bubbles/v2/textinput"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/filepicker"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
 	"github.com/charmbracelet/glamour/v2/ansi"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/rivo/uniseg"
@@ -179,7 +179,7 @@ func (t *Theme) buildStyles() *Styles {
 			},
 			Cursor: textinput.CursorStyle{
 				Color: t.Secondary,
-				Shape: tea.CursorBar,
+				Shape: tea.CursorBlock,
 				Blink: true,
 			},
 		},
@@ -204,7 +204,7 @@ func (t *Theme) buildStyles() *Styles {
 			},
 			Cursor: textarea.CursorStyle{
 				Color: t.Secondary,
-				Shape: tea.CursorBar,
+				Shape: tea.CursorBlock,
 				Blink: true,
 			},
 		},

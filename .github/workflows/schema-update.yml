@@ -21,6 +21,6 @@ jobs:
         with:
           commit_message: "chore: auto-update generated files"
           branch: main
-          commit_user_name: actions-user
-          commit_user_email: actions@github.com
-          commit_author: actions-user <actions@github.com>
+          commit_user_name: Charm
+          commit_user_email: 124303983+charmcli@users.noreply.github.com
+          commit_author: Charm <124303983+charmcli@users.noreply.github.com>

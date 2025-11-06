@@ -1,17 +1,16 @@
 package commands
 
 import (
-	"fmt"
-	"strings"
+	"cmp"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/textinput"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 const (
@@ -20,9 +19,10 @@ const (
 
 // ShowArgumentsDialogMsg is a message that is sent to show the arguments dialog.
 type ShowArgumentsDialogMsg struct {
-	CommandID string
-	Content   string
-	ArgNames  []string
+	CommandID   string
+	Description string
+	ArgNames    []string
+	OnSubmit    func(args map[string]string) tea.Cmd
 }
 
 // CloseArgumentsDialogMsg is a message that is sent when the arguments dialog is closed.
@@ -39,26 +39,39 @@ type CommandArgumentsDialog interface {
 }
 
 type commandArgumentsDialogCmp struct {
-	width   int
-	wWidth  int // Width of the terminal window
-	wHeight int // Height of the terminal window
+	wWidth, wHeight int
+	width, height   int
 
-	inputs     []textinput.Model
-	focusIndex int
-	keys       ArgumentsDialogKeyMap
-	commandID  string
-	content    string
-	argNames   []string
-	help       help.Model
+	inputs    []textinput.Model
+	focused   int
+	keys      ArgumentsDialogKeyMap
+	arguments []Argument
+	help      help.Model
+
+	id          string
+	title       string
+	name        string
+	description string
+
+	onSubmit func(args map[string]string) tea.Cmd
 }
 
-func NewCommandArgumentsDialog(commandID, content string, argNames []string) CommandArgumentsDialog {
-	t := styles.CurrentTheme()
-	inputs := make([]textinput.Model, len(argNames))
+type Argument struct {
+	Name, Title, Description string
+	Required                 bool
+}
 
-	for i, name := range argNames {
+func NewCommandArgumentsDialog(
+	id, title, name, description string,
+	arguments []Argument,
+	onSubmit func(args map[string]string) tea.Cmd,
+) CommandArgumentsDialog {
+	t := styles.CurrentTheme()
+	inputs := make([]textinput.Model, len(arguments))
+
+	for i, arg := range arguments {
 		ti := textinput.New()
-		ti.Placeholder = fmt.Sprintf("Enter value for %s...", name)
+		ti.Placeholder = cmp.Or(arg.Description, "Enter value for "+arg.Title)
 		ti.SetWidth(40)
 		ti.SetVirtualCursor(false)
 		ti.Prompt = ""
@@ -75,14 +88,16 @@ func NewCommandArgumentsDialog(commandID, content string, argNames []string) Com
 	}
 
 	return &commandArgumentsDialogCmp{
-		inputs:     inputs,
-		keys:       DefaultArgumentsDialogKeyMap(),
-		commandID:  commandID,
-		content:    content,
-		argNames:   argNames,
-		focusIndex: 0,
-		width:      60,
-		help:       help.New(),
+		inputs:      inputs,
+		keys:        DefaultArgumentsDialogKeyMap(),
+		id:          id,
+		name:        name,
+		title:       title,
+		description: description,
+		arguments:   arguments,
+		width:       60,
+		help:        help.New(),
+		onSubmit:    onSubmit,
 	}
 }
 
@@ -97,47 +112,51 @@ func (c *commandArgumentsDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		c.wWidth = msg.Width
 		c.wHeight = msg.Height
+		c.width = min(90, c.wWidth)
+		c.height = min(15, c.wHeight)
+		for i := range c.inputs {
+			c.inputs[i].SetWidth(c.width - (paddingHorizontal * 2))
+		}
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, c.keys.Close):
+			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		case key.Matches(msg, c.keys.Confirm):
-			if c.focusIndex == len(c.inputs)-1 {
-				content := c.content
-				for i, name := range c.argNames {
+			if c.focused == len(c.inputs)-1 {
+				args := make(map[string]string)
+				for i, arg := range c.arguments {
 					value := c.inputs[i].Value()
-					placeholder := "$" + name
-					content = strings.ReplaceAll(content, placeholder, value)
+					args[arg.Name] = value
 				}
 				return c, tea.Sequence(
 					util.CmdHandler(dialogs.CloseDialogMsg{}),
-					util.CmdHandler(CommandRunCustomMsg{
-						Content: content,
-					}),
+					c.onSubmit(args),
 				)
 			}
 			// Otherwise, move to the next input
-			c.inputs[c.focusIndex].Blur()
-			c.focusIndex++
-			c.inputs[c.focusIndex].Focus()
+			c.inputs[c.focused].Blur()
+			c.focused++
+			c.inputs[c.focused].Focus()
 		case key.Matches(msg, c.keys.Next):
 			// Move to the next input
-			c.inputs[c.focusIndex].Blur()
-			c.focusIndex = (c.focusIndex + 1) % len(c.inputs)
-			c.inputs[c.focusIndex].Focus()
+			c.inputs[c.focused].Blur()
+			c.focused = (c.focused + 1) % len(c.inputs)
+			c.inputs[c.focused].Focus()
 		case key.Matches(msg, c.keys.Previous):
 			// Move to the previous input
-			c.inputs[c.focusIndex].Blur()
-			c.focusIndex = (c.focusIndex - 1 + len(c.inputs)) % len(c.inputs)
-			c.inputs[c.focusIndex].Focus()
+			c.inputs[c.focused].Blur()
+			c.focused = (c.focused - 1 + len(c.inputs)) % len(c.inputs)
+			c.inputs[c.focused].Focus()
 		case key.Matches(msg, c.keys.Close):
 			return c, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			var cmd tea.Cmd
-			c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)
+			c.inputs[c.focused], cmd = c.inputs[c.focused].Update(msg)
 			return c, cmd
 		}
 	case tea.PasteMsg:
 		var cmd tea.Cmd
-		c.inputs[c.focusIndex], cmd = c.inputs[c.focusIndex].Update(msg)
+		c.inputs[c.focused], cmd = c.inputs[c.focused].Update(msg)
 		return c, cmd
 	}
 	return c, nil
@@ -152,26 +171,28 @@ func (c *commandArgumentsDialogCmp) View() string {
 		Foreground(t.Primary).
 		Bold(true).
 		Padding(0, 1).
-		Render("Command Arguments")
+		Render(cmp.Or(c.title, c.name))
 
-	explanation := t.S().Text.
+	promptName := t.S().Text.
 		Padding(0, 1).
-		Render("This command requires arguments.")
+		Render(c.description)
 
-	// Create input fields for each argument
 	inputFields := make([]string, len(c.inputs))
 	for i, input := range c.inputs {
-		// Highlight the label of the focused input
-		labelStyle := baseStyle.
-			Padding(1, 1, 0, 1)
+		labelStyle := baseStyle.Padding(1, 1, 0, 1)
 
-		if i == c.focusIndex {
+		if i == c.focused {
 			labelStyle = labelStyle.Foreground(t.FgBase).Bold(true)
 		} else {
 			labelStyle = labelStyle.Foreground(t.FgMuted)
 		}
 
-		label := labelStyle.Render(c.argNames[i] + ":")
+		arg := c.arguments[i]
+		argName := cmp.Or(arg.Title, arg.Name)
+		if arg.Required {
+			argName += "*"
+		}
+		label := labelStyle.Render(argName + ":")
 
 		field := t.S().Text.
 			Padding(0, 1).
@@ -180,18 +201,14 @@ func (c *commandArgumentsDialogCmp) View() string {
 		inputFields[i] = lipgloss.JoinVertical(lipgloss.Left, label, field)
 	}
 
-	// Join all elements vertically
-	elements := []string{title, explanation}
+	elements := []string{title, promptName}
 	elements = append(elements, inputFields...)
 
 	c.help.ShowAll = false
 	helpText := baseStyle.Padding(0, 1).Render(c.help.View(c.keys))
 	elements = append(elements, "", helpText)
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		elements...,
-	)
+	content := lipgloss.JoinVertical(lipgloss.Left, elements...)
 
 	return baseStyle.Padding(1, 1, 0, 1).
 		Border(lipgloss.RoundedBorder()).
@@ -201,26 +218,33 @@ func (c *commandArgumentsDialogCmp) View() string {
 }
 
 func (c *commandArgumentsDialogCmp) Cursor() *tea.Cursor {
-	cursor := c.inputs[c.focusIndex].Cursor()
+	if len(c.inputs) == 0 {
+		return nil
+	}
+	cursor := c.inputs[c.focused].Cursor()
 	if cursor != nil {
 		cursor = c.moveCursor(cursor)
 	}
 	return cursor
 }
 
+const (
+	headerHeight      = 3
+	itemHeight        = 3
+	paddingHorizontal = 3
+)
+
 func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	row, col := c.Position()
-	offset := row + 3 + (1+c.focusIndex)*3
+	offset := row + headerHeight + (1+c.focused)*itemHeight
 	cursor.Y += offset
-	cursor.X = cursor.X + col + 3
+	cursor.X = cursor.X + col + paddingHorizontal
 	return cursor
 }
 
 func (c *commandArgumentsDialogCmp) Position() (int, int) {
-	row := c.wHeight / 2
-	row -= c.wHeight / 2
-	col := c.wWidth / 2
-	col -= c.width / 2
+	row := (c.wHeight / 2) - (c.height / 2)
+	col := (c.wWidth / 2) - (c.width / 2)
 	return row, col
 }
 

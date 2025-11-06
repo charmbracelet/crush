@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,10 +19,13 @@ The prompt can be provided as arguments or piped from stdin.`,
 crush run Explain the use of context in Go
 
 # Pipe input from stdin
-echo "What is this code doing?" | crush run
+curl https://charm.land | crush run "Summarize this website"
 
-# Run with quiet mode (no spinner)
-crush run -q "Generate a README for this project"
+# Read from a file
+crush run "What is this code doing?" <<< prrr.go
+
+# Run in quiet mode (hide the spinner)
+crush run --quiet "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
@@ -48,8 +52,13 @@ crush run -q "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		// Run non-interactive flow using the App method
-		return app.RunNonInteractive(cmd.Context(), prompt, quiet)
+		// TODO: Make this work when redirected to something other than stdout.
+		// For example:
+		//     crush run "Do something fancy" > output.txt
+		//     echo "Do something fancy" | crush run > output.txt
+		//
+		// TODO: We currently need to press ^c twice to cancel. Fix that.
+		return app.RunNonInteractive(cmd.Context(), os.Stdout, prompt, quiet)
 	},
 }
 

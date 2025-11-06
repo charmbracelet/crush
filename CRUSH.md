@@ -6,7 +6,7 @@
 - **Test**: `task test` or `go test ./...` (run single test: `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
 - **Update Golden Files**: `go test ./... -update` (regenerates .golden files when test output changes)
   - Update specific package: `go test ./internal/tui/components/core -update` (in this case, we're updating "core")
-- **Lint**: `task lint-fix`
+- **Lint**: `task lint:fix`
 - **Format**: `task fmt` (gofumpt -w .)
 - **Dev**: `task dev` (runs with profiling enabled)
 
@@ -60,6 +60,13 @@ func TestYourFunction(t *testing.T) {
   - You can also use `task fmt` to run `gofumpt -w .` on the entire project,
     as long as `gofumpt` is on the `PATH`.
 
+## Comments
+
+- Comments that live on their own lines should start with capital letters and
+  end with periods. Wrap comments at 78 columns.
+
 ## Committing
 
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
+- Try to keep commits to one line, not including your attribution. Only use
+  multi-line commits when additional context is truly necessary.

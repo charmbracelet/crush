@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/zeebo/xxh3"
 )
@@ -500,19 +500,6 @@ outer:
 		}
 	}
 
-	for printedLines < dv.height {
-		if shouldWrite() {
-			ls := dv.style.MissingLine
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
-				b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
-			}
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render("  "))
-			b.WriteRune('\n')
-		}
-		printedLines++
-	}
-
 	return b.String()
 }
 
@@ -668,22 +655,6 @@ outer:
 
 			printedLines++
 		}
-	}
-
-	for printedLines < dv.height {
-		if shouldWrite() {
-			ls := dv.style.MissingLine
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad(" ", dv.beforeNumDigits)))
-			}
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(" "))
-			if dv.lineNumbers {
-				b.WriteString(ls.LineNumber.Render(pad(" ", dv.afterNumDigits)))
-			}
-			b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
-			b.WriteRune('\n')
-		}
-		printedLines++
 	}
 
 	return b.String()

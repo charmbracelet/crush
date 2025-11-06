@@ -13,10 +13,11 @@ import (
 )
 
 type CreateMessageParams struct {
-	Role     MessageRole
-	Parts    []ContentPart
-	Model    string
-	Provider string
+	Role             MessageRole
+	Parts            []ContentPart
+	Model            string
+	Provider         string
+	IsSummaryMessage bool
 }
 
 type Service interface {
@@ -64,13 +65,18 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if err != nil {
 		return Message{}, err
 	}
+	isSummary := int64(0)
+	if params.IsSummaryMessage {
+		isSummary = 1
+	}
 	dbMessage, err := s.q.CreateMessage(ctx, db.CreateMessageParams{
-		ID:        uuid.New().String(),
-		SessionID: sessionID,
-		Role:      string(params.Role),
-		Parts:     string(partsJSON),
-		Model:     sql.NullString{String: string(params.Model), Valid: true},
-		Provider:  sql.NullString{String: params.Provider, Valid: params.Provider != ""},
+		ID:               uuid.New().String(),
+		SessionID:        sessionID,
+		Role:             string(params.Role),
+		Parts:            string(partsJSON),
+		Model:            sql.NullString{String: string(params.Model), Valid: true},
+		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
+		IsSummaryMessage: isSummary,
 	})
 	if err != nil {
 		return Message{}, err
@@ -151,14 +157,15 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		return Message{}, err
 	}
 	return Message{
-		ID:        item.ID,
-		SessionID: item.SessionID,
-		Role:      MessageRole(item.Role),
-		Parts:     parts,
-		Model:     item.Model.String,
-		Provider:  item.Provider.String,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
+		ID:               item.ID,
+		SessionID:        item.SessionID,
+		Role:             MessageRole(item.Role),
+		Parts:            parts,
+		Model:            item.Model.String,
+		Provider:         item.Provider.String,
+		CreatedAt:        item.CreatedAt,
+		UpdatedAt:        item.UpdatedAt,
+		IsSummaryMessage: item.IsSummaryMessage != 0,
 	}, nil
 }
 

@@ -28,7 +28,7 @@ const (
 	//
 	// If the FPS is 20 (50 milliseconds) this means that the ellipsis will
 	// change every 8 frames (400 milliseconds).
-	ellipsisanimSpeed = 8
+	ellipsisAnimSpeed = 8
 
 	// The maximum amount of time that can pass before a character appears.
 	// This is used to create a staggered entrance effect.
@@ -342,7 +342,7 @@ func (a *anim) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 		if a.initialized.Load() && a.labelWidth > 0 {
 			// Manage the ellipsis animation.
 			ellipsisStep := a.ellipsisStep.Add(1)
-			if int(ellipsisStep) >= ellipsisanimSpeed*len(ellipsisFrames) {
+			if int(ellipsisStep) >= ellipsisAnimSpeed*len(ellipsisFrames) {
 				a.ellipsisStep.Store(0)
 			}
 		} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
@@ -380,7 +380,7 @@ func (a *anim) View() string {
 	// have been initialized.
 	if a.initialized.Load() && a.labelWidth > 0 {
 		ellipsisStep := int(a.ellipsisStep.Load())
-		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisanimSpeed); ok {
+		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
 			b.WriteString(ellipsisFrame)
 		}
 	}

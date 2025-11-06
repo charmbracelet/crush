@@ -14,93 +14,24 @@ import (
 const (
 	// MaxBackgroundJobs is the maximum number of concurrent background jobs allowed
 	MaxBackgroundJobs = 50
-	// MaxOutputBufferSize is the maximum size of output buffer per stream (1MB)
-	MaxOutputBufferSize = 1024 * 1024
 	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup
 	CompletedJobRetentionMinutes = 30
 )
 
-// LimitedBuffer is a buffer that enforces a maximum size by truncating old data
-type LimitedBuffer struct {
-	buf       *bytes.Buffer
-	maxSize   int
-	totalSize int
-	mu        sync.Mutex
-	truncated bool
-}
-
-// NewLimitedBuffer creates a new limited buffer with the specified max size
-func NewLimitedBuffer(maxSize int) *LimitedBuffer {
-	return &LimitedBuffer{
-		buf:     &bytes.Buffer{},
-		maxSize: maxSize,
-	}
-}
-
-// Write implements io.Writer and enforces the size limit
-func (lb *LimitedBuffer) Write(p []byte) (n int, err error) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	lb.totalSize += len(p)
-
-	// If adding this data would exceed the limit, truncate from the beginning
-	if lb.buf.Len()+len(p) > lb.maxSize {
-		lb.truncated = true
-		// Calculate how much to keep from the current buffer
-		keepSize := lb.maxSize - len(p)
-		if keepSize <= 0 {
-			// New data alone exceeds limit, just take the end of new data
-			lb.buf.Reset()
-			if len(p) > lb.maxSize {
-				lb.buf.Write(p[len(p)-lb.maxSize:])
-				return len(p), nil
-			}
-		} else {
-			// Keep the most recent data from buffer
-			currentData := lb.buf.Bytes()
-			lb.buf.Reset()
-			lb.buf.Write(currentData[len(currentData)-keepSize:])
-		}
-	}
-
-	return lb.buf.Write(p)
-}
-
-// String returns the buffered content with truncation notice if applicable
-func (lb *LimitedBuffer) String() string {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	if lb.truncated {
-		truncatedBytes := lb.totalSize - lb.buf.Len()
-		notice := fmt.Sprintf("... [output truncated: %d bytes omitted] ...\n\n", truncatedBytes)
-		return notice + lb.buf.String()
-	}
-	return lb.buf.String()
-}
-
-// Len returns the current buffer length
-func (lb *LimitedBuffer) Len() int {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	return lb.buf.Len()
-}
-
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
-	ID           string
-	Command      string
-	Description  string
-	Shell        *Shell
-	WorkingDir   string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	stdout       *LimitedBuffer
-	stderr       *LimitedBuffer
-	done         chan struct{}
-	exitErr      error
-	completedAt  int64 // Unix timestamp when job completed (0 if still running)
+	ID          string
+	Command     string
+	Description string
+	Shell       *Shell
+	WorkingDir  string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	stdout      *bytes.Buffer
+	stderr      *bytes.Buffer
+	done        chan struct{}
+	exitErr     error
+	completedAt int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -148,8 +79,8 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		Shell:       shell,
 		ctx:         shellCtx,
 		cancel:      cancel,
-		stdout:      NewLimitedBuffer(MaxOutputBufferSize),
-		stderr:      NewLimitedBuffer(MaxOutputBufferSize),
+		stdout:      &bytes.Buffer{},
+		stderr:      &bytes.Buffer{},
 		done:        make(chan struct{}),
 	}
 

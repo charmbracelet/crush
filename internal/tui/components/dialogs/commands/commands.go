@@ -480,7 +480,7 @@ func (c *commandDialogCmp) ID() dialogs.DialogID {
 
 func buildShortcut(key string) string {
 	if runtime.GOOS == "darwin" {
-		return "󰘳 +" + strings.ToLower(key)
+		return "󰘳 +" + key
 	}
-	return "ctrl + " + strings.ToLower(key)
+	return "ctrl + " + key
 }

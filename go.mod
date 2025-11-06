@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759
-	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251105182244-3138f1cd1bf8
+	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251106164730-d9f7210a9efd
 	charm.land/fantasy v0.1.6
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251104200114-3aae28661422
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0

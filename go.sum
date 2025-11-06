@@ -1,7 +1,7 @@
 charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759 h1:P1MxkVl8ZeI9tHmmrn9UzV/5Mz7heoiTgqECHRFsUcs=
 charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759/go.mod h1:G7JWaj3kDT0BDB+h5BLDUhhBLpDoRLKrpOp5QrA2SQs=
-charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251105182244-3138f1cd1bf8 h1:A1y0nyy7ykH1judtnD36sgpepLBrU4y7mN6QlZEVhZk=
-charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251105182244-3138f1cd1bf8/go.mod h1:oR2A+f83vzDY0hALwW4eh90fKXdranRWnH/vfwJL1lU=
+charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251106164730-d9f7210a9efd h1:eyiUO6fojEdTbEq70qd8S5NXiRzvvIt5YaZsEa/vsfE=
+charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251106164730-d9f7210a9efd/go.mod h1:oR2A+f83vzDY0hALwW4eh90fKXdranRWnH/vfwJL1lU=
 charm.land/fantasy v0.1.6 h1:laomMUqUaniQoLx7UOb+MLUpIGJPoNwsXvw1PbzgnB8=
 charm.land/fantasy v0.1.6/go.mod h1:JpFcJ5zs/1CjmYYGAZ7GaFmeBv0mPaTzEPRG6Eic5pc=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251104200114-3aae28661422 h1:LcW3SSv1EZvlb9pfaVZIZyHrPVRJdb0adgX+tWPYl0k=

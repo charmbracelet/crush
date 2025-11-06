@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -317,7 +318,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "new_session",
 			Title:       "New Session",
 			Description: "start a new session",
-			Shortcut:    "ctrl+n",
+			Shortcut:    buildShortcut("n"),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(NewSessionsMsg{})
 			},
@@ -326,7 +327,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_session",
 			Title:       "Switch Session",
 			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
+			Shortcut:    buildShortcut("s"),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchSessionsMsg{})
 			},
@@ -335,7 +336,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
-			Shortcut:    "ctrl+l",
+			Shortcut:    buildShortcut("l"),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},
@@ -411,7 +412,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			commands = append(commands, Command{
 				ID:          "file_picker",
 				Title:       "Open File Picker",
-				Shortcut:    "ctrl+f",
+				Shortcut:    buildShortcut("f"),
 				Description: "Open file picker",
 				Handler: func(cmd Command) tea.Cmd {
 					return util.CmdHandler(OpenFilePickerMsg{})
@@ -425,7 +426,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		commands = append(commands, Command{
 			ID:          "open_external_editor",
 			Title:       "Open External Editor",
-			Shortcut:    "ctrl+o",
+			Shortcut:    buildShortcut("o"),
 			Description: "Open external editor to compose message",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(OpenExternalEditorMsg{})
@@ -445,7 +446,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "toggle_help",
 			Title:       "Toggle Help",
-			Shortcut:    "ctrl+g",
+			Shortcut:    buildShortcut("g"),
 			Description: "Toggle help",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(ToggleHelpMsg{})
@@ -465,7 +466,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "quit",
 			Title:       "Quit",
 			Description: "Quit",
-			Shortcut:    "ctrl+c",
+			Shortcut:    buildShortcut("q"),
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(QuitMsg{})
 			},
@@ -475,4 +476,11 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {
 	return CommandsDialogID
+}
+
+func buildShortcut(key string) string {
+	if runtime.GOOS == "darwin" {
+		return "󰘳 +" + strings.ToLower(key)
+	}
+	return "ctrl + " + strings.ToLower(key)
 }

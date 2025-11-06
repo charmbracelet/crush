@@ -210,8 +210,8 @@ func (m *BackgroundShellManager) List() []string {
 	return ids
 }
 
-// CleanupCompleted removes completed jobs that have been finished for more than the retention period
-func (m *BackgroundShellManager) CleanupCompleted() int {
+// Cleanup removes completed jobs that have been finished for more than the retention period
+func (m *BackgroundShellManager) Cleanup() int {
 	now := time.Now().Unix()
 	retentionSeconds := int64(CompletedJobRetentionMinutes * 60)
 

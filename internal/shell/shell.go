@@ -282,7 +282,7 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 }
 
 // execPOSIXStream executes commands using POSIX shell emulation with streaming output
-func (s *Shell) execPOSIXStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
+func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	return s.execCommon(ctx, command, stdout, stderr)
 }
 

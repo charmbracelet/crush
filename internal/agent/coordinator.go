@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -61,6 +62,7 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
+	hooks       *hooks.Executor
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -76,6 +78,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	hooksExecutor *hooks.Executor,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -84,6 +87,7 @@ func NewCoordinator(
 		permissions: permissions,
 		history:     history,
 		lspClients:  lspClients,
+		hooks:       hooksExecutor,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -287,15 +291,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		systemPrompt,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         systemPrompt,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Hooks:                c.hooks,
 	})
 	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)

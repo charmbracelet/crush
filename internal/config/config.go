@@ -303,6 +303,8 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
+	Hooks HookConfig `json:"hooks,omitempty" jsonschema:"description=Hook configurations for lifecycle events"`
+
 	Agents map[string]Agent `json:"-"`
 
 	// Internal

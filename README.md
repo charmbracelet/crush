@@ -18,6 +18,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **[Hooks](./internal/hooks/HOOKS.md):** execute custom shell commands at lifecycle events
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
 
 ## Installation

@@ -3,12 +3,15 @@ package permission
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -66,6 +69,7 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
 	allowedTools          []string
+	hooks                 *hooks.Executor
 
 	// used to make sure we only process one request at a time
 	requestMu     sync.Mutex
@@ -181,16 +185,24 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 	s.sessionPermissionsMu.RUnlock()
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
+	s.activeRequest = &permission
+
+	// Execute PermissionRequested hook.
+	// Uses context.Background() since Request() is called synchronously and hooks should
+	// run even if the calling operation is cancelled. Hooks have their own timeout.
+	if s.hooks != nil {
+		if err := s.hooks.Execute(context.Background(), hooks.HookContext{
+			EventType:          config.PermissionRequested,
+			SessionID:          permission.SessionID,
+			ToolName:           permission.ToolName,
+			PermissionAction:   permission.Action,
+			PermissionPath:     permission.Path,
+			PermissionParams:   permission.Params,
+			PermissionToolCall: permission.ToolCallID,
+		}); err != nil {
+			slog.Debug("permission_requested hook execution failed", "error", err)
 		}
 	}
-	s.sessionPermissionsMu.RUnlock()
-
-	s.activeRequest = &permission
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
@@ -220,7 +232,7 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+func NewPermissionService(workingDir string, skip bool, allowedTools []string, hooksExecutor *hooks.Executor) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -230,5 +242,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		skip:                skip,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
+		hooks:               hooksExecutor,
 	}
 }

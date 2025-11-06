@@ -256,7 +256,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 					}
 
-					stdout = formatCompletedCommandOutput(stdout, stderr, execErr)
+					stdout = formatOutput(stdout, stderr, execErr)
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
@@ -336,7 +336,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 				}
 
-				stdout = formatCompletedCommandOutput(stdout, stderr, execErr)
+				stdout = formatOutput(stdout, stderr, execErr)
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
@@ -366,8 +366,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		})
 }
 
-// formatCompletedCommandOutput formats the output of a completed command with error handling
-func formatCompletedCommandOutput(stdout, stderr string, execErr error) string {
+// formatOutput formats the output of a completed command with error handling
+func formatOutput(stdout, stderr string, execErr error) string {
 	interrupted := shell.IsInterrupt(execErr)
 	exitCode := shell.ExitCode(execErr)
 

@@ -335,6 +335,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
+			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},

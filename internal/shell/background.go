@@ -14,8 +14,8 @@ import (
 const (
 	// MaxBackgroundJobs is the maximum number of concurrent background jobs allowed
 	MaxBackgroundJobs = 50
-	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup
-	CompletedJobRetentionMinutes = 30
+	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
+	CompletedJobRetentionMinutes = 8 * 60
 )
 
 // BackgroundShell represents a shell running in the background.

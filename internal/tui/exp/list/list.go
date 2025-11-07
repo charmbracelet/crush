@@ -864,6 +864,7 @@ func (l *list[T]) selectLastItem() {
 }
 
 func (l *list[T]) firstSelectableItemAbove(inx int) int {
+	unfocusableCount := 0
 	for i := inx - 1; i >= 0; i-- {
 		if i < 0 || i >= len(l.items) {
 			continue
@@ -873,14 +874,16 @@ func (l *list[T]) firstSelectableItemAbove(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == 0 && l.wrap {
+	if unfocusableCount == inx && l.wrap {
 		return l.firstSelectableItemAbove(len(l.items))
 	}
 	return ItemNotFound
 }
 
 func (l *list[T]) firstSelectableItemBelow(inx int) int {
+	unfocusableCount := 0
 	itemsLen := len(l.items)
 	for i := inx + 1; i < itemsLen; i++ {
 		if i < 0 || i >= len(l.items) {
@@ -891,8 +894,9 @@ func (l *list[T]) firstSelectableItemBelow(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == itemsLen-1 && l.wrap {
+	if unfocusableCount == itemsLen-inx-1 && l.wrap {
 		return l.firstSelectableItemBelow(-1)
 	}
 	return ItemNotFound
@@ -1352,6 +1356,14 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 	}
 	// Pre-allocate with expected capacity
 	cmds := make([]tea.Cmd, 0, 2)
+	if newIndex > l.selectedItemIdx && l.selectedItemIdx > 0 && l.offset > 0 {
+		// this means there is a section above and not showing on the top, move to the top
+		newIndex = l.selectedItemIdx
+		cmd := l.GoToTop()
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	if newIndex == 1 {
 		peakAboveIndex := l.firstSelectableItemAbove(newIndex)
 		if peakAboveIndex == ItemNotFound {
@@ -1383,11 +1395,15 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 
 	newIndex := l.firstSelectableItemBelow(l.selectedItemIdx)
 	if newIndex == ItemNotFound {
-		// no item above
+		// no item below
 		return nil
 	}
 	if newIndex < 0 || newIndex >= len(l.items) {
 		return nil
+	}
+	if newIndex < l.selectedItemIdx {
+		// reset offset when wrap to the top to show the top section if it exists
+		l.offset = 0
 	}
 	l.prevSelectedItemIdx = l.selectedItemIdx
 	l.selectedItemIdx = newIndex

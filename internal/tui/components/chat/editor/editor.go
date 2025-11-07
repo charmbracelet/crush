@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
@@ -271,9 +272,15 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.setEditorPrompt()
 		return m, nil
 	case loadHistoryMsg:
-		m.history = InitialiseHistory([]string{})
+		msgs, err := m.getUserMessagesAsText()
+		if err != nil {
+			// TODO(tauraamui): handle error for loading history better in the UI later
+		}
+		m.history = InitialiseHistory(msgs)
+		m.textarea.SetValue("opened history state")
 	case closeHistoryMsg:
 		m.history = nil
+		m.textarea.SetValue("closed history") // for easier temporary visual debugging
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -468,11 +475,10 @@ func (m *editorCmp) View() string {
 	return content
 }
 
-/*
-func (m *editorCmp) getUserMessagesAsText(ctx context.Context) ([]string, error) {
-	if len(m.historyCache) > 0 {
-		return m.historyCache, nil
-	}
+func (m *editorCmp) getUserMessagesAsText() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	allMessages, err := m.app.Messages.List(ctx, m.session.ID)
 	if err != nil {
 		return nil, err
@@ -486,10 +492,10 @@ func (m *editorCmp) getUserMessagesAsText(ctx context.Context) ([]string, error)
 	}
 
 	userMessages = append(userMessages, m.textarea.Value())
-	m.historyCache = userMessages
 	return userMessages, nil
 }
 
+/*
 type direction int
 
 const (

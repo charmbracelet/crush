@@ -7,8 +7,14 @@ type historyState struct {
 }
 
 type History interface {
+	ScrollUp()
+	ScrollDown()
 }
 
 func InitialiseHistory(messages []string) History {
-	return historyState{}
+	return &historyState{}
 }
+
+func (h *historyState) ScrollUp() {}
+
+func (h *historyState) ScrollDown() {}

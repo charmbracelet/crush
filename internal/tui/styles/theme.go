@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	defaultListIndent      = 2
-	defaultListLevelIndent = 4
-	defaultMargin          = 2
+	defaultListIndent = 2
+	defaultMargin     = 2
 )
 
 type Theme struct {
@@ -455,28 +454,30 @@ func (t *Theme) buildStyles() *Styles {
 					Foreground(t.FgMuted).
 					Background(t.BgBase),
 				Code: lipgloss.NewStyle().
-					Foreground(t.FgMuted).
+					Foreground(t.FgBase).
 					Background(t.BgBase),
 			},
 			InsertLine: diffview.LineStyle{
 				LineNumber: lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#629657")).
-					Background(lipgloss.Color("#2b322a")),
+					Foreground(t.Success).
+					Background(blendColor(t.BgBase, t.Success, 0.15)),
 				Symbol: lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#629657")).
-					Background(lipgloss.Color("#323931")),
+					Foreground(t.Success).
+					Background(blendColor(t.BgBase, t.Success, 0.20)),
 				Code: lipgloss.NewStyle().
-					Background(lipgloss.Color("#323931")),
+					Foreground(t.FgBase).
+					Background(blendColor(t.BgBase, t.Success, 0.20)),
 			},
 			DeleteLine: diffview.LineStyle{
 				LineNumber: lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#a45c59")).
-					Background(lipgloss.Color("#312929")),
+					Foreground(t.Error).
+					Background(blendColor(t.BgBase, t.Error, 0.15)),
 				Symbol: lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#a45c59")).
-					Background(lipgloss.Color("#383030")),
+					Foreground(t.Error).
+					Background(blendColor(t.BgBase, t.Error, 0.20)),
 				Code: lipgloss.NewStyle().
-					Background(lipgloss.Color("#383030")),
+					Foreground(t.FgBase).
+					Background(blendColor(t.BgBase, t.Error, 0.20)),
 			},
 		},
 		FilePicker: filepicker.Styles{
@@ -521,13 +522,29 @@ func CurrentTheme() *Theme {
 }
 
 func NewManager() *Manager {
+	return NewManagerWithTheme("")
+}
+
+func NewManagerWithTheme(themeName string) *Manager {
 	m := &Manager{
 		themes: make(map[string]*Theme),
 	}
 
-	t := NewCharmtoneTheme() // default theme
-	m.Register(t)
-	m.current = m.themes[t.Name]
+	// Register all available themes
+	defaultTheme := NewCharmtoneTheme()
+	m.Register(defaultTheme)
+	m.Register(NewCatppuccinFrappeTheme())
+
+	// Set initial theme
+	if themeName != "" {
+		if theme, ok := m.themes[themeName]; ok {
+			m.current = theme
+		} else {
+			m.current = defaultTheme
+		}
+	} else {
+		m.current = defaultTheme
+	}
 
 	return m
 }
@@ -595,6 +612,19 @@ func Lighten(c color.Color, percent float64) color.Color {
 		G: uint8(min(255, float64(g>>8)+255*factor)),
 		B: uint8(min(255, float64(b>>8)+255*factor)),
 		A: uint8(a >> 8),
+	}
+}
+
+// blendColor blends two colors with a given ratio (0.0 = base, 1.0 = overlay).
+func blendColor(base, overlay color.Color, ratio float64) color.Color {
+	r1, g1, b1, _ := base.RGBA()
+	r2, g2, b2, _ := overlay.RGBA()
+
+	return color.RGBA{
+		R: uint8((float64(r1>>8)*(1-ratio) + float64(r2>>8)*ratio)),
+		G: uint8((float64(g1>>8)*(1-ratio) + float64(g2>>8)*ratio)),
+		B: uint8((float64(b1>>8)*(1-ratio) + float64(b2>>8)*ratio)),
+		A: 255,
 	}
 }
 

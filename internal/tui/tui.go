@@ -555,12 +555,19 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (a *appModel) isTransparent() bool {
+	cfg := a.app.Config().Options.TUI
+	return cfg.Transparent != nil && *cfg.Transparent
+}
+
 // View renders the complete application interface including pages, dialogs, and overlays.
 func (a *appModel) View() tea.View {
 	var view tea.View
 	view.AltScreen = true
 	t := styles.CurrentTheme()
-	view.BackgroundColor = t.BgBase
+	if !a.isTransparent() {
+		view.BackgroundColor = t.BgBase
+	}
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Layer = lipgloss.NewCanvas(
 			lipgloss.NewLayer(

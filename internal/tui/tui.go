@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/themes"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -204,6 +205,29 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					msg.OnSubmit,
 				),
 			},
+		)
+	case commands.SwitchThemeMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: themes.NewThemeDialog(),
+			},
+		)
+	case themes.ThemeSelectedMsg:
+		// Save theme to config
+		if err := a.app.Config().SetTheme(msg.ThemeName); err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to save theme: %v", err))
+		}
+
+		// Update the theme manager
+		manager := styles.DefaultManager()
+		if err := manager.SetTheme(msg.ThemeName); err != nil {
+			return a, util.ReportError(fmt.Errorf("failed to switch theme: %v", err))
+		}
+
+		// Trigger a full re-render
+		return a, tea.Batch(
+			util.ReportInfo(fmt.Sprintf("Theme changed to %s", msg.ThemeName)),
+			a.handleWindowResize(a.wWidth, a.wHeight),
 		)
 	case commands.ShowMCPPromptArgumentsDialogMsg:
 		args := make([]commands.Argument, 0, len(msg.Prompt.Arguments))
@@ -687,6 +711,11 @@ func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
 
 // New creates and initializes a new TUI application model.
 func New(app *app.App) *appModel {
+	// Initialize theme manager with theme from config
+	themeName := app.Config().GetTheme()
+	themeManager := styles.NewManagerWithTheme(themeName)
+	styles.SetDefaultManager(themeManager)
+
 	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()

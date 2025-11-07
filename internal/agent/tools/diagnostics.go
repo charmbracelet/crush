@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ const DiagnosticsToolName = "lsp_diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription []byte
 
-func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
 		string(diagnosticsDescription),
@@ -33,7 +34,7 @@ func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agen
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
 			notifyLSPs(ctx, lspClients, params.FilePath)
-			output := getDiagnostics(params.FilePath, lspClients)
+			output := getDiagnostics(params.FilePath, lspClients, workingDir)
 			return fantasy.NewTextResponse(output), nil
 		})
 }
@@ -52,9 +53,15 @@ func notifyLSPs(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filep
 	}
 }
 
-func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) string {
+func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client], workingDir string) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
+
+	absWd, err := filepath.Abs(workingDir)
+	if err != nil {
+		slog.Error("Failed to resolve working directory", "error", err)
+		return "Error: Failed to resolve working directory"
+	}
 
 	for lspName, client := range lsps.Seq2() {
 		for location, diags := range client.GetDiagnostics() {
@@ -63,6 +70,17 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) strin
 				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
 				continue
 			}
+
+			// Skip diagnostics for files outside the working directory.
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				slog.Debug("Failed to resolve diagnostic path", "path", path, "error", err)
+				continue
+			}
+			if !strings.HasPrefix(absPath, absWd) {
+				continue
+			}
+
 			isCurrentFile := path == filePath
 			for _, diag := range diags {
 				formattedDiag := formatDiagnostic(path, diag, lspName)

@@ -185,7 +185,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 					params.Offset+len(strings.Split(content, "\n")))
 			}
 			output += "\n</file>\n"
-			output += getDiagnostics(filePath, lspClients)
+			output += getDiagnostics(filePath, lspClients, workingDir)
 			recordFileRead(filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),

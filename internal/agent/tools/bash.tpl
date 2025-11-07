@@ -28,15 +28,15 @@ Common shell builtins and core utils available on Windows.
 - Returns a shell ID for managing the background process
 - Use job_output tool to view current output from background shell
 - Use job_kill tool to terminate a background shell
-- IMPORTANT: NEVER use '&' at the end of commands to run in background - use run_in_background parameter instead
+- IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead
 - Commands that should run in background:
-  * Long-running servers (e.g., 'npm start', 'python -m http.server', 'node server.js')
-  * Watch/monitoring tasks (e.g., 'npm run watch', 'tail -f logfile')
+  * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)
+  * Watch/monitoring tasks (e.g., `npm run watch`, `tail -f logfile`)
   * Continuous processes that don't exit on their own
   * Any command expected to run indefinitely
 - Commands that should NOT run in background:
-  * Build commands (e.g., 'npm run build', 'go build')
-  * Test suites (e.g., 'npm test', 'pytest')
+  * Build commands (e.g., `npm run build`, `go build`)
+  * Test suites (e.g., `npm test`, `pytest`)
   * Git operations
   * File operations
   * Short-lived scripts

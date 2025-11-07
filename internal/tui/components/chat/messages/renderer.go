@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -223,12 +224,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		var meta tools.BashResponseMetadata
 		_ = br.unmarshalParams(v.result.Metadata, &meta)
 		if meta.Background {
-			var description string
-			if meta.Description != "" {
-				description = meta.Description
-			} else {
-				description = params.Command
-			}
+			description := cmp.Or(meta.Description, params.Command)
 			width := v.textWidth()
 			if v.isNested {
 				width -= 4 // Adjust for nested tool call indentation

@@ -68,6 +68,7 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
+      - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
 
   profile:cpu:

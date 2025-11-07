@@ -14,7 +14,7 @@ import (
 // It also checks the ownership of files to ensure that the search does
 // not cross ownership boundaries. It skips ownership mismatches without
 // errors.
-// Returns full paths to fount targets.
+// Returns full paths to found targets.
 // The search includes the starting directory itself.
 func Lookup(dir string, targets ...string) ([]string, error) {
 	if len(targets) == 0 {

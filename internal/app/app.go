@@ -58,7 +58,7 @@ type App struct {
 	cleanupFuncs []func() error
 }
 
-// New initializes a new applcation instance.
+// New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)

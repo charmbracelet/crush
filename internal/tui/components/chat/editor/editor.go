@@ -94,7 +94,13 @@ const (
 
 type LoadHistoryMsg struct{}
 
-type CloseHistoryMsg struct{}
+type CloseHistoryMsg struct {
+	valueToSet string
+}
+
+type ScrollHistoryUp struct{}
+
+type ScrollHistoryDown struct{}
 
 type OpenEditorMsg struct {
 	Text string
@@ -202,9 +208,19 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(m.history.Value())
 		return m, nil
 	case CloseHistoryMsg:
-		m.textarea.SetValue(m.history.ExistingValue())
+		m.textarea.SetValue(msg.valueToSet)
 		m.history = nil
 		return m, nil
+	case ScrollHistoryUp:
+		if m.inHistoryMode() {
+			m.history.ScrollUp()
+			m.textarea.SetValue(m.history.Value())
+		}
+	case ScrollHistoryDown:
+		if m.inHistoryMode() {
+			m.history.ScrollDown()
+			m.textarea.SetValue(m.history.Value())
+		}
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -292,16 +308,22 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
-		/*
-			if m.inHistoryMode() {
-				switch true {
-				case key.Matches(msg, m.keyMap.Escape):
-					return m, util.CmdHandler(CloseHistoryMsg{})
-				case key.Matches(msg, m.keyMap.Previous):
-					m.history.ScrollUp()
-				}
+
+		// history
+		if m.inHistoryMode() {
+			switch true {
+			case key.Matches(msg, m.keyMap.Escape):
+				return m, util.CmdHandler(CloseHistoryMsg{valueToSet: m.history.ExistingValue()})
+			case key.Matches(msg, m.keyMap.Previous):
+				return m, util.CmdHandler(ScrollHistoryUp{})
+			case key.Matches(msg, m.keyMap.Next):
+				return m, util.CmdHandler(ScrollHistoryDown{})
 			}
-		*/
+			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
+				valueToSet: m.textarea.Value(),
+			}))
+		}
+
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
 		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
@@ -319,6 +341,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
+
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
 			return m, nil
@@ -328,8 +351,16 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.attachments = nil
 			return m, nil
 		}
-		if key.Matches(msg, m.keyMap.Escape) && m.inHistoryMode() {
-			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{}))
+		if key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			if !m.inHistoryMode() {
+				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+			} else {
+				if key.Matches(msg, m.keyMap.Previous) {
+					cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+				} else if key.Matches(msg, m.keyMap.Next) {
+					cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
+				}
+			}
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -368,23 +399,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				// Otherwise, send the message
 				return m, m.send()
 			}
-		}
-		// history
-		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
-			if !m.inHistoryMode() {
-				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
-				break
-			}
-
-			if key.Matches(msg, m.keyMap.Previous) {
-				m.history.ScrollUp()
-			} else if key.Matches(msg, m.keyMap.Next) {
-				m.history.ScrollDown()
-			} else {
-				break
-			}
-
-			m.textarea.SetValue(m.history.Value())
 		}
 	}
 

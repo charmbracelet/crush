@@ -6,9 +6,9 @@ import (
 	"image/color"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/MakeNowJust/heredoc"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/slice"
 )

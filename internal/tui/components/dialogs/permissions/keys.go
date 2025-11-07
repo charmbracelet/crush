@@ -1,7 +1,7 @@
 package permissions
 
 import (
-	"github.com/charmbracelet/bubbles/v2/key"
+	"charm.land/bubbles/v2/key"
 )
 
 type KeyMap struct {

@@ -13,8 +13,9 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -31,7 +32,6 @@ import (
 	"github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 )

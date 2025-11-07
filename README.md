@@ -521,6 +521,11 @@ To add specific models to the configuration, configure as such:
 }
 ```
 
+## Custom Commands (a.k.a. Saved Prompts)
+
+Crush has first-class support for predefined prompts with variables that can be
+filled in when run. See [COMMANDS.md](COMMANDS.md) for more info.
+
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of

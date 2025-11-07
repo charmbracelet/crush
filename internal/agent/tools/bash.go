@@ -235,6 +235,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if params.RunInBackground {
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
+				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
 				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 				if err != nil {
@@ -252,38 +253,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					interrupted := shell.IsInterrupt(execErr)
 					exitCode := shell.ExitCode(execErr)
 					if exitCode == 0 && !interrupted && execErr != nil {
-						return fantasy.ToolResponse{}, fmt.Errorf("error executing command: %w", execErr)
+						return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 					}
 
-					stdout = truncateOutput(stdout)
-					stderr = truncateOutput(stderr)
-
-					errorMessage := stderr
-					if errorMessage == "" && execErr != nil {
-						errorMessage = execErr.Error()
-					}
-
-					if interrupted {
-						if errorMessage != "" {
-							errorMessage += "\n"
-						}
-						errorMessage += "Command was aborted before completion"
-					} else if exitCode != 0 {
-						if errorMessage != "" {
-							errorMessage += "\n"
-						}
-						errorMessage += fmt.Sprintf("Exit code %d", exitCode)
-					}
-
-					hasBothOutputs := stdout != "" && stderr != ""
-
-					if hasBothOutputs {
-						stdout += "\n"
-					}
-
-					if errorMessage != "" {
-						stdout += "\n" + errorMessage
-					}
+					stdout = formatOutput(stdout, stderr, execErr)
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
@@ -317,6 +290,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
+			bgManager.Cleanup()
 			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
@@ -359,38 +333,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				interrupted := shell.IsInterrupt(execErr)
 				exitCode := shell.ExitCode(execErr)
 				if exitCode == 0 && !interrupted && execErr != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("error executing command: %w", execErr)
+					return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 				}
 
-				stdout = truncateOutput(stdout)
-				stderr = truncateOutput(stderr)
-
-				errorMessage := stderr
-				if errorMessage == "" && execErr != nil {
-					errorMessage = execErr.Error()
-				}
-
-				if interrupted {
-					if errorMessage != "" {
-						errorMessage += "\n"
-					}
-					errorMessage += "Command was aborted before completion"
-				} else if exitCode != 0 {
-					if errorMessage != "" {
-						errorMessage += "\n"
-					}
-					errorMessage += fmt.Sprintf("Exit code %d", exitCode)
-				}
-
-				hasBothOutputs := stdout != "" && stderr != ""
-
-				if hasBothOutputs {
-					stdout += "\n"
-				}
-
-				if errorMessage != "" {
-					stdout += "\n" + errorMessage
-				}
+				stdout = formatOutput(stdout, stderr, execErr)
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
@@ -418,6 +364,44 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		})
+}
+
+// formatOutput formats the output of a completed command with error handling
+func formatOutput(stdout, stderr string, execErr error) string {
+	interrupted := shell.IsInterrupt(execErr)
+	exitCode := shell.ExitCode(execErr)
+
+	stdout = truncateOutput(stdout)
+	stderr = truncateOutput(stderr)
+
+	errorMessage := stderr
+	if errorMessage == "" && execErr != nil {
+		errorMessage = execErr.Error()
+	}
+
+	if interrupted {
+		if errorMessage != "" {
+			errorMessage += "\n"
+		}
+		errorMessage += "Command was aborted before completion"
+	} else if exitCode != 0 {
+		if errorMessage != "" {
+			errorMessage += "\n"
+		}
+		errorMessage += fmt.Sprintf("Exit code %d", exitCode)
+	}
+
+	hasBothOutputs := stdout != "" && stderr != ""
+
+	if hasBothOutputs {
+		stdout += "\n"
+	}
+
+	if errorMessage != "" {
+		stdout += "\n" + errorMessage
+	}
+
+	return stdout
 }
 
 func truncateOutput(content string) string {

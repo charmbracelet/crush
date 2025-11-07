@@ -6,8 +6,16 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
+)
+
+const (
+	// MaxBackgroundJobs is the maximum number of concurrent background jobs allowed
+	MaxBackgroundJobs = 50
+	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
+	CompletedJobRetentionMinutes = 8 * 60
 )
 
 // BackgroundShell represents a shell running in the background.
@@ -23,6 +31,7 @@ type BackgroundShell struct {
 	stderr      *bytes.Buffer
 	done        chan struct{}
 	exitErr     error
+	completedAt int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -48,6 +57,11 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 
 // Start creates and starts a new background shell with the given command.
 func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+	// Check job limit
+	if m.shells.Len() >= MaxBackgroundJobs {
+		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
+	}
+
 	id := fmt.Sprintf("%03X", idCounter.Add(1))
 
 	shell := NewShell(&Options{
@@ -78,6 +92,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
 
 		bgShell.exitErr = err
+		atomic.StoreInt64(&bgShell.completedAt, time.Now().Unix())
 	}()
 
 	return bgShell, nil
@@ -124,6 +139,26 @@ func (m *BackgroundShellManager) List() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// Cleanup removes completed jobs that have been finished for more than the retention period
+func (m *BackgroundShellManager) Cleanup() int {
+	now := time.Now().Unix()
+	retentionSeconds := int64(CompletedJobRetentionMinutes * 60)
+
+	var toRemove []string
+	for shell := range m.shells.Seq() {
+		completedAt := atomic.LoadInt64(&shell.completedAt)
+		if completedAt > 0 && now-completedAt > retentionSeconds {
+			toRemove = append(toRemove, shell.ID)
+		}
+	}
+
+	for _, id := range toRemove {
+		m.Remove(id)
+	}
+
+	return len(toRemove)
 }
 
 // KillAll terminates all background shells.

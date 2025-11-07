@@ -263,6 +263,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						EndTime:          time.Now().UnixMilli(),
 						Output:           stdout,
 						Description:      params.Description,
+						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
 					}
 					if stdout == "" {
@@ -343,6 +344,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					EndTime:          time.Now().UnixMilli(),
 					Output:           stdout,
 					Description:      params.Description,
+					Background:       params.RunInBackground,
 					WorkingDirectory: bgShell.WorkingDir,
 				}
 				if stdout == "" {

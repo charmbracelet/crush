@@ -13,9 +13,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/textarea"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
@@ -29,7 +30,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type Editor interface {
@@ -220,7 +220,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		path := strings.ReplaceAll(string(msg), "\\ ", " ")
+		path := strings.ReplaceAll(msg.Content, "\\ ", " ")
 		// try to get an image
 		path, err := filepath.Abs(strings.TrimSpace(path))
 		if err != nil {

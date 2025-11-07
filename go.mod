@@ -3,7 +3,10 @@ module github.com/charmbracelet/crush
 go 1.25.0
 
 require (
+	charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759
+	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251106164730-d9f7210a9efd
 	charm.land/fantasy v0.1.6
+	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251104200114-3aae28661422
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.10.3
@@ -12,18 +15,15 @@ require (
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14
-	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1.0.20250820203609-601216f68ee2
-	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.6
 	github.com/charmbracelet/catwalk v0.8.2
-	github.com/charmbracelet/colorprofile v0.3.2
+	github.com/charmbracelet/colorprofile v0.3.3
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
-	github.com/charmbracelet/ultraviolet v0.0.0-20251017140847-d4ace4d6e731
-	github.com/charmbracelet/x/ansi v0.10.2
+	github.com/charmbracelet/ultraviolet v0.0.0-20251105181648-75d1e37ff1bb
+	github.com/charmbracelet/x/ansi v0.10.3
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
-	github.com/charmbracelet/x/exp/golden v0.0.0-20250207160936-21c02780d27a
+	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
@@ -88,10 +88,14 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 // indirect
+	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20251103214348-d3032608aa74 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/clipperhouse/displaywidth v0.4.1 // indirect
+	github.com/clipperhouse/stringish v0.1.1 // indirect
+	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
@@ -116,7 +120,7 @@ require (
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.17 // indirect
+	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect

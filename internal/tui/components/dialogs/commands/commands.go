@@ -5,11 +5,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -335,6 +335,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
+			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},

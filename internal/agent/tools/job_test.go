@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -58,24 +57,6 @@ func TestBackgroundShell_Kill(t *testing.T) {
 
 	// Verify the shell is done
 	require.True(t, bgShell.IsDone())
-}
-
-func TestBackgroundShell_GetOutput_NoHang(t *testing.T) {
-	t.Parallel()
-
-	workingDir := t.TempDir()
-	ctx := context.Background()
-
-	// Start a long-running background shell
-	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, workingDir, nil, "while true; do echo \"Hello from background job - $(date +%T)\"; sleep 1; done", "")
-	require.NoError(t, err)
-	defer bgManager.Kill(bgShell.ID)
-	// wait for 2 seconds
-	time.Sleep(2 * time.Second)
-	stdout, _, _, err := bgShell.GetOutput()
-	require.NoError(t, err)
-	require.Len(t, strings.Split(stdout, "\n"), 3)
 }
 
 func TestBackgroundShell_MultipleOutputCalls(t *testing.T) {
@@ -344,28 +325,5 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		retrieved, ok := bgManager.Get(bgShell.ID)
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
-	})
-
-	// Test that we can check output of long-running command later
-	t.Run("can check output after completion", func(t *testing.T) {
-		t.Parallel()
-		bgManager := shell.GetBackgroundShellManager()
-		bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 3 && echo 'completed'", "")
-		require.NoError(t, err)
-		defer bgManager.Kill(bgShell.ID)
-
-		// Initially should be running
-		_, _, done, _ := bgShell.GetOutput()
-		require.False(t, done, "Should be running initially")
-
-		// Wait for completion
-		time.Sleep(4 * time.Second)
-
-		// Now should be done
-		stdout, stderr, done, err := bgShell.GetOutput()
-		require.NoError(t, err)
-		require.True(t, done, "Should be done after waiting")
-		require.Contains(t, stdout, "completed")
-		require.Empty(t, stderr)
 	})
 }

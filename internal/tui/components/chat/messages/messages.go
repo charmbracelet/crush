@@ -54,7 +54,7 @@ type messageCmp struct {
 	// Core message data and state
 	message  message.Message // The underlying message content
 	spinning bool            // Whether to show loading animation
-	anim     *anim.Anim      // Animation component for loading states
+	anim     anim.Spinner    // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -75,6 +75,7 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 	m := &messageCmp{
 		message: msg,
 		anim: anim.New(anim.Settings{
+			Static:      isReduceAnimations(),
 			Size:        15,
 			GradColorA:  t.Primary,
 			GradColorB:  t.Secondary,
@@ -99,8 +100,8 @@ func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case anim.StepMsg:
 		m.spinning = m.shouldSpin()
 		if m.spinning {
-			u, cmd := m.anim.Update(msg)
-			m.anim = u.(*anim.Anim)
+			var cmd tea.Cmd
+			m.anim, cmd = m.anim.Update(msg)
 			return m, cmd
 		}
 	case tea.KeyPressMsg:
@@ -438,4 +439,12 @@ func (m *assistantSectionModel) IsSectionHeader() bool {
 
 func (m *messageCmp) ID() string {
 	return m.message.ID
+}
+
+func isReduceAnimations() bool {
+	cfg := config.Get()
+	return cfg.Options != nil &&
+		cfg.Options.TUI != nil &&
+		cfg.Options.TUI.ReduceAnimations != nil &&
+		*cfg.Options.TUI.ReduceAnimations
 }

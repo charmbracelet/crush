@@ -61,8 +61,8 @@ type toolCallCmp struct {
 	permissionGranted   bool
 
 	// Animation state for pending tool calls
-	spinning bool       // Whether to show loading animation
-	anim     util.Model // Animation component for pending states
+	spinning bool         // Whether to show loading animation
+	anim     anim.Spinner // Animation component for pending states
 
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
 }
@@ -120,6 +120,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	}
 	t := styles.CurrentTheme()
 	m.anim = anim.New(anim.Settings{
+		Static:      isReduceAnimations(),
 		Size:        15,
 		Label:       "Working",
 		GradColorA:  t.Primary,
@@ -129,6 +130,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	})
 	if m.isNested {
 		m.anim = anim.New(anim.Settings{
+			Static:      isReduceAnimations(),
 			Size:        10,
 			GradColorA:  t.Primary,
 			GradColorB:  t.Secondary,
@@ -159,8 +161,8 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		}
 		if m.spinning {
-			u, cmd := m.anim.Update(msg)
-			m.anim = u
+			var cmd tea.Cmd
+			m.anim, cmd = m.anim.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)

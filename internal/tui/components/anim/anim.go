@@ -16,7 +16,6 @@ import (
 	"github.com/lucasb-eyer/go-colorful"
 
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
 const (
@@ -95,13 +94,18 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+	Static      bool
 }
 
-// Default settings.
-const ()
+// Spinner is a Bubble for a spinner.
+type Spinner interface {
+	Init() tea.Cmd
+	Update(tea.Msg) (Spinner, tea.Cmd)
+	View() string
+	SetLabel(string)
+}
 
-// Anim is a Bubble for an animated spinner.
-type Anim struct {
+type anim struct {
 	width            int
 	cyclingCharWidth int
 	label            *csync.Slice[string]
@@ -118,9 +122,16 @@ type Anim struct {
 	id               int
 }
 
-// New creates a new Anim instance with the specified width and label.
-func New(opts Settings) *Anim {
-	a := &Anim{}
+// New creates a new anim instance with the specified width and label.
+func New(opts Settings) Spinner {
+	if colorIsUnset(opts.LabelColor) {
+		opts.LabelColor = defaultLabelColor
+	}
+
+	if opts.Static {
+		return newStatic(opts.Label, opts.LabelColor)
+	}
+
 	// Validate settings.
 	if opts.Size < 1 {
 		opts.Size = defaultNumCyclingChars
@@ -131,10 +142,8 @@ func New(opts Settings) *Anim {
 	if colorIsUnset(opts.GradColorB) {
 		opts.GradColorB = defaultGradColorB
 	}
-	if colorIsUnset(opts.LabelColor) {
-		opts.LabelColor = defaultLabelColor
-	}
 
+	a := &anim{}
 	a.id = nextID()
 	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
@@ -255,7 +264,7 @@ func New(opts Settings) *Anim {
 }
 
 // SetLabel updates the label text and re-renders it.
-func (a *Anim) SetLabel(newLabel string) {
+func (a *anim) SetLabel(newLabel string) {
 	a.labelWidth = lipgloss.Width(newLabel)
 
 	// Update total width
@@ -269,7 +278,7 @@ func (a *Anim) SetLabel(newLabel string) {
 }
 
 // renderLabel renders the label with the current label color.
-func (a *Anim) renderLabel(label string) {
+func (a *anim) renderLabel(label string) {
 	if a.labelWidth > 0 {
 		// Pre-render the label.
 		labelRunes := []rune(label)
@@ -296,7 +305,7 @@ func (a *Anim) renderLabel(label string) {
 }
 
 // Width returns the total width of the animation.
-func (a *Anim) Width() (w int) {
+func (a *anim) Width() (w int) {
 	w = a.width
 	if a.labelWidth > 0 {
 		w += labelGapWidth + a.labelWidth
@@ -314,12 +323,10 @@ func (a *Anim) Width() (w int) {
 }
 
 // Init starts the animation.
-func (a *Anim) Init() tea.Cmd {
-	return a.Step()
-}
+func (a *anim) Init() tea.Cmd { return stepCmd(a.id) }
 
 // Update processes animation steps (or not).
-func (a *Anim) Update(msg tea.Msg) (util.Model, tea.Cmd) {
+func (a *anim) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 	switch msg := msg.(type) {
 	case StepMsg:
 		if msg.id != a.id {
@@ -341,14 +348,14 @@ func (a *Anim) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
 			a.initialized.Store(true)
 		}
-		return a, a.Step()
+		return a, stepCmd(a.id)
 	default:
 		return a, nil
 	}
 }
 
 // View renders the current state of the animation.
-func (a *Anim) View() string {
+func (a *anim) View() string {
 	var b strings.Builder
 	step := int(a.step.Load())
 	for i := range a.width {
@@ -381,10 +388,10 @@ func (a *Anim) View() string {
 	return b.String()
 }
 
-// Step is a command that triggers the next step in the animation.
-func (a *Anim) Step() tea.Cmd {
+// stepCmd is a command that triggers the next stepCmd in the animation.
+func stepCmd(id int) tea.Cmd {
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
-		return StepMsg{id: a.id}
+		return StepMsg{id: id}
 	})
 }
 

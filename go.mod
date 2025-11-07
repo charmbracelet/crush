@@ -19,6 +19,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.3.3
 	github.com/charmbracelet/fang v0.4.3
 	github.com/charmbracelet/glamour/v2 v2.0.0-20250811143442-a27abb32f018
+	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20251103214348-d3032608aa74
 	github.com/charmbracelet/log/v2 v2.0.0-20250226163916-c379e29ff706
 	github.com/charmbracelet/ultraviolet v0.0.0-20251105181648-75d1e37ff1bb
 	github.com/charmbracelet/x/ansi v0.10.3
@@ -88,7 +89,6 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 // indirect
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20251103214348-d3032608aa74 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250811133356-e0c5dbe5ea4a // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect

@@ -11,6 +11,7 @@ type EditorKeyMap struct {
 	Newline     key.Binding
 	Next        key.Binding
 	Previous    key.Binding
+	Escape      key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -41,6 +42,10 @@ func DefaultEditorKeyMap() EditorKeyMap {
 		Previous: key.NewBinding(
 			key.WithKeys("shift+up"),
 			key.WithHelp("shift+↑", "up"),
+		),
+		Escape: key.NewBinding(
+			key.WithKeys("esc", "alt+esc"),
+			key.WithHelp("esc", "cancel history mode"),
 		),
 	}
 }

@@ -365,6 +365,12 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.editor = u.(editor.Editor)
 			cmds = append(cmds, cmd)
 		}
+	case editor.CloseHistoryMsg:
+		if p.focusedPane == PanelTypeEditor {
+			u, cmd := p.editor.Update(msg)
+			p.editor = u.(editor.Editor)
+			cmds = append(cmds, cmd)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):

@@ -188,6 +188,9 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case LoadHistoryMsg:
+		if m.inHistoryMode() {
+			return m, nil
+		}
 		msgs, err := m.getUserMessagesAsText()
 		if err != nil {
 			// TODO(tauraamui): handle error for loading history better in the UI later
@@ -198,6 +201,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case CloseHistoryMsg:
 		m.history = nil
 		m.textarea.SetValue("closed history") // for easier temporary visual debugging
+		return m, nil
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -312,7 +316,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) && m.inHistoryMode() {
-			return m, util.CmdHandler(CloseHistoryMsg{})
+			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{}))
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -333,7 +337,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return m, m.openEditor(m.textarea.Value())
 		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
+		if key.Matches(msg, DeleteKeyMaps.Escape) && m.deleteMode {
 			m.deleteMode = false
 			return m, nil
 		}
@@ -354,9 +358,9 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		// history
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
-			// m.textarea.SetValue(m.stepOverHistory(m.getUserMessagesAsText, m.getDirectionFromKey(msg)))
-			if m.history == nil {
+			if !m.inHistoryMode() {
 				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				break
 			}
 		}
 	}

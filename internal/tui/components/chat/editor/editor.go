@@ -195,12 +195,15 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if err != nil {
 			// TODO(tauraamui): handle error for loading history better in the UI later
 		}
-		m.history = InitialiseHistory(msgs)
-		m.textarea.SetValue("opened history state")
+		if len(msgs) == 0 {
+			break
+		}
+		m.history = InitialiseHistory(m.textarea.Value(), msgs)
+		m.textarea.SetValue(m.history.Value())
 		return m, nil
 	case CloseHistoryMsg:
+		m.textarea.SetValue(m.history.ExistingValue())
 		m.history = nil
-		m.textarea.SetValue("closed history") // for easier temporary visual debugging
 		return m, nil
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
@@ -289,6 +292,16 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
+		/*
+			if m.inHistoryMode() {
+				switch true {
+				case key.Matches(msg, m.keyMap.Escape):
+					return m, util.CmdHandler(CloseHistoryMsg{})
+				case key.Matches(msg, m.keyMap.Previous):
+					m.history.ScrollUp()
+				}
+			}
+		*/
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
 		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
@@ -315,7 +328,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.attachments = nil
 			return m, nil
 		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) && m.inHistoryMode() {
+		if key.Matches(msg, m.keyMap.Escape) && m.inHistoryMode() {
 			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{}))
 		}
 		rune := msg.Code
@@ -362,6 +375,16 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
 				break
 			}
+
+			if key.Matches(msg, m.keyMap.Previous) {
+				m.history.ScrollUp()
+			} else if key.Matches(msg, m.keyMap.Next) {
+				m.history.ScrollDown()
+			} else {
+				break
+			}
+
+			m.textarea.SetValue(m.history.Value())
 		}
 	}
 
@@ -496,7 +519,6 @@ func (m *editorCmp) getUserMessagesAsText() ([]string, error) {
 		}
 	}
 
-	userMessages = append(userMessages, m.textarea.Value())
 	return userMessages, nil
 }
 

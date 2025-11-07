@@ -359,6 +359,12 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 		}
 		return p, p.newSession()
+	case editor.LoadHistoryMsg:
+		if p.focusedPane == PanelTypeEditor {
+			u, cmd := p.editor.Update(msg)
+			p.editor = u.(editor.Editor)
+			cmds = append(cmds, cmd)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):

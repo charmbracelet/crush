@@ -92,9 +92,9 @@ const (
 	maxFileResults = 25
 )
 
-type loadHistoryMsg struct{}
+type LoadHistoryMsg struct{}
 
-type closeHistoryMsg struct{}
+type CloseHistoryMsg struct{}
 
 type OpenEditorMsg struct {
 	Text string
@@ -187,6 +187,17 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case LoadHistoryMsg:
+		msgs, err := m.getUserMessagesAsText()
+		if err != nil {
+			// TODO(tauraamui): handle error for loading history better in the UI later
+		}
+		m.history = InitialiseHistory(msgs)
+		m.textarea.SetValue("opened history state")
+		return m, nil
+	case CloseHistoryMsg:
+		m.history = nil
+		m.textarea.SetValue("closed history") // for easier temporary visual debugging
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -271,16 +282,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case commands.ToggleYoloModeMsg:
 		m.setEditorPrompt()
 		return m, nil
-	case loadHistoryMsg:
-		msgs, err := m.getUserMessagesAsText()
-		if err != nil {
-			// TODO(tauraamui): handle error for loading history better in the UI later
-		}
-		m.history = InitialiseHistory(msgs)
-		m.textarea.SetValue("opened history state")
-	case closeHistoryMsg:
-		m.history = nil
-		m.textarea.SetValue("closed history") // for easier temporary visual debugging
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
@@ -310,15 +311,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.attachments = nil
 			return m, nil
 		}
-		// history
-		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
-			// m.textarea.SetValue(m.stepOverHistory(m.getUserMessagesAsText, m.getDirectionFromKey(msg)))
-			if m.history == nil {
-				return m, util.CmdHandler(loadHistoryMsg{})
-			}
-		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) && m.inHistoryMode() {
-			return m, util.CmdHandler(closeHistoryMsg{})
+			return m, util.CmdHandler(CloseHistoryMsg{})
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -356,6 +350,13 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			} else {
 				// Otherwise, send the message
 				return m, m.send()
+			}
+		}
+		// history
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			// m.textarea.SetValue(m.stepOverHistory(m.getUserMessagesAsText, m.getDirectionFromKey(msg)))
+			if m.history == nil {
+				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
 			}
 		}
 	}

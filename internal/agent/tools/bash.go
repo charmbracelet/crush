@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -193,10 +194,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			// Determine working directory
-			execWorkingDir := workingDir
-			if params.WorkingDir != "" {
-				execWorkingDir = params.WorkingDir
-			}
+			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)

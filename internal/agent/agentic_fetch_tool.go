@@ -193,7 +193,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				PresencePenalty:  small.ModelCfg.PresencePenalty,
 			})
 			if err != nil {
-				return fantasy.NewTextErrorResponse("error generating response"), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error generating response: %s", err)), nil
 			}
 
 			updatedSession, err := c.sessions.Get(ctx, session.ID)

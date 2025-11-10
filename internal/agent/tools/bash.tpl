@@ -64,16 +64,16 @@ When user asks to create git commit:
    git commit -m "$(cat <<'EOF'
    Commit message here.
 
-{{- if .Attribution.GeneratedWith}}
+{{ if .Attribution.GeneratedWith }}
    💘 Generated with Crush
-{{- end}}
-{{- if eq .Attribution.TrailerStyle "assisted-by"}}
+{{ end}}
+{{if eq .Attribution.TrailerStyle "assisted-by" }}
 
    Assisted-by: {{ .ModelName }} via Crush
-{{- else if eq .Attribution.TrailerStyle "co-authored-by"}}
+{{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
 
    Co-Authored-By: Crush <crush@charm.land>
-{{- end}}
+{{ end }}
 
    EOF
    )"

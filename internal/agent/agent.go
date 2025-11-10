@@ -8,6 +8,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -32,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/stringext"
 )
 
 //go:embed templates/title.md
@@ -303,7 +305,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnRetry: func(err *fantasy.APICallError, delay time.Duration) {
+		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
@@ -459,12 +461,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return nil, createErr
 			}
 		}
+		var fantasyErr *fantasy.Error
+		var providerErr *fantasy.ProviderError
+		const defaultTitle = "Provider Error"
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+		} else if errors.As(err, &providerErr) {
+			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+		} else if errors.As(err, &fantasyErr) {
+			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, "API Error", err.Error())
+			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
 		}
 		// Note: we use the parent context here because the genCtx has been
 		// cancelled.

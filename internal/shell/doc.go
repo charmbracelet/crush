@@ -16,12 +16,7 @@ package shell
 //	shell.Exec(ctx, "export FOO=bar")
 //	shell.Exec(ctx, "echo $FOO")  // Will print "bar"
 //
-// 3. For the singleton persistent shell (used by tools):
-//
-//	shell := shell.GetPersistentShell("/path/to/cwd")
-//	stdout, stderr, err := shell.Exec(ctx, "ls -la")
-//
-// 4. Managing environment and working directory:
+// 3. Managing environment and working directory:
 //
 //	shell := shell.NewShell(nil)
 //	shell.SetEnv("MY_VAR", "value")

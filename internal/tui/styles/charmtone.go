@@ -42,6 +42,7 @@ func NewCharmtoneTheme() *Theme {
 		White: charmtone.Butter,
 
 		BlueLight: charmtone.Sardine,
+		BlueDark:  charmtone.Damson,
 		Blue:      charmtone.Malibu,
 
 		Yellow: charmtone.Mustard,

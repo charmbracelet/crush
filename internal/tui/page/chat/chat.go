@@ -955,7 +955,8 @@ func (p *chatPage) Help() help.KeyMap {
 			key.WithKeys("ctrl+m", "ctrl+l"),
 			key.WithHelp("ctrl+l", "models"),
 		)
-		if p.keyboardEnhancements.SupportsKeyDisambiguation() {
+		if p.keyboardEnhancements.Flags > 0 {
+			// non-zero flags mean we have at least key disambiguation
 			modelsBinding.SetHelp("ctrl+m", "models")
 		}
 		helpBinding := key.NewBinding(

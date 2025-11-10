@@ -10,7 +10,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
@@ -40,7 +39,6 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 
 	createSimpleGoProject(t, env.workingDir)
 	agent, err := coderAgent(r, env, large, small)
-	shell.Reset(env.workingDir)
 	require.NoError(t, err)
 	return agent, env
 }

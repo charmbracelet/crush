@@ -475,7 +475,8 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				ts := t.TextSelection
 
 				cell = cell.Clone()
-				cell.Style = cell.Style.Background(ts.GetBackground()).Foreground(ts.GetForeground())
+				cell.Style.Bg = ts.GetBackground()
+				cell.Style.Fg = ts.GetForeground()
 				scr.SetCell(x, y, cell)
 			}
 		}

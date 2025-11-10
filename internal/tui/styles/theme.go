@@ -57,6 +57,7 @@ type Theme struct {
 
 	// Blues
 	BlueLight color.Color
+	BlueDark  color.Color
 	Blue      color.Color
 
 	// Yellows

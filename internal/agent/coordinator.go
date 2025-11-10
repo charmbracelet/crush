@@ -362,7 +362,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		if len(agent.AllowedMCP) == 0 {
 			// No MCPs allowed
-			slog.Warn("MCPs not allowed")
+			slog.Debug("no MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
 			break
 		}
 
@@ -374,6 +374,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 				filteredTools = append(filteredTools, tool)
 			}
 		}
+		slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)

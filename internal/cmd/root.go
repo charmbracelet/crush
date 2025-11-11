@@ -33,9 +33,12 @@ func init() {
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().StringP("prompt", "p", "", "Run single prompt and exit (programmatic mode)")
+	rootCmd.Flags().BoolP("quiet", "q", false, "Quiet mode - hide spinner and reduce output")
 
 	rootCmd.AddCommand(
 		runCmd,
+		gitCmd,
 		dirsCmd,
 		updateProvidersCmd,
 		logsCmd,
@@ -65,13 +68,27 @@ crush -D /path/to/custom/.crush
 # Print version
 crush -v
 
-# Run a single non-interactive prompt
+# Run a single non-interactive prompt (programmatic mode)
+crush -p "Explain the use of context in Go"
 crush run "Explain the use of context in Go"
+
+# Pipe input with programmatic mode
+echo "What is this code doing?" | crush -p "Review this code"
 
 # Run in dangerous mode (auto-accept all permissions)
 crush -y
+
+# Run with quiet mode (no spinner)
+crush -p -q "Generate tests for main.go"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check if programmatic mode is requested via -p flag
+		promptFlag, _ := cmd.Flags().GetString("prompt")
+		if promptFlag != "" {
+			// Delegate to run command logic
+			quiet, _ := cmd.Flags().GetBool("quiet")
+			return runProgrammaticMode(cmd, promptFlag, quiet)
+		}
 		app, err := setupApp(cmd)
 		if err != nil {
 			return err
@@ -221,6 +238,35 @@ func MaybePrependStdin(prompt string) (string, error) {
 		return prompt, err
 	}
 	return string(bts) + "\n\n" + prompt, nil
+}
+
+// runProgrammaticMode handles the -p/--prompt flag for one-shot execution
+func runProgrammaticMode(cmd *cobra.Command, promptFlag string, quiet bool) error {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return err
+	}
+	defer app.Shutdown()
+
+	if !app.Config().IsConfigured() {
+		return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+	}
+
+	prompt := promptFlag
+
+	// Maybe prepend stdin if available
+	prompt, err = MaybePrependStdin(prompt)
+	if err != nil {
+		slog.Error("Failed to read from stdin", "error", err)
+		return err
+	}
+
+	if prompt == "" {
+		return fmt.Errorf("no prompt provided")
+	}
+
+	// Run non-interactive flow
+	return app.RunNonInteractive(cmd.Context(), prompt, quiet)
 }
 
 func ResolveCwd(cmd *cobra.Command) (string, error) {

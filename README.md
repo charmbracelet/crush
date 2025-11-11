@@ -19,6 +19,9 @@
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
+- **Git Integration:** native git commands with AI-powered commit messages and code analysis
+- **Programmatic Mode:** run single prompts via `-p` flag for scripting and automation
+- **Interactive & Non-Interactive:** full-featured TUI or scriptable CLI mode
 
 ## Installation
 
@@ -205,6 +208,70 @@ task install
 The quickest way to get started is to grab an API key for your preferred
 provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
 Crush. You'll be prompted to enter your API key.
+
+### Usage Modes
+
+Crush supports multiple modes of operation:
+
+#### Interactive Mode (TUI)
+```bash
+# Launch interactive terminal UI
+crush
+
+# With debug logging
+crush -d
+
+# In a specific directory
+crush -c /path/to/project
+```
+
+#### Programmatic Mode
+```bash
+# Run a single prompt and exit
+crush -p "Explain the use of context in Go"
+
+# Pipe input for analysis
+cat main.go | crush -p "Review this code"
+
+# Quiet mode (no spinner)
+crush -p -q "Generate tests for main.go"
+```
+
+#### Run Mode
+```bash
+# Alternative syntax for non-interactive prompts
+crush run "Explain the use of context in Go"
+
+# With quiet flag
+crush run -q "Generate a README for this project"
+```
+
+### Git Integration
+
+Crush provides native git integration with AI assistance:
+
+```bash
+# Show git status
+crush git status
+
+# Show diff with AI analysis
+crush git diff --analyze
+
+# Generate AI commit message
+crush git commit
+
+# Commit with custom message
+crush git commit "Add new feature"
+
+# Undo last commit
+crush git undo
+
+# View commit history with AI analysis
+crush git log --analyze
+
+# Push to remote
+crush git push origin main
+```
 
 That said, you can also set environment variables for preferred providers.
 
@@ -547,6 +614,50 @@ To add specific models to the configuration, configure as such:
   }
 }
 ```
+
+## Advanced Features
+
+### Programmatic Mode & Automation
+
+Crush's programmatic mode makes it ideal for CI/CD pipelines and automation:
+
+```bash
+#!/bin/bash
+# CI/CD script example
+crush -p "run all tests and fix failures" --yolo -q > results.txt
+
+if [ $? -ne 0 ]; then
+  echo "Tests failed"
+  exit 1
+fi
+```
+
+**Flags:**
+- `-p, --prompt`: Run single prompt and exit
+- `-q, --quiet`: Quiet mode (hide spinner)
+- `-y, --yolo`: Auto-approve all permissions (use with caution)
+- `-d, --debug`: Enable debug logging
+- `-c, --cwd`: Set working directory
+- `-D, --data-dir`: Custom data directory
+
+### Git Commands Reference
+
+All git commands support the same flags and options you're used to:
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `crush git status` | Show git status | `crush git status` |
+| `crush git diff` | Show changes | `crush git diff --analyze` |
+| `crush git commit` | AI-powered commit | `crush git commit` |
+| `crush git log` | View history | `crush git log -n 20 --analyze` |
+| `crush git push` | Push to remote | `crush git push origin main` |
+| `crush git pull` | Pull from remote | `crush git pull` |
+| `crush git undo` | Undo last commit | `crush git undo` |
+
+**Special flags:**
+- `--analyze`: Get AI analysis of changes/history
+- `--all, -a`: Include all changes (commit, diff)
+- `--force, -f`: Force operation (push)
 
 ## Logging
 

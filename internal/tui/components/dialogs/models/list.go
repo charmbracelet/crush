@@ -107,8 +107,13 @@ func (m *ModelListComponent) SelectedModel() *ModelOption {
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
+	favoriteModels := config.Get().Options.FavoritedModels
 
 	var groups []list.Group[list.CompletionItem[ModelOption]]
+	favGroup := list.Group[list.CompletionItem[ModelOption]]{
+		Section: list.NewItemSection("Favorites"),
+	}
+
 	// first none section
 	selectedItemID := ""
 	itemsByKey := make(map[string]list.CompletionItem[ModelOption])
@@ -254,6 +259,9 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			Section: section,
 		}
 		for _, model := range displayProvider.Models {
+			if slices.Contains(favoriteModels, model.ID) {
+				model.Name = " ✦ " + model.Name
+			}
 			modelOption := ModelOption{
 				Provider: displayProvider,
 				Model:    model,
@@ -264,8 +272,15 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				modelOption,
 				list.WithCompletionID(key),
 			)
+
 			itemsByKey[key] = item
-			group.Items = append(group.Items, item)
+
+			if slices.Contains(favoriteModels, model.ID) {
+				favGroup.Items = append(favGroup.Items, item)
+			} else {
+				group.Items = append(group.Items, item)
+			}
+
 			if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
 				selectedItemID = item.ID()
 			}
@@ -314,10 +329,15 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			groups = append([]list.Group[list.CompletionItem[ModelOption]]{recentGroup}, groups...)
 		}
 	}
+	finalGroups := []list.Group[list.CompletionItem[ModelOption]]{}
+	if len(favGroup.Items) > 0 {
+		finalGroups = append(finalGroups, favGroup)
+	}
+	finalGroups = append(finalGroups, groups...)
 
 	var cmds []tea.Cmd
 
-	cmd := m.list.SetGroups(groups)
+	cmd := m.list.SetGroups(finalGroups)
 
 	if cmd != nil {
 		cmds = append(cmds, cmd)

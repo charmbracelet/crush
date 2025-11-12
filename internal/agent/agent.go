@@ -300,7 +300,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ID:               id,
 				Name:             toolName,
 				ProviderExecuted: false,
-				Finished:         false,
+				Status:           message.ToolStatusPending,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
@@ -314,7 +314,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Name:             tc.ToolName,
 				Input:            tc.Input,
 				ProviderExecuted: false,
-				Finished:         true,
+				Status:           message.ToolStatusCompleted,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
@@ -412,8 +412,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
+			if tc.Status != message.ToolStatusCompleted {
+				tc.Status = message.ToolStatusCompleted
 				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
 				updateErr := a.messages.Update(ctx, *currentAssistant)

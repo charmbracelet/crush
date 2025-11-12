@@ -192,7 +192,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (m *toolCallCmp) View() string {
 	box := m.style()
 
-	if !m.call.Finished && m.state != Cancelled {
+	if m.call.Status != message.ToolStatusCompleted && m.state != Cancelled {
 		return box.Render(m.renderPending())
 	}
 
@@ -720,7 +720,7 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 // SetToolCall updates the tool call data and stops spinning if finished
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	if m.call.Finished {
+	if m.call.Status == message.ToolStatusCompleted {
 		m.spinning = false
 	}
 }
@@ -849,7 +849,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished and not in a terminal state.
 func (m *toolCallCmp) shouldSpin() bool {
-	return !m.call.Finished && m.state != Cancelled
+	return m.call.Status != message.ToolStatusCompleted && m.state != Cancelled
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation

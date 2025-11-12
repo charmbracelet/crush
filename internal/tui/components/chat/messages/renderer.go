@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
@@ -221,7 +222,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		addMain(cmd).
 		addFlag("background", params.RunInBackground).
 		build()
-	if v.call.Finished {
+	if v.call.Status == message.ToolStatusCompleted {
 		var meta tools.BashResponseMetadata
 		_ = br.unmarshalParams(v.result.Metadata, &meta)
 		if meta.Background {

@@ -37,6 +37,16 @@ const (
 	FinishReasonUnknown FinishReason = "unknown"
 )
 
+type ToolStatus string
+
+const (
+	ToolStatusPending   ToolStatus = "pending"
+	ToolStatusRunning   ToolStatus = "running"
+	ToolStatusCompleted ToolStatus = "completed"
+	ToolStatusFailed    ToolStatus = "failed"
+	ToolStatusCancelled ToolStatus = "cancelled"
+)
+
 type ContentPart interface {
 	isPart()
 }
@@ -93,11 +103,11 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Input            string `json:"input"`
-	ProviderExecuted bool   `json:"provider_executed"`
-	Finished         bool   `json:"finished"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Input            string     `json:"input"`
+	ProviderExecuted bool       `json:"provider_executed"`
+	Status           ToolStatus `json:"status"`
 }
 
 func (ToolCall) isPart() {}
@@ -341,10 +351,10 @@ func (m *Message) FinishToolCall(toolCallID string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: true,
+					ID:     c.ID,
+					Name:   c.Name,
+					Input:  c.Input,
+					Status:  ToolStatusCompleted,
 				}
 				return
 			}
@@ -357,10 +367,10 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
+					ID:     c.ID,
+					Name:   c.Name,
+					Input:  c.Input + inputDelta,
+					Status: c.Status,
 				}
 				return
 			}

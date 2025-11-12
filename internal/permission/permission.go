@@ -203,9 +203,10 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
 
+	s.schedulePermissionNotification(permission)
+
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
-	s.schedulePermissionNotification(permission)
 
 	return <-respCh
 }

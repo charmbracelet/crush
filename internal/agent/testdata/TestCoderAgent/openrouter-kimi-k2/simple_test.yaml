@@ -24,13 +24,11 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1762952737-QVchj1B4adm8WkBAw47i","provider":"Parasail","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1762957254-rulp5SnGXRm8mMy6W4LV","provider":"AtlasCloud","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762957255,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
 
-      data: {"id":"gen-1762952737-QVchj1B4adm8WkBAw47i","provider":"Parasail","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1762957254-rulp5SnGXRm8mMy6W4LV","provider":"AtlasCloud","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762957255,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
 
-      data: {"id":"gen-1762952737-QVchj1B4adm8WkBAw47i","provider":"Parasail","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
-
-      data: {"id":"gen-1762952737-QVchj1B4adm8WkBAw47i","provider":"Parasail","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":128,"completion_tokens":2,"total_tokens":130,"cost":0.000015,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0000128,"upstream_inference_completions_cost":0.0000022},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1762957254-rulp5SnGXRm8mMy6W4LV","provider":"AtlasCloud","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1762957255,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":128,"completion_tokens":2,"total_tokens":130,"cost":0.0000222,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0000192,"upstream_inference_completions_cost":0.000003},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
 
       data: [DONE]
 
@@ -39,7 +37,7 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 1.94721775s
+    duration: 3.700683541s
 - id: 1
   request:
     proto: HTTP/1.1
@@ -63,13 +61,13 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1762952737-rpaKJGXhAaz7CqBn1ZmK","provider":"Parasail","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1762957254-cAAHYMHBv6gitSSnCZBj","provider":"SiliconFlow","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762957254,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":""}
 
-      data: {"id":"gen-1762952737-rpaKJGXhAaz7CqBn1ZmK","provider":"Parasail","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1762957254-cAAHYMHBv6gitSSnCZBj","provider":"SiliconFlow","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762957254,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"system_fingerprint":""}
 
-      data: {"id":"gen-1762952737-rpaKJGXhAaz7CqBn1ZmK","provider":"Parasail","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
+      data: {"id":"gen-1762957254-cAAHYMHBv6gitSSnCZBj","provider":"SiliconFlow","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762957254,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}],"system_fingerprint":""}
 
-      data: {"id":"gen-1762952737-rpaKJGXhAaz7CqBn1ZmK","provider":"Parasail","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762952737,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":10719,"completion_tokens":2,"total_tokens":10721,"cost":0.00590143,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.00589545,"upstream_inference_completions_cost":0.00000598},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1762957254-cAAHYMHBv6gitSSnCZBj","provider":"SiliconFlow","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1762957254,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":10796,"completion_tokens":1,"total_tokens":10797,"cost":0.0043204,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0043184,"upstream_inference_completions_cost":0.000002},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
 
       data: [DONE]
 
@@ -78,4 +76,4 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 2.621919458s
+    duration: 9.729891041s

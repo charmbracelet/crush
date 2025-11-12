@@ -64,9 +64,6 @@ type toolCallCmp struct {
 	spinning bool       // Whether to show loading animation
 	anim     util.Model // Animation component for pending states
 
-	// Timer state for elapsed time tracking
-	timerActive bool // Whether timer updates are active
-
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
 }
 
@@ -155,7 +152,6 @@ func (m *toolCallCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 // Manages animation updates for pending tool calls.
 func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
-
 	switch msg := msg.(type) {
 	case anim.StepMsg:
 		var cmds []tea.Cmd
@@ -877,31 +873,4 @@ func (m *toolCallCmp) SetPermissionRequested() {
 // Deprecated: Use SetPermissionStatus(permission.PermissionApproved) instead.
 func (m *toolCallCmp) SetPermissionGranted() {
 	m.SetPermissionStatus(permission.PermissionApproved)
-}
-
-// Timer methods for elapsed time tracking
-
-// StartTimer activates timer updates for this tool call
-func (m *toolCallCmp) StartTimer() {
-	m.timerActive = true
-}
-
-// StopTimer deactivates timer updates for this tool call
-func (m *toolCallCmp) StopTimer() {
-	m.timerActive = false
-}
-
-// IsTimerActive returns whether timer updates are active for this tool call
-func (m *toolCallCmp) IsTimerActive() bool {
-	return m.timerActive
-}
-
-// GetElapsedTime returns the elapsed time for this tool call
-func (m *toolCallCmp) GetElapsedTime() time.Duration {
-	return m.call.ElapsedTime()
-}
-
-// ShouldShowTimer returns whether timer should be displayed for this tool call
-func (m *toolCallCmp) ShouldShowTimer() bool {
-	return m.timerActive && !m.call.Finished
 }

@@ -87,8 +87,6 @@ func cancelTimerCmd() tea.Cmd {
 	})
 }
 
-
-
 type chatPage struct {
 	width, height               int
 	detailsWidth, detailsHeight int

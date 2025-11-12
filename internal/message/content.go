@@ -93,33 +93,14 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	Input            string    `json:"input"`
-	ProviderExecuted bool      `json:"provider_executed"`
-	Finished         bool      `json:"finished"`
-	StartTime        int64     `json:"start_time,omitempty"`
-	EndTime          int64     `json:"end_time,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Input            string `json:"input"`
+	ProviderExecuted bool   `json:"provider_executed"`
+	Finished         bool   `json:"finished"`
 }
 
 func (ToolCall) isPart() {}
-
-// ElapsedTime returns the elapsed time for this tool call.
-// If StartTime is not set, returns 0.
-// If EndTime is set, returns EndTime - StartTime.
-// If EndTime is not set (still running), returns time.Now() - StartTime.
-func (tc ToolCall) ElapsedTime() time.Duration {
-	if tc.StartTime == 0 {
-		return 0
-	}
-	
-	endTime := tc.EndTime
-	if endTime == 0 {
-		endTime = time.Now().Unix()
-	}
-	
-	return time.Duration(endTime-tc.StartTime) * time.Second
-}
 
 type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
@@ -364,8 +345,6 @@ func (m *Message) FinishToolCall(toolCallID string) {
 					Name:     c.Name,
 					Input:    c.Input,
 					Finished: true,
-					StartTime: c.StartTime,
-					EndTime:   time.Now().Unix(),
 				}
 				return
 			}
@@ -382,8 +361,6 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 					Name:     c.Name,
 					Input:    c.Input + inputDelta,
 					Finished: c.Finished,
-					StartTime: c.StartTime,
-					EndTime:   c.EndTime,
 				}
 				return
 			}
@@ -401,26 +378,6 @@ func (m *Message) AddToolCall(tc ToolCall) {
 		}
 	}
 	m.Parts = append(m.Parts, tc)
-}
-
-// StartToolCallTimer sets the StartTime for a tool call to track when it began.
-// This should be called when a tool call starts awaiting permission or begins execution.
-func (m *Message) StartToolCallTimer(toolCallID string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID && c.StartTime == 0 {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: c.Finished,
-					StartTime: time.Now().Unix(),
-					EndTime:   c.EndTime,
-				}
-				return
-			}
-		}
-	}
 }
 
 func (m *Message) SetToolCalls(tc []ToolCall) {

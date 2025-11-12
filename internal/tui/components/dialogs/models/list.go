@@ -274,7 +274,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	}
 
 	if len(recentItems) > 0 {
-		recentSection := list.NewItemSection("Recently used")
+		recentSection := list.NewItemSection("Recently Used")
 		recentGroup := list.Group[list.CompletionItem[ModelOption]]{
 			Section: recentSection,
 		}

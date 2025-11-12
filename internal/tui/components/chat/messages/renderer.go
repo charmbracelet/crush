@@ -124,7 +124,7 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.cancelled {
+	} else if v.state == Cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
@@ -145,7 +145,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.cancelled {
+	} else if v.state == Cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
@@ -273,7 +273,7 @@ func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width in
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.cancelled {
+	} else if v.state == Cancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 
@@ -621,7 +621,7 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); v.cancelled && done {
+	if res, done := earlyState(header, v); v.state == Cancelled && done {
 		return res
 	}
 
@@ -887,7 +887,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); v.cancelled && done {
+	if res, done := earlyState(header, v); v.state == Cancelled && done {
 		return res
 	}
 	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
@@ -987,7 +987,7 @@ func earlyState(header string, v *toolCallCmp) (string, bool) {
 	switch {
 	case v.result.IsError:
 		message = v.renderToolError()
-	case v.cancelled:
+	case v.state == Cancelled:
 		message = messageBaseStyle.Render("Canceled.")
 	case v.result.ToolCallID == "":
 		switch v.permissionStatus {

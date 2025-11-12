@@ -24,6 +24,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// 1. Separated State Machine
+type ToolCallState uint8
+const (
+	Unstarted ToolCallState = iota
+	AwaitingPermission
+	Running
+	Done
+	Failed
+	Cancelled
+)
+
 // ToolCallCmp defines the interface for tool call components in the chat interface.
 // It manages the display of tool execution including pending states, results, and errors.
 type ToolCallCmp interface {
@@ -57,7 +68,7 @@ type toolCallCmp struct {
 	parentMessageID  string             // ID of the message that initiated this tool call
 	call             message.ToolCall   // The tool call being executed
 	result           message.ToolResult // The result of the tool execution
-	cancelled        bool               // Whether the tool call was cancelled
+	state            ToolCallState      // Current state of the tool call
 	permissionStatus permission.PermissionStatus
 
 	// Animation state for pending tool calls
@@ -70,10 +81,10 @@ type toolCallCmp struct {
 // ToolCallOption provides functional options for configuring tool call components
 type ToolCallOption func(*toolCallCmp)
 
-// WithToolCallCancelled marks the tool call as cancelled
+// WithToolCallCancelled sets the tool call state to Cancelled
 func WithToolCallCancelled() ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.cancelled = true
+		m.state = Cancelled
 	}
 }
 
@@ -181,7 +192,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (m *toolCallCmp) View() string {
 	box := m.style()
 
-	if !m.call.Finished && !m.cancelled {
+	if !m.call.Finished && m.state != Cancelled {
 		return box.Render(m.renderPending())
 	}
 
@@ -195,9 +206,9 @@ func (m *toolCallCmp) View() string {
 
 // State management methods
 
-// SetCancelled marks the tool call as cancelled
+// SetCancelled sets the tool call state to Cancelled
 func (m *toolCallCmp) SetCancelled() {
-	m.cancelled = true
+	m.state = Cancelled
 }
 
 func (m *toolCallCmp) copyTool() tea.Cmd {
@@ -237,7 +248,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 				parts = append(parts, content)
 			}
 		}
-	} else if m.cancelled {
+	} else if m.state == Cancelled {
 		parts = append(parts, "### Status:")
 		parts = append(parts, "Cancelled")
 	} else {
@@ -836,9 +847,9 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 }
 
 // shouldSpin determines whether the tool call should show a loading animation.
-// Returns true if the tool call is not finished or if the result doesn't match the call ID.
+// Returns true if the tool call is not finished and not in a terminal state.
 func (m *toolCallCmp) shouldSpin() bool {
-	return !m.call.Finished && !m.cancelled
+	return !m.call.Finished && m.state != Cancelled
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation

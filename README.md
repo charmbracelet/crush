@@ -355,54 +355,6 @@ it creates. You can customize this behavior with the `attribution` option:
 - `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
 
-### Local Models
-
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
-
-#### Ollama
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### LM Studio
-
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
 ### Custom Providers
 
 Crush supports custom provider configurations for both OpenAI-compatible and
@@ -514,6 +466,54 @@ To add specific models to the configuration, configure as such:
           "default_max_tokens": 50000,
           "can_reason": true,
           "supports_attachments": true
+        }
+      ]
+    }
+  }
+}
+```
+
+### Local Models
+
+Local models can also be configured via OpenAI-compatible API. Here are two common examples:
+
+#### Ollama
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "openai-compat",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen3:30b",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}
+```
+
+#### LM Studio
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:1234/v1/",
+      "type": "openai-compat",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen/qwen3-30b-a3b-2507",
+          "context_window": 256000,
+          "default_max_tokens": 20000
         }
       ]
     }

@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/enum"
 )
 
 type MessageRole string
@@ -35,16 +36,6 @@ const (
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
-)
-
-type ToolStatus string
-
-const (
-	ToolStatusPending   ToolStatus = "pending"
-	ToolStatusRunning   ToolStatus = "running"
-	ToolStatusCompleted ToolStatus = "completed"
-	ToolStatusFailed    ToolStatus = "failed"
-	ToolStatusCancelled ToolStatus = "cancelled"
 )
 
 type ContentPart interface {
@@ -103,11 +94,11 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Input            string     `json:"input"`
-	ProviderExecuted bool       `json:"provider_executed"`
-	Status           ToolStatus `json:"status"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Input            string             `json:"input"`
+	ProviderExecuted bool               `json:"provider_executed"`
+	State            enum.ToolCallState `json:"state"`
 }
 
 func (ToolCall) isPart() {}
@@ -351,10 +342,10 @@ func (m *Message) FinishToolCall(toolCallID string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:     c.ID,
-					Name:   c.Name,
-					Input:  c.Input,
-					Status:  ToolStatusCompleted,
+					ID:    c.ID,
+					Name:  c.Name,
+					Input: c.Input,
+					State: enum.ToolCallStateCompleted,
 				}
 				return
 			}
@@ -367,10 +358,10 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:     c.ID,
-					Name:   c.Name,
-					Input:  c.Input + inputDelta,
-					Status: c.Status,
+					ID:    c.ID,
+					Name:  c.Name,
+					Input: c.Input + inputDelta,
+					State: c.State,
 				}
 				return
 			}

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -21,18 +22,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/log/v2"
 	"github.com/charmbracelet/x/ansi"
-)
-
-// 1. Separated State Machine
-type ToolCallState uint8
-const (
-	Unstarted ToolCallState = iota
-	AwaitingPermission
-	Running
-	Done
-	Failed
-	Cancelled
 )
 
 // ToolCallCmp defines the interface for tool call components in the chat interface.
@@ -52,9 +43,8 @@ type ToolCallCmp interface {
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
 	ID() string
+	SetToolCallState(state enum.ToolCallState)
 	SetPermissionStatus(status permission.PermissionStatus) // Set permission status directly
-	SetPermissionRequested()                                // Mark permission request [deprecated: use SetPermissionStatus]
-	SetPermissionGranted()                                  // Mark permission granted [deprecated: use SetPermissionStatus]
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -68,7 +58,6 @@ type toolCallCmp struct {
 	parentMessageID  string             // ID of the message that initiated this tool call
 	call             message.ToolCall   // The tool call being executed
 	result           message.ToolResult // The result of the tool execution
-	state            ToolCallState      // Current state of the tool call
 	permissionStatus permission.PermissionStatus
 
 	// Animation state for pending tool calls
@@ -81,10 +70,10 @@ type toolCallCmp struct {
 // ToolCallOption provides functional options for configuring tool call components
 type ToolCallOption func(*toolCallCmp)
 
-// WithToolCallCancelled sets the tool call state to Cancelled
-func WithToolCallCancelled() ToolCallOption {
+// WithToolCallState sets the tool call state
+func WithToolCallState(state enum.ToolCallState) ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.state = Cancelled
+		m.call.State = state
 	}
 }
 
@@ -105,22 +94,6 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	return func(m *toolCallCmp) {
 		m.nestedToolCalls = calls
 	}
-}
-
-func WithToolPermissionStatus(status permission.PermissionStatus) ToolCallOption {
-	return func(m *toolCallCmp) {
-		m.SetPermissionStatus(status)
-	}
-}
-
-// Deprecated: Use WithToolPermissionStatus(permission.PermissionPending) instead.
-func WithToolPermissionRequested() ToolCallOption {
-	return WithToolPermissionStatus(permission.PermissionPending)
-}
-
-// Deprecated: Use WithToolPermissionStatus(permission.PermissionApproved) instead.
-func WithToolPermissionGranted() ToolCallOption {
-	return WithToolPermissionStatus(permission.PermissionApproved)
 }
 
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
@@ -190,25 +163,29 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the tool call component based on its current state.
 // Shows either a pending animation or the tool-specific rendered result.
 func (m *toolCallCmp) View() string {
-	box := m.style()
+	return m.style().Render(m.viewUnboxed())
+}
 
-	if m.call.Status != message.ToolStatusCompleted && m.state != Cancelled {
-		return box.Render(m.renderPending())
+func (m *toolCallCmp) viewUnboxed() string {
+	if m.call.State.IsNonFinalState() {
+		switch m.call.State {
+		case enum.ToolCallStatePending:
+			return m.renderPending()
+		case enum.ToolCallStateRunning:
+
+		case enum.ToolCallStatePermission:
+		//case enum.ToolCallStateCompleted:
+		//case enum.ToolCallStateCancelled:
+		case enum.ToolCallStateFailed:
+		}
 	}
 
 	r := registry.lookup(m.call.Name)
 
 	if m.isNested {
-		return box.Render(r.Render(m))
+		return r.Render(m)
 	}
-	return box.Render(r.Render(m))
-}
-
-// State management methods
-
-// SetCancelled sets the tool call state to Cancelled
-func (m *toolCallCmp) SetCancelled() {
-	m.state = Cancelled
+	return r.Render(m)
 }
 
 func (m *toolCallCmp) copyTool() tea.Cmd {
@@ -237,7 +214,10 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		}
 	}
 
-	if m.result.ToolCallID != "" {
+	if m.call.State == enum.ToolCallStateCompleted {
+		if m.result.ToolCallID == "" {
+			log.Error("Unknown state: ToolCallState = Completed and ToolCallID is empty")
+		}
 		if m.result.IsError {
 			parts = append(parts, "### Error:")
 			parts = append(parts, m.result.Content)
@@ -248,12 +228,9 @@ func (m *toolCallCmp) formatToolForCopy() string {
 				parts = append(parts, content)
 			}
 		}
-	} else if m.state == Cancelled {
-		parts = append(parts, "### Status:")
-		parts = append(parts, "Cancelled")
 	} else {
 		parts = append(parts, "### Status:")
-		parts = append(parts, "Pending...")
+		parts = append(parts, m.call.State.FormatToolForCopy())
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -720,7 +697,7 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 // SetToolCall updates the tool call data and stops spinning if finished
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	if m.call.Status == message.ToolStatusCompleted {
+	if m.call.State.IsFinalState() {
 		m.spinning = false
 	}
 }
@@ -768,8 +745,13 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 
 // renderPending displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderPending() string {
+	return m.renderState()
+}
+
+// renderState displays the tool name with a loading animation for pending tool calls
+func (m *toolCallCmp) renderState() string {
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	icon := m.call.State.ToIconColored()
 	if m.isNested {
 		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
 		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
@@ -849,7 +831,8 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished and not in a terminal state.
 func (m *toolCallCmp) shouldSpin() bool {
-	return m.call.Status != message.ToolStatusCompleted && m.state != Cancelled
+	//TODO: review logic
+	return m.call.State != enum.ToolCallStateCompleted && m.call.State != enum.ToolCallStateCancelled
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation

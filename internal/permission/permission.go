@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
@@ -240,4 +241,21 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
+}
+
+func (status PermissionStatus) ToMessage() string {
+	switch status {
+	case PermissionPending:
+		return "Requesting permission..."
+	case PermissionApproved:
+		return "Permission approved. Executing command..."
+	case PermissionDenied:
+		return "Permission denied."
+	default:
+		return "Unknown state: regarding tool call permissions"
+	}
+}
+
+func (status PermissionStatus) ToMessageColored(baseStyle lipgloss.Style) string {
+	return baseStyle.Render(status.ToMessage())
 }

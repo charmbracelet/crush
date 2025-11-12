@@ -12,9 +12,8 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -118,6 +117,7 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
 func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
+	//TODO: revisit logic, now that we have more ToolCallStates
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	if v.result.ToolCallID != "" {
 		if v.result.IsError {
@@ -125,7 +125,7 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 		} else {
 			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
 		}
-	} else if v.state == Cancelled {
+	} else if v.call.State == enum.ToolCallStateCancelled {
 		icon = t.S().Muted.Render(styles.ToolPending)
 	}
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
@@ -139,16 +139,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		return br.makeNestedHeader(v, tool, width, params...)
 	}
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.state == Cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	icon := v.call.State.ToIconColored()
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(false, width-lipgloss.Width(prefix), params...)
@@ -222,7 +213,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		addMain(cmd).
 		addFlag("background", params.RunInBackground).
 		build()
-	if v.call.Status == message.ToolStatusCompleted {
+	if v.call.State == enum.ToolCallStateCompleted {
 		var meta tools.BashResponseMetadata
 		_ = br.unmarshalParams(v.result.Metadata, &meta)
 		if meta.Background {
@@ -267,16 +258,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.state == Cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	icon := v.call.State.ToIconColored()
 
 	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
 	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
@@ -622,7 +604,7 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); v.state == Cancelled && done {
+	if res, done := earlyState(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
 
@@ -888,7 +870,8 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); v.state == Cancelled && done {
+	//TODO: revisit logic, now that we have more ToolCallStates
+	if res, done := earlyState(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
 	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
@@ -984,27 +967,15 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 func earlyState(header string, v *toolCallCmp) (string, bool) {
 	t := styles.CurrentTheme()
 	message := ""
-	messageBaseStyle := t.S().Base.Foreground(t.FgSubtle)
-	switch {
-	case v.result.IsError:
+	//TODO: revisit logic, now that we have more ToolCallStates
+	if v.result.IsError {
 		message = v.renderToolError()
-	case v.state == Cancelled:
-		message = messageBaseStyle.Render("Canceled.")
-	case v.result.ToolCallID == "":
-		switch v.permissionStatus {
-		case permission.PermissionPending:
-			message = messageBaseStyle.Render("Requesting permission...")
-		case permission.PermissionApproved:
-			message = messageBaseStyle.Render("Permission approved. Executing command...")
-		case permission.PermissionDenied:
-			message = messageBaseStyle.Render("Permission denied.")
-
-			// Note: I did not add a default case here, to make sure other developer will notice,
-			//       if a new PermissionStatus is added and add a proper message here.
-
+	} else {
+		m, err := v.call.State.RenderTUIMessageColored(v.permissionStatus)
+		if err != nil {
+			return "", false
 		}
-	default:
-		return "", false
+		message = m
 	}
 
 	message = t.S().Base.PaddingLeft(2).Render(message)

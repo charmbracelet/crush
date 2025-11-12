@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -521,8 +522,10 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 	for _, existingTC := range existingToolCalls {
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
+
+			//TODO: revisit this logic!
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-				existingTC.SetCancelled()
+				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}
 			m.listCmp.UpdateItem(tc.ID, existingTC)
 			return nil
@@ -664,7 +667,7 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 
 	// Add cancelled status if applicable
 	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-		options = append(options, messages.WithToolCallCancelled())
+		options = append(options, messages.WithToolCallState(enum.ToolCallStateCancelled))
 	}
 
 	return options

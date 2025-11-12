@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -300,7 +301,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ID:               id,
 				Name:             toolName,
 				ProviderExecuted: false,
-				Status:           message.ToolStatusPending,
+				State:            enum.ToolCallStatePending,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
@@ -314,12 +315,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Name:             tc.ToolName,
 				Input:            tc.Input,
 				ProviderExecuted: false,
-				Status:           message.ToolStatusCompleted,
+				State:            enum.ToolCallStateRunning,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			//TODO: Do we need to update ToolCallState here? - most likely yet
 			var resultContent string
 			isError := false
 			switch result.Result.GetType() {
@@ -412,8 +414,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			if tc.Status != message.ToolStatusCompleted {
-				tc.Status = message.ToolStatusCompleted
+			if tc.State.IsNonFinalState() {
+				//TODO: double check which state we need to set this to here
+				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
 				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
 				updateErr := a.messages.Update(ctx, *currentAssistant)
@@ -437,13 +440,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 			if found {
+				tc.State = enum.ToolCallStateCompleted
 				continue
 			}
+
 			content := "There was an error while executing the tool"
-			if isCancelErr {
+			switch {
+			case isCancelErr:
+				tc.State = enum.ToolCallStateCancelled
 				content = "Tool execution canceled by user"
-			} else if isPermissionErr {
+			case isPermissionErr:
+				tc.State = enum.ToolCallStatePermission
 				content = "User denied permission"
+			default:
+				tc.State = enum.ToolCallStateFailed
+				//Note: do not need to set content since it's the default
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,

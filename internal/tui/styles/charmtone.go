@@ -56,6 +56,7 @@ func NewCharmtoneTheme() *Theme {
 		RedDark:  charmtone.Sriracha,
 		RedLight: charmtone.Salmon,
 		Cherry:   charmtone.Cherry,
+		Awaiting:  charmtone.Paprika,
 	}
 
 	// Text selection.

@@ -12,6 +12,7 @@ type KeyMap struct {
 	No,
 	Tab,
 	LeftRight,
+	Favorite,
 	Back key.Binding
 }
 
@@ -44,6 +45,10 @@ func DefaultKeyMap() KeyMap {
 		LeftRight: key.NewBinding(
 			key.WithKeys("left", "right"),
 			key.WithHelp("←/→", "switch"),
+		),
+		Favorite: key.NewBinding(
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("ctrl+t", "favorite"),
 		),
 		Back: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),

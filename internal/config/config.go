@@ -203,6 +203,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	FavoritedModels           []string     `json:"favorited_models,omitempty" jsonschema:"description=Models favorited by the user"`
 }
 
 type MCPs map[string]MCPConfig
@@ -698,4 +699,26 @@ func ptrValOr[T any](t *T, el T) T {
 		return el
 	}
 	return *t
+}
+
+func (c *Config) ToggleFavoriteModel(model string) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	if c.Options.FavoritedModels == nil {
+		c.Options.FavoritedModels = []string{}
+	}
+
+	if slices.Contains(c.Options.FavoritedModels, model) {
+		for i, favModels := range c.Options.FavoritedModels {
+			if favModels == model {
+				c.Options.FavoritedModels = slices.Delete(c.Options.FavoritedModels, i, i+1)
+				break
+			}
+		}
+	} else {
+		c.Options.FavoritedModels = append(c.Options.FavoritedModels, model)
+	}
+	err := c.SetConfigField("options.favorited_models", c.Options.FavoritedModels)
+	return err
 }

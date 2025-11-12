@@ -171,6 +171,13 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		return nil, err
 	}
 
+	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
+	// independently of user config on `$HOME/.config/crush/crush.json`.
+	cfg.Options.Attribution = &config.Attribution{
+		TrailerStyle:  "co-authored-by",
+		GeneratedWith: true,
+	}
+
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)
 	if err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ import (
 const (
 	ModelsDialogID dialogs.DialogID = "models"
 
-	defaultWidth = 60
+	defaultWidth = 75
 )
 
 const (
@@ -104,7 +104,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.wWidth = msg.Width
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
-		m.help.SetWidth(m.width - 2)
+		m.help.SetWidth(m.width)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)
@@ -194,19 +194,40 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			if m.modelList.GetModelType() == LargeModelType {
 				m.modelList.SetInputPlaceholder(smallModelInputPlaceholder)
-				return m, m.modelList.SetModelType(SmallModelType)
+				return m, m.modelList.SetModelType(SmallModelType, "")
 			} else {
 				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
-				return m, m.modelList.SetModelType(LargeModelType)
+				return m, m.modelList.SetModelType(LargeModelType, "")
 			}
 		case key.Matches(msg, m.keyMap.Favorite):
-			selectedModel := m.modelList.SelectedModel()
-			if selectedModel == nil {
+			selectedModelOption := m.modelList.SelectedModel()
+			if selectedModelOption == nil {
 				return m, nil
 			}
+			selectedModelID := selectedModelOption.Model.ID
+			selectedModelProviderID := string(selectedModelOption.Provider.ID)
 
-			selectedModelID := selectedModel.Model.ID
-			selectedModelProviderID := string(selectedModel.Provider.ID)
+			cfg := config.Get()
+
+			selectedType := config.SelectedModelTypeLarge
+			if m.modelList.GetModelType() == SmallModelType {
+				selectedType = config.SelectedModelTypeSmall
+			}
+			recentItems := cfg.RecentModels[selectedType]
+			isRecent := false
+			for _, recent := range recentItems {
+				if recent.Provider == selectedModelProviderID && recent.Model == selectedModelID {
+					isRecent = true
+					break
+				}
+			}
+
+			var targetID string
+			if isRecent {
+				targetID = fmt.Sprintf("recent::%s:%s", selectedModelProviderID, selectedModelID)
+			} else {
+				targetID = fmt.Sprintf("%s:%s", selectedModelProviderID, selectedModelID)
+			}
 
 			sm := config.SelectedModel{
 				Model:    selectedModelID,
@@ -216,7 +237,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if err != nil {
 				return m, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
 			}
-			return m, m.modelList.SetModelType(m.modelList.GetModelType())
+			return m, m.modelList.SetModelType(m.modelList.GetModelType(), targetID)
 		case key.Matches(msg, m.keyMap.Close):
 			if m.needsAPIKey {
 				if m.isAPIKeyValid {
@@ -287,7 +308,7 @@ func (m *modelDialogCmp) View() string {
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-lipgloss.Width(radio)-5)+" "+radio),
 		listView,
 		"",
-		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		t.S().Base.Width(m.width).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
 	return m.style().Render(content)
 }

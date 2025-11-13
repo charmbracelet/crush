@@ -199,6 +199,24 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
+		case key.Matches(msg, m.keyMap.Favorite):
+			selectedModel := m.modelList.SelectedModel()
+			if selectedModel == nil {
+				return m, nil
+			}
+
+			selectedModelID := selectedModel.Model.ID
+			selectedModelProviderID := string(selectedModel.Provider.ID)
+
+			sm := config.SelectedModel{
+				Model:    selectedModelID,
+				Provider: selectedModelProviderID,
+			}
+			err := config.Get().ToggleFavoriteModel(&sm)
+			if err != nil {
+				return m, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
+			}
+			return m, m.modelList.SetModelType(m.modelList.GetModelType())
 		case key.Matches(msg, m.keyMap.Close):
 			if m.needsAPIKey {
 				if m.isAPIKeyValid {

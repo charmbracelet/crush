@@ -404,6 +404,17 @@
           "type": "boolean",
           "description": "Disable sending metrics",
           "default": false
+        },
+        "initialize_as": {
+          "type": "string",
+          "description": "Name of the context file to create/update during project initialization",
+          "default": "AGENTS.md",
+          "examples": [
+            "AGENTS.md",
+            "CRUSH.md",
+            "CLAUDE.md",
+            "docs/LLMs.md"
+          ]
         }
       },
       "additionalProperties": false,

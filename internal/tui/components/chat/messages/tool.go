@@ -919,14 +919,7 @@ func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
 		}
 		return enum.ToolCallStateCompleted
 	}
-	
+
 	// If no result, use the current tool call state
 	return m.call.State
-}
-
-// getEffectiveDisplayIcon returns the appropriate icon for display purposes
-// using our state-aware icon system while preserving result priority
-func (m *toolCallCmp) getEffectiveDisplayIcon() string {
-	effectiveState := m.getEffectiveDisplayState()
-	return effectiveState.ToIconColored()
 }

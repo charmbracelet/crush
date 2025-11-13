@@ -118,7 +118,7 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
 	// Use state-aware icon system while preserving result priority logic
-	icon := v.getEffectiveDisplayIcon()
+	icon := v.getEffectiveDisplayState().ToIconColored()
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)

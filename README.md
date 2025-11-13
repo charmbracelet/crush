@@ -335,6 +335,28 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Initialization
+
+When you initialize a project, Crush analyzes your codebase and creates
+a context file that helps it work more effectively in future sessions.
+By default, this file is named `AGENTS.md`, but you can customize the
+name and location with the `initialize_as` option:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "initialize_as": "AGENTS.md"
+  }
+}
+```
+
+This is useful if you prefer a different naming convention or want to
+place the file in a specific directory (e.g., `CRUSH.md` or
+`docs/LLMs.md`). Crush will fill the file with project-specific context
+like build commands, code patterns, and conventions it discovered during
+initialization.
+
 ### Attribution Settings
 
 By default, Crush adds attribution information to Git commits and pull requests

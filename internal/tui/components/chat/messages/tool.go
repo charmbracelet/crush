@@ -886,10 +886,10 @@ func (m *toolCallCmp) updateAnimationForState() {
 		m.anim = anim.New(anim.Settings{
 			Size:        10,
 			Label:       "",
-			GradColorA:  t.Primary,  // Restore original visibility
+			GradColorA:  t.Primary, // Restore original visibility
 			GradColorB:  t.Secondary,
 			LabelColor:  t.FgBase,
-			CycleColors: true,  // Restore original cycling
+			CycleColors: true, // Restore original cycling
 		})
 	}
 

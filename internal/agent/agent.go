@@ -471,7 +471,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				content = "User denied permission"
 			default:
 				tc.State = enum.ToolCallStateFailed
-				// Note: do not need to set content since it's the default
+				// Note: content already set to default error message above
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,

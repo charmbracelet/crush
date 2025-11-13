@@ -105,20 +105,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	for _, opt := range opts {
 		opt(m)
 	}
-	t := styles.CurrentTheme()
 	m.updateAnimationForState()
-	
-	// Override for nested tools to ensure consistent styling
-	if m.isNested {
-		m.anim = anim.New(anim.Settings{
-			Size:        10,
-			Label:       "",
-			GradColorA:  t.FgMuted,
-			GradColorB:  t.FgMuted,
-			LabelColor:  t.FgSubtle,
-			CycleColors: false,
-		})
-	}
 	return m
 }
 
@@ -164,16 +151,7 @@ func (m *toolCallCmp) View() string {
 
 func (m *toolCallCmp) viewUnboxed() string {
 	if m.call.State.IsNonFinalState(m.permissionStatus) {
-		switch m.call.State {
-		case enum.ToolCallStatePending:
-			return m.renderState()
-		case enum.ToolCallStateRunning:
-			return m.renderState()
-		case enum.ToolCallStatePermission:
-			return m.renderState()
-		case enum.ToolCallStateFailed:
-			return m.renderState()
-		}
+		return m.renderState()
 	}
 
 	r := registry.lookup(m.call.Name)
@@ -903,14 +881,15 @@ func (m *toolCallCmp) updateAnimationForState() {
 		})
 	}
 
+	// Override for nested tools to ensure consistent styling
 	if m.isNested {
 		m.anim = anim.New(anim.Settings{
 			Size:        10,
 			Label:       "",
-			GradColorA:  t.FgMuted,
-			GradColorB:  t.FgMuted,
-			LabelColor:  t.FgSubtle,
-			CycleColors: false,
+			GradColorA:  t.Primary,  // Restore original visibility
+			GradColorB:  t.Secondary,
+			LabelColor:  t.FgBase,
+			CycleColors: true,  // Restore original cycling
 		})
 	}
 

@@ -36,7 +36,6 @@ type ToolCallCmp interface {
 	GetToolResult() message.ToolResult // Access to tool result data
 	SetToolResult(message.ToolResult)  // Update tool result
 	SetToolCall(message.ToolCall)      // Update tool call
-	SetCancelled()                     // Mark as cancelled
 	ParentMessageID() string           // Get parent message ID
 	Spinning() bool                    // Animation state for pending tools
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
@@ -855,6 +854,11 @@ func (m *toolCallCmp) ID() string {
 // SetPermissionStatus sets the permission status for this tool call
 func (m *toolCallCmp) SetPermissionStatus(status permission.PermissionStatus) {
 	m.permissionStatus = status
+}
+
+// SetToolCallState sets the tool call state
+func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
+	m.call.State = state
 }
 
 // SetPermissionRequested marks that a permission request was made for this tool call

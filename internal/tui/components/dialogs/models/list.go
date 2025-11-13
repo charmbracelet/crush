@@ -72,7 +72,7 @@ func (m *ModelListComponent) Init() tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 		}
 	}
-	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType))
+	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType, ""))
 	return tea.Batch(cmds...)
 }
 
@@ -104,7 +104,7 @@ func (m *ModelListComponent) SelectedModel() *ModelOption {
 	return &model
 }
 
-func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
+func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
@@ -126,7 +126,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	}
 
 	// first none section
-	selectedItemID := ""
+	hasPreselectedID := selectedID != ""
+	selectedItemID := selectedID
 	itemsByKey := make(map[string]list.CompletionItem[ModelOption])
 
 	cfg := config.Get()
@@ -210,8 +211,10 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				itemsByKey[key] = item
 
 				group.Items = append(group.Items, item)
-				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
-					selectedItemID = item.ID()
+				if !hasPreselectedID && selectedItemID == "" {
+					if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
+						selectedItemID = item.ID()
+					}
 				}
 			}
 			groups = append(groups, group)
@@ -270,19 +273,33 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			Section: section,
 		}
 		for _, model := range displayProvider.Models {
+			var isFavorite bool = false
 			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
-				model.Name = " ✦ " + model.Name + fmt.Sprintf(" (%s)", displayProvider.Name)
+				model.Name = " ✦ " + model.Name
+				isFavorite = true
 			}
 			modelOption := ModelOption{
 				Provider: displayProvider,
 				Model:    model,
 			}
 			key := modelKey(string(displayProvider.ID), model.ID)
-			item := list.NewCompletionItem(
-				model.Name,
-				modelOption,
-				list.WithCompletionID(key),
-			)
+
+			var item list.CompletionItem[ModelOption]
+
+			if isFavorite {
+				item = list.NewCompletionItem(
+					model.Name,
+					modelOption,
+					list.WithCompletionID(key),
+					list.WithCompletionShortcut(string(displayProvider.Name)),
+				)
+			} else {
+				item = list.NewCompletionItem(
+					model.Name,
+					modelOption,
+					list.WithCompletionID(key),
+				)
+			}
 
 			itemsByKey[key] = item
 
@@ -292,11 +309,17 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				group.Items = append(group.Items, item)
 			}
 
-			if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
-				selectedItemID = item.ID()
+			if !hasPreselectedID && selectedItemID == "" {
+				if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
+				}
 			}
 		}
 		groups = append(groups, group)
+	}
+
+	if len(favGroup.Items) > 0 {
+		groups = append([]list.Group[list.CompletionItem[ModelOption]]{favGroup}, groups...)
 	}
 
 	if len(recentItems) > 0 {
@@ -325,8 +348,10 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				list.WithCompletionShortcut(providerName),
 			)
 			recentGroup.Items = append(recentGroup.Items, item)
-			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
-				selectedItemID = recentID
+			if !hasPreselectedID {
+				if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
+					selectedItemID = recentID
+				}
 			}
 		}
 
@@ -340,15 +365,10 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			groups = append([]list.Group[list.CompletionItem[ModelOption]]{recentGroup}, groups...)
 		}
 	}
-	finalGroups := []list.Group[list.CompletionItem[ModelOption]]{}
-	if len(favGroup.Items) > 0 {
-		finalGroups = append(finalGroups, favGroup)
-	}
-	finalGroups = append(finalGroups, groups...)
 
 	var cmds []tea.Cmd
 
-	cmd := m.list.SetGroups(finalGroups)
+	cmd := m.list.SetGroups(groups)
 
 	if cmd != nil {
 		cmds = append(cmds, cmd)

@@ -185,7 +185,7 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if err != nil {
 				return s, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
 			}
-			return s, s.modelList.SetModelType(s.modelList.GetModelType())
+			return s, s.modelList.SetModelType(s.modelList.GetModelType(), selectedModelID)
 		case key.Matches(msg, s.keyMap.Select):
 			if s.isAPIKeyValid {
 				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)

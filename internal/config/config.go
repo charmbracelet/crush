@@ -535,6 +535,28 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 	return nil
 }
 
+func (c *Config) ToggleFavoriteModel(selectedModel *SelectedModel) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	if c.Options.FavoritedModels == nil {
+		c.Options.FavoritedModels = []SelectedModel{}
+	}
+
+	i := slices.IndexFunc(c.Options.FavoritedModels, func(m SelectedModel) bool {
+		return m.Model == selectedModel.Model && m.Provider == selectedModel.Provider
+	})
+
+	if i != -1 {
+		c.Options.FavoritedModels = slices.Delete(c.Options.FavoritedModels, i, i+1)
+	} else {
+		c.Options.FavoritedModels = append(c.Options.FavoritedModels, *selectedModel)
+	}
+	err := c.SetConfigField("options.favorited_models", c.Options.FavoritedModels)
+
+	return err
+}
+
 func allToolNames() []string {
 	return []string{
 		"agent",
@@ -699,26 +721,4 @@ func ptrValOr[T any](t *T, el T) T {
 		return el
 	}
 	return *t
-}
-
-func (c *Config) ToggleFavoriteModel(selectedModel *SelectedModel) error {
-	if c.Options == nil {
-		c.Options = &Options{}
-	}
-	if c.Options.FavoritedModels == nil {
-		c.Options.FavoritedModels = []SelectedModel{}
-	}
-
-	i := slices.IndexFunc(c.Options.FavoritedModels, func(m SelectedModel) bool {
-		return m.Model == selectedModel.Model && m.Provider == selectedModel.Provider
-	})
-
-	if i != -1 {
-		c.Options.FavoritedModels = slices.Delete(c.Options.FavoritedModels, i, i+1)
-	} else {
-		c.Options.FavoritedModels = append(c.Options.FavoritedModels, *selectedModel)
-	}
-	err := c.SetConfigField("options.favorited_models", c.Options.FavoritedModels)
-
-	return err
 }

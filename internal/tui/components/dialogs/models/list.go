@@ -197,27 +197,58 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 			group := list.Group[list.CompletionItem[ModelOption]]{
 				Section: section,
 			}
+
+			totalModels := len(configProvider.Models)
+			var favoriteCount int = 0
+
 			for _, model := range configProvider.Models {
+				var isFavorite bool = false
+				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
+					model.Name = " ✦ " + model.Name
+					isFavorite = true
+				}
 				modelOption := ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}
 				key := modelKey(string(configProvider.ID), model.ID)
-				item := list.NewCompletionItem(
-					model.Name,
-					modelOption,
-					list.WithCompletionID(key),
-				)
+
+				var item list.CompletionItem[ModelOption]
+
+				if isFavorite {
+					item = list.NewCompletionItem(
+						model.Name,
+						modelOption,
+						list.WithCompletionID(key),
+						list.WithCompletionShortcut(string(configProvider.Name)),
+					)
+				} else {
+					item = list.NewCompletionItem(
+						model.Name,
+						modelOption,
+						list.WithCompletionID(key),
+					)
+				}
+
 				itemsByKey[key] = item
 
-				group.Items = append(group.Items, item)
+				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
+					favoriteCount++
+					favGroup.Items = append(favGroup.Items, item)
+				} else {
+					group.Items = append(group.Items, item)
+				}
+
 				if !hasPreselectedID && selectedItemID == "" {
 					if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
 						selectedItemID = item.ID()
 					}
 				}
 			}
-			groups = append(groups, group)
+
+			if favoriteCount < totalModels {
+				groups = append(groups, group)
+			}
 
 			addedProviders[providerID] = true
 		}
@@ -272,6 +303,10 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,
 		}
+
+		totalModels := len(displayProvider.Models)
+		var favoriteCount int = 0
+
 		for _, model := range displayProvider.Models {
 			var isFavorite bool = false
 			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
@@ -304,6 +339,7 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 			itemsByKey[key] = item
 
 			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
+				favoriteCount++
 				favGroup.Items = append(favGroup.Items, item)
 			} else {
 				group.Items = append(group.Items, item)
@@ -315,7 +351,9 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 				}
 			}
 		}
-		groups = append(groups, group)
+		if favoriteCount < totalModels {
+			groups = append(groups, group)
+		}
 	}
 
 	if len(favGroup.Items) > 0 {

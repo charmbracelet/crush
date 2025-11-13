@@ -172,8 +172,16 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if selectedModel == nil {
 				return s, nil
 			}
+
 			selectedModelID := selectedModel.Model.ID
-			err := config.Get().ToggleFavoriteModel(selectedModelID)
+			selectedModelProviderID := string(selectedModel.Provider.ID)
+
+			sm := config.SelectedModel{
+				Model:    selectedModelID,
+				Provider: selectedModelProviderID,
+			}
+
+			err := config.Get().ToggleFavoriteModel(&sm)
 			if err != nil {
 				return s, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
 			}

@@ -107,7 +107,18 @@ func (m *ModelListComponent) SelectedModel() *ModelOption {
 func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
-	favoriteModels := config.Get().Options.FavoritedModels
+
+	// create and populate string slices containing all model IDs and provider IDs
+	// will be used to ensure that favorited models are favorited based on both ID
+	favoritedModelsConfig := config.Get().Options.FavoritedModels
+	favoriteModels := make([]string, len(favoritedModelsConfig))
+	for i, fm := range favoritedModelsConfig {
+		favoriteModels[i] = fm.Model
+	}
+	favoriteModelsProviders := make([]string, len(favoritedModelsConfig))
+	for i, fmp := range favoritedModelsConfig {
+		favoriteModelsProviders[i] = fmp.Provider
+	}
 
 	var groups []list.Group[list.CompletionItem[ModelOption]]
 	favGroup := list.Group[list.CompletionItem[ModelOption]]{
@@ -259,8 +270,8 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			Section: section,
 		}
 		for _, model := range displayProvider.Models {
-			if slices.Contains(favoriteModels, model.ID) {
-				model.Name = " ✦ " + model.Name
+			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
+				model.Name = " ✦ " + model.Name + fmt.Sprintf(" (%s)", displayProvider.Name)
 			}
 			modelOption := ModelOption{
 				Provider: displayProvider,
@@ -275,7 +286,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 
 			itemsByKey[key] = item
 
-			if slices.Contains(favoriteModels, model.ID) {
+			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
 				favGroup.Items = append(favGroup.Items, item)
 			} else {
 				group.Items = append(group.Items, item)

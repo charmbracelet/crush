@@ -117,7 +117,7 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
 func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
-	//TODO: revisit logic, now that we have more ToolCallStates
+	// TODO: revisit logic, now that we have more ToolCallStates
 	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
 	if v.result.ToolCallID != "" {
 		if v.result.IsError {
@@ -870,7 +870,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
-	//TODO: revisit logic, now that we have more ToolCallStates
+	// TODO: revisit logic, now that we have more ToolCallStates
 	if res, done := earlyState(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
@@ -967,7 +967,7 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 func earlyState(header string, v *toolCallCmp) (string, bool) {
 	t := styles.CurrentTheme()
 	message := ""
-	//TODO: revisit logic, now that we have more ToolCallStates
+	// TODO: revisit logic, now that we have more ToolCallStates
 	if v.result.IsError {
 		message = v.renderToolError()
 	} else {

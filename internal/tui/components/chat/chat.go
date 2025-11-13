@@ -523,7 +523,7 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
 
-			//TODO: revisit this logic!
+			// TODO: revisit this logic!
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
 				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}

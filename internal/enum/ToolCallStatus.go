@@ -53,11 +53,11 @@ func (state ToolCallState) ToIcon() string {
 	case ToolCallStateCompleted:
 		return styles.ToolSuccess
 	case ToolCallStateCancelled:
-		return styles.ToolPending
+		return styles.ToolCancel
 	case ToolCallStateFailed:
 		return styles.ToolError
 	default:
-		//In case of unknown states we also return the error Icon
+		// In case of unknown states we also return the error Icon
 		return styles.ToolError
 	}
 }
@@ -66,21 +66,20 @@ func (state ToolCallState) ToColor() color.Color {
 	t := styles.CurrentTheme()
 	switch state {
 	case ToolCallStatePending:
-		//TODO: random color must be replace with some kind of Gray.
-		return t.Info //TODO: not sure if this is a shade of gray
+		// TODO: random color must be replace with some kind of Gray.
+		return t.Info // TODO: not sure if this is a shade of gray
 	case ToolCallStatePermission:
 		return t.Paprika
 	case ToolCallStateRunning:
-		// TODO: I am for now sticking with GreenDark instead of Success since that was used before.
-		return t.GreenDark //TODO consider: t.Success
+		return t.GreenDark // Use darker green for active running state
 	case ToolCallStateCompleted:
-		return t.Green //TODO consider: t.Success
+		return t.Green // Use bright green for successful completion
 	case ToolCallStateCancelled:
-		return t.FgMuted //TODO: consider: t.Error
+		return t.FgMuted // Muted is appropriate for user-initiated cancellation
 	case ToolCallStateFailed:
-		return t.RedDark //TODO: consider: t.Error
+		return t.Error // Use error color for failed operations
 	default:
-		//In case of unknown states we also return the error Icon
+		// In case of unknown states we also return the error Icon
 		return t.Error
 	}
 }
@@ -102,13 +101,15 @@ func (state ToolCallState) FormatToolForCopy() string {
 		return "Cancelled"
 	case ToolCallStateFailed:
 		return "Failed"
+	case ToolCallStateCompleted:
+		return "" // Final states don't need status messages
 	default:
 		return ""
 	}
 }
 
 func (state ToolCallState) renderTUIMessage(permissionStatus permission.PermissionStatus) (string, error) {
-	//TODO: revisit logic, now that we have more ToolCallStates
+	// TODO: revisit logic, now that we have more ToolCallStates
 	switch state {
 	case ToolCallStateFailed:
 		return "Tool call failed.", nil

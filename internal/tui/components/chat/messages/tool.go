@@ -106,20 +106,17 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 		opt(m)
 	}
 	t := styles.CurrentTheme()
-	m.anim = anim.New(anim.Settings{
-		Size:        15,
-		Label:       "Working",
-		GradColorA:  t.Primary,
-		GradColorB:  t.Secondary,
-		LabelColor:  t.FgBase,
-		CycleColors: true,
-	})
+	m.updateAnimationForState()
+	
+	// Override for nested tools to ensure consistent styling
 	if m.isNested {
 		m.anim = anim.New(anim.Settings{
 			Size:        10,
-			GradColorA:  t.Primary,
-			GradColorB:  t.Secondary,
-			CycleColors: true,
+			Label:       "",
+			GradColorA:  t.FgMuted,
+			GradColorB:  t.FgMuted,
+			LabelColor:  t.FgSubtle,
+			CycleColors: false,
 		})
 	}
 	return m
@@ -169,13 +166,13 @@ func (m *toolCallCmp) viewUnboxed() string {
 	if m.call.State.IsNonFinalState(m.permissionStatus) {
 		switch m.call.State {
 		case enum.ToolCallStatePending:
-			return m.renderPending()
+			return m.renderState()
 		case enum.ToolCallStateRunning:
-
+			return m.renderState()
 		case enum.ToolCallStatePermission:
-		//case enum.ToolCallStateCompleted:
-		//case enum.ToolCallStateCancelled:
+			return m.renderState()
 		case enum.ToolCallStateFailed:
+			return m.renderState()
 		}
 	}
 
@@ -743,10 +740,6 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 // Rendering methods
 
 // renderPending displays the tool name with a loading animation for pending tool calls
-func (m *toolCallCmp) renderPending() string {
-	return m.renderState()
-}
-
 // renderState displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderState() string {
 	t := styles.CurrentTheme()
@@ -830,8 +823,8 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // shouldSpin determines whether the tool call should show a loading animation.
 // Returns true if the tool call is not finished and not in a terminal state.
 func (m *toolCallCmp) shouldSpin() bool {
-	//TODO: review logic
-	return m.call.State != enum.ToolCallStateCompleted && m.call.State != enum.ToolCallStateCancelled
+	// Tools should only spin when in non-final states
+	return m.call.State.IsNonFinalState(m.permissionStatus)
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation
@@ -859,6 +852,70 @@ func (m *toolCallCmp) SetPermissionStatus(status permission.PermissionStatus) {
 // SetToolCallState sets the tool call state
 func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 	m.call.State = state
+	m.updateAnimationForState()
+}
+
+// updateAnimationForState reconfigures animation based on current tool call state
+func (m *toolCallCmp) updateAnimationForState() {
+	t := styles.CurrentTheme()
+
+	// Configure animation based on tool call state
+	switch m.call.State {
+	case enum.ToolCallStatePending:
+		// State 1 (Unstarted): static - no animation
+		m.anim = anim.New(anim.Settings{
+			Size:        15,
+			Label:       "Pending",
+			GradColorA:  t.FgMuted,
+			GradColorB:  t.FgMuted,
+			LabelColor:  t.FgSubtle,
+			CycleColors: false,
+		})
+	case enum.ToolCallStatePermission:
+		// State 2 (Awaiting permission): timer counts up every 1s
+		m.anim = anim.New(anim.Settings{
+			Size:        15,
+			Label:       "Requesting Permission",
+			GradColorA:  t.Paprika,
+			GradColorB:  t.Paprika,
+			LabelColor:  t.FgBase,
+			CycleColors: false,
+		})
+	case enum.ToolCallStateRunning:
+		// State 3 (Running): dot blinks every 1s and timer counts up
+		m.anim = anim.New(anim.Settings{
+			Size:        15,
+			Label:       "Running",
+			GradColorA:  t.GreenDark,
+			GradColorB:  t.Green,
+			LabelColor:  t.FgBase,
+			CycleColors: true,
+		})
+	case enum.ToolCallStateCompleted, enum.ToolCallStateFailed, enum.ToolCallStateCancelled:
+		// State 4 & 5 (Done/Failed/Cancelled): static - no animation
+		m.anim = anim.New(anim.Settings{
+			Size:        15,
+			Label:       "",
+			GradColorA:  t.FgMuted,
+			GradColorB:  t.FgMuted,
+			LabelColor:  t.FgSubtle,
+			CycleColors: false,
+		})
+	}
+
+	if m.isNested {
+		m.anim = anim.New(anim.Settings{
+			Size:        10,
+			Label:       "",
+			GradColorA:  t.FgMuted,
+			GradColorB:  t.FgMuted,
+			LabelColor:  t.FgSubtle,
+			CycleColors: false,
+		})
+	}
+
+	// Update spinning state based on new state
+	m.spinning = m.shouldSpin()
 }
 
 // SetPermissionRequested marks that a permission request was made for this tool call

@@ -321,7 +321,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
-			//TODO: Do we need to update ToolCallState here? - most likely yet
 			var resultContent string
 			isError := false
 			switch result.Result.GetType() {
@@ -339,6 +338,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			case fantasy.ToolResultContentTypeMedia:
 				// TODO: handle this message type
 			}
+
+			// Update tool call state based on result
+			for i, part := range currentAssistant.Parts {
+				if tc, ok := part.(message.ToolCall); ok && tc.ID == result.ToolCallID {
+					newState := enum.ToolCallStateCompleted
+					if isError {
+						newState = enum.ToolCallStateFailed
+					}
+					currentAssistant.Parts[i] = message.ToolCall{
+						ID:    tc.ID,
+						Name:  tc.Name,
+						Input: tc.Input,
+						State: newState,
+					}
+					break
+				}
+			}
+
 			toolResult := message.ToolResult{
 				ToolCallID: result.ToolCallID,
 				Name:       result.ToolName,
@@ -415,7 +432,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 		for _, tc := range toolCalls {
 			if tc.State.IsNonFinalState(permission.PermissionPending) {
-				//TODO: double check which state we need to set this to here
+				// TODO: double check which state we need to set this to here
 				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
 				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
@@ -454,7 +471,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				content = "User denied permission"
 			default:
 				tc.State = enum.ToolCallStateFailed
-				//Note: do not need to set content since it's the default
+				// Note: do not need to set content since it's the default
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,

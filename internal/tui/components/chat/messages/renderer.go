@@ -117,17 +117,8 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
 func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
-	// TODO: revisit logic, now that we have more ToolCallStates
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.call.State == enum.ToolCallStateCancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	// Use state-aware icon system while preserving result priority logic
+	icon := v.getEffectiveDisplayIcon()
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)

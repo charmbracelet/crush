@@ -908,3 +908,25 @@ func (m *toolCallCmp) SetPermissionRequested() {
 func (m *toolCallCmp) SetPermissionGranted() {
 	m.SetPermissionStatus(permission.PermissionApproved)
 }
+
+// getEffectiveDisplayState determines the appropriate state for display purposes
+// considering both tool call state and execution results
+func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
+	// If we have a result, execution outcome takes priority
+	if m.result.ToolCallID != "" {
+		if m.result.IsError {
+			return enum.ToolCallStateFailed
+		}
+		return enum.ToolCallStateCompleted
+	}
+	
+	// If no result, use the current tool call state
+	return m.call.State
+}
+
+// getEffectiveDisplayIcon returns the appropriate icon for display purposes
+// using our state-aware icon system while preserving result priority
+func (m *toolCallCmp) getEffectiveDisplayIcon() string {
+	effectiveState := m.getEffectiveDisplayState()
+	return effectiveState.ToIconColored()
+}

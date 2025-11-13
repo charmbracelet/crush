@@ -166,7 +166,7 @@ func (m *toolCallCmp) View() string {
 }
 
 func (m *toolCallCmp) viewUnboxed() string {
-	if m.call.State.IsNonFinalState() {
+	if m.call.State.IsNonFinalState(m.permissionStatus) {
 		switch m.call.State {
 		case enum.ToolCallStatePending:
 			return m.renderPending()
@@ -696,7 +696,7 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 // SetToolCall updates the tool call data and stops spinning if finished
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	if m.call.State.IsFinalState() {
+	if m.call.State.IsFinalState(m.permissionStatus) {
 		m.spinning = false
 	}
 }

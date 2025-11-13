@@ -31,15 +31,15 @@ const (
 	ToolCallStateCancelled ToolCallState = "cancelled"
 )
 
-func (state ToolCallState) IsFinalState() bool {
-	//TODO: if ToolCallState = Permission && PermissionDenied should be final too; hmm
+func (state ToolCallState) IsFinalState(permissionStatus permission.PermissionStatus) bool {
 	return state == ToolCallStateCompleted ||
 		state == ToolCallStateFailed ||
-		state == ToolCallStateCancelled
+		state == ToolCallStateCancelled ||
+		(state == ToolCallStatePermission && permissionStatus == permission.PermissionDenied)
 }
 
-func (state ToolCallState) IsNonFinalState() bool {
-	return !state.IsFinalState()
+func (state ToolCallState) IsNonFinalState(permissionStatus permission.PermissionStatus) bool {
+	return !state.IsFinalState(permissionStatus)
 }
 
 func (state ToolCallState) ToIcon() string {

@@ -414,7 +414,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			if tc.State.IsNonFinalState() {
+			if tc.State.IsNonFinalState(permission.PermissionPending) {
 				//TODO: double check which state we need to set this to here
 				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
 				tc.Input = "{}"

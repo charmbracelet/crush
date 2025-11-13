@@ -364,6 +364,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
 		}
 	}
+	if c.Options.InitializeAs == "" {
+		c.Options.InitializeAs = defaultInitializeAs
+	}
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations

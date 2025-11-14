@@ -113,7 +113,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 // Init initializes the tool call component and starts animations if needed.
 // Returns a command to start the animation for pending tool calls.
 func (m *toolCallCmp) Init() tea.Cmd {
-	m.spinning = m.shouldSpin()
+	m.UpdateSpinner()
 	return m.anim.Init()
 }
 
@@ -672,12 +672,10 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 	return result.String()
 }
 
-// SetToolCall updates the tool call data and stops spinning if finished
+// SetToolCall updates the tool call data and updates spinning state
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	if m.call.State.IsFinalState(m.permissionStatus) {
-		m.spinning = false
-	}
+	m.UpdateSpinner()
 }
 
 // ParentMessageID returns the ID of the message that initiated this tool call
@@ -685,10 +683,10 @@ func (m *toolCallCmp) ParentMessageID() string {
 	return m.parentMessageID
 }
 
-// SetToolResult updates the tool result and stops the spinning animation
+// SetToolResult updates the tool result and updates the spinning animation state
 func (m *toolCallCmp) SetToolResult(result message.ToolResult) {
 	m.result = result
-	m.spinning = false
+	m.UpdateSpinner()
 }
 
 // GetToolCall returns the current tool call data
@@ -809,6 +807,19 @@ func (m *toolCallCmp) shouldSpin() bool {
 	return m.call.State.IsNonFinalState(m.permissionStatus)
 }
 
+// UpdateSpinner updates the spinning state based on current tool call and result data.
+// This is the single source of truth for determining when to show/hide the loading animation.
+func (m *toolCallCmp) UpdateSpinner() {
+	// If we have a result with a ToolCallID, we're done spinning regardless of state
+	if m.result.ToolCallID != "" {
+		m.spinning = false
+		return
+	}
+	
+	// Otherwise, use the standard shouldSpin logic
+	m.spinning = m.shouldSpin()
+}
+
 // Spinning returns whether the tool call is currently showing a loading animation
 func (m *toolCallCmp) Spinning() bool {
 	if m.spinning {
@@ -898,7 +909,7 @@ func (m *toolCallCmp) updateAnimationForState() {
 	}
 
 	// Update spinning state based on new state
-	m.spinning = m.shouldSpin()
+	m.UpdateSpinner()
 }
 
 // SetPermissionRequested marks that a permission request was made for this tool call

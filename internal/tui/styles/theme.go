@@ -24,6 +24,12 @@ const (
 	defaultMargin          = 2
 )
 
+// colorToHex converts a color.Color to hex string for ANSI styles.
+func colorToHex(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
 type Theme struct {
 	Name   string
 	IsDark bool
@@ -215,7 +221,7 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					// BlockPrefix: "\n",
 					// BlockSuffix: "\n",
-					Color: stringPtr(charmtone.Smoke.Hex()),
+					Color: stringPtr(colorToHex(t.FgBase)),
 				},
 				// Margin: uintPtr(defaultMargin),
 			},
@@ -230,7 +236,7 @@ func (t *Theme) buildStyles() *Styles {
 			Heading: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					BlockSuffix: "\n",
-					Color:       stringPtr(charmtone.Malibu.Hex()),
+					Color:       stringPtr(colorToHex(t.Blue)),
 					Bold:        boolPtr(true),
 				},
 			},
@@ -238,8 +244,8 @@ func (t *Theme) buildStyles() *Styles {
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix:          " ",
 					Suffix:          " ",
-					Color:           stringPtr(charmtone.Zest.Hex()),
-					BackgroundColor: stringPtr(charmtone.Charple.Hex()),
+					Color:           stringPtr(colorToHex(t.Yellow)),
+					BackgroundColor: stringPtr(colorToHex(t.Primary)),
 					Bold:            boolPtr(true),
 				},
 			},
@@ -266,7 +272,7 @@ func (t *Theme) buildStyles() *Styles {
 			H6: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix: "###### ",
-					Color:  stringPtr(charmtone.Guac.Hex()),
+					Color:  stringPtr(colorToHex(t.Green)),
 					Bold:   boolPtr(false),
 				},
 			},
@@ -280,7 +286,7 @@ func (t *Theme) buildStyles() *Styles {
 				Bold: boolPtr(true),
 			},
 			HorizontalRule: ansi.StylePrimitive{
-				Color:  stringPtr(charmtone.Charcoal.Hex()),
+				Color:  stringPtr(colorToHex(t.Border)),
 				Format: "\n--------\n",
 			},
 			Item: ansi.StylePrimitive{
@@ -295,117 +301,117 @@ func (t *Theme) buildStyles() *Styles {
 				Unticked:       "[ ] ",
 			},
 			Link: ansi.StylePrimitive{
-				Color:     stringPtr(charmtone.Zinc.Hex()),
+				Color:     stringPtr(colorToHex(t.Blue)),
 				Underline: boolPtr(true),
 			},
 			LinkText: ansi.StylePrimitive{
-				Color: stringPtr(charmtone.Guac.Hex()),
+				Color: stringPtr(colorToHex(t.Green)),
 				Bold:  boolPtr(true),
 			},
 			Image: ansi.StylePrimitive{
-				Color:     stringPtr(charmtone.Cheeky.Hex()),
+				Color:     stringPtr(colorToHex(t.Cherry)),
 				Underline: boolPtr(true),
 			},
 			ImageText: ansi.StylePrimitive{
-				Color:  stringPtr(charmtone.Squid.Hex()),
+				Color:  stringPtr(colorToHex(t.FgMuted)),
 				Format: "Image: {{.text}} →",
 			},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Prefix:          " ",
 					Suffix:          " ",
-					Color:           stringPtr(charmtone.Coral.Hex()),
-					BackgroundColor: stringPtr(charmtone.Charcoal.Hex()),
+					Color:           stringPtr(colorToHex(t.Red)),
+					BackgroundColor: stringPtr(colorToHex(t.BgSubtle)),
 				},
 			},
 			CodeBlock: ansi.StyleCodeBlock{
 				StyleBlock: ansi.StyleBlock{
 					StylePrimitive: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Charcoal.Hex()),
+						Color: stringPtr(colorToHex(t.BgSubtle)),
 					},
 					Margin: uintPtr(defaultMargin),
 				},
 				Chroma: &ansi.Chroma{
 					Text: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Smoke.Hex()),
+						Color: stringPtr(colorToHex(t.FgBase)),
 					},
 					Error: ansi.StylePrimitive{
-						Color:           stringPtr(charmtone.Butter.Hex()),
-						BackgroundColor: stringPtr(charmtone.Sriracha.Hex()),
+						Color:           stringPtr(colorToHex(t.White)),
+						BackgroundColor: stringPtr(colorToHex(t.Error)),
 					},
 					Comment: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Oyster.Hex()),
+						Color: stringPtr(colorToHex(t.FgSubtle)),
 					},
 					CommentPreproc: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Bengal.Hex()),
+						Color: stringPtr(colorToHex(t.Yellow)),
 					},
 					Keyword: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Malibu.Hex()),
+						Color: stringPtr(colorToHex(t.Blue)),
 					},
 					KeywordReserved: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Pony.Hex()),
+						Color: stringPtr(colorToHex(t.Cherry)),
 					},
 					KeywordNamespace: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Pony.Hex()),
+						Color: stringPtr(colorToHex(t.Cherry)),
 					},
 					KeywordType: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guppy.Hex()),
+						Color: stringPtr(colorToHex(t.BlueLight)),
 					},
 					Operator: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Salmon.Hex()),
+						Color: stringPtr(colorToHex(t.RedLight)),
 					},
 					Punctuation: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Zest.Hex()),
+						Color: stringPtr(colorToHex(t.Yellow)),
 					},
 					Name: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Smoke.Hex()),
+						Color: stringPtr(colorToHex(t.FgBase)),
 					},
 					NameBuiltin: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Cheeky.Hex()),
+						Color: stringPtr(colorToHex(t.Cherry)),
 					},
 					NameTag: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Mauve.Hex()),
+						Color: stringPtr(colorToHex(t.Cherry)),
 					},
 					NameAttribute: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Hazy.Hex()),
+						Color: stringPtr(colorToHex(t.Citron)),
 					},
 					NameClass: ansi.StylePrimitive{
-						Color:     stringPtr(charmtone.Salt.Hex()),
+						Color:     stringPtr(colorToHex(t.FgSelected)),
 						Underline: boolPtr(true),
 						Bold:      boolPtr(true),
 					},
 					NameDecorator: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Citron.Hex()),
+						Color: stringPtr(colorToHex(t.Citron)),
 					},
 					NameFunction: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guac.Hex()),
+						Color: stringPtr(colorToHex(t.Green)),
 					},
 					LiteralNumber: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Julep.Hex()),
+						Color: stringPtr(colorToHex(t.GreenLight)),
 					},
 					LiteralString: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Cumin.Hex()),
+						Color: stringPtr(colorToHex(t.Yellow)),
 					},
 					LiteralStringEscape: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Bok.Hex()),
+						Color: stringPtr(colorToHex(t.Tertiary)),
 					},
 					GenericDeleted: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Coral.Hex()),
+						Color: stringPtr(colorToHex(t.Red)),
 					},
 					GenericEmph: ansi.StylePrimitive{
 						Italic: boolPtr(true),
 					},
 					GenericInserted: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Guac.Hex()),
+						Color: stringPtr(colorToHex(t.Green)),
 					},
 					GenericStrong: ansi.StylePrimitive{
 						Bold: boolPtr(true),
 					},
 					GenericSubheading: ansi.StylePrimitive{
-						Color: stringPtr(charmtone.Squid.Hex()),
+						Color: stringPtr(colorToHex(t.FgMuted)),
 					},
 					Background: ansi.StylePrimitive{
-						BackgroundColor: stringPtr(charmtone.Charcoal.Hex()),
+						BackgroundColor: stringPtr(colorToHex(t.BgSubtle)),
 					},
 				},
 			},
@@ -694,4 +700,129 @@ func blendColors(size int, stops ...color.Color) []color.Color {
 	}
 
 	return blended
+}
+
+// ThemeConfig is an interface that config.Theme implements.
+// This avoids circular dependencies while allowing us to accept the config.Theme.
+type ThemeConfig interface {
+	GetName() string
+	GetIsDark() bool
+	GetPrimary() string
+	GetSecondary() string
+	GetTertiary() string
+	GetAccent() string
+	GetBackground() string
+	GetBackgroundLight() string
+	GetBackgroundSubtle() string
+	GetBackgroundOverlay() string
+	GetForeground() string
+	GetForegroundMuted() string
+	GetForegroundSubtle() string
+	GetForegroundSelected() string
+	GetBorder() string
+	GetBorderFocus() string
+	GetSuccess() string
+	GetError() string
+	GetWarning() string
+	GetInfo() string
+	GetRed() string
+	GetGreen() string
+	GetYellow() string
+	GetBlue() string
+	GetMagenta() string
+	GetWhite() string
+	GetBrightRed() string
+	GetBrightGreen() string
+	GetBrightYellow() string
+	GetBrightBlue() string
+}
+
+// NewThemeFromConfig creates a Theme from a config theme.
+// Falls back to charmtone colors for any empty/unspecified colors.
+// If cfg is nil, returns the default charmtone theme.
+func NewThemeFromConfig(cfg ThemeConfig) *Theme {
+	if cfg == nil {
+		return NewCharmtoneTheme()
+	}
+
+	// Helper to parse hex or fall back to default
+	parseOrDefault := func(hex string, defaultColor color.Color) color.Color {
+		if hex == "" {
+			return defaultColor
+		}
+		return ParseHex(hex)
+	}
+
+	name := cfg.GetName()
+	if name == "" {
+		name = "custom"
+	}
+
+	t := &Theme{
+		Name:   name,
+		IsDark: cfg.GetIsDark(),
+
+		Primary:   parseOrDefault(cfg.GetPrimary(), charmtone.Charple),
+		Secondary: parseOrDefault(cfg.GetSecondary(), charmtone.Dolly),
+		Tertiary:  parseOrDefault(cfg.GetTertiary(), charmtone.Bok),
+		Accent:    parseOrDefault(cfg.GetAccent(), charmtone.Zest),
+
+		BgBase:        parseOrDefault(cfg.GetBackground(), charmtone.Pepper),
+		BgBaseLighter: parseOrDefault(cfg.GetBackgroundLight(), charmtone.BBQ),
+		BgSubtle:      parseOrDefault(cfg.GetBackgroundSubtle(), charmtone.Charcoal),
+		BgOverlay:     parseOrDefault(cfg.GetBackgroundOverlay(), charmtone.Iron),
+
+		FgBase:      parseOrDefault(cfg.GetForeground(), charmtone.Ash),
+		FgMuted:     parseOrDefault(cfg.GetForegroundMuted(), charmtone.Squid),
+		FgHalfMuted: parseOrDefault(cfg.GetForegroundMuted(), charmtone.Smoke),
+		FgSubtle:    parseOrDefault(cfg.GetForegroundSubtle(), charmtone.Oyster),
+		FgSelected:  parseOrDefault(cfg.GetForegroundSelected(), charmtone.Salt),
+
+		Border:      parseOrDefault(cfg.GetBorder(), charmtone.Charcoal),
+		BorderFocus: parseOrDefault(cfg.GetBorderFocus(), charmtone.Charple),
+
+		Success: parseOrDefault(cfg.GetSuccess(), charmtone.Guac),
+		Error:   parseOrDefault(cfg.GetError(), charmtone.Sriracha),
+		Warning: parseOrDefault(cfg.GetWarning(), charmtone.Zest),
+		Info:    parseOrDefault(cfg.GetInfo(), charmtone.Malibu),
+
+		White: parseOrDefault(cfg.GetWhite(), charmtone.Butter),
+
+		BlueLight: parseOrDefault(cfg.GetBrightBlue(), charmtone.Sardine),
+		Blue:      parseOrDefault(cfg.GetBlue(), charmtone.Malibu),
+
+		Yellow: parseOrDefault(cfg.GetYellow(), charmtone.Mustard),
+		Citron: parseOrDefault(cfg.GetBrightYellow(), charmtone.Citron),
+
+		Green:      parseOrDefault(cfg.GetBrightGreen(), charmtone.Julep),
+		GreenDark:  parseOrDefault(cfg.GetGreen(), charmtone.Guac),
+		GreenLight: parseOrDefault(cfg.GetBrightGreen(), charmtone.Bok),
+
+		Red:      parseOrDefault(cfg.GetRed(), charmtone.Coral),
+		RedDark:  parseOrDefault(cfg.GetBrightRed(), charmtone.Sriracha),
+		RedLight: parseOrDefault(cfg.GetBrightRed(), charmtone.Salmon),
+		Cherry:   parseOrDefault(cfg.GetMagenta(), charmtone.Cherry),
+	}
+
+	// Text selection
+	selectionBg := parseOrDefault(cfg.GetPrimary(), charmtone.Charple)
+	selectionFg := parseOrDefault(cfg.GetForegroundSelected(), charmtone.Salt)
+	t.TextSelection = lipgloss.NewStyle().Foreground(selectionFg).Background(selectionBg)
+
+	// LSP and MCP status icons
+	offlineColor := parseOrDefault(cfg.GetForegroundMuted(), charmtone.Squid)
+	t.ItemOfflineIcon = lipgloss.NewStyle().Foreground(offlineColor).SetString("●")
+	t.ItemBusyIcon = t.ItemOfflineIcon.Foreground(parseOrDefault(cfg.GetWarning(), charmtone.Citron))
+	t.ItemErrorIcon = t.ItemOfflineIcon.Foreground(parseOrDefault(cfg.GetError(), charmtone.Coral))
+	t.ItemOnlineIcon = t.ItemOfflineIcon.Foreground(parseOrDefault(cfg.GetSuccess(), charmtone.Guac))
+
+	// YOLO mode indicators
+	yoloBg := parseOrDefault(cfg.GetWarning(), charmtone.Citron)
+	yoloFg := parseOrDefault(cfg.GetBackgroundSubtle(), charmtone.Oyster)
+	t.YoloIconFocused = lipgloss.NewStyle().Foreground(yoloFg).Background(yoloBg).Bold(true).SetString(" ! ")
+	t.YoloIconBlurred = t.YoloIconFocused.Foreground(parseOrDefault(cfg.GetBackground(), charmtone.Pepper)).Background(offlineColor)
+	t.YoloDotsFocused = lipgloss.NewStyle().Foreground(parseOrDefault(cfg.GetAccent(), charmtone.Zest)).SetString(":::")
+	t.YoloDotsBlurred = t.YoloDotsFocused.Foreground(offlineColor)
+
+	return t
 }

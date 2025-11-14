@@ -613,6 +613,10 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "theme": {
+          "$ref": "#/$defs/Theme",
+          "description": "Custom color theme for the TUI interface"
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
@@ -623,6 +627,297 @@
       "required": [
         "completions"
       ]
+    },
+    "Theme": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Theme name",
+          "default": "custom",
+          "examples": [
+            "spaceduck"
+          ]
+        },
+        "is_dark": {
+          "type": "boolean",
+          "description": "Whether this is a dark theme",
+          "default": true
+        },
+        "primary": {
+          "type": "string",
+          "format": "color",
+          "description": "Primary accent color",
+          "examples": [
+            "#ce6f8f"
+          ]
+        },
+        "secondary": {
+          "type": "string",
+          "format": "color",
+          "description": "Secondary accent color",
+          "examples": [
+            "#00a3cc"
+          ]
+        },
+        "tertiary": {
+          "type": "string",
+          "format": "color",
+          "description": "Tertiary accent color",
+          "examples": [
+            "#5ccc96"
+          ]
+        },
+        "accent": {
+          "type": "string",
+          "format": "color",
+          "description": "Accent highlight color",
+          "examples": [
+            "#f2ce00"
+          ]
+        },
+        "background": {
+          "type": "string",
+          "format": "color",
+          "description": "Main background color",
+          "examples": [
+            "#0f111b"
+          ]
+        },
+        "background_light": {
+          "type": "string",
+          "format": "color",
+          "description": "Lighter background color",
+          "examples": [
+            "#1a1b26"
+          ]
+        },
+        "background_subtle": {
+          "type": "string",
+          "format": "color",
+          "description": "Subtle background color",
+          "examples": [
+            "#4e5173"
+          ]
+        },
+        "background_overlay": {
+          "type": "string",
+          "format": "color",
+          "description": "Overlay background color",
+          "examples": [
+            "#818596"
+          ]
+        },
+        "foreground": {
+          "type": "string",
+          "format": "color",
+          "description": "Main text color",
+          "examples": [
+            "#ecf0c1"
+          ]
+        },
+        "foreground_muted": {
+          "type": "string",
+          "format": "color",
+          "description": "Muted text color",
+          "examples": [
+            "#acb0d0"
+          ]
+        },
+        "foreground_subtle": {
+          "type": "string",
+          "format": "color",
+          "description": "Subtle text color",
+          "examples": [
+            "#818596"
+          ]
+        },
+        "foreground_selected": {
+          "type": "string",
+          "format": "color",
+          "description": "Selected text color",
+          "examples": [
+            "#ffffff"
+          ]
+        },
+        "border": {
+          "type": "string",
+          "format": "color",
+          "description": "Border color",
+          "examples": [
+            "#4e5173"
+          ]
+        },
+        "border_focus": {
+          "type": "string",
+          "format": "color",
+          "description": "Focused border color",
+          "examples": [
+            "#ce6f8f"
+          ]
+        },
+        "success": {
+          "type": "string",
+          "format": "color",
+          "description": "Success color",
+          "examples": [
+            "#5ccc96"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "format": "color",
+          "description": "Error color",
+          "examples": [
+            "#e33400"
+          ]
+        },
+        "warning": {
+          "type": "string",
+          "format": "color",
+          "description": "Warning color",
+          "examples": [
+            "#f2ce00"
+          ]
+        },
+        "info": {
+          "type": "string",
+          "format": "color",
+          "description": "Info color",
+          "examples": [
+            "#00a3cc"
+          ]
+        },
+        "black": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI black color",
+          "examples": [
+            "#000000"
+          ]
+        },
+        "red": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI red color",
+          "examples": [
+            "#e33400"
+          ]
+        },
+        "green": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI green color",
+          "examples": [
+            "#5ccc96"
+          ]
+        },
+        "yellow": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI yellow color",
+          "examples": [
+            "#f2ce00"
+          ]
+        },
+        "blue": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI blue color",
+          "examples": [
+            "#818596"
+          ]
+        },
+        "magenta": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI magenta color",
+          "examples": [
+            "#ce6f8f"
+          ]
+        },
+        "cyan": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI cyan color",
+          "examples": [
+            "#00a3cc"
+          ]
+        },
+        "white": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI white color",
+          "examples": [
+            "#acb0d0"
+          ]
+        },
+        "bright_black": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright black color",
+          "examples": [
+            "#4e5173"
+          ]
+        },
+        "bright_red": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright red color",
+          "examples": [
+            "#e39400"
+          ]
+        },
+        "bright_green": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright green color",
+          "examples": [
+            "#5ccc96"
+          ]
+        },
+        "bright_yellow": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright yellow color",
+          "examples": [
+            "#f2ce00"
+          ]
+        },
+        "bright_blue": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright blue color",
+          "examples": [
+            "#c1c3cc"
+          ]
+        },
+        "bright_magenta": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright magenta color",
+          "examples": [
+            "#ce6f8f"
+          ]
+        },
+        "bright_cyan": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright cyan color",
+          "examples": [
+            "#00a3cc"
+          ]
+        },
+        "bright_white": {
+          "type": "string",
+          "format": "color",
+          "description": "ANSI bright white color",
+          "examples": [
+            "#acb0d0"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "ToolLs": {
       "properties": {

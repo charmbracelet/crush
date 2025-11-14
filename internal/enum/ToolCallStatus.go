@@ -114,9 +114,9 @@ func (state ToolCallState) renderTUIMessage(permissionStatus permission.Permissi
 	case ToolCallStateFailed:
 		return "Tool call failed.", nil
 	case ToolCallStateCancelled:
-		return "Done", nil
+		return "Cancelled.", nil
 	case ToolCallStateCompleted:
-		return "Completed.", nil
+		return "Done", nil
 	case ToolCallStateRunning:
 		return "Running...", nil
 	case ToolCallStatePending:

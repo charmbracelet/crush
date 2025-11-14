@@ -103,37 +103,23 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 		return v.style().Render(header)
 	}
 
-	// Handle error states
-	if v.result.IsError {
-		return br.renderError(v, "Tool execution failed")
-	}
-
-	// Handle states that shouldn't show content yet
-	if !shouldShowContentForState(v.call.State) {
-		message, err := v.call.State.RenderTUIMessageColored(v.permissionStatus)
-		if err == nil {
-			t := styles.CurrentTheme()
-			message = t.S().Base.PaddingLeft(2).Render(message)
-			return lipgloss.JoinVertical(lipgloss.Left, header, "", message)
-		}
-		return lipgloss.JoinVertical(lipgloss.Left, header, "", err.Error())
-	}
-
 	body := contentRenderer()
 	return joinHeaderBody(header, body)
 }
 
 // shouldShowContentForState determines if content should be displayed for a given tool state
 func shouldShowContentForState(state enum.ToolCallState) bool {
-	switch state {
-	case enum.ToolCallStateFailed, enum.ToolCallStateCancelled,
-		enum.ToolCallStateRunning, enum.ToolCallStatePending:
-		return false
-	case enum.ToolCallStatePermission, enum.ToolCallStateCompleted:
-		return true
-	default:
-		return false
-	}
+	//TODO: test
+	return true
+	//switch state {
+	//case enum.ToolCallStateFailed, enum.ToolCallStateCancelled,
+	//	enum.ToolCallStateRunning, enum.ToolCallStatePending:
+	//	return false
+	//case enum.ToolCallStatePermission, enum.ToolCallStateCompleted:
+	//	return true
+	//default:
+	//	return false
+	//}
 }
 
 // unmarshalParams safely unmarshal JSON parameters

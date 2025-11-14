@@ -84,6 +84,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	enableToonConversion bool
 	isYolo               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -96,6 +97,7 @@ type SessionAgentOptions struct {
 	SystemPromptPrefix   string
 	SystemPrompt         string
 	DisableAutoSummarize bool
+	ToonConversion       bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -113,6 +115,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		enableToonConversion: opts.ToonConversion,
 		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
@@ -219,7 +222,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage(a.enableToonConversion)...)
 			}
 
 			lastSystemRoleInx := 0
@@ -665,7 +668,8 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...mess
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
-		history = append(history, m.ToAIMessage()...)
+
+		history = append(history, m.ToAIMessage(a.enableToonConversion)...)
 	}
 
 	var files []fantasy.FilePart

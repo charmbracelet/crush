@@ -424,7 +424,7 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
 }
 
-func (m *Message) ToAIMessage() []fantasy.Message {
+func (m *Message) ToAIMessage(enableToonConversion bool) []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {
 	case User:
@@ -494,8 +494,12 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 					MediaType: result.MIMEType,
 				}
 			} else {
+				resultContent := result.Content
+				if enableToonConversion {
+					resultContent = ConvertJSONToTOON(resultContent)
+				}
 				content = fantasy.ToolResultOutputContentText{
-					Text: result.Content,
+					Text: resultContent,
 				}
 			}
 			parts = append(parts, fantasy.ToolResultPart{

@@ -353,15 +353,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
-			TrailerStyle:  TrailerStyleCoAuthoredBy,
+			TrailerStyle:  TrailerStyleAssistedBy,
 			GeneratedWith: true,
 		}
 	} else if c.Options.Attribution.TrailerStyle == "" {
 		// Migrate deprecated co_authored_by or apply default
-		if c.Options.Attribution.CoAuthoredBy != nil && !*c.Options.Attribution.CoAuthoredBy {
-			c.Options.Attribution.TrailerStyle = TrailerStyleNone
+		if c.Options.Attribution.CoAuthoredBy != nil {
+			if *c.Options.Attribution.CoAuthoredBy {
+				c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+			} else {
+				c.Options.Attribution.TrailerStyle = TrailerStyleNone
+			}
 		} else {
-			c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
 	if c.Options.InitializeAs == "" {

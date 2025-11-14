@@ -352,11 +352,14 @@ it creates. You can customize this behavior with the `attribution` option:
 }
 ```
 
-- `trailer_style`: Controls the attribution trailer added to commit messages (default: `co-authored-by`)
-  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
-  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush` (includes the model name)
-  - `none`: No attribution trailer
-- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
+- `trailer_style`: Controls the attribution trailer added to commit messages
+  (default: `assisted-by`)
+	- `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
+	  (includes the model name)
+	- `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+	- `none`: No attribution trailer
+- `generated_with`: When true (default), adds `💘 Generated with Crush` line to
+  commit messages and PR descriptions
 
 ### Custom Providers
 

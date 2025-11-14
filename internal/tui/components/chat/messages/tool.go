@@ -54,9 +54,9 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID  string             // ID of the message that initiated this tool call
-	call             message.ToolCall   // The tool call being executed
-	result           message.ToolResult // The result of the tool execution
+	parentMessageID  string                      // ID of the message that initiated this tool call
+	call             message.ToolCall            // The tool call being executed
+	result           message.ToolResult          // The result of the tool execution
 	permissionStatus permission.PermissionStatus // Default will be set in constructor
 
 	// Animation state for pending tool calls
@@ -151,16 +151,19 @@ func (m *toolCallCmp) View() string {
 }
 
 func (m *toolCallCmp) viewUnboxed() string {
-	if m.call.State.IsNonFinalState(m.permissionStatus) {
+	switch m.call.State {
+	case enum.ToolCallStatePending:
 		return m.renderState()
-	}
+	default:
+		{
+			r := registry.lookup(m.call.Name)
 
-	r := registry.lookup(m.call.Name)
-
-	if m.isNested {
-		return r.Render(m)
+			if m.isNested {
+				return r.Render(m)
+			}
+			return r.Render(m)
+		}
 	}
-	return r.Render(m)
 }
 
 func (m *toolCallCmp) copyTool() tea.Cmd {

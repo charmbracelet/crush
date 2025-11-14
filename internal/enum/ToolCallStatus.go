@@ -122,7 +122,7 @@ func (state ToolCallState) renderTUIMessage(permissionStatus permission.Permissi
 	case ToolCallStatePending:
 		return "Waiting for tool to start...", nil
 	case ToolCallStatePermission:
-		return permissionStatus.ToMessage(), nil
+		return permissionStatus.ToMessage()
 	default:
 		return "", errors.New("unknown state: tool call related rendering issue")
 	}
@@ -135,6 +135,22 @@ func (state ToolCallState) RenderTUIMessageColored(permissionStatus permission.P
 	if err != nil {
 		return "", err
 	}
-	// TODO: make the background light gray in case of ToolCallStateCompleted, see: https://github.com/charmbracelet/crush/pull/1385#issuecomment-3504123709
+
+	switch state {
+	case ToolCallStateFailed:
+		{
+			messageBaseStyle = messageBaseStyle.Padding(0, 1).Background(t.Red).Foreground(t.White)
+			//TODO: ERROR content? Most likely not in this function.
+			//err := strings.ReplaceAll(v.result.Content, "\n", " ")
+			//err = fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(v.fit(err, v.textWidth()-2-lipgloss.Width(errTag))))
+		}
+	case ToolCallStateCompleted:
+		{
+			// This should make the background light gray in case of ToolCallStateCompleted, see: https://github.com/charmbracelet/crush/pull/1385#issuecomment-3504123709
+			messageBaseStyle = messageBaseStyle.Padding(0, 1).Background(t.BgBaseLighter).Foreground(t.FgSubtle)
+		}
+
+	}
+
 	return messageBaseStyle.Render(message), nil
 }

@@ -289,7 +289,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		item, ok := a.pages[a.currentPage]
 		if !ok {
 			return a, nil

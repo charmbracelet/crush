@@ -15,6 +15,7 @@ import (
 )
 
 var ErrorPermissionDenied = errors.New("user denied permission")
+var ErrorPermissionStatusUnknown = errors.New("unknown state: regarding tool call permission status")
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
@@ -36,24 +37,18 @@ const (
 	PermissionDenied   PermissionStatus = "denied"
 )
 
-type PermissionNotification struct {
+type PermissionEvent struct {
 	ToolCallID string           `json:"tool_call_id"`
 	Status     PermissionStatus `json:"status"`
 }
 
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID string `json:"id"`
+	CreatePermissionRequest
 }
 
 type Service interface {
-	pubsub.Suscriber[PermissionRequest]
+	pubsub.Subscriber[PermissionRequest]
 	GrantPersistent(permission PermissionRequest)
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
@@ -61,13 +56,13 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
-	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionEvent]
 }
 
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	notificationBroker    *pubsub.Broker[PermissionNotification]
+	EventBroker           *pubsub.Broker[PermissionEvent]
 	workingDir            string
 	sessionPermissions    []PermissionRequest
 	sessionPermissionsMu  sync.RWMutex
@@ -83,7 +78,7 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
 		Status:     PermissionApproved,
 	})
@@ -96,13 +91,11 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.sessionPermissions = append(s.sessionPermissions, permission)
 	s.sessionPermissionsMu.Unlock()
 
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
+	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
 		Status:     PermissionApproved,
 	})
@@ -111,13 +104,11 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 		respCh <- true
 	}
 
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
+	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
 		Status:     PermissionDenied,
 	})
@@ -126,6 +117,10 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 		respCh <- false
 	}
 
+	s.noLongerActiveRequest(permission)
+}
+
+func (s *permissionService) noLongerActiveRequest(permission PermissionRequest) {
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
@@ -137,7 +132,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 
 	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: opts.ToolCallID,
 		Status:     PermissionPending,
 	})
@@ -172,15 +167,10 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		dir = s.workingDir
 	}
 	permission := PermissionRequest{
-		ID:          uuid.New().String(),
-		Path:        dir,
-		SessionID:   opts.SessionID,
-		ToolCallID:  opts.ToolCallID,
-		ToolName:    opts.ToolName,
-		Description: opts.Description,
-		Action:      opts.Action,
-		Params:      opts.Params,
+		ID:                      uuid.New().String(),
+		CreatePermissionRequest: opts,
 	}
+	permission.CreatePermissionRequest.Path = dir
 
 	s.sessionPermissionsMu.RLock()
 	for _, p := range s.sessionPermissions {
@@ -218,8 +208,8 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
-	return s.notificationBroker.Subscribe(ctx)
+func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionEvent] {
+	return s.EventBroker.Subscribe(ctx)
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
@@ -233,7 +223,7 @@ func (s *permissionService) SkipRequests() bool {
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
-		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		EventBroker:         pubsub.NewBroker[PermissionEvent](),
 		workingDir:          workingDir,
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
@@ -243,19 +233,23 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 	}
 }
 
-func (status PermissionStatus) ToMessage() string {
+func (status PermissionStatus) ToMessage() (string, error) {
 	switch status {
 	case PermissionPending:
-		return "Requesting permission..."
+		return "Requesting permission...", nil
 	case PermissionApproved:
-		return "Permission approved. Executing command..."
+		return "Permission approved. Executing command...", nil
 	case PermissionDenied:
-		return "Permission denied."
+		return "Permission denied.", nil
 	default:
-		return "Unknown state: regarding tool call permissions"
+		return "", ErrorPermissionStatusUnknown
 	}
 }
 
-func (status PermissionStatus) ToMessageColored(baseStyle lipgloss.Style) string {
-	return baseStyle.Render(status.ToMessage())
+func (status PermissionStatus) ToMessageColored(baseStyle lipgloss.Style) (string, error) {
+	message, err := status.ToMessage()
+	if err != nil {
+		return "", err
+	}
+	return baseStyle.Render(message), nil
 }

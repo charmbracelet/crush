@@ -191,7 +191,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			cmds = append(cmds, m.CopySelectedText(true))
 			return m, tea.Batch(cmds...)
 		}
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		cmds = append(cmds, m.handlePermissionRequest(msg.Payload))
 		return m, tea.Batch(cmds...)
 	case SessionSelectedMsg:
@@ -244,7 +244,7 @@ func (m *messageListCmp) View() string {
 	return strings.Join(view, "\n")
 }
 
-func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
+func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionEvent) tea.Cmd {
 	items := m.listCmp.Items()
 	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)

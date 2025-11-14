@@ -122,7 +122,8 @@ func (state ToolCallState) renderTUIMessage(permissionStatus permission.Permissi
 	case ToolCallStatePending:
 		return "Waiting for tool to start...", nil
 	case ToolCallStatePermission:
-		return permissionStatus.ToMessage()
+		message, err := permissionStatus.ToMessage()
+		return message, err
 	default:
 		return "", errors.New("unknown state: tool call related rendering issue")
 	}

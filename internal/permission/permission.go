@@ -42,8 +42,10 @@ type PermissionEvent struct {
 	Status     PermissionStatus `json:"status"`
 }
 
+type PermissionRequestId = string
+
 type PermissionRequest struct {
-	ID string `json:"id"`
+	ID PermissionRequestId `json:"id"`
 	CreatePermissionRequest
 }
 
@@ -62,15 +64,13 @@ type Service interface {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	EventBroker           *pubsub.Broker[PermissionEvent]
-	workingDir            string
-	sessionPermissions    []PermissionRequest
-	sessionPermissionsMu  sync.RWMutex
-	pendingRequests       *csync.Map[string, chan bool]
-	autoApproveSessions   map[string]bool
-	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
-	allowedTools          []string
+	uiBroker            *pubsub.Broker[PermissionEvent]
+	workingDir          string
+	sessionPermissions  *csync.Slice[PermissionRequest]
+	pendingRequests     *csync.Map[PermissionRequestId, chan PermissionStatus]
+	autoApproveSessions *csync.Map[string, bool]
+	skip                bool
+	allowedTools        []string
 
 	// used to make sure we only process one request at a time
 	requestMu     sync.Mutex
@@ -78,46 +78,30 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
-		ToolCallID: permission.ToolCallID,
-		Status:     PermissionApproved,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
-	}
-
-	s.sessionPermissionsMu.Lock()
-	s.sessionPermissions = append(s.sessionPermissions, permission)
-	s.sessionPermissionsMu.Unlock()
-
+	s.publishUnsafe(permission, PermissionApproved)
+	s.sessionPermissions.Append(permission)
 	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
-	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
-		ToolCallID: permission.ToolCallID,
-		Status:     PermissionApproved,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
-	}
-
+	s.publishUnsafe(permission, PermissionApproved)
 	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
-	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
+	s.publishUnsafe(permission, PermissionDenied)
+	s.noLongerActiveRequest(permission)
+}
+
+func (s *permissionService) publishUnsafe(permission PermissionRequest, status PermissionStatus) {
+	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
-		Status:     PermissionDenied,
+		Status:     status,
 	})
 	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh <- false
+		respCh <- status
 	}
-
-	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) noLongerActiveRequest(permission PermissionRequest) {
@@ -132,7 +116,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 
 	// tell the UI that a permission was requested
-	s.EventBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
+	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: opts.ToolCallID,
 		Status:     PermissionPending,
 	})
@@ -145,9 +129,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
+	autoApprove, _ := s.autoApproveSessions.Get(opts.SessionID)
 
 	if autoApprove {
 		return true
@@ -172,44 +154,33 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 	permission.CreatePermissionRequest.Path = dir
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
+	for request := range s.sessionPermissions.Seq() {
+		if request.ToolName == permission.ToolName &&
+			request.Action == permission.Action &&
+			request.SessionID == permission.SessionID &&
+			request.Path == permission.Path {
 			return true
 		}
 	}
-	s.sessionPermissionsMu.RUnlock()
-
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
 
 	s.activeRequest = &permission
 
-	respCh := make(chan bool, 1)
+	respCh := make(chan PermissionStatus, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	return <-respCh
+	return <-respCh == PermissionApproved
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
-	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
-	s.autoApproveSessionsMu.Unlock()
+	s.autoApproveSessions.Set(sessionID, true)
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionEvent] {
-	return s.EventBroker.Subscribe(ctx)
+	return s.uiBroker.Subscribe(ctx)
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
@@ -223,13 +194,13 @@ func (s *permissionService) SkipRequests() bool {
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
-		EventBroker:         pubsub.NewBroker[PermissionEvent](),
+		uiBroker:            pubsub.NewBroker[PermissionEvent](),
 		workingDir:          workingDir,
-		sessionPermissions:  make([]PermissionRequest, 0),
-		autoApproveSessions: make(map[string]bool),
+		sessionPermissions:  csync.NewSlice[PermissionRequest](),
+		autoApproveSessions: csync.NewMap[string, bool](),
 		skip:                skip,
 		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[string, chan bool](),
+		pendingRequests:     csync.NewMap[PermissionRequestId, chan PermissionStatus](),
 	}
 }
 

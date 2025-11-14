@@ -62,7 +62,7 @@ func (state ToolCallState) ToIcon() string {
 	}
 }
 
-func (state ToolCallState) ToColor() color.Color {
+func (state ToolCallState) ToFgColor() color.Color {
 	t := styles.CurrentTheme()
 	switch state {
 	case ToolCallStatePending:
@@ -86,7 +86,7 @@ func (state ToolCallState) ToColor() color.Color {
 
 func (state ToolCallState) ToIconColored() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.Foreground(state.ToColor()).Render(state.ToIcon())
+	return t.S().Base.Foreground(state.ToFgColor()).Render(state.ToIcon())
 }
 
 func (state ToolCallState) FormatToolForCopy() string {

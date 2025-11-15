@@ -249,15 +249,7 @@ func (m *messageListCmp) handlePermissionRequest(event permission.PermissionEven
 	if toolCallIndex := m.findToolCallByID(items, event.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 		
-		// Convert permission status to unified ToolCallState
-		switch event.Status {
-		case enum.ToolCallStatePermissionPending:
-			toolCall.SetToolCallState(enum.ToolCallStatePermissionPending)
-		case enum.ToolCallStatePermissionApproved:
-			toolCall.SetToolCallState(enum.ToolCallStatePermissionApproved)
-		case enum.ToolCallStatePermissionDenied:
-			toolCall.SetToolCallState(enum.ToolCallStatePermissionDenied)
-		}
+		toolCall.SetToolCallState(event.Status)
 		
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"image/color"
 
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
@@ -15,8 +14,14 @@ const (
 	// e.g. multiple tool calls at once
 	ToolCallStatePending ToolCallState = "pending"
 
-	// ToolCallStatePermission Tool is in a Permissions related state
-	ToolCallStatePermission ToolCallState = "permission"
+	// ToolCallStatePermissionPending Tool is pending permission approval
+	ToolCallStatePermissionPending ToolCallState = "permission_pending"
+
+	// ToolCallStatePermissionApproved Tool has received permission approval
+	ToolCallStatePermissionApproved ToolCallState = "permission_approved"
+
+	// ToolCallStatePermissionDenied Tool permission was denied
+	ToolCallStatePermissionDenied ToolCallState = "permission_denied"
 
 	// ToolCallStateRunning Tool is actively executing
 	ToolCallStateRunning ToolCallState = "running"
@@ -31,15 +36,15 @@ const (
 	ToolCallStateCancelled ToolCallState = "cancelled"
 )
 
-func (state ToolCallState) IsFinalState(permissionStatus permission.PermissionStatus) bool {
+func (state ToolCallState) IsFinalState() bool {
 	return state == ToolCallStateCompleted ||
 		state == ToolCallStateFailed ||
 		state == ToolCallStateCancelled ||
-		(state == ToolCallStatePermission && permissionStatus == permission.PermissionDenied)
+		state == ToolCallStatePermissionDenied
 }
 
-func (state ToolCallState) IsNonFinalState(permissionStatus permission.PermissionStatus) bool {
-	return !state.IsFinalState(permissionStatus)
+func (state ToolCallState) IsNonFinalState() bool {
+	return !state.IsFinalState()
 }
 
 func (state ToolCallState) ToIcon() string {
@@ -48,7 +53,7 @@ func (state ToolCallState) ToIcon() string {
 		return styles.ToolPending
 	case ToolCallStateRunning:
 		return styles.ToolPending
-	case ToolCallStatePermission:
+	case ToolCallStatePermissionPending:
 		return styles.ToolPending
 	case ToolCallStateCompleted:
 		return styles.ToolSuccess
@@ -68,7 +73,7 @@ func (state ToolCallState) ToFgColor() color.Color {
 	case ToolCallStatePending:
 		// TODO: random color must be replace with some kind of Gray.
 		return t.Info // TODO: not sure if this is a shade of gray
-	case ToolCallStatePermission:
+	case ToolCallStatePermissionPending:
 		return t.Paprika
 	case ToolCallStateRunning:
 		return t.GreenDark // Use darker green for active running state
@@ -95,7 +100,7 @@ func (state ToolCallState) FormatToolForCopy() string {
 		return "Pending..."
 	case ToolCallStateRunning:
 		return "Running..."
-	case ToolCallStatePermission:
+	case ToolCallStatePermissionPending:
 		return "Permissions..."
 	case ToolCallStateCancelled:
 		return "Cancelled"
@@ -108,7 +113,7 @@ func (state ToolCallState) FormatToolForCopy() string {
 	}
 }
 
-func (state ToolCallState) renderTUIMessage(permissionStatus permission.PermissionStatus) (string, error) {
+func (state ToolCallState) renderTUIMessage() (string, error) {
 	// TODO: revisit logic, now that we have more ToolCallStates
 	switch state {
 	case ToolCallStateFailed:
@@ -121,18 +126,21 @@ func (state ToolCallState) renderTUIMessage(permissionStatus permission.Permissi
 		return "Running...", nil
 	case ToolCallStatePending:
 		return "Waiting for tool to start...", nil
-	case ToolCallStatePermission:
-		message, err := permissionStatus.ToMessage()
-		return message, err
+	case ToolCallStatePermissionPending:
+		return "Requesting permission...", nil
+	case ToolCallStatePermissionApproved:
+		return "Permission approved. Executing command...", nil
+	case ToolCallStatePermissionDenied:
+		return "Permission denied.", nil
 	default:
 		return "", errors.New("unknown state: tool call related rendering issue")
 	}
 }
 
-func (state ToolCallState) RenderTUIMessageColored(permissionStatus permission.PermissionStatus) (string, error) {
+func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 	t := styles.CurrentTheme()
 	messageBaseStyle := t.S().Base.Foreground(t.FgSubtle)
-	message, err := state.renderTUIMessage(permissionStatus)
+	message, err := state.renderTUIMessage()
 	if err != nil {
 		return "", err
 	}

@@ -976,7 +976,7 @@ func renderStatusOnly(header string, v *toolCallCmp) (string, bool) {
 	if v.result.IsError {
 		message = v.renderToolCallError()
 	} else {
-		m, err := v.call.State.RenderTUIMessageColored(v.permissionStatus)
+		m, err := v.call.State.RenderTUIMessageColored()
 		if err != nil {
 			return "", false
 		}

@@ -43,7 +43,6 @@ type ToolCallCmp interface {
 	SetIsNested(bool)                  // Set whether this tool call is nested
 	ID() string
 	SetToolCallState(state enum.ToolCallState)
-	SetPermissionStatus(status permission.PermissionStatus) // Set permission status directly
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -804,7 +803,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // Returns true if the tool call is not finished and not in a terminal state.
 func (m *toolCallCmp) shouldSpin() bool {
 	// Tools should only spin when in non-final states
-	return m.call.State.IsNonFinalState(m.permissionStatus)
+	return m.call.State.IsNonFinalState()
 }
 
 // UpdateSpinner updates the spinning state based on current tool call and result data.
@@ -837,11 +836,6 @@ func (m *toolCallCmp) ID() string {
 	return m.call.ID
 }
 
-// SetPermissionStatus sets the permission status for this tool call
-func (m *toolCallCmp) SetPermissionStatus(status permission.PermissionStatus) {
-	m.permissionStatus = status
-}
-
 // SetToolCallState sets the tool call state
 func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 	m.call.State = state
@@ -864,7 +858,7 @@ func (m *toolCallCmp) updateAnimationForState() {
 			LabelColor:  t.FgSubtle,
 			CycleColors: false,
 		})
-	case enum.ToolCallStatePermission:
+	case enum.ToolCallStatePermissionPending:
 		// State 2 (Awaiting permission): timer counts up every 1s
 		m.anim = anim.New(anim.Settings{
 			Size:        15,
@@ -873,6 +867,16 @@ func (m *toolCallCmp) updateAnimationForState() {
 			GradColorB:  t.Paprika,
 			LabelColor:  t.FgBase,
 			CycleColors: false,
+		})
+	case enum.ToolCallStatePermissionApproved:
+		// State 2.5 (Permission approved): transitioning to running
+		m.anim = anim.New(anim.Settings{
+			Size:        15,
+			Label:       "Running",
+			GradColorA:  t.GreenDark,
+			GradColorB:  t.Green,
+			LabelColor:  t.FgBase,
+			CycleColors: true,
 		})
 	case enum.ToolCallStateRunning:
 		// State 3 (Running): dot blinks every 1s and timer counts up
@@ -884,7 +888,7 @@ func (m *toolCallCmp) updateAnimationForState() {
 			LabelColor:  t.FgBase,
 			CycleColors: true,
 		})
-	case enum.ToolCallStateCompleted, enum.ToolCallStateFailed, enum.ToolCallStateCancelled:
+	case enum.ToolCallStateCompleted, enum.ToolCallStateFailed, enum.ToolCallStateCancelled, enum.ToolCallStatePermissionDenied:
 		// State 4 & 5 (Done/Failed/Cancelled): static - no animation
 		m.anim = anim.New(anim.Settings{
 			Size:        15,
@@ -915,13 +919,13 @@ func (m *toolCallCmp) updateAnimationForState() {
 // SetPermissionRequested marks that a permission request was made for this tool call
 // Deprecated: Use SetPermissionStatus(permission.PermissionPending) instead.
 func (m *toolCallCmp) SetPermissionRequested() {
-	m.SetPermissionStatus(permission.PermissionPending)
+	m.SetToolCallState(enum.ToolCallStatePermissionPending)
 }
 
 // SetPermissionGranted marks that permission was granted for this tool call
-// Deprecated: Use SetPermissionStatus(permission.PermissionApproved) instead.
+// Deprecated: Use SetToolCallState(enum.ToolCallStatePermissionApproved) instead.
 func (m *toolCallCmp) SetPermissionGranted() {
-	m.SetPermissionStatus(permission.PermissionApproved)
+	m.SetToolCallState(enum.ToolCallStatePermissionApproved)
 }
 
 // getEffectiveDisplayState determines the appropriate state for display purposes

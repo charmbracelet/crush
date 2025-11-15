@@ -431,7 +431,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			if tc.State.IsNonFinalState(permission.PermissionPending) {
+			if tc.State.IsNonFinalState() {
 				// TODO: double check which state we need to set this to here
 				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
 				tc.Input = "{}"
@@ -467,7 +467,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				tc.State = enum.ToolCallStateCancelled
 				content = "Tool execution canceled by user"
 			case isPermissionErr:
-				tc.State = enum.ToolCallStatePermission
+				tc.State = enum.ToolCallStatePermissionDenied
 				content = "User denied permission"
 			default:
 				tc.State = enum.ToolCallStateFailed

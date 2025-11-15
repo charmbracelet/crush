@@ -34,7 +34,7 @@ type PermissionRequest struct {
 }
 
 type PermissionEvent struct {
-	ToolCallID string          `json:"tool_call_id"`
+	ToolCallID string             `json:"tool_call_id"`
 	Status     enum.ToolCallState `json:"status"`
 }
 
@@ -194,5 +194,3 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		pendingRequests:     csync.NewMap[PermissionRequestId, chan enum.ToolCallState](),
 	}
 }
-
-

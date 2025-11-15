@@ -248,9 +248,9 @@ func (m *messageListCmp) handlePermissionRequest(event permission.PermissionEven
 	items := m.listCmp.Items()
 	if toolCallIndex := m.findToolCallByID(items, event.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
-		
+
 		toolCall.SetToolCallState(event.Status)
-		
+
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}
 	return nil

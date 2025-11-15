@@ -119,6 +119,10 @@ func (m *toolCallCmp) Init() tea.Cmd {
 func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.StepMsg:
+		// Performance optimization: skip updates if no active animations
+		if !m.IsAnimating() {
+			return m, nil
+		}
 		var cmds []tea.Cmd
 		for i, nested := range m.nestedToolCalls {
 			if nested.Spinning() {

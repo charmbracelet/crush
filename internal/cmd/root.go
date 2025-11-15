@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	termutil "github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -177,6 +178,9 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
+	// Initialize custom theme if configured
+	initializeTheme(cfg)
+
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
@@ -279,4 +283,18 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 		strings.Contains(termType, "alacritty") ||
 		strings.Contains(termType, "kitty") ||
 		strings.Contains(termType, "rio")
+}
+
+
+// initializeTheme sets up the theme manager with a custom theme if configured.
+func initializeTheme(cfg *config.Config) {
+	if cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Theme == nil {
+		return
+	}
+
+	customTheme := styles.NewThemeFromConfig(cfg.Options.TUI.Theme)
+	m := styles.NewManager()
+	m.Register(customTheme)
+	_ = m.SetTheme(customTheme.Name)
+	styles.SetDefaultManager(m)
 }

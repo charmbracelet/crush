@@ -147,11 +147,88 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	Theme       *Theme `json:"theme,omitempty" jsonschema:"description=Custom color theme for the TUI interface"`
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 }
+
+// Theme defines a custom color scheme for the TUI.
+type Theme struct {
+	Name   string `json:"name,omitempty" jsonschema:"description=Theme name,default=custom,example=spaceduck"`
+	IsDark bool   `json:"is_dark,omitempty" jsonschema:"description=Whether this is a dark theme,default=true"`
+
+	// Core colors
+	Primary   string `json:"primary,omitempty" jsonschema:"description=Primary accent color,format=color,example=#ce6f8f"`
+	Secondary string `json:"secondary,omitempty" jsonschema:"description=Secondary accent color,format=color,example=#00a3cc"`
+	Tertiary  string `json:"tertiary,omitempty" jsonschema:"description=Tertiary accent color,format=color,example=#5ccc96"`
+	Accent    string `json:"accent,omitempty" jsonschema:"description=Accent highlight color,format=color,example=#f2ce00"`
+
+	// Backgrounds
+	Background       string `json:"background,omitempty" jsonschema:"description=Main background color,format=color,example=#0f111b"`
+	BackgroundLight  string `json:"background_light,omitempty" jsonschema:"description=Lighter background color,format=color,example=#1a1b26"`
+	BackgroundSubtle string `json:"background_subtle,omitempty" jsonschema:"description=Subtle background color,format=color,example=#4e5173"`
+	BackgroundOverlay string `json:"background_overlay,omitempty" jsonschema:"description=Overlay background color,format=color,example=#818596"`
+
+	// Foregrounds
+	Foreground        string `json:"foreground,omitempty" jsonschema:"description=Main text color,format=color,example=#ecf0c1"`
+	ForegroundMuted   string `json:"foreground_muted,omitempty" jsonschema:"description=Muted text color,format=color,example=#acb0d0"`
+	ForegroundSubtle  string `json:"foreground_subtle,omitempty" jsonschema:"description=Subtle text color,format=color,example=#818596"`
+	ForegroundSelected string `json:"foreground_selected,omitempty" jsonschema:"description=Selected text color,format=color,example=#ffffff"`
+
+	// Borders
+	Border      string `json:"border,omitempty" jsonschema:"description=Border color,format=color,example=#4e5173"`
+	BorderFocus string `json:"border_focus,omitempty" jsonschema:"description=Focused border color,format=color,example=#ce6f8f"`
+
+	// Status colors
+	Success string `json:"success,omitempty" jsonschema:"description=Success color,format=color,example=#5ccc96"`
+	Error   string `json:"error,omitempty" jsonschema:"description=Error color,format=color,example=#e33400"`
+	Warning string `json:"warning,omitempty" jsonschema:"description=Warning color,format=color,example=#f2ce00"`
+	Info    string `json:"info,omitempty" jsonschema:"description=Info color,format=color,example=#00a3cc"`
+
+	// ANSI-style colors for additional customization
+	Red          string `json:"red,omitempty" jsonschema:"description=Red color variant,format=color,example=#e33400"`
+	Green        string `json:"green,omitempty" jsonschema:"description=Green color variant,format=color,example=#5ccc96"`
+	Yellow       string `json:"yellow,omitempty" jsonschema:"description=Yellow color variant,format=color,example=#f2ce00"`
+	Blue         string `json:"blue,omitempty" jsonschema:"description=Blue color variant,format=color,example=#818596"`
+	Magenta      string `json:"magenta,omitempty" jsonschema:"description=Magenta color variant,format=color,example=#ce6f8f"`
+	White        string `json:"white,omitempty" jsonschema:"description=White color variant,format=color,example=#acb0d0"`
+	BrightRed    string `json:"bright_red,omitempty" jsonschema:"description=Bright red color variant,format=color,example=#e39400"`
+	BrightGreen  string `json:"bright_green,omitempty" jsonschema:"description=Bright green color variant,format=color,example=#5ccc96"`
+	BrightYellow string `json:"bright_yellow,omitempty" jsonschema:"description=Bright yellow color variant,format=color,example=#f2ce00"`
+	BrightBlue   string `json:"bright_blue,omitempty" jsonschema:"description=Bright blue color variant,format=color,example=#c1c3cc"`
+}
+
+// Getter methods for theme properties (implements styles.ThemeConfig interface).
+func (t *Theme) GetName() string              { return t.Name }
+func (t *Theme) GetIsDark() bool              { return t.IsDark }
+func (t *Theme) GetPrimary() string           { return t.Primary }
+func (t *Theme) GetSecondary() string         { return t.Secondary }
+func (t *Theme) GetTertiary() string          { return t.Tertiary }
+func (t *Theme) GetAccent() string            { return t.Accent }
+func (t *Theme) GetBackground() string        { return t.Background }
+func (t *Theme) GetBackgroundLight() string   { return t.BackgroundLight }
+func (t *Theme) GetBackgroundSubtle() string  { return t.BackgroundSubtle }
+func (t *Theme) GetBackgroundOverlay() string { return t.BackgroundOverlay }
+func (t *Theme) GetForeground() string        { return t.Foreground }
+func (t *Theme) GetForegroundMuted() string   { return t.ForegroundMuted }
+func (t *Theme) GetForegroundSubtle() string  { return t.ForegroundSubtle }
+func (t *Theme) GetForegroundSelected() string { return t.ForegroundSelected }
+func (t *Theme) GetBorder() string             { return t.Border }
+func (t *Theme) GetBorderFocus() string        { return t.BorderFocus }
+func (t *Theme) GetSuccess() string            { return t.Success }
+func (t *Theme) GetError() string              { return t.Error }
+func (t *Theme) GetWarning() string            { return t.Warning }
+func (t *Theme) GetInfo() string               { return t.Info }
+func (t *Theme) GetRed() string                { return t.Red }
+func (t *Theme) GetGreen() string              { return t.Green }
+func (t *Theme) GetYellow() string             { return t.Yellow }
+func (t *Theme) GetBlue() string               { return t.Blue }
+func (t *Theme) GetMagenta() string            { return t.Magenta }
+func (t *Theme) GetWhite() string              { return t.White }
+func (t *Theme) GetBrightRed() string          { return t.BrightRed }
+func (t *Theme) GetBrightGreen() string        { return t.BrightGreen }
+func (t *Theme) GetBrightYellow() string       { return t.BrightYellow }
+func (t *Theme) GetBrightBlue() string         { return t.BrightBlue }
 
 // Completions defines options for the completions UI.
 type Completions struct {

@@ -661,6 +661,28 @@ Or by setting the following in your config:
 Crush also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
 convention which can be enabled via `export DO_NOT_TRACK=1`.
 
+## Theme
+
+theme config limited example:
+
+```json
+{
+  "options": {
+    "tui": {
+      "theme": {
+        "name": "spaceduck",
+        "background": "#0f111b",
+        "foreground": "#ecf0c1",
+        "primary": "#ce6f8f",
+        "secondary": "#00a3cc"
+      }
+    }
+  }
+}
+```
+
+other colors and options in [config schema](./schema.json)
+
 ## A Note on Claude Max and GitHub Copilot
 
 Crush only supports model providers through official, compliant APIs. We do not

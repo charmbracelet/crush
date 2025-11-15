@@ -1,10 +1,13 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
@@ -54,7 +57,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service := NewPermissionService("/tmp", false, tt.allowedTools)
+			service := NewPermissionService(t.Context(), "/tmp", false, tt.allowedTools, nil)
 
 			// Create a channel to capture the permission request
 			// Since we're testing the allowlist logic, we need to simulate the request
@@ -79,7 +82,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
-	service := NewPermissionService("/tmp", true, []string{})
+	service := NewPermissionService(t.Context(), "/tmp", true, []string{}, nil)
 
 	result := service.Request(CreatePermissionRequest{
 		SessionID:   "test-session",
@@ -96,7 +99,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 
 func TestPermissionService_SequentialProperties(t *testing.T) {
 	t.Run("Sequential permission requests with persistent grants", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{})
+		service := NewPermissionService(t.Context(), "/tmp", false, []string{}, nil)
 
 		req1 := CreatePermissionRequest{
 			SessionID:   "session1",
@@ -140,7 +143,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.True(t, result2, "Second request should be auto-approved")
 	})
 	t.Run("Sequential requests with temporary grants", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{})
+		service := NewPermissionService(t.Context(), "/tmp", false, []string{}, nil)
 
 		req := CreatePermissionRequest{
 			SessionID:   "session2",
@@ -180,12 +183,11 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.False(t, result2, "Second request should be denied")
 	})
 	t.Run("Concurrent requests with different outcomes", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{})
+		service := NewPermissionService(t.Context(), "/tmp", false, []string{}, nil)
 
 		events := service.Subscribe(t.Context())
 
 		var wg sync.WaitGroup
-		results := make([]bool, 0)
 
 		requests := []CreatePermissionRequest{
 			{
@@ -211,11 +213,13 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			},
 		}
 
+		results := make([]bool, len(requests))
+
 		for i, req := range requests {
 			wg.Add(1)
 			go func(index int, request CreatePermissionRequest) {
 				defer wg.Done()
-				results = append(results, service.Request(request))
+				results[index] = service.Request(request)
 			}(i, req)
 		}
 
@@ -244,4 +248,114 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		result := service.Request(secondReq)
 		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
 	})
+}
+
+func TestPermissionService_NotifierSchedulesAndCancelsOnGrant(t *testing.T) {
+	notifier := &testPermissionNotifier{}
+	service := NewPermissionService(t.Context(), "/tmp", false, []string{}, notifier)
+
+	events := service.Subscribe(t.Context())
+	req := CreatePermissionRequest{
+		SessionID:  "session-grant",
+		ToolCallID: "tool-call-grant",
+		ToolName:   "bash",
+		Action:     "execute",
+		Path:       "/tmp/script.sh",
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		result := service.Request(req)
+		require.True(t, result, "Request should be granted")
+	}()
+
+	event := <-events
+	calls := notifier.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "💘 Crush is waiting", calls[0].title)
+	assert.Equal(t, "Permission required to execute \"bash\"", calls[0].message)
+	assert.Equal(t, permissionNotificationDelay, calls[0].delay)
+
+	service.Grant(event.Payload)
+	wg.Wait()
+
+	calls = notifier.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, 1, calls[0].cancelCount)
+}
+
+func TestPermissionService_NotifyInteractionCancelsNotification(t *testing.T) {
+	notifier := &testPermissionNotifier{}
+	service := NewPermissionService(t.Context(), "/tmp", false, []string{}, notifier)
+
+	events := service.Subscribe(t.Context())
+	req := CreatePermissionRequest{
+		SessionID:  "session-interact",
+		ToolCallID: "tool-call-interact",
+		ToolName:   "edit",
+		Action:     "write",
+		Path:       "/tmp/file.txt",
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		result := service.Request(req)
+		require.False(t, result, "Request should be denied")
+	}()
+
+	event := <-events
+	calls := notifier.Calls()
+	require.Len(t, calls, 1)
+
+	service.NotifyInteraction(event.Payload.ToolCallID)
+	calls = notifier.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, 1, calls[0].cancelCount)
+
+	service.Deny(event.Payload)
+	wg.Wait()
+}
+
+type notificationCall struct {
+	title       string
+	message     string
+	delay       time.Duration
+	cancelCount int
+}
+
+type testPermissionNotifier struct {
+	mu    sync.Mutex
+	calls []*notificationCall
+}
+
+func (n *testPermissionNotifier) NotifyPermissionRequest(ctx context.Context, title, message string, delay time.Duration) context.CancelFunc {
+	call := &notificationCall{
+		title:   title,
+		message: message,
+		delay:   delay,
+	}
+	n.mu.Lock()
+	n.calls = append(n.calls, call)
+	n.mu.Unlock()
+
+	return func() {
+		n.mu.Lock()
+		call.cancelCount++
+		n.mu.Unlock()
+	}
+}
+
+func (n *testPermissionNotifier) Calls() []notificationCall {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	result := make([]notificationCall, len(n.calls))
+	for i, call := range n.calls {
+		result[i] = *call
+	}
+	return result
 }

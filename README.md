@@ -577,6 +577,29 @@ config:
 }
 ```
 
+## Desktop Notifications
+
+Crush defaults to sending desktop notifications that let you know:
+
+- When its turn is finished (automatically cancelled when you interact with the
+  chat interface)
+- When it's waiting for permission to execute a tool (automatically cancelled
+  when you interact with the permission dialog)
+
+### Disabling notifications
+
+If you prefer to work without desktop notifications, you can disable them in
+your `crush.json` config.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_notifications": true
+  }
+}
+```
+
 ## Provider Auto-Updates
 
 By default, Crush automatically checks for the latest and greatest list of

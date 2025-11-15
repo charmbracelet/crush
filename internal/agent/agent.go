@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -67,7 +68,15 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+	// CancelCompletionNotification cancels any scheduled "turn ended"
+	// notification for the provided sessionID.
+	CancelCompletionNotification(sessionID string)
+	// HasPendingCompletionNotification returns true if a turn-end
+	// notification has been scheduled and not yet cancelled/shown.
+	HasPendingCompletionNotification(sessionID string) bool
 }
+
+const completionNotificationDelay = 5 * time.Second
 
 type Model struct {
 	Model      fantasy.LanguageModel
@@ -86,8 +95,11 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, context.CancelFunc]
+	messageQueue      *csync.Map[string, []SessionAgentCall]
+	activeRequests    *csync.Map[string, context.CancelFunc]
+	notifier          *notification.Notifier
+	notifyCtx         context.Context
+	completionCancels *csync.Map[string, context.CancelFunc]
 }
 
 type SessionAgentOptions struct {
@@ -100,11 +112,18 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	Notifier             *notification.Notifier
+	NotificationCtx      context.Context
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	notifyCtx := opts.NotificationCtx
+	if notifyCtx == nil {
+		notifyCtx = context.Background()
+	}
+
 	return &sessionAgent{
 		largeModel:           opts.LargeModel,
 		smallModel:           opts.SmallModel,
@@ -117,6 +136,9 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		notifier:             opts.Notifier,
+		notifyCtx:            notifyCtx,
+		completionCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
 }
 
@@ -127,6 +149,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.SessionID == "" {
 		return nil, ErrSessionMissing
 	}
+
+	a.cancelCompletionNotification(call.SessionID)
 
 	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
@@ -373,6 +397,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if sessionErr != nil {
 				return sessionErr
 			}
+			if finishReason == message.FinishReasonEndTurn {
+				a.scheduleCompletionNotification(call.SessionID, currentSession.Title)
+			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -486,6 +513,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	wg.Wait()
 
 	if shouldSummarize {
+		a.cancelCompletionNotification(call.SessionID)
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
@@ -514,6 +542,56 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+func (a *sessionAgent) scheduleCompletionNotification(sessionID, sessionTitle string) {
+	// Do not emit notifications for Agent-tool sub-sessions.
+	if a.sessions != nil && a.sessions.IsAgentToolSession(sessionID) {
+		return
+	}
+	if a.notifier == nil {
+		return
+	}
+
+	if sessionTitle == "" {
+		sessionTitle = sessionID
+	}
+
+	if cancel, ok := a.completionCancels.Take(sessionID); ok && cancel != nil {
+		cancel()
+	}
+
+	title := "💘 Crush is waiting"
+	message := fmt.Sprintf("Agent's turn completed in session \"%s\"", sessionTitle)
+	cancel := a.notifier.NotifyTaskComplete(a.notifyCtx, title, message, completionNotificationDelay)
+	if cancel == nil {
+		cancel = func() {}
+	}
+	a.completionCancels.Set(sessionID, cancel)
+}
+
+func (a *sessionAgent) cancelCompletionNotification(sessionID string) {
+	if a.notifier == nil {
+		return
+	}
+
+	if cancel, ok := a.completionCancels.Take(sessionID); ok && cancel != nil {
+		cancel()
+	}
+}
+
+// CancelCompletionNotification implements SessionAgent.
+func (a *sessionAgent) CancelCompletionNotification(sessionID string) {
+	a.cancelCompletionNotification(sessionID)
+}
+
+// HasPendingCompletionNotification implements SessionAgent.
+func (a *sessionAgent) HasPendingCompletionNotification(sessionID string) bool {
+	if a.IsSessionBusy(sessionID) {
+		return false
+	}
+	_, ok := a.completionCancels.Get(sessionID)
+	return ok
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
@@ -829,6 +907,13 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 
 func (a *sessionAgent) CancelAll() {
 	if !a.IsBusy() {
+		// still ensure notifications are cancelled even when not busy
+		for cancel := range a.completionCancels.Seq() {
+			if cancel != nil {
+				cancel()
+			}
+		}
+		a.completionCancels.Reset(make(map[string]context.CancelFunc))
 		return
 	}
 	for key := range a.activeRequests.Seq2() {
@@ -844,6 +929,13 @@ func (a *sessionAgent) CancelAll() {
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+
+	for cancel := range a.completionCancels.Seq() {
+		if cancel != nil {
+			cancel()
+		}
+	}
+	a.completionCancels.Reset(make(map[string]context.CancelFunc))
 }
 
 func (a *sessionAgent) IsBusy() bool {

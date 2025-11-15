@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -190,7 +191,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			cmds = append(cmds, m.CopySelectedText(true))
 			return m, tea.Batch(cmds...)
 		}
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		cmds = append(cmds, m.handlePermissionRequest(msg.Payload))
 		return m, tea.Batch(cmds...)
 	case SessionSelectedMsg:
@@ -243,14 +244,13 @@ func (m *messageListCmp) View() string {
 	return strings.Join(view, "\n")
 }
 
-func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
+func (m *messageListCmp) handlePermissionRequest(event permission.PermissionEvent) tea.Cmd {
 	items := m.listCmp.Items()
-	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
+	if toolCallIndex := m.findToolCallByID(items, event.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
-		toolCall.SetPermissionRequested()
-		if permission.Granted {
-			toolCall.SetPermissionGranted()
-		}
+
+		toolCall.SetToolCallState(event.Status)
+
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}
 	return nil
@@ -524,8 +524,10 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 	for _, existingTC := range existingToolCalls {
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
+
+			// TODO: revisit this logic!
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-				existingTC.SetCancelled()
+				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}
 			m.listCmp.UpdateItem(tc.ID, existingTC)
 			return nil
@@ -667,7 +669,7 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 
 	// Add cancelled status if applicable
 	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-		options = append(options, messages.WithToolCallCancelled())
+		options = append(options, messages.WithToolCallState(enum.ToolCallStateCancelled))
 	}
 
 	return options

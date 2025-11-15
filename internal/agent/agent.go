@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -300,7 +301,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ID:               id,
 				Name:             toolName,
 				ProviderExecuted: false,
-				Finished:         false,
+				State:            enum.ToolCallStatePending,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
@@ -314,7 +315,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Name:             tc.ToolName,
 				Input:            tc.Input,
 				ProviderExecuted: false,
-				Finished:         true,
+				State:            enum.ToolCallStateRunning,
 			}
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
@@ -337,6 +338,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			case fantasy.ToolResultContentTypeMedia:
 				// TODO: handle this message type
 			}
+
+			// Update tool call state based on result
+			for i, part := range currentAssistant.Parts {
+				if tc, ok := part.(message.ToolCall); ok && tc.ID == result.ToolCallID {
+					newState := enum.ToolCallStateCompleted
+					if isError {
+						newState = enum.ToolCallStateFailed
+					}
+					currentAssistant.Parts[i] = message.ToolCall{
+						ID:    tc.ID,
+						Name:  tc.Name,
+						Input: tc.Input,
+						State: newState,
+					}
+					break
+				}
+			}
+
 			toolResult := message.ToolResult{
 				ToolCallID: result.ToolCallID,
 				Name:       result.ToolName,
@@ -412,8 +431,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
+			if tc.State.IsNonFinalState() {
+				// TODO: double check which state we need to set this to here
+				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
 				tc.Input = "{}"
 				currentAssistant.AddToolCall(tc)
 				updateErr := a.messages.Update(ctx, *currentAssistant)
@@ -437,13 +457,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 			if found {
+				tc.State = enum.ToolCallStateCompleted
 				continue
 			}
+
 			content := "There was an error while executing the tool"
-			if isCancelErr {
+			switch {
+			case isCancelErr:
+				tc.State = enum.ToolCallStateCancelled
 				content = "Tool execution canceled by user"
-			} else if isPermissionErr {
+			case isPermissionErr:
+				tc.State = enum.ToolCallStatePermissionDenied
 				content = "User denied permission"
+			default:
+				tc.State = enum.ToolCallStateFailed
+				// Note: content already set to default error message above
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,

@@ -17,6 +17,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -52,9 +53,9 @@ type messageCmp struct {
 	focused bool // Focus state for border styling
 
 	// Core message data and state
-	message  message.Message // The underlying message content
-	spinning bool            // Whether to show loading animation
-	anim     *anim.Anim      // Animation component for loading states
+	message        message.Message     // The underlying message content
+	animationState enum.AnimationState // Current animation state
+	anim           *anim.Anim          // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -88,7 +89,7 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 // Init initializes the message component and starts animations if needed.
 // Returns a command to start the animation for spinning messages.
 func (m *messageCmp) Init() tea.Cmd {
-	m.spinning = m.shouldSpin()
+	m.updateAnimationState()
 	return m.anim.Init()
 }
 
@@ -97,8 +98,8 @@ func (m *messageCmp) Init() tea.Cmd {
 func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.StepMsg:
-		m.spinning = m.shouldSpin()
-		if m.spinning {
+		m.updateAnimationState()
+		if m.animationState.IsActive() {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u.(*anim.Anim)
 			return m, cmd
@@ -121,7 +122,7 @@ func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
-	if m.spinning && m.message.ReasoningContent().Thinking == "" {
+	if m.animationState.IsActive() && m.message.ReasoningContent().Thinking == "" {
 		if m.message.IsSummaryMessage {
 			m.anim.SetLabel("Summarizing")
 		}
@@ -313,24 +314,28 @@ func (m *messageCmp) renderThinkingContent() string {
 	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }
 
-// shouldSpin determines whether the message should show a loading animation.
-// Only assistant messages without content that aren't finished should spin.
-func (m *messageCmp) shouldSpin() bool {
+// updateAnimationState determines whether the message should show a loading animation.
+// Only assistant messages without content that aren't finished should animate.
+func (m *messageCmp) updateAnimationState() {
 	if m.message.Role != message.Assistant {
-		return false
+		m.animationState = enum.AnimationStateStatic
+		return
 	}
 
 	if m.message.IsFinished() {
-		return false
+		m.animationState = enum.AnimationStateStatic
+		return
 	}
 
 	if strings.TrimSpace(m.message.Content().Text) != "" {
-		return false
+		m.animationState = enum.AnimationStateStatic
+		return
 	}
 	if len(m.message.ToolCalls()) > 0 {
-		return false
+		m.animationState = enum.AnimationStateStatic
+		return
 	}
-	return true
+	m.animationState = enum.AnimationStateSpinner
 }
 
 // Blur removes focus from the message component
@@ -366,7 +371,7 @@ func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
 
 // Spinning returns whether the message is currently showing a loading animation
 func (m *messageCmp) Spinning() bool {
-	return m.spinning
+	return m.animationState.IsActive()
 }
 
 type AssistantSection interface {

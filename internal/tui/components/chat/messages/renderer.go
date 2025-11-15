@@ -12,10 +12,12 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/log/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -92,6 +94,7 @@ func (pb *paramBuilder) build() []string {
 }
 
 // renderWithParams provides a common rendering pattern for tools with parameters
+// TODO: Consider using shouldShowContentForState() to control body visibility based on tool state
 func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
 	width := v.textWidth()
 	if v.isNested {
@@ -101,11 +104,46 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
-		return res
-	}
+
 	body := contentRenderer()
 	return joinHeaderBody(header, body)
+}
+
+// shouldShowContentForState determines if content should be displayed for a given tool state
+func shouldShowContentForState(state enum.ToolCallState, isNested bool) bool {
+	switch state {
+	// Show content for permission states
+	case enum.ToolCallStatePermissionPending:
+		return true // Show tool details while waiting for permission
+
+	case enum.ToolCallStatePermissionApproved:
+		return true // Show content that was approved
+
+	case enum.ToolCallStatePermissionDenied:
+		return false // [RFC] Don't show content that was denied - review this policy
+
+	// Show content for final states (except denied)
+	case enum.ToolCallStateCompleted:
+		return true // Show successful results
+
+	case enum.ToolCallStateFailed:
+		return true // Show error content for debugging
+
+	case enum.ToolCallStateCancelled:
+		return true // Show what was cancelled
+
+	// Show minimal content for transitional states
+	case enum.ToolCallStatePending:
+		return false // Don't show content until tool starts
+
+	case enum.ToolCallStateRunning:
+		return true // Show progress/running state
+
+	default:
+		// Add error logging for unknown states
+		log.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
+		return false // Unknown states don't show content
+	}
 }
 
 // unmarshalParams safely unmarshal JSON parameters
@@ -116,16 +154,8 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 // makeHeader builds the tool call header with status icon and parameters for a nested tool call.
 func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	// Use state-aware icon system while preserving result priority logic
+	icon := v.getEffectiveDisplayState().ToIconColored()
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
@@ -137,16 +167,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		return br.makeNestedHeader(v, tool, width, params...)
 	}
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	icon := v.call.State.ToIconColored()
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(false, width-lipgloss.Width(prefix), params...)
@@ -154,6 +175,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 
 // renderError provides consistent error rendering
 func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
+	// TODO: This should be replace with the normal rendering process.
 	t := styles.CurrentTheme()
 	header := br.makeHeader(v, prettifyToolName(v.call.Name), v.textWidth(), "")
 	errorTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
@@ -220,7 +242,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		addMain(cmd).
 		addFlag("background", params.RunInBackground).
 		build()
-	if v.call.Finished {
+	if v.call.State == enum.ToolCallStateCompleted {
 		var meta tools.BashResponseMetadata
 		_ = br.unmarshalParams(v.result.Metadata, &meta)
 		if meta.Background {
@@ -233,12 +255,12 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 			if v.isNested {
 				return v.style().Render(header)
 			}
-			if res, done := earlyState(header, v); done {
-				return res
-			}
+			// For background jobs, let the common renderWithParams handle states
 			content := "Command: " + params.Command + "\n" + v.result.Content
-			body := renderPlainContent(v, content)
-			return joinHeaderBody(header, body)
+			return br.renderWithParams(v, "Bash", args, func() string {
+				body := renderPlainContent(v, content)
+				return body
+			})
 		}
 	}
 
@@ -265,16 +287,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	icon := v.call.State.ToIconColored()
 
 	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
 	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
@@ -334,7 +347,7 @@ func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
+	if res, done := renderStatusOnly(header, v); done {
 		return res
 	}
 	body := renderPlainContent(v, v.result.Content)
@@ -377,7 +390,7 @@ func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
+	if res, done := renderStatusOnly(header, v); done {
 		return res
 	}
 	body := renderPlainContent(v, v.result.Content)
@@ -620,7 +633,7 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); v.cancelled && done {
+	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
 
@@ -650,10 +663,10 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.spinning = true
+		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
 	} else {
-		v.spinning = false
+		v.UpdateAnimationState()
 	}
 
 	header = lipgloss.JoinVertical(
@@ -886,7 +899,8 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); v.cancelled && done {
+	// TODO: revisit logic, now that we have more ToolCallStates
+	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
 	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
@@ -915,10 +929,10 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.spinning = true
+		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
 	} else {
-		v.spinning = false
+		v.UpdateAnimationState()
 	}
 
 	header = lipgloss.JoinVertical(
@@ -978,23 +992,19 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 }
 
-// earlyState returns immediately‑rendered error/cancelled/ongoing states.
-func earlyState(header string, v *toolCallCmp) (string, bool) {
+// renderStatusOnly returns immediately‑rendered error/cancelled/ongoing states.
+func renderStatusOnly(header string, v *toolCallCmp) (string, bool) {
 	t := styles.CurrentTheme()
 	message := ""
-	switch {
-	case v.result.IsError:
-		message = v.renderToolError()
-	case v.cancelled:
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
-	case v.result.ToolCallID == "":
-		if v.permissionRequested && !v.permissionGranted {
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting permission...")
-		} else {
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
+	// TODO: revisit logic, now that we have more ToolCallStates
+	if v.result.IsError {
+		message = v.renderToolCallError()
+	} else {
+		m, err := v.call.State.RenderTUIMessageColored()
+		if err != nil {
+			return "", false
 		}
-	default:
-		return "", false
+		message = m
 	}
 
 	message = t.S().Base.PaddingLeft(2).Render(message)
@@ -1143,7 +1153,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (v *toolCallCmp) renderToolError() string {
+func (v *toolCallCmp) renderToolCallError() string {
 	t := styles.CurrentTheme()
 	err := strings.ReplaceAll(v.result.Content, "\n", " ")
 	errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")

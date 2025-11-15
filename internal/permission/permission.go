@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sync"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -16,7 +15,6 @@ import (
 )
 
 var ErrorPermissionDenied = errors.New("user denied permission")
-var ErrorPermissionStatusUnknown = errors.New("unknown state: regarding tool call permission status")
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
@@ -197,25 +195,4 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 	}
 }
 
-// ToMessage converts tool call state to human readable message
-func ToMessage(status enum.ToolCallState) (string, error) {
-	switch status {
-	case enum.ToolCallStatePermissionPending:
-		return "Requesting permission...", nil
-	case enum.ToolCallStatePermissionApproved:
-		return "Permission approved. Executing command...", nil
-	case enum.ToolCallStatePermissionDenied:
-		return "Permission denied.", nil
-	default:
-		return "", ErrorPermissionStatusUnknown
-	}
-}
 
-// ToMessageColored converts tool call state to colored human readable message
-func ToMessageColored(status enum.ToolCallState, baseStyle lipgloss.Style) (string, error) {
-	message, err := ToMessage(status)
-	if err != nil {
-		return "", err
-	}
-	return baseStyle.Render(message), nil
-}

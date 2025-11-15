@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -93,6 +94,7 @@ func (pb *paramBuilder) build() []string {
 }
 
 // renderWithParams provides a common rendering pattern for tools with parameters
+// TODO: Consider using shouldShowContentForState() to control body visibility based on tool state
 func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
 	width := v.textWidth()
 	if v.isNested {
@@ -108,18 +110,40 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 }
 
 // shouldShowContentForState determines if content should be displayed for a given tool state
-func shouldShowContentForState(state enum.ToolCallState) bool {
-	//TODO: test
-	return true
-	//switch state {
-	//case enum.ToolCallStateFailed, enum.ToolCallStateCancelled,
-	//	enum.ToolCallStateRunning, enum.ToolCallStatePending:
-	//	return false
-	//case enum.ToolCallStatePermission, enum.ToolCallStateCompleted:
-	//	return true
-	//default:
-	//	return false
-	//}
+func shouldShowContentForState(state enum.ToolCallState, isNested bool) bool {
+	switch state {
+	// Show content for permission states
+	case enum.ToolCallStatePermissionPending:
+		return true  // Show tool details while waiting for permission
+		
+	case enum.ToolCallStatePermissionApproved:
+		return true  // Show content that was approved
+		
+	case enum.ToolCallStatePermissionDenied:
+		return false // [RFC] Don't show content that was denied - review this policy
+		
+	// Show content for final states (except denied)
+	case enum.ToolCallStateCompleted:
+		return true  // Show successful results
+		
+	case enum.ToolCallStateFailed:
+		return true  // Show error content for debugging
+		
+	case enum.ToolCallStateCancelled:
+		return true  // Show what was cancelled
+		
+	// Show minimal content for transitional states
+	case enum.ToolCallStatePending:
+		return false // Don't show content until tool starts
+		
+	case enum.ToolCallStateRunning:
+		return true  // Show progress/running state
+		
+	default:
+		// Add error logging for unknown states
+		slog.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
+		return false // Unknown states don't show content
+	}
 }
 
 // unmarshalParams safely unmarshal JSON parameters

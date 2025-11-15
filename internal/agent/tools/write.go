@@ -163,7 +163,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspClients)
+			result += getDiagnostics(filePath, lspClients, workingDir)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,

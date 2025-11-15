@@ -386,6 +386,15 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			p.changeFocus()
 			return p, nil
+		case key.Matches(msg, p.keyMap.SelectAll):
+			// Only handle SelectAll if chat is focused
+			if p.focusedPane == PanelTypeChat {
+				cmds = append(cmds, p.chat.SelectAll())
+				return p, tea.Batch(cmds...)
+			}
+			// If editor is focused, let editor handle SelectAll normally
+			// (this prevents hint from triggering when editor has focus)
+			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" && p.app.AgentCoordinator.IsBusy() {
 				return p, p.cancel()

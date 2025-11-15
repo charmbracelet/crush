@@ -25,7 +25,6 @@ type SessionDialog interface {
 type SessionsList = list.FilterableList[list.CompletionItem[session.Session]]
 
 type sessionDialogCmp struct {
-	selectedInx       int
 	wWidth            int
 	wHeight           int
 	width             int

@@ -53,6 +53,9 @@ type MessageListCmp interface {
 	GoToBottom() tea.Cmd
 	GetSelectedText() string
 	CopySelectedText(bool) tea.Cmd
+	HasSelection() bool
+	SelectAll() tea.Cmd
+	SelectionClear() tea.Cmd
 }
 
 // messageListCmp implements MessageListCmp, providing a virtualized list
@@ -113,14 +116,21 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	}
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
+		if m.listCmp.IsFocused() {
 			switch {
 			case key.Matches(msg, messages.CopyKey):
-				cmds = append(cmds, m.CopySelectedText(true))
+				if m.listCmp.HasSelection() {
+					cmds = append(cmds, m.CopySelectedText(true))
+					return m, tea.Batch(cmds...)
+				}
+			case key.Matches(msg, messages.SelectAllKey):
+				cmds = append(cmds, m.SelectAll())
 				return m, tea.Batch(cmds...)
 			case key.Matches(msg, messages.ClearSelectionKey):
-				cmds = append(cmds, m.SelectionClear())
-				return m, tea.Batch(cmds...)
+				if m.listCmp.HasSelection() {
+					cmds = append(cmds, m.SelectionClear())
+					return m, tea.Batch(cmds...)
+				}
 			}
 		}
 	case tea.MouseClickMsg:
@@ -248,7 +258,7 @@ func (m *messageListCmp) handlePermissionRequest(permission permission.Permissio
 	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 		toolCall.SetPermissionRequested()
-		if permission.Granted {
+		if permission.Status == "approved" {
 			toolCall.SetPermissionGranted()
 		}
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
@@ -797,6 +807,36 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		},
 		util.ReportInfo("Selected text copied to clipboard"),
 	)
+}
+
+// SelectAll selects all messages in the chat list.
+func (m *messageListCmp) SelectAll() tea.Cmd {
+	if len(m.listCmp.Items()) == 0 {
+		return util.ReportWarn("No messages to select")
+	}
+	
+	// Select the first item for navigation focus
+	m.listCmp.SetSelected(m.listCmp.Items()[0].ID())
+	
+	// Get list dimensions for proper viewport coordinates
+	width, height := m.listCmp.GetSize()
+	
+
+	
+	// Start selection at top-left of content (like mouse click at origin)
+	m.listCmp.StartSelection(0, 0)
+	
+	// End selection at bottom-right of content, not viewport
+	// Use content height instead of viewport height for "select all"
+	// We need to account for the total rendered content height
+	// For "select all", use large end coordinate that exceeds content boundaries
+	// The list component will clamp to actual content bounds automatically
+	// This works for both DirectionForward and DirectionBackward
+	endLine := height * 10  // Large enough to include all scrollable content
+	
+	m.listCmp.EndSelection(width-1, endLine)
+	
+	return nil  // Return nil for cleaner user experience
 }
 
 // abs returns the absolute value of an integer.

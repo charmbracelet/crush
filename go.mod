@@ -4,9 +4,10 @@ go 1.25.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759
-	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251106195925-579e174cd7fa
-	charm.land/fantasy v0.2.0
+	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251114215930-55b3503a2a7c
+	charm.land/fantasy v0.3.1
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251106193318-19329a3e8410
+	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.10.3
@@ -20,12 +21,12 @@ require (
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930
 	github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0
-	github.com/charmbracelet/ultraviolet v0.0.0-20251106193841-7889546fc720
-	github.com/charmbracelet/x/ansi v0.11.0
+	github.com/charmbracelet/ultraviolet v0.0.0-20251114211333-9deacb990ee7
+	github.com/charmbracelet/x/ansi v0.11.1
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
-	github.com/charmbracelet/x/exp/slice v0.0.0-20250904123553-b4e2667e5ad5
+	github.com/charmbracelet/x/exp/slice v0.0.0-20251113172435-cef867b85f6a
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/denisbrodbeck/machineid v1.0.1
@@ -52,10 +53,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
-	go.yaml.in/yaml/v4 v4.0.0-rc.3
 	golang.org/x/sync v0.18.0
-	golang.org/x/text v0.30.0
-	gopkg.in/dnaeon/go-vcr.v4 v4.0.6-0.20250923044825-7b4892dd3117
+	golang.org/x/text v0.31.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 	mvdan.cc/sh/v3 v3.12.1-0.20250902163504-3cf4fd5717a5
@@ -68,8 +67,9 @@ require (
 	cloud.google.com/go/compute/metadata v0.8.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
+	github.com/RealAlexandreAI/json-repair v0.0.14 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.39.5 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.39.6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.27.27 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.27 // indirect
@@ -82,7 +82,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.22.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.3 // indirect
-	github.com/aws/smithy-go v1.23.1 // indirect
+	github.com/aws/smithy-go v1.23.2 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -91,7 +91,7 @@ require (
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/clipperhouse/displaywidth v0.4.1 // indirect
+	github.com/clipperhouse/displaywidth v0.5.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -100,10 +100,12 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
@@ -113,6 +115,9 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kaptinlin/go-i18n v0.2.0 // indirect
+	github.com/kaptinlin/jsonschema v0.5.2 // indirect
+	github.com/kaptinlin/messageformat-go v0.4.6 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
@@ -152,19 +157,21 @@ require (
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/image v0.27.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
-	golang.org/x/oauth2 v0.32.0 // indirect
+	golang.org/x/oauth2 v0.33.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
-	google.golang.org/genai v1.33.1-0.20251103191629-d15baab4f79e // indirect
+	google.golang.org/genai v1.34.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
+	gopkg.in/dnaeon/go-vcr.v4 v4.0.6-0.20251110073552-01de4eb40290 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

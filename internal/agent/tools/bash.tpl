@@ -60,15 +60,21 @@ When user asks to create git commit:
    - Use clear language, accurate reflection ("add"=new feature, "update"=enhancement, "fix"=bug fix)
    - Avoid generic messages, review draft
 
-4. Create commit with Crush signature using HEREDOC:
+4. Create commit{{ if or (eq .Attribution.TrailerStyle "assisted-by") (eq .Attribution.TrailerStyle "co-authored-by")}} with attribution{{ end }} using HEREDOC:
    git commit -m "$(cat <<'EOF'
    Commit message here.
-{{ if .Attribution.GeneratedWith}}
+
+{{ if .Attribution.GeneratedWith }}
    💘 Generated with Crush
-{{ end }}
-{{ if .Attribution.CoAuthoredBy}}
+{{ end}}
+{{if eq .Attribution.TrailerStyle "assisted-by" }}
+
+   Assisted-by: {{ .ModelName }} via Crush
+{{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
+
    Co-Authored-By: Crush <crush@charm.land>
 {{ end }}
+
    EOF
    )"
 

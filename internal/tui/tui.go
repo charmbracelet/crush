@@ -267,7 +267,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.ReportWarn("Agent is busy, please wait...")
 		}
 
-		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
+		cfg := config.Get()
+		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+			return a, util.ReportError(err)
+		}
 
 		go a.app.UpdateAgentModel(context.TODO())
 

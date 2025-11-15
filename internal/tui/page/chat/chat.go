@@ -144,7 +144,7 @@ func (p *chatPage) Init() tea.Cmd {
 		p.isOnboarding = true
 		p.splashFullScreen = true
 	} else if b, _ := config.ProjectNeedsInitialization(); b {
-		// Project needs CRUSH.md initialization
+		// Project needs context initialization
 		p.splash.SetProjectInit(true)
 		p.isProjectInit = true
 		p.splashFullScreen = true

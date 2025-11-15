@@ -5,10 +5,20 @@
   "$defs": {
     "Attribution": {
       "properties": {
+        "trailer_style": {
+          "type": "string",
+          "enum": [
+            "none",
+            "co-authored-by",
+            "assisted-by"
+          ],
+          "description": "Style of attribution trailer to add to commits",
+          "default": "co-authored-by"
+        },
         "co_authored_by": {
           "type": "boolean",
-          "description": "Add Co-Authored-By trailer to commit messages",
-          "default": true
+          "description": "Deprecated: use trailer_style instead",
+          "deprecated": true
         },
         "generated_with": {
           "type": "boolean",
@@ -52,6 +62,16 @@
           },
           "type": "object",
           "description": "Model configurations for different model types"
+        },
+        "recent_models": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/SelectedModel"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "Recently used models sorted by most recent first"
         },
         "providers": {
           "additionalProperties": {
@@ -384,6 +404,17 @@
           "type": "boolean",
           "description": "Disable sending metrics",
           "default": false
+        },
+        "initialize_as": {
+          "type": "string",
+          "description": "Name of the context file to create/update during project initialization",
+          "default": "AGENTS.md",
+          "examples": [
+            "AGENTS.md",
+            "CRUSH.md",
+            "CLAUDE.md",
+            "docs/LLMs.md"
+          ]
         }
       },
       "additionalProperties": false,

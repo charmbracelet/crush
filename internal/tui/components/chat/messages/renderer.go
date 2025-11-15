@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/log/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -141,7 +141,7 @@ func shouldShowContentForState(state enum.ToolCallState, isNested bool) bool {
 		
 	default:
 		// Add error logging for unknown states
-		slog.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
+		log.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
 		return false // Unknown states don't show content
 	}
 }

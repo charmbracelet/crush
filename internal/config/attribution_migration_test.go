@@ -66,7 +66,7 @@ func TestAttributionMigration(t *testing.T) {
 					}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleCoAuthoredBy,
+			expectedTrailer:  TrailerStyleAssistedBy,
 			expectedGenerate: true,
 		},
 		{
@@ -74,7 +74,7 @@ func TestAttributionMigration(t *testing.T) {
 			configJSON: `{
 				"options": {}
 			}`,
-			expectedTrailer:  TrailerStyleCoAuthoredBy,
+			expectedTrailer:  TrailerStyleAssistedBy,
 			expectedGenerate: true,
 		},
 	}

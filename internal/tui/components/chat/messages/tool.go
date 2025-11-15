@@ -915,17 +915,6 @@ func (m *toolCallCmp) updateAnimationForState() {
 	m.UpdateSpinner()
 }
 
-// SetPermissionRequested marks that a permission request was made for this tool call
-// Deprecated: Use SetPermissionStatus(permission.PermissionPending) instead.
-func (m *toolCallCmp) SetPermissionRequested() {
-	m.SetToolCallState(enum.ToolCallStatePermissionPending)
-}
-
-// SetPermissionGranted marks that permission was granted for this tool call
-// Deprecated: Use SetToolCallState(enum.ToolCallStatePermissionApproved) instead.
-func (m *toolCallCmp) SetPermissionGranted() {
-	m.SetToolCallState(enum.ToolCallStatePermissionApproved)
-}
 
 // getEffectiveDisplayState determines the appropriate state for display purposes
 // considering both tool call state and execution results

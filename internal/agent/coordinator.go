@@ -346,6 +346,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
+		tools.NewSearchTool(c.permissions, c.cfg.WorkingDir()),
 		tools.NewSourcegraphTool(nil),
 		tools.NewViewTool(c.lspClients, c.permissions, c.cfg.WorkingDir()),
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),

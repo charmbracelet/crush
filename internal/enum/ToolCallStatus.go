@@ -55,6 +55,10 @@ func (state ToolCallState) ToIcon() string {
 		return styles.ToolPending
 	case ToolCallStatePermissionPending:
 		return styles.ToolPending
+	case ToolCallStatePermissionApproved:
+		return styles.ToolSuccess
+	case ToolCallStatePermissionDenied:
+		return styles.ToolError
 	case ToolCallStateCompleted:
 		return styles.ToolSuccess
 	case ToolCallStateCancelled:
@@ -75,6 +79,10 @@ func (state ToolCallState) ToFgColor() color.Color {
 		return t.Info // TODO: not sure if this is a shade of gray
 	case ToolCallStatePermissionPending:
 		return t.Paprika
+	case ToolCallStatePermissionApproved:
+		return t.Green
+	case ToolCallStatePermissionDenied:
+		return t.Error
 	case ToolCallStateRunning:
 		return t.GreenDark // Use darker green for active running state
 	case ToolCallStateCompleted:
@@ -102,6 +110,10 @@ func (state ToolCallState) FormatToolForCopy() string {
 		return "Running..."
 	case ToolCallStatePermissionPending:
 		return "Permissions..."
+	case ToolCallStatePermissionApproved:
+		return "Approved"
+	case ToolCallStatePermissionDenied:
+		return "Denied"
 	case ToolCallStateCancelled:
 		return "Cancelled"
 	case ToolCallStateFailed:
@@ -152,6 +164,16 @@ func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 			//TODO: ERROR content? Most likely not in this function.
 			//err := strings.ReplaceAll(v.result.Content, "\n", " ")
 			//err = fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(v.fit(err, v.textWidth()-2-lipgloss.Width(errTag))))
+		}
+	case ToolCallStatePermissionApproved:
+		{
+			// Green background for approved permission
+			messageBaseStyle = messageBaseStyle.Padding(0, 1).Background(t.Green).Foreground(t.White)
+		}
+	case ToolCallStatePermissionDenied:
+		{
+			// Red background for denied permission
+			messageBaseStyle = messageBaseStyle.Padding(0, 1).Background(t.Red).Foreground(t.White)
 		}
 	case ToolCallStateCompleted:
 		{

@@ -10,6 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -27,27 +28,19 @@ type CreatePermissionRequest struct {
 	Path        string `json:"path"`
 }
 
-// PermissionStatus represents the state of a permission request
+// PermissionRequest represents a permission request for tool execution
 // This eliminates split-brain states like {granted: true, denied: true}
-type PermissionStatus string
-
-const (
-	PermissionPending  PermissionStatus = "pending"
-	PermissionApproved PermissionStatus = "approved"
-	PermissionDenied   PermissionStatus = "denied"
-)
-
-type PermissionEvent struct {
-	ToolCallID string           `json:"tool_call_id"`
-	Status     PermissionStatus `json:"status"`
-}
-
-type PermissionRequestId = string
-
 type PermissionRequest struct {
 	ID PermissionRequestId `json:"id"`
 	CreatePermissionRequest
 }
+
+type PermissionEvent struct {
+	ToolCallID string          `json:"tool_call_id"`
+	Status     enum.ToolCallState `json:"status"`
+}
+
+type PermissionRequestId = string
 
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
@@ -67,7 +60,7 @@ type permissionService struct {
 	uiBroker            *pubsub.Broker[PermissionEvent]
 	workingDir          string
 	sessionPermissions  *csync.Slice[PermissionRequest]
-	pendingRequests     *csync.Map[PermissionRequestId, chan PermissionStatus]
+	pendingRequests     *csync.Map[PermissionRequestId, chan enum.ToolCallState]
 	autoApproveSessions *csync.Map[string, bool]
 	skip                bool
 	allowedTools        []string
@@ -78,22 +71,22 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.publishUnsafe(permission, PermissionApproved)
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
 	s.sessionPermissions.Append(permission)
 	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
-	s.publishUnsafe(permission, PermissionApproved)
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
 	s.noLongerActiveRequest(permission)
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
-	s.publishUnsafe(permission, PermissionDenied)
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionDenied)
 	s.noLongerActiveRequest(permission)
 }
 
-func (s *permissionService) publishUnsafe(permission PermissionRequest, status PermissionStatus) {
+func (s *permissionService) publishUnsafe(permission PermissionRequest, status enum.ToolCallState) {
 	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
 		Status:     status,
@@ -118,7 +111,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	// tell the UI that a permission was requested
 	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: opts.ToolCallID,
-		Status:     PermissionPending,
+		Status:     enum.ToolCallStatePermissionPending,
 	})
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
@@ -165,14 +158,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 
 	s.activeRequest = &permission
 
-	respCh := make(chan PermissionStatus, 1)
+	respCh := make(chan enum.ToolCallState, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	return <-respCh == PermissionApproved
+	return <-respCh == enum.ToolCallStatePermissionApproved
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
@@ -200,25 +193,27 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: csync.NewMap[string, bool](),
 		skip:                skip,
 		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[PermissionRequestId, chan PermissionStatus](),
+		pendingRequests:     csync.NewMap[PermissionRequestId, chan enum.ToolCallState](),
 	}
 }
 
-func (status PermissionStatus) ToMessage() (string, error) {
+// ToMessage converts tool call state to human readable message
+func ToMessage(status enum.ToolCallState) (string, error) {
 	switch status {
-	case PermissionPending:
+	case enum.ToolCallStatePermissionPending:
 		return "Requesting permission...", nil
-	case PermissionApproved:
+	case enum.ToolCallStatePermissionApproved:
 		return "Permission approved. Executing command...", nil
-	case PermissionDenied:
+	case enum.ToolCallStatePermissionDenied:
 		return "Permission denied.", nil
 	default:
 		return "", ErrorPermissionStatusUnknown
 	}
 }
 
-func (status PermissionStatus) ToMessageColored(baseStyle lipgloss.Style) (string, error) {
-	message, err := status.ToMessage()
+// ToMessageColored converts tool call state to colored human readable message
+func ToMessageColored(status enum.ToolCallState, baseStyle lipgloss.Style) (string, error) {
+	message, err := ToMessage(status)
 	if err != nil {
 		return "", err
 	}

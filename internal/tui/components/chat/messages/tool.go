@@ -56,7 +56,7 @@ type toolCallCmp struct {
 	parentMessageID  string                      // ID of the message that initiated this tool call
 	call             message.ToolCall            // The tool call being executed
 	result           message.ToolResult          // The result of the tool execution
-	permissionStatus permission.PermissionStatus // Default will be set in constructor
+
 
 	// Animation state for pending tool calls
 	spinning bool       // Whether to show loading animation
@@ -100,7 +100,6 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	m := &toolCallCmp{
 		call:             tc,
 		parentMessageID:  parentMessageID,
-		permissionStatus: permission.PermissionPending, // Initialize to valid enum value
 	}
 	for _, opt := range opts {
 		opt(m)

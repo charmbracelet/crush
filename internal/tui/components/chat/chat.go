@@ -251,11 +251,11 @@ func (m *messageListCmp) handlePermissionRequest(event permission.PermissionEven
 		
 		// Convert permission status to unified ToolCallState
 		switch event.Status {
-		case permission.PermissionPending:
+		case enum.ToolCallStatePermissionPending:
 			toolCall.SetToolCallState(enum.ToolCallStatePermissionPending)
-		case permission.PermissionApproved:
+		case enum.ToolCallStatePermissionApproved:
 			toolCall.SetToolCallState(enum.ToolCallStatePermissionApproved)
-		case permission.PermissionDenied:
+		case enum.ToolCallStatePermissionDenied:
 			toolCall.SetToolCallState(enum.ToolCallStatePermissionDenied)
 		}
 		

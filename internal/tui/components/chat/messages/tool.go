@@ -53,14 +53,13 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID  string                      // ID of the message that initiated this tool call
-	call             message.ToolCall            // The tool call being executed
-	result           message.ToolResult          // The result of the tool execution
-
+	parentMessageID string             // ID of the message that initiated this tool call
+	call            message.ToolCall   // The tool call being executed
+	result          message.ToolResult // The result of the tool execution
 
 	// Animation state for pending tool calls
-	spinning bool       // Whether to show loading animation
-	anim     util.Model // Animation component for pending states
+	animationState enum.AnimationState // Type-safe animation state
+	anim           util.Model          // Animation component for pending states
 
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
 }
@@ -98,8 +97,8 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 // tool call, and optional configuration
 func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions permission.Service, opts ...ToolCallOption) ToolCallCmp {
 	m := &toolCallCmp{
-		call:             tc,
-		parentMessageID:  parentMessageID,
+		call:            tc,
+		parentMessageID: parentMessageID,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -111,7 +110,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 // Init initializes the tool call component and starts animations if needed.
 // Returns a command to start the animation for pending tool calls.
 func (m *toolCallCmp) Init() tea.Cmd {
-	m.UpdateSpinner()
+	m.UpdateAnimationState()
 	return m.anim.Init()
 }
 
@@ -128,7 +127,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.spinning {
+		if m.animationState.IsActive() {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u
 			cmds = append(cmds, cmd)
@@ -670,10 +669,10 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 	return result.String()
 }
 
-// SetToolCall updates the tool call data and updates spinning state
+// SetToolCall updates the tool call data and updates animation state
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	m.UpdateSpinner()
+	m.UpdateAnimationState()
 }
 
 // ParentMessageID returns the ID of the message that initiated this tool call
@@ -681,10 +680,10 @@ func (m *toolCallCmp) ParentMessageID() string {
 	return m.parentMessageID
 }
 
-// SetToolResult updates the tool result and updates the spinning animation state
+// SetToolResult updates the tool result and updates the animation state
 func (m *toolCallCmp) SetToolResult(result message.ToolResult) {
 	m.result = result
-	m.UpdateSpinner()
+	m.UpdateAnimationState()
 }
 
 // GetToolCall returns the current tool call data
@@ -805,22 +804,17 @@ func (m *toolCallCmp) shouldSpin() bool {
 	return m.call.State.IsNonFinalState()
 }
 
-// UpdateSpinner updates the spinning state based on current tool call and result data.
-// This is the single source of truth for determining when to show/hide the loading animation.
-func (m *toolCallCmp) UpdateSpinner() {
-	// If we have a result with a ToolCallID, we're done spinning regardless of state
-	if m.result.ToolCallID != "" {
-		m.spinning = false
-		return
-	}
-	
-	// Otherwise, use the standard shouldSpin logic
-	m.spinning = m.shouldSpin()
+// UpdateAnimationState updates the animation state based on current tool call and result data.
+// This is the single source of truth for determining animation behavior.
+func (m *toolCallCmp) UpdateAnimationState() {
+	// Get effective display state considering both tool call state and results
+	effectiveState := m.getEffectiveDisplayState()
+	m.animationState = effectiveState.ToAnimationState()
 }
 
 // Spinning returns whether the tool call is currently showing a loading animation
-func (m *toolCallCmp) Spinning() bool {
-	if m.spinning {
+func (m *toolCallCmp) IsAnimating() bool {
+	if m.animationState.IsActive() {
 		return true
 	}
 	for _, nested := range m.nestedToolCalls {
@@ -828,7 +822,13 @@ func (m *toolCallCmp) Spinning() bool {
 			return true
 		}
 	}
-	return m.spinning
+	return false
+}
+
+// Spinning returns whether tool call is currently showing a loading animation
+// Deprecated: Use IsAnimating() instead for better type safety
+func (m *toolCallCmp) Spinning() bool {
+	return m.animationState.IsActive()
 }
 
 func (m *toolCallCmp) ID() string {
@@ -911,10 +911,9 @@ func (m *toolCallCmp) updateAnimationForState() {
 		})
 	}
 
-	// Update spinning state based on new state
-	m.UpdateSpinner()
+	// Update animation state based on new state
+	m.UpdateAnimationState()
 }
-
 
 // getEffectiveDisplayState determines the appropriate state for display purposes
 // considering both tool call state and execution results

@@ -46,3 +46,39 @@ func (state AnimationState) IsStatic() bool {
 func (state AnimationState) String() string {
 	return string(state)
 }
+
+// ToIcon returns appropriate icon for animation state
+func (state AnimationState) ToIcon() string {
+	switch state {
+	case AnimationStateNone, AnimationStateStatic:
+		return ""
+	case AnimationStateSpinner, AnimationStateTimer:
+		return "⋯" // Loading icon
+	case AnimationStateBlink:
+		return "✅" // Success icon
+	case AnimationStatePulse:
+		return "⚡" // Processing icon
+	default:
+		return ""
+	}
+}
+
+// ToLabel returns descriptive label for animation state
+func (state AnimationState) ToLabel() string {
+	switch state {
+	case AnimationStateNone:
+		return ""
+	case AnimationStateStatic:
+		return ""
+	case AnimationStateSpinner:
+		return "Running"
+	case AnimationStateTimer:
+		return "Waiting"
+	case AnimationStateBlink:
+		return "Completed"
+	case AnimationStatePulse:
+		return "Processing"
+	default:
+		return ""
+	}
+}

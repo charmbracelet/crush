@@ -185,3 +185,35 @@ func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 
 	return messageBaseStyle.Render(message), nil
 }
+
+// ToAnimationState converts tool call state to appropriate animation state
+func (state ToolCallState) ToAnimationState() AnimationState {
+	switch state {
+	// Permission states use timer animation
+	case ToolCallStatePermissionPending:
+		return AnimationStateTimer
+	case ToolCallStatePermissionApproved:
+		return AnimationStatePulse
+	case ToolCallStatePermissionDenied:
+		return AnimationStateStatic
+
+	// Final states are static
+	case ToolCallStateCompleted:
+		return AnimationStateBlink
+	case ToolCallStateFailed:
+		return AnimationStateStatic
+	case ToolCallStateCancelled:
+		return AnimationStateStatic
+
+	// Running states use spinner
+	case ToolCallStateRunning:
+		return AnimationStateSpinner
+
+	// Pending state is static
+	case ToolCallStatePending:
+		return AnimationStateStatic
+
+	default:
+		return AnimationStateNone
+	}
+}

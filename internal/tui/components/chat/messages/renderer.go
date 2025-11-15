@@ -114,31 +114,31 @@ func shouldShowContentForState(state enum.ToolCallState, isNested bool) bool {
 	switch state {
 	// Show content for permission states
 	case enum.ToolCallStatePermissionPending:
-		return true  // Show tool details while waiting for permission
-		
+		return true // Show tool details while waiting for permission
+
 	case enum.ToolCallStatePermissionApproved:
-		return true  // Show content that was approved
-		
+		return true // Show content that was approved
+
 	case enum.ToolCallStatePermissionDenied:
 		return false // [RFC] Don't show content that was denied - review this policy
-		
+
 	// Show content for final states (except denied)
 	case enum.ToolCallStateCompleted:
-		return true  // Show successful results
-		
+		return true // Show successful results
+
 	case enum.ToolCallStateFailed:
-		return true  // Show error content for debugging
-		
+		return true // Show error content for debugging
+
 	case enum.ToolCallStateCancelled:
-		return true  // Show what was cancelled
-		
+		return true // Show what was cancelled
+
 	// Show minimal content for transitional states
 	case enum.ToolCallStatePending:
 		return false // Don't show content until tool starts
-		
+
 	case enum.ToolCallStateRunning:
-		return true  // Show progress/running state
-		
+		return true // Show progress/running state
+
 	default:
 		// Add error logging for unknown states
 		log.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
@@ -663,10 +663,10 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.spinning = true
+		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
 	} else {
-		v.spinning = false
+		v.UpdateAnimationState()
 	}
 
 	header = lipgloss.JoinVertical(
@@ -929,10 +929,10 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.spinning = true
+		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
 	} else {
-		v.spinning = false
+		v.UpdateAnimationState()
 	}
 
 	header = lipgloss.JoinVertical(

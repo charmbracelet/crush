@@ -72,7 +72,7 @@ func (m *ModelListComponent) Init() tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 		}
 	}
-	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType))
+	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType, ""))
 	return tea.Batch(cmds...)
 }
 
@@ -104,13 +104,30 @@ func (m *ModelListComponent) SelectedModel() *ModelOption {
 	return &model
 }
 
-func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
+func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.Cmd {
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
+	// create and populate string slices containing all model IDs and provider IDs
+	// will be used to ensure that favorited models are favorited based on both ID
+	favoritedModelsConfig := config.Get().Options.FavoritedModels
+	favoriteModels := make([]string, len(favoritedModelsConfig))
+	for i, fm := range favoritedModelsConfig {
+		favoriteModels[i] = fm.Model
+	}
+	favoriteModelsProviders := make([]string, len(favoritedModelsConfig))
+	for i, fmp := range favoritedModelsConfig {
+		favoriteModelsProviders[i] = fmp.Provider
+	}
+
 	var groups []list.Group[list.CompletionItem[ModelOption]]
+	favGroup := list.Group[list.CompletionItem[ModelOption]]{
+		Section: list.NewItemSection("Favorites"),
+	}
+
 	// first none section
-	selectedItemID := ""
+	hasPreselectedID := selectedID != ""
+	selectedItemID := selectedID
 	itemsByKey := make(map[string]list.CompletionItem[ModelOption])
 
 	cfg := config.Get()
@@ -180,25 +197,58 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			group := list.Group[list.CompletionItem[ModelOption]]{
 				Section: section,
 			}
+
+			totalModels := len(configProvider.Models)
+			var favoriteCount int = 0
+
 			for _, model := range configProvider.Models {
+				var isFavorite bool = false
+				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
+					model.Name = " ✦ " + model.Name
+					isFavorite = true
+				}
 				modelOption := ModelOption{
 					Provider: configProvider,
 					Model:    model,
 				}
 				key := modelKey(string(configProvider.ID), model.ID)
-				item := list.NewCompletionItem(
-					model.Name,
-					modelOption,
-					list.WithCompletionID(key),
-				)
+
+				var item list.CompletionItem[ModelOption]
+
+				if isFavorite {
+					item = list.NewCompletionItem(
+						model.Name,
+						modelOption,
+						list.WithCompletionID(key),
+						list.WithCompletionShortcut(string(configProvider.Name)),
+					)
+				} else {
+					item = list.NewCompletionItem(
+						model.Name,
+						modelOption,
+						list.WithCompletionID(key),
+					)
+				}
+
 				itemsByKey[key] = item
 
-				group.Items = append(group.Items, item)
-				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
-					selectedItemID = item.ID()
+				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
+					favoriteCount++
+					favGroup.Items = append(favGroup.Items, item)
+				} else {
+					group.Items = append(group.Items, item)
+				}
+
+				if !hasPreselectedID && selectedItemID == "" {
+					if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
+						selectedItemID = item.ID()
+					}
 				}
 			}
-			groups = append(groups, group)
+
+			if favoriteCount < totalModels {
+				groups = append(groups, group)
+			}
 
 			addedProviders[providerID] = true
 		}
@@ -253,24 +303,61 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,
 		}
+
+		totalModels := len(displayProvider.Models)
+		var favoriteCount int = 0
+
 		for _, model := range displayProvider.Models {
+			var isFavorite bool = false
+			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
+				model.Name = " ✦ " + model.Name
+				isFavorite = true
+			}
 			modelOption := ModelOption{
 				Provider: displayProvider,
 				Model:    model,
 			}
 			key := modelKey(string(displayProvider.ID), model.ID)
-			item := list.NewCompletionItem(
-				model.Name,
-				modelOption,
-				list.WithCompletionID(key),
-			)
+
+			var item list.CompletionItem[ModelOption]
+
+			if isFavorite {
+				item = list.NewCompletionItem(
+					model.Name,
+					modelOption,
+					list.WithCompletionID(key),
+					list.WithCompletionShortcut(string(displayProvider.Name)),
+				)
+			} else {
+				item = list.NewCompletionItem(
+					model.Name,
+					modelOption,
+					list.WithCompletionID(key),
+				)
+			}
+
 			itemsByKey[key] = item
-			group.Items = append(group.Items, item)
-			if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
-				selectedItemID = item.ID()
+
+			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
+				favoriteCount++
+				favGroup.Items = append(favGroup.Items, item)
+			} else {
+				group.Items = append(group.Items, item)
+			}
+
+			if !hasPreselectedID && selectedItemID == "" {
+				if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
+				}
 			}
 		}
-		groups = append(groups, group)
+		if favoriteCount < totalModels {
+			groups = append(groups, group)
+		}
+	}
+
+	if len(favGroup.Items) > 0 {
+		groups = append([]list.Group[list.CompletionItem[ModelOption]]{favGroup}, groups...)
 	}
 
 	if len(recentItems) > 0 {
@@ -299,8 +386,10 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				list.WithCompletionShortcut(providerName),
 			)
 			recentGroup.Items = append(recentGroup.Items, item)
-			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
-				selectedItemID = recentID
+			if !hasPreselectedID {
+				if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
+					selectedItemID = recentID
+				}
 			}
 		}
 

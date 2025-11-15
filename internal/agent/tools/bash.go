@@ -63,6 +63,7 @@ type bashDescriptionData struct {
 	BannedCommands  string
 	MaxOutputLength int
 	Attribution     config.Attribution
+	ModelName       string
 }
 
 var bannedCommands = []string{
@@ -138,13 +139,14 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution) string {
+func bashDescription(attribution *config.Attribution, modelName string) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
+		ModelName:       modelName,
 	}); err != nil {
 		// Return proper error instead of panic - this prevents application crashes
 		return fmt.Sprintf("Error: failed to generate bash tool description: %s", err.Error())
@@ -184,10 +186,10 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution)),
+		string(bashDescription(attribution, modelName)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil

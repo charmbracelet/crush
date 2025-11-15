@@ -335,6 +335,28 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Initialization
+
+When you initialize a project, Crush analyzes your codebase and creates
+a context file that helps it work more effectively in future sessions.
+By default, this file is named `AGENTS.md`, but you can customize the
+name and location with the `initialize_as` option:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "initialize_as": "AGENTS.md"
+  }
+}
+```
+
+This is useful if you prefer a different naming convention or want to
+place the file in a specific directory (e.g., `CRUSH.md` or
+`docs/LLMs.md`). Crush will fill the file with project-specific context
+like build commands, code patterns, and conventions it discovered during
+initialization.
+
 ### Attribution Settings
 
 By default, Crush adds attribution information to Git commits and pull requests
@@ -345,63 +367,18 @@ it creates. You can customize this behavior with the `attribution` option:
   "$schema": "https://charm.land/crush.json",
   "options": {
     "attribution": {
-      "co_authored_by": true,
+      "trailer_style": "co-authored-by",
       "generated_with": true
     }
   }
 }
 ```
 
-- `co_authored_by`: When true (default), adds `Co-Authored-By: Crush <crush@charm.land>` to commit messages
+- `trailer_style`: Controls the attribution trailer added to commit messages (default: `co-authored-by`)
+  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush` (includes the model name)
+  - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
-
-### Local Models
-
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
-
-#### Ollama
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### LM Studio
-
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
 
 ### Custom Providers
 
@@ -514,6 +491,54 @@ To add specific models to the configuration, configure as such:
           "default_max_tokens": 50000,
           "can_reason": true,
           "supports_attachments": true
+        }
+      ]
+    }
+  }
+}
+```
+
+### Local Models
+
+Local models can also be configured via OpenAI-compatible API. Here are two common examples:
+
+#### Ollama
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "openai-compat",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen3:30b",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}
+```
+
+#### LM Studio
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:1234/v1/",
+      "type": "openai-compat",
+      "models": [
+        {
+          "name": "Qwen 3 30B",
+          "id": "qwen/qwen3-30b-a3b-2507",
+          "context_window": 256000,
+          "default_max_tokens": 20000
         }
       ]
     }

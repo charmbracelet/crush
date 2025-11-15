@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -454,10 +455,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "init",
 			Title:       "Initialize Project",
-			Description: "Create/Update the CRUSH.md memory file",
+			Description: fmt.Sprintf("Create/Update the %s memory file", config.Get().Options.InitializeAs),
 			Handler: func(cmd Command) tea.Cmd {
+				initPrompt, err := agent.InitializePrompt(*config.Get())
+				if err != nil {
+					return util.ReportError(err)
+				}
 				return util.CmdHandler(chat.SendMsg{
-					Text: agent.InitializePrompt(),
+					Text: initPrompt,
 				})
 			},
 		},

@@ -329,6 +329,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
@@ -350,9 +353,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
-			CoAuthoredBy:  true,
+			TrailerStyle:  TrailerStyleCoAuthoredBy,
 			GeneratedWith: true,
 		}
+	} else if c.Options.Attribution.TrailerStyle == "" {
+		// Migrate deprecated co_authored_by or apply default
+		if c.Options.Attribution.CoAuthoredBy != nil && !*c.Options.Attribution.CoAuthoredBy {
+			c.Options.Attribution.TrailerStyle = TrailerStyleNone
+		} else {
+			c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+		}
+	}
+	if c.Options.InitializeAs == "" {
+		c.Options.InitializeAs = defaultInitializeAs
 	}
 }
 

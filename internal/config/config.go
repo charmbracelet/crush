@@ -14,12 +14,14 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
+	defaultInitializeAs  = "AGENTS.md"
 )
 
 var defaultContextPaths = []string{
@@ -166,9 +168,27 @@ type Permissions struct {
 	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
 }
 
+type TrailerStyle string
+
+const (
+	TrailerStyleNone         TrailerStyle = "none"
+	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
+	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
+)
+
 type Attribution struct {
-	CoAuthoredBy  bool `json:"co_authored_by,omitempty" jsonschema:"description=Add Co-Authored-By trailer to commit messages,default=true"`
-	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=co-authored-by"`
+	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+}
+
+// JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
+func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		if prop, ok := schema.Properties.Get("co_authored_by"); ok {
+			prop.Deprecated = true
+		}
+	}
 }
 
 type Options struct {
@@ -182,6 +202,7 @@ type Options struct {
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 }
 
 type MCPs map[string]MCPConfig
@@ -289,6 +310,8 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+	// Recently used models stored in the data directory config.
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -398,6 +421,9 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
+	if err := c.recordRecentModel(modelType, model); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -462,6 +488,49 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	}
 	// Store the updated provider config
 	c.Providers.Set(providerID, providerConfig)
+	return nil
+}
+
+const maxRecentModelsPerType = 5
+
+func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
+	if model.Provider == "" || model.Model == "" {
+		return nil
+	}
+
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
+
+	entry := SelectedModel{
+		Provider: model.Provider,
+		Model:    model.Model,
+	}
+
+	current := c.RecentModels[modelType]
+	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
+		return eq(existing, entry)
+	})
+
+	updated := append([]SelectedModel{entry}, withoutCurrent...)
+	if len(updated) > maxRecentModelsPerType {
+		updated = updated[:maxRecentModelsPerType]
+	}
+
+	if slices.EqualFunc(current, updated, eq) {
+		return nil
+	}
+
+	c.RecentModels[modelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
 	return nil
 }
 

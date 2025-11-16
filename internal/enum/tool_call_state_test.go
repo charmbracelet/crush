@@ -6,106 +6,106 @@ import (
 
 func TestShouldShowContentForState(t *testing.T) {
 	tests := []struct {
-		name     string
-		state    ToolCallState
-		isNested bool
+		name      string
+		state     ToolCallState
+		isNested  bool
 		hasNested bool
-		want     bool
+		want      bool
 	}{
 		// Pending state: only show for top-level tools with nested calls
 		{
-			name:     "Pending top-level with no children",
-			state:    ToolCallStatePending,
-			isNested: false,
+			name:      "Pending top-level with no children",
+			state:     ToolCallStatePending,
+			isNested:  false,
 			hasNested: false,
-			want:     false,
+			want:      false,
 		},
 		{
-			name:     "Pending top-level with children",
-			state:    ToolCallStatePending,
-			isNested: false,
+			name:      "Pending top-level with children",
+			state:     ToolCallStatePending,
+			isNested:  false,
 			hasNested: true,
-			want:     true, // Show header to provide context for nested tools
+			want:      true, // Show header to provide context for nested tools
 		},
 		{
-			name:     "Nested pending with no children",
-			state:    ToolCallStatePending,
-			isNested: true,
+			name:      "Nested pending with no children",
+			state:     ToolCallStatePending,
+			isNested:  true,
 			hasNested: false,
-			want:     false,
+			want:      false,
 		},
 		{
-			name:     "Nested pending with children",
-			state:    ToolCallStatePending,
-			isNested: true,
+			name:      "Nested pending with children",
+			state:     ToolCallStatePending,
+			isNested:  true,
 			hasNested: true,
-			want:     false,
+			want:      false,
 		},
 
 		// Running state: always show
 		{
-			name:     "Running top-level",
-			state:    ToolCallStateRunning,
-			isNested: false,
+			name:      "Running top-level",
+			state:     ToolCallStateRunning,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 		{
-			name:     "Running nested",
-			state:    ToolCallStateRunning,
-			isNested: true,
+			name:      "Running nested",
+			state:     ToolCallStateRunning,
+			isNested:  true,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 
 		// Completed state: always show
 		{
-			name:     "Completed top-level",
-			state:    ToolCallStateCompleted,
-			isNested: false,
+			name:      "Completed top-level",
+			state:     ToolCallStateCompleted,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 
 		// Failed state: always show
 		{
-			name:     "Failed top-level",
-			state:    ToolCallStateFailed,
-			isNested: false,
+			name:      "Failed top-level",
+			state:     ToolCallStateFailed,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 
 		// Cancelled state: always show
 		{
-			name:     "Cancelled top-level",
-			state:    ToolCallStateCancelled,
-			isNested: false,
+			name:      "Cancelled top-level",
+			state:     ToolCallStateCancelled,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 
 		// Permission states
 		{
-			name:     "Permission Pending",
-			state:    ToolCallStatePermissionPending,
-			isNested: false,
+			name:      "Permission Pending",
+			state:     ToolCallStatePermissionPending,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 		{
-			name:     "Permission Approved",
-			state:    ToolCallStatePermissionApproved,
-			isNested: false,
+			name:      "Permission Approved",
+			state:     ToolCallStatePermissionApproved,
+			isNested:  false,
 			hasNested: false,
-			want:     true,
+			want:      true,
 		},
 		{
-			name:     "Permission Denied",
-			state:    ToolCallStatePermissionDenied,
-			isNested: false,
+			name:      "Permission Denied",
+			state:     ToolCallStatePermissionDenied,
+			isNested:  false,
 			hasNested: false,
-			want:     false,
+			want:      false,
 		},
 	}
 

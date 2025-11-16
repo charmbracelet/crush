@@ -592,7 +592,7 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 	// Create base renderer for header functionality
 	baseRenderer := baseRenderer{}
 	header := baseRenderer.makeHeader(v, toolName, v.textWidth(), args...)
-	
+
 	// Handle cancelled state
 	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
@@ -600,11 +600,11 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 
 	// Create task tag
 	taskTag := taskTagStyle.Render("Prompt")
-	
+
 	// Calculate remaining width for prompt
 	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
 	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
-	
+
 	// Style and assemble header with prompt
 	prompt = styles.CurrentTheme().S().Muted.Width(remainingWidth).Render(prompt)
 	header = lipgloss.JoinVertical(
@@ -625,7 +625,7 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 		call.SetSize(remainingWidth, 1)
 		childTools.Child(call.View())
 	}
-	
+
 	parts := []string{
 		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
 	}
@@ -660,7 +660,7 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 
 	t := styles.CurrentTheme()
 	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border)
-	
+
 	return renderNestedToolWithPrompt(v, "Agentic Fetch", args, params.Prompt, taskTagStyle)
 }
 
@@ -879,7 +879,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 
 	t := styles.CurrentTheme()
 	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White)
-	
+
 	return renderNestedToolWithPrompt(v, "Agent", []string{}, params.Prompt, taskTagStyle)
 }
 

@@ -211,7 +211,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		}
 	} else {
 		parts = append(parts, "### Status:")
-		parts = append(parts, m.call.State.FormatToolForCopy())
+		parts = append(parts, m.getEffectiveDisplayState().FormatToolForCopy())
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -806,7 +806,8 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
 func (m *toolCallCmp) RefreshAnimation() {
-	m.anim = anim.New(m.call.State.ToAnimationSettings(m.isNested))
+	// Use effective display state for consistent animation behavior with results
+	m.anim = anim.New(m.getEffectiveDisplayState().ToAnimationSettings(m.isNested))
 
 	// Update animation state based on new state
 	m.updateAnimationState()

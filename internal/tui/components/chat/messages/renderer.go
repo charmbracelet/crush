@@ -104,7 +104,7 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	}
 
 	// Only render body if the tool state allows content visibility
-	if v.call.State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+	if v.getEffectiveDisplayState().ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
 		body := contentRenderer()
 		return joinHeaderBody(header, body)
 	}
@@ -922,14 +922,14 @@ func renderParamList(paramsWidth int, params ...string) string {
 // This replaces the old renderStatusOnly function by using ShouldShowContentForState
 func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func() string) string {
 	// Check if content should be shown based on state
-	if !v.call.State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+	if !v.getEffectiveDisplayState().ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
 		// Don't show content, render status message only
 		t := styles.CurrentTheme()
 		message := ""
 		if v.result.IsError {
 			message = v.renderToolCallError()
 		} else {
-			m, err := v.call.State.RenderTUIMessageColored()
+			m, err := v.getEffectiveDisplayState().RenderTUIMessageColored()
 			if err != nil {
 				return header // Fallback to header-only on error
 			}

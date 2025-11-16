@@ -862,7 +862,7 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	label, err := m.call.State.RenderTUIMessage()
 	if err != nil {
 		// Fallback to reasonable default when state rendering fails
-		label = "Error"
+		label = "Unknown State"
 	}
 
 	size := 15
@@ -911,9 +911,11 @@ func (m *toolCallCmp) configureVisualAnimation() {
 		})
 	case enum.ToolCallStateCompleted, enum.ToolCallStateFailed, enum.ToolCallStateCancelled, enum.ToolCallStatePermissionDenied:
 		// State 4 & 5 (Done/Failed/Cancelled): static - no animation
+		// Use empty label for static states (status shown elsewhere in UI)
+		finalStateLabel := ""
 		m.anim = anim.New(anim.Settings{
 			Size:        size,
-			Label:       label,
+			Label:       finalStateLabel,
 			GradColorA:  t.FgMuted,
 			GradColorB:  t.FgMuted,
 			LabelColor:  t.FgSubtle,

@@ -37,7 +37,7 @@ type ToolCallCmp interface {
 	SetToolResult(message.ToolResult)  // Update tool result
 	SetToolCall(message.ToolCall)      // Update tool call
 	ParentMessageID() string           // Get parent message ID
-	Spinning() bool                    // Animation state for pending tools
+	IsAnimating() bool                 // Animation state for pending tools
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
@@ -125,7 +125,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		var cmds []tea.Cmd
 		for i, nested := range m.nestedToolCalls {
-			if nested.Spinning() {
+			if nested.IsAnimating() {
 				u, cmd := nested.Update(msg)
 				m.nestedToolCalls[i] = u.(ToolCallCmp)
 				cmds = append(cmds, cmd)
@@ -816,23 +816,17 @@ func (m *toolCallCmp) UpdateAnimationState() {
 	m.animationState = effectiveState.ToAnimationState()
 }
 
-// Spinning returns whether the tool call is currently showing a loading animation
+// IsAnimating returns whether the tool call is currently showing a loading animation
 func (m *toolCallCmp) IsAnimating() bool {
 	if m.animationState.IsActive() {
 		return true
 	}
 	for _, nested := range m.nestedToolCalls {
-		if nested.Spinning() {
+		if nested.IsAnimating() {
 			return true
 		}
 	}
 	return false
-}
-
-// Spinning returns whether tool call is currently showing a loading animation
-// Deprecated: Use IsAnimating() instead for better type safety
-func (m *toolCallCmp) Spinning() bool {
-	return m.animationState.IsActive()
 }
 
 func (m *toolCallCmp) ID() string {

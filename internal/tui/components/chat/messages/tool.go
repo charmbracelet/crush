@@ -726,7 +726,7 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 // renderState displays the tool name with a loading animation for pending tool calls
 func (m *toolCallCmp) renderState() string {
 	t := styles.CurrentTheme()
-	icon := m.call.State.ToIconColored()
+	icon := m.getEffectiveDisplayState().ToIconColored()
 	if m.isNested {
 		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
 		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())

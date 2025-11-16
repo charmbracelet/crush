@@ -134,7 +134,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 		return br.makeNestedHeader(v, tool, width, params...)
 	}
 	t := styles.CurrentTheme()
-	icon := v.call.State.ToIconColored()
+	icon := v.getEffectiveDisplayState().ToIconColored()
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
@@ -252,7 +252,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
 	t := styles.CurrentTheme()
-	icon := v.call.State.ToIconColored()
+	icon := v.getEffectiveDisplayState().ToIconColored()
 
 	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
 	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")

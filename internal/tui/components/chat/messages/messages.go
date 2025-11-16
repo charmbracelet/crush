@@ -372,6 +372,11 @@ func (m *messageCmp) IsAnimating() bool {
 	return m.animationState.IsActive()
 }
 
+// GetAnimationState returns the current animation state
+func (m *messageCmp) GetAnimationState() enum.AnimationState {
+	return m.animationState
+}
+
 type AssistantSection interface {
 	list.Item
 	layout.Sizeable

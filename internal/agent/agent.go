@@ -298,7 +298,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		OnToolInputStart: func(id string, toolName string) error {
 			toolCall := message.ToolCall{
-				ID:               id,
+				ID:               message.ToolCallID(id),
 				Name:             toolName,
 				ProviderExecuted: false,
 				State:            enum.ToolCallStatePending,
@@ -311,7 +311,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
-				ID:               tc.ToolCallID,
+				ID:               message.ToolCallID(tc.ToolCallID),
 				Name:             tc.ToolName,
 				Input:            tc.Input,
 				ProviderExecuted: false,
@@ -341,7 +341,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 			// Update tool call state based on result
 			for i, part := range currentAssistant.Parts {
-				if tc, ok := part.(message.ToolCall); ok && tc.ID == result.ToolCallID {
+				if tc, ok := part.(message.ToolCall); ok && tc.ID.String() == result.ToolCallID {
 					newState := enum.ToolCallStateCompleted
 					if isError {
 						newState = enum.ToolCallStateFailed
@@ -357,7 +357,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 
 			toolResult := message.ToolResult{
-				ToolCallID: result.ToolCallID,
+				ToolCallID: message.ToolCallID(result.ToolCallID),
 				Name:       result.ToolName,
 				Content:    resultContent,
 				IsError:    isError,

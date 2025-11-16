@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -42,9 +43,10 @@ type Item interface {
 	ID() string
 }
 
-type HasAnim interface {
+// Animatable interface for items that can have animation states
+type Animatable interface {
 	Item
-	Spinning() bool
+	GetAnimationState() enum.AnimationState
 }
 
 type List[T Item] interface {
@@ -261,8 +263,8 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return l, nil
 		}
 
-		// Fast path: check if ANY items are actually spinning before processing
-		if !l.hasSpinningItems() {
+		// Fast path: check if ANY items are actually animating before processing
+		if !l.hasAnimatingItems() {
 			return l, nil
 		}
 
@@ -273,7 +275,7 @@ func (l *list[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				continue
 			}
 			item := l.items[i]
-			if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+			if animItem, ok := any(item).(Animatable); ok && animItem.GetAnimationState().IsActive() {
 				updated, cmd := animItem.Update(msg)
 				cmds = append(cmds, cmd)
 				if u, ok := updated.(T); ok {
@@ -334,10 +336,10 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (util.Model, tea.Cmd) 
 	return l, cmd
 }
 
-func (l *list[T]) hasSpinningItems() bool {
+func (l *list[T]) hasAnimatingItems() bool {
 	for i := range l.items {
 		item := l.items[i]
-		if animItem, ok := any(item).(HasAnim); ok && animItem.Spinning() {
+		if animItem, ok := any(item).(Animatable); ok && animItem.GetAnimationState().IsActive() {
 			return true
 		}
 	}

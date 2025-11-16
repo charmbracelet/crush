@@ -621,7 +621,7 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
 	}
 
-	if v.result.ToolCallID == "" {
+	if v.result.ToolCallID.IsEmpty() {
 		parts = append(parts, "", v.anim.View())
 	}
 	v.updateAnimationState()
@@ -631,7 +631,7 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 		parts...,
 	)
 
-	if v.result.ToolCallID == "" {
+	if v.result.ToolCallID.IsEmpty() {
 		return header
 	}
 

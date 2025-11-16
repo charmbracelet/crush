@@ -15,6 +15,31 @@ import (
 	"github.com/charmbracelet/crush/internal/enum"
 )
 
+// ToolCallID represents a strongly-typed tool call identifier
+type ToolCallID string
+
+// Validate ensures tool call ID is not empty
+func (id ToolCallID) Validate() error {
+	if id.IsEmpty() {
+		return errors.New("tool call ID cannot be empty")
+	}
+	return nil
+}
+
+// String returns string representation of ToolCallID
+func (id ToolCallID) String() string {
+	return string(id)
+}
+
+// IsEmpty returns true if tool call ID is empty or only whitespace
+func (id ToolCallID) IsEmpty() bool {
+	return strings.TrimSpace(string(id)) == ""
+}
+
+func (id ToolCallID) IsNotEmpty() bool {
+	return !id.IsEmpty()
+}
+
 type MessageRole string
 
 const (
@@ -94,7 +119,7 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string             `json:"id"`
+	ID               ToolCallID         `json:"id"`
 	Name             string             `json:"name"`
 	Input            string             `json:"input"`
 	ProviderExecuted bool               `json:"provider_executed"`
@@ -104,13 +129,13 @@ type ToolCall struct {
 func (ToolCall) isPart() {}
 
 type ToolResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-	Data       string `json:"data"`
-	MIMEType   string `json:"mime_type"`
-	Metadata   string `json:"metadata"`
-	IsError    bool   `json:"is_error"`
+	ToolCallID ToolCallID `json:"tool_call_id"`
+	Name       string     `json:"name"`
+	Content    string     `json:"content"`
+	Data       string     `json:"data"`
+	MIMEType   string     `json:"mime_type"`
+	Metadata   string     `json:"metadata"`
+	IsError    bool       `json:"is_error"`
 }
 
 func (ToolResult) isPart() {}
@@ -337,7 +362,7 @@ func (m *Message) ThinkingDuration() time.Duration {
 	return time.Duration(endTime-reasoning.StartedAt) * time.Second
 }
 
-func (m *Message) FinishToolCall(toolCallID string) {
+func (m *Message) FinishToolCall(toolCallID ToolCallID) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
@@ -356,7 +381,7 @@ func (m *Message) FinishToolCall(toolCallID string) {
 func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
+			if c.ID.String() == toolCallID {
 				m.Parts[i] = ToolCall{
 					ID:    c.ID,
 					Name:  c.Name,
@@ -471,7 +496,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{
-				ToolCallID:       call.ID,
+				ToolCallID:       call.ID.String(),
 				ToolName:         call.Name,
 				Input:            call.Input,
 				ProviderExecuted: call.ProviderExecuted,
@@ -500,7 +525,8 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				}
 			}
 			parts = append(parts, fantasy.ToolResultPart{
-				ToolCallID: result.ToolCallID,
+				// Note: fantasy uses a plain string ToolCallID
+				ToolCallID: result.ToolCallID.String(),
 				Output:     content,
 			})
 		}

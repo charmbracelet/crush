@@ -274,7 +274,7 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 	var toolCall messages.ToolCallCmp
 	for i := len(items) - 1; i >= 0; i-- {
 		if msg, ok := items[i].(messages.ToolCallCmp); ok {
-			if msg.ParentMessageID() == parentMessageID && msg.GetToolCall().ID == toolCallID {
+			if msg.ParentMessageID() == parentMessageID && msg.GetToolCall().ID.String() == toolCallID {
 				toolCallInx = i
 				toolCall = msg
 			}
@@ -401,7 +401,7 @@ func (m *messageListCmp) handleNewUserMessage(msg message.Message) tea.Cmd {
 func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
 	items := m.listCmp.Items()
 	for _, tr := range msg.ToolResults() {
-		if toolCallIndex := m.findToolCallByID(items, tr.ToolCallID); toolCallIndex != NotFound {
+		if toolCallIndex := m.findToolCallByID(items, tr.ToolCallID.String()); toolCallIndex != NotFound {
 			toolCall := items[toolCallIndex].(messages.ToolCallCmp)
 			toolCall.SetToolResult(tr)
 			m.listCmp.UpdateItem(toolCall.ID(), toolCall)
@@ -415,7 +415,7 @@ func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
 func (m *messageListCmp) findToolCallByID(items []list.Item, toolCallID string) int {
 	// Search backwards as tool calls are more likely to be recent
 	for i := len(items) - 1; i >= 0; i-- {
-		if toolCall, ok := items[i].(messages.ToolCallCmp); ok && toolCall.GetToolCall().ID == toolCallID {
+		if toolCall, ok := items[i].(messages.ToolCallCmp); ok && toolCall.GetToolCall().ID.String() == toolCallID {
 			return i
 		}
 	}
@@ -529,7 +529,7 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
 				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}
-			m.listCmp.UpdateItem(tc.ID, existingTC)
+			m.listCmp.UpdateItem(tc.ID.String(), existingTC)
 			return nil
 		}
 	}
@@ -594,7 +594,7 @@ func (m *messageListCmp) buildToolResultMap(messages []message.Message) map[stri
 	toolResultMap := make(map[string]message.ToolResult)
 	for _, msg := range messages {
 		for _, tr := range msg.ToolResults() {
-			toolResultMap[tr.ToolCallID] = tr
+			toolResultMap[tr.ToolCallID.String()] = tr
 		}
 	}
 	return toolResultMap
@@ -640,7 +640,7 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions, options...))
 		// If this tool call is the agent tool or agentic fetch, fetch nested tool calls
 		if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
-			agentToolSessionID := m.app.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
+			agentToolSessionID := m.app.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID.String())
 			nestedMessages, _ := m.app.Messages.List(context.Background(), agentToolSessionID)
 			nestedToolResultMap := m.buildToolResultMap(nestedMessages)
 			nestedUIMessages := m.convertMessagesToUI(nestedMessages, nestedToolResultMap)
@@ -663,7 +663,7 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 	var options []messages.ToolCallOption
 
 	// Add tool result if available
-	if tr, ok := toolResultMap[tc.ID]; ok {
+	if tr, ok := toolResultMap[tc.ID.String()]; ok {
 		options = append(options, messages.WithToolCallResult(tr))
 	}
 

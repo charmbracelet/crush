@@ -41,7 +41,8 @@ type ToolCallCmp interface {
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
-	ID() string
+	ID() string               // Access to tool call ID (as string for Item interface)
+	GetToolCallID() message.ToolCallID // Access to strongly-typed tool call ID
 	SetToolCallState(state enum.ToolCallState)
 }
 
@@ -195,7 +196,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 	}
 
 	if m.call.State == enum.ToolCallStateCompleted {
-		if m.result.ToolCallID == "" {
+		if m.result.ToolCallID.IsEmpty() {
 			log.Error("Unknown state: ToolCallState = Completed and ToolCallID is empty")
 		}
 		if m.result.IsError {
@@ -831,7 +832,17 @@ func (m *toolCallCmp) IsAnimating() bool {
 	return false
 }
 
+// GetAnimationState returns current animation state
+func (m *toolCallCmp) GetAnimationState() enum.AnimationState {
+	return m.animationState
+}
+
 func (m *toolCallCmp) ID() string {
+	return m.call.ID.String()
+}
+
+// GetToolCallID returns the strongly-typed ToolCallID
+func (m *toolCallCmp) GetToolCallID() message.ToolCallID {
 	return m.call.ID
 }
 
@@ -921,7 +932,7 @@ func (m *toolCallCmp) configureVisualAnimation() {
 // considering both tool call state and execution results
 func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
 	// If we have a result, execution outcome takes priority
-	if m.result.ToolCallID != "" {
+	if m.result.ToolCallID.IsNotEmpty() {
 		if m.result.IsError {
 			return enum.ToolCallStateFailed
 		}

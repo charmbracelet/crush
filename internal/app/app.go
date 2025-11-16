@@ -255,6 +255,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
+	// There are currently no agents configured.
+	if app.AgentCoordinator == nil {
+		return nil
+	}
+
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 

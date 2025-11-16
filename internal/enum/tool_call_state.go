@@ -76,8 +76,7 @@ func (state ToolCallState) ToFgColor() color.Color {
 	t := styles.CurrentTheme()
 	switch state {
 	case ToolCallStatePending:
-		// TODO: random color must be replace with some kind of Gray.
-		return t.Info // TODO: not sure if this is a shade of gray
+		return t.FgMuted
 	case ToolCallStatePermissionPending:
 		return t.Paprika
 	case ToolCallStatePermissionApproved:

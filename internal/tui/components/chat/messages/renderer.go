@@ -222,12 +222,10 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 			if v.isNested {
 				return v.style().Render(header)
 			}
-			// For background jobs, let the common renderWithParams handle states
+			// For background jobs, show content regardless of state
 			content := "Command: " + params.Command + "\n" + v.result.Content
-			return br.renderWithParams(v, "Bash", args, func() string {
-				body := renderPlainContent(v, content)
-				return body
-			})
+			body := renderPlainContent(v, content)
+			return joinHeaderBody(header, body)
 		}
 	}
 

@@ -41,7 +41,7 @@ type MessageCmp interface {
 	layout.Focusable                // Focus state management
 	GetMessage() message.Message    // Access to underlying message data
 	SetMessage(msg message.Message) // Update the message content
-	Spinning() bool                 // Animation state for loading messages
+	IsAnimating() bool                // Animation state for loading messages
 	ID() string
 }
 
@@ -369,8 +369,8 @@ func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
-// Spinning returns whether the message is currently showing a loading animation
-func (m *messageCmp) Spinning() bool {
+// IsAnimating returns whether the message is currently showing a loading animation
+func (m *messageCmp) IsAnimating() bool {
 	return m.animationState.IsActive()
 }
 

@@ -801,8 +801,6 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
-
-
 // UpdateAnimationState updates the animation state based on current tool call and result data.
 // This is the single source of truth for determining animation behavior.
 func (m *toolCallCmp) UpdateAnimationState() {

@@ -161,9 +161,8 @@ func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 	case ToolCallStateFailed:
 		{
 			messageBaseStyle = messageBaseStyle.Padding(0, 1).Background(t.Red).Foreground(t.White)
-			// TODO: ERROR content? Most likely not in this function.
-			// err := strings.ReplaceAll(v.result.Content, "\n", " ")
-			// err = fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(v.fit(err, v.textWidth()-2-lipgloss.Width(errTag))))
+			// Error content is handled by renderer logic, not here
+			// This function only provides the status message styling
 		}
 	case ToolCallStatePermissionApproved:
 		{

@@ -140,7 +140,7 @@ func (state ToolCallState) renderTUIMessage() (string, error) {
 	case ToolCallStatePending:
 		return "Waiting for tool to start...", nil
 	case ToolCallStatePermissionPending:
-		return "Requesting permission...", nil
+		return "Awaiting permission...", nil
 	case ToolCallStatePermissionApproved:
 		return "Permission approved. Executing command...", nil
 	case ToolCallStatePermissionDenied:

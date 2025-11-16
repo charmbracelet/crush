@@ -874,7 +874,7 @@ func (m *toolCallCmp) configureVisualAnimation() {
 		// State 2 (Awaiting permission): timer counts up every 1s
 		m.anim = anim.New(anim.Settings{
 			Size:        15,
-			Label:       "Requesting Permission",
+			Label:       "Awaiting permission",
 			GradColorA:  t.Paprika,
 			GradColorB:  t.Paprika,
 			LabelColor:  t.FgBase,

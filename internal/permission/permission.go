@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/enum"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -17,13 +18,13 @@ import (
 var ErrorPermissionDenied = errors.New("user denied permission")
 
 type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	SessionID   string             `json:"session_id"`
+	ToolCallID  message.ToolCallID `json:"tool_call_id"`
+	ToolName    string             `json:"tool_name"`
+	Description string             `json:"description"`
+	Action      string             `json:"action"`
+	Params      any                `json:"params"`
+	Path        string             `json:"path"`
 }
 
 // PermissionRequest represents a permission request for tool execution
@@ -34,7 +35,7 @@ type PermissionRequest struct {
 }
 
 type PermissionEvent struct {
-	ToolCallID string             `json:"tool_call_id"`
+	ToolCallID message.ToolCallID `json:"tool_call_id"`
 	Status     enum.ToolCallState `json:"status"`
 }
 

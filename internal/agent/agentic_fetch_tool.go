@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/message"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -77,9 +78,10 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			p := c.permissions.Request(
 				permission.CreatePermissionRequest{
-					SessionID:   validationResult.SessionID,
-					Path:        c.cfg.WorkingDir(),
-					ToolCallID:  call.ID,
+					SessionID: validationResult.SessionID,
+					Path:      c.cfg.WorkingDir(),
+					// Note: fantasy uses strings for ToolCallID
+					ToolCallID:  message.ToolCallID(call.ID),
 					ToolName:    tools.AgenticFetchToolName,
 					Action:      "fetch",
 					Description: fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL),
@@ -167,8 +169,9 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(validationResult.AgentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, validationResult.SessionID, "Fetch Analysis")
+			agentToolSessionID := c.sessions.CreateAgentToolSessionID(validationResult.AgentMessageID, message.ToolCallID(call.ID))
+			// TODO: This is off agentToolSessionID is a message.ToolCallID??
+			session, err := c.sessions.CreateTaskSession(ctx, message.ToolCallID(agentToolSessionID), validationResult.SessionID, "Fetch Analysis")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}

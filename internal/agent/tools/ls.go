@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -81,9 +82,10 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 
 				granted := permissions.Request(
 					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        absSearchPath,
-						ToolCallID:  call.ID,
+						SessionID: sessionID,
+						Path:      absSearchPath,
+						// Note: fantasy uses strings for ToolCallID
+						ToolCallID:  message.ToolCallID(call.ID),
 						ToolName:    LSToolName,
 						Action:      "list",
 						Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),

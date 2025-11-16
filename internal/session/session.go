@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -29,15 +30,15 @@ type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
-	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
+	CreateTaskSession(ctx context.Context, toolCallID message.ToolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
-	CreateAgentToolSessionID(messageID, toolCallID string) string
-	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
+	CreateAgentToolSessionID(messageID string, toolCallID message.ToolCallID) string
+	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID message.ToolCallID, ok bool)
 	IsAgentToolSession(sessionID string) bool
 }
 
@@ -60,9 +61,10 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	return session, nil
 }
 
-func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
+func (s *service) CreateTaskSession(ctx context.Context, toolCallID message.ToolCallID, parentSessionID, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:              toolCallID,
+		// Note: in the database ToolCallID stay just strings
+		ID:              toolCallID.String(),
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
 	})
@@ -166,17 +168,17 @@ func NewService(q db.Querier) Service {
 }
 
 // CreateAgentToolSessionID creates a session ID for agent tool sessions using the format "messageID$$toolCallID"
-func (s *service) CreateAgentToolSessionID(messageID, toolCallID string) string {
+func (s *service) CreateAgentToolSessionID(messageID string, toolCallID message.ToolCallID) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }
 
 // ParseAgentToolSessionID parses an agent tool session ID into its components
-func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
+func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID message.ToolCallID, ok bool) {
 	parts := strings.Split(sessionID, "$$")
 	if len(parts) != 2 {
-		return "", "", false
+		return "", message.EmptyToolCallId, false
 	}
-	return parts[0], parts[1], true
+	return parts[0], message.ToolCallID(parts[1]), true
 }
 
 // IsAgentToolSession checks if a session ID follows the agent tool session format

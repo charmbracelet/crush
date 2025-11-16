@@ -18,6 +18,8 @@ import (
 // ToolCallID represents a strongly-typed tool call identifier
 type ToolCallID string
 
+const EmptyToolCallId ToolCallID = ""
+
 // Validate ensures tool call ID is not empty
 func (id ToolCallID) Validate() error {
 	if id.IsEmpty() {
@@ -33,7 +35,7 @@ func (id ToolCallID) String() string {
 
 // IsEmpty returns true if tool call ID is empty or only whitespace
 func (id ToolCallID) IsEmpty() bool {
-	return strings.TrimSpace(string(id)) == ""
+	return id == EmptyToolCallId
 }
 
 func (id ToolCallID) IsNotEmpty() bool {
@@ -378,10 +380,10 @@ func (m *Message) FinishToolCall(toolCallID ToolCallID) {
 	}
 }
 
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
+func (m *Message) AppendToolCallInput(toolCallID ToolCallID, inputDelta string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
-			if c.ID.String() == toolCallID {
+			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
 					ID:    c.ID,
 					Name:  c.Name,
@@ -496,6 +498,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{
+				// Note: fantasy uses strings for ToolCallID
 				ToolCallID:       call.ID.String(),
 				ToolName:         call.Name,
 				Input:            call.Input,

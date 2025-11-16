@@ -341,7 +341,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 			// Update tool call state based on result
 			for i, part := range currentAssistant.Parts {
-				if tc, ok := part.(message.ToolCall); ok && tc.ID.String() == result.ToolCallID {
+				if tc, ok := part.(message.ToolCall); ok && tc.ID == message.ToolCallID(result.ToolCallID) {
 					newState := enum.ToolCallStateCompleted
 					if isError {
 						newState = enum.ToolCallStateFailed

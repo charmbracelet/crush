@@ -15,6 +15,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -217,9 +218,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if !isSafeReadOnly {
 				p := permissions.Request(
 					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        execWorkingDir,
-						ToolCallID:  call.ID,
+						SessionID: sessionID,
+						Path:      execWorkingDir,
+						// Note: fantasy uses strings for ToolCallID
+						ToolCallID:  message.ToolCallID(call.ID),
 						ToolName:    BashToolName,
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),

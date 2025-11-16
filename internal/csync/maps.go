@@ -127,9 +127,9 @@ var (
 	_ json.Marshaler   = &Map[string, any]{}
 )
 
-func (Map[K, V]) JSONSchemaAlias() any { //nolint
-	m := map[K]V{}
-	return m
+func (m *Map[K, V]) JSONSchemaAlias() any {
+	mapValue := map[K]V{}
+	return mapValue
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

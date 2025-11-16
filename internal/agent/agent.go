@@ -380,7 +380,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			for i, part := range currentAssistant.Parts {
 				if tc, ok := part.(message.ToolCall); ok {
 					currentState := tc.State
-					
+
 					// Determine final state based on step result and current state
 					var newState enum.ToolCallState
 					switch stepResult.FinishReason {
@@ -400,7 +400,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						// Unknown finish reason - mark as failed
 						newState = enum.ToolCallStateFailed
 					}
-					
+
 					// Update tool call with final state
 					currentAssistant.Parts[i] = message.ToolCall{
 						ID:    tc.ID,

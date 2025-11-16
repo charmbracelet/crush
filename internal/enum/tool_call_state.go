@@ -1,7 +1,6 @@
 package enum
 
 import (
-	"errors"
 	"image/color"
 
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -145,7 +144,7 @@ func (state ToolCallState) RenderTUIMessage() (string, error) {
 	case ToolCallStatePermissionDenied:
 		return "Permission denied.", nil
 	default:
-		return "", errors.New("unknown state: tool call related rendering issue")
+		return "", ErrUnknownToolCallState
 	}
 }
 
@@ -280,40 +279,32 @@ func (state ToolCallState) ToAnimationSettings(isNested bool) anim.Settings {
 	}
 
 	gradColors := state.ToFgColor()
+
+	// Convert to animation state to get animation-specific properties
+	animationState := state.ToAnimationState()
+
+	// Get label color with error handling
+	labelColor, err := animationState.toLabelColor()
+	if err != nil {
+		// Fallback to error color when state is unknown
+		labelColor = t.Error
+	}
+
+	// Get cycle colors with error handling
+	cycleColors, err := animationState.isCycleColors()
+	if err != nil {
+		// Fallback to no cycling when state is unknown
+		cycleColors = false
+	}
+
 	animationSettings := anim.Settings{
 		Size:        size,
 		Label:       label,
 		GradColorA:  gradColors,
 		GradColorB:  gradColors,
-		LabelColor:  state.toLabelColor(),
-		CycleColors: state.isCycleColors(),
+		LabelColor:  labelColor,
+		CycleColors: cycleColors,
 	}
 
 	return animationSettings
-}
-
-func (state ToolCallState) isCycleColors() bool {
-	switch state {
-	case ToolCallStatePermissionApproved, ToolCallStateRunning:
-		return true
-	case ToolCallStatePending, ToolCallStatePermissionPending, ToolCallStateCompleted, ToolCallStateFailed,
-		ToolCallStateCancelled, ToolCallStatePermissionDenied:
-		// States (Done/Failed/Cancelled): static - no animation
-		return false
-	}
-	// TODO: consider returning a error instead.
-	return false
-}
-
-func (state ToolCallState) toLabelColor() color.Color {
-	t := styles.CurrentTheme()
-	switch state {
-	case ToolCallStatePermissionPending, ToolCallStatePermissionApproved, ToolCallStateRunning:
-		return t.FgBase
-	case ToolCallStatePending, ToolCallStateCompleted, ToolCallStateFailed,
-		ToolCallStateCancelled, ToolCallStatePermissionDenied:
-		return t.FgSubtle
-	}
-	// TODO: consider returning a error instead.
-	return t.Error
 }

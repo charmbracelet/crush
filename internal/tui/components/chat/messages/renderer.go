@@ -125,7 +125,7 @@ func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, 
 	icon := v.getEffectiveDisplayState().ToIconColored()
 	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
+	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
@@ -137,7 +137,7 @@ func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params
 	icon := v.call.State.ToIconColored()
 	tool = t.S().Base.Foreground(t.Blue).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(false, width-lipgloss.Width(prefix), params...)
+	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
 // renderError provides consistent error rendering
@@ -875,7 +875,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
-func renderParamList(nested bool, paramsWidth int, params ...string) string {
+func renderParamList(paramsWidth int, params ...string) string {
 	t := styles.CurrentTheme()
 	if len(params) == 0 {
 		return ""

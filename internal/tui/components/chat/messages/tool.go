@@ -104,7 +104,7 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	for _, opt := range opts {
 		opt(m)
 	}
-	m.configureVisualAnimation()
+	m.RefreshAnimation()
 	return m
 }
 
@@ -806,7 +806,9 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
 func (m *toolCallCmp) RefreshAnimation() {
-	m.configureVisualAnimation()
+	m.anim = anim.New(m.call.State.ToAnimationSettings(m.isNested))
+
+	// Update animation state based on new state
 	m.updateAnimationState()
 }
 
@@ -815,8 +817,7 @@ func (m *toolCallCmp) RefreshAnimation() {
 // This is an internal method - use RefreshAnimation() for public updates.
 func (m *toolCallCmp) updateAnimationState() {
 	// Get effective display state considering both tool call state and results
-	effectiveState := m.getEffectiveDisplayState()
-	m.animationState = effectiveState.ToAnimationState()
+	m.animationState = m.getEffectiveDisplayState().ToAnimationState()
 }
 
 // IsAnimating returns whether the tool call is currently showing a loading animation
@@ -850,16 +851,6 @@ func (m *toolCallCmp) GetToolCallID() message.ToolCallID {
 func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 	m.call.State = state
 	m.RefreshAnimation()
-}
-
-// configureVisualAnimation reconfigures the visual animation object (m.anim) with colors,
-// labels, and cycling behavior based on the current tool call state.
-// This is an internal method - use RefreshAnimation() for public updates.
-func (m *toolCallCmp) configureVisualAnimation() {
-	m.anim = anim.New(m.call.State.ToAnimationSettings(m.isNested))
-
-	// Update animation state based on new state
-	m.updateAnimationState()
 }
 
 // getEffectiveDisplayState determines the appropriate state for display purposes

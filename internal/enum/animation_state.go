@@ -1,5 +1,11 @@
 package enum
 
+import (
+	"image/color"
+
+	"github.com/charmbracelet/crush/internal/tui/styles"
+)
+
 // AnimationState represents the different animation states for tool calls.
 // This replaces the boolean spinning field with type-safe animation states.
 type AnimationState string
@@ -66,9 +72,7 @@ func (state AnimationState) ToIcon() string {
 // ToLabel returns descriptive label for animation state
 func (state AnimationState) ToLabel() string {
 	switch state {
-	case AnimationStateNone:
-		return ""
-	case AnimationStateStatic:
+	case AnimationStateNone, AnimationStateStatic:
 		return ""
 	case AnimationStateSpinner:
 		return "Running"
@@ -81,4 +85,31 @@ func (state AnimationState) ToLabel() string {
 	default:
 		return ""
 	}
+}
+
+// isCycleColors determines if the animation should cycle colors based on animation state
+func (state AnimationState) isCycleColors() (bool, error) {
+	switch state {
+	case AnimationStateSpinner, AnimationStatePulse:
+		// Active animations should cycle colors for visual feedback
+		return true, nil
+	case AnimationStateStatic, AnimationStateTimer, AnimationStateBlink, AnimationStateNone:
+		// Static or single-shot animations don't need color cycling
+		return false, nil
+	}
+	return false, ErrUnknownAnimationState
+}
+
+// toLabelColor returns the appropriate label color for the animation state
+func (state AnimationState) toLabelColor() (color.Color, error) {
+	t := styles.CurrentTheme()
+	switch state {
+	case AnimationStateSpinner, AnimationStatePulse, AnimationStateTimer:
+		// Active animations use base color for high visibility
+		return t.FgBase, nil
+	case AnimationStateStatic, AnimationStateBlink, AnimationStateNone:
+		// Static or completed states use subtle color
+		return t.FgSubtle, nil
+	}
+	return t.Error, ErrUnknownAnimationState
 }

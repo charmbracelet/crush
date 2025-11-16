@@ -23,7 +23,7 @@ const EmptyToolCallId ToolCallID = ""
 // Validate ensures tool call ID is not empty
 func (id ToolCallID) Validate() error {
 	if id.IsEmpty() {
-		return errors.New("tool call ID cannot be empty")
+		return ErrToolCallIDEmpty
 	}
 	return nil
 }

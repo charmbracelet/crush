@@ -467,6 +467,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
+			//TODO: Extract this whole blocks logic into it's own function!
+
 			if tc.State.IsNonFinalState() {
 				// TODO: double check which state we need to set this to here
 				//  tc.Status = enum.ToolCallStateCompleted #sees like we can handle it all below
@@ -528,15 +530,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
-		if isCancelErr {
+		switch {
+		//TODO: Extract this whole switch logic into it's own function!
+		case isCancelErr:
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if isPermissionErr {
+		case isPermissionErr:
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
-		} else if errors.As(err, &providerErr) {
+		case errors.As(err, &providerErr):
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-		} else if errors.As(err, &fantasyErr) {
+		case errors.As(err, &fantasyErr):
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		} else {
+		default:
 			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
 		}
 		// Note: we use the parent context here because the genCtx has been

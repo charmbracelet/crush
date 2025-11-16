@@ -97,7 +97,7 @@ func (state AnimationState) isCycleColors() (bool, error) {
 		// Static or single-shot animations don't need color cycling
 		return false, nil
 	}
-	return false, ErrUnknownAnimationState
+	return false, ErrAnimationStateUnknown
 }
 
 // toLabelColor returns the appropriate label color for the animation state
@@ -111,5 +111,5 @@ func (state AnimationState) toLabelColor() (color.Color, error) {
 		// Static or completed states use subtle color
 		return t.FgSubtle, nil
 	}
-	return t.Error, ErrUnknownAnimationState
+	return t.Error, ErrAnimationStateUnknown
 }

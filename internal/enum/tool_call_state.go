@@ -144,7 +144,7 @@ func (state ToolCallState) RenderTUIMessage() (string, error) {
 	case ToolCallStatePermissionDenied:
 		return "Permission denied.", nil
 	default:
-		return "", ErrUnknownToolCallState
+		return "", ErrToolCallStateUnknown
 	}
 }
 

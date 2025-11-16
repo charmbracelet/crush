@@ -41,7 +41,7 @@ type ToolCallCmp interface {
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
-	ID() string               // Access to tool call ID (as string for Item interface)
+	ID() string                        // Access to tool call ID (as string for Item interface)
 	GetToolCallID() message.ToolCallID // Access to strongly-typed tool call ID
 	SetToolCallState(state enum.ToolCallState)
 }
@@ -858,13 +858,22 @@ func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 func (m *toolCallCmp) configureVisualAnimation() {
 	t := styles.CurrentTheme()
 
+	// Get consistent label from RenderTUIMessage for animation
+	label, err := m.call.State.RenderTUIMessage()
+	if err != nil {
+		// Fallback to reasonable default when state rendering fails
+		label = "Error"
+	}
+
+	size := 15
+
 	// Configure animation based on tool call state
 	switch m.call.State {
 	case enum.ToolCallStatePending:
 		// State 1 (Unstarted): static - no animation
 		m.anim = anim.New(anim.Settings{
-			Size:        15,
-			Label:       "Pending",
+			Size:        size,
+			Label:       label,
 			GradColorA:  t.FgMuted,
 			GradColorB:  t.FgMuted,
 			LabelColor:  t.FgSubtle,
@@ -873,8 +882,8 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	case enum.ToolCallStatePermissionPending:
 		// State 2 (Awaiting permission): timer counts up every 1s
 		m.anim = anim.New(anim.Settings{
-			Size:        15,
-			Label:       "Awaiting permission",
+			Size:        size,
+			Label:       label,
 			GradColorA:  t.Paprika,
 			GradColorB:  t.Paprika,
 			LabelColor:  t.FgBase,
@@ -883,8 +892,8 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	case enum.ToolCallStatePermissionApproved:
 		// State 2.5 (Permission approved): transitioning to running
 		m.anim = anim.New(anim.Settings{
-			Size:        15,
-			Label:       "Running",
+			Size:        size,
+			Label:       label,
 			GradColorA:  t.GreenDark,
 			GradColorB:  t.Green,
 			LabelColor:  t.FgBase,
@@ -893,8 +902,8 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	case enum.ToolCallStateRunning:
 		// State 3 (Running): dot blinks every 1s and timer counts up
 		m.anim = anim.New(anim.Settings{
-			Size:        15,
-			Label:       "Running",
+			Size:        size,
+			Label:       label,
 			GradColorA:  t.GreenDark,
 			GradColorB:  t.Green,
 			LabelColor:  t.FgBase,
@@ -903,8 +912,8 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	case enum.ToolCallStateCompleted, enum.ToolCallStateFailed, enum.ToolCallStateCancelled, enum.ToolCallStatePermissionDenied:
 		// State 4 & 5 (Done/Failed/Cancelled): static - no animation
 		m.anim = anim.New(anim.Settings{
-			Size:        15,
-			Label:       "",
+			Size:        size,
+			Label:       label,
 			GradColorA:  t.FgMuted,
 			GradColorB:  t.FgMuted,
 			LabelColor:  t.FgSubtle,
@@ -915,7 +924,7 @@ func (m *toolCallCmp) configureVisualAnimation() {
 	// Override for nested tools to ensure consistent styling
 	if m.isNested {
 		m.anim = anim.New(anim.Settings{
-			Size:        10,
+			Size:        size / 3 * 2,
 			Label:       "",
 			GradColorA:  t.Primary, // Restore original visibility
 			GradColorB:  t.Secondary,

@@ -41,7 +41,7 @@ type MessageCmp interface {
 	layout.Focusable                // Focus state management
 	GetMessage() message.Message    // Access to underlying message data
 	SetMessage(msg message.Message) // Update the message content
-	IsAnimating() bool                // Animation state for loading messages
+	IsAnimating() bool              // Animation state for loading messages
 	ID() string
 }
 
@@ -89,7 +89,8 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 // Init initializes the message component and starts animations if needed.
 // Returns a command to start the animation for spinning messages.
 func (m *messageCmp) Init() tea.Cmd {
-	m.updateAnimationState()
+	// Determine animation state for the message
+	m.animationState = m.determineAnimationState()
 	return m.anim.Init()
 }
 
@@ -98,7 +99,8 @@ func (m *messageCmp) Init() tea.Cmd {
 func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.StepMsg:
-		m.updateAnimationState()
+		// Determine animation state for the message
+		m.animationState = m.determineAnimationState()
 		if m.animationState.IsActive() {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u.(*anim.Anim)
@@ -314,28 +316,24 @@ func (m *messageCmp) renderThinkingContent() string {
 	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
 }
 
-// updateAnimationState determines whether the message should show a loading animation.
+// determineAnimationState calculates the appropriate animation state for a message.
 // Only assistant messages without content that aren't finished should animate.
-func (m *messageCmp) updateAnimationState() {
+func (m *messageCmp) determineAnimationState() enum.AnimationState {
 	if m.message.Role != message.Assistant {
-		m.animationState = enum.AnimationStateStatic
-		return
+		return enum.AnimationStateStatic
 	}
 
 	if m.message.IsFinished() {
-		m.animationState = enum.AnimationStateStatic
-		return
+		return enum.AnimationStateStatic
 	}
 
 	if strings.TrimSpace(m.message.Content().Text) != "" {
-		m.animationState = enum.AnimationStateStatic
-		return
+		return enum.AnimationStateStatic
 	}
 	if len(m.message.ToolCalls()) > 0 {
-		m.animationState = enum.AnimationStateStatic
-		return
+		return enum.AnimationStateStatic
 	}
-	m.animationState = enum.AnimationStateSpinner
+	return enum.AnimationStateSpinner
 }
 
 // Blur removes focus from the message component

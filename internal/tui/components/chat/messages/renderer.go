@@ -118,24 +118,15 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 	return json.Unmarshal([]byte(input), target)
 }
 
-// makeHeader builds the tool call header with status icon and parameters for a nested tool call.
-func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
-	t := styles.CurrentTheme()
-	// Use state-aware icon system while preserving result priority logic
-	icon := v.getEffectiveDisplayState().ToIconColored()
-	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
-	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
-}
-
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
 func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params ...string) string {
-	if v.isNested {
-		return br.makeNestedHeader(v, tool, width, params...)
-	}
 	t := styles.CurrentTheme()
 	icon := v.getEffectiveDisplayState().ToIconColored()
-	tool = t.S().Base.Foreground(t.Blue).Render(tool)
+	fgColor := t.Blue
+	if v.isNested {
+		fgColor = t.FgHalfMuted
+	}
+	tool = t.S().Base.Foreground(fgColor).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
 	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
@@ -926,7 +917,7 @@ func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func()
 		// Don't show content, render status message only
 		t := styles.CurrentTheme()
 		message := ""
-		if v.result.IsError {
+		if v.result.IsResultError() {
 			message = v.renderToolCallError()
 		} else {
 			m, err := v.getEffectiveDisplayState().RenderTUIMessageColored()

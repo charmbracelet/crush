@@ -322,28 +322,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			var resultContent string
-			isError := false
+			var resultState enum.ToolResultState
 			switch result.Result.GetType() {
 			case fantasy.ToolResultContentTypeText:
 				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result)
 				if ok {
 					resultContent = r.Text
+					resultState = enum.ToolResultStateSuccess
 				}
 			case fantasy.ToolResultContentTypeError:
 				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result)
 				if ok {
-					isError = true
+					resultState = enum.ToolResultStateError
 					resultContent = r.Error.Error()
 				}
 			case fantasy.ToolResultContentTypeMedia:
 				// TODO: handle this message type
+				resultState = enum.ToolResultStateUnknown
 			}
 
 			// Update tool call state based on result
 			for i, part := range currentAssistant.Parts {
 				if tc, ok := part.(message.ToolCall); ok && tc.ID == message.ToolCallID(result.ToolCallID) {
 					newState := enum.ToolCallStateCompleted
-					if isError {
+					if resultState.IsError() {
 						newState = enum.ToolCallStateFailed
 					}
 					currentAssistant.Parts[i] = message.ToolCall{
@@ -357,11 +359,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 
 			toolResult := message.ToolResult{
-				ToolCallID: message.ToolCallID(result.ToolCallID),
-				Name:       result.ToolName,
-				Content:    resultContent,
-				IsError:    isError,
-				Metadata:   result.ClientMetadata,
+				ToolCallID:  message.ToolCallID(result.ToolCallID),
+				Name:        result.ToolName,
+				Content:     resultContent,
+				ResultState:  resultState,
+				IsError:     resultState.ToBool(), // Backward compatibility
+				Metadata:    result.ClientMetadata,
 			}
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,

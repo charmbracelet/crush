@@ -5,4 +5,5 @@ import "errors"
 var (
 	ErrToolCallStateUnknown  = errors.New("unknown tool call state")
 	ErrAnimationStateUnknown = errors.New("unknown animation state")
+	ErrToolResultStateUnknown = errors.New("unknown tool result state")
 )

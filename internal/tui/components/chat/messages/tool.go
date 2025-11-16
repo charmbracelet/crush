@@ -199,7 +199,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		if m.result.ToolCallID.IsEmpty() {
 			log.Error("Unknown state: ToolCallState = Completed and ToolCallID is empty")
 		}
-		if m.result.IsError {
+		if m.result.IsResultError() {
 			parts = append(parts, "### Error:")
 			parts = append(parts, m.result.Content)
 		} else {
@@ -840,7 +840,7 @@ func (m *toolCallCmp) GetAnimationState() enum.AnimationState {
 }
 
 func (m *toolCallCmp) ID() string {
-	return m.call.ID.String()
+	return m.GetToolCallID().String()
 }
 
 // GetToolCallID returns the strongly-typed ToolCallID
@@ -863,8 +863,9 @@ func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
 		return m.call.State
 	}
 
-	// We have a result - use result outcome
-	if m.result.IsError {
+	// We have a result - use result outcome with enhanced ToolResultState
+	resultState := m.result.GetResultState()
+	if resultState.IsError() {
 		return enum.ToolCallStateFailed
 	}
 	return enum.ToolCallStateCompleted

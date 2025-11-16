@@ -2,6 +2,7 @@ package enum
 
 import (
 	"image/color"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -185,31 +186,32 @@ func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 }
 
 // ToAnimationState converts tool call state to appropriate animation state
+// Enhanced for PR #1385: 5-state system with timer and blinking animations
 func (state ToolCallState) ToAnimationState() AnimationState {
 	switch state {
-	// Permission states use timer animation
+	// Permission states use timer animation for visual queue feedback
 	case ToolCallStatePermissionPending:
-		return AnimationStateTimer
+		return AnimationStateTimer // Timer counts up every 1s while awaiting permission
 	case ToolCallStatePermissionApproved:
 		return AnimationStatePulse
 	case ToolCallStatePermissionDenied:
 		return AnimationStateStatic
 
-	// Final states are static
+	// Final states
 	case ToolCallStateCompleted:
-		return AnimationStateBlink
+		return AnimationStateBlink // Blinks every 1s for success feedback
 	case ToolCallStateFailed:
 		return AnimationStateStatic
 	case ToolCallStateCancelled:
 		return AnimationStateStatic
 
-	// Running states use spinner
+	// Running states use spinner for active feedback
 	case ToolCallStateRunning:
-		return AnimationStateSpinner
+		return AnimationStateSpinner // Green dot that blinks every 1s
 
 	// Pending state is static
 	case ToolCallStatePending:
-		return AnimationStateStatic
+		return AnimationStateStatic // Grey dot, no animation
 
 	default:
 		return AnimationStateNone
@@ -250,7 +252,7 @@ func (state ToolCallState) ShouldShowContentForState(isNested, hasNested bool) b
 
 	default:
 		// Add error logging for unknown states
-		log.Error("Unknown tool state in ShouldShowContentForState:", "state", string(state))
+		log.Error("Unknown tool state in ShouldShowContentForState:", "state", state)
 		return false // Unknown states don't show content
 	}
 }
@@ -328,6 +330,12 @@ func (state ToolCallState) ToAnimationSettings(isNested bool) anim.Settings {
 		GradColorB:  gradColors,
 		LabelColor:  labelColor,
 		CycleColors: cycleColors,
+		
+		// PR #1385: Timer and blinking animation configuration
+		IsTimer:          animationState == AnimationStateTimer,
+		IsBlinking:       animationState == AnimationStateBlink,
+		TimerInterval:    time.Second, // 1 second intervals
+		BlinkingInterval: time.Second, // 1 second intervals
 	}
 
 	return animationSettings

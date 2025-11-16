@@ -131,16 +131,40 @@ type ToolCall struct {
 func (ToolCall) isPart() {}
 
 type ToolResult struct {
-	ToolCallID ToolCallID `json:"tool_call_id"`
-	Name       string     `json:"name"`
-	Content    string     `json:"content"`
-	Data       string     `json:"data"`
-	MIMEType   string     `json:"mime_type"`
-	Metadata   string     `json:"metadata"`
-	IsError    bool       `json:"is_error"`
+	ToolCallID      ToolCallID          `json:"tool_call_id"`
+	Name            string              `json:"name"`
+	Content         string              `json:"content"`
+	Data            string              `json:"data"`
+	MIMEType        string              `json:"mime_type"`
+	Metadata        string              `json:"metadata"`
+	ResultState     enum.ToolResultState `json:"result_state"`
+	// Legacy field for backward compatibility - deprecated, use ResultState instead
+	IsError         bool                `json:"is_error"`
 }
 
 func (ToolResult) isPart() {}
+
+// GetResultState returns the current result state
+// If ResultState is not set, it derives from legacy IsError field for backward compatibility
+func (tr ToolResult) GetResultState() enum.ToolResultState {
+	// If ResultState is explicitly set, use it
+	if tr.ResultState != enum.ToolResultStateUnknown {
+		return tr.ResultState
+	}
+	// Fall back to legacy IsError field for backward compatibility
+	return enum.FromBool(tr.IsError)
+}
+
+// IsResultError returns true if the tool result indicates an error state
+// This method provides semantic clarity over the legacy IsError field
+func (tr ToolResult) IsResultError() bool {
+	return tr.GetResultState().IsError()
+}
+
+// IsResultSuccess returns true if the tool result indicates success
+func (tr ToolResult) IsResultSuccess() bool {
+	return tr.GetResultState().IsSuccess()
+}
 
 type Finish struct {
 	Reason  FinishReason `json:"reason"`

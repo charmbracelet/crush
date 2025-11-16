@@ -103,27 +103,47 @@ func (state AnimationState) ToLabel() string {
 }
 
 // isCycleColors determines if the animation should cycle colors based on animation state
+// Enhanced for PR #1385: Specific cycling for different animation types
 func (state AnimationState) isCycleColors() (bool, error) {
 	switch state {
-	case AnimationStateSpinner, AnimationStatePulse:
-		// Active animations should cycle colors for visual feedback
+	case AnimationStateSpinner:
+		// Running state: green dot that blinks every 1s, cycles colors
 		return true, nil
-	case AnimationStateStatic, AnimationStateTimer, AnimationStateBlink, AnimationStateNone:
-		// Static or single-shot animations don't need color cycling
+	case AnimationStatePulse:
+		// Processing state: pulses with color cycling
+		return true, nil
+	case AnimationStateTimer:
+		// Awaiting permission: orange timer, no cycling (to focus on countdown)
+		return false, nil
+	case AnimationStateBlink:
+		// Recently completed: blink success, no cycling
+		return false, nil
+	case AnimationStateStatic, AnimationStateNone:
+		// Static states: no cycling
 		return false, nil
 	}
 	return false, ErrAnimationStateUnknown
 }
 
 // toLabelColor returns the appropriate label color for the animation state
+// Enhanced for PR #1385: Color-coded states for better UX
 func (state AnimationState) toLabelColor() (color.Color, error) {
 	t := styles.CurrentTheme()
 	switch state {
-	case AnimationStateSpinner, AnimationStatePulse, AnimationStateTimer:
-		// Active animations use base color for high visibility
-		return t.FgBase, nil
-	case AnimationStateStatic, AnimationStateBlink, AnimationStateNone:
-		// Static or completed states use subtle color
+	case AnimationStateSpinner:
+		// Running state: green label for active execution
+		return t.Green, nil
+	case AnimationStatePulse:
+		// Processing state: blue label for transitional
+		return t.Blue, nil
+	case AnimationStateTimer:
+		// Awaiting permission: orange label (Paprika) for attention
+		return t.Paprika, nil
+	case AnimationStateBlink:
+		// Recently completed: green label for success
+		return t.Green, nil
+	case AnimationStateStatic, AnimationStateNone:
+		// Static states: subtle color for non-active
 		return t.FgSubtle, nil
 	}
 	return t.Error, ErrAnimationStateUnknown

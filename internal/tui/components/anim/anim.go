@@ -42,6 +42,13 @@ const (
 
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
+
+	// PR #1385: Timer and blinking animation settings
+	//
+	// Timer animation: counts up every 1 second for permission queue
+	// Blinking animation: blinks every 1 second for running state
+	timerBlinkInterval = time.Second // 1 second intervals
+	blinkingInterval   = time.Second // 1 second intervals for blinking
 )
 
 // Default colors for gradient.
@@ -88,6 +95,7 @@ func settingsHash(opts Settings) string {
 type StepMsg struct{ id int }
 
 // Settings defines settings for the animation.
+// Enhanced for PR #1385: Support for timer and blinking animations
 type Settings struct {
 	Size        int
 	Label       string
@@ -95,12 +103,19 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+	
+	// PR #1385: Timer and blinking animation settings
+	TimerInterval    time.Duration // Interval for timer animations (1s default)
+	BlinkingInterval time.Duration // Interval for blinking animations (1s default)
+	IsTimer          bool         // Whether this is a timer animation
+	IsBlinking       bool         // Whether this is a blinking animation
 }
 
 // Default settings.
 const ()
 
 // Anim is a Bubble for an animated spinner.
+// Enhanced for PR #1385: Support for timer and blinking animations
 type Anim struct {
 	width            int
 	cyclingCharWidth int
@@ -116,6 +131,16 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               int
+	
+	// PR #1385: Timer and blinking animation state
+	timerCount       atomic.Int64         // timer counter for countdown/up
+	blinkState       atomic.Bool          // blinking on/off state
+	isTimer          bool                // whether this is a timer animation
+	isBlinking       bool                // whether this is a blinking animation
+	timerInterval    time.Duration        // timer interval for counting
+	blinkingInterval time.Duration        // blinking interval
+	lastTimerUpdate  time.Time           // last time timer was updated
+	lastBlinkUpdate  time.Time           // last time blink was updated
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -139,6 +164,20 @@ func New(opts Settings) *Anim {
 	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
+	
+	// PR #1385: Initialize timer and blinking state
+	a.isTimer = opts.IsTimer
+	a.isBlinking = opts.IsBlinking
+	a.timerInterval = opts.TimerInterval
+	if a.timerInterval == 0 {
+		a.timerInterval = timerBlinkInterval
+	}
+	a.blinkingInterval = opts.BlinkingInterval
+	if a.blinkingInterval == 0 {
+		a.blinkingInterval = blinkingInterval
+	}
+	a.lastTimerUpdate = time.Now()
+	a.lastBlinkUpdate = time.Now()
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -319,12 +358,27 @@ func (a *Anim) Init() tea.Cmd {
 }
 
 // Update processes animation steps (or not).
+// Enhanced for PR #1385: Support for timer and blinking animations
 func (a *Anim) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case StepMsg:
 		if msg.id != a.id {
 			// Reject messages that are not for this instance.
 			return a, nil
+		}
+		
+		currentTime := time.Now()
+
+		// PR #1385: Handle timer animations (counts up every 1s)
+		if a.isTimer && currentTime.Sub(a.lastTimerUpdate) >= a.timerInterval {
+			a.timerCount.Add(1)
+			a.lastTimerUpdate = currentTime
+		}
+
+		// PR #1385: Handle blinking animations (blinks every 1s)
+		if a.isBlinking && currentTime.Sub(a.lastBlinkUpdate) >= a.blinkingInterval {
+			a.blinkState.Store(!a.blinkState.Load())
+			a.lastBlinkUpdate = currentTime
 		}
 
 		step := a.step.Add(1)
@@ -375,6 +429,22 @@ func (a *Anim) View() string {
 		ellipsisStep := int(a.ellipsisStep.Load())
 		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
 			b.WriteString(ellipsisFrame)
+		}
+	}
+
+	// PR #1385: Add timer display for timer animations
+	if a.isTimer {
+		timerCount := a.timerCount.Load()
+		timerDisplay := fmt.Sprintf(" [Timer: %ds]", timerCount)
+		b.WriteString(timerDisplay)
+	}
+
+	// PR #1385: Add blinking display for blinking animations
+	if a.isBlinking {
+		if a.blinkState.Load() {
+			b.WriteString(" ●") // Show solid dot when blinking ON
+		} else {
+			b.WriteString(" ○") // Show hollow dot when blinking OFF
 		}
 	}
 

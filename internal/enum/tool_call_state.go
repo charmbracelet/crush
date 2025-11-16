@@ -126,8 +126,7 @@ func (state ToolCallState) FormatToolForCopy() string {
 	}
 }
 
-func (state ToolCallState) renderTUIMessage() (string, error) {
-	// TODO: revisit logic, now that we have more ToolCallStates
+func (state ToolCallState) RenderTUIMessage() (string, error) {
 	switch state {
 	case ToolCallStateFailed:
 		return "Tool call failed.", nil
@@ -153,7 +152,7 @@ func (state ToolCallState) renderTUIMessage() (string, error) {
 func (state ToolCallState) RenderTUIMessageColored() (string, error) {
 	t := styles.CurrentTheme()
 	messageBaseStyle := t.S().Base.Foreground(t.FgSubtle)
-	message, err := state.renderTUIMessage()
+	message, err := state.RenderTUIMessage()
 	if err != nil {
 		return "", err
 	}

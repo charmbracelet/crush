@@ -93,7 +93,6 @@ func (pb *paramBuilder) build() []string {
 }
 
 // renderWithParams provides a common rendering pattern for tools with parameters
-// TODO: Consider using shouldShowContentForState() to control body visibility based on tool state
 func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []string, contentRenderer func() string) string {
 	width := v.textWidth()
 	if v.isNested {
@@ -104,8 +103,14 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 		return v.style().Render(header)
 	}
 
-	body := contentRenderer()
-	return joinHeaderBody(header, body)
+	// Only render body if the tool state allows content visibility
+	if v.call.State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+		body := contentRenderer()
+		return joinHeaderBody(header, body)
+	}
+
+	// Return header-only for states where content shouldn't be shown
+	return header
 }
 
 // unmarshalParams safely unmarshal JSON parameters

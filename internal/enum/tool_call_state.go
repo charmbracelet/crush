@@ -219,9 +219,8 @@ func (state ToolCallState) ToAnimationState() AnimationState {
 	}
 }
 
-// shouldShowContentForState determines if content should be displayed for a given tool state
-func (state ToolCallState) shouldShowContentForState(isNested, hasNested bool) bool {
-	// TODO: use isNested and hasNested
+// ShouldShowContentForState determines if content should be displayed for a given tool state
+func (state ToolCallState) ShouldShowContentForState(isNested, hasNested bool) bool {
 	switch state {
 	// Show content for permission states
 	case ToolCallStatePermissionPending:
@@ -245,14 +244,16 @@ func (state ToolCallState) shouldShowContentForState(isNested, hasNested bool) b
 
 	// Show minimal content for transitional states
 	case ToolCallStatePending:
-		return false // Don't show content until tool starts
+		// Don't show content until tool starts, unless it's a parent tool with nested calls
+		// In that case, show the header to provide context for the nested tools
+		return hasNested && !isNested
 
 	case ToolCallStateRunning:
 		return true // Show progress/running state
 
 	default:
 		// Add error logging for unknown states
-		log.Error("Unknown tool state in shouldShowContentForState:", "state", string(state))
+		log.Error("Unknown tool state in ShouldShowContentForState:", "state", string(state))
 		return false // Unknown states don't show content
 	}
 }

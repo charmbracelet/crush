@@ -5,7 +5,7 @@
 ```mermaid
 graph TD
     A[AnimationState] --> B{State Value}
-    B --> C["" (None)]
+    B --> C["(None)"]
     B --> D[static]
     B --> E[spinner]
     B --> F[timer]
@@ -86,7 +86,7 @@ func (state AnimationState) ToLabel() string {
 ```mermaid
 graph TD
     A[AnimationState] --> B{State Value}
-    B --> C["" (None)]
+    B --> C["(None)"]
     B --> D[static]
     B --> E[spinner]
     B --> F[timer]

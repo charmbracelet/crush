@@ -157,38 +157,36 @@ graph TB
     subgraph "ToolCallState → AnimationState"
         TS1[ToolCallState] -->|ToAnimationState| MAP{Mapping<br/>Logic}
 
-        MAP -->|Pending| AS1[AnimationStateStatic]
-        MAP -->|PermissionPending| AS2[AnimationStateTimer]
-        MAP -->|PermissionApproved| AS3[AnimationStatePulse]
-        MAP -->|PermissionDenied| AS4[AnimationStateStatic]
-        MAP -->|Running| AS5[AnimationStateSpinner]
-        MAP -->|Completed| AS6[AnimationStateBlink]
-        MAP -->|Failed| AS7[AnimationStateStatic]
-        MAP -->|Cancelled| AS8[AnimationStateStatic]
-        MAP -->|Unknown| AS9[AnimationStateNone]
+        MAP -->|Pending| AnimationStateStatic[AnimationStateStatic]
+        MAP -->|PermissionPending| AnimationStateTimer[AnimationStateTimer]
+        MAP -->|PermissionApproved| AnimationStatePulse[AnimationStatePulse]
+        MAP -->|PermissionDenied| AnimationStateStatic[AnimationStateStatic]
+        MAP -->|Running| AnimationStateSpinner[AnimationStateSpinner]
+        MAP -->|Completed| AnimationStateBlink[AnimationStateBlink]
+        MAP -->|Failed| AnimationStateStatic[AnimationStateStatic]
+        MAP -->|Cancelled| AnimationStateStatic[AnimationStateStatic]
+        MAP -->|Unknown| AnimationStateNone[AnimationStateNone]
     end
 
     subgraph "Animation Characteristics"
-        AS1 -->|No cycling| C1[Muted gray, static]
-        AS2 -->|Timer| C2[Paprika, no cycling]
-        AS3 -->|Pulse| C3[Green gradient, cycling]
-        AS4 -->|Error| C4[Error color, static]
-        AS5 -->|Spinner| C5[Green gradient, cycling]
-        AS6 -->|Blink| C6[Brief animation]
-        AS7 -->|Error| C7[Error color, static]
-        AS8 -->|Muted| C8[Muted gray, static]
-        AS9 -->|None| C9[No display]
+        AnimationStateStatic -->|No cycling| C1[Muted gray, static]
+        AnimationStateTimer -->|Timer| C2[Paprika, no cycling]
+        AnimationStatePulse -->|Pulse| C3[Green gradient, cycling]
+        AnimationStateStatic -->|Error| C4[Error color, static]
+        AnimationStateSpinner -->|Spinner| C5[Green gradient, cycling]
+        AnimationStateBlink -->|Blink| C6[Brief animation]
+        AnimationStateStatic -->|Error| C7[Error color, static]
+        AnimationStateStatic -->|Muted| C8[Muted gray, static]
+        AnimationStateNone -->|None| C9[No display]
     end
 
-    style AS1 fill:#E0E0E0
-    style AS2 fill:#FFA07A
-    style AS3 fill:#90EE90
-    style AS4 fill:#FFB6C1
-    style AS5 fill:#87CEEB
-    style AS6 fill:#98FB98
-    style AS7 fill:#FFB6C1
-    style AS8 fill:#E0E0E0
-    style AS9 fill:#FFFFFF
+    style AnimationStateStatic fill:#E0E0E0
+    style AnimationStateTimer fill:#FFA07A
+    style AnimationStatePulse fill:#90EE90
+    style AnimationStateStatic fill:#FFB6C1
+    style AnimationStateSpinner fill:#87CEEB
+    style AnimationStateBlink fill:#98FB98
+    style AnimationStateNone fill:#FFFFFF
 ```
 
 ### Layer 2: Animation Component
@@ -200,10 +198,10 @@ graph TB
 
         A2 -->|Contains| F1[step: atomic.Int64]
         A2 -->|Contains| F2[ellipsisStep: atomic.Int64]
-        A2 -->|Contains| F3[initialFrames: [][]string]
-        A2 -->|Contains| F4[cyclingFrames: [][]string]
-        A2 -->|Contains| F5[label: []string]
-        A2 -->|Contains| F6[birthOffsets: []duration]
+        A2 -->|Contains| F3["initialFrames: [][]string"]
+        A2 -->|Contains| F4["cyclingFrames: [][]string"]
+        A2 -->|Contains| F5["label: []string"]
+        A2 -->|Contains| F6["birthOffsets: []duration"]
 
         A3[Init] -->|Returns| A4[Step Cmd]
         A4 -->|Schedule| A5[StepMsg every 50ms]
@@ -236,7 +234,7 @@ graph TB
         G2 -->|No| G4[Generate frames]
 
         G4 -->|Create| G5[Gradient ramp]
-        G5 -->|Number of colors| G6[width × 3 (cycling)<br/>width (static)]
+        G5 -->|Number of colors| G6["width × 3 (cycling)<br/>width (static)"]
 
         G6 -->|Pre-render| G7[initialFrames]
         G6 -->|Pre-render| G8[cyclingFrames]

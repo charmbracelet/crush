@@ -801,12 +801,7 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
-// shouldSpin determines whether the tool call should show a loading animation.
-// Returns true if the tool call is not finished and not in a terminal state.
-func (m *toolCallCmp) shouldSpin() bool {
-	// Tools should only spin when in non-final states
-	return m.call.State.IsNonFinalState()
-}
+
 
 // UpdateAnimationState updates the animation state based on current tool call and result data.
 // This is the single source of truth for determining animation behavior.

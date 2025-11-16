@@ -312,11 +312,10 @@ func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := renderStatusOnly(header, v); done {
-		return res
-	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+
+	return renderStatusOrContent(header, v, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -355,11 +354,10 @@ func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := renderStatusOnly(header, v); done {
-		return res
-	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+
+	return renderStatusOrContent(header, v, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -590,11 +588,6 @@ func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, 
 	// Create base renderer for header functionality
 	baseRenderer := baseRenderer{}
 	header := baseRenderer.makeHeader(v, toolName, v.textWidth(), args...)
-
-	// Handle cancelled state
-	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
-		return res
-	}
 
 	// Create task tag
 	taskTag := taskTagStyle.Render("Prompt")
@@ -925,23 +918,30 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 }
 
-// renderStatusOnly returns immediately‑rendered error/cancelled/ongoing states.
-func renderStatusOnly(header string, v *toolCallCmp) (string, bool) {
-	t := styles.CurrentTheme()
-	message := ""
-	// TODO: revisit logic, now that we have more ToolCallStates
-	if v.result.IsError {
-		message = v.renderToolCallError()
-	} else {
-		m, err := v.call.State.RenderTUIMessageColored()
-		if err != nil {
-			return "", false
+// renderStatusOrContent determines whether to render status-only or full content
+// This replaces the old renderStatusOnly function by using ShouldShowContentForState
+func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func() string) string {
+	// Check if content should be shown based on state
+	if !v.call.State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+		// Don't show content, render status message only
+		t := styles.CurrentTheme()
+		message := ""
+		if v.result.IsError {
+			message = v.renderToolCallError()
+		} else {
+			m, err := v.call.State.RenderTUIMessageColored()
+			if err != nil {
+				return header // Fallback to header-only on error
+			}
+			message = m
 		}
-		message = m
+		message = t.S().Base.PaddingLeft(2).Render(message)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", message)
 	}
 
-	message = t.S().Base.PaddingLeft(2).Render(message)
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", message), true
+	// Show content
+	body := contentRenderer()
+	return joinHeaderBody(header, body)
 }
 
 func joinHeaderBody(header, body string) string {

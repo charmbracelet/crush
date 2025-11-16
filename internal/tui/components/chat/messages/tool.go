@@ -858,13 +858,14 @@ func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 // considering both tool call state and execution results
 func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
 	// If we have a result, execution outcome takes priority
-	if m.result.ToolCallID.IsNotEmpty() {
-		if m.result.IsError {
-			return enum.ToolCallStateFailed
-		}
-		return enum.ToolCallStateCompleted
+	if m.result.ToolCallID.IsEmpty() {
+		// No result yet - use the current tool call state
+		return m.call.State
 	}
 
-	// If no result, use the current tool call state
-	return m.call.State
+	// We have a result - use result outcome
+	if m.result.IsError {
+		return enum.ToolCallStateFailed
+	}
+	return enum.ToolCallStateCompleted
 }

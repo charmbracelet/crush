@@ -663,11 +663,9 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
-	} else {
-		v.UpdateAnimationState()
 	}
+	v.UpdateAnimationState()
 
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -929,11 +927,9 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	}
 
 	if v.result.ToolCallID == "" {
-		v.UpdateAnimationState()
 		parts = append(parts, "", v.anim.View())
-	} else {
-		v.UpdateAnimationState()
 	}
+	v.UpdateAnimationState()
 
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,

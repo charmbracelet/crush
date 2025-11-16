@@ -375,7 +375,41 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
-			//TODO: Update ToolCallState!
+			// Update final ToolCallState based on overall step completion
+			// This ensures tools without explicit results get proper terminal states
+			for i, part := range currentAssistant.Parts {
+				if tc, ok := part.(message.ToolCall); ok {
+					currentState := tc.State
+					
+					// Determine final state based on step result and current state
+					var newState enum.ToolCallState
+					switch stepResult.FinishReason {
+					case fantasy.FinishReasonStop:
+						newState = enum.ToolCallStateCancelled
+					case fantasy.FinishReasonLength:
+						newState = enum.ToolCallStateFailed
+					case fantasy.FinishReasonToolCalls:
+						// Keep current state if already completed/failed from OnStepResult
+						if currentState == enum.ToolCallStateCompleted || currentState == enum.ToolCallStateFailed {
+							newState = currentState
+						} else {
+							// Tools without explicit results get completed state
+							newState = enum.ToolCallStateCompleted
+						}
+					default:
+						// Unknown finish reason - mark as failed
+						newState = enum.ToolCallStateFailed
+					}
+					
+					// Update tool call with final state
+					currentAssistant.Parts[i] = message.ToolCall{
+						ID:    tc.ID,
+						Name:  tc.Name,
+						Input: tc.Input,
+						State: newState,
+					}
+				}
+			}
 
 			finishReason := message.FinishReasonUnknown
 			switch stepResult.FinishReason {

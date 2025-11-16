@@ -345,19 +345,19 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundGrep := false
-				var grepTCID string
+				var grepTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.GrepToolName {
-								grepTCID = tc.ID.String()
+								grepTCID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID.String() == grepTCID {
+							if tr.ToolCallID == grepTCID {
 								foundGrep = true
 								require.Contains(t, tr.Content, "main.go", "Expected grep to find main.go")
 							}
@@ -385,19 +385,19 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundLS := false
-				var lsTCID string
+				var lsTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.LSToolName {
-								lsTCID = tc.ID.String()
+								lsTCID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID.String() == lsTCID {
+							if tr.ToolCallID == lsTCID {
 								foundLS = true
 								require.Contains(t, tr.Content, "main.go", "Expected ls to list main.go")
 								require.Contains(t, tr.Content, "go.mod", "Expected ls to list go.mod")
@@ -426,19 +426,19 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundMultiEdit := false
-				var multiEditTCID string
+				var multiEditTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.MultiEditToolName {
-								multiEditTCID = tc.ID.String()
+								multiEditTCID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID.String() == multiEditTCID {
+							if tr.ToolCallID == multiEditTCID {
 								foundMultiEdit = true
 							}
 						}
@@ -470,19 +470,19 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundSourcegraph := false
-				var sourcegraphTCID string
+				var sourcegraphTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.SourcegraphToolName {
-								sourcegraphTCID = tc.ID.String()
+								sourcegraphTCID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID.String() == sourcegraphTCID {
+							if tr.ToolCallID == sourcegraphTCID {
 								foundSourcegraph = true
 							}
 						}
@@ -509,19 +509,19 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundWrite := false
-				var writeTCID string
+				var writeTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.WriteToolName {
-								writeTCID = tc.ID.String()
+								writeTCID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID.String() == writeTCID {
+							if tr.ToolCallID == writeTCID {
 								foundWrite = true
 							}
 						}
@@ -573,16 +573,16 @@ func TestCoderAgent(t *testing.T) {
 
 				foundGlob := false
 				foundLS := false
-				var globTCID, lsTCID string
+				var globTCID, lsTCID message.ToolCallID
 
 				for _, tc := range toolCalls {
 					if tc.Name == tools.GlobToolName {
 						foundGlob = true
-						globTCID = tc.ID.String()
+						globTCID = tc.ID
 					}
 					if tc.Name == tools.LSToolName {
 						foundLS = true
-						lsTCID = tc.ID.String()
+						lsTCID = tc.ID
 					}
 				}
 
@@ -596,12 +596,12 @@ func TestCoderAgent(t *testing.T) {
 
 				for _, msg := range toolMsgs {
 					for _, tr := range msg.ToolResults() {
-						if tr.ToolCallID.String() == globTCID {
+						if tr.ToolCallID == globTCID {
 							foundGlobResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
 							require.False(t, tr.IsError, "Expected glob result to not be an error")
 						}
-						if tr.ToolCallID.String() == lsTCID {
+						if tr.ToolCallID == lsTCID {
 							foundLSResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected ls result to contain main.go")
 							require.False(t, tr.IsError, "Expected ls result to not be an error")

@@ -580,29 +580,28 @@ type agenticFetchRenderer struct {
 	baseRenderer
 }
 
-// Render displays the fetched URL with prompt parameter and nested tool calls
-func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
-	t := styles.CurrentTheme()
-	var params tools.AgenticFetchParams
-	var args []string
-	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
-		args = newParamBuilder().
-			addMain(params.URL).
-			build()
-	}
-
-	prompt := params.Prompt
+// renderNestedToolWithPrompt handles common rendering pattern for tools with prompts and nested calls
+func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, prompt string, taskTagStyle lipgloss.Style) string {
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
+	// Create base renderer for header functionality
+	baseRenderer := baseRenderer{}
+	header := baseRenderer.makeHeader(v, toolName, v.textWidth(), args...)
+	
+	// Handle cancelled state
 	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
 		return res
 	}
 
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border).Render("Prompt")
-	remainingWidth := v.textWidth() - (lipgloss.Width(taskTag) + 1)
-	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(taskTag)+1))
-	prompt = t.S().Base.Width(remainingWidth).Render(prompt)
+	// Create task tag
+	taskTag := taskTagStyle.Render("Prompt")
+	
+	// Calculate remaining width for prompt
+	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
+	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
+	
+	// Style and assemble header with prompt
+	prompt = styles.CurrentTheme().S().Muted.Width(remainingWidth).Render(prompt)
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
@@ -614,12 +613,14 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 			prompt,
 		),
 	)
-	childTools := tree.Root(header)
 
+	// Handle nested tool calls
+	childTools := tree.Root(header)
 	for _, call := range v.nestedToolCalls {
 		call.SetSize(remainingWidth, 1)
 		childTools.Child(call.View())
 	}
+	
 	parts := []string{
 		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
 	}
@@ -637,8 +638,25 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	if v.result.ToolCallID == "" {
 		return header
 	}
+
 	body := renderMarkdownContent(v, v.result.Content)
 	return joinHeaderBody(header, body)
+}
+
+// Render displays the fetched URL with prompt parameter and nested tool calls
+func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
+	var params tools.AgenticFetchParams
+	var args []string
+	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			build()
+	}
+
+	t := styles.CurrentTheme()
+	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border)
+	
+	return renderNestedToolWithPrompt(v, "Agentic Fetch", args, params.Prompt, taskTagStyle)
 }
 
 // formatTimeout converts timeout seconds to duration string
@@ -851,59 +869,13 @@ func RoundedEnumeratorWithWidth(lPadding, width int) tree.Enumerator {
 
 // Render displays agent task parameters and result content
 func (tr agentRenderer) Render(v *toolCallCmp) string {
-	t := styles.CurrentTheme()
 	var params agent.AgentParams
 	tr.unmarshalParams(v.call.Input, &params)
 
-	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-
-	header := tr.makeHeader(v, "Agent", v.textWidth())
-	// TODO: revisit logic, now that we have more ToolCallStates
-	if res, done := renderStatusOnly(header, v); v.call.State == enum.ToolCallStateCancelled && done {
-		return res
-	}
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
-	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
-	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
-	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			prompt,
-		),
-	)
-	childTools := tree.Root(header)
-
-	for _, call := range v.nestedToolCalls {
-		call.SetSize(remainingWidth, 1)
-		childTools.Child(call.View())
-	}
-	parts := []string{
-		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
-	}
-
-	if v.result.ToolCallID == "" {
-		parts = append(parts, "", v.anim.View())
-	}
-	v.updateAnimationState()
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		parts...,
-	)
-
-	if v.result.ToolCallID == "" {
-		return header
-	}
-
-	body := renderMarkdownContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	t := styles.CurrentTheme()
+	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White)
+	
+	return renderNestedToolWithPrompt(v, "Agent", []string{}, params.Prompt, taskTagStyle)
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)

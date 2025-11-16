@@ -8,31 +8,31 @@ import (
 
 // AnimationState represents the different animation states for tool calls.
 // This replaces the boolean spinning field with type-safe animation states.
-type AnimationState string
+type AnimationState uint8
 
 const (
 	// AnimationStateNone indicates no animation should be shown
-	AnimationStateNone AnimationState = ""
+	AnimationStateNone AnimationState = iota
 
 	// AnimationStateStatic indicates a static display without animation
 	// Used for completed, failed, cancelled, or pending tools
-	AnimationStateStatic AnimationState = "static"
+	AnimationStateStatic
 
 	// AnimationStateSpinner indicates a dot spinner animation
 	// Used for actively running tool calls
-	AnimationStateSpinner AnimationState = "spinner"
+	AnimationStateSpinner
 
 	// AnimationStateTimer indicates a countdown timer animation
 	// Used for tools awaiting user permission approval
-	AnimationStateTimer AnimationState = "timer"
+	AnimationStateTimer
 
 	// AnimationStateBlink indicates a blinking success animation
 	// Used for recently completed successful tool calls
-	AnimationStateBlink AnimationState = "blink"
+	AnimationStateBlink
 
 	// AnimationStatePulse indicates a pulsing animation
 	// Used for processing or transitional states
-	AnimationStatePulse AnimationState = "pulse"
+	AnimationStatePulse
 )
 
 // IsActive returns true if the animation state should display movement
@@ -48,9 +48,24 @@ func (state AnimationState) IsStatic() bool {
 	return state == AnimationStateNone || state == AnimationStateStatic
 }
 
-// String returns the string representation of the animation state
+// String returns string representation of animation state
 func (state AnimationState) String() string {
-	return string(state)
+	switch state {
+	case AnimationStateNone:
+		return ""
+	case AnimationStateStatic:
+		return "static"
+	case AnimationStateSpinner:
+		return "spinner"
+	case AnimationStateTimer:
+		return "timer"
+	case AnimationStateBlink:
+		return "blink"
+	case AnimationStatePulse:
+		return "pulse"
+	default:
+		return "unknown"
+	}
 }
 
 // ToIcon returns appropriate icon for animation state

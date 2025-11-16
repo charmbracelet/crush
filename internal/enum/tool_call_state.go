@@ -8,33 +8,33 @@ import (
 	"github.com/charmbracelet/log/v2"
 )
 
-type ToolCallState string
+type ToolCallState uint8
 
 const (
 	// ToolCallStatePending Tool has been created but not yet started execution
 	// e.g. multiple tool calls at once
-	ToolCallStatePending ToolCallState = "pending"
+	ToolCallStatePending ToolCallState = iota
 
 	// ToolCallStatePermissionPending Tool is pending permission approval
-	ToolCallStatePermissionPending ToolCallState = "permission_pending"
+	ToolCallStatePermissionPending
 
 	// ToolCallStatePermissionApproved Tool has received permission approval
-	ToolCallStatePermissionApproved ToolCallState = "permission_approved"
+	ToolCallStatePermissionApproved
 
 	// ToolCallStatePermissionDenied Tool permission was denied
-	ToolCallStatePermissionDenied ToolCallState = "permission_denied"
+	ToolCallStatePermissionDenied
 
 	// ToolCallStateRunning Tool is actively executing
-	ToolCallStateRunning ToolCallState = "running"
+	ToolCallStateRunning
 
 	// ToolCallStateCompleted Tool completed successfully
-	ToolCallStateCompleted ToolCallState = "completed"
+	ToolCallStateCompleted
 
 	// ToolCallStateFailed Tool failed during execution
-	ToolCallStateFailed ToolCallState = "failed"
+	ToolCallStateFailed
 
 	// ToolCallStateCancelled Tool was explicitly cancelled by user
-	ToolCallStateCancelled ToolCallState = "cancelled"
+	ToolCallStateCancelled
 )
 
 func (state ToolCallState) IsFinalState() bool {
@@ -252,6 +252,30 @@ func (state ToolCallState) ShouldShowContentForState(isNested, hasNested bool) b
 		// Add error logging for unknown states
 		log.Error("Unknown tool state in ShouldShowContentForState:", "state", string(state))
 		return false // Unknown states don't show content
+	}
+}
+
+// String returns string representation of tool call state
+func (state ToolCallState) String() string {
+	switch state {
+	case ToolCallStatePending:
+		return "pending"
+	case ToolCallStatePermissionPending:
+		return "permission_pending"
+	case ToolCallStatePermissionApproved:
+		return "permission_approved"
+	case ToolCallStatePermissionDenied:
+		return "permission_denied"
+	case ToolCallStateRunning:
+		return "running"
+	case ToolCallStateCompleted:
+		return "completed"
+	case ToolCallStateFailed:
+		return "failed"
+	case ToolCallStateCancelled:
+		return "cancelled"
+	default:
+		return "unknown"
 	}
 }
 

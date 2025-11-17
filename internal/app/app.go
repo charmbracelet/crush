@@ -1,3 +1,5 @@
+// Package app wires together services, coordinates agents, and manages
+// application lifecycle.
 package app
 
 import (
@@ -5,26 +7,36 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/term"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 type App struct {
@@ -33,7 +45,7 @@ type App struct {
 	History     history.Service
 	Permissions permission.Service
 
-	CoderAgent agent.Service
+	AgentCoordinator agent.Coordinator
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -85,16 +97,21 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
+	go func() {
+		slog.Info("Initializing MCP clients")
+		mcp.Initialize(ctx, app.Permissions, cfg)
+	}()
+
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close)
+	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
 
 	// TODO: remove the concept of agent config, most likely.
-	if cfg.IsConfigured() {
-		if err := app.InitCoderAgent(); err != nil {
-			return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
-		}
-	} else {
+	if !cfg.IsConfigured() {
 		slog.Warn("No agent configuration found")
+		return app, nil
+	}
+	if err := app.InitCoderAgent(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	return app, nil
 }
@@ -104,9 +121,9 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
-// RunNonInteractive handles the execution flow when a prompt is provided via
-// CLI flag.
-func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool) error {
+// RunNonInteractive runs the application in non-interactive mode with the
+// given prompt, printing to stdout.
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -114,7 +131,25 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 
 	var spinner *format.Spinner
 	if !quiet {
-		spinner = format.NewSpinner(ctx, cancel, "Generating")
+		t := styles.CurrentTheme()
+
+		// Detect background color to set the appropriate color for the
+		// spinner's 'Generating...' text. Without this, that text would be
+		// unreadable in light terminals.
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
 		spinner.Start()
 	}
 
@@ -128,7 +163,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
-	titlePrefix := "Non-interactive: "
+	const titlePrefix = "Non-interactive: "
 	var titleSuffix string
 
 	if len(prompt) > maxPromptLengthForTitle {
@@ -144,45 +179,59 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
-	// Automatically approve all permission requests for this non-interactive session
+	// Automatically approve all permission requests for this non-interactive
+	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
 
-	done, err := app.CoderAgent.Run(ctx, sess.ID, prompt)
-	if err != nil {
-		return fmt.Errorf("failed to start agent processing stream: %w", err)
+	type response struct {
+		result *fantasy.AgentResult
+		err    error
 	}
+	done := make(chan response, 1)
+
+	go func(ctx context.Context, sessionID, prompt string) {
+		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		if err != nil {
+			done <- response{
+				err: fmt.Errorf("failed to start agent processing stream: %w", err),
+			}
+		}
+		done <- response{
+			result: result,
+		}
+	}(ctx, sess.ID, prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
+	supportsProgressBar := term.SupportsProgressBar()
 
-	defer fmt.Printf(ansi.ResetProgressBar)
+	defer func() {
+		if supportsProgressBar {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+		}
+
+		// Always print a newline at the end. If output is a TTY this will
+		// prevent the prompt from overwriting the last line of output.
+		_, _ = fmt.Fprintln(output)
+	}()
+
 	for {
-		// HACK: add it again on every iteration so it doesn't get hidden by
-		// the terminal due to inactivity.
-		fmt.Printf(ansi.SetIndeterminateProgressBar)
+		if supportsProgressBar {
+			// HACK: Reinitialize the terminal progress bar on every iteration so
+			// it doesn't get hidden by the terminal due to inactivity.
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		}
+
 		select {
 		case result := <-done:
 			stopSpinner()
-
-			if result.Error != nil {
-				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, agent.ErrRequestCancelled) {
+			if result.err != nil {
+				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
 					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
-				return fmt.Errorf("agent processing failed: %w", result.Error)
+				return fmt.Errorf("agent processing failed: %w", result.err)
 			}
-
-			msgContent := result.Message.Content().String()
-			readBts := messageReadBytes[result.Message.ID]
-
-			if len(msgContent) < readBts {
-				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(msgContent), "read_bytes", readBts)
-				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(msgContent), readBts)
-			}
-			fmt.Println(msgContent[readBts:])
-			messageReadBytes[result.Message.ID] = len(msgContent)
-
-			slog.Info("Non-interactive: run completed", "session_id", sess.ID)
 			return nil
 
 		case event := <-messageEvents:
@@ -199,7 +248,7 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 				}
 
 				part := content[readBytes:]
-				fmt.Print(part)
+				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}
 
@@ -210,8 +259,8 @@ func (app *App) RunNonInteractive(ctx context.Context, prompt string, quiet bool
 	}
 }
 
-func (app *App) UpdateAgentModel() error {
-	return app.CoderAgent.UpdateModel()
+func (app *App) UpdateAgentModel(ctx context.Context) error {
+	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
 func (app *App) setupEvents() {
@@ -222,7 +271,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", agent.SubscribeMCPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func() error {
 		cancel()
@@ -265,18 +314,18 @@ func setupSubscriber[T any](
 	})
 }
 
-func (app *App) InitCoderAgent() error {
-	coderAgentCfg := app.config.Agents["coder"]
+func (app *App) InitCoderAgent(ctx context.Context) error {
+	coderAgentCfg := app.config.Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
-	app.CoderAgent, err = agent.NewAgent(
-		app.globalCtx,
-		coderAgentCfg,
-		app.Permissions,
+	app.AgentCoordinator, err = agent.NewCoordinator(
+		ctx,
+		app.config,
 		app.Sessions,
 		app.Messages,
+		app.Permissions,
 		app.History,
 		app.LSPClients,
 	)
@@ -284,11 +333,6 @@ func (app *App) InitCoderAgent() error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
-
-	// Add MCP client cleanup to shutdown process
-	app.cleanupFuncs = append(app.cleanupFuncs, agent.CloseMCPClients)
-
-	setupSubscriber(app.eventsCtx, app.serviceEventsWG, "coderAgent", app.CoderAgent.Subscribe, app.events)
 	return nil
 }
 
@@ -326,9 +370,12 @@ func (app *App) Subscribe(program *tea.Program) {
 
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
-	if app.CoderAgent != nil {
-		app.CoderAgent.CancelAll()
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.CancelAll()
 	}
+
+	// Kill all background shells.
+	shell.GetBackgroundShellManager().KillAll()
 
 	// Shutdown all LSP clients.
 	for name, client := range app.LSPClients.Seq2() {

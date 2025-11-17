@@ -45,7 +45,9 @@ Thumbs.db
 **/.crush/**
 
 /crush
+/tmp/
 
 manpages/
 completions/
 !internal/tui/components/completions/
+.prettierignore

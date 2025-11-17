@@ -1,7 +1,7 @@
 package styles
 
 import (
-	"github.com/charmbracelet/lipgloss/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -42,6 +42,7 @@ func NewCharmtoneTheme() *Theme {
 		White: charmtone.Butter,
 
 		BlueLight: charmtone.Sardine,
+		BlueDark:  charmtone.Damson,
 		Blue:      charmtone.Malibu,
 
 		Yellow: charmtone.Mustard,

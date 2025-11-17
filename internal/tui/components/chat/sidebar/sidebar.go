@@ -6,7 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -27,7 +28,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/lipgloss/v2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -545,7 +545,7 @@ func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
 
 func (s *sidebarCmp) currentModelBlock() string {
 	cfg := config.Get()
-	agentCfg := cfg.Agents["coder"]
+	agentCfg := cfg.Agents[config.AgentCoder]
 
 	selectedModel := cfg.Models[agentCfg.Model]
 
@@ -563,13 +563,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
 		switch modelProvider.Type {
-		case catwalk.TypeOpenAI:
-			reasoningEffort := model.DefaultReasoningEffort
-			if selectedModel.ReasoningEffort != "" {
-				reasoningEffort = selectedModel.ReasoningEffort
-			}
-			formatter := cases.Title(language.English, cases.NoLower)
-			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		case catwalk.TypeAnthropic:
 			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
@@ -577,6 +570,13 @@ func (s *sidebarCmp) currentModelBlock() string {
 			} else {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
 			}
+		default:
+			reasoningEffort := model.DefaultReasoningEffort
+			if selectedModel.ReasoningEffort != "" {
+				reasoningEffort = selectedModel.ReasoningEffort
+			}
+			formatter := cases.Title(language.English, cases.NoLower)
+			parts = append(parts, reasoningInfoStyle.Render(formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))))
 		}
 	}
 	if s.session.ID != "" {

@@ -5,10 +5,20 @@
   "$defs": {
     "Attribution": {
       "properties": {
+        "trailer_style": {
+          "type": "string",
+          "enum": [
+            "none",
+            "co-authored-by",
+            "assisted-by"
+          ],
+          "description": "Style of attribution trailer to add to commits",
+          "default": "co-authored-by"
+        },
         "co_authored_by": {
           "type": "boolean",
-          "description": "Add Co-Authored-By trailer to commit messages",
-          "default": true
+          "description": "Deprecated: use trailer_style instead",
+          "deprecated": true
         },
         "generated_with": {
           "type": "boolean",
@@ -52,6 +62,16 @@
           },
           "type": "object",
           "description": "Model configurations for different model types"
+        },
+        "recent_models": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/SelectedModel"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "Recently used models sorted by most recent first"
         },
         "providers": {
           "additionalProperties": {
@@ -268,14 +288,20 @@
         "can_reason": {
           "type": "boolean"
         },
-        "has_reasoning_efforts": {
-          "type": "boolean"
+        "reasoning_levels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "default_reasoning_effort": {
           "type": "string"
         },
         "supports_attachments": {
           "type": "boolean"
+        },
+        "options": {
+          "$ref": "#/$defs/ModelOptions"
         }
       },
       "additionalProperties": false,
@@ -290,9 +316,33 @@
         "context_window",
         "default_max_tokens",
         "can_reason",
-        "has_reasoning_efforts",
-        "supports_attachments"
+        "supports_attachments",
+        "options"
       ]
+    },
+    "ModelOptions": {
+      "properties": {
+        "temperature": {
+          "type": "number"
+        },
+        "top_p": {
+          "type": "number"
+        },
+        "top_k": {
+          "type": "integer"
+        },
+        "frequency_penalty": {
+          "type": "number"
+        },
+        "presence_penalty": {
+          "type": "number"
+        },
+        "provider_options": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "Options": {
       "properties": {
@@ -354,6 +404,17 @@
           "type": "boolean",
           "description": "Disable sending metrics",
           "default": false
+        },
+        "initialize_as": {
+          "type": "string",
+          "description": "Name of the context file to create/update during project initialization",
+          "default": "AGENTS.md",
+          "examples": [
+            "AGENTS.md",
+            "CRUSH.md",
+            "CLAUDE.md",
+            "docs/LLMs.md"
+          ]
         }
       },
       "additionalProperties": false,
@@ -442,6 +503,10 @@
           "type": "object",
           "description": "Additional fields to include in request bodies"
         },
+        "provider_options": {
+          "type": "object",
+          "description": "Additional provider-specific options for this provider"
+        },
         "models": {
           "items": {
             "$ref": "#/$defs/Model"
@@ -478,6 +543,10 @@
           ],
           "description": "Reasoning effort level for OpenAI models that support it"
         },
+        "think": {
+          "type": "boolean",
+          "description": "Enable thinking mode for Anthropic models that support reasoning"
+        },
         "max_tokens": {
           "type": "integer",
           "maximum": 200000,
@@ -487,9 +556,39 @@
             4096
           ]
         },
-        "think": {
-          "type": "boolean",
-          "description": "Enable thinking mode for Anthropic models that support reasoning"
+        "temperature": {
+          "type": "number",
+          "maximum": 1,
+          "minimum": 0,
+          "description": "Sampling temperature",
+          "examples": [
+            0.7
+          ]
+        },
+        "top_p": {
+          "type": "number",
+          "maximum": 1,
+          "minimum": 0,
+          "description": "Top-p (nucleus) sampling parameter",
+          "examples": [
+            0.9
+          ]
+        },
+        "top_k": {
+          "type": "integer",
+          "description": "Top-k sampling parameter"
+        },
+        "frequency_penalty": {
+          "type": "number",
+          "description": "Frequency penalty to reduce repetition"
+        },
+        "presence_penalty": {
+          "type": "number",
+          "description": "Presence penalty to increase topic diversity"
+        },
+        "provider_options": {
+          "type": "object",
+          "description": "Additional provider-specific options for the model"
         }
       },
       "additionalProperties": false,

@@ -1,7 +1,7 @@
 package quit
 
 import (
-	"github.com/charmbracelet/bubbles/v2/key"
+	"charm.land/bubbles/v2/key"
 )
 
 // KeyMap defines the keyboard bindings for the quit dialog.

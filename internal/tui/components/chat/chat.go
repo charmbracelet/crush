@@ -5,11 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -103,8 +104,8 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.session.ID != "" && m.app.CoderAgent != nil {
-		queueSize := m.app.CoderAgent.QueuedPrompts(m.session.ID)
+	if m.session.ID != "" && m.app.AgentCoordinator != nil {
+		queueSize := m.app.AgentCoordinator.QueuedPrompts(m.session.ID)
 		if queueSize != m.promptQueue {
 			m.promptQueue = queueSize
 			cmds = append(cmds, m.SetSize(m.width, m.height))
@@ -235,7 +236,7 @@ func (m *messageListCmp) View() string {
 				m.listCmp.View(),
 			),
 	}
-	if m.app.CoderAgent != nil && m.promptQueue > 0 {
+	if m.app.AgentCoordinator != nil && m.promptQueue > 0 {
 		queuePill := queuePill(m.promptQueue, t)
 		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
 	}
@@ -261,12 +262,19 @@ func (m *messageListCmp) handleChildSession(event pubsub.Event[message.Message])
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
 	}
+
+	// Check if this is an agent tool session and parse it
+	childSessionID := event.Payload.SessionID
+	parentMessageID, toolCallID, ok := m.app.Sessions.ParseAgentToolSessionID(childSessionID)
+	if !ok {
+		return nil
+	}
 	items := m.listCmp.Items()
 	toolCallInx := NotFound
 	var toolCall messages.ToolCallCmp
 	for i := len(items) - 1; i >= 0; i-- {
 		if msg, ok := items[i].(messages.ToolCallCmp); ok {
-			if msg.GetToolCall().ID == event.Payload.SessionID {
+			if msg.ParentMessageID() == parentMessageID && msg.GetToolCall().ID == toolCallID {
 				toolCallInx = i
 				toolCall = msg
 			}
@@ -327,6 +335,11 @@ func (m *messageListCmp) handleMessageEvent(event pubsub.Event[message.Message])
 			return nil
 		}
 		return m.handleNewMessage(event.Payload)
+	case pubsub.DeletedEvent:
+		if event.Payload.SessionID != m.session.ID {
+			return nil
+		}
+		return m.handleDeleteMessage(event.Payload)
 	case pubsub.UpdatedEvent:
 		if event.Payload.SessionID != m.session.ID {
 			return m.handleChildSession(event)
@@ -351,6 +364,18 @@ func (m *messageListCmp) messageExists(messageID string) bool {
 		}
 	}
 	return false
+}
+
+// handleDeleteMessage removes a message from the list.
+func (m *messageListCmp) handleDeleteMessage(msg message.Message) tea.Cmd {
+	items := m.listCmp.Items()
+	for i := len(items) - 1; i >= 0; i-- {
+		if msgCmp, ok := items[i].(messages.MessageCmp); ok && msgCmp.GetMessage().ID == msg.ID {
+			m.listCmp.DeleteItem(items[i].ID())
+			return nil
+		}
+	}
+	return nil
 }
 
 // handleNewMessage routes new messages to appropriate handlers based on role.
@@ -611,9 +636,10 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 	for _, tc := range msg.ToolCalls() {
 		options := m.buildToolCallOptions(tc, msg, toolResultMap)
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions, options...))
-		// If this tool call is the agent tool, fetch nested tool calls
-		if tc.Name == agent.AgentToolName {
-			nestedMessages, _ := m.app.Messages.List(context.Background(), tc.ID)
+		// If this tool call is the agent tool or agentic fetch, fetch nested tool calls
+		if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
+			agentToolSessionID := m.app.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
+			nestedMessages, _ := m.app.Messages.List(context.Background(), agentToolSessionID)
 			nestedToolResultMap := m.buildToolResultMap(nestedMessages)
 			nestedUIMessages := m.convertMessagesToUI(nestedMessages, nestedToolResultMap)
 			nestedToolCalls := make([]messages.ToolCallCmp, 0, len(nestedUIMessages))

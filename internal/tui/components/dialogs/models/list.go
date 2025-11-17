@@ -1,11 +1,12 @@
 package models
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
@@ -19,6 +20,13 @@ type ModelListComponent struct {
 	list      listModel
 	modelType int
 	providers []catwalk.Provider
+}
+
+func modelKey(providerID, modelID string) string {
+	if providerID == "" || modelID == "" {
+		return ""
+	}
+	return providerID + ":" + modelID
 }
 
 func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
@@ -103,14 +111,19 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 	var groups []list.Group[list.CompletionItem[ModelOption]]
 	// first none section
 	selectedItemID := ""
+	itemsByKey := make(map[string]list.CompletionItem[ModelOption])
 
 	cfg := config.Get()
 	var currentModel config.SelectedModel
+	selectedType := config.SelectedModelTypeLarge
 	if m.modelType == LargeModelType {
 		currentModel = cfg.Models[config.SelectedModelTypeLarge]
+		selectedType = config.SelectedModelTypeLarge
 	} else {
 		currentModel = cfg.Models[config.SelectedModelTypeSmall]
+		selectedType = config.SelectedModelTypeSmall
 	}
+	recentItems := cfg.RecentModels[selectedType]
 
 	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
 	configured := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))
@@ -151,7 +164,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 					ContextWindow:          model.ContextWindow,
 					DefaultMaxTokens:       model.DefaultMaxTokens,
 					CanReason:              model.CanReason,
-					HasReasoningEffort:     model.HasReasoningEffort,
+					ReasoningLevels:        model.ReasoningLevels,
 					DefaultReasoningEffort: model.DefaultReasoningEffort,
 					SupportsImages:         model.SupportsImages,
 				}
@@ -168,14 +181,17 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 				Section: section,
 			}
 			for _, model := range configProvider.Models {
-				item := list.NewCompletionItem(model.Name, ModelOption{
+				modelOption := ModelOption{
 					Provider: configProvider,
 					Model:    model,
-				},
-					list.WithCompletionID(
-						fmt.Sprintf("%s:%s", providerConfig.ID, model.ID),
-					),
+				}
+				key := modelKey(string(configProvider.ID), model.ID)
+				item := list.NewCompletionItem(
+					model.Name,
+					modelOption,
+					list.WithCompletionID(key),
 				)
+				itemsByKey[key] = item
 
 				group.Items = append(group.Items, item)
 				if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
@@ -195,38 +211,108 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 			continue
 		}
 
-		// Check if this provider is configured and not disabled
-		if providerConfig, exists := cfg.Providers.Get(string(provider.ID)); exists && providerConfig.Disable {
+		providerConfig, providerConfigured := cfg.Providers.Get(string(provider.ID))
+		if providerConfigured && providerConfig.Disable {
 			continue
 		}
 
-		name := provider.Name
+		displayProvider := provider
+		if providerConfigured {
+			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
+			modelIndex := make(map[string]int, len(displayProvider.Models))
+			for i, model := range displayProvider.Models {
+				modelIndex[model.ID] = i
+			}
+			for _, model := range providerConfig.Models {
+				if model.ID == "" {
+					continue
+				}
+				if idx, ok := modelIndex[model.ID]; ok {
+					if model.Name != "" {
+						displayProvider.Models[idx].Name = model.Name
+					}
+					continue
+				}
+				if model.Name == "" {
+					model.Name = model.ID
+				}
+				displayProvider.Models = append(displayProvider.Models, model)
+				modelIndex[model.ID] = len(displayProvider.Models) - 1
+			}
+		}
+
+		name := displayProvider.Name
 		if name == "" {
-			name = string(provider.ID)
+			name = string(displayProvider.ID)
 		}
 
 		section := list.NewItemSection(name)
-		if _, ok := cfg.Providers.Get(string(provider.ID)); ok {
+		if providerConfigured {
 			section.SetInfo(configured)
 		}
 		group := list.Group[list.CompletionItem[ModelOption]]{
 			Section: section,
 		}
-		for _, model := range provider.Models {
-			item := list.NewCompletionItem(model.Name, ModelOption{
-				Provider: provider,
+		for _, model := range displayProvider.Models {
+			modelOption := ModelOption{
+				Provider: displayProvider,
 				Model:    model,
-			},
-				list.WithCompletionID(
-					fmt.Sprintf("%s:%s", provider.ID, model.ID),
-				),
+			}
+			key := modelKey(string(displayProvider.ID), model.ID)
+			item := list.NewCompletionItem(
+				model.Name,
+				modelOption,
+				list.WithCompletionID(key),
 			)
+			itemsByKey[key] = item
 			group.Items = append(group.Items, item)
-			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+			if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
 				selectedItemID = item.ID()
 			}
 		}
 		groups = append(groups, group)
+	}
+
+	if len(recentItems) > 0 {
+		recentSection := list.NewItemSection("Recently used")
+		recentGroup := list.Group[list.CompletionItem[ModelOption]]{
+			Section: recentSection,
+		}
+		var validRecentItems []config.SelectedModel
+		for _, recent := range recentItems {
+			key := modelKey(recent.Provider, recent.Model)
+			option, ok := itemsByKey[key]
+			if !ok {
+				continue
+			}
+			validRecentItems = append(validRecentItems, recent)
+			recentID := fmt.Sprintf("recent::%s", key)
+			modelOption := option.Value()
+			providerName := modelOption.Provider.Name
+			if providerName == "" {
+				providerName = string(modelOption.Provider.ID)
+			}
+			item := list.NewCompletionItem(
+				modelOption.Model.Name,
+				option.Value(),
+				list.WithCompletionID(recentID),
+				list.WithCompletionShortcut(providerName),
+			)
+			recentGroup.Items = append(recentGroup.Items, item)
+			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
+				selectedItemID = recentID
+			}
+		}
+
+		if len(validRecentItems) != len(recentItems) {
+			if err := cfg.SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+				return util.ReportError(err)
+			}
+		}
+
+		if len(recentGroup.Items) > 0 {
+			groups = append([]list.Group[list.CompletionItem[ModelOption]]{recentGroup}, groups...)
+		}
 	}
 
 	var cmds []tea.Cmd

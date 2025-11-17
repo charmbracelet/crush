@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -23,7 +25,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/compact"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
@@ -33,7 +34,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var lastMouseEvent time.Time
@@ -74,6 +76,14 @@ type appModel struct {
 
 	// Chat Page Specific
 	selectedSessionID string // The ID of the currently selected session
+
+	// sendProgressBar instructs the TUI to send progress bar updates to the
+	// terminal.
+	sendProgressBar bool
+
+	// QueryVersion instructs the TUI to query for the terminal version when it
+	// starts.
+	QueryVersion bool
 }
 
 // Init initializes the application model and returns initial commands.
@@ -90,6 +100,9 @@ func (a appModel) Init() tea.Cmd {
 
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
+	if a.QueryVersion {
+		cmds = append(cmds, tea.RequestTerminalVersion)
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -101,7 +114,23 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case tea.EnvMsg:
+		// Is this Windows Terminal?
+		if !a.sendProgressBar {
+			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
+		}
+	case tea.TerminalVersionMsg:
+		termVersion := strings.ToLower(msg.Name)
+		// Only enable progress bar for the following terminals.
+		if !a.sendProgressBar {
+			a.sendProgressBar = strings.Contains(termVersion, "ghostty")
+		}
+		return a, nil
 	case tea.KeyboardEnhancementsMsg:
+		// A non-zero value means we have key disambiguation support.
+		if msg.Flags > 0 {
+			a.keyMap.Models.SetHelp("ctrl+m", "models")
+		}
 		for id, page := range a.pages {
 			m, pageCmd := page.Update(msg)
 			a.pages[id] = m
@@ -115,6 +144,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.wWidth, a.wHeight = msg.Width, msg.Height
 		a.completions.Update(msg)
 		return a, a.handleWindowResize(msg.Width, msg.Height)
+
+	case pubsub.Event[mcp.Event]:
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return a, a.handleStateChanged(context.Background())
+		case mcp.EventPromptsListChanged:
+			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+		}
 
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
@@ -134,13 +173,42 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dialog = u.(dialogs.DialogCmp)
 		return a, tea.Batch(completionCmd, dialogCmd)
 	case commands.ShowArgumentsDialogMsg:
+		var args []commands.Argument
+		for _, arg := range msg.ArgNames {
+			args = append(args, commands.Argument{
+				Name:     arg,
+				Title:    cases.Title(language.English).String(arg),
+				Required: true,
+			})
+		}
 		return a, util.CmdHandler(
 			dialogs.OpenDialogMsg{
 				Model: commands.NewCommandArgumentsDialog(
 					msg.CommandID,
-					msg.Content,
-					msg.ArgNames,
+					msg.CommandID,
+					msg.CommandID,
+					msg.Description,
+					args,
+					msg.OnSubmit,
 				),
+			},
+		)
+	case commands.ShowMCPPromptArgumentsDialogMsg:
+		args := make([]commands.Argument, 0, len(msg.Prompt.Arguments))
+		for _, arg := range msg.Prompt.Arguments {
+			args = append(args, commands.Argument(*arg))
+		}
+		dialog := commands.NewCommandArgumentsDialog(
+			msg.Prompt.Name,
+			msg.Prompt.Title,
+			msg.Prompt.Name,
+			msg.Prompt.Description,
+			args,
+			msg.OnSubmit,
+		)
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: dialog,
 			},
 		)
 	// Page change messages
@@ -176,9 +244,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 	// Compact
 	case commands.CompactMsg:
-		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: compact.NewCompactDialogCmp(a.app.CoderAgent, msg.SessionID, true),
-		})
+		return a, func() tea.Msg {
+			err := a.app.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		}
 	case commands.QuitMsg:
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
@@ -191,16 +263,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleWindowResize(a.wWidth, a.wHeight)
 	// Model Switch
 	case models.ModelSelectedMsg:
-		if a.app.CoderAgent.IsBusy() {
+		if a.app.AgentCoordinator.IsBusy() {
 			return a, util.ReportWarn("Agent is busy, please wait...")
 		}
 
-		config.Get().UpdatePreferredModel(msg.ModelType, msg.Model)
-
-		// Update the agent with the new model/provider configuration
-		if err := a.app.UpdateAgentModel(); err != nil {
-			return a, util.ReportError(fmt.Errorf("model changed to %s but failed to update agent: %v", msg.Model.Model, err))
+		cfg := config.Get()
+		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+			return a, util.ReportError(err)
 		}
+
+		go a.app.UpdateAgentModel(context.TODO())
 
 		modelTypeName := "large"
 		if msg.ModelType == config.SelectedModelTypeSmall {
@@ -247,48 +319,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.app.Permissions.Deny(msg.Permission)
 		}
 		return a, nil
-	// Agent Events
-	case pubsub.Event[agent.AgentEvent]:
-		payload := msg.Payload
-
-		// Forward agent events to dialogs
-		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() == compact.CompactDialogID {
-			u, dialogCmd := a.dialog.Update(payload)
-			if model, ok := u.(dialogs.DialogCmp); ok {
-				a.dialog = model
-			}
-
-			cmds = append(cmds, dialogCmd)
-		}
-
-		// Handle auto-compact logic
-		if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSessionID != "" {
-			// Get current session to check token usage
-			session, err := a.app.Sessions.Get(context.Background(), a.selectedSessionID)
-			if err == nil {
-				model := a.app.CoderAgent.Model()
-				contextWindow := model.ContextWindow
-				tokens := session.CompletionTokens + session.PromptTokens
-				if (tokens >= int64(float64(contextWindow)*0.95)) && !config.Get().Options.DisableAutoSummarize { // Show compact confirmation dialog
-					cmds = append(cmds, util.CmdHandler(dialogs.OpenDialogMsg{
-						Model: compact.NewCompactDialogCmp(a.app.CoderAgent, a.selectedSessionID, false),
-					}))
-				}
-			}
-		}
-
-		return a, tea.Batch(cmds...)
-	// Update Available
-	case pubsub.UpdateAvailableMsg:
-		// Show update notification in status bar
-		statusMsg := fmt.Sprintf("🎉 New Crush version available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
-		s, statusCmd := a.status.Update(util.InfoMsg{
-			Type: util.InfoTypeInfo,
-			Msg:  statusMsg,
-			TTL:  30 * time.Second,
-		})
-		a.status = s.(status.StatusCmp)
-		return a, statusCmd
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]
 		if !ok {
@@ -342,6 +372,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, pageCmd)
 		}
 		return a, tea.Batch(cmds...)
+	// Update Available
+	case pubsub.UpdateAvailableMsg:
+		// Show update notification in status bar
+		statusMsg := fmt.Sprintf("🎉 New Crush version available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		s, statusCmd := a.status.Update(util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  statusMsg,
+			TTL:  30 * time.Second,
+		})
+		a.status = s.(status.StatusCmp)
+		return a, statusCmd
 	}
 	s, _ := a.status.Update(msg)
 	a.status = s.(status.StatusCmp)
@@ -454,6 +495,20 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: commands.NewCommandDialog(a.selectedSessionID),
 		})
+	case key.Matches(msg, a.keyMap.Models):
+		// if the app is not configured show no models
+		if !a.isConfigured {
+			return nil
+		}
+		if a.dialog.ActiveDialogID() == models.ModelsDialogID {
+			return util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		if a.dialog.HasDialogs() {
+			return nil
+		}
+		return util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: models.NewModelDialogCmp(),
+		})
 	case key.Matches(msg, a.keyMap.Sessions):
 		// if the app is not configured show no sessions
 		if !a.isConfigured {
@@ -466,10 +521,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		var cmds []tea.Cmd
-		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
-			// If the commands dialog is open, close it first
-			cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
-		}
 		cmds = append(cmds,
 			func() tea.Msg {
 				allSessions, _ := a.app.Sessions.List(context.Background())
@@ -480,7 +531,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		)
 		return tea.Sequence(cmds...)
 	case key.Matches(msg, a.keyMap.Suspend):
-		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+		if a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 			return util.ReportWarn("Agent is busy, please wait...")
 		}
 		return tea.Suspend
@@ -498,7 +549,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
-	if a.app.CoderAgent.IsBusy() {
+	if a.app.AgentCoordinator.IsBusy() {
 		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
@@ -523,20 +574,24 @@ func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 func (a *appModel) View() tea.View {
 	var view tea.View
 	t := styles.CurrentTheme()
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
 	if a.wWidth < 25 || a.wHeight < 15 {
-		view.Layer = lipgloss.NewCanvas(
-			lipgloss.NewLayer(
-				t.S().Base.Width(a.wWidth).Height(a.wHeight).
-					Align(lipgloss.Center, lipgloss.Center).
-					Render(
-						t.S().Base.
-							Padding(1, 4).
-							Foreground(t.White).
-							BorderStyle(lipgloss.RoundedBorder()).
-							BorderForeground(t.Primary).
-							Render("Window too small!"),
-					),
+		view.SetContent(
+			lipgloss.NewCanvas(
+				lipgloss.NewLayer(
+					t.S().Base.Width(a.wWidth).Height(a.wHeight).
+						Align(lipgloss.Center, lipgloss.Center).
+						Render(
+							t.S().Base.
+								Padding(1, 4).
+								Foreground(t.White).
+								BorderStyle(lipgloss.RoundedBorder()).
+								BorderForeground(t.Primary).
+								Render("Window too small!"),
+						),
+				),
 			),
 		)
 		return view
@@ -593,11 +648,10 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
-	view.Layer = canvas
+	view.Content = canvas
 	view.Cursor = cursor
-	view.MouseMode = tea.MouseModeCellMotion
-	view.AltScreen = true
-	if a.app != nil && a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+
+	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
 		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
@@ -605,8 +659,29 @@ func (a *appModel) View() tea.View {
 	return view
 }
 
+func (a *appModel) handleStateChanged(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		a.app.UpdateAgentModel(ctx)
+		return nil
+	}
+}
+
+func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshPrompts(ctx, name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshTools(ctx, name)
+		return nil
+	}
+}
+
 // New creates and initializes a new TUI application model.
-func New(app *app.App) tea.Model {
+func New(app *app.App) *appModel {
 	chatPage := chat.New(app)
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()

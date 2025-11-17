@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
@@ -49,7 +48,7 @@ func providerCacheFileData() string {
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {
-	slog.Info("Saving cached provider data", "path", path)
+	slog.Info("Saving provider data to disk", "path", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
@@ -126,8 +125,6 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 }
 
 func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
-	_, cacheExists := isCacheStale(path)
-
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
 		providers, err := client.GetProviders()
 		if err != nil {
@@ -146,7 +143,7 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 	case autoUpdateDisabled:
 		slog.Warn("Providers auto-update is disabled")
 
-		if cacheExists {
+		if _, err := os.Stat(path); err == nil {
 			slog.Warn("Using locally cached providers")
 			return loadProvidersFromCache(path)
 		}
@@ -159,21 +156,13 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		return providers, nil
 
 	default:
-		slog.Info("Cache is not available or is stale. Fetching providers from Catwalk.", "path", path)
+		slog.Info("Fetching providers from Catwalk.", "path", path)
 
 		providers, err := catwalkGetAndSave()
 		if err != nil {
-			catwalkUrl := fmt.Sprintf("%s/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
+			catwalkUrl := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
 			return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
 		}
 		return providers, nil
 	}
-}
-
-func isCacheStale(path string) (stale, exists bool) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return true, false
-	}
-	return time.Since(info.ModTime()) > 24*time.Hour, true
 }

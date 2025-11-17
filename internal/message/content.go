@@ -2,9 +2,15 @@ package message
 
 import (
 	"encoding/base64"
+	"errors"
 	"slices"
+	"strings"
 	"time"
 
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/google"
+	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
 
@@ -36,10 +42,12 @@ type ContentPart interface {
 }
 
 type ReasoningContent struct {
-	Thinking   string `json:"thinking"`
-	Signature  string `json:"signature"`
-	StartedAt  int64  `json:"started_at,omitempty"`
-	FinishedAt int64  `json:"finished_at,omitempty"`
+	Thinking         string                             `json:"thinking"`
+	Signature        string                             `json:"signature"`
+	ThoughtSignature string                             `json:"thought_signature"` // Used for google
+	ResponsesData    *openai.ResponsesReasoningMetadata `json:"responses_data"`
+	StartedAt        int64                              `json:"started_at,omitempty"`
+	FinishedAt       int64                              `json:"finished_at,omitempty"`
 }
 
 func (tc ReasoningContent) String() string {
@@ -85,11 +93,11 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Input    string `json:"input"`
-	Type     string `json:"type"`
-	Finished bool   `json:"finished"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Input            string `json:"input"`
+	ProviderExecuted bool   `json:"provider_executed"`
+	Finished         bool   `json:"finished"`
 }
 
 func (ToolCall) isPart() {}
@@ -98,6 +106,8 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	Name       string `json:"name"`
 	Content    string `json:"content"`
+	Data       string `json:"data"`
+	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
 }
@@ -114,14 +124,15 @@ type Finish struct {
 func (Finish) isPart() {}
 
 type Message struct {
-	ID        string
-	Role      MessageRole
-	SessionID string
-	Parts     []ContentPart
-	Model     string
-	Provider  string
-	CreatedAt int64
-	UpdatedAt int64
+	ID               string
+	Role             MessageRole
+	SessionID        string
+	Parts            []ContentPart
+	Model            string
+	Provider         string
+	CreatedAt        int64
+	UpdatedAt        int64
+	IsSummaryMessage bool
 }
 
 func (m *Message) Content() TextContent {
@@ -250,6 +261,22 @@ func (m *Message) AppendReasoningContent(delta string) {
 	}
 }
 
+func (m *Message) AppendThoughtSignature(signature string) {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			m.Parts[i] = ReasoningContent{
+				Thinking:         c.Thinking,
+				ThoughtSignature: c.ThoughtSignature + signature,
+				Signature:        c.Signature,
+				StartedAt:        c.StartedAt,
+				FinishedAt:       c.FinishedAt,
+			}
+			return
+		}
+	}
+	m.Parts = append(m.Parts, ReasoningContent{ThoughtSignature: signature})
+}
+
 func (m *Message) AppendReasoningSignature(signature string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
@@ -263,6 +290,20 @@ func (m *Message) AppendReasoningSignature(signature string) {
 		}
 	}
 	m.Parts = append(m.Parts, ReasoningContent{Signature: signature})
+}
+
+func (m *Message) SetReasoningResponsesData(data *openai.ResponsesReasoningMetadata) {
+	for i, part := range m.Parts {
+		if c, ok := part.(ReasoningContent); ok {
+			m.Parts[i] = ReasoningContent{
+				Thinking:      c.Thinking,
+				ResponsesData: data,
+				StartedAt:     c.StartedAt,
+				FinishedAt:    c.FinishedAt,
+			}
+			return
+		}
+	}
 }
 
 func (m *Message) FinishThinking() {
@@ -303,7 +344,6 @@ func (m *Message) FinishToolCall(toolCallID string) {
 					ID:       c.ID,
 					Name:     c.Name,
 					Input:    c.Input,
-					Type:     c.Type,
 					Finished: true,
 				}
 				return
@@ -320,7 +360,6 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 					ID:       c.ID,
 					Name:     c.Name,
 					Input:    c.Input + inputDelta,
-					Type:     c.Type,
 					Finished: c.Finished,
 				}
 				return
@@ -383,4 +422,91 @@ func (m *Message) AddImageURL(url, detail string) {
 
 func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
+}
+
+func (m *Message) ToAIMessage() []fantasy.Message {
+	var messages []fantasy.Message
+	switch m.Role {
+	case User:
+		var parts []fantasy.MessagePart
+		text := strings.TrimSpace(m.Content().Text)
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
+		}
+		for _, content := range m.BinaryContent() {
+			parts = append(parts, fantasy.FilePart{
+				Filename:  content.Path,
+				Data:      content.Data,
+				MediaType: content.MIMEType,
+			})
+		}
+		messages = append(messages, fantasy.Message{
+			Role:    fantasy.MessageRoleUser,
+			Content: parts,
+		})
+	case Assistant:
+		var parts []fantasy.MessagePart
+		text := strings.TrimSpace(m.Content().Text)
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
+		}
+		reasoning := m.ReasoningContent()
+		if reasoning.Thinking != "" {
+			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
+			if reasoning.Signature != "" {
+				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
+					Signature: reasoning.Signature,
+				}
+			}
+			if reasoning.ResponsesData != nil {
+				reasoningPart.ProviderOptions[openai.Name] = reasoning.ResponsesData
+			}
+			if reasoning.ThoughtSignature != "" {
+				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
+					Signature: reasoning.ThoughtSignature,
+				}
+			}
+			parts = append(parts, reasoningPart)
+		}
+		for _, call := range m.ToolCalls() {
+			parts = append(parts, fantasy.ToolCallPart{
+				ToolCallID:       call.ID,
+				ToolName:         call.Name,
+				Input:            call.Input,
+				ProviderExecuted: call.ProviderExecuted,
+			})
+		}
+		messages = append(messages, fantasy.Message{
+			Role:    fantasy.MessageRoleAssistant,
+			Content: parts,
+		})
+	case Tool:
+		var parts []fantasy.MessagePart
+		for _, result := range m.ToolResults() {
+			var content fantasy.ToolResultOutputContent
+			if result.IsError {
+				content = fantasy.ToolResultOutputContentError{
+					Error: errors.New(result.Content),
+				}
+			} else if result.Data != "" {
+				content = fantasy.ToolResultOutputContentMedia{
+					Data:      result.Data,
+					MediaType: result.MIMEType,
+				}
+			} else {
+				content = fantasy.ToolResultOutputContentText{
+					Text: result.Content,
+				}
+			}
+			parts = append(parts, fantasy.ToolResultPart{
+				ToolCallID: result.ToolCallID,
+				Output:     content,
+			})
+		}
+		messages = append(messages, fantasy.Message{
+			Role:    fantasy.MessageRoleTool,
+			Content: parts,
+		})
+	}
+	return messages
 }

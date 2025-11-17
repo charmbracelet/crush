@@ -14,12 +14,14 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
+	defaultInitializeAs  = "AGENTS.md"
 )
 
 var defaultContextPaths = []string{
@@ -48,6 +50,11 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
+const (
+	AgentCoder string = "coder"
+	AgentTask  string = "task"
+)
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -59,11 +66,19 @@ type SelectedModel struct {
 	// Only used by models that use the openai provider and need this set.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
 
-	// Overrides the default model configuration.
-	MaxTokens int64 `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
-
 	// Used by anthropic models that can reason to indicate if the model should think.
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
+
+	// Overrides the default model configuration.
+	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
+	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
+	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
+	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty" jsonschema:"description=Frequency penalty to reduce repetition"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty" jsonschema:"description=Presence penalty to increase topic diversity"`
+
+	// Override provider specific options.
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
 type ProviderConfig struct {
@@ -86,7 +101,9 @@ type ProviderConfig struct {
 	// Extra headers to send with each request to the provider.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
 	// Extra body
-	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies"`
+	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
+
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
@@ -151,9 +168,27 @@ type Permissions struct {
 	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
 }
 
+type TrailerStyle string
+
+const (
+	TrailerStyleNone         TrailerStyle = "none"
+	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
+	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
+)
+
 type Attribution struct {
-	CoAuthoredBy  bool `json:"co_authored_by,omitempty" jsonschema:"description=Add Co-Authored-By trailer to commit messages,default=true"`
-	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=co-authored-by"`
+	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+}
+
+// JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
+func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		if prop, ok := schema.Properties.Get("co_authored_by"); ok {
+			prop.Deprecated = true
+		}
+	}
 }
 
 type Options struct {
@@ -167,6 +202,7 @@ type Options struct {
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 }
 
 type MCPs map[string]MCPConfig
@@ -251,10 +287,6 @@ type Agent struct {
 	//  if the string array is nil, all tools from the AllowedMCP are available
 	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty"`
 
-	// The list of LSPs that this agent can use
-	//  if this is nil, all LSPs are available
-	AllowedLSP []string `json:"allowed_lsp,omitempty"`
-
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
@@ -278,6 +310,8 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+	// Recently used models stored in the data directory config.
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -292,10 +326,10 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
+	Agents map[string]Agent `json:"-"`
+
 	// Internal
 	workingDir string `json:"-"`
-	// TODO: most likely remove this concept when I come back to it
-	Agents map[string]Agent `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
 	dataConfigDir  string             `json:"-"`
@@ -387,6 +421,9 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
+	if err := c.recordRecentModel(modelType, model); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -454,14 +491,62 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	return nil
 }
 
+const maxRecentModelsPerType = 5
+
+func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
+	if model.Provider == "" || model.Model == "" {
+		return nil
+	}
+
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
+
+	entry := SelectedModel{
+		Provider: model.Provider,
+		Model:    model.Model,
+	}
+
+	current := c.RecentModels[modelType]
+	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
+		return eq(existing, entry)
+	})
+
+	updated := append([]SelectedModel{entry}, withoutCurrent...)
+	if len(updated) > maxRecentModelsPerType {
+		updated = updated[:maxRecentModelsPerType]
+	}
+
+	if slices.EqualFunc(current, updated, eq) {
+		return nil
+	}
+
+	c.RecentModels[modelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
+	return nil
+}
+
 func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"job_output",
+		"job_kill",
 		"download",
 		"edit",
 		"multiedit",
+		"lsp_diagnostics",
+		"lsp_references",
 		"fetch",
+		"agentic_fetch",
 		"glob",
 		"grep",
 		"ls",
@@ -501,16 +586,17 @@ func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
-		"coder": {
-			ID:           "coder",
+		AgentCoder: {
+			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: allowedTools,
 		},
-		"task": {
-			ID:           "task",
+
+		AgentTask: {
+			ID:           AgentCoder,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
@@ -518,7 +604,6 @@ func (c *Config) SetupAgents() {
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
-			AllowedLSP: []string{},
 		},
 	}
 	c.Agents = agents
@@ -533,7 +618,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	headers := make(map[string]string)
 	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	switch c.Type {
-	case catwalk.TypeOpenAI:
+	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://api.openai.com/v1"
@@ -552,7 +637,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		testURL = baseURL + "/models"
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGemini:
+	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://generativelanguage.googleapis.com"

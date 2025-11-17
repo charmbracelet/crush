@@ -2,14 +2,15 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/spinner"
-	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -36,7 +37,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 var ChatPageID page.PageID = "chat"
@@ -144,7 +144,7 @@ func (p *chatPage) Init() tea.Cmd {
 		p.isOnboarding = true
 		p.splashFullScreen = true
 	} else if b, _ := config.ProjectNeedsInitialization(); b {
-		// Project needs CRUSH.md initialization
+		// Project needs context initialization
 		p.splash.SetProjectInit(true)
 		p.isProjectInit = true
 		p.splashFullScreen = true
@@ -331,7 +331,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, tea.Batch(cmds...)
 
 	case commands.CommandRunCustomMsg:
-		if p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 
@@ -346,7 +346,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.splashFullScreen = true
 			return p, p.SetSize(p.width, p.height)
 		}
-		err := p.app.InitCoderAgent()
+		err := p.app.InitCoderAgent(context.TODO())
 		if err != nil {
 			return p, util.ReportError(err)
 		}
@@ -355,7 +355,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
 	case commands.NewSessionsMsg:
-		if p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator.IsBusy() {
 			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 		}
 		return p, p.newSession()
@@ -363,15 +363,15 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, p.keyMap.NewSession):
 			// if we have no agent do nothing
-			if p.app.CoderAgent == nil {
+			if p.app.AgentCoordinator == nil {
 				return p, nil
 			}
-			if p.app.CoderAgent.IsBusy() {
+			if p.app.AgentCoordinator.IsBusy() {
 				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			agentCfg := config.Get().Agents["coder"]
+			agentCfg := config.Get().Agents[config.AgentCoder]
 			model := config.Get().GetModelByType(agentCfg.Model)
 			if model.SupportsImages {
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
@@ -387,7 +387,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.changeFocus()
 			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
-			if p.session.ID != "" && p.app.CoderAgent.IsBusy() {
+			if p.session.ID != "" && p.app.AgentCoordinator.IsBusy() {
 				return p, p.cancel()
 			}
 		case key.Matches(msg, p.keyMap.Details):
@@ -530,20 +530,20 @@ func (p *chatPage) updateCompactConfig(compact bool) tea.Cmd {
 func (p *chatPage) toggleThinking() tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		currentModel := cfg.Models[agentCfg.Model]
 
 		// Toggle the thinking mode
 		currentModel.Think = !currentModel.Think
-		cfg.Models[agentCfg.Model] = currentModel
-
-		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(); err != nil {
+		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  "Failed to update thinking mode: " + err.Error(),
 			}
 		}
+
+		// Update the agent with the new configuration
+		go p.app.UpdateAgentModel(context.TODO())
 
 		status := "disabled"
 		if currentModel.Think {
@@ -559,12 +559,11 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 func (p *chatPage) openReasoningDialog() tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		model := cfg.GetModelByType(agentCfg.Model)
 		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
 
-		if providerCfg != nil && model != nil &&
-			providerCfg.Type == catwalk.TypeOpenAI && model.HasReasoningEffort {
+		if providerCfg != nil && model != nil && len(model.ReasoningLevels) > 0 {
 			// Return the OpenDialogMsg directly so it bubbles up to the main TUI
 			return dialogs.OpenDialogMsg{
 				Model: reasoning.NewReasoningDialog(),
@@ -577,15 +576,20 @@ func (p *chatPage) openReasoningDialog() tea.Cmd {
 func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := config.Get()
-		agentCfg := cfg.Agents["coder"]
+		agentCfg := cfg.Agents[config.AgentCoder]
 		currentModel := cfg.Models[agentCfg.Model]
 
 		// Update the model configuration
 		currentModel.ReasoningEffort = effort
-		cfg.Models[agentCfg.Model] = currentModel
+		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to update reasoning effort: " + err.Error(),
+			}
+		}
 
 		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(); err != nil {
+		if err := p.app.UpdateAgentModel(context.TODO()); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  "Failed to update reasoning effort: " + err.Error(),
@@ -706,14 +710,14 @@ func (p *chatPage) changeFocus() {
 func (p *chatPage) cancel() tea.Cmd {
 	if p.isCanceling {
 		p.isCanceling = false
-		if p.app.CoderAgent != nil {
-			p.app.CoderAgent.Cancel(p.session.ID)
+		if p.app.AgentCoordinator != nil {
+			p.app.AgentCoordinator.Cancel(p.session.ID)
 		}
 		return nil
 	}
 
-	if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
-		p.app.CoderAgent.ClearQueue(p.session.ID)
+	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.QueuedPrompts(p.session.ID) > 0 {
+		p.app.AgentCoordinator.ClearQueue(p.session.ID)
 		return nil
 	}
 	p.isCanceling = true
@@ -746,14 +750,25 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		session = newSession
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
 	}
-	if p.app.CoderAgent == nil {
+	if p.app.AgentCoordinator == nil {
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
-	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
-	if err != nil {
-		return util.ReportError(err)
-	}
 	cmds = append(cmds, p.chat.GoToBottom())
+	cmds = append(cmds, func() tea.Msg {
+		_, err := p.app.AgentCoordinator.Run(context.Background(), session.ID, text, attachments...)
+		if err != nil {
+			isCancelErr := errors.Is(err, context.Canceled)
+			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+			if isCancelErr || isPermissionErr {
+				return nil
+			}
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  err.Error(),
+			}
+		}
+		return nil
+	})
 	return tea.Batch(cmds...)
 }
 
@@ -762,7 +777,7 @@ func (p *chatPage) Bindings() []key.Binding {
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
 	}
-	if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
+	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 		cancelBinding := p.keyMap.Cancel
 		if p.isCanceling {
 			cancelBinding = key.NewBinding(
@@ -883,7 +898,7 @@ func (p *chatPage) Help() help.KeyMap {
 			}
 			return core.NewSimpleHelp(shortList, fullList)
 		}
-		if p.app.CoderAgent != nil && p.app.CoderAgent.IsBusy() {
+		if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 			cancelBinding := key.NewBinding(
 				key.WithKeys("esc", "alt+esc"),
 				key.WithHelp("esc", "cancel"),
@@ -894,7 +909,7 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("esc", "press again to cancel"),
 				)
 			}
-			if p.app.CoderAgent != nil && p.app.CoderAgent.QueuedPrompts(p.session.ID) > 0 {
+			if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.QueuedPrompts(p.session.ID) > 0 {
 				cancelBinding = key.NewBinding(
 					key.WithKeys("esc", "alt+esc"),
 					key.WithHelp("esc", "clear queue"),
@@ -927,11 +942,19 @@ func (p *chatPage) Help() help.KeyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		)
+		modelsBinding := key.NewBinding(
+			key.WithKeys("ctrl+m", "ctrl+l"),
+			key.WithHelp("ctrl+l", "models"),
+		)
+		if p.keyboardEnhancements.Flags > 0 {
+			// non-zero flags mean we have at least key disambiguation
+			modelsBinding.SetHelp("ctrl+m", "models")
+		}
 		helpBinding := key.NewBinding(
 			key.WithKeys("ctrl+g"),
 			key.WithHelp("ctrl+g", "more"),
 		)
-		globalBindings = append(globalBindings, commandsBinding)
+		globalBindings = append(globalBindings, commandsBinding, modelsBinding)
 		globalBindings = append(globalBindings,
 			key.NewBinding(
 				key.WithKeys("ctrl+s"),
@@ -948,6 +971,7 @@ func (p *chatPage) Help() help.KeyMap {
 		shortList = append(shortList,
 			// Commands
 			commandsBinding,
+			modelsBinding,
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1010,7 +1034,8 @@ func (p *chatPage) Help() help.KeyMap {
 				// to reflect that.
 				key.WithHelp("ctrl+j", "newline"),
 			)
-			if p.keyboardEnhancements.SupportsKeyDisambiguation() {
+			if p.keyboardEnhancements.Flags > 0 {
+				// Non-zero flags mean we have at least key disambiguation.
 				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
 			}
 			shortList = append(shortList, newLineBinding)
@@ -1022,8 +1047,8 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("ctrl+f", "add image"),
 					),
 					key.NewBinding(
-						key.WithKeys("/"),
-						key.WithHelp("/", "add file"),
+						key.WithKeys("@"),
+						key.WithHelp("@", "mention file"),
 					),
 					key.NewBinding(
 						key.WithKeys("ctrl+o"),

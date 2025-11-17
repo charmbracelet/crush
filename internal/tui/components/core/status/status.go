@@ -40,7 +40,7 @@ func (m *statusCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.help.Width = msg.Width - 2
+		m.help.SetWidth(msg.Width - 2)
 		return m, nil
 
 	// Handle status info

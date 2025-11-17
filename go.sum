@@ -1,7 +1,7 @@
 charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759 h1:P1MxkVl8ZeI9tHmmrn9UzV/5Mz7heoiTgqECHRFsUcs=
 charm.land/bubbles/v2 v2.0.0-beta.1.0.20251104200223-da0b892d1759/go.mod h1:G7JWaj3kDT0BDB+h5BLDUhhBLpDoRLKrpOp5QrA2SQs=
-charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251114215930-55b3503a2a7c h1:cgbD51IKZ2c00N9SHDIZ1B4VoPd3S67DqKuLI6fLLrI=
-charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251114215930-55b3503a2a7c/go.mod h1:tuw7XKtB+/GvKmYn//gk+47mXuVfDOLFxcjchHDuZ1c=
+charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251117161017-15f884bd2973 h1:Ay8VWyn/CbwltswomzWXj0m5KKfSJavFfCDCxI+j8qo=
+charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251117161017-15f884bd2973/go.mod h1:IXFmnCnMLTWw/KQ9rEatSYqbAPAYi8kA3Yqwa1SFnLk=
 charm.land/fantasy v0.3.1 h1:YeMoLnaOHM3hdXq+SByxIKZxdm/2CHgKIS7HE0k/G6I=
 charm.land/fantasy v0.3.1/go.mod h1:sV8Ns/JTJHOaYOHPgVRDugMheAyxsW/nmdpVGrycYEk=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251106193318-19329a3e8410 h1:D9PbaszZYpB4nj+d6HTWr1onlmlyuGVNfL9gAi8iB3k=
@@ -98,8 +98,8 @@ github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930 h1:+47Z2j
 github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930/go.mod h1:izs11tnkYaT3DTEH2E0V/lCb18VGZ7k9HLYEGuvgXGA=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0 h1:lxHzxsHd4P7o7+5D5OcEItYkQ1xY3ovNg8Dc5ftd3rI=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0/go.mod h1:Q7oMtlboDPnnrYiJDXNwdWmJblOmuOnycPKczlVju6I=
-github.com/charmbracelet/ultraviolet v0.0.0-20251114211333-9deacb990ee7 h1:PeoXe8fG5yb6uaimw4Om9eiXL74MzFSwSj3coBtDPmY=
-github.com/charmbracelet/ultraviolet v0.0.0-20251114211333-9deacb990ee7/go.mod h1:6lfcr3MNP+kZR25sF1nQwJFuQnNYBlFy3PGX5rvslXc=
+github.com/charmbracelet/ultraviolet v0.0.0-20251116181749-377898bcce38 h1:7Rs87fbKJoIIxsQS8YKJYGYa0tlsDwwb0twQjV1KB+g=
+github.com/charmbracelet/ultraviolet v0.0.0-20251116181749-377898bcce38/go.mod h1:6lfcr3MNP+kZR25sF1nQwJFuQnNYBlFy3PGX5rvslXc=
 github.com/charmbracelet/x/ansi v0.11.1 h1:iXAC8SyMQDJgtcz9Jnw+HU8WMEctHzoTAETIeA3JXMk=
 github.com/charmbracelet/x/ansi v0.11.1/go.mod h1:M49wjzpIujwPceJ+t5w3qh2i87+HRtHohgb5iTyepL0=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=

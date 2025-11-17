@@ -13,7 +13,7 @@
             "assisted-by"
           ],
           "description": "Style of attribution trailer to add to commits",
-          "default": "co-authored-by"
+          "default": "assisted-by"
         },
         "co_authored_by": {
           "type": "boolean",

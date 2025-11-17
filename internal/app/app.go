@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -42,6 +43,7 @@ type App struct {
 	Messages    message.Service
 	History     history.Service
 	Permissions permission.Service
+	Hooks       hooks.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -71,10 +73,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	hooks := hooks.NewService(cfg.Hooks, cfg.WorkingDir(), nil, messages)
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
+		Hooks:       hooks,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
@@ -323,6 +328,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		app.Hooks,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

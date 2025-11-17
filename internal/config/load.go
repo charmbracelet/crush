@@ -81,6 +81,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 	cfg.knownProviders = providers
 
+	// Validate hooks configuration.
+	if err := cfg.validateHooks(); err != nil {
+		return nil, fmt.Errorf("invalid hooks configuration: %w", err)
+	}
+
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)

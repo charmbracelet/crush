@@ -10,6 +10,7 @@ var (
 	ErrSessionBusy      = errors.New("session is currently processing another request")
 	ErrEmptyPrompt      = errors.New("prompt is empty")
 	ErrSessionMissing   = errors.New("session id is missing")
+	ErrHookCancellation = errors.New("hook cancelled the agent")
 )
 
 func isCancelledErr(err error) bool {

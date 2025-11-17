@@ -326,6 +326,8 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
+	Hooks HookConfig `json:"hooks,omitempty" jsonschema:"description=Hook configurations for lifecycle events"`
+
 	Agents map[string]Agent `json:"-"`
 
 	// Internal
@@ -353,6 +355,14 @@ func (c *Config) EnabledProviders() []ProviderConfig {
 // IsConfigured  return true if at least one provider is configured
 func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
+}
+
+// validateHooks validates the hooks configuration.
+func (c *Config) validateHooks() error {
+	if c.Hooks == nil {
+		return nil
+	}
+	return c.Hooks.Validate()
 }
 
 func (c *Config) GetModel(provider, model string) *catwalk.Model {

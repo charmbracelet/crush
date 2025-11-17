@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -83,6 +84,7 @@ type sessionAgent struct {
 	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
+	hooks                hooks.Service
 	disableAutoSummarize bool
 	isYolo               bool
 
@@ -99,6 +101,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Hooks                hooks.Service
 	Tools                []fantasy.AgentTool
 }
 
@@ -113,6 +116,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		hooks:                opts.Hooks,
 		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
@@ -172,7 +176,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	userMsg, err := a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -182,19 +186,52 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(call.SessionID, cancel)
-
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
+
+	// create the agent message asap to show loading
+	var currentAssistant *message.Message
+	assistantMessage, err := a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Parts:    []message.ContentPart{},
+		Model:    a.largeModel.ModelCfg.Model,
+		Provider: a.largeModel.ModelCfg.Provider,
+	})
+	if err != nil {
+		return nil, err
+	}
+	currentAssistant = &assistantMessage
+
+	// run hooks after assistant message is created
+	// this way we show loading for the user
+	hooks, err := a.executeUserPromptSubmitHook(genCtx, call.SessionID, call.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	userMsg.AddHookOutputs(hooks...)
+	if updateErr := a.messages.Update(genCtx, userMsg); updateErr != nil {
+		return nil, updateErr
+	}
+
+	for _, hook := range hooks {
+		// execution stopped
+		if hook.Stop {
+			deleteErr := a.messages.Delete(genCtx, assistantMessage.ID)
+			if deleteErr != nil {
+				return nil, deleteErr
+			}
+			return nil, nil
+		}
+	}
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
-	var currentAssistant *message.Message
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           call.Prompt,
+		Prompt:           userMsg.ContentWithHooksContext(),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
@@ -206,6 +243,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		FrequencyPenalty: call.FrequencyPenalty,
 		// Before each step create a new assistant message.
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// only add new assistant message when its not the first step
+			if options.StepNumber != 0 {
+				var assistantMsg message.Message
+				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    a.largeModel.ModelCfg.Model,
+					Provider: a.largeModel.ModelCfg.Provider,
+				})
+				currentAssistant = &assistantMsg
+				// create the message first so we show loading asap
+				if err != nil {
+					return callContext, prepared, err
+				}
+			}
+
 			prepared.Messages = options.Messages
 			// Reset all cached items.
 			for i := range prepared.Messages {
@@ -218,6 +271,27 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				userMessage, createErr := a.createUserMessage(callContext, queued)
 				if createErr != nil {
 					return callContext, prepared, createErr
+				}
+
+				// run hooks after assistant message is created
+				// this way we show loading for the user
+				hooks, hookErr := a.executeUserPromptSubmitHook(genCtx, call.SessionID, call.Prompt)
+				if hookErr != nil {
+					return callContext, prepared, hookErr
+				}
+				userMsg.AddHookOutputs(hooks...)
+				for _, hook := range hooks {
+					// execution stopped
+					if hook.Stop {
+						deleteErr := a.messages.Delete(genCtx, assistantMessage.ID)
+						if deleteErr != nil {
+							return callContext, prepared, deleteErr
+						}
+						return callContext, prepared, ErrHookCancellation
+					}
+				}
+				if updateErr := a.messages.Update(genCtx, userMsg); updateErr != nil {
+					return callContext, prepared, updateErr
 				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
@@ -242,18 +316,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
 			}
 
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    a.largeModel.ModelCfg.Model,
-				Provider: a.largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
-				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			currentAssistant = &assistantMsg
+			callContext = context.WithValue(callContext, tools.MessageIDContextKey, currentAssistant.ID)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -400,6 +463,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+		isHookCancelled := errors.Is(err, ErrHookCancellation)
 		if currentAssistant == nil {
 			return result, err
 		}
@@ -468,6 +532,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+		} else if isHookCancelled {
+			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "Hook canceled request", "")
 		} else if errors.As(err, &providerErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 		} else if errors.As(err, &fantasyErr) {
@@ -881,4 +947,21 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel
+}
+
+func (a *sessionAgent) executeUserPromptSubmitHook(
+	ctx context.Context,
+	sessionID string,
+	prompt string,
+) ([]message.HookOutput, error) {
+	if a.hooks == nil {
+		return nil, nil
+	}
+	return a.hooks.Execute(ctx, hooks.HookContext{
+		EventType:  config.UserPromptSubmit,
+		SessionID:  sessionID,
+		UserPrompt: prompt,
+		Provider:   a.largeModel.ModelCfg.Provider,
+		Model:      a.largeModel.ModelCfg.Model,
+	})
 }

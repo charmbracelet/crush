@@ -133,6 +133,16 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	HookOutputs      []HookOutput
+}
+
+type HookOutput struct {
+	Stop              bool   `json:"stop"`
+	Error             string `json:"error"`
+	Message           string `json:"message"`
+	Decision          string `json:"decision"`
+	UpdatedInput      string `json:"updated_input"`
+	AdditionalContext string `json:"additional_context"`
 }
 
 func (m *Message) Content() TextContent {
@@ -142,6 +152,23 @@ func (m *Message) Content() TextContent {
 		}
 	}
 	return TextContent{}
+}
+
+func (m *Message) ContentWithHooksContext() string {
+	text := strings.TrimSpace(m.Content().Text)
+
+	var additionalContext []string
+	for _, hookOutput := range m.HookOutputs {
+		context := strings.TrimSpace(hookOutput.AdditionalContext)
+		if context != "" {
+			additionalContext = append(additionalContext, context)
+		}
+	}
+	if len(additionalContext) > 0 {
+		text += "## Additional Context\n"
+		text += strings.Join(additionalContext, "\n")
+	}
+	return text
 }
 
 func (m *Message) ReasoningContent() ReasoningContent {
@@ -200,6 +227,11 @@ func (m *Message) IsFinished() bool {
 		}
 	}
 	return false
+}
+
+// AddHookOutputs appends multiple hook outputs to the message's hook outputs.
+func (m *Message) AddHookOutputs(outputs ...HookOutput) {
+	m.HookOutputs = append(m.HookOutputs, outputs...)
 }
 
 func (m *Message) FinishPart() *Finish {
@@ -429,7 +461,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	switch m.Role {
 	case User:
 		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
+		text := strings.TrimSpace(m.ContentWithHooksContext())
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}

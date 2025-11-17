@@ -111,6 +111,15 @@ func (s *Shell) ExecStream(ctx context.Context, command string, stdout, stderr i
 	return s.execStream(ctx, command, stdout, stderr)
 }
 
+func (s *Shell) ExecWithStdin(ctx context.Context, command string, stdin string) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var stdout, stderr bytes.Buffer
+	err := s.execCommonWithStdin(ctx, command, strings.NewReader(stdin), &stdout, &stderr)
+	return stdout.String(), stderr.String(), err
+}
+
 // GetWorkingDir returns the current working directory
 func (s *Shell) GetWorkingDir() string {
 	s.mu.Lock()
@@ -237,9 +246,9 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 }
 
 // newInterp creates a new interpreter with the current shell state
-func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
+func (s *Shell) newInterp(stdin io.Reader, stdout, stderr io.Writer) (*interp.Runner, error) {
 	return interp.New(
-		interp.StdIO(nil, stdout, stderr),
+		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
@@ -263,7 +272,7 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err := s.newInterp(stdout, stderr)
+	runner, err := s.newInterp(nil, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}
@@ -284,6 +293,24 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 // execStream executes commands using POSIX shell emulation with streaming output
 func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	return s.execCommon(ctx, command, stdout, stderr)
+}
+
+// execCommonWithStdin is like execCommon but with stdin support
+func (s *Shell) execCommonWithStdin(ctx context.Context, command string, stdin io.Reader, stdout, stderr io.Writer) error {
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return fmt.Errorf("could not parse command: %w", err)
+	}
+
+	runner, err := s.newInterp(stdin, stdout, stderr)
+	if err != nil {
+		return fmt.Errorf("could not run command: %w", err)
+	}
+
+	err = runner.Run(ctx, line)
+	s.updateShellFromRunner(runner)
+	s.logger.InfoPersist("command finished", "command", command, "err", err)
+	return err
 }
 
 func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {

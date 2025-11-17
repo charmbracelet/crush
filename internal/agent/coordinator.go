@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -60,6 +61,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	history     history.Service
+	hooks       hooks.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
 	currentAgent SessionAgent
@@ -76,6 +78,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	hooks hooks.Service,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -98,7 +101,7 @@ func NewCoordinator(
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, hooks)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +277,7 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent) (SessionAgent, error) {
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, hooks hooks.Service) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx)
 	if err != nil {
 		return nil, err
@@ -286,6 +289,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
@@ -295,6 +299,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.permissions.SkipRequests(),
 		c.sessions,
 		c.messages,
+		hooks,
 		nil,
 	})
 	c.readyWg.Go(func() error {

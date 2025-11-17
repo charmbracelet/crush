@@ -18,6 +18,7 @@ type CreateMessageParams struct {
 	Model            string
 	Provider         string
 	IsSummaryMessage bool
+	HookOutputs      []HookOutput
 }
 
 type Service interface {
@@ -69,6 +70,10 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if params.IsSummaryMessage {
 		isSummary = 1
 	}
+	hookOutputsJSON, err := json.Marshal(params.HookOutputs)
+	if err != nil {
+		return Message{}, err
+	}
 	dbMessage, err := s.q.CreateMessage(ctx, db.CreateMessageParams{
 		ID:               uuid.New().String(),
 		SessionID:        sessionID,
@@ -77,6 +82,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Model:            sql.NullString{String: string(params.Model), Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
+		HookOutputs:      string(hookOutputsJSON),
 	})
 	if err != nil {
 		return Message{}, err
@@ -115,10 +121,15 @@ func (s *service) Update(ctx context.Context, message Message) error {
 		finishedAt.Int64 = f.Time
 		finishedAt.Valid = true
 	}
+	hookOutputsJSON, err := json.Marshal(message.HookOutputs)
+	if err != nil {
+		return err
+	}
 	err = s.q.UpdateMessage(ctx, db.UpdateMessageParams{
-		ID:         message.ID,
-		Parts:      string(parts),
-		FinishedAt: finishedAt,
+		ID:          message.ID,
+		Parts:       string(parts),
+		FinishedAt:  finishedAt,
+		HookOutputs: string(hookOutputsJSON),
 	})
 	if err != nil {
 		return err
@@ -156,6 +167,12 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
+	var hookOutputs []HookOutput
+	if item.HookOutputs != "" {
+		if err := json.Unmarshal([]byte(item.HookOutputs), &hookOutputs); err != nil {
+			return Message{}, err
+		}
+	}
 	return Message{
 		ID:               item.ID,
 		SessionID:        item.SessionID,
@@ -166,6 +183,7 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 		IsSummaryMessage: item.IsSummaryMessage != 0,
+		HookOutputs:      hookOutputs,
 	}, nil
 }
 

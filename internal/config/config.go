@@ -579,7 +579,6 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 }
 
 func (c *Config) SetTheme(themeName string) error {
-
 	err := c.SetConfigField("options.tui.theme", themeName)
 	if err != nil {
 		return fmt.Errorf("failed to save theme to config file: %w", err)

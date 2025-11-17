@@ -85,11 +85,17 @@ type Theme struct {
 	ItemErrorIcon   lipgloss.Style
 	ItemOnlineIcon  lipgloss.Style
 
-	// Editor: Yolo Mode
+	// Editor: Yolo Mode.
 	YoloIconFocused lipgloss.Style
 	YoloIconBlurred lipgloss.Style
 	YoloDotsFocused lipgloss.Style
 	YoloDotsBlurred lipgloss.Style
+
+	// oAuth Chooser.
+	AuthBorderSelected   lipgloss.Style
+	AuthTextSelected     lipgloss.Style
+	AuthBorderUnselected lipgloss.Style
+	AuthTextUnselected   lipgloss.Style
 
 	styles *Styles
 }

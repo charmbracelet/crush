@@ -579,13 +579,12 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 }
 
 func (c *Config) SetTheme(themeName string) error {
-	// Save to the config file
+
 	err := c.SetConfigField("options.tui.theme", themeName)
 	if err != nil {
 		return fmt.Errorf("failed to save theme to config file: %w", err)
 	}
 
-	// Update in-memory config
 	if c.Options == nil {
 		c.Options = &Options{}
 	}

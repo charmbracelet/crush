@@ -4,9 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/version"
 )
 
 // SidebarModel is the model for the sidebar UI component.
@@ -65,17 +62,6 @@ func (m *SidebarModel) View() string {
 
 // SetWidth sets the width of the sidebar and updates the logo accordingly.
 func (m *SidebarModel) SetWidth(width int) {
-	m.logo = logoBlock(m.com.Styles, width)
+	m.logo = renderLogo(m.com.Styles, true, width)
 	m.width = width
-}
-
-func logoBlock(t *styles.Styles, width int) string {
-	return logo.Render(version.Version, true, logo.Opts{
-		FieldColor:   t.LogoFieldColor,
-		TitleColorA:  t.LogoTitleColorA,
-		TitleColorB:  t.LogoTitleColorB,
-		CharmColor:   t.LogoCharmColor,
-		VersionColor: t.LogoVersionColor,
-		Width:        max(0, width-2),
-	})
 }

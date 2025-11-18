@@ -14,6 +14,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -23,8 +26,8 @@ type uiFocusState uint8
 // Possible uiFocusState values.
 const (
 	uiFocusNone uiFocusState = iota
-	uiFocusEdit
-	uiFocusChat
+	uiFocusEditor
+	uiFocusMain
 )
 
 type uiState uint8
@@ -38,11 +41,6 @@ const (
 	uiChatCompact
 )
 
-const (
-	editorHeight = 5
-	sidebarWidth = 40
-)
-
 // UI represents the main user interface model.
 type UI struct {
 	com  *common.Common
@@ -54,13 +52,12 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	chat       *ChatModel
-	side       *SidebarModel
-	dialog     *dialog.Overlay
-	help       help.Model
-	initialize *InitializeModel
-	configure  *ConfigureModel
-	header     *HeaderModel
+	chat   *ChatModel
+	side   *SidebarModel
+	dialog *dialog.Overlay
+	help   help.Model
+
+	header string
 
 	layout layout
 
@@ -92,16 +89,25 @@ func New(com *common.Common) *UI {
 	ta.Focus()
 
 	ui := &UI{
-		com:        com,
-		dialog:     dialog.NewOverlay(),
-		keyMap:     DefaultKeyMap(),
-		side:       NewSidebarModel(com),
-		help:       help.New(),
-		initialize: NewInitModel(com),
-		configure:  NewConfigureModel(com),
-		header:     NewHeaderModel(com),
-		focus:      uiFocusNone,
-		textarea:   ta,
+		com:      com,
+		dialog:   dialog.NewOverlay(),
+		keyMap:   DefaultKeyMap(),
+		side:     NewSidebarModel(com),
+		help:     help.New(),
+		focus:    uiFocusNone,
+		state:    uiConfigure,
+		textarea: ta,
+	}
+	// If no provider is configured show the user the provider list
+	if !com.Config().IsConfigured() {
+		ui.state = uiConfigure
+		// if the project needs initialization show the user the question
+	} else if n, _ := com.Config().ProjectNeedsInitialization(); n {
+		ui.state = uiInitialize
+		// otherwise go to the landing UI
+	} else {
+		ui.state = uiLanding
+		ui.focus = uiFocusEditor
 	}
 
 	ui.setEditorPrompt()
@@ -113,17 +119,6 @@ func New(com *common.Common) *UI {
 
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
-	// If no provider is configured show the user the provider list
-	if !m.com.Config().IsConfigured() {
-		m.state = uiConfigure
-		// if the project needs initialization show the user the question
-	} else if n, _ := m.com.Config().ProjectNeedsInitialization(); n {
-		m.state = uiInitialize
-		// otherwise go to the landing UI
-	} else {
-		m.state = uiLanding
-		m.focus = uiFocusEdit
-	}
 	if m.QueryVersion {
 		return tea.RequestTerminalVersion
 	}
@@ -167,11 +162,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyPressMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
-				if m.focus == uiFocusChat {
-					m.focus = uiFocusEdit
+				if m.focus == uiFocusMain {
+					m.focus = uiFocusEditor
 					cmds = append(cmds, m.textarea.Focus())
 				} else {
-					m.focus = uiFocusChat
+					m.focus = uiFocusMain
 					m.textarea.Blur()
 				}
 			case key.Matches(msg, m.keyMap.Help):
@@ -195,8 +190,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// This logic gets triggered on any message type, but should it?
 		switch m.focus {
-		case uiFocusChat:
-		case uiFocusEdit:
+		case uiFocusMain:
+		case uiFocusEditor:
 			// Textarea placeholder logic
 			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 				m.textarea.Placeholder = m.workingPlaceholder
@@ -243,7 +238,7 @@ func (m *UI) View() tea.View {
 		}
 	}
 
-	if m.focus == uiFocusEdit && m.textarea.Focused() {
+	if m.focus == uiFocusEditor && m.textarea.Focused() {
 		cur := m.textarea.Cursor()
 		cur.X++ // Adjust for app margins
 		cur.Y += editRect.Min.Y
@@ -255,15 +250,25 @@ func (m *UI) View() tea.View {
 
 	switch m.state {
 	case uiConfigure:
-		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
-		main := lipgloss.NewLayer(m.configure.View()).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Configure "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main)
 	case uiInitialize:
-		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
-		main := lipgloss.NewLayer(m.initialize.View()).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Initialize "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main)
 	case uiLanding:
-		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
 		main := lipgloss.NewLayer(
 			lipgloss.NewStyle().Width(mainRect.Dx()).
 				Height(mainRect.Dy()).
@@ -273,7 +278,7 @@ func (m *UI) View() tea.View {
 		editor := lipgloss.NewLayer(m.textarea.View()).X(editRect.Min.X).Y(editRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main, editor)
 	case uiChat:
-		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
 		side := lipgloss.NewLayer(m.side.View()).X(sideRect.Min.X).Y(sideRect.Min.Y)
 		main := lipgloss.NewLayer(
 			lipgloss.NewStyle().Width(mainRect.Dx()).
@@ -284,7 +289,7 @@ func (m *UI) View() tea.View {
 		editor := lipgloss.NewLayer(m.textarea.View()).X(editRect.Min.X).Y(editRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main, side, editor)
 	case uiChatCompact:
-		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
 		main := lipgloss.NewLayer(
 			lipgloss.NewStyle().Width(mainRect.Dx()).
 				Height(mainRect.Dy()).
@@ -403,9 +408,9 @@ func (m *UI) updateDialogs(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 // and appends any resulting commands to the cmds slice.
 func (m *UI) updateFocused(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch m.focus {
-	case uiFocusChat:
+	case uiFocusMain:
 		m.updateChat(msg, cmds)
-	case uiFocusEdit:
+	case uiFocusEditor:
 		switch {
 		case key.Matches(msg, m.keyMap.Editor.Newline):
 			m.textarea.InsertRune('\n')
@@ -434,8 +439,18 @@ func (m *UI) updateChat(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 func (m *UI) updateLayoutAndSize(w, h int) {
 	// The screen area we're working with
 	area := image.Rect(0, 0, w, h)
-	var helpKeyMap help.KeyMap = m
+
+	// The help height
 	helpHeight := 1
+	// The editor height
+	editorHeight := 5
+	// The sidebar width
+	sidebarWidth := 40
+	// The header height
+	// TODO: handle compact
+	headerHeight := 4
+
+	var helpKeyMap help.KeyMap = m
 	if m.help.ShowAll {
 		for _, row := range helpKeyMap.FullHelp() {
 			helpHeight = max(helpHeight, len(row))
@@ -472,11 +487,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
-		m.header.SetWidth(m.layout.header.Dx())
-		m.initialize.SetWidth(m.layout.main.Dx())
-		m.initialize.SetHeight(m.layout.main.Dy())
-		m.configure.SetWidth(m.layout.main.Dx())
-		m.configure.SetHeight(m.layout.main.Dy())
+		m.renderHeader(false, m.layout.header.Dx())
 
 	case uiLanding:
 		// Layout
@@ -494,7 +505,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		m.layout.main = mainRect
 		m.layout.editor = editorRect
 		// TODO: set the width and heigh of the chat component
-		m.header.SetWidth(m.layout.header.Dx())
+		m.renderHeader(false, m.layout.header.Dx())
 		m.textarea.SetWidth(m.layout.editor.Dx())
 		m.textarea.SetHeight(m.layout.editor.Dy())
 
@@ -527,13 +538,13 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// editor
 		// ------
 		// help
-		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-headerCompactHeight))
+		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-headerHeight))
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
 		m.layout.editor = editorRect
 		// TODO: set the width and heigh of the chat component
-		m.header.SetWidth(headerRect.Dx())
+		m.renderHeader(true, m.layout.header.Dx())
 		m.textarea.SetWidth(m.layout.editor.Dx())
 		m.textarea.SetHeight(m.layout.editor.Dy())
 	}
@@ -616,4 +627,20 @@ var workingPlaceholders = [...]string{
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
+func (m *UI) renderHeader(compact bool, width int) {
+	// TODO: handle the compact case differently
+	m.header = renderLogo(m.com.Styles, compact, width)
+}
+
+func renderLogo(t *styles.Styles, compact bool, width int) string {
+	return logo.Render(version.Version, compact, logo.Opts{
+		FieldColor:   t.LogoFieldColor,
+		TitleColorA:  t.LogoTitleColorA,
+		TitleColorB:  t.LogoTitleColorB,
+		CharmColor:   t.LogoCharmColor,
+		VersionColor: t.LogoVersionColor,
+		Width:        max(0, width-2),
+	})
 }

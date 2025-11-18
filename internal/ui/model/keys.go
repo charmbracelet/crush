@@ -17,6 +17,12 @@ type KeyMap struct {
 		DeleteAllAttachments key.Binding
 	}
 
+	Initialize struct {
+		Yes,
+		No,
+		Switch key.Binding
+	}
+
 	// Global key maps
 	Quit     key.Binding
 	Help     key.Binding
@@ -97,6 +103,19 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.DeleteAllAttachments = key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("ctrl+r+r", "delete all attachments"),
+	)
+
+	km.Initialize.Yes = key.NewBinding(
+		key.WithKeys("y", "Y"),
+		key.WithHelp("y", "yes"),
+	)
+	km.Initialize.No = key.NewBinding(
+		key.WithKeys("n", "N", "esc", "alt+esc"),
+		key.WithHelp("n", "no"),
+	)
+	km.Initialize.Switch = key.NewBinding(
+		key.WithKeys("left", "right", "tab"),
+		key.WithHelp("tab", "switch"),
 	)
 
 	return km

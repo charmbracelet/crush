@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"image"
 	"math/rand"
 	"slices"
@@ -11,6 +12,8 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
@@ -57,6 +60,7 @@ type UI struct {
 	dialog *dialog.Overlay
 	help   help.Model
 
+	// header is the last cached header logo
 	header string
 
 	layout layout
@@ -76,6 +80,9 @@ type UI struct {
 
 	readyPlaceholder   string
 	workingPlaceholder string
+
+	// Initialize state
+	yesInitializeSelected bool
 }
 
 // New creates a new instance of the [UI] model.
@@ -97,12 +104,15 @@ func New(com *common.Common) *UI {
 		focus:    uiFocusNone,
 		state:    uiConfigure,
 		textarea: ta,
+
+		// initialize
+		yesInitializeSelected: true,
 	}
 	// If no provider is configured show the user the provider list
 	if !com.Config().IsConfigured() {
 		ui.state = uiConfigure
 		// if the project needs initialization show the user the question
-	} else if n, _ := com.Config().ProjectNeedsInitialization(); n {
+	} else if n, _ := config.ProjectNeedsInitialization(); n {
 		ui.state = uiInitialize
 		// otherwise go to the landing UI
 	} else {
@@ -211,6 +221,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
+	v.BackgroundColor = m.com.Styles.Background
 
 	layers := []*lipgloss.Layer{}
 
@@ -260,12 +271,7 @@ func (m *UI) View() tea.View {
 		mainLayer = mainLayer.AddLayers(header, main)
 	case uiInitialize:
 		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
-		main := lipgloss.NewLayer(
-			lipgloss.NewStyle().Width(mainRect.Dx()).
-				Height(mainRect.Dy()).
-				Background(lipgloss.ANSIColor(rand.Intn(256))).
-				Render(" Initialize "),
-		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		main := lipgloss.NewLayer(m.initializeView()).X(mainRect.Min.X).Y(mainRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main)
 	case uiLanding:
 		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
@@ -321,37 +327,44 @@ func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
 
-	if m.sess == nil {
-		// no session selected
-		binds = append(binds,
-			k.Commands,
-			k.Models,
-			k.Editor.Newline,
-			k.Quit,
-			k.Help,
-		)
-	} else {
-		// we have a session
-	}
+	switch m.state {
+	case uiInitialize:
+		binds = append(binds, k.Quit)
+	default:
+		// TODO: other states
+		if m.sess == nil {
+			// no session selected
+			binds = append(binds,
+				k.Commands,
+				k.Models,
+				k.Editor.Newline,
+				k.Quit,
+				k.Help,
+			)
+		} else {
+			// we have a session
+		}
 
-	// switch m.state {
-	// case uiChat:
-	// case uiEdit:
-	// 	binds = append(binds,
-	// 		k.Editor.AddFile,
-	// 		k.Editor.SendMessage,
-	// 		k.Editor.OpenEditor,
-	// 		k.Editor.Newline,
-	// 	)
-	//
-	// 	if len(m.attachments) > 0 {
-	// 		binds = append(binds,
-	// 			k.Editor.AttachmentDeleteMode,
-	// 			k.Editor.DeleteAllAttachments,
-	// 			k.Editor.Escape,
-	// 		)
-	// 	}
-	// }
+		// switch m.state {
+		// case uiChat:
+		// case uiEdit:
+		// 	binds = append(binds,
+		// 		k.Editor.AddFile,
+		// 		k.Editor.SendMessage,
+		// 		k.Editor.OpenEditor,
+		// 		k.Editor.Newline,
+		// 	)
+		//
+		// 	if len(m.attachments) > 0 {
+		// 		binds = append(binds,
+		// 			k.Editor.AttachmentDeleteMode,
+		// 			k.Editor.DeleteAllAttachments,
+		// 			k.Editor.Escape,
+		// 		)
+		// 	}
+		// }
+
+	}
 
 	return binds
 }
@@ -363,26 +376,34 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help := k.Help
 	help.SetHelp("ctrl+g", "less")
 
-	if m.sess == nil {
-		// no session selected
+	switch m.state {
+	case uiInitialize:
 		binds = append(binds,
 			[]key.Binding{
-				k.Commands,
-				k.Models,
-				k.Sessions,
-			},
-			[]key.Binding{
-				k.Editor.Newline,
-				k.Editor.AddImage,
-				k.Editor.MentionFile,
-				k.Editor.OpenEditor,
-			},
-			[]key.Binding{
-				help,
-			},
-		)
-	} else {
-		// we have a session
+				k.Quit,
+			})
+	default:
+		if m.sess == nil {
+			// no session selected
+			binds = append(binds,
+				[]key.Binding{
+					k.Commands,
+					k.Models,
+					k.Sessions,
+				},
+				[]key.Binding{
+					k.Editor.Newline,
+					k.Editor.AddImage,
+					k.Editor.MentionFile,
+					k.Editor.OpenEditor,
+				},
+				[]key.Binding{
+					help,
+				},
+			)
+		} else {
+			// we have a session
+		}
 	}
 
 	// switch m.state {
@@ -627,6 +648,39 @@ var workingPlaceholders = [...]string{
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
+func (m *UI) initializeView() string {
+	cfg := m.com.Config()
+	style := m.com.Styles.Initialize
+	cwd := home.Short(cfg.WorkingDir())
+
+	initFile := cfg.Options.InitializeAs
+
+	buttonOpts := []common.ButtonOpts{
+		{Text: "Yep!", Selected: m.yesInitializeSelected},
+		{Text: "Nope", Selected: !m.yesInitializeSelected},
+	}
+	buttons := common.ButtonGroup(m.com.Styles, buttonOpts, " ")
+	initText := lipgloss.JoinVertical(
+		lipgloss.Left,
+		style.Header.Render("Would you like to initialize this project?"),
+		"",
+		style.Accent.PaddingLeft(2).Render(cwd),
+		"",
+		style.Content.Render("When I initialize your codebase I examine the project and put the"),
+		style.Content.Render(fmt.Sprintf("result into an %s file which serves as general context.", initFile)),
+		"",
+		style.Content.Render("You can also initialize anytime via ")+style.Accent.Render("ctrl+p")+style.Content.Render("."),
+		"",
+		style.Content.Render("Would you like to initialize now?"),
+		"",
+		buttons,
+		"",
+	)
+
+	sectionHeight := m.layout.main.Dy()
+	return lipgloss.NewStyle().Height(sectionHeight).AlignVertical(lipgloss.Bottom).Render(initText)
 }
 
 func (m *UI) renderHeader(compact bool, width int) {

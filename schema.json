@@ -471,7 +471,8 @@
             "anthropic",
             "gemini",
             "azure",
-            "vertexai"
+            "vertexai",
+            "openai-compat"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

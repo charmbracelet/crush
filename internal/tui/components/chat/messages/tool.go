@@ -48,6 +48,32 @@ type ToolCallCmp interface {
 	SetToolCallState(state enum.ToolCallState)
 }
 
+// ========== EVENT-DRIVEN TOOL CALL MESSAGES (LOCK-FREE!) ==========
+
+// ToolCallStreamMsg represents real-time output streaming
+type ToolCallStreamMsg struct {
+	ToolCallID message.ToolCallID
+	Output     string
+	Timestamp   time.Time
+	IsPartial   bool // Whether this is a partial chunk
+}
+
+// ToolCallCompleteMsg represents final completion
+type ToolCallCompleteMsg struct {
+	ToolCallID   message.ToolCallID
+	FinalResult  message.ToolResult
+	Duration     time.Duration
+	Timestamp    time.Time
+}
+
+// ToolCallStateChangeMsg represents immutable state transition
+type ToolCallStateChangeMsg struct {
+	ToolCallID message.ToolCallID
+	NewState    enum.ToolCallState
+	OldState    enum.ToolCallState
+	Timestamp   time.Time
+}
+
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
 // It handles rendering of tool execution states including pending, completed, and error states.
 type toolCallCmp struct {

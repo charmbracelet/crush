@@ -408,5 +408,6 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	app.events <- pubsub.UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
+		IsDevelopment:  info.IsDevelopment(),
 	}
 }

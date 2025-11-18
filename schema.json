@@ -468,11 +468,11 @@
           "type": "string",
           "enum": [
             "openai",
+            "openai-compat",
             "anthropic",
             "gemini",
             "azure",
-            "vertexai",
-            "openai-compat"
+            "vertexai"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

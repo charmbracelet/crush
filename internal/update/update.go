@@ -25,6 +25,10 @@ type Info struct {
 	URL     string
 }
 
+func (i Info) IsDevelopment() bool {
+	return i.Current == "devel" || i.Current == "unknown" || strings.Contains(i.Current, "dirty")
+}
+
 // Available returns true if there's an update available.
 //
 // If both current and latest are stable versions, returns true if versions are
@@ -50,10 +54,6 @@ func Check(ctx context.Context, current string, client Client) (Info, error) {
 	info := Info{
 		Current: current,
 		Latest:  current,
-	}
-
-	if info.Current == "devel" || info.Current == "unknown" || strings.Contains(info.Current, "dirty") {
-		return info, nil
 	}
 
 	release, err := client.Latest(ctx)

@@ -7,13 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCheckForUpdate_DevelopmentVersion(t *testing.T) {
-	info, err := Check(t.Context(), "unknown", testClient{"v0.11.0"})
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.False(t, info.Available())
-}
-
 func TestCheckForUpdate_Old(t *testing.T) {
 	info, err := Check(t.Context(), "v0.10.0", testClient{"v0.11.0"})
 	require.NoError(t, err)

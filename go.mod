@@ -6,7 +6,9 @@ require (
 	charm.land/bubbles/v2 v2.0.0-rc.1
 	charm.land/bubbletea/v2 v2.0.0-rc.1.0.20251117161017-15f884bd2973
 	charm.land/fantasy v0.3.1
+	charm.land/glamour/v2 v2.0.0-20251110203732-69649f93d3b1
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251106193318-19329a3e8410
+	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/MakeNowJust/heredoc v1.0.0
@@ -19,8 +21,6 @@ require (
 	github.com/charmbracelet/catwalk v0.8.2
 	github.com/charmbracelet/colorprofile v0.3.3
 	github.com/charmbracelet/fang v0.4.4
-	github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930
-	github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0
 	github.com/charmbracelet/ultraviolet v0.0.0-20251116181749-377898bcce38
 	github.com/charmbracelet/x/ansi v0.11.1
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3

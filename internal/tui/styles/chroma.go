@@ -1,8 +1,8 @@
 package styles
 
 import (
+	"charm.land/glamour/v2/ansi"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/glamour/v2/ansi"
 )
 
 func chromaStyle(style ansi.StylePrimitive) string {

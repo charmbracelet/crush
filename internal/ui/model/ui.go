@@ -662,7 +662,7 @@ func (m *UI) initializeView() string {
 		{Text: "Nope", Selected: !m.yesInitializeSelected},
 	}
 	buttons := common.ButtonGroup(m.com.Styles, buttonOpts, " ")
-	initText := lipgloss.JoinVertical(
+	initialize := lipgloss.JoinVertical(
 		lipgloss.Left,
 		style.Header.Render("Would you like to initialize this project?"),
 		"",
@@ -679,8 +679,11 @@ func (m *UI) initializeView() string {
 		"",
 	)
 
-	sectionHeight := m.layout.main.Dy()
-	return lipgloss.NewStyle().Height(sectionHeight).AlignVertical(lipgloss.Bottom).Render(initText)
+	return lipgloss.NewStyle().
+		Width(m.layout.main.Dx()).
+		Height(m.layout.main.Dy()).
+		AlignVertical(lipgloss.Bottom).
+		Render(initialize)
 }
 
 func (m *UI) renderHeader(compact bool, width int) {

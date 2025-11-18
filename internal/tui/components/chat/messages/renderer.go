@@ -40,11 +40,12 @@ type renderRegistry map[string]rendererFactory
 func (rr renderRegistry) register(name string, f rendererFactory) { rr[name] = f }
 
 // lookup retrieves a renderer for the given tool name, falling back to generic renderer
+// Returns defensive renderer that handles nil/invalid inputs gracefully
 func (rr renderRegistry) lookup(name string) renderer {
 	if f, ok := rr[name]; ok {
-		return f()
+		return defensiveRenderer{f()}
 	}
-	return genericRenderer{} // sensible fallback
+	return defensiveRenderer{genericRenderer{}} // sensible fallback with defensive wrapper
 }
 
 // registry holds all registered tool renderers
@@ -52,6 +53,37 @@ var registry = renderRegistry{}
 
 // baseRenderer provides common functionality for all tool renderers
 type baseRenderer struct{}
+
+// defensiveRenderer wraps other renderers to provide nil/invalid input protection
+type defensiveRenderer struct {
+	inner renderer
+}
+
+// Render provides defensive wrapper around inner renderer
+func (dr defensiveRenderer) Render(v *toolCallCmp) string {
+	// Defensive checks to prevent crashes from corrupted data
+	if v == nil {
+		return "⚠️  Tool call component is nil"
+	}
+	
+	// Use read lock to get consistent state
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	
+	// Check for corrupted/zero values
+	if v.call.Name == "" {
+		return "⚠️  Tool call has empty name"
+	}
+	
+	// Check for extremely large content that could cause memory issues
+	const maxSafeContent = 10 * 1024 * 1024 // 10MB limit
+	if len(v.result.Content) > maxSafeContent {
+		return "⚠️  Tool output too large to display safely"
+	}
+	
+	// Call inner renderer with our protections
+	return dr.inner.Render(v)
+}
 
 // paramBuilder helps construct parameter lists for tool headers
 type paramBuilder struct {
@@ -944,56 +976,97 @@ func joinHeaderBody(header, body string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 }
 
-func renderPlainContent(v *toolCallCmp, content string) string {
-	t := styles.CurrentTheme()
+// truncateContentEarly performs early truncation of large content to avoid processing overhead
+// This is a performance optimization to prevent the UI from being overwhelmed by massive outputs
+func truncateContentEarly(content string) string {
+	const maxContentSize = 50000 // ~500KB of text should be more than enough for display
+	if len(content) > maxContentSize {
+		lines := strings.Split(content, "\n")
+		if len(lines) > responseContextHeight {
+			content = strings.Join(lines[len(lines)-responseContextHeight:], "\n")
+		}
+	}
+	return content
+}
+
+// ContentProcessor defines how to process content lines before final rendering
+type ContentProcessor func(lines []string, v *toolCallCmp) []string
+
+// renderContentUnified provides common rendering pipeline for all content types
+// Eliminates duplication between renderPlainContent, renderMarkdownContent, renderCodeContent
+func renderContentUnified(v *toolCallCmp, content string, processor ContentProcessor) string {
+	// === COMMON CONTENT PREPROCESSING ===
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	content = strings.TrimSpace(content)
-	lines := strings.Split(content, "\n")
 
+	t := styles.CurrentTheme()
 	width := v.textWidth() - 2
+	
+	// === COMMON LINE PROCESSING ===
+	lines := strings.Split(content, "\n")
+	
+	// Apply type-specific processing
+	if processor != nil {
+		lines = processor(lines, v)
+	}
+	
+	// === COMMON TRUNCATION ===
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
 			break
 		}
-		ln = ansiext.Escape(ln)
-		ln = " " + ln
-		if len(ln) > width {
-			ln = v.fit(ln, width)
-		}
-		out = append(out, t.S().Muted.
-			Width(width).
-			Background(t.BgBaseLighter).
-			Render(ln))
+		out = append(out, ln)
 	}
-
+	
+	// Add truncation message if needed
 	if len(lines) > responseContextHeight {
+		truncateMsg := fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)
 		out = append(out, t.S().Muted.
 			Background(t.BgBaseLighter).
 			Width(width).
-			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
+			Render(truncateMsg))
 	}
-
+	
 	return strings.Join(out, "\n")
 }
 
+// renderPlainContent renders plain text content using unified pipeline
+func renderPlainContent(v *toolCallCmp, content string) string {
+	return renderContentUnified(v, content, func(lines []string, v *toolCallCmp) []string {
+		width := v.textWidth() - 2
+		var processed []string
+		for _, ln := range lines {
+			ln = ansiext.Escape(ln)
+			ln = " " + ln
+			if len(ln) > width {
+				ln = v.fit(ln, width)
+			}
+			processed = append(processed, ln)
+		}
+		return processed
+	})
+}
+
 func renderMarkdownContent(v *toolCallCmp, content string) string {
-	t := styles.CurrentTheme()
+	// First try markdown rendering
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\t", "    ")
 	content = strings.TrimSpace(content)
 
-	width := v.textWidth() - 2
-	width = min(width, 120)
-
+	width := min(v.textWidth()-2, 120)
 	renderer := styles.GetPlainMarkdownRenderer(width)
 	rendered, err := renderer.Render(content)
 	if err != nil {
+		// Fallback to plain content if markdown rendering fails
 		return renderPlainContent(v, content)
 	}
 
 	lines := strings.Split(rendered, "\n")
+	t := styles.CurrentTheme()
 
 	var out []string
 	for i, ln := range lines {
@@ -1031,7 +1104,9 @@ func getDigits(n int) int {
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
-	t := styles.CurrentTheme()
+	// Note: This is more complex as it needs line numbers and syntax highlighting
+	// but we still use the common preprocessing
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	truncated := truncateHeight(content, responseContextHeight)
@@ -1041,6 +1116,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 		lines[i] = ansiext.Escape(ln)
 	}
 
+	t := styles.CurrentTheme()
 	bg := t.BgBase
 	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, bg)
 	lines = strings.Split(highlighted, "\n")

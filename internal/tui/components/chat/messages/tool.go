@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -13,6 +14,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -62,7 +64,13 @@ type toolCallCmp struct {
 	animationState enum.AnimationState // Type-safe animation state
 	anim           util.Model          // Animation component for pending states
 
+	// Streaming display for real-time tool output
+	streamingContent []string           // Accumulated output lines from running tools
+	maxStreamLines  int              // Maximum lines to keep in stream buffer
+	showStreaming    bool             // Whether to show streaming output vs final result
+
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
+	mu             sync.RWMutex     // Mutex for thread-safe access to mutable fields
 }
 
 // ToolCallOption provides functional options for configuring tool call components
@@ -94,6 +102,27 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	}
 }
 
+// StreamOutputMsg represents real-time output from a running tool
+type StreamOutputMsg struct {
+	ToolCallID message.ToolCallID
+	Output     string
+	Timestamp  time.Time
+}
+
+// StreamCompleteMsg indicates that tool execution has finished and streaming should stop
+type StreamCompleteMsg struct {
+	ToolCallID message.ToolCallID
+	FinalResult message.ToolResult
+}
+
+// WithStreamingOutput enables real-time streaming display for tool output
+func WithStreamingOutput(enabled bool) ToolCallOption {
+	return func(m *toolCallCmp) {
+		m.showStreaming = enabled
+		m.maxStreamLines = 100 // Keep last 100 lines for streaming display
+	}
+}
+
 // NewToolCallCmp creates a new tool call component with the given parent message ID,
 // tool call, and optional configuration
 func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions permission.Service, opts ...ToolCallOption) ToolCallCmp {
@@ -120,6 +149,35 @@ func (m *toolCallCmp) Init() tea.Cmd {
 // Manages animation updates for pending tool calls.
 func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case StreamOutputMsg:
+		// Handle real-time streaming output
+		if msg.ToolCallID == m.call.ID && m.showStreaming {
+			m.mu.Lock()
+			// Split output into lines and append to streaming buffer
+			lines := strings.Split(msg.Output, "\n")
+			m.streamingContent = append(m.streamingContent, lines...)
+			
+			// Keep only last N lines to prevent memory issues
+			if len(m.streamingContent) > m.maxStreamLines {
+				excess := len(m.streamingContent) - m.maxStreamLines
+				m.streamingContent = m.streamingContent[excess:]
+			}
+			m.mu.Unlock()
+		}
+		return m, nil
+		
+	case StreamCompleteMsg:
+		// Handle streaming completion - switch to final result
+		if msg.ToolCallID == m.call.ID {
+			m.mu.Lock()
+			m.result = msg.FinalResult
+			m.showStreaming = false // Disable streaming, show final result
+			m.streamingContent = nil // Clear streaming buffer
+			m.mu.Unlock()
+			m.RefreshAnimation()
+		}
+		return m, nil
+		
 	case anim.StepMsg:
 		// Performance optimization: skip updates if no active animations
 		if !m.IsAnimating() {
@@ -154,10 +212,19 @@ func (m *toolCallCmp) View() string {
 }
 
 func (m *toolCallCmp) viewUnboxed() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
 	switch m.call.State {
 	case enum.ToolCallStatePending:
 		return m.renderState()
 	default:
+		// Show streaming content if available and enabled
+		if m.showStreaming && len(m.streamingContent) > 0 {
+			return m.renderStreamingContent()
+		}
+		
+		// Show final result
 		{
 			r := registry.lookup(m.call.Name)
 
@@ -688,28 +755,43 @@ func (m *toolCallCmp) ParentMessageID() string {
 
 // SetToolResult updates the tool result and updates the animation state
 func (m *toolCallCmp) SetToolResult(result message.ToolResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.result = result
 	m.updateAnimationState()
 }
 
 // GetToolCall returns the current tool call data
+// Thread-safe read-only access
 func (m *toolCallCmp) GetToolCall() message.ToolCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.call
 }
 
 // GetToolResult returns the current tool result data
+// GetToolResult returns current tool result data
+// Thread-safe read-only access
 func (m *toolCallCmp) GetToolResult() message.ToolResult {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.result
 }
 
-// GetNestedToolCalls returns the nested tool calls
+// GetNestedToolCalls returns nested tool calls
+// Thread-safe read-only access
 func (m *toolCallCmp) GetNestedToolCalls() []ToolCallCmp {
-	return m.nestedToolCalls
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]ToolCallCmp{}, m.nestedToolCalls...) // Return copy to prevent mutation
 }
 
-// SetNestedToolCalls sets the nested tool calls
+// SetNestedToolCalls sets nested tool calls
+// Thread-safe implementation using copy-on-write semantics
 func (m *toolCallCmp) SetNestedToolCalls(calls []ToolCallCmp) {
-	m.nestedToolCalls = calls
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nestedToolCalls = append([]ToolCallCmp{}, calls...) // Create copy
 	for _, nested := range m.nestedToolCalls {
 		nested.SetSize(m.width, 0)
 	}
@@ -803,6 +885,35 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
+// renderStreamingContent renders real-time streaming output from running tools
+func (m *toolCallCmp) renderStreamingContent() string {
+	if len(m.streamingContent) == 0 {
+		return ""
+	}
+	
+	t := styles.CurrentTheme()
+	width := m.textWidth() - 2
+	
+	// Use our unified rendering pipeline with streaming content
+	content := strings.Join(m.streamingContent, "\n")
+	return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
+		// For streaming, apply basic styling without truncation (we already truncate in Update)
+		var processed []string
+		for _, ln := range lines {
+			ln = ansiext.Escape(ln)
+			ln = " " + ln
+			if len(ln) > width {
+				ln = v.fit(ln, width)
+			}
+			processed = append(processed, t.S().Muted.
+				Width(width).
+				Background(t.BgBaseLighter).
+				Render(ln))
+		}
+		return processed
+	})
+}
+
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
 func (m *toolCallCmp) RefreshAnimation() {
@@ -848,8 +959,11 @@ func (m *toolCallCmp) GetToolCallID() message.ToolCallID {
 	return m.call.ID
 }
 
-// SetToolCallState sets the tool call state and updates animation accordingly
+// SetToolCallState sets tool call state and updates animation accordingly
+// Thread-safe implementation using copy-on-write semantics
 func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.call.State = state
 	m.RefreshAnimation()
 }

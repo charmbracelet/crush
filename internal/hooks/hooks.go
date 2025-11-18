@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -231,11 +232,71 @@ func (s *service) executeHook(ctx context.Context, hook config.Hook, hookCtx Hoo
 		return nil, fmt.Errorf("unsupported hook type: %s", hook.Type)
 	}
 
+	if result != nil {
+		result.EventType = string(hookCtx.EventType)
+	}
+
 	return result, err
 }
 
 func (s *service) executePromptHook(ctx context.Context, hook config.Hook, hookCtx HookContext) (*message.HookOutput, error) {
-	panic("not implemented")
+	contextJSON, err := json.Marshal(hookCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal hook context: %w", err)
+	}
+
+	var finalPrompt string
+	if strings.Contains(hook.Prompt, "$ARGUMENTS") {
+		finalPrompt = strings.ReplaceAll(hook.Prompt, "$ARGUMENTS", string(contextJSON))
+	} else {
+		finalPrompt = fmt.Sprintf("%s\n\nContext: %s", hook.Prompt, string(contextJSON))
+	}
+
+	timeout := DefaultHookTimeout
+	if hook.Timeout != nil {
+		timeout = time.Duration(*hook.Timeout) * time.Second
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type readTranscriptParams struct{}
+	readTranscriptTool := fantasy.NewAgentTool(
+		"read_transcript",
+		"Used to read the conversation so far",
+		func(ctx context.Context, params readTranscriptParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if hookCtx.TranscriptPath == "" {
+				return fantasy.NewTextErrorResponse("No transcript available"), nil
+			}
+			data, err := os.ReadFile(hookCtx.TranscriptPath)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			return fantasy.NewTextResponse(string(data)), nil
+		})
+
+	var output *message.HookOutput
+	outputTool := fantasy.NewAgentTool(
+		"output",
+		"Used to submit the output, remember you MUST call this tool at the end",
+		func(ctx context.Context, params message.HookOutput, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			output = &params
+			return fantasy.NewTextResponse("ouptut submitted"), nil
+		})
+	agent := fantasy.NewAgent(
+		s.smallModel,
+		fantasy.WithSystemPrompt(`You are a helpful sub agent used in a larger agents conversation loop,
+			your goal is to intercept the conversation and fulfill the intermediate requests, makesure to ALWAYS use the output tool at the end to output your decision`),
+		fantasy.WithTools(readTranscriptTool, outputTool),
+	)
+
+	_, err = agent.Generate(execCtx, fantasy.AgentCall{
+		Prompt: finalPrompt,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return output, nil
 }
 
 func (s *service) executeCommandHook(ctx context.Context, hook config.Hook, hookCtx HookContext) (*message.HookOutput, error) {
@@ -342,9 +403,8 @@ func parseHookOutput(stdout string) *message.HookOutput {
 	return &output
 }
 
-// SetSmallModel implements Service.
 func (s *service) SetSmallModel(model fantasy.LanguageModel) {
-	panic("unimplemented")
+	s.smallModel = model
 }
 
 func (s *service) collectMatchingHooks(hookCtx HookContext) []config.Hook {

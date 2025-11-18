@@ -137,12 +137,13 @@ type Message struct {
 }
 
 type HookOutput struct {
-	Stop              bool   `json:"stop"`
-	Error             string `json:"error"`
-	Message           string `json:"message"`
-	Decision          string `json:"decision"`
-	UpdatedInput      string `json:"updated_input"`
-	AdditionalContext string `json:"additional_context"`
+	Stop              bool   `json:"stop,omitempty" description:"set to true if the execution should stop"`
+	EventType         string `json:"event_type" description:"ignore"`
+	Error             string `json:"error,omitempty"`
+	Message           string `json:"message,omitempty" description:"a message to send to show the user"`
+	Decision          string `json:"decision" description:"block, allow, deny, ask, only set if the request asks you to do so"`
+	UpdatedInput      string `json:"updated_input" description:"the updated tool input json, only set if the user requests you update a tool input"`
+	AdditionalContext string `json:"additional_context" description:"additional context to send to the LLM, only set if the user asks to add additional context"`
 }
 
 func (m *Message) Content() TextContent {

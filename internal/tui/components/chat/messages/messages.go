@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
@@ -246,7 +247,36 @@ func (m *messageCmp) renderUserMessage() string {
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return m.style().Render(joined)
+	hooks := m.getHookOutputs(t)
+	if len(hooks) == 0 {
+		return m.style().Render(joined)
+	}
+	root := tree.Root(joined)
+	root.EnumeratorStyle(t.S().Subtle)
+	for _, h := range hooks {
+		root.Child(h)
+	}
+	return m.style().Render(root.Enumerator(RoundedEnumeratorWithWidth(0, 1)).String())
+}
+
+func (m *messageCmp) getHookOutputs(t *styles.Theme) []string {
+	var hooks []string
+	for _, h := range m.message.HookOutputs {
+		var hookStatus []string
+		hookStatus = append(hookStatus, t.S().Base.Foreground(t.Blue).Render(fmt.Sprintf(" hook:%s", h.EventType)))
+		if h.Stop {
+			hookStatus = append(hookStatus, t.S().Error.Render("hook stopped execution"))
+		} else if h.AdditionalContext != "" {
+			hookStatus = append(hookStatus, t.S().Subtle.Render("additional context added"))
+		}
+
+		if h.Message != "" {
+			hookStatus = append(hookStatus, t.S().Muted.Render(h.Message))
+		}
+		hookOutput := ansi.Truncate(strings.Join(hookStatus, " "), m.textWidth()-2, "…")
+		hooks = append(hooks, hookOutput)
+	}
+	return hooks
 }
 
 // toMarkdown converts text content to rendered markdown using the configured renderer

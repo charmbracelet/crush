@@ -107,6 +107,12 @@ func NewCoordinator(
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	_, small, err := c.buildAgentModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hooks.SetSmallModel(small.Model)
 	return c, nil
 }
 
@@ -745,6 +751,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return err
 	}
 	c.currentAgent.SetModels(large, small)
+	c.hooks.SetSmallModel(small.Model)
 
 	agentCfg, ok := c.cfg.Agents[config.AgentCoder]
 	if !ok {

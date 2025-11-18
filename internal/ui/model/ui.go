@@ -49,12 +49,13 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	chat   *ChatModel
-	side   *SidebarModel
-	dialog *dialog.Overlay
-	help   help.Model
-	init   *InitModel
-	header *HeaderModel
+	chat       *ChatModel
+	side       *SidebarModel
+	dialog     *dialog.Overlay
+	help       help.Model
+	initialize *InitializeModel
+	configure  *ConfigureModel
+	header     *HeaderModel
 
 	layout layout
 
@@ -86,15 +87,16 @@ func New(com *common.Common) *UI {
 	ta.Focus()
 
 	ui := &UI{
-		com:      com,
-		dialog:   dialog.NewOverlay(),
-		keyMap:   DefaultKeyMap(),
-		side:     NewSidebarModel(com),
-		help:     help.New(),
-		init:     NewInitModel(com),
-		header:   NewHeaderModel(com),
-		focus:    uiFocusNone,
-		textarea: ta,
+		com:        com,
+		dialog:     dialog.NewOverlay(),
+		keyMap:     DefaultKeyMap(),
+		side:       NewSidebarModel(com),
+		help:       help.New(),
+		initialize: NewInitModel(com),
+		configure:  NewConfigureModel(com),
+		header:     NewHeaderModel(com),
+		focus:      uiFocusNone,
+		textarea:   ta,
 	}
 
 	ui.setEditorPrompt()
@@ -246,15 +248,13 @@ func (m *UI) View() tea.View {
 		Width(area.Dx()).Height(area.Dy())
 
 	switch m.state {
-	// INFO: config and initialize will probably be treated differently this is just an example
-	case uiConfigure, uiInitialize:
+	case uiConfigure:
 		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
-		main := lipgloss.NewLayer(
-			lipgloss.NewStyle().Width(mainRect.Dx()).
-				Height(mainRect.Dy()).
-				Background(lipgloss.ANSIColor(rand.Intn(256))).
-				Render(" Initialize, Configure"),
-		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		main := lipgloss.NewLayer(m.configure.View()).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main)
+	case uiInitialize:
+		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(m.initialize.View()).X(mainRect.Min.X).Y(mainRect.Min.Y)
 		mainLayer = mainLayer.AddLayers(header, main)
 	case uiLanding:
 		header := lipgloss.NewLayer(m.header.View()).X(headerRect.Min.X).Y(headerRect.Min.Y)
@@ -466,8 +466,11 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
-		// TODO: set the width and heigh of the configure/init component
 		m.header.SetWidth(m.layout.header.Dx())
+		m.initialize.SetWidth(m.layout.main.Dx())
+		m.initialize.SetHeight(m.layout.main.Dy())
+		m.configure.SetWidth(m.layout.main.Dx())
+		m.configure.SetHeight(m.layout.main.Dy())
 
 	case uiLanding:
 		// Layout

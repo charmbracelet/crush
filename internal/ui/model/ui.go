@@ -117,6 +117,7 @@ func (m *UI) Init() tea.Cmd {
 		// otherwise go to the landing UI
 	} else {
 		m.state = uiLanding
+		m.focus = uiFocusEdit
 	}
 	if m.QueryVersion {
 		return tea.RequestTerminalVersion
@@ -482,7 +483,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// editor
 		// ------
 		// help
-		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-headerHeight))
+		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-5))
 		m.layout.header = headerRect
 		m.layout.main = mainRect

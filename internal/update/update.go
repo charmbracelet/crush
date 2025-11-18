@@ -54,7 +54,7 @@ func Check(ctx context.Context, current string, client Client) (Info, error) {
 		Latest:  current,
 	}
 
-	if info.Current == "devel" || info.Current == "unknown" {
+	if info.Current == "devel" || info.Current == "unknown" || strings.Contains(info.Current, "dirty") {
 		return info, nil
 	}
 
@@ -64,6 +64,7 @@ func Check(ctx context.Context, current string, client Client) (Info, error) {
 	}
 
 	info.Latest = strings.TrimPrefix(release.TagName, "v")
+	info.Current = strings.TrimPrefix(info.Current, "v")
 	info.URL = release.HTMLURL
 	return info, nil
 }

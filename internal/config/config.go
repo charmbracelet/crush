@@ -192,18 +192,17 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths              []string        `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	TUI                       *TUIOptions     `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                     bool            `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP                  bool            `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize      bool            `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string          `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
-	DisabledTools             []string        `json:"disabled_tools" jsonschema:"description=Tools to disable"`
-	DisableProviderAutoUpdate bool            `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	Attribution               *Attribution    `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool            `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string          `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	FavoritedModels           []SelectedModel `json:"favorited_models,omitempty" jsonschema:"description=Models favorited by the user"`
+	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	DisabledTools             []string     `json:"disabled_tools" jsonschema:"description=Tools to disable"`
+	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 }
 
 type MCPs map[string]MCPConfig
@@ -313,6 +312,9 @@ type Config struct {
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 	// Recently used models stored in the data directory config.
 	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
+
+	// User favorited models stored in the config
+	FavoritedModels map[SelectedModelType][]SelectedModel `json:"favorited_models,omitempty" jsonschema:"description=Models favorited by the user"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -425,6 +427,9 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.recordRecentModel(modelType, model); err != nil {
 		return err
 	}
+	if err := c.ToggleFavoriteModel(modelType, model); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -535,26 +540,39 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 	return nil
 }
 
-func (c *Config) ToggleFavoriteModel(selectedModel *SelectedModel) error {
-	if c.Options == nil {
-		c.Options = &Options{}
+func (c *Config) ToggleFavoriteModel(selectedModelType SelectedModelType, selectedModel SelectedModel) error {
+	if selectedModel.Provider == "" || selectedModel.Model == "" {
+		return nil
 	}
-	if c.Options.FavoritedModels == nil {
-		c.Options.FavoritedModels = []SelectedModel{}
+	if c.FavoritedModels == nil {
+		c.FavoritedModels = make(map[SelectedModelType][]SelectedModel)
 	}
 
-	i := slices.IndexFunc(c.Options.FavoritedModels, func(m SelectedModel) bool {
-		return m.Model == selectedModel.Model && m.Provider == selectedModel.Provider
-	})
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
 
-	if i != -1 {
-		c.Options.FavoritedModels = slices.Delete(c.Options.FavoritedModels, i, i+1)
+	selectedModelEntry := SelectedModel{
+		Model:    selectedModel.Model,
+		Provider: selectedModel.Provider,
+	}
+
+	current := c.FavoritedModels[selectedModelType]
+	var updated []SelectedModel
+
+	if idx := slices.IndexFunc(current, func(sm SelectedModel) bool { return eq(sm, selectedModelEntry) }); idx != -1 {
+		updated = slices.Delete(current, idx, idx+1)
 	} else {
-		c.Options.FavoritedModels = append(c.Options.FavoritedModels, *selectedModel)
+		updated = append([]SelectedModel{selectedModelEntry}, current...)
 	}
-	err := c.SetConfigField("options.favorited_models", c.Options.FavoritedModels)
 
-	return err
+	c.FavoritedModels[selectedModelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("favorited_models.%s", selectedModelType), updated); err != nil {
+		return fmt.Errorf("failed to toggle favorite model: %w", err)
+	}
+
+	return nil
 }
 
 func allToolNames() []string {

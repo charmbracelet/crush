@@ -233,7 +233,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				Model:    selectedModelID,
 				Provider: selectedModelProviderID,
 			}
-			err := config.Get().ToggleFavoriteModel(&sm)
+			err := config.Get().ToggleFavoriteModel(selectedType, sm)
 			if err != nil {
 				return m, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
 			}

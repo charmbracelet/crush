@@ -108,18 +108,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
-	// create and populate string slices containing all model IDs and provider IDs
-	// will be used to ensure that favorited models are favorited based on both ID
-	favoritedModelsConfig := config.Get().Options.FavoritedModels
-	favoriteModels := make([]string, len(favoritedModelsConfig))
-	for i, fm := range favoritedModelsConfig {
-		favoriteModels[i] = fm.Model
-	}
-	favoriteModelsProviders := make([]string, len(favoritedModelsConfig))
-	for i, fmp := range favoritedModelsConfig {
-		favoriteModelsProviders[i] = fmp.Provider
-	}
-
 	var groups []list.Group[list.CompletionItem[ModelOption]]
 	favGroup := list.Group[list.CompletionItem[ModelOption]]{
 		Section: list.NewItemSection("Favorites"),
@@ -141,6 +129,19 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		selectedType = config.SelectedModelTypeSmall
 	}
 	recentItems := cfg.RecentModels[selectedType]
+
+	// create and populate string slices containing all model IDs and provider IDs
+	// will be used to ensure that favorited models are favorited based on both ID
+	favoritedModelsConfig := config.Get().FavoritedModels
+	favoriteModelsByType := favoritedModelsConfig[selectedType]
+	favoriteModels := make([]string, len(favoriteModelsByType))
+	for i, fm := range favoriteModelsByType {
+		favoriteModels[i] = fm.Model
+	}
+	favoriteModelsProviders := make([]string, len(favoriteModelsByType))
+	for i, fmp := range favoriteModelsByType {
+		favoriteModelsProviders[i] = fmp.Provider
+	}
 
 	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
 	configured := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))

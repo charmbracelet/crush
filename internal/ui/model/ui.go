@@ -38,6 +38,11 @@ const (
 	uiChatCompact
 )
 
+const (
+	editorHeight = 5
+	sidebarWidth = 40
+)
+
 // UI represents the main user interface model.
 type UI struct {
 	com  *common.Common
@@ -484,7 +489,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// ------
 		// help
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
-		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-5))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
 		m.layout.editor = editorRect
@@ -503,8 +508,8 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// ----------
 		// help
 
-		mainRect, sideRect := uv.SplitHorizontal(appRect, uv.Fixed(appRect.Dx()-40))
-		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-5))
+		mainRect, sideRect := uv.SplitHorizontal(appRect, uv.Fixed(appRect.Dx()-sidebarWidth))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 		m.layout.sidebar = sideRect
 		m.layout.main = mainRect
 		m.layout.editor = editorRect
@@ -523,7 +528,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// ------
 		// help
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-headerCompactHeight))
-		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-5))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
 		m.layout.editor = editorRect

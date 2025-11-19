@@ -635,6 +635,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://api.anthropic.com/v1"
 		}
 		testURL = baseURL + "/models"
+		// TODO: replace with const when catwalk is released
+		if c.ID == "kimi-coding" {
+			testURL = baseURL + "/v1/models"
+		}
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:

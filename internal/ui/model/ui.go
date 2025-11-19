@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"math/rand"
+	"os"
 	"slices"
 	"strings"
 
@@ -312,6 +313,15 @@ func (m *UI) View() tea.View {
 
 	layers = append(layers, mainLayer)
 
+	// Debugging rendering (visually see when the tui rerenders)
+	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
+		content := lipgloss.NewStyle().Background(lipgloss.ANSIColor(rand.Intn(256))).Width(4).Height(2)
+		debugLayer := lipgloss.NewLayer(content).
+			X(4).
+			Y(1)
+		layers = append(layers, debugLayer)
+	}
+
 	v.Content = lipgloss.NewCanvas(layers...)
 	if m.sendProgressBar && m.com.App != nil && m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
@@ -485,6 +495,12 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 	appRect.Max.X -= 1
 	appRect.Max.Y -= 1
 
+	if slices.Contains([]uiState{uiConfigure, uiInitialize}, m.state) {
+		// extra padding on left and right for these states
+		appRect.Min.X += 1
+		appRect.Max.X -= 1
+	}
+
 	appRect, helpRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-helpHeight))
 
 	m.layout = layout{
@@ -505,6 +521,7 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 		// main
 		// ------
 		// help
+
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
 		m.layout.header = headerRect
 		m.layout.main = mainRect
@@ -652,38 +669,40 @@ func (m *UI) randomizePlaceholders() {
 
 func (m *UI) initializeView() string {
 	cfg := m.com.Config()
-	style := m.com.Styles.Initialize
+	s := m.com.Styles.Initialize
 	cwd := home.Short(cfg.WorkingDir())
-
 	initFile := cfg.Options.InitializeAs
 
-	buttonOpts := []common.ButtonOpts{
+	header := s.Header.Render("Would you like to initialize this project?")
+	path := s.Accent.PaddingLeft(2).Render(cwd)
+	desc := s.Content.Render(fmt.Sprintf("When I initialize your codebase I examine the project and put the result into an %s file which serves as general context.", initFile))
+	hint := s.Content.Render("You can also initialize anytime via ") + s.Accent.Render("ctrl+p") + s.Content.Render(".")
+	prompt := s.Content.Render("Would you like to initialize now?")
+
+	buttons := common.ButtonGroup(m.com.Styles, []common.ButtonOpts{
 		{Text: "Yep!", Selected: m.yesInitializeSelected},
 		{Text: "Nope", Selected: !m.yesInitializeSelected},
-	}
-	buttons := common.ButtonGroup(m.com.Styles, buttonOpts, " ")
-	initialize := lipgloss.JoinVertical(
-		lipgloss.Left,
-		style.Header.Render("Would you like to initialize this project?"),
-		"",
-		style.Accent.PaddingLeft(2).Render(cwd),
-		"",
-		style.Content.Render("When I initialize your codebase I examine the project and put the"),
-		style.Content.Render(fmt.Sprintf("result into an %s file which serves as general context.", initFile)),
-		"",
-		style.Content.Render("You can also initialize anytime via ")+style.Accent.Render("ctrl+p")+style.Content.Render("."),
-		"",
-		style.Content.Render("Would you like to initialize now?"),
-		"",
-		buttons,
-		"",
-	)
+	}, " ")
+
+	// max width 60 so the text is compact
+	width := min(m.layout.main.Dx(), 60)
 
 	return lipgloss.NewStyle().
-		Width(m.layout.main.Dx()).
+		Width(width).
 		Height(m.layout.main.Dy()).
+		PaddingBottom(1).
 		AlignVertical(lipgloss.Bottom).
-		Render(initialize)
+		Render(strings.Join(
+			[]string{
+				header,
+				path,
+				desc,
+				hint,
+				prompt,
+				buttons,
+			},
+			"\n\n",
+		))
 }
 
 func (m *UI) renderHeader(compact bool, width int) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -49,6 +50,7 @@ type MessageCmp interface {
 // It handles rendering of user and assistant messages with proper styling,
 // animations, and state management.
 type messageCmp struct {
+	mu      sync.RWMutex // Thread-safe access to message state
 	width   int  // Component width for text wrapping
 	focused bool // Focus state for border styling
 
@@ -148,6 +150,8 @@ func (m *messageCmp) GetMessage() message.Message {
 }
 
 func (m *messageCmp) SetMessage(msg message.Message) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.message = msg
 }
 
@@ -319,6 +323,10 @@ func (m *messageCmp) renderThinkingContent() string {
 // determineAnimationState calculates the appropriate animation state for a message.
 // Only assistant messages without content that aren't finished should animate.
 func (m *messageCmp) determineAnimationState() enum.AnimationState {
+	// Protect concurrent access to message fields
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
 	if m.message.Role != message.Assistant {
 		return enum.AnimationStateStatic
 	}

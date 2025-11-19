@@ -199,6 +199,13 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.result = msg.FinalResult
 			m.showStreaming = false // Disable streaming, show final result
 			m.streamingContent = nil // Clear streaming buffer
+			
+			// CRITICAL: Update call.State to reflect result - eliminates need for getEffectiveDisplayState()
+			if msg.FinalResult.IsResultError() {
+				m.call.State = enum.ToolCallStateFailed
+			} else {
+				m.call.State = enum.ToolCallStateCompleted
+			}
 			m.mu.Unlock()
 			m.RefreshAnimation()
 		}
@@ -350,7 +357,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		}
 	} else {
 		parts = append(parts, "### Status:")
-		parts = append(parts, m.getEffectiveDisplayState().FormatToolForCopy())
+		parts = append(parts, m.call.State.FormatToolForCopy())
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -876,18 +883,7 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 
 // Rendering methods
 
-// renderPending displays the tool name with a loading animation for pending tool calls
-// renderState displays the tool name with a loading animation for pending tool calls
-func (m *toolCallCmp) renderState() string {
-	t := styles.CurrentTheme()
-	icon := m.getEffectiveDisplayState().ToIconColored()
-	if m.isNested {
-		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
-		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-	}
-	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
-	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-}
+
 
 
 
@@ -993,8 +989,8 @@ func (m *toolCallCmp) renderStreamingContent() string {
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
 func (m *toolCallCmp) RefreshAnimation() {
-	// Use effective display state for consistent animation behavior with results
-	m.anim = anim.New(m.getEffectiveDisplayState().ToAnimationSettings(m.isNested))
+	// Use call.State directly - it's now always authoritative
+	m.anim = anim.New(m.call.State.ToAnimationSettings(m.isNested))
 
 	// Update animation state based on new state
 	m.updateAnimationState()
@@ -1004,8 +1000,8 @@ func (m *toolCallCmp) RefreshAnimation() {
 // current tool call and result data. This determines logical animation behavior.
 // This is an internal method - use RefreshAnimation() for public updates.
 func (m *toolCallCmp) updateAnimationState() {
-	// Get effective display state considering both tool call state and results
-	m.animationState = m.getEffectiveDisplayState().ToAnimationState()
+	// Use call.State directly - it's now always authoritative
+	m.animationState = m.call.State.ToAnimationState()
 }
 
 // IsAnimating returns whether the tool call is currently showing a loading animation
@@ -1044,21 +1040,6 @@ func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 	m.RefreshAnimation()
 }
 
-// getEffectiveDisplayState determines the appropriate state for display purposes
-// considering both tool call state and execution results
-func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
-	// If we have a result, execution outcome takes priority
-	if m.result.ToolCallID.IsEmpty() {
-		// No result yet - use the current tool call state
-		return m.call.State
-	}
 
-	// We have a result - use result outcome with enhanced ToolResultState
-	resultState := m.result.GetResultState()
-	if resultState.IsError() {
-		return enum.ToolCallStateFailed
-	}
-	return enum.ToolCallStateCompleted
-}
 
 

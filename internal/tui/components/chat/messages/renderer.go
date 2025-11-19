@@ -136,7 +136,7 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	}
 
 	// Only render body if the tool state allows content visibility
-	if v.getEffectiveDisplayState().ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+	if v.GetToolCall().State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
 		body := contentRenderer()
 		return joinHeaderBody(header, body)
 	}
@@ -153,7 +153,7 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
 func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params ...string) string {
 	t := styles.CurrentTheme()
-	icon := v.getEffectiveDisplayState().ToIconColored()
+	icon := v.GetToolCall().State.ToIconColored()
 	fgColor := t.Blue
 	if v.isNested {
 		fgColor = t.FgHalfMuted
@@ -275,7 +275,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
 	t := styles.CurrentTheme()
-	icon := v.getEffectiveDisplayState().ToIconColored()
+	icon := v.GetToolCall().State.ToIconColored()
 
 	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
 	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
@@ -945,14 +945,14 @@ func renderParamList(paramsWidth int, params ...string) string {
 // This replaces the old renderStatusOnly function by using ShouldShowContentForState
 func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func() string) string {
 	// Check if content should be shown based on state
-	if !v.getEffectiveDisplayState().ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+	if !v.GetToolCall().State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
 		// Don't show content, render status message only
 		t := styles.CurrentTheme()
 		message := ""
 		if v.result.IsResultError() {
 			message = v.renderToolCallError()
 		} else {
-			m, err := v.getEffectiveDisplayState().RenderTUIMessageColored()
+			m, err := v.GetToolCall().State.RenderTUIMessageColored()
 			if err != nil {
 				return header // Fallback to header-only on error
 			}

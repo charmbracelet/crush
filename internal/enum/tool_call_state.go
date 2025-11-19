@@ -129,21 +129,21 @@ func (state ToolCallState) FormatToolForCopy() string {
 func (state ToolCallState) RenderTUIMessage() (string, error) {
 	switch state {
 	case ToolCallStateFailed:
-		return "Tool call failed.", nil
+		return "Tool call failed", nil
 	case ToolCallStateCancelled:
-		return "Cancelled.", nil
+		return "Cancelled", nil
 	case ToolCallStateCompleted:
 		return "Done", nil
 	case ToolCallStateRunning:
-		return "Running...", nil
+		return "Running", nil
 	case ToolCallStatePending:
-		return "Waiting for tool to start...", nil
+		return "Waiting for tool to start", nil
 	case ToolCallStatePermissionPending:
 		return "Awaiting permission...", nil
 	case ToolCallStatePermissionApproved:
-		return "Permission approved. Executing command...", nil
+		return "Permission approved. Executing command", nil
 	case ToolCallStatePermissionDenied:
-		return "Permission denied.", nil
+		return "Permission denied", nil
 	default:
 		return "", ErrToolCallStateUnknown
 	}
@@ -330,7 +330,7 @@ func (state ToolCallState) ToAnimationSettings(isNested bool) anim.Settings {
 		GradColorB:  gradColors,
 		LabelColor:  labelColor,
 		CycleColors: cycleColors,
-		
+
 		// PR #1385: Timer and blinking animation configuration
 		IsTimer:          animationState == AnimationStateTimer,
 		IsBlinking:       animationState == AnimationStateBlink,

@@ -238,16 +238,62 @@ func (m *toolCallCmp) View() string {
 }
 
 func (m *toolCallCmp) viewUnboxed() string {
+	// Do ALL state access within the locked region to eliminate race conditions
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	
-	switch m.call.State {
+	// Determine effective display state atomically
+	effectiveState := enum.ToolCallState(m.call.State)
+	if !m.result.ToolCallID.IsEmpty() {
+		// We have a result - use result outcome
+		resultState := m.result.GetResultState()
+		if resultState.IsError() {
+			effectiveState = enum.ToolCallStateFailed
+		} else {
+			effectiveState = enum.ToolCallStateCompleted
+		}
+	}
+	
+	switch effectiveState {
 	case enum.ToolCallStatePending:
-		return m.renderState()
+		// Render with current state, no need for snapshot methods
+		t := styles.CurrentTheme()
+		icon := effectiveState.ToIconColored()
+		if m.isNested {
+			tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
+			return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
+		}
+		tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
+		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
+		
 	default:
 		// Show streaming content if available and enabled
 		if m.showStreaming && len(m.streamingContent) > 0 {
-			return m.renderStreamingContent()
+			if len(m.streamingContent) == 0 {
+				return ""
+			}
+			
+			t := styles.CurrentTheme()
+			width := m.textWidth() - 2
+			
+			// Copy streaming content to avoid race conditions during rendering
+			streamingCopy := append([]string{}, m.streamingContent...)
+			content := strings.Join(streamingCopy, "\n")
+			return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
+				var processed []string
+				for _, ln := range lines {
+					ln = ansiext.Escape(ln)
+					ln = " " + ln
+					if len(ln) > width {
+						ln = v.fit(ln, width)
+					}
+					processed = append(processed, t.S().Muted.
+						Width(width).
+						Background(t.BgBaseLighter).
+						Render(ln))
+				}
+				return processed
+			})
 		}
 		
 		// Show final result
@@ -843,6 +889,8 @@ func (m *toolCallCmp) renderState() string {
 	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
 }
 
+
+
 // style returns the lipgloss style for the tool call component.
 // Applies muted colors and focus-dependent border styles.
 func (m *toolCallCmp) style() lipgloss.Style {
@@ -940,6 +988,8 @@ func (m *toolCallCmp) renderStreamingContent() string {
 	})
 }
 
+
+
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
 func (m *toolCallCmp) RefreshAnimation() {
@@ -1010,3 +1060,5 @@ func (m *toolCallCmp) getEffectiveDisplayState() enum.ToolCallState {
 	}
 	return enum.ToolCallStateCompleted
 }
+
+

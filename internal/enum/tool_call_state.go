@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/log/v2"
 )
 
 type ToolCallState uint8
@@ -251,8 +250,7 @@ func (state ToolCallState) ShouldShowContentForState(isNested, hasNested bool) b
 		return true // Show progress/running state
 
 	default:
-		// Add error logging for unknown states
-		log.Error("Unknown tool state in ShouldShowContentForState:", "state", state)
+		// Remove error logging for unknown states - return false directly
 		return false // Unknown states don't show content
 	}
 }
@@ -339,4 +337,40 @@ func (state ToolCallState) ToAnimationSettings(isNested bool) anim.Settings {
 	}
 
 	return animationSettings
+}
+
+// ToResultState derives result state from tool call state
+// This eliminates ToolResultState by making ToolCallState the single source
+func (state ToolCallState) ToResultState() ToolResultState {
+	switch state {
+	case ToolCallStateCompleted:
+		return ToolResultStateSuccess
+	case ToolCallStateFailed, ToolCallStateCancelled:
+		return ToolResultStateError
+	case ToolCallStatePermissionDenied:
+		return ToolResultStateError // Permission denied is error condition
+	case ToolCallStateRunning:
+		return ToolResultStateUnknown // Still executing
+	case ToolCallStatePending:
+		return ToolResultStateUnknown // Not started yet
+	default:
+		return ToolResultStateUnknown
+	}
+}
+
+// ToFinishReasonKey returns a canonical identifier for the finish reason
+// This can be used to map to message.FinishReason without creating circular imports
+func (state ToolCallState) ToFinishReasonKey() string {
+	switch state {
+	case ToolCallStateCompleted:
+		return "tool_use"
+	case ToolCallStateFailed:
+		return "max_tokens" // Best match for token limits/length failures
+	case ToolCallStateCancelled:
+		return "end_turn"
+	case ToolCallStatePermissionDenied:
+		return "permission_denied"
+	default:
+		return "unknown"
+	}
 }

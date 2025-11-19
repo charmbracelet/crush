@@ -103,6 +103,35 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 }
 
+// mapToolCallStateToFinishReason converts ToolCallState to FinishReason
+// This makes ToolCallState the single source of truth for completion states
+func mapToolCallStateToFinishReason(state enum.ToolCallState) message.FinishReason {
+	switch state {
+	case enum.ToolCallStateCompleted:
+		return message.FinishReasonToolUse
+	case enum.ToolCallStateFailed:
+		return message.FinishReasonMaxTokens // Best match for tool execution failures
+	case enum.ToolCallStateCancelled:
+		return message.FinishReasonEndTurn
+	case enum.ToolCallStatePermissionDenied:
+		return message.FinishReasonPermissionDenied
+	default:
+		return message.FinishReasonUnknown
+	}
+}
+
+// mapErrorConditionToFinishReason converts error conditions to FinishReason
+// Used for session-level errors, not tool-level states
+func mapErrorConditionToFinishReason(isCancel, isPermission bool) message.FinishReason {
+	if isCancel {
+		return message.FinishReasonEndTurn
+	}
+	if isPermission {
+		return message.FinishReasonPermissionDenied
+	}
+	return message.FinishReasonError
+}
+
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
@@ -362,7 +391,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ToolCallID:  message.ToolCallID(result.ToolCallID),
 				Name:        result.ToolName,
 				Content:     resultContent,
-				ResultState:  resultState,
+				ResultState: resultState,
 				IsError:     resultState.ToBool(), // Backward compatibility
 				Metadata:    result.ClientMetadata,
 			}
@@ -414,15 +443,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
+			// Use the final ToolCallState from the first tool to determine FinishReason
+			// This makes ToolCallState the single source of truth instead of dual mapping
+			var finalState enum.ToolCallState
+			for _, part := range currentAssistant.Parts {
+				if tc, ok := part.(message.ToolCall); ok {
+					finalState = tc.State
+					break
+				}
 			}
+
+			finishReason := mapToolCallStateToFinishReason(finalState)
 			currentAssistant.AddFinish(finishReason, "", "")
 			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			sessionLock.Lock()
@@ -536,15 +567,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		switch {
 		//TODO: Extract this whole switch logic into it's own function!
 		case isCancelErr:
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+			currentAssistant.AddFinish(mapErrorConditionToFinishReason(true, false), "User canceled request", "")
 		case isPermissionErr:
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, true), "User denied permission", "")
 		case errors.As(err, &providerErr):
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 		case errors.As(err, &fantasyErr):
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		default:
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), defaultTitle, err.Error())
 		}
 		// Note: we use the parent context here because the genCtx has been
 		// cancelled.
@@ -665,7 +696,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	summaryMessage.AddFinish(mapErrorConditionToFinishReason(true, false), "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
 		return err

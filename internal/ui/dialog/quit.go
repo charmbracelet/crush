@@ -60,8 +60,9 @@ type Quit struct {
 // NewQuit creates a new quit confirmation dialog.
 func NewQuit(com *common.Common) *Quit {
 	q := &Quit{
-		com:    com,
-		keyMap: DefaultQuitKeyMap(),
+		com:        com,
+		keyMap:     DefaultQuitKeyMap(),
+		selectedNo: true,
 	}
 	return q
 }

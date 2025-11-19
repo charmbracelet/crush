@@ -468,6 +468,7 @@
           "type": "string",
           "enum": [
             "openai",
+            "openai-compat",
             "anthropic",
             "gemini",
             "azure",

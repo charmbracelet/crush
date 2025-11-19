@@ -26,3 +26,10 @@ type (
 		Publish(EventType, T)
 	}
 )
+
+// UpdateAvailableMsg is sent when a new version is available.
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}

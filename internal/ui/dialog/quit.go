@@ -60,8 +60,9 @@ type Quit struct {
 // NewQuit creates a new quit confirmation dialog.
 func NewQuit(com *common.Common) *Quit {
 	q := &Quit{
-		com:    com,
-		keyMap: DefaultQuitKeyMap(),
+		com:        com,
+		keyMap:     DefaultQuitKeyMap(),
+		selectedNo: true,
 	}
 	return q
 }
@@ -98,24 +99,11 @@ func (q *Quit) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 func (q *Quit) View() string {
 	const question = "Are you sure you want to quit?"
 	baseStyle := q.com.Styles.Base
-	yesStyle := q.com.Styles.ButtonSelected
-	noStyle := q.com.Styles.ButtonUnselected
-
-	if q.selectedNo {
-		noStyle = q.com.Styles.ButtonSelected
-		yesStyle = q.com.Styles.ButtonUnselected
+	buttonOpts := []common.ButtonOpts{
+		{Text: "Yep!", Selected: !q.selectedNo, Padding: 3},
+		{Text: "Nope", Selected: q.selectedNo, Padding: 3},
 	}
-
-	const horizontalPadding = 3
-	yesButton := yesStyle.PaddingLeft(horizontalPadding).Underline(true).Render("Y") +
-		yesStyle.PaddingRight(horizontalPadding).Render("ep!")
-	noButton := noStyle.PaddingLeft(horizontalPadding).Underline(true).Render("N") +
-		noStyle.PaddingRight(horizontalPadding).Render("ope")
-
-	buttons := baseStyle.Width(lipgloss.Width(question)).Align(lipgloss.Right).Render(
-		lipgloss.JoinHorizontal(lipgloss.Center, yesButton, "  ", noButton),
-	)
-
+	buttons := common.ButtonGroup(q.com.Styles, buttonOpts, " ")
 	content := baseStyle.Render(
 		lipgloss.JoinVertical(
 			lipgloss.Center,

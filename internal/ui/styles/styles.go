@@ -98,8 +98,8 @@ type Styles struct {
 	FilePicker filepicker.Styles
 
 	// Buttons
-	ButtonSelected   lipgloss.Style
-	ButtonUnselected lipgloss.Style
+	ButtonFocus lipgloss.Style
+	ButtonBlur  lipgloss.Style
 
 	// Borders
 	BorderFocus lipgloss.Style
@@ -113,6 +113,8 @@ type Styles struct {
 	EditorPromptYoloDotsFocused lipgloss.Style
 	EditorPromptYoloDotsBlurred lipgloss.Style
 
+	// Background
+	Background color.Color
 	// Logo
 	LogoFieldColor   color.Color
 	LogoTitleColorA  color.Color
@@ -123,6 +125,13 @@ type Styles struct {
 	// Sidebar
 	SidebarFull    lipgloss.Style
 	SidebarCompact lipgloss.Style
+
+	// Initialize
+	Initialize struct {
+		Header  lipgloss.Style
+		Content lipgloss.Style
+		Accent  lipgloss.Style
+	}
 }
 
 func DefaultStyles() Styles {
@@ -177,6 +186,8 @@ func DefaultStyles() Styles {
 	base := lipgloss.NewStyle().Foreground(fgBase)
 
 	s := Styles{}
+
+	s.Background = bgBase
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -537,8 +548,8 @@ func DefaultStyles() Styles {
 	s.EarlyStateMessage = s.Subtle.PaddingLeft(2)
 
 	// Buttons
-	s.ButtonSelected = lipgloss.NewStyle().Foreground(white).Background(secondary)
-	s.ButtonUnselected = s.Base.Background(bgSubtle)
+	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)
+	s.ButtonBlur = s.Base.Background(bgSubtle)
 
 	// Borders
 	s.BorderFocus = lipgloss.NewStyle().BorderForeground(borderFocus).Border(lipgloss.RoundedBorder()).Padding(1, 2)
@@ -562,6 +573,10 @@ func DefaultStyles() Styles {
 	s.SidebarFull = lipgloss.NewStyle().Padding(1, 1)
 	s.SidebarCompact = s.SidebarFull.PaddingTop(0)
 
+	// Initialize
+	s.Initialize.Header = s.Base
+	s.Initialize.Content = s.Muted
+	s.Initialize.Accent = s.Base.Foreground(greenDark)
 	return s
 }
 

@@ -1,8 +1,10 @@
 package model
 
 import (
+	"fmt"
 	"image"
 	"math/rand"
+	"os"
 	"slices"
 	"strings"
 
@@ -11,19 +13,36 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// uiState represents the current focus state of the UI.
+// uiFocusState represents the current focus state of the UI.
+type uiFocusState uint8
+
+// Possible uiFocusState values.
+const (
+	uiFocusNone uiFocusState = iota
+	uiFocusEditor
+	uiFocusMain
+)
+
 type uiState uint8
 
 // Possible uiState values.
 const (
-	uiEdit uiState = iota
+	uiConfigure uiState = iota
+	uiInitialize
+	uiLanding
 	uiChat
+	uiChatCompact
 )
 
 // UI represents the main user interface model.
@@ -31,6 +50,7 @@ type UI struct {
 	com  *common.Common
 	sess *session.Session
 
+	focus uiFocusState
 	state uiState
 
 	keyMap KeyMap
@@ -40,6 +60,9 @@ type UI struct {
 	side   *SidebarModel
 	dialog *dialog.Overlay
 	help   help.Model
+
+	// header is the last cached header logo
+	header string
 
 	layout layout
 
@@ -58,6 +81,9 @@ type UI struct {
 
 	readyPlaceholder   string
 	workingPlaceholder string
+
+	// Initialize state
+	yesInitializeSelected bool
 }
 
 // New creates a new instance of the [UI] model.
@@ -76,7 +102,23 @@ func New(com *common.Common) *UI {
 		keyMap:   DefaultKeyMap(),
 		side:     NewSidebarModel(com),
 		help:     help.New(),
+		focus:    uiFocusNone,
+		state:    uiConfigure,
 		textarea: ta,
+
+		// initialize
+		yesInitializeSelected: true,
+	}
+	// If no provider is configured show the user the provider list
+	if !com.Config().IsConfigured() {
+		ui.state = uiConfigure
+		// if the project needs initialization show the user the question
+	} else if n, _ := config.ProjectNeedsInitialization(); n {
+		ui.state = uiInitialize
+		// otherwise go to the landing UI
+	} else {
+		ui.state = uiLanding
+		ui.focus = uiFocusEditor
 	}
 
 	ui.setEditorPrompt()
@@ -91,7 +133,6 @@ func (m *UI) Init() tea.Cmd {
 	if m.QueryVersion {
 		return tea.RequestTerminalVersion
 	}
-
 	return nil
 }
 
@@ -132,11 +173,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyPressMsg:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
-				if m.state == uiChat {
-					m.state = uiEdit
+				if m.focus == uiFocusMain {
+					m.focus = uiFocusEditor
 					cmds = append(cmds, m.textarea.Focus())
 				} else {
-					m.state = uiChat
+					m.focus = uiFocusMain
 					m.textarea.Blur()
 				}
 			case key.Matches(msg, m.keyMap.Help):
@@ -159,9 +200,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// This logic gets triggered on any message type, but should it?
-		switch m.state {
-		case uiChat:
-		case uiEdit:
+		switch m.focus {
+		case uiFocusMain:
+		case uiFocusEditor:
 			// Textarea placeholder logic
 			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 				m.textarea.Placeholder = m.workingPlaceholder
@@ -181,6 +222,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
+	v.BackgroundColor = m.com.Styles.Background
 
 	layers := []*lipgloss.Layer{}
 
@@ -189,7 +231,8 @@ func (m *UI) View() tea.View {
 
 	// The screen areas we're working with
 	area := m.layout.area
-	chatRect := m.layout.chat
+	headerRect := m.layout.header
+	mainRect := m.layout.main
 	sideRect := m.layout.sidebar
 	editRect := m.layout.editor
 	helpRect := m.layout.help
@@ -207,7 +250,7 @@ func (m *UI) View() tea.View {
 		}
 	}
 
-	if m.state == uiEdit && m.textarea.Focused() {
+	if m.focus == uiFocusEditor && m.textarea.Focused() {
 		cur := m.textarea.Cursor()
 		cur.X++ // Adjust for app margins
 		cur.Y += editRect.Min.Y
@@ -215,23 +258,69 @@ func (m *UI) View() tea.View {
 	}
 
 	mainLayer := lipgloss.NewLayer("").X(area.Min.X).Y(area.Min.Y).
-		Width(area.Dx()).Height(area.Dy()).
-		AddLayers(
-			lipgloss.NewLayer(
-				lipgloss.NewStyle().Width(chatRect.Dx()).
-					Height(chatRect.Dy()).
-					Background(lipgloss.ANSIColor(rand.Intn(256))).
-					Render(" Main View "),
-			).X(chatRect.Min.X).Y(chatRect.Min.Y),
-			lipgloss.NewLayer(m.side.View()).
-				X(sideRect.Min.X).Y(sideRect.Min.Y),
-			lipgloss.NewLayer(m.textarea.View()).
-				X(editRect.Min.X).Y(editRect.Min.Y),
-			lipgloss.NewLayer(m.help.View(helpKeyMap)).
-				X(helpRect.Min.X).Y(helpRect.Min.Y),
-		)
+		Width(area.Dx()).Height(area.Dy())
+
+	switch m.state {
+	case uiConfigure:
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Configure "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main)
+	case uiInitialize:
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(m.initializeView()).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main)
+	case uiLanding:
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Landing Page "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		editor := lipgloss.NewLayer(m.textarea.View()).X(editRect.Min.X).Y(editRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main, editor)
+	case uiChat:
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		side := lipgloss.NewLayer(m.side.View()).X(sideRect.Min.X).Y(sideRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Chat Messages "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		editor := lipgloss.NewLayer(m.textarea.View()).X(editRect.Min.X).Y(editRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main, side, editor)
+	case uiChatCompact:
+		header := lipgloss.NewLayer(m.header).X(headerRect.Min.X).Y(headerRect.Min.Y)
+		main := lipgloss.NewLayer(
+			lipgloss.NewStyle().Width(mainRect.Dx()).
+				Height(mainRect.Dy()).
+				Background(lipgloss.ANSIColor(rand.Intn(256))).
+				Render(" Compact Chat Messages "),
+		).X(mainRect.Min.X).Y(mainRect.Min.Y)
+		editor := lipgloss.NewLayer(m.textarea.View()).X(editRect.Min.X).Y(editRect.Min.Y)
+		mainLayer = mainLayer.AddLayers(header, main, editor)
+	}
+
+	// Add help layer
+	help := lipgloss.NewLayer(m.help.View(helpKeyMap)).X(helpRect.Min.X).Y(helpRect.Min.Y)
+	mainLayer = mainLayer.AddLayers(help)
 
 	layers = append(layers, mainLayer)
+
+	// Debugging rendering (visually see when the tui rerenders)
+	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
+		content := lipgloss.NewStyle().Background(lipgloss.ANSIColor(rand.Intn(256))).Width(4).Height(2)
+		debugLayer := lipgloss.NewLayer(content).
+			X(4).
+			Y(1)
+		layers = append(layers, debugLayer)
+	}
 
 	v.Content = lipgloss.NewCanvas(layers...)
 	if m.sendProgressBar && m.com.App != nil && m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
@@ -248,37 +337,44 @@ func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
 
-	if m.sess == nil {
-		// no session selected
-		binds = append(binds,
-			k.Commands,
-			k.Models,
-			k.Editor.Newline,
-			k.Quit,
-			k.Help,
-		)
-	} else {
-		// we have a session
-	}
+	switch m.state {
+	case uiInitialize:
+		binds = append(binds, k.Quit)
+	default:
+		// TODO: other states
+		if m.sess == nil {
+			// no session selected
+			binds = append(binds,
+				k.Commands,
+				k.Models,
+				k.Editor.Newline,
+				k.Quit,
+				k.Help,
+			)
+		} else {
+			// we have a session
+		}
 
-	// switch m.state {
-	// case uiChat:
-	// case uiEdit:
-	// 	binds = append(binds,
-	// 		k.Editor.AddFile,
-	// 		k.Editor.SendMessage,
-	// 		k.Editor.OpenEditor,
-	// 		k.Editor.Newline,
-	// 	)
-	//
-	// 	if len(m.attachments) > 0 {
-	// 		binds = append(binds,
-	// 			k.Editor.AttachmentDeleteMode,
-	// 			k.Editor.DeleteAllAttachments,
-	// 			k.Editor.Escape,
-	// 		)
-	// 	}
-	// }
+		// switch m.state {
+		// case uiChat:
+		// case uiEdit:
+		// 	binds = append(binds,
+		// 		k.Editor.AddFile,
+		// 		k.Editor.SendMessage,
+		// 		k.Editor.OpenEditor,
+		// 		k.Editor.Newline,
+		// 	)
+		//
+		// 	if len(m.attachments) > 0 {
+		// 		binds = append(binds,
+		// 			k.Editor.AttachmentDeleteMode,
+		// 			k.Editor.DeleteAllAttachments,
+		// 			k.Editor.Escape,
+		// 		)
+		// 	}
+		// }
+
+	}
 
 	return binds
 }
@@ -290,26 +386,34 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help := k.Help
 	help.SetHelp("ctrl+g", "less")
 
-	if m.sess == nil {
-		// no session selected
+	switch m.state {
+	case uiInitialize:
 		binds = append(binds,
 			[]key.Binding{
-				k.Commands,
-				k.Models,
-				k.Sessions,
-			},
-			[]key.Binding{
-				k.Editor.Newline,
-				k.Editor.AddImage,
-				k.Editor.MentionFile,
-				k.Editor.OpenEditor,
-			},
-			[]key.Binding{
-				help,
-			},
-		)
-	} else {
-		// we have a session
+				k.Quit,
+			})
+	default:
+		if m.sess == nil {
+			// no session selected
+			binds = append(binds,
+				[]key.Binding{
+					k.Commands,
+					k.Models,
+					k.Sessions,
+				},
+				[]key.Binding{
+					k.Editor.Newline,
+					k.Editor.AddImage,
+					k.Editor.MentionFile,
+					k.Editor.OpenEditor,
+				},
+				[]key.Binding{
+					help,
+				},
+			)
+		} else {
+			// we have a session
+		}
 	}
 
 	// switch m.state {
@@ -334,10 +438,10 @@ func (m *UI) updateDialogs(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 // updateFocused updates the focused model (chat or editor) with the given message
 // and appends any resulting commands to the cmds slice.
 func (m *UI) updateFocused(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
-	switch m.state {
-	case uiChat:
+	switch m.focus {
+	case uiFocusMain:
 		m.updateChat(msg, cmds)
-	case uiEdit:
+	case uiFocusEditor:
 		switch {
 		case key.Matches(msg, m.keyMap.Editor.Newline):
 			m.textarea.InsertRune('\n')
@@ -366,8 +470,18 @@ func (m *UI) updateChat(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 func (m *UI) updateLayoutAndSize(w, h int) {
 	// The screen area we're working with
 	area := image.Rect(0, 0, w, h)
-	var helpKeyMap help.KeyMap = m
+
+	// The help height
 	helpHeight := 1
+	// The editor height
+	editorHeight := 5
+	// The sidebar width
+	sidebarWidth := 40
+	// The header height
+	// TODO: handle compact
+	headerHeight := 4
+
+	var helpKeyMap help.KeyMap = m
 	if m.help.ShowAll {
 		for _, row := range helpKeyMap.FullHelp() {
 			helpHeight = max(helpHeight, len(row))
@@ -375,35 +489,103 @@ func (m *UI) updateLayoutAndSize(w, h int) {
 	}
 
 	// Add app margins
-	mainRect := area
-	mainRect.Min.X += 1
-	mainRect.Min.Y += 1
-	mainRect.Max.X -= 1
-	mainRect.Max.Y -= 1
+	appRect := area
+	appRect.Min.X += 1
+	appRect.Min.Y += 1
+	appRect.Max.X -= 1
+	appRect.Max.Y -= 1
 
-	mainRect, helpRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-helpHeight))
-	chatRect, sideRect := uv.SplitHorizontal(mainRect, uv.Fixed(mainRect.Dx()-40))
-	chatRect, editRect := uv.SplitVertical(chatRect, uv.Fixed(mainRect.Dy()-5))
-
-	// Add 1 line margin bottom of chatRect
-	chatRect, _ = uv.SplitVertical(chatRect, uv.Fixed(chatRect.Dy()-1))
-	// Add 1 line margin bottom of editRect
-	editRect, _ = uv.SplitVertical(editRect, uv.Fixed(editRect.Dy()-1))
-
-	m.layout = layout{
-		area:    area,
-		main:    mainRect,
-		chat:    chatRect,
-		editor:  editRect,
-		sidebar: sideRect,
-		help:    helpRect,
+	if slices.Contains([]uiState{uiConfigure, uiInitialize}, m.state) {
+		// extra padding on left and right for these states
+		appRect.Min.X += 1
+		appRect.Max.X -= 1
 	}
 
-	// Update sub-model sizes
-	m.side.SetWidth(m.layout.sidebar.Dx())
-	m.textarea.SetWidth(m.layout.editor.Dx())
-	m.textarea.SetHeight(m.layout.editor.Dy())
+	appRect, helpRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-helpHeight))
+
+	m.layout = layout{
+		area: area,
+		help: helpRect,
+	}
+
+	// Set help width
 	m.help.SetWidth(m.layout.help.Dx())
+
+	// Handle different app states
+	switch m.state {
+	case uiConfigure, uiInitialize:
+		// Layout
+		//
+		// header
+		// ------
+		// main
+		// ------
+		// help
+
+		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
+		m.layout.header = headerRect
+		m.layout.main = mainRect
+		m.renderHeader(false, m.layout.header.Dx())
+
+	case uiLanding:
+		// Layout
+		//
+		// header
+		// ------
+		// main
+		// ------
+		// editor
+		// ------
+		// help
+		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		m.layout.header = headerRect
+		m.layout.main = mainRect
+		m.layout.editor = editorRect
+		// TODO: set the width and heigh of the chat component
+		m.renderHeader(false, m.layout.header.Dx())
+		m.textarea.SetWidth(m.layout.editor.Dx())
+		m.textarea.SetHeight(m.layout.editor.Dy())
+
+	case uiChat:
+		// Layout
+		//
+		// ------|---
+		// main  |
+		// ------| side
+		// editor|
+		// ----------
+		// help
+
+		mainRect, sideRect := uv.SplitHorizontal(appRect, uv.Fixed(appRect.Dx()-sidebarWidth))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		m.layout.sidebar = sideRect
+		m.layout.main = mainRect
+		m.layout.editor = editorRect
+		// TODO: set the width and heigh of the chat component
+		m.side.SetWidth(m.layout.sidebar.Dx())
+		m.textarea.SetWidth(m.layout.editor.Dx())
+		m.textarea.SetHeight(m.layout.editor.Dy())
+	case uiChatCompact:
+		// Layout
+		//
+		// compact-header
+		// ------
+		// main
+		// ------
+		// editor
+		// ------
+		// help
+		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(appRect.Dy()-headerHeight))
+		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		m.layout.header = headerRect
+		m.layout.main = mainRect
+		m.layout.editor = editorRect
+		// TODO: set the width and heigh of the chat component
+		m.renderHeader(true, m.layout.header.Dx())
+		m.textarea.SetWidth(m.layout.editor.Dx())
+		m.textarea.SetHeight(m.layout.editor.Dy())
+	}
 }
 
 // layout defines the positioning of UI elements.
@@ -411,11 +593,14 @@ type layout struct {
 	// area is the overall available area.
 	area uv.Rectangle
 
-	// main is the main area excluding help.
-	main uv.Rectangle
+	// header is the header shown in special cases
+	// e.x when the sidebar is collapsed
+	// or when in the landing page
+	// or in init/config
+	header uv.Rectangle
 
-	// chat is the area for the chat pane.
-	chat uv.Rectangle
+	// main is the area for the main pane. (e.x chat, configure, landing)
+	main uv.Rectangle
 
 	// editor is the area for the editor pane.
 	editor uv.Rectangle
@@ -480,4 +665,58 @@ var workingPlaceholders = [...]string{
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
+func (m *UI) initializeView() string {
+	cfg := m.com.Config()
+	s := m.com.Styles.Initialize
+	cwd := home.Short(cfg.WorkingDir())
+	initFile := cfg.Options.InitializeAs
+
+	header := s.Header.Render("Would you like to initialize this project?")
+	path := s.Accent.PaddingLeft(2).Render(cwd)
+	desc := s.Content.Render(fmt.Sprintf("When I initialize your codebase I examine the project and put the result into an %s file which serves as general context.", initFile))
+	hint := s.Content.Render("You can also initialize anytime via ") + s.Accent.Render("ctrl+p") + s.Content.Render(".")
+	prompt := s.Content.Render("Would you like to initialize now?")
+
+	buttons := common.ButtonGroup(m.com.Styles, []common.ButtonOpts{
+		{Text: "Yep!", Selected: m.yesInitializeSelected},
+		{Text: "Nope", Selected: !m.yesInitializeSelected},
+	}, " ")
+
+	// max width 60 so the text is compact
+	width := min(m.layout.main.Dx(), 60)
+
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(m.layout.main.Dy()).
+		PaddingBottom(1).
+		AlignVertical(lipgloss.Bottom).
+		Render(strings.Join(
+			[]string{
+				header,
+				path,
+				desc,
+				hint,
+				prompt,
+				buttons,
+			},
+			"\n\n",
+		))
+}
+
+func (m *UI) renderHeader(compact bool, width int) {
+	// TODO: handle the compact case differently
+	m.header = renderLogo(m.com.Styles, compact, width)
+}
+
+func renderLogo(t *styles.Styles, compact bool, width int) string {
+	return logo.Render(version.Version, compact, logo.Opts{
+		FieldColor:   t.LogoFieldColor,
+		TitleColorA:  t.LogoTitleColorA,
+		TitleColorB:  t.LogoTitleColorB,
+		CharmColor:   t.LogoCharmColor,
+		VersionColor: t.LogoVersionColor,
+		Width:        max(0, width-2),
+	})
 }

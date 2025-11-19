@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,8 +26,12 @@ type Info struct {
 	URL     string
 }
 
+// Matches a version string like:
+// v0.0.0-0.20251231235959-06c807842604
+var goInstallRegexp = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+\.\d{14}-[0-9a-f]{12}$`)
+
 func (i Info) IsDevelopment() bool {
-	return i.Current == "devel" || i.Current == "unknown" || strings.Contains(i.Current, "dirty")
+	return i.Current == "devel" || i.Current == "unknown" || strings.Contains(i.Current, "dirty") || goInstallRegexp.MatchString(i.Current)
 }
 
 // Available returns true if there's an update available.

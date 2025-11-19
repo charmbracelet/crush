@@ -484,7 +484,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 			items[assistantIndex].ID(),
 			uiMsg,
 		)
-		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+		if msg.FinishPart() != nil && msg.GetToolCallState().IsEndTurn() {
 			m.listCmp.AppendItem(
 				messages.NewAssistantSection(
 					msg,
@@ -526,7 +526,7 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 			existingTC.SetToolCall(tc)
 
 			// TODO: revisit this logic!
-			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
+			if msg.FinishPart() != nil && msg.GetToolCallState().IsCanceled() {
 				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}
 			m.listCmp.UpdateItem(tc.ID.String(), existingTC)
@@ -611,7 +611,7 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 			uiMessages = append(uiMessages, messages.NewMessageCmp(msg))
 		case message.Assistant:
 			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
-			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+			if msg.FinishPart() != nil && msg.GetToolCallState().IsEndTurn() {
 				uiMessages = append(uiMessages, messages.NewAssistantSection(msg, time.Unix(m.lastUserMessageTime, 0)))
 			}
 		}

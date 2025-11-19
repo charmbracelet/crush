@@ -16,9 +16,9 @@ func BenchmarkToolCallStateUint8Comparison(b *testing.B) {
 		ToolCallStatePermissionApproved,
 		ToolCallStatePermissionDenied,
 	}
-	
+
 	target := ToolCallStateCompleted
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, state := range states {
@@ -39,9 +39,9 @@ func BenchmarkAnimationStateUint8Comparison(b *testing.B) {
 		AnimationStateBlink,
 		AnimationStatePulse,
 	}
-	
+
 	target := AnimationStateSpinner
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, state := range states {

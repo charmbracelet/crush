@@ -137,8 +137,7 @@ type ToolResult struct {
 	Data            string              `json:"data"`
 	MIMEType        string              `json:"mime_type"`
 	Metadata        string              `json:"metadata"`
-	ResultState     enum.ToolResultState `json:"result_state"`
-	// Legacy field for backward compatibility - deprecated, use ResultState instead
+	// Legacy field for backward compatibility - deprecated
 	IsError         bool                `json:"is_error"`
 }
 
@@ -147,10 +146,6 @@ func (ToolResult) isPart() {}
 // GetResultState returns the current result state
 // If ResultState is not set, it derives from legacy IsError field for backward compatibility
 func (tr ToolResult) GetResultState() enum.ToolResultState {
-	// If ResultState is explicitly set, use it
-	if tr.ResultState != enum.ToolResultStateUnknown {
-		return tr.ResultState
-	}
 	// Fall back to legacy IsError field for backward compatibility
 	return enum.FromBool(tr.IsError)
 }
@@ -270,6 +265,28 @@ func (m *Message) FinishReason() FinishReason {
 		}
 	}
 	return ""
+}
+
+// GetToolCallState derives ToolCallState from FinishReason for TUI compatibility
+// This allows TUI to use ToolCallState methods instead of FinishReason enums
+func (m *Message) GetToolCallState() enum.ToolCallState {
+	reason := m.FinishReason()
+	switch reason {
+	case FinishReasonEndTurn:
+		return enum.ToolCallStateCompleted
+	case FinishReasonToolUse:
+		return enum.ToolCallStateCompleted
+	case FinishReasonMaxTokens:
+		return enum.ToolCallStateFailed
+	case FinishReasonCanceled:
+		return enum.ToolCallStateCancelled
+	case FinishReasonPermissionDenied:
+		return enum.ToolCallStatePermissionDenied
+	case FinishReasonError:
+		return enum.ToolCallStateFailed
+	default:
+		return enum.ToolCallStatePending
+	}
 }
 
 func (m *Message) IsThinking() bool {

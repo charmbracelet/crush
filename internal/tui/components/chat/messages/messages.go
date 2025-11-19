@@ -197,11 +197,11 @@ func (m *messageCmp) renderAssistantMessage() string {
 	if thinking || strings.TrimSpace(m.message.ReasoningContent().Thinking) != "" {
 		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
+	} else if finished && content == "" && m.message.GetToolCallState().IsEndTurn() {
 		content = ""
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
+	} else if finished && content == "" && m.message.GetToolCallState().IsCanceled() {
 		content = "*Canceled*"
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonError {
+	} else if finished && content == "" && m.message.GetToolCallState().IsError() {
 		errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
 		truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
 		title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
@@ -310,7 +310,7 @@ func (m *messageCmp) renderThinkingContent() string {
 			if duration.String() != "0s" {
 				footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 			}
-		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
+		} else if finishReason != nil && m.message.GetToolCallState().IsCanceled() {
 			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {
 			footer = m.anim.View()

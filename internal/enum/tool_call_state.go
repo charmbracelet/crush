@@ -358,6 +358,24 @@ func (state ToolCallState) ToResultState() ToolResultState {
 	}
 }
 
+// IsEndTurn returns true if the state indicates a normal completion
+// Replaces FinishReasonEndTurn check in TUI
+func (state ToolCallState) IsEndTurn() bool {
+	return state == ToolCallStateCompleted
+}
+
+// IsCanceled returns true if the state indicates cancellation
+// Replaces FinishReasonCanceled check in TUI  
+func (state ToolCallState) IsCanceled() bool {
+	return state == ToolCallStateCancelled
+}
+
+// IsError returns true if the state indicates error
+// Replaces FinishReasonError check in TUI
+func (state ToolCallState) IsError() bool {
+	return state == ToolCallStateFailed || state == ToolCallStatePermissionDenied
+}
+
 // ToFinishReasonKey returns a canonical identifier for the finish reason
 // This can be used to map to message.FinishReason without creating circular imports
 func (state ToolCallState) ToFinishReasonKey() string {

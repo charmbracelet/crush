@@ -391,7 +391,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ToolCallID:  message.ToolCallID(result.ToolCallID),
 				Name:        result.ToolName,
 				Content:     resultContent,
-				ResultState: resultState,
 				IsError:     resultState.ToBool(), // Backward compatibility
 				Metadata:    result.ClientMetadata,
 			}

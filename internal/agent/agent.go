@@ -358,13 +358,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				resultState = enum.ToolResultStateUnknown
 			}
 
-			// Update tool call state based on result
+			// Update tool call state based on result using centralized state mapping
 			for i, part := range currentAssistant.Parts {
 				if tc, ok := part.(message.ToolCall); ok && tc.ID == message.ToolCallID(result.ToolCallID) {
-					newState := enum.ToolCallStateCompleted
-					if resultState.IsError() {
-						newState = enum.ToolCallStateFailed
-					}
+					// Use centralized state mapping for consistent state transitions
+					newState := enum.ResultStateToToolCallState(resultState)
 					currentAssistant.Parts[i] = message.ToolCall{
 						ID:    tc.ID,
 						Name:  tc.Name,

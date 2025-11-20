@@ -82,7 +82,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if err != nil {
 		return Message{}, err
 	}
-	message, err := s.fromDBItem(dbMessage)
+	message, err := fromDBItem(dbMessage)
 	if err != nil {
 		return Message{}, err
 	}
@@ -134,17 +134,16 @@ func (s *service) Get(ctx context.Context, id string) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	return s.fromDBItem(dbMessage)
+	return fromDBItem(dbMessage)
 }
 
-func (s *service) List(ctx context.Context, sessionID string) ([]Message, error) {
-	dbMessages, err := s.q.ListMessagesBySession(ctx, sessionID)
+func convertDBMessagesToMessages(dbMessages []db.Message, err error) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
+		messages[i], err = fromDBItem(dbMessage)
 		if err != nil {
 			return nil, err
 		}
@@ -152,12 +151,15 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	return messages, nil
 }
 
-func (s *service) FullList(ctx context.Context) ([]Message, error) {
-	dbMessages, err := s.q.ListAllMessages(ctx)
-	return nil, nil
+func (s *service) List(ctx context.Context, sessionID string) ([]Message, error) {
+	return convertDBMessagesToMessages(s.q.ListMessagesBySession(ctx, sessionID))
 }
 
-func (s *service) fromDBItem(item db.Message) (Message, error) {
+func (s *service) FullList(ctx context.Context) ([]Message, error) {
+	return convertDBMessagesToMessages(s.q.ListAllMessages(ctx))
+}
+
+func fromDBItem(item db.Message) (Message, error) {
 	parts, err := unmarshallParts([]byte(item.Parts))
 	if err != nil {
 		return Message{}, err

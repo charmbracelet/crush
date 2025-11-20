@@ -521,7 +521,7 @@ func (m *editorCmp) getUserMessagesAsText() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	allMessages, err := m.app.Messages.List(ctx, m.session.ID)
+	allMessages, err := m.app.Messages.FullList(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -132,44 +132,6 @@ func TestToolResultState_RenderTUIMessage(t *testing.T) {
 	}
 }
 
-func TestFromBool(t *testing.T) {
-	tests := []struct {
-		name     string
-		isError  bool
-		expected ToolResultState
-	}{
-		{"False becomes success", false, ToolResultStateSuccess},
-		{"True becomes error", true, ToolResultStateError},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, FromBool(tt.isError))
-		})
-	}
-}
-
-func TestToolResultState_ToBool(t *testing.T) {
-	tests := []struct {
-		name     string
-		state    ToolResultState
-		expected bool
-	}{
-		{"Success to bool", ToolResultStateSuccess, false},
-		{"Partial to bool", ToolResultStatePartial, false},
-		{"Error to bool", ToolResultStateError, true},
-		{"Timeout to bool", ToolResultStateTimeout, true},
-		{"Unknown to bool", ToolResultStateUnknown, true},
-		{"Cancelled to bool", ToolResultStateCancelled, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, tt.state.ToBool())
-		})
-	}
-}
-
 func TestToolResultState_ToIcon(t *testing.T) {
 	// Test that icons are not empty and vary by state
 	states := []ToolResultState{

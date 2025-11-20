@@ -64,8 +64,8 @@ func (m *ToolCallStateMapping) ResultStateToToolCallState(resultState ToolResult
 // IsErrorState returns true if the given state represents an error condition
 // This replaces scattered IsError() calls throughout the codebase
 func (m *ToolCallStateMapping) IsErrorState(state ToolCallState) bool {
-	return state == ToolCallStateFailed || 
-		   state == ToolCallStatePermissionDenied
+	return state == ToolCallStateFailed ||
+		state == ToolCallStatePermissionDenied
 }
 
 // IsSuccessState returns true if the given state represents success
@@ -75,10 +75,10 @@ func (m *ToolCallStateMapping) IsSuccessState(state ToolCallState) bool {
 
 // IsFinalState returns true if the state is terminal (no further changes expected)
 func (m *ToolCallStateMapping) IsFinalState(state ToolCallState) bool {
-	return state == ToolCallStateCompleted || 
-		   state == ToolCallStateFailed || 
-		   state == ToolCallStateCancelled || 
-		   state == ToolCallStatePermissionDenied
+	return state == ToolCallStateCompleted ||
+		state == ToolCallStateFailed ||
+		state == ToolCallStateCancelled ||
+		state == ToolCallStatePermissionDenied
 }
 
 // Global mapping instance for convenience
@@ -91,7 +91,7 @@ func ToolCallStateToResultState(state ToolCallState) ToolResultState {
 	return StateMapping.ToolCallStateToResultState(state)
 }
 
-// ToolCallStateToFinishReason maps ToolCallState to fantasy.FinishReason  
+// ToolCallStateToFinishReason maps ToolCallState to fantasy.FinishReason
 func ToolCallStateToFinishReason(state ToolCallState) fantasy.FinishReason {
 	return StateMapping.ToolCallStateToFinishReason(state)
 }

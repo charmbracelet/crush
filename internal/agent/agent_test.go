@@ -599,12 +599,12 @@ func TestCoderAgent(t *testing.T) {
 						if tr.ToolCallID == globTCID {
 							foundGlobResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
-							require.False(t, tr.IsError, "Expected glob result to not be an error")
+							require.False(t, tr.ResultState.IsError(), "Expected glob result to not be an error")
 						}
 						if tr.ToolCallID == lsTCID {
 							foundLSResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected ls result to contain main.go")
-							require.False(t, tr.IsError, "Expected ls result to not be an error")
+							require.False(t, tr.ResultState.IsError(), "Expected ls result to not be an error")
 						}
 					}
 				}

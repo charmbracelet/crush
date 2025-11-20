@@ -511,7 +511,6 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			if reasoning.ThoughtSignature != "" {
 				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
 					Signature: reasoning.ThoughtSignature,
-					ToolID:    reasoning.ToolID,
 				}
 			}
 			parts = append(parts, reasoningPart)

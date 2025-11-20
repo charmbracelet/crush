@@ -291,7 +291,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
 				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					currentAssistant.AppendThoughtSignature(reasoning.Signature, "")
 				}
 			}
 			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {

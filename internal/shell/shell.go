@@ -51,19 +51,21 @@ type BlockFunc func(args []string) bool
 
 // Shell provides cross-platform shell execution with optional state persistence
 type Shell struct {
-	env        []string
-	cwd        string
-	mu         sync.Mutex
-	logger     Logger
-	blockFuncs []BlockFunc
+	env                []string
+	cwd                string
+	mu                 sync.Mutex
+	logger             Logger
+	blockFuncs         []BlockFunc
+	customExecHandlers []func(interp.ExecHandlerFunc) interp.ExecHandlerFunc
 }
 
 // Options for creating a new shell
 type Options struct {
-	WorkingDir string
-	Env        []string
-	Logger     Logger
-	BlockFuncs []BlockFunc
+	WorkingDir   string
+	Env          []string
+	Logger       Logger
+	BlockFuncs   []BlockFunc
+	ExecHandlers []func(interp.ExecHandlerFunc) interp.ExecHandlerFunc
 }
 
 // NewShell creates a new shell instance with the given options
@@ -88,10 +90,11 @@ func NewShell(opts *Options) *Shell {
 	}
 
 	return &Shell{
-		cwd:        cwd,
-		env:        env,
-		logger:     logger,
-		blockFuncs: opts.BlockFuncs,
+		cwd:                cwd,
+		env:                env,
+		logger:             logger,
+		blockFuncs:         opts.BlockFuncs,
+		customExecHandlers: opts.ExecHandlers,
 	}
 }
 
@@ -246,13 +249,15 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 
 // newInterp creates a new interpreter with the current shell state
 func (s *Shell) newInterp(stdin io.Reader, stdout, stderr io.Writer) (*interp.Runner, error) {
-	return interp.New(
+	opts := []interp.RunnerOption{
 		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
 		interp.ExecHandlers(s.execHandlers()...),
-	)
+	}
+
+	return interp.New(opts...)
 }
 
 // updateShellFromRunner updates the shell from the interpreter after execution
@@ -298,6 +303,8 @@ func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHa
 	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
 		s.blockHandler(),
 	}
+	// Add custom exec handlers first (they get priority)
+	handlers = append(handlers, s.customExecHandlers...)
 	if useGoCoreUtils {
 		handlers = append(handlers, coreutils.ExecHandler)
 	}

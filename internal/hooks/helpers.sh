@@ -92,30 +92,3 @@ crush_stop() {
   exit 1
 }
 
-# Input parsing helpers
-# These read from the JSON context saved in _CRUSH_STDIN
-
-# Get a field from the hook context.
-# Usage: VALUE=$(crush_get_input "field_name")
-crush_get_input() {
-  echo "$_CRUSH_STDIN" | jq -r ".$1 // empty"
-}
-
-# Get a tool input parameter.
-# Usage: COMMAND=$(crush_get_tool_input "command")
-crush_get_tool_input() {
-  echo "$_CRUSH_STDIN" | jq -r ".tool_input.$1 // empty"
-}
-
-# Get the user prompt.
-# Usage: PROMPT=$(crush_get_prompt)
-crush_get_prompt() {
-  echo "$_CRUSH_STDIN" | jq -r '.prompt // empty'
-}
-
-# Logging helper.
-# Writes to stderr which is captured by Crush.
-# Usage: crush_log "debug message"
-crush_log() {
-  echo "[CRUSH HOOK] $*" >&2
-}

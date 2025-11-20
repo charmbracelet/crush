@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
+	"mvdan.cc/sh/v3/interp"
 )
 
 //go:embed helpers.sh
@@ -36,7 +37,7 @@ func (e *Executor) Execute(ctx context.Context, hookPath string, context HookCon
 		return nil, fmt.Errorf("failed to marshal context: %w", err)
 	}
 
-	// Wrap user hook in a function and prepend helper functions  
+	// Wrap user hook in a function and prepend helper functions
 	// Read stdin before calling the function, then export it
 	fullScript := fmt.Sprintf(`%s
 
@@ -69,8 +70,9 @@ _crush_hook_main
 	}
 
 	hookShell := shell.NewShell(&shell.Options{
-		WorkingDir: context.WorkingDir,
-		Env:        env,
+		WorkingDir:   context.WorkingDir,
+		Env:          env,
+		ExecHandlers: []func(interp.ExecHandlerFunc) interp.ExecHandlerFunc{RegisterBuiltins},
 	})
 
 	// Pass JSON context via stdin instead of heredoc

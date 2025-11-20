@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/viewport"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -16,7 +17,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -291,19 +291,30 @@ func (p *permissionDialogCmp) renderHeader() string {
 			toolKey,
 			toolValue,
 		),
-		baseStyle.Render(strings.Repeat(" ", p.width)),
 		lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			pathKey,
 			pathValue,
 		),
-		baseStyle.Render(strings.Repeat(" ", p.width)),
 	}
 
 	// Add tool-specific header information
 	switch p.permission.ToolName {
 	case tools.BashToolName:
-		headerParts = append(headerParts, t.S().Muted.Width(p.width).Render("Command"))
+		params := p.permission.Params.(tools.BashPermissionsParams)
+		descKey := t.S().Muted.Render("Desc")
+		descValue := t.S().Text.
+			Width(p.width - lipgloss.Width(descKey)).
+			Render(fmt.Sprintf(" %s", params.Description))
+		headerParts = append(headerParts,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				descKey,
+				descValue,
+			),
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			t.S().Muted.Width(p.width).Render("Command"),
+		)
 	case tools.DownloadToolName:
 		params := p.permission.Params.(tools.DownloadPermissionsParams)
 		urlKey := t.S().Muted.Render("URL")
@@ -320,7 +331,6 @@ func (p *permissionDialogCmp) renderHeader() string {
 				urlKey,
 				urlValue,
 			),
-			baseStyle.Render(strings.Repeat(" ", p.width)),
 			lipgloss.JoinHorizontal(
 				lipgloss.Left,
 				fileKey,
@@ -372,7 +382,15 @@ func (p *permissionDialogCmp) renderHeader() string {
 			baseStyle.Render(strings.Repeat(" ", p.width)),
 		)
 	case tools.FetchToolName:
-		headerParts = append(headerParts, t.S().Muted.Width(p.width).Bold(true).Render("URL"))
+		headerParts = append(headerParts,
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			t.S().Muted.Width(p.width).Bold(true).Render("URL"),
+		)
+	case tools.AgenticFetchToolName:
+		headerParts = append(headerParts,
+			baseStyle.Render(strings.Repeat(" ", p.width)),
+			t.S().Muted.Width(p.width).Bold(true).Render("URL"),
+		)
 	case tools.ViewToolName:
 		params := p.permission.Params.(tools.ViewPermissionsParams)
 		fileKey := t.S().Muted.Render("File")
@@ -427,6 +445,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateMultiEditContent()
 	case tools.FetchToolName:
 		content = p.generateFetchContent()
+	case tools.AgenticFetchToolName:
+		content = p.generateAgenticFetchContent()
 	case tools.ViewToolName:
 		content = p.generateViewContent()
 	case tools.LSToolName:
@@ -460,6 +480,17 @@ func (p *permissionDialogCmp) generateBashContent() string {
 				Foreground(t.FgBase).
 				Background(t.BgSubtle).
 				Render(ln))
+		}
+
+		// Ensure minimum of 7 lines for command display
+		minLines := 7
+		for len(out) < minLines {
+			out = append(out, t.S().Muted.
+				Width(width).
+				Padding(0, 3).
+				Foreground(t.FgBase).
+				Background(t.BgSubtle).
+				Render(""))
 		}
 
 		// Use the cache for markdown rendering
@@ -565,6 +596,20 @@ func (p *permissionDialogCmp) generateFetchContent() string {
 			Padding(1, 2).
 			Width(p.contentViewPort.Width()).
 			Render(pr.URL)
+		return finalContent
+	}
+	return ""
+}
+
+func (p *permissionDialogCmp) generateAgenticFetchContent() string {
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+	if pr, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams); ok {
+		content := fmt.Sprintf("URL: %s\n\nPrompt: %s", pr.URL, pr.Prompt)
+		finalContent := baseStyle.
+			Padding(1, 2).
+			Width(p.contentViewPort.Width()).
+			Render(content)
 		return finalContent
 	}
 	return ""
@@ -723,6 +768,7 @@ func (p *permissionDialogCmp) render() string {
 		title,
 		"",
 		headerContent,
+		"",
 		p.styleViewport(),
 		"",
 		buttons,
@@ -775,6 +821,9 @@ func (p *permissionDialogCmp) SetSize() tea.Cmd {
 	case tools.FetchToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.3)
+	case tools.AgenticFetchToolName:
+		p.width = int(float64(p.wWidth) * 0.8)
+		p.height = int(float64(p.wHeight) * 0.4)
 	case tools.ViewToolName:
 		p.width = int(float64(p.wWidth) * 0.8)
 		p.height = int(float64(p.wHeight) * 0.4)

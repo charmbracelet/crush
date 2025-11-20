@@ -1,11 +1,14 @@
 package messages
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
@@ -13,8 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -163,12 +164,16 @@ func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
 // Register tool renderers
 func init() {
 	registry.register(tools.BashToolName, func() renderer { return bashRenderer{} })
+	registry.register(tools.JobOutputToolName, func() renderer { return bashOutputRenderer{} })
+	registry.register(tools.JobKillToolName, func() renderer { return bashKillRenderer{} })
 	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
 	registry.register(tools.MultiEditToolName, func() renderer { return multiEditRenderer{} })
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
-	registry.register(tools.FetchToolName, func() renderer { return fetchRenderer{} })
+	registry.register(tools.FetchToolName, func() renderer { return simpleFetchRenderer{} })
+	registry.register(tools.AgenticFetchToolName, func() renderer { return agenticFetchRenderer{} })
+	registry.register(tools.WebFetchToolName, func() renderer { return webFetchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
 	registry.register(tools.GrepToolName, func() renderer { return grepRenderer{} })
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
@@ -211,7 +216,31 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 	cmd := strings.ReplaceAll(params.Command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
-	args := newParamBuilder().addMain(cmd).build()
+	args := newParamBuilder().
+		addMain(cmd).
+		addFlag("background", params.RunInBackground).
+		build()
+	if v.call.Finished {
+		var meta tools.BashResponseMetadata
+		_ = br.unmarshalParams(v.result.Metadata, &meta)
+		if meta.Background {
+			description := cmp.Or(meta.Description, params.Command)
+			width := v.textWidth()
+			if v.isNested {
+				width -= 4 // Adjust for nested tool call indentation
+			}
+			header := makeJobHeader(v, "Start", fmt.Sprintf("PID %s", meta.ShellID), description, width)
+			if v.isNested {
+				return v.style().Render(header)
+			}
+			if res, done := earlyState(header, v); done {
+				return res
+			}
+			content := "Command: " + params.Command + "\n" + v.result.Content
+			body := renderPlainContent(v, content)
+			return joinHeaderBody(header, body)
+		}
+	}
 
 	return br.renderWithParams(v, "Bash", args, func() string {
 		var meta tools.BashResponseMetadata
@@ -228,6 +257,131 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		}
 		return renderPlainContent(v, meta.Output)
 	})
+}
+
+// -----------------------------------------------------------------------------
+//  Bash Output renderer
+// -----------------------------------------------------------------------------
+
+func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
+	t := styles.CurrentTheme()
+	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
+	if v.result.ToolCallID != "" {
+		if v.result.IsError {
+			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
+		} else {
+			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
+		}
+	} else if v.cancelled {
+		icon = t.S().Muted.Render(styles.ToolPending)
+	}
+
+	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
+	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
+	pidPart := t.S().Muted.Render(pid)
+	descPart := ""
+	if description != "" {
+		descPart = " " + t.S().Subtle.Render(description)
+	}
+
+	// Build the complete header
+	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, subcommandPart, pidPart)
+	fullHeader := prefix + descPart
+
+	// Truncate if needed
+	if lipgloss.Width(fullHeader) > width {
+		availableWidth := width - lipgloss.Width(prefix) - 1 // -1 for space
+		if availableWidth < 10 {
+			// Not enough space for description, just show prefix
+			return prefix
+		}
+		descPart = " " + t.S().Subtle.Render(ansi.Truncate(description, availableWidth, "…"))
+		fullHeader = prefix + descPart
+	}
+
+	return fullHeader
+}
+
+// bashOutputRenderer handles bash output retrieval display
+type bashOutputRenderer struct {
+	baseRenderer
+}
+
+// Render displays the shell ID and output from a background shell
+func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
+	var params tools.JobOutputParams
+	if err := bor.unmarshalParams(v.call.Input, &params); err != nil {
+		return bor.renderError(v, "Invalid job_output parameters")
+	}
+
+	var meta tools.JobOutputResponseMetadata
+	var description string
+	if v.result.Metadata != "" {
+		if err := bor.unmarshalParams(v.result.Metadata, &meta); err == nil {
+			if meta.Description != "" {
+				description = meta.Description
+			} else {
+				description = meta.Command
+			}
+		}
+	}
+
+	width := v.textWidth()
+	if v.isNested {
+		width -= 4 // Adjust for nested tool call indentation
+	}
+	header := makeJobHeader(v, "Output", fmt.Sprintf("PID %s", params.ShellID), description, width)
+	if v.isNested {
+		return v.style().Render(header)
+	}
+	if res, done := earlyState(header, v); done {
+		return res
+	}
+	body := renderPlainContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
+}
+
+// -----------------------------------------------------------------------------
+//  Bash Kill renderer
+// -----------------------------------------------------------------------------
+
+// bashKillRenderer handles bash process termination display
+type bashKillRenderer struct {
+	baseRenderer
+}
+
+// Render displays the shell ID being terminated
+func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
+	var params tools.JobKillParams
+	if err := bkr.unmarshalParams(v.call.Input, &params); err != nil {
+		return bkr.renderError(v, "Invalid job_kill parameters")
+	}
+
+	var meta tools.JobKillResponseMetadata
+	var description string
+	if v.result.Metadata != "" {
+		if err := bkr.unmarshalParams(v.result.Metadata, &meta); err == nil {
+			if meta.Description != "" {
+				description = meta.Description
+			} else {
+				description = meta.Command
+			}
+		}
+	}
+
+	width := v.textWidth()
+	if v.isNested {
+		width -= 4 // Adjust for nested tool call indentation
+	}
+	header := makeJobHeader(v, "Kill", fmt.Sprintf("PID %s", params.ShellID), description, width)
+	if v.isNested {
+		return v.style().Render(header)
+	}
+	if res, done := earlyState(header, v); done {
+		return res
+	}
+	body := renderPlainContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
 }
 
 // -----------------------------------------------------------------------------
@@ -407,13 +561,13 @@ func (wr writeRenderer) Render(v *toolCallCmp) string {
 //  Fetch renderer
 // -----------------------------------------------------------------------------
 
-// fetchRenderer handles URL fetching with format-specific content display
-type fetchRenderer struct {
+// simpleFetchRenderer handles URL fetching with format-specific content display
+type simpleFetchRenderer struct {
 	baseRenderer
 }
 
 // Render displays the fetched URL with format and timeout parameters
-func (fr fetchRenderer) Render(v *toolCallCmp) string {
+func (fr simpleFetchRenderer) Render(v *toolCallCmp) string {
 	var params tools.FetchParams
 	var args []string
 	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
@@ -431,7 +585,7 @@ func (fr fetchRenderer) Render(v *toolCallCmp) string {
 }
 
 // getFileExtension returns appropriate file extension for syntax highlighting
-func (fr fetchRenderer) getFileExtension(format string) string {
+func (fr simpleFetchRenderer) getFileExtension(format string) string {
 	switch format {
 	case "text":
 		return "fetch.txt"
@@ -442,12 +596,108 @@ func (fr fetchRenderer) getFileExtension(format string) string {
 	}
 }
 
+// -----------------------------------------------------------------------------
+//  Agentic fetch renderer
+// -----------------------------------------------------------------------------
+
+// agenticFetchRenderer handles URL fetching with prompt parameter and nested tool calls
+type agenticFetchRenderer struct {
+	baseRenderer
+}
+
+// Render displays the fetched URL with prompt parameter and nested tool calls
+func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.AgenticFetchParams
+	var args []string
+	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			build()
+	}
+
+	prompt := params.Prompt
+	prompt = strings.ReplaceAll(prompt, "\n", " ")
+
+	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
+	if res, done := earlyState(header, v); v.cancelled && done {
+		return res
+	}
+
+	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border).Render("Prompt")
+	remainingWidth := v.textWidth() - (lipgloss.Width(taskTag) + 1)
+	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(taskTag)+1))
+	prompt = t.S().Base.Width(remainingWidth).Render(prompt)
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		"",
+		lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			taskTag,
+			" ",
+			prompt,
+		),
+	)
+	childTools := tree.Root(header)
+
+	for _, call := range v.nestedToolCalls {
+		call.SetSize(remainingWidth, 1)
+		childTools.Child(call.View())
+	}
+	parts := []string{
+		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
+	}
+
+	if v.result.ToolCallID == "" {
+		v.spinning = true
+		parts = append(parts, "", v.anim.View())
+	} else {
+		v.spinning = false
+	}
+
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
+	)
+
+	if v.result.ToolCallID == "" {
+		return header
+	}
+	body := renderMarkdownContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
+}
+
 // formatTimeout converts timeout seconds to duration string
 func formatTimeout(timeout int) string {
 	if timeout == 0 {
 		return ""
 	}
 	return (time.Duration(timeout) * time.Second).String()
+}
+
+// -----------------------------------------------------------------------------
+//  Web fetch renderer
+// -----------------------------------------------------------------------------
+
+// webFetchRenderer handles web page fetching with simplified URL display
+type webFetchRenderer struct {
+	baseRenderer
+}
+
+// Render displays a compact view of web_fetch with just the URL in a link style
+func (wfr webFetchRenderer) Render(v *toolCallCmp) string {
+	var params tools.WebFetchParams
+	var args []string
+	if err := wfr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			build()
+	}
+
+	return wfr.renderWithParams(v, "Fetch", args, func() string {
+		return renderMarkdownContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -609,11 +859,21 @@ type agentRenderer struct {
 	baseRenderer
 }
 
-func RoundedEnumerator(children tree.Children, index int) string {
-	if children.Length()-1 == index {
-		return " ╰──"
+func RoundedEnumeratorWithWidth(lPadding, width int) tree.Enumerator {
+	if width == 0 {
+		width = 2
 	}
-	return " ├──"
+	if lPadding == 0 {
+		lPadding = 1
+	}
+	return func(children tree.Children, index int) string {
+		line := strings.Repeat("─", width)
+		padding := strings.Repeat(" ", lPadding)
+		if children.Length()-1 == index {
+			return padding + "╰" + line
+		}
+		return padding + "├" + line
+	}
 }
 
 // Render displays agent task parameters and result content
@@ -629,8 +889,9 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	if res, done := earlyState(header, v); v.cancelled && done {
 		return res
 	}
-	taskTag := t.S().Base.Padding(0, 1).MarginLeft(1).Background(t.BlueLight).Foreground(t.White).Render("Task")
-	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2 // -2 for padding
+	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
+	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
+	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
 	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -646,10 +907,11 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 	childTools := tree.Root(header)
 
 	for _, call := range v.nestedToolCalls {
+		call.SetSize(remainingWidth, 1)
 		childTools.Child(call.View())
 	}
 	parts := []string{
-		childTools.Enumerator(RoundedEnumerator).String(),
+		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
 	}
 
 	if v.result.ToolCallID == "" {
@@ -668,7 +930,7 @@ func (tr agentRenderer) Render(v *toolCallCmp) string {
 		return header
 	}
 
-	body := renderPlainContent(v, v.result.Content)
+	body := renderMarkdownContent(v, v.result.Content)
 	return joinHeaderBody(header, body)
 }
 
@@ -684,9 +946,6 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	}
 
 	if len(params) == 1 {
-		if nested {
-			return t.S().Muted.Render(mainParam)
-		}
 		return t.S().Subtle.Render(mainParam)
 	}
 	otherParams := params[1:]
@@ -708,9 +967,6 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	partsRendered := strings.Join(parts, ", ")
 	remainingWidth := paramsWidth - lipgloss.Width(partsRendered) - 3 // count for " ()"
 	if remainingWidth < 30 {
-		if nested {
-			return t.S().Muted.Render(mainParam)
-		}
 		// No space for the params, just show the main
 		return t.S().Subtle.Render(mainParam)
 	}
@@ -719,9 +975,6 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 		mainParam = fmt.Sprintf("%s (%s)", mainParam, strings.Join(parts, ", "))
 	}
 
-	if nested {
-		return t.S().Muted.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
-	}
 	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 }
 
@@ -764,14 +1017,14 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
-	width := v.textWidth() - 2 // -2 for left padding
+	width := v.textWidth() - 2
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
 			break
 		}
 		ln = ansiext.Escape(ln)
-		ln = " " + ln // left padding
+		ln = " " + ln
 		if len(ln) > width {
 			ln = v.fit(ln, width)
 		}
@@ -789,6 +1042,41 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	}
 
 	return strings.Join(out, "\n")
+}
+
+func renderMarkdownContent(v *toolCallCmp, content string) string {
+	t := styles.CurrentTheme()
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\t", "    ")
+	content = strings.TrimSpace(content)
+
+	width := v.textWidth() - 2
+	width = min(width, 120)
+
+	renderer := styles.GetPlainMarkdownRenderer(width)
+	rendered, err := renderer.Render(content)
+	if err != nil {
+		return renderPlainContent(v, content)
+	}
+
+	lines := strings.Split(rendered, "\n")
+
+	var out []string
+	for i, ln := range lines {
+		if i >= responseContextHeight {
+			break
+		}
+		out = append(out, ln)
+	}
+
+	style := t.S().Muted.Background(t.BgBaseLighter)
+	if len(lines) > responseContextHeight {
+		out = append(out, style.
+			Width(width-2).
+			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
+	}
+
+	return style.Render(strings.Join(out, "\n"))
 }
 
 func getDigits(n int) int {
@@ -877,6 +1165,10 @@ func prettifyToolName(name string) string {
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"
+	case tools.JobOutputToolName:
+		return "Job: Output"
+	case tools.JobKillToolName:
+		return "Job: Kill"
 	case tools.DownloadToolName:
 		return "Download"
 	case tools.EditToolName:
@@ -885,6 +1177,10 @@ func prettifyToolName(name string) string {
 		return "Multi-Edit"
 	case tools.FetchToolName:
 		return "Fetch"
+	case tools.AgenticFetchToolName:
+		return "Agentic Fetch"
+	case tools.WebFetchToolName:
+		return "Fetching"
 	case tools.GlobToolName:
 		return "Glob"
 	case tools.GrepToolName:

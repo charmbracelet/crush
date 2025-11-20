@@ -3,11 +3,11 @@ package status
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -40,7 +40,7 @@ func (m *statusCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.help.Width = msg.Width - 2
+		m.help.SetWidth(msg.Width - 2)
 		return m, nil
 
 	// Handle status info
@@ -82,10 +82,10 @@ func (m *statusCmp) infoMsg() string {
 		info := ansi.Truncate(m.info.Msg, widthLeft, "…")
 		message = t.S().Base.Foreground(t.BgOverlay).Width(widthLeft+2).Background(t.Warning).Padding(0, 1).Render(info)
 	default:
-		infoType = t.S().Base.Foreground(t.BgOverlay).Background(t.Green).Padding(0, 1).Render("OKAY!")
+		infoType = t.S().Base.Foreground(t.BgSubtle).Background(t.Green).Padding(0, 1).Bold(true).Render("HEY!")
 		widthLeft := m.width - (lipgloss.Width(infoType) + 2)
 		info := ansi.Truncate(m.info.Msg, widthLeft, "…")
-		message = t.S().Base.Background(t.Success).Width(widthLeft+2).Foreground(t.White).Padding(0, 1).Render(info)
+		message = t.S().Base.Background(t.GreenDark).Width(widthLeft+2).Foreground(t.BgSubtle).Padding(0, 1).Render(info)
 	}
 	return ansi.Truncate(infoType+message, m.width, "…")
 }

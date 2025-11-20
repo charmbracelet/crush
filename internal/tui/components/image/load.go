@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"github.com/disintegration/imageorient"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/muesli/termenv"

@@ -109,8 +109,8 @@ func GetState(name string) (ClientInfo, bool) {
 // Close closes all MCP clients. This should be called during application shutdown.
 func Close() error {
 	var errs []error
-	for name, c := range sessions.Seq2() {
-		if err := c.Close(); err != nil &&
+	for name, session := range sessions.Seq2() {
+		if err := session.Close(); err != nil &&
 			!errors.Is(err, io.EOF) &&
 			!errors.Is(err, context.Canceled) &&
 			err.Error() != "signal: killed" {
@@ -154,9 +154,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				}
 			}()
 
-			ctx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
-			defer cancel()
-
+			// createSession handles its own timeout internally.
 			session, err := createSession(ctx, name, m, cfg.Resolver())
 			if err != nil {
 				return
@@ -233,7 +231,6 @@ func updateState(name string, state State, err error, client *mcp.ClientSession,
 	case StateConnected:
 		info.ConnectedAt = time.Now()
 	case StateError:
-		updateTools(name, nil)
 		sessions.Del(name)
 	}
 	states.Set(name, info)

@@ -4,13 +4,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
@@ -475,7 +475,8 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				ts := t.TextSelection
 
 				cell = cell.Clone()
-				cell.Style = cell.Style.Background(ts.GetBackground()).Foreground(ts.GetForeground())
+				cell.Style.Bg = ts.GetBackground()
+				cell.Style.Fg = ts.GetForeground()
 				scr.SetCell(x, y, cell)
 			}
 		}

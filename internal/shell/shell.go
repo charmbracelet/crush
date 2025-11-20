@@ -1,13 +1,12 @@
 // Package shell provides cross-platform shell execution capabilities.
 //
-// This package offers two main types:
-// - Shell: A general-purpose shell executor for one-off or managed commands
-// - PersistentShell: A singleton shell that maintains state across the application
+// This package provides Shell instances for executing commands with their own
+// working directory and environment. Each shell execution is independent.
 //
 // WINDOWS COMPATIBILITY:
-// This implementation provides both POSIX shell emulation (mvdan.cc/sh/v3),
-// even on Windows. Some caution has to be taken: commands should have forward
-// slashes (/) as path separators to work, even on Windows.
+// This implementation provides POSIX shell emulation (mvdan.cc/sh/v3) even on
+// Windows. Commands should use forward slashes (/) as path separators to work
+// correctly on all platforms.
 package shell
 
 import (
@@ -15,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -101,6 +101,14 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	defer s.mu.Unlock()
 
 	return s.exec(ctx, command)
+}
+
+// ExecStream executes a command in the shell with streaming output to provided writers
+func (s *Shell) ExecStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.execStream(ctx, command, stdout, stderr)
 }
 
 // GetWorkingDir returns the current working directory
@@ -228,32 +236,54 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 	}
 }
 
-// exec executes commands using a cross-platform shell interpreter.
-func (s *Shell) exec(ctx context.Context, command string) (string, string, error) {
-	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
-	if err != nil {
-		return "", "", fmt.Errorf("could not parse command: %w", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	runner, err := interp.New(
-		interp.StdIO(nil, &stdout, &stderr),
+// newInterp creates a new interpreter with the current shell state
+func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
+	return interp.New(
+		interp.StdIO(nil, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
 		interp.ExecHandlers(s.execHandlers()...),
 	)
-	if err != nil {
-		return "", "", fmt.Errorf("could not run command: %w", err)
-	}
+}
 
-	err = runner.Run(ctx, line)
+// updateShellFromRunner updates the shell from the interpreter after execution
+func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 	s.cwd = runner.Dir
+	s.env = nil
 	for name, vr := range runner.Vars {
 		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
 	}
+}
+
+// execCommon is the shared implementation for executing commands
+func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) error {
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return fmt.Errorf("could not parse command: %w", err)
+	}
+
+	runner, err := s.newInterp(stdout, stderr)
+	if err != nil {
+		return fmt.Errorf("could not run command: %w", err)
+	}
+
+	err = runner.Run(ctx, line)
+	s.updateShellFromRunner(runner)
 	s.logger.InfoPersist("command finished", "command", command, "err", err)
+	return err
+}
+
+// exec executes commands using a cross-platform shell interpreter.
+func (s *Shell) exec(ctx context.Context, command string) (string, string, error) {
+	var stdout, stderr bytes.Buffer
+	err := s.execCommon(ctx, command, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
+}
+
+// execStream executes commands using POSIX shell emulation with streaming output
+func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
+	return s.execCommon(ctx, command, stdout, stderr)
 }
 
 func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {

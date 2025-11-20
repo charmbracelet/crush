@@ -13,8 +13,9 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -28,10 +29,12 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/update"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -90,6 +93,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
+
+	// Check for updates in the background.
+	go app.checkForUpdates(ctx)
 
 	go func() {
 		slog.Info("Initializing MCP clients")
@@ -368,6 +374,9 @@ func (app *App) Shutdown() {
 		app.AgentCoordinator.CancelAll()
 	}
 
+	// Kill all background shells.
+	shell.GetBackgroundShellManager().KillAll()
+
 	// Shutdown all LSP clients.
 	for name, client := range app.LSPClients.Seq2() {
 		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
@@ -384,5 +393,21 @@ func (app *App) Shutdown() {
 				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
 			}
 		}
+	}
+}
+
+// checkForUpdates checks for available updates.
+func (app *App) checkForUpdates(ctx context.Context) {
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	info, err := update.Check(checkCtx, version.Version, update.Default)
+	if err != nil || !info.Available() {
+		return
+	}
+	app.events <- pubsub.UpdateAvailableMsg{
+		CurrentVersion: info.Current,
+		LatestVersion:  info.Latest,
+		IsDevelopment:  info.IsDevelopment(),
 	}
 }

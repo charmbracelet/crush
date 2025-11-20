@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/spinner"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -36,7 +37,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 var ChatPageID page.PageID = "chat"
@@ -144,7 +144,7 @@ func (p *chatPage) Init() tea.Cmd {
 		p.isOnboarding = true
 		p.splashFullScreen = true
 	} else if b, _ := config.ProjectNeedsInitialization(); b {
-		// Project needs CRUSH.md initialization
+		// Project needs context initialization
 		p.splash.SetProjectInit(true)
 		p.isProjectInit = true
 		p.splashFullScreen = true
@@ -966,11 +966,19 @@ func (p *chatPage) Help() help.KeyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		)
+		modelsBinding := key.NewBinding(
+			key.WithKeys("ctrl+m", "ctrl+l"),
+			key.WithHelp("ctrl+l", "models"),
+		)
+		if p.keyboardEnhancements.Flags > 0 {
+			// non-zero flags mean we have at least key disambiguation
+			modelsBinding.SetHelp("ctrl+m", "models")
+		}
 		helpBinding := key.NewBinding(
 			key.WithKeys("ctrl+g"),
 			key.WithHelp("ctrl+g", "more"),
 		)
-		globalBindings = append(globalBindings, commandsBinding)
+		globalBindings = append(globalBindings, commandsBinding, modelsBinding)
 		globalBindings = append(globalBindings,
 			key.NewBinding(
 				key.WithKeys("ctrl+s"),
@@ -987,6 +995,7 @@ func (p *chatPage) Help() help.KeyMap {
 		shortList = append(shortList,
 			// Commands
 			commandsBinding,
+			modelsBinding,
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1049,7 +1058,8 @@ func (p *chatPage) Help() help.KeyMap {
 				// to reflect that.
 				key.WithHelp("ctrl+j", "newline"),
 			)
-			if p.keyboardEnhancements.SupportsKeyDisambiguation() {
+			if p.keyboardEnhancements.Flags > 0 {
+				// Non-zero flags mean we have at least key disambiguation.
 				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
 			}
 			shortList = append(shortList, newLineBinding)

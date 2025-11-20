@@ -4,7 +4,7 @@ import "runtime/debug"
 
 // Build-time parameters set via -ldflags
 
-var Version = "unknown"
+var Version = "devel"
 
 // A user may install crush using `go install github.com/charmbracelet/crush@latest`.
 // without -ldflags, in which case the version above is unset. As a workaround
@@ -13,14 +13,10 @@ var Version = "unknown"
 func init() {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		// < go v1.18
 		return
 	}
 	mainVersion := info.Main.Version
-	if mainVersion == "" || mainVersion == "(devel)" {
-		// bin not built using `go install`
-		return
+	if mainVersion != "" && mainVersion != "(devel)" {
+		Version = mainVersion
 	}
-	// bin built using `go install`
-	Version = mainVersion
 }

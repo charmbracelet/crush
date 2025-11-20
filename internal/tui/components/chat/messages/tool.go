@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -20,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -293,9 +293,24 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 				parts = append(parts, fmt.Sprintf("**Format:** %s", params.Format))
 			}
 			if params.Timeout > 0 {
-				parts = append(parts, fmt.Sprintf("**Timeout:** %s", (time.Duration(params.Timeout)*time.Second).String()))
+				parts = append(parts, fmt.Sprintf("**Timeout:** %ds", params.Timeout))
 			}
 			return strings.Join(parts, "\n")
+		}
+	case tools.AgenticFetchToolName:
+		var params tools.AgenticFetchParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			if params.Prompt != "" {
+				parts = append(parts, fmt.Sprintf("**Prompt:** %s", params.Prompt))
+			}
+			return strings.Join(parts, "\n")
+		}
+	case tools.WebFetchToolName:
+		var params tools.WebFetchParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			return fmt.Sprintf("**URL:** %s", params.URL)
 		}
 	case tools.GrepToolName:
 		var params tools.GrepParams
@@ -395,6 +410,10 @@ func (m *toolCallCmp) formatResultForCopy() string {
 		return m.formatWriteResultForCopy()
 	case tools.FetchToolName:
 		return m.formatFetchResultForCopy()
+	case tools.AgenticFetchToolName:
+		return m.formatAgenticFetchResultForCopy()
+	case tools.WebFetchToolName:
+		return m.formatWebFetchResultForCopy()
 	case agent.AgentToolName:
 		return m.formatAgentResultForCopy()
 	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName:
@@ -608,15 +627,49 @@ func (m *toolCallCmp) formatFetchResultForCopy() string {
 	if params.URL != "" {
 		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
 	}
-
-	switch params.Format {
-	case "html":
-		result.WriteString("```html\n")
-	case "text":
-		result.WriteString("```\n")
-	default: // markdown
-		result.WriteString("```markdown\n")
+	if params.Format != "" {
+		result.WriteString(fmt.Sprintf("Format: %s\n", params.Format))
 	}
+	if params.Timeout > 0 {
+		result.WriteString(fmt.Sprintf("Timeout: %ds\n", params.Timeout))
+	}
+	result.WriteString("\n")
+
+	result.WriteString(m.result.Content)
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatAgenticFetchResultForCopy() string {
+	var params tools.AgenticFetchParams
+	if json.Unmarshal([]byte(m.call.Input), &params) != nil {
+		return m.result.Content
+	}
+
+	var result strings.Builder
+	if params.URL != "" {
+		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+	}
+	if params.Prompt != "" {
+		result.WriteString(fmt.Sprintf("Prompt: %s\n\n", params.Prompt))
+	}
+
+	result.WriteString("```markdown\n")
+	result.WriteString(m.result.Content)
+	result.WriteString("\n```")
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatWebFetchResultForCopy() string {
+	var params tools.WebFetchParams
+	if json.Unmarshal([]byte(m.call.Input), &params) != nil {
+		return m.result.Content
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("URL: %s\n\n", params.URL))
+	result.WriteString("```markdown\n")
 	result.WriteString(m.result.Content)
 	result.WriteString("\n```")
 
@@ -718,10 +771,10 @@ func (m *toolCallCmp) style() lipgloss.Style {
 	if m.isNested {
 		return t.S().Muted
 	}
-	style := t.S().Muted.PaddingLeft(4)
+	style := t.S().Muted.PaddingLeft(2)
 
 	if m.focused {
-		style = style.PaddingLeft(3).BorderStyle(focusedMessageBorder).BorderLeft(true).BorderForeground(t.GreenDark)
+		style = style.PaddingLeft(1).BorderStyle(focusedMessageBorder).BorderLeft(true).BorderForeground(t.GreenDark)
 	}
 	return style
 }

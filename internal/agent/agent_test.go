@@ -8,12 +8,11 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -25,7 +24,7 @@ var modelPairs = []modelPair{
 	{"zai-glm4.6", zAIBuilder("glm-4.6"), zAIBuilder("glm-4.5-air")},
 }
 
-func getModels(t *testing.T, r *recorder.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
+func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
 	large, err := pair.largeModel(t, r)
 	require.NoError(t, err)
 	small, err := pair.smallModel(t, r)
@@ -34,13 +33,12 @@ func getModels(t *testing.T, r *recorder.Recorder, pair modelPair) (fantasy.Lang
 }
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
-	r := newRecorder(t)
+	r := vcr.NewRecorder(t)
 	large, small := getModels(t, r, pair)
 	env := testEnv(t)
 
 	createSimpleGoProject(t, env.workingDir)
 	agent, err := coderAgent(r, env, large, small)
-	shell.Reset(env.workingDir)
 	require.NoError(t, err)
 	return agent, env
 }

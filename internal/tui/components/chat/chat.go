@@ -5,10 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -635,8 +636,8 @@ func (m *messageListCmp) convertAssistantMessage(msg message.Message, toolResult
 	for _, tc := range msg.ToolCalls() {
 		options := m.buildToolCallOptions(tc, msg, toolResultMap)
 		uiMessages = append(uiMessages, messages.NewToolCallCmp(msg.ID, tc, m.app.Permissions, options...))
-		// If this tool call is the agent tool, fetch nested tool calls
-		if tc.Name == agent.AgentToolName {
+		// If this tool call is the agent tool or agentic fetch, fetch nested tool calls
+		if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
 			agentToolSessionID := m.app.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
 			nestedMessages, _ := m.app.Messages.List(context.Background(), agentToolSessionID)
 			nestedToolResultMap := m.buildToolResultMap(nestedMessages)

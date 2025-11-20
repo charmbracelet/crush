@@ -1,15 +1,16 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -335,6 +336,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
+			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},
@@ -453,10 +455,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		{
 			ID:          "init",
 			Title:       "Initialize Project",
-			Description: "Create/Update the CRUSH.md memory file",
+			Description: fmt.Sprintf("Create/Update the %s memory file", config.Get().Options.InitializeAs),
 			Handler: func(cmd Command) tea.Cmd {
+				initPrompt, err := agent.InitializePrompt(*config.Get())
+				if err != nil {
+					return util.ReportError(err)
+				}
 				return util.CmdHandler(chat.SendMsg{
-					Text: agent.InitializePrompt(),
+					Text: initPrompt,
 				})
 			},
 		},

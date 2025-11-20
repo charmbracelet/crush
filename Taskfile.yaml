@@ -51,6 +51,13 @@ tasks:
     cmds:
       - go test ./... {{.CLI_ARGS}}
 
+  test:record:
+    desc: Run tests and record all VCR cassettes again
+    aliases: [record]
+    cmds:
+      - rm -r internal/agent/testdata
+      - go test -v -count=1 -timeout=1h ./internal/agent
+
   fmt:
     desc: Run gofumpt
     cmds:
@@ -68,6 +75,7 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
+      - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
 
   profile:cpu:

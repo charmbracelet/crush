@@ -446,7 +446,7 @@ func (s *splashCmp) View() string {
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Choose a Model"),
+				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("To start, let’s choose a provider and model."),
 				"",
 				modelListView,
 			),

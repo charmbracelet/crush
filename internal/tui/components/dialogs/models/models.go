@@ -104,7 +104,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.wWidth = msg.Width
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
-		m.help.Width = m.width - 2
+		m.help.SetWidth(m.width - 2)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)

@@ -55,7 +55,7 @@ type editorCmp struct {
 	x, y               int
 	app                *app.App
 	session            session.Session
-	textarea           *textarea.Model
+	textarea           textarea.Model
 	attachments        []message.Attachment
 	deleteMode         bool
 	readyPlaceholder   string

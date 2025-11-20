@@ -186,11 +186,11 @@ That said, you can also set environment variables for preferred providers.
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `GROQ_API_KEY`              | Groq                                               |
-| `AWS_ACCESS_KEY_ID`         | AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`     | AWS Bedrock (Claude)                               |
-| `AWS_REGION`                | AWS Bedrock (Claude)                               |
-| `AWS_PROFILE`               | AWS Bedrock (Custom Profile)                       |
-| `AWS_BEARER_TOKEN_BEDROCK`  | AWS Bedrock                                        |
+| `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                               |
+| `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                               |
+| `AWS_REGION`                | Amazon Bedrock (Claude)                               |
+| `AWS_PROFILE`               | Amazon Bedrock (Custom Profile)                       |
+| `AWS_BEARER_TOKEN_BEDROCK`  | Amazon Bedrock                                        |
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
@@ -374,11 +374,14 @@ it creates. You can customize this behavior with the `attribution` option:
 }
 ```
 
-- `trailer_style`: Controls the attribution trailer added to commit messages (default: `co-authored-by`)
-  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
-  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush` (includes the model name)
-  - `none`: No attribution trailer
-- `generated_with`: When true (default), adds `💘 Generated with Crush` line to commit messages and PR descriptions
+- `trailer_style`: Controls the attribution trailer added to commit messages
+  (default: `assisted-by`)
+	- `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
+	  (includes the model name)
+	- `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+	- `none`: No attribution trailer
+- `generated_with`: When true (default), adds `💘 Generated with Crush` line to
+  commit messages and PR descriptions
 
 ### Custom Providers
 

@@ -382,7 +382,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s, statusCmd := a.status.Update(util.InfoMsg{
 			Type: util.InfoTypeUpdate,
 			Msg:  statusMsg,
-			TTL:  30 * time.Second,
+			TTL:  10 * time.Second,
 		})
 		a.status = s.(status.StatusCmp)
 		return a, statusCmd

@@ -101,6 +101,15 @@ tasks:
     generates:
       - schema.json
 
+  sqlc:
+    desc: Generate .sql.go from .sql query definitions
+    cmds:
+      - sqlc generate ./internal/db/sql
+    sources:
+      - ./internal/db/sql/*.sql
+    generates:
+      - ./internal/db/sql/*.sql.go
+
   release:
     desc: Create and push a new tag following semver
     vars:

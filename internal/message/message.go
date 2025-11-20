@@ -26,6 +26,7 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	FullList(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 }
@@ -149,6 +150,11 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 		}
 	}
 	return messages, nil
+}
+
+func (s *service) FullList(ctx context.Context) ([]Message, error) {
+	dbMessages, err := s.q.ListAllMessages(ctx)
+	return nil, nil
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {

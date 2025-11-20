@@ -200,6 +200,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		msgs, err := m.getUserMessagesAsText()
 		if err != nil {
 			// TODO(tauraamui): handle error for loading history better in the UI later
+			panic(err)
 		}
 		if len(msgs) == 0 {
 			break

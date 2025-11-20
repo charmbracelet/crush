@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -199,8 +200,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		msgs, err := m.getUserMessagesAsText()
 		if err != nil {
-			// TODO(tauraamui): handle error for loading history better in the UI later
-			panic(err)
+			slog.Error("failed to acquire all sessions message history", "error", err)
+			return m, nil
 		}
 		if len(msgs) == 0 {
 			break

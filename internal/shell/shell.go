@@ -182,7 +182,7 @@ func CommandsBlocker(cmds []string) BlockFunc {
 }
 
 // ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
-func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
+func ArgumentsBlocker(cmd string, args, flags []string) BlockFunc {
 	return func(parts []string) bool {
 		if len(parts) == 0 || parts[0] != cmd {
 			return false
@@ -200,7 +200,7 @@ func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 	}
 }
 
-func splitArgsFlags(parts []string) (args []string, flags []string) {
+func splitArgsFlags(parts []string) (args, flags []string) {
 	args = make([]string, 0, len(parts))
 	flags = make([]string, 0, len(parts))
 	for _, part := range parts {

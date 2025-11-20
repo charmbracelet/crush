@@ -615,7 +615,7 @@ func (p *chatPage) setCompactMode(compact bool) {
 	}
 }
 
-func (p *chatPage) handleCompactMode(newWidth int, newHeight int) {
+func (p *chatPage) handleCompactMode(newWidth, newHeight int) {
 	if p.forceCompact {
 		return
 	}

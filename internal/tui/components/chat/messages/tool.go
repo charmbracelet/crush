@@ -54,24 +54,24 @@ type ToolCallCmp interface {
 type ToolCallStreamMsg struct {
 	ToolCallID message.ToolCallID
 	Output     string
-	Timestamp   time.Time
-	IsPartial   bool // Whether this is a partial chunk
+	Timestamp  time.Time
+	IsPartial  bool // Whether this is a partial chunk
 }
 
 // ToolCallCompleteMsg represents final completion
 type ToolCallCompleteMsg struct {
-	ToolCallID   message.ToolCallID
-	FinalResult  message.ToolResult
-	Duration     time.Duration
-	Timestamp    time.Time
+	ToolCallID  message.ToolCallID
+	FinalResult message.ToolResult
+	Duration    time.Duration
+	Timestamp   time.Time
 }
 
 // ToolCallStateChangeMsg represents immutable state transition
 type ToolCallStateChangeMsg struct {
 	ToolCallID message.ToolCallID
-	NewState    enum.ToolCallState
-	OldState    enum.ToolCallState
-	Timestamp   time.Time
+	NewState   enum.ToolCallState
+	OldState   enum.ToolCallState
+	Timestamp  time.Time
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -91,12 +91,12 @@ type toolCallCmp struct {
 	anim           util.Model          // Animation component for pending states
 
 	// Streaming display for real-time tool output
-	streamingContent []string           // Accumulated output lines from running tools
-	maxStreamLines  int              // Maximum lines to keep in stream buffer
-	showStreaming    bool             // Whether to show streaming output vs final result
+	streamingContent []string // Accumulated output lines from running tools
+	maxStreamLines   int      // Maximum lines to keep in stream buffer
+	showStreaming    bool     // Whether to show streaming output vs final result
 
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
-	mu             sync.RWMutex     // Mutex for thread-safe access to mutable fields
+	mu              sync.RWMutex  // Mutex for thread-safe access to mutable fields
 }
 
 // ToolCallOption provides functional options for configuring tool call components
@@ -137,7 +137,7 @@ type StreamOutputMsg struct {
 
 // StreamCompleteMsg indicates that tool execution has finished and streaming should stop
 type StreamCompleteMsg struct {
-	ToolCallID message.ToolCallID
+	ToolCallID  message.ToolCallID
 	FinalResult message.ToolResult
 }
 
@@ -182,7 +182,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			// Split output into lines and append to streaming buffer
 			lines := strings.Split(msg.Output, "\n")
 			m.streamingContent = append(m.streamingContent, lines...)
-			
+
 			// Keep only last N lines to prevent memory issues
 			if len(m.streamingContent) > m.maxStreamLines {
 				excess := len(m.streamingContent) - m.maxStreamLines
@@ -191,17 +191,17 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.mu.Unlock()
 		}
 		return m, nil
-		
+
 	case StreamCompleteMsg:
 		// Handle streaming completion - switch to final result
 		if msg.ToolCallID == m.call.ID {
 			m.mu.Lock()
 			m.result = msg.FinalResult
-			m.showStreaming = false // Disable streaming, show final result
+			m.showStreaming = false  // Disable streaming, show final result
 			m.streamingContent = nil // Clear streaming buffer
-			
+
 			// CRITICAL: Update call.State to reflect result - eliminates need for getEffectiveDisplayState()
-			if msg.FinalResult.IsResultError() {
+			if msg.FinalResult.ResultState.IsError() {
 				m.call.State = enum.ToolCallStateFailed
 			} else {
 				m.call.State = enum.ToolCallStateCompleted
@@ -210,7 +210,7 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.RefreshAnimation()
 		}
 		return m, nil
-		
+
 	case anim.StepMsg:
 		// Performance optimization: skip updates if no active animations
 		if !m.IsAnimating() {
@@ -248,19 +248,18 @@ func (m *toolCallCmp) viewUnboxed() string {
 	// Do ALL state access within the locked region to eliminate race conditions
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	// Determine effective display state atomically
 	effectiveState := enum.ToolCallState(m.call.State)
 	if !m.result.ToolCallID.IsEmpty() {
 		// We have a result - use result outcome
-		resultState := m.result.GetResultState()
-		if resultState.IsError() {
+		if m.result.ResultState.IsError() {
 			effectiveState = enum.ToolCallStateFailed
 		} else {
 			effectiveState = enum.ToolCallStateCompleted
 		}
 	}
-	
+
 	switch effectiveState {
 	case enum.ToolCallStatePending:
 		// Render with current state, no need for snapshot methods
@@ -272,17 +271,17 @@ func (m *toolCallCmp) viewUnboxed() string {
 		}
 		tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
 		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-		
+
 	default:
 		// Show streaming content if available and enabled
 		if m.showStreaming && len(m.streamingContent) > 0 {
 			if len(m.streamingContent) == 0 {
 				return ""
 			}
-			
+
 			t := styles.CurrentTheme()
 			width := m.textWidth() - 2
-			
+
 			// Copy streaming content to avoid race conditions during rendering
 			streamingCopy := append([]string{}, m.streamingContent...)
 			content := strings.Join(streamingCopy, "\n")
@@ -302,7 +301,7 @@ func (m *toolCallCmp) viewUnboxed() string {
 				return processed
 			})
 		}
-		
+
 		// Show final result
 		{
 			r := registry.lookup(m.call.Name)
@@ -345,7 +344,7 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		if m.result.ToolCallID.IsEmpty() {
 			log.Error("Unknown state: ToolCallState = Completed and ToolCallID is empty")
 		}
-		if m.result.IsResultError() {
+		if m.result.ResultState.IsError() {
 			parts = append(parts, "### Error:")
 			parts = append(parts, m.result.Content)
 		} else {
@@ -883,10 +882,6 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 
 // Rendering methods
 
-
-
-
-
 // style returns the lipgloss style for the tool call component.
 // Applies muted colors and focus-dependent border styles.
 func (m *toolCallCmp) style() lipgloss.Style {
@@ -947,7 +942,7 @@ func (m *toolCallCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the width of the tool call component for text wrapping
-func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
+func (m *toolCallCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	for _, nested := range m.nestedToolCalls {
 		nested.SetSize(width, height)
@@ -960,10 +955,10 @@ func (m *toolCallCmp) renderStreamingContent() string {
 	if len(m.streamingContent) == 0 {
 		return ""
 	}
-	
+
 	t := styles.CurrentTheme()
 	width := m.textWidth() - 2
-	
+
 	// Use our unified rendering pipeline with streaming content
 	content := strings.Join(m.streamingContent, "\n")
 	return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
@@ -983,8 +978,6 @@ func (m *toolCallCmp) renderStreamingContent() string {
 		return processed
 	})
 }
-
-
 
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.
@@ -1039,7 +1032,3 @@ func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
 	m.call.State = state
 	m.RefreshAnimation()
 }
-
-
-
-

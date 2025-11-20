@@ -88,7 +88,7 @@ func imageToString(width, height uint, img image.Image) (string, error) {
 	return str.String(), nil
 }
 
-func readerToImage(width uint, height uint, url string, r io.Reader) (string, error) {
+func readerToImage(width, height uint, url string, r io.Reader) (string, error) {
 	if strings.HasSuffix(strings.ToLower(url), ".svg") {
 		return svgToImage(width, height, r)
 	}
@@ -101,7 +101,7 @@ func readerToImage(width uint, height uint, url string, r io.Reader) (string, er
 	return imageToString(width, height, img)
 }
 
-func svgToImage(width uint, height uint, r io.Reader) (string, error) {
+func svgToImage(width, height uint, r io.Reader) (string, error) {
 	// Original author: https://stackoverflow.com/users/10826783/usual-human
 	// https://stackoverflow.com/questions/42993407/how-to-create-and-export-svg-to-png-jpeg-in-golang
 	// Adapted to use size from SVG, and to use temp file.

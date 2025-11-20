@@ -365,7 +365,7 @@ func (state ToolCallState) IsEndTurn() bool {
 }
 
 // IsCanceled returns true if the state indicates cancellation
-// Replaces FinishReasonCanceled check in TUI  
+// Replaces FinishReasonCanceled check in TUI
 func (state ToolCallState) IsCanceled() bool {
 	return state == ToolCallStateCancelled
 }

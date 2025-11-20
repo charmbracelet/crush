@@ -65,22 +65,22 @@ func (dr defensiveRenderer) Render(v *toolCallCmp) string {
 	if v == nil {
 		return "⚠️  Tool call component is nil"
 	}
-	
+
 	// Use read lock to get consistent state
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	
+
 	// Check for corrupted/zero values
 	if v.call.Name == "" {
 		return "⚠️  Tool call has empty name"
 	}
-	
+
 	// Check for extremely large content that could cause memory issues
 	const maxSafeContent = 10 * 1024 * 1024 // 10MB limit
 	if len(v.result.Content) > maxSafeContent {
 		return "⚠️  Tool output too large to display safely"
 	}
-	
+
 	// Call inner renderer with our protections
 	return dr.inner.Render(v)
 }
@@ -949,7 +949,7 @@ func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func()
 		// Don't show content, render status message only
 		t := styles.CurrentTheme()
 		message := ""
-		if v.result.IsResultError() {
+		if v.call.State == enum.ToolCallStateFailed {
 			message = v.renderToolCallError()
 		} else {
 			m, err := v.GetToolCall().State.RenderTUIMessageColored()
@@ -1003,15 +1003,15 @@ func renderContentUnified(v *toolCallCmp, content string, processor ContentProce
 
 	t := styles.CurrentTheme()
 	width := v.textWidth() - 2
-	
+
 	// === COMMON LINE PROCESSING ===
 	lines := strings.Split(content, "\n")
-	
+
 	// Apply type-specific processing
 	if processor != nil {
 		lines = processor(lines, v)
 	}
-	
+
 	// === COMMON TRUNCATION ===
 	var out []string
 	for i, ln := range lines {
@@ -1020,7 +1020,7 @@ func renderContentUnified(v *toolCallCmp, content string, processor ContentProce
 		}
 		out = append(out, ln)
 	}
-	
+
 	// Add truncation message if needed
 	if len(lines) > responseContextHeight {
 		truncateMsg := fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)
@@ -1029,7 +1029,7 @@ func renderContentUnified(v *toolCallCmp, content string, processor ContentProce
 			Width(width).
 			Render(truncateMsg))
 	}
-	
+
 	return strings.Join(out, "\n")
 }
 

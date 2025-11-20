@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -668,7 +669,7 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 	}
 
 	// Add cancelled status if applicable
-	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
+	if msg.FinishPart() != nil && msg.FinishPart().Reason == fantasy.FinishReasonStop {
 		options = append(options, messages.WithToolCallState(enum.ToolCallStateCancelled))
 	}
 
@@ -681,7 +682,7 @@ func (m *messageListCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the component dimensions and propagates to the list component.
-func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
+func (m *messageListCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
 	if m.promptQueue > 0 {

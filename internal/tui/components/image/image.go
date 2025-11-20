@@ -55,7 +55,7 @@ func (m Model) View() string {
 
 type errMsg struct{ error }
 
-func (m Model) Redraw(width uint, height uint, url string) tea.Cmd {
+func (m Model) Redraw(width, height uint, url string) tea.Cmd {
 	return func() tea.Msg {
 		return redrawMsg{
 			width:  width,

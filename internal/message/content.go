@@ -51,20 +51,6 @@ const (
 	Tool      MessageRole = "tool"
 )
 
-type FinishReason string
-
-const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
-
-	// Should never happen
-	FinishReasonUnknown FinishReason = "unknown"
-)
-
 type ContentPart interface {
 	isPart()
 }
@@ -132,41 +118,22 @@ type ToolCall struct {
 func (ToolCall) isPart() {}
 
 type ToolResult struct {
-	ToolCallID      ToolCallID          `json:"tool_call_id"`
-	Name            string              `json:"name"`
-	Content         string              `json:"content"`
-	Data            string              `json:"data"`
-	MIMEType        string              `json:"mime_type"`
-	Metadata        string              `json:"metadata"`
-	// Legacy field for backward compatibility - deprecated
-	IsError         bool                `json:"is_error"`
+	ToolCallID  ToolCallID           `json:"tool_call_id"`
+	Name        string               `json:"name"`
+	Content     string               `json:"content"`
+	Data        string               `json:"data"`
+	MIMEType    string               `json:"mime_type"`
+	Metadata    string               `json:"metadata"`
+	ResultState enum.ToolResultState `json:"result_state"`
 }
 
 func (ToolResult) isPart() {}
 
-// GetResultState returns the current result state
-// If ResultState is not set, it derives from legacy IsError field for backward compatibility
-func (tr ToolResult) GetResultState() enum.ToolResultState {
-	// Fall back to legacy IsError field for backward compatibility
-	return enum.FromBool(tr.IsError)
-}
-
-// IsResultError returns true if the tool result indicates an error state
-// This method provides semantic clarity over the legacy IsError field
-func (tr ToolResult) IsResultError() bool {
-	return tr.GetResultState().IsError()
-}
-
-// IsResultSuccess returns true if the tool result indicates success
-func (tr ToolResult) IsResultSuccess() bool {
-	return tr.GetResultState().IsSuccess()
-}
-
 type Finish struct {
-	Reason  FinishReason `json:"reason"`
-	Time    int64        `json:"time"`
-	Message string       `json:"message,omitempty"`
-	Details string       `json:"details,omitempty"`
+	Reason  fantasy.FinishReason `json:"reason"`
+	Time    int64                `json:"time"`
+	Message string               `json:"message,omitempty"`
+	Details string               `json:"details,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -259,7 +226,7 @@ func (m *Message) FinishPart() *Finish {
 	return nil
 }
 
-func (m *Message) FinishReason() FinishReason {
+func (m *Message) FinishReason() fantasy.FinishReason {
 	for _, part := range m.Parts {
 		if c, ok := part.(Finish); ok {
 			return c.Reason
@@ -273,20 +240,29 @@ func (m *Message) FinishReason() FinishReason {
 func (m *Message) GetToolCallState() enum.ToolCallState {
 	reason := m.FinishReason()
 	switch reason {
-	case FinishReasonEndTurn:
+	// FinishReasonStop indicates the model generated a stop sequence.
+	case fantasy.FinishReasonStop:
 		return enum.ToolCallStateCompleted
-	case FinishReasonToolUse:
+		// FinishReasonLength indicates the model generated maximum number of tokens.
+	case fantasy.FinishReasonLength:
 		return enum.ToolCallStateCompleted
-	case FinishReasonMaxTokens:
+		// FinishReasonContentFilter indicates content filter violation stopped the model.
+	case fantasy.FinishReasonContentFilter:
 		return enum.ToolCallStateFailed
-	case FinishReasonCanceled:
-		return enum.ToolCallStateCancelled
-	case FinishReasonPermissionDenied:
-		return enum.ToolCallStatePermissionDenied
-	case FinishReasonError:
+		// FinishReasonToolCalls indicates the model triggered tool calls.
+	case fantasy.FinishReasonToolCalls:
+		return enum.ToolCallStatePending
+		// FinishReasonError indicates the model stopped because of an error.
+	case fantasy.FinishReasonError:
+		return enum.ToolCallStateFailed
+		// FinishReasonOther indicates the model stopped for other reasons.
+	case fantasy.FinishReasonOther:
+		return enum.ToolCallStateFailed
+		// FinishReasonUnknown indicates the model has not transmitted a finish reason.
+	case fantasy.FinishReasonUnknown:
 		return enum.ToolCallStateFailed
 	default:
-		return enum.ToolCallStatePending
+		return enum.ToolCallStateFailed
 	}
 }
 
@@ -331,7 +307,7 @@ func (m *Message) AppendReasoningContent(delta string) {
 	}
 }
 
-func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {
+func (m *Message) AppendThoughtSignature(signature, toolCallID string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
@@ -476,7 +452,7 @@ func (m *Message) SetToolResults(tr []ToolResult) {
 	}
 }
 
-func (m *Message) AddFinish(reason FinishReason, message, details string) {
+func (m *Message) AddFinish(reason fantasy.FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -557,7 +533,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		var parts []fantasy.MessagePart
 		for _, result := range m.ToolResults() {
 			var content fantasy.ToolResultOutputContent
-			if result.IsError {
+			if result.ResultState.IsError() {
 				content = fantasy.ToolResultOutputContentError{
 					Error: errors.New(result.Content),
 				}

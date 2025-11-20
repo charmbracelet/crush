@@ -556,7 +556,7 @@ func allToolNames() []string {
 	}
 }
 
-func resolveAllowedTools(allTools []string, disabledTools []string) []string {
+func resolveAllowedTools(allTools, disabledTools []string) []string {
 	if disabledTools == nil {
 		return allTools
 	}
@@ -570,7 +570,7 @@ func resolveReadOnlyTools(tools []string) []string {
 	return filterSlice(tools, readOnlyTools, true)
 }
 
-func filterSlice(data []string, mask []string, include bool) []string {
+func filterSlice(data, mask []string, include bool) []string {
 	filtered := []string{}
 	for _, s := range data {
 		// if include is true, we include items that ARE in the mask

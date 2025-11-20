@@ -35,11 +35,9 @@ func (state ToolResultState) IsSuccess() bool {
 	return state == ToolResultStateSuccess || state == ToolResultStatePartial
 }
 
-// IsError returns true if the result state indicates failed execution
+// IsError returns true if the result state indicates an error
 func (state ToolResultState) IsError() bool {
-	return state == ToolResultStateError ||
-		state == ToolResultStateTimeout ||
-		state == ToolResultStateUnknown
+	return state == ToolResultStateError || state == ToolResultStateTimeout || state == ToolResultStateUnknown
 }
 
 // IsFinal returns true if the result state is final (no further processing expected)
@@ -152,19 +150,4 @@ func (state ToolResultState) RenderTUIMessage() string {
 	default:
 		return "Unknown result state"
 	}
-}
-
-// FromBool converts legacy boolean IsError to ToolResultState
-// This provides backward compatibility during migration
-func FromBool(isError bool) ToolResultState {
-	if isError {
-		return ToolResultStateError
-	}
-	return ToolResultStateSuccess
-}
-
-// ToBool converts ToolResultState back to boolean for legacy code
-// This provides backward compatibility during migration
-func (state ToolResultState) ToBool() bool {
-	return state.IsError()
 }

@@ -103,12 +103,12 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
-	
+
 	// PR #1385: Timer and blinking animation settings
 	TimerInterval    time.Duration // Interval for timer animations (1s default)
 	BlinkingInterval time.Duration // Interval for blinking animations (1s default)
-	IsTimer          bool         // Whether this is a timer animation
-	IsBlinking       bool         // Whether this is a blinking animation
+	IsTimer          bool          // Whether this is a timer animation
+	IsBlinking       bool          // Whether this is a blinking animation
 }
 
 // Default settings.
@@ -131,16 +131,16 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               int
-	
+
 	// PR #1385: Timer and blinking animation state
-	timerCount       atomic.Int64         // timer counter for countdown/up
-	blinkState       atomic.Bool          // blinking on/off state
-	isTimer          bool                // whether this is a timer animation
-	isBlinking       bool                // whether this is a blinking animation
-	timerInterval    time.Duration        // timer interval for counting
-	blinkingInterval time.Duration        // blinking interval
-	lastTimerUpdate  time.Time           // last time timer was updated
-	lastBlinkUpdate  time.Time           // last time blink was updated
+	timerCount       atomic.Int64  // timer counter for countdown/up
+	blinkState       atomic.Bool   // blinking on/off state
+	isTimer          bool          // whether this is a timer animation
+	isBlinking       bool          // whether this is a blinking animation
+	timerInterval    time.Duration // timer interval for counting
+	blinkingInterval time.Duration // blinking interval
+	lastTimerUpdate  time.Time     // last time timer was updated
+	lastBlinkUpdate  time.Time     // last time blink was updated
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -164,7 +164,7 @@ func New(opts Settings) *Anim {
 	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
-	
+
 	// PR #1385: Initialize timer and blinking state
 	a.isTimer = opts.IsTimer
 	a.isBlinking = opts.IsBlinking
@@ -366,7 +366,7 @@ func (a *Anim) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			// Reject messages that are not for this instance.
 			return a, nil
 		}
-		
+
 		currentTime := time.Now()
 
 		// PR #1385: Handle timer animations (counts up every 1s)

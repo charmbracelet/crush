@@ -1465,7 +1465,7 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 }
 
 // SetSize implements List.
-func (l *list[T]) SetSize(width int, height int) tea.Cmd {
+func (l *list[T]) SetSize(width, height int) tea.Cmd {
 	oldWidth := l.width
 	l.width = width
 	l.height = height

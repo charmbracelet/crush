@@ -56,7 +56,7 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 }
 
 // Start creates and starts a new background shell with the given command.
-func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command, description string) (*BackgroundShell, error) {
 	// Check job limit
 	if m.shells.Len() >= MaxBackgroundJobs {
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
@@ -176,7 +176,7 @@ func (m *BackgroundShellManager) KillAll() {
 }
 
 // GetOutput returns the current output of a background shell.
-func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool, err error) {
+func (bs *BackgroundShell) GetOutput() (stdout, stderr string, done bool, err error) {
 	select {
 	case <-bs.done:
 		return bs.stdout.String(), bs.stderr.String(), true, bs.exitErr

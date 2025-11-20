@@ -51,8 +51,8 @@ type MessageCmp interface {
 // animations, and state management.
 type messageCmp struct {
 	mu      sync.RWMutex // Thread-safe access to message state
-	width   int  // Component width for text wrapping
-	focused bool // Focus state for border styling
+	width   int          // Component width for text wrapping
+	focused bool         // Focus state for border styling
 
 	// Core message data and state
 	message        message.Message     // The underlying message content
@@ -326,7 +326,7 @@ func (m *messageCmp) determineAnimationState() enum.AnimationState {
 	// Protect concurrent access to message fields
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if m.message.Role != message.Assistant {
 		return enum.AnimationStateStatic
 	}
@@ -369,7 +369,7 @@ func (m *messageCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the width of the message component for text wrapping
-func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
+func (m *messageCmp) SetSize(width, height int) tea.Cmd {
 	m.width = ordered.Clamp(width, 1, 120)
 	m.thinkingViewport.SetWidth(m.width - 4)
 	return nil
@@ -443,7 +443,7 @@ func (m *assistantSectionModel) GetSize() (int, int) {
 	return m.width, 1
 }
 
-func (m *assistantSectionModel) SetSize(width int, height int) tea.Cmd {
+func (m *assistantSectionModel) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	return nil
 }

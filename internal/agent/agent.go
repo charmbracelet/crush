@@ -58,7 +58,7 @@ type SessionAgentCall struct {
 
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
-	SetModels(large Model, small Model)
+	SetModels(large, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	Cancel(sessionID string)
 	CancelAll()
@@ -105,31 +105,19 @@ type SessionAgentOptions struct {
 
 // mapToolCallStateToFinishReason converts ToolCallState to FinishReason
 // This makes ToolCallState the single source of truth for completion states
-func mapToolCallStateToFinishReason(state enum.ToolCallState) message.FinishReason {
-	switch state {
-	case enum.ToolCallStateCompleted:
-		return message.FinishReasonToolUse
-	case enum.ToolCallStateFailed:
-		return message.FinishReasonMaxTokens // Best match for tool execution failures
-	case enum.ToolCallStateCancelled:
-		return message.FinishReasonEndTurn
-	case enum.ToolCallStatePermissionDenied:
-		return message.FinishReasonPermissionDenied
-	default:
-		return message.FinishReasonUnknown
-	}
-}
+// Use centralized mapping from enum package
+var stateMapping = enum.NewToolCallStateMapping()
 
 // mapErrorConditionToFinishReason converts error conditions to FinishReason
 // Used for session-level errors, not tool-level states
-func mapErrorConditionToFinishReason(isCancel, isPermission bool) message.FinishReason {
+func mapErrorConditionToFinishReason(isCancel, isPermission bool) fantasy.FinishReason {
 	if isCancel {
-		return message.FinishReasonEndTurn
+		return fantasy.FinishReasonStop
 	}
 	if isPermission {
-		return message.FinishReasonPermissionDenied
+		return fantasy.FinishReasonError
 	}
-	return message.FinishReasonError
+	return fantasy.FinishReasonError
 }
 
 func NewSessionAgent(
@@ -290,7 +278,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AppendReasoningContent(reasoning.Text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnReasoningDelta: func(id string, text string) error {
+		OnReasoningDelta: func(id, text string) error {
 			currentAssistant.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
@@ -314,7 +302,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.FinishThinking()
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnTextDelta: func(id string, text string) error {
+		OnTextDelta: func(id, text string) error {
 			// Strip leading newline from initial text content. This is is
 			// particularly important in non-interactive mode where leading
 			// newlines are very visible.
@@ -325,7 +313,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AppendContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnToolInputStart: func(id string, toolName string) error {
+		OnToolInputStart: func(id, toolName string) error {
 			toolCall := message.ToolCall{
 				ID:               message.ToolCallID(id),
 				Name:             toolName,
@@ -391,8 +379,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				ToolCallID:  message.ToolCallID(result.ToolCallID),
 				Name:        result.ToolName,
 				Content:     resultContent,
-				IsError:     resultState.ToBool(), // Backward compatibility
 				Metadata:    result.ClientMetadata,
+				ResultState: resultState,
 			}
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
@@ -452,7 +440,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			finishReason := mapToolCallStateToFinishReason(finalState)
+			finishReason := stateMapping.ToolCallStateToFinishReason(finalState)
 			currentAssistant.AddFinish(finishReason, "", "")
 			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			sessionLock.Lock()
@@ -465,6 +453,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
+				// TODO: Inform the user about this!
 				cw := a.largeModel.CatwalkCfg.ContextWindow
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
@@ -500,7 +489,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, createErr
 		}
 		for _, tc := range toolCalls {
-			//TODO: Extract this whole blocks logic into it's own function!
+			// TODO: Extract this whole blocks logic into it's own function!
 
 			if tc.State.IsNonFinalState() {
 				// TODO: double check which state we need to set this to here
@@ -544,12 +533,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				tc.State = enum.ToolCallStateFailed
 				// Note: content already set to default error message above
 			}
-			toolResult := message.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    content,
-				IsError:    true,
+			var resultState enum.ToolResultState
+			switch tc.State {
+			case enum.ToolCallStateCancelled:
+				resultState = enum.ToolResultStateCancelled
+			case enum.ToolCallStatePermissionDenied:
+				resultState = enum.ToolResultStateError
+			case enum.ToolCallStateFailed:
+				resultState = enum.ToolResultStateError
+			default:
+				resultState = enum.ToolResultStateSuccess
 			}
+			toolResult := message.ToolResult{
+				ToolCallID:  tc.ID,
+				Name:        tc.Name,
+				Content:     content,
+				ResultState: resultState,
+			}
+
 			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
@@ -564,7 +565,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		switch {
-		//TODO: Extract this whole switch logic into it's own function!
+		// TODO: Extract this whole switch logic into it's own function!
 		case isCancelErr:
 			currentAssistant.AddFinish(mapErrorConditionToFinishReason(true, false), "User canceled request", "")
 		case isPermissionErr:
@@ -666,7 +667,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			}
 			return callContext, prepared, nil
 		},
-		OnReasoningDelta: func(id string, text string) error {
+		OnReasoningDelta: func(id, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
 		},
@@ -971,7 +972,7 @@ func (a *sessionAgent) QueuedPrompts(sessionID string) int {
 	return len(l)
 }
 
-func (a *sessionAgent) SetModels(large Model, small Model) {
+func (a *sessionAgent) SetModels(large, small Model) {
 	a.largeModel = large
 	a.smallModel = small
 }

@@ -22,7 +22,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, name, toolName string, input string) (string, error) {
+func RunTool(ctx context.Context, name, toolName, input string) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return "", fmt.Errorf("error parsing parameters: %s", err)

@@ -39,7 +39,6 @@ func crushGetInput(ctx context.Context, args []string) error {
 // Usage: COMMAND=$(crush_get_tool_input "command")
 func crushGetToolInput(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
-
 	if len(args) != 2 {
 		fmt.Fprintln(hc.Stderr, "Usage: crush_get_tool_input <param_name>")
 		return interp.ExitStatus(1)

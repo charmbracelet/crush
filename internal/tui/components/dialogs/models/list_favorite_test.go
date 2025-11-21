@@ -50,7 +50,7 @@ func TestModelList_Favorites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(confPath, bts, 0o644))
 
-	// Also create empty providers.json to prevent loading real providers
+	// Create empty providers.json to prevent loading real providers
 	dataConfDir := filepath.Join(dataDir, "crush")
 	require.NoError(t, os.MkdirAll(dataConfDir, 0o755))
 	emptyProviders := []byte("[]")
@@ -90,16 +90,12 @@ func TestModelList_Favorites(t *testing.T) {
 	groups := cmp.list.Groups()
 	require.NotEmpty(t, groups)
 
-	// In our test setup, we expect exactly two groups:
-	// 1. Favorites
-	// 2. Provider Two (because Provider One was fully favorited and should be hidden)
 	require.Len(t, groups, 2, "Expected 2 groups: Favorites and Provider Two")
 
 	favGroup := groups[0]
 	p2Group := groups[1]
 
-	// 1. Assert Favorites group is correct
-	// We can't read the title, but we know it's the first group.
+	// Assert Favorites group is correct
 	require.Len(t, favGroup.Items, 3, "Favorites group should have 3 items")
 	favIDs := make([]string, len(favGroup.Items))
 	for i, item := range favGroup.Items {
@@ -109,11 +105,8 @@ func TestModelList_Favorites(t *testing.T) {
 	require.Contains(t, favIDs, "p1:p1-m2")
 	require.Contains(t, favIDs, "p2:p2-m1")
 
-	// 2. Assert Provider One group is HIDDEN by checking the group count is 2.
-	// If it were not hidden, we would have 3 groups.
-
-	// 3. Assert Provider Two group is VISIBLE and has the correct content
-	// We know this is the second group.
+	// Assert Provider One group is HIDDEN by checking the group count is 2.
+	// Assert Provider Two group is VISIBLE and has the correct content
 	require.Len(t, p2Group.Items, 1, "Provider Two group should have 1 non-favorite model")
 	require.Equal(t, "p2:p2-m2", p2Group.Items[0].ID(), "The remaining model in Provider Two should be p2-m2")
 }

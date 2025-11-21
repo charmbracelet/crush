@@ -33,9 +33,16 @@ func NewManager(workingDir, dataDir string, cfg *Config) *manager {
 		}
 	}
 
+	defaultHooksDir := filepath.Join(dataDir, "hooks")
+
 	// Ensure default directory if not specified.
 	if len(cfg.Directories) == 0 {
-		cfg.Directories = []string{filepath.Join(dataDir, "hooks")}
+		cfg.Directories = []string{defaultHooksDir}
+	} else {
+		// Always include default hooks directory even when user overrides config.
+		if !slices.Contains(cfg.Directories, defaultHooksDir) {
+			cfg.Directories = append([]string{defaultHooksDir}, cfg.Directories...)
+		}
 	}
 
 	return &manager{

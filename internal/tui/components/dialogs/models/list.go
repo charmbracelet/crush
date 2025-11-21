@@ -108,12 +108,10 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
-	var groups []list.Group[list.CompletionItem[ModelOption]]
+	// --- 1. INITIAL SETUP ---
 	favGroup := list.Group[list.CompletionItem[ModelOption]]{
 		Section: list.NewItemSection("Favorites"),
 	}
-
-	// first none section
 	hasPreselectedID := selectedID != ""
 	selectedItemID := selectedID
 	itemsByKey := make(map[string]list.CompletionItem[ModelOption])
@@ -130,10 +128,9 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	}
 	recentItems := cfg.RecentModels[selectedType]
 
-	// create and populate string slices containing all model IDs and provider IDs
-	// will be used to ensure that favorited models are favorited based on both ID
-	favoritedModelsConfig := config.Get().FavoritedModels
-	favoriteModelsByType := favoritedModelsConfig[selectedType]
+	// Correctly get and unpack the favorites for the current model type
+	allFavoritedModels := config.Get().FavoritedModels
+	favoriteModelsByType := allFavoritedModels[selectedType]
 	favoriteModels := make([]string, len(favoriteModelsByType))
 	for i, fm := range favoriteModelsByType {
 		favoriteModels[i] = fm.Model
@@ -144,13 +141,14 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	}
 
 	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
-	configured := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))
+	configuredInfo := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))
 
-	// Create a map to track which providers we've already added
+	// Slices to hold groups for configured and unconfigured providers
+	var configuredProviderGroups []list.Group[list.CompletionItem[ModelOption]]
+	var unconfiguredProviderGroups []list.Group[list.CompletionItem[ModelOption]]
 	addedProviders := make(map[string]bool)
 
-	// First, add any configured providers that are not in the known providers list
-	// These should appear at the top of the list
+	// --- 2. PROCESS CUSTOM CONFIGURED PROVIDERS ---
 	knownProviders, err := config.Providers(cfg)
 	if err != nil {
 		return util.ReportError(err)
@@ -160,104 +158,51 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 			continue
 		}
 
-		// Check if this provider is not in the known providers list
-		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) ||
-			!slices.ContainsFunc(m.providers, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
-			// Convert config provider to provider.Provider format
-			configProvider := catwalk.Provider{
-				Name:   providerConfig.Name,
-				ID:     catwalk.InferenceProvider(providerID),
-				Models: make([]catwalk.Model, len(providerConfig.Models)),
-			}
+		isCustomProvider := !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) })
 
-			// Convert models
-			for i, model := range providerConfig.Models {
-				configProvider.Models[i] = catwalk.Model{
-					ID:                     model.ID,
-					Name:                   model.Name,
-					CostPer1MIn:            model.CostPer1MIn,
-					CostPer1MOut:           model.CostPer1MOut,
-					CostPer1MInCached:      model.CostPer1MInCached,
-					CostPer1MOutCached:     model.CostPer1MOutCached,
-					ContextWindow:          model.ContextWindow,
-					DefaultMaxTokens:       model.DefaultMaxTokens,
-					CanReason:              model.CanReason,
-					ReasoningLevels:        model.ReasoningLevels,
-					DefaultReasoningEffort: model.DefaultReasoningEffort,
-					SupportsImages:         model.SupportsImages,
-				}
-			}
-
-			// Add this unknown provider to the list
-			name := configProvider.Name
-			if name == "" {
-				name = string(configProvider.ID)
-			}
+		if isCustomProvider {
+			// Build provider and group
+			configProvider := catwalk.Provider{Name: providerConfig.Name, ID: catwalk.InferenceProvider(providerID), Models: providerConfig.Models}
+			name := cmp.Or(configProvider.Name, string(configProvider.ID))
 			section := list.NewItemSection(name)
-			section.SetInfo(configured)
-			group := list.Group[list.CompletionItem[ModelOption]]{
-				Section: section,
-			}
+			section.SetInfo(configuredInfo)
+			group := list.Group[list.CompletionItem[ModelOption]]{Section: section}
+			favoriteCount := 0
 
-			totalModels := len(configProvider.Models)
-			var favoriteCount int = 0
-
+			// Process models for this provider
 			for _, model := range configProvider.Models {
-				var isFavorite bool = false
-				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
-					model.Name = " ✦ " + model.Name
-					isFavorite = true
-				}
-				modelOption := ModelOption{
-					Provider: configProvider,
-					Model:    model,
-				}
-				key := modelKey(string(configProvider.ID), model.ID)
-
-				var item list.CompletionItem[ModelOption]
-
+				isFavorite := slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID))
+				modelName := model.Name
 				if isFavorite {
-					item = list.NewCompletionItem(
-						model.Name,
-						modelOption,
-						list.WithCompletionID(key),
-						list.WithCompletionShortcut(string(configProvider.Name)),
-					)
-				} else {
-					item = list.NewCompletionItem(
-						model.Name,
-						modelOption,
-						list.WithCompletionID(key),
-					)
+					modelName = " ✦ " + modelName
 				}
-
+				modelOption := ModelOption{Provider: configProvider, Model: model}
+				key := modelKey(string(configProvider.ID), model.ID)
+				item := list.NewCompletionItem(modelName, modelOption, list.WithCompletionID(key))
 				itemsByKey[key] = item
 
-				if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID)) {
+				if isFavorite {
 					favoriteCount++
 					favGroup.Items = append(favGroup.Items, item)
 				} else {
 					group.Items = append(group.Items, item)
 				}
 
-				if !hasPreselectedID && selectedItemID == "" {
-					if model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
-						selectedItemID = item.ID()
-					}
+				if !hasPreselectedID && selectedItemID == "" && model.ID == currentModel.Model && string(configProvider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
 				}
 			}
 
-			if favoriteCount < totalModels {
-				groups = append(groups, group)
+			// Only add the group if not all models were favorites
+			if favoriteCount < len(configProvider.Models) {
+				configuredProviderGroups = append(configuredProviderGroups, group)
 			}
-
 			addedProviders[providerID] = true
 		}
 	}
 
-	// Then add the known providers from the predefined list
+	// --- 3. PROCESS PREDEFINED PROVIDERS ---
 	for _, provider := range m.providers {
-		// Skip if we already added this provider as an unknown provider
 		if addedProviders[string(provider.ID)] {
 			continue
 		}
@@ -269,146 +214,107 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 
 		displayProvider := provider
 		if providerConfigured {
+			// Augment with user-defined models and names
 			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
 			modelIndex := make(map[string]int, len(displayProvider.Models))
 			for i, model := range displayProvider.Models {
 				modelIndex[model.ID] = i
 			}
 			for _, model := range providerConfig.Models {
-				if model.ID == "" {
-					continue
+				if idx, ok := modelIndex[model.ID]; !ok {
+					displayProvider.Models = append(displayProvider.Models, model)
+				} else if model.Name != "" {
+					displayProvider.Models[idx].Name = model.Name
 				}
-				if idx, ok := modelIndex[model.ID]; ok {
-					if model.Name != "" {
-						displayProvider.Models[idx].Name = model.Name
-					}
-					continue
-				}
-				if model.Name == "" {
-					model.Name = model.ID
-				}
-				displayProvider.Models = append(displayProvider.Models, model)
-				modelIndex[model.ID] = len(displayProvider.Models) - 1
 			}
 		}
 
-		name := displayProvider.Name
-		if name == "" {
-			name = string(displayProvider.ID)
-		}
-
+		name := cmp.Or(displayProvider.Name, string(displayProvider.ID))
 		section := list.NewItemSection(name)
-		if providerConfigured {
-			section.SetInfo(configured)
-		}
-		group := list.Group[list.CompletionItem[ModelOption]]{
-			Section: section,
-		}
+		group := list.Group[list.CompletionItem[ModelOption]]{Section: section}
+		favoriteCount := 0
 
-		totalModels := len(displayProvider.Models)
-		var favoriteCount int = 0
-
+		// Process models for this provider
 		for _, model := range displayProvider.Models {
-			var isFavorite bool = false
-			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
-				model.Name = " ✦ " + model.Name
-				isFavorite = true
-			}
-			modelOption := ModelOption{
-				Provider: displayProvider,
-				Model:    model,
-			}
-			key := modelKey(string(displayProvider.ID), model.ID)
-
-			var item list.CompletionItem[ModelOption]
-
+			isFavorite := slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID))
+			modelName := model.Name
 			if isFavorite {
-				item = list.NewCompletionItem(
-					model.Name,
-					modelOption,
-					list.WithCompletionID(key),
-					list.WithCompletionShortcut(string(displayProvider.Name)),
-				)
-			} else {
-				item = list.NewCompletionItem(
-					model.Name,
-					modelOption,
-					list.WithCompletionID(key),
-				)
+				modelName = " ✦ " + modelName
 			}
-
+			modelOption := ModelOption{Provider: displayProvider, Model: model}
+			key := modelKey(string(displayProvider.ID), model.ID)
+			item := list.NewCompletionItem(modelName, modelOption, list.WithCompletionID(key))
 			itemsByKey[key] = item
 
-			if slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID)) {
+			if isFavorite {
 				favoriteCount++
 				favGroup.Items = append(favGroup.Items, item)
 			} else {
 				group.Items = append(group.Items, item)
 			}
 
-			if !hasPreselectedID && selectedItemID == "" {
-				if model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
-					selectedItemID = item.ID()
-				}
+			if !hasPreselectedID && selectedItemID == "" && model.ID == currentModel.Model && string(displayProvider.ID) == currentModel.Provider {
+				selectedItemID = item.ID()
 			}
 		}
-		if favoriteCount < totalModels {
-			groups = append(groups, group)
+
+		// Only add the group if not all models were favorites
+		if favoriteCount < len(displayProvider.Models) {
+			if providerConfigured {
+				section.SetInfo(configuredInfo)
+				configuredProviderGroups = append(configuredProviderGroups, group)
+			} else {
+				unconfiguredProviderGroups = append(unconfiguredProviderGroups, group)
+			}
 		}
 	}
 
-	if len(favGroup.Items) > 0 {
-		groups = append([]list.Group[list.CompletionItem[ModelOption]]{favGroup}, groups...)
-	}
+	// --- 4. ASSEMBLE FINAL GROUPS IN ORDER ---
+	var finalGroups []list.Group[list.CompletionItem[ModelOption]]
 
+	// 1. Recently used
 	if len(recentItems) > 0 {
-		recentSection := list.NewItemSection("Recently used")
-		recentGroup := list.Group[list.CompletionItem[ModelOption]]{
-			Section: recentSection,
-		}
+		recentGroup := list.Group[list.CompletionItem[ModelOption]]{Section: list.NewItemSection("Recently used")}
 		var validRecentItems []config.SelectedModel
 		for _, recent := range recentItems {
-			key := modelKey(recent.Provider, recent.Model)
-			option, ok := itemsByKey[key]
-			if !ok {
-				continue
-			}
-			validRecentItems = append(validRecentItems, recent)
-			recentID := fmt.Sprintf("recent::%s", key)
-			modelOption := option.Value()
-			providerName := modelOption.Provider.Name
-			if providerName == "" {
-				providerName = string(modelOption.Provider.ID)
-			}
-			item := list.NewCompletionItem(
-				modelOption.Model.Name,
-				option.Value(),
-				list.WithCompletionID(recentID),
-				list.WithCompletionShortcut(providerName),
-			)
-			recentGroup.Items = append(recentGroup.Items, item)
-			if !hasPreselectedID {
-				if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
+			if option, ok := itemsByKey[modelKey(recent.Provider, recent.Model)]; ok {
+				validRecentItems = append(validRecentItems, recent)
+				recentID := fmt.Sprintf("recent::%s", modelKey(recent.Provider, recent.Model)) // Keep recent:: prefix for unique ID
+				modelOption := option.Value()
+				providerName := cmp.Or(modelOption.Provider.Name, string(modelOption.Provider.ID))
+				item := list.NewCompletionItem(modelOption.Model.Name, option.Value(), list.WithCompletionID(recentID), list.WithCompletionShortcut(providerName))
+				recentGroup.Items = append(recentGroup.Items, item)
+				if !hasPreselectedID && recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
 					selectedItemID = recentID
 				}
 			}
 		}
-
 		if len(validRecentItems) != len(recentItems) {
-			if err := cfg.SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
-				return util.ReportError(err)
-			}
+			_ = cfg.SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems)
 		}
-
 		if len(recentGroup.Items) > 0 {
-			groups = append([]list.Group[list.CompletionItem[ModelOption]]{recentGroup}, groups...)
+			finalGroups = append(finalGroups, recentGroup)
 		}
 	}
 
+	// 2. Favorites
+	if len(favGroup.Items) > 0 {
+		finalGroups = append(finalGroups, favGroup)
+	}
+
+	// 3. Configured Providers
+	if len(configuredProviderGroups) > 0 {
+		finalGroups = append(finalGroups, configuredProviderGroups...)
+	}
+
+	// 4. Unconfigured Providers
+	if len(unconfiguredProviderGroups) > 0 {
+		finalGroups = append(finalGroups, unconfiguredProviderGroups...)
+	}
+
+	// --- 5. SET GROUPS AND SELECTION ---
 	var cmds []tea.Cmd
-
-	cmd := m.list.SetGroups(groups)
-
+	cmd := m.list.SetGroups(finalGroups)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}

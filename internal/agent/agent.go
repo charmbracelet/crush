@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -484,6 +485,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, err
 	}
 	wg.Wait()
+
+	// Send notification that agent has finished its turn.
+	notifBody := fmt.Sprintf("Agent's turn completed in \"%s\"", currentSession.Title)
+	_ = notification.Send("Crush is waiting...", notifBody)
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)

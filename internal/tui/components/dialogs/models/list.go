@@ -270,7 +270,14 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 				recentID := fmt.Sprintf("recent::%s", modelKey(recent.Provider, recent.Model)) // Keep recent:: prefix for unique ID
 				modelOption := option.Value()
 				providerName := cmp.Or(modelOption.Provider.Name, string(modelOption.Provider.ID))
-				item := list.NewCompletionItem(modelOption.Model.Name, option.Value(), list.WithCompletionID(recentID), list.WithCompletionShortcut(providerName))
+
+				isFavorite := slices.Contains(favoriteModels, recent.Model) && slices.Contains(favoriteModelsProviders, recent.Provider)
+				modelName := modelOption.Model.Name
+				if isFavorite {
+					modelName = " ✦ " + modelName
+				}
+
+				item := list.NewCompletionItem(modelName, option.Value(), list.WithCompletionID(recentID), list.WithCompletionShortcut(providerName))
 				recentGroup.Items = append(recentGroup.Items, item)
 				if !hasPreselectedID && recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
 					selectedItemID = recentID

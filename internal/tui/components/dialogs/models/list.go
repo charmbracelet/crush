@@ -108,7 +108,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	t := styles.CurrentTheme()
 	m.modelType = modelType
 
-	// --- 1. INITIAL SETUP ---
 	favGroup := list.Group[list.CompletionItem[ModelOption]]{
 		Section: list.NewItemSection("Favorites"),
 	}
@@ -128,7 +127,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	}
 	recentItems := cfg.RecentModels[selectedType]
 
-	// Correctly get and unpack the favorites for the current model type
 	allFavoritedModels := config.Get().FavoritedModels
 	favoriteModelsByType := allFavoritedModels[selectedType]
 	favoriteModels := make([]string, len(favoriteModelsByType))
@@ -143,12 +141,10 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 	configuredIcon := t.S().Base.Foreground(t.Success).Render(styles.CheckIcon)
 	configuredInfo := fmt.Sprintf("%s %s", configuredIcon, t.S().Subtle.Render("Configured"))
 
-	// Slices to hold groups for configured and unconfigured providers
 	var configuredProviderGroups []list.Group[list.CompletionItem[ModelOption]]
 	var unconfiguredProviderGroups []list.Group[list.CompletionItem[ModelOption]]
 	addedProviders := make(map[string]bool)
 
-	// --- 2. PROCESS CUSTOM CONFIGURED PROVIDERS ---
 	knownProviders, err := config.Providers(cfg)
 	if err != nil {
 		return util.ReportError(err)
@@ -161,7 +157,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		isCustomProvider := !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) })
 
 		if isCustomProvider {
-			// Build provider and group
 			configProvider := catwalk.Provider{Name: providerConfig.Name, ID: catwalk.InferenceProvider(providerID), Models: providerConfig.Models}
 			name := cmp.Or(configProvider.Name, string(configProvider.ID))
 			section := list.NewItemSection(name)
@@ -169,7 +164,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 			group := list.Group[list.CompletionItem[ModelOption]]{Section: section}
 			favoriteCount := 0
 
-			// Process models for this provider
 			for _, model := range configProvider.Models {
 				isFavorite := slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(configProvider.ID))
 				modelName := model.Name
@@ -201,7 +195,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		}
 	}
 
-	// --- 3. PROCESS PREDEFINED PROVIDERS ---
 	for _, provider := range m.providers {
 		if addedProviders[string(provider.ID)] {
 			continue
@@ -214,7 +207,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 
 		displayProvider := provider
 		if providerConfigured {
-			// Augment with user-defined models and names
 			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
 			modelIndex := make(map[string]int, len(displayProvider.Models))
 			for i, model := range displayProvider.Models {
@@ -234,7 +226,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		group := list.Group[list.CompletionItem[ModelOption]]{Section: section}
 		favoriteCount := 0
 
-		// Process models for this provider
 		for _, model := range displayProvider.Models {
 			isFavorite := slices.Contains(favoriteModels, model.ID) && slices.Contains(favoriteModelsProviders, string(displayProvider.ID))
 			modelName := model.Name
@@ -258,7 +249,6 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 			}
 		}
 
-		// Only add the group if not all models were favorites
 		if favoriteCount < len(displayProvider.Models) {
 			if providerConfigured {
 				section.SetInfo(configuredInfo)
@@ -269,10 +259,8 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		}
 	}
 
-	// --- 4. ASSEMBLE FINAL GROUPS IN ORDER ---
 	var finalGroups []list.Group[list.CompletionItem[ModelOption]]
 
-	// 1. Recently used
 	if len(recentItems) > 0 {
 		recentGroup := list.Group[list.CompletionItem[ModelOption]]{Section: list.NewItemSection("Recently used")}
 		var validRecentItems []config.SelectedModel
@@ -297,22 +285,18 @@ func (m *ModelListComponent) SetModelType(modelType int, selectedID string) tea.
 		}
 	}
 
-	// 2. Favorites
 	if len(favGroup.Items) > 0 {
 		finalGroups = append(finalGroups, favGroup)
 	}
 
-	// 3. Configured Providers
 	if len(configuredProviderGroups) > 0 {
 		finalGroups = append(finalGroups, configuredProviderGroups...)
 	}
 
-	// 4. Unconfigured Providers
 	if len(unconfiguredProviderGroups) > 0 {
 		finalGroups = append(finalGroups, unconfiguredProviderGroups...)
 	}
 
-	// --- 5. SET GROUPS AND SELECTION ---
 	var cmds []tea.Cmd
 	cmd := m.list.SetGroups(finalGroups)
 	if cmd != nil {

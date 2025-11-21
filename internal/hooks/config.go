@@ -2,8 +2,8 @@ package hooks
 
 // Config defines hook system configuration.
 type Config struct {
-	// Enabled controls whether hooks are executed.
-	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Enable or disable hook execution,default=true"`
+	// Disabled controls whether hooks are executed.
+	Disabled bool `json:"disabled,omitempty" jsonschema:"description=Disable hook execution,default=false"`
 
 	// TimeoutSeconds is the maximum time a hook can run.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty" jsonschema:"description=Maximum execution time for hooks in seconds,default=30,example=30"`
@@ -16,10 +16,10 @@ type Config struct {
 	// Map key is the hook type (e.g., "pre-tool-use").
 	Inline map[string][]InlineHook `json:"inline,omitempty" jsonschema:"description=Inline hook scripts defined in configuration"`
 
-	// Disabled is a list of hook paths to skip.
+	// DisableHooks is a list of hook paths to skip.
 	// Paths are relative to the hooks directory.
 	// Example: ["pre-tool-use/02-slow-check.sh"]
-	Disabled []string `json:"disabled,omitempty" jsonschema:"description=List of hook paths to disable,example=pre-tool-use/02-slow-check.sh"`
+	DisableHooks []string `json:"disable_hooks,omitempty" jsonschema:"description=List of hook paths to disable,example=pre-tool-use/02-slow-check.sh"`
 
 	// Environment variables to pass to hooks.
 	Environment map[string]string `json:"environment,omitempty" jsonschema:"description=Environment variables to pass to all hooks"`

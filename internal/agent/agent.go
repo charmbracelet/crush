@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -85,6 +86,9 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	isSubAgent           bool
+	hooksManager         hooks.Manager
+	workingDir           string
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -97,6 +101,9 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	DisableAutoSummarize bool
 	IsYolo               bool
+	IsSubAgent           bool
+	HooksManager         hooks.Manager
+	WorkingDir           string
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -115,6 +122,9 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
+		isSubAgent:           opts.IsSubAgent,
+		hooksManager:         opts.HooksManager,
+		workingDir:           opts.WorkingDir,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -172,7 +182,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	msg, err := a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -186,15 +196,36 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
+	// create the agent message asap to show loading
+	var currentAssistant *message.Message
+	assistantMessage, err := a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Parts:    []message.ContentPart{},
+		Model:    a.largeModel.ModelCfg.Model,
+		Provider: a.largeModel.ModelCfg.Provider,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	currentAssistant = &assistantMessage
+
+	hookErr := a.executePromptSubmitHook(genCtx, &msg, len(msgs) == 0)
+	if hookErr != nil {
+		// Delete the assistant message
+		// use the ctx since this could be a cancellation
+		deleteErr := a.messages.Delete(ctx, currentAssistant.ID)
+		return nil, cmp.Or(deleteErr, hookErr)
+	}
+
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
-	var currentAssistant *message.Message
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           call.Prompt,
+		Prompt:           msg.ContentWithHookContext(),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
@@ -206,6 +237,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		FrequencyPenalty: call.FrequencyPenalty,
 		// Before each step create a new assistant message.
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// only add new assistant message when its not the first step
+			if options.StepNumber != 0 {
+				var assistantMsg message.Message
+				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    a.largeModel.ModelCfg.Model,
+					Provider: a.largeModel.ModelCfg.Provider,
+				})
+				currentAssistant = &assistantMsg
+				// create the message first so we show loading asap
+				if err != nil {
+					return callContext, prepared, err
+				}
+			}
 			prepared.Messages = options.Messages
 			// Reset all cached items.
 			for i := range prepared.Messages {
@@ -219,6 +265,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
+
+				hookErr := a.executePromptSubmitHook(ctx, &msg, len(msgs) == 0)
+				if hookErr != nil {
+					return callContext, prepared, hookErr
+				}
+
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
@@ -242,18 +294,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
 			}
 
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    a.largeModel.ModelCfg.Model,
-				Provider: a.largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
-				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			currentAssistant = &assistantMsg
+			callContext = context.WithValue(callContext, tools.MessageIDContextKey, currentAssistant.ID)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -881,4 +922,49 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel
+}
+
+// executePromptSubmitHook executes the user-prompt-submit hook and applies modifications to the call.
+// Only runs for main agent (not sub-agents).
+func (a *sessionAgent) executePromptSubmitHook(ctx context.Context, msg *message.Message, isFirstMessage bool) error {
+	// Skip if sub-agent or no hooks manager.
+	if a.isSubAgent || a.hooksManager == nil {
+		return nil
+	}
+
+	// Convert attachments to file paths.
+	attachmentPaths := make([]string, len(msg.BinaryContent()))
+	for i, att := range msg.BinaryContent() {
+		attachmentPaths[i] = att.Path
+	}
+
+	hookResult, err := a.hooksManager.ExecuteUserPromptSubmit(ctx, msg.SessionID, a.workingDir, hooks.UserPromptSubmitData{
+		Prompt:         msg.Content().Text,
+		Attachments:    attachmentPaths,
+		Model:          a.largeModel.CatwalkCfg.ID,
+		Provider:       a.largeModel.Model.Provider(),
+		IsFirstMessage: isFirstMessage,
+	})
+	if err != nil {
+		return fmt.Errorf("hook execution failed: %w", err)
+	}
+
+	// Apply hook modifications to the prompt.
+	if hookResult.ModifiedPrompt != nil {
+		for i, part := range msg.Parts {
+			if _, ok := part.(message.TextContent); ok {
+				msg.Parts[i] = message.TextContent{Text: *hookResult.ModifiedPrompt}
+			}
+		}
+	}
+	msg.AddHookResult(hookResult)
+	err = a.messages.Update(ctx, *msg)
+	if err != nil {
+		return err
+	}
+	// If hook returned Continue: false, stop execution.
+	if !hookResult.Continue {
+		return ErrHookExecutionStop
+	}
+	return nil
 }

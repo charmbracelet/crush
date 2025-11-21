@@ -6,10 +6,11 @@ import (
 )
 
 var (
-	ErrRequestCancelled = errors.New("request canceled by user")
-	ErrSessionBusy      = errors.New("session is currently processing another request")
-	ErrEmptyPrompt      = errors.New("prompt is empty")
-	ErrSessionMissing   = errors.New("session id is missing")
+	ErrRequestCancelled  = errors.New("request canceled by user")
+	ErrSessionBusy       = errors.New("session is currently processing another request")
+	ErrEmptyPrompt       = errors.New("prompt is empty")
+	ErrSessionMissing    = errors.New("session id is missing")
+	ErrHookExecutionStop = errors.New("hook stopped execution")
 )
 
 func isCancelledErr(err error) bool {

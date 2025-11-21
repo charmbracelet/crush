@@ -25,10 +25,9 @@ type manager struct {
 }
 
 // NewManager creates a new hook manager.
-func NewManager(workingDir, dataDir string, cfg *Config) Manager {
+func NewManager(workingDir, dataDir string, cfg *Config) *manager {
 	if cfg == nil {
 		cfg = &Config{
-			Enabled:        true,
 			TimeoutSeconds: 30,
 			Directories:    []string{filepath.Join(dataDir, "hooks")},
 		}
@@ -63,9 +62,9 @@ func isExecutable(info os.FileInfo) bool {
 	return info.Mode()&0o111 != 0
 }
 
-// ExecuteHooks implements Manager.
-func (m *manager) ExecuteHooks(ctx context.Context, hookType HookType, hookContext HookContext) (HookResult, error) {
-	if !m.config.Enabled {
+// executeHooks is the internal method that executes hooks for a given type.
+func (m *manager) executeHooks(ctx context.Context, hookType HookType, hookContext HookContext) (HookResult, error) {
+	if m.config.Disabled {
 		return HookResult{Continue: true}, nil
 	}
 
@@ -220,7 +219,7 @@ func (m *manager) isDisabled(hookPath string) bool {
 		if rel, err := filepath.Rel(dir, hookPath); err == nil {
 			// Normalize to forward slashes for cross-platform comparison
 			rel = filepath.ToSlash(rel)
-			if slices.Contains(m.config.Disabled, rel) {
+			if slices.Contains(m.config.DisableHooks, rel) {
 				return true
 			}
 		}
@@ -282,4 +281,52 @@ func (m *manager) mergeResults(accumulated *HookResult, new *HookResult) {
 // ListHooks implements Manager.
 func (m *manager) ListHooks(hookType HookType) []string {
 	return m.discoverHooks(hookType)
+}
+
+// ExecuteUserPromptSubmit executes user-prompt-submit hooks.
+func (m *manager) ExecuteUserPromptSubmit(ctx context.Context, sessionID, workingDir string, data UserPromptSubmitData) (HookResult, error) {
+	hookCtx := HookContext{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+		Data:       data,
+	}
+
+	return m.executeHooks(ctx, HookUserPromptSubmit, hookCtx)
+}
+
+// ExecutePreToolUse executes pre-tool-use hooks.
+func (m *manager) ExecutePreToolUse(ctx context.Context, sessionID, workingDir string, data PreToolUseData) (HookResult, error) {
+	hookCtx := HookContext{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+		ToolName:   data.ToolName,
+		ToolCallID: data.ToolCallID,
+		Data:       data,
+	}
+
+	return m.executeHooks(ctx, HookPreToolUse, hookCtx)
+}
+
+// ExecutePostToolUse executes post-tool-use hooks.
+func (m *manager) ExecutePostToolUse(ctx context.Context, sessionID, workingDir string, data PostToolUseData) (HookResult, error) {
+	hookCtx := HookContext{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+		ToolName:   data.ToolName,
+		ToolCallID: data.ToolCallID,
+		Data:       data,
+	}
+
+	return m.executeHooks(ctx, HookPostToolUse, hookCtx)
+}
+
+// ExecuteStop executes stop hooks.
+func (m *manager) ExecuteStop(ctx context.Context, sessionID, workingDir string, data StopData) (HookResult, error) {
+	hookCtx := HookContext{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+		Data:       data,
+	}
+
+	return m.executeHooks(ctx, HookStop, hookCtx)
 }

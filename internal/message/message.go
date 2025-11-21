@@ -18,6 +18,7 @@ type CreateMessageParams struct {
 	Model            string
 	Provider         string
 	IsSummaryMessage bool
+	Metadata         MessageMetadata
 }
 
 type Service interface {
@@ -65,6 +66,10 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if err != nil {
 		return Message{}, err
 	}
+	metadataJSON, err := json.Marshal(params.Metadata)
+	if err != nil {
+		return Message{}, err
+	}
 	isSummary := int64(0)
 	if params.IsSummaryMessage {
 		isSummary = 1
@@ -77,6 +82,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Model:            sql.NullString{String: string(params.Model), Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
+		Metadata:         string(metadataJSON),
 	})
 	if err != nil {
 		return Message{}, err
@@ -110,6 +116,10 @@ func (s *service) Update(ctx context.Context, message Message) error {
 	if err != nil {
 		return err
 	}
+	metadata, err := json.Marshal(message.Metadata)
+	if err != nil {
+		return err
+	}
 	finishedAt := sql.NullInt64{}
 	if f := message.FinishPart(); f != nil {
 		finishedAt.Int64 = f.Time
@@ -118,6 +128,7 @@ func (s *service) Update(ctx context.Context, message Message) error {
 	err = s.q.UpdateMessage(ctx, db.UpdateMessageParams{
 		ID:         message.ID,
 		Parts:      string(parts),
+		Metadata:   string(metadata),
 		FinishedAt: finishedAt,
 	})
 	if err != nil {
@@ -156,6 +167,10 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
+	var metadata MessageMetadata
+	if err := json.Unmarshal([]byte(item.Metadata), &metadata); err != nil {
+		return Message{}, err
+	}
 	return Message{
 		ID:               item.ID,
 		SessionID:        item.SessionID,
@@ -166,6 +181,7 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 		IsSummaryMessage: item.IsSummaryMessage != 0,
+		Metadata:         metadata,
 	}, nil
 }
 

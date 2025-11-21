@@ -18,10 +18,11 @@ INSERT INTO messages (
     model,
     provider,
     is_summary_message,
+    metadata,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -29,6 +30,7 @@ RETURNING *;
 UPDATE messages
 SET
     parts = ?,
+    metadata = ?,
     finished_at = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;

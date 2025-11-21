@@ -109,12 +109,8 @@ crush_add_context "Context from hook 2"
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data: map[string]any{
-				"prompt": "test prompt",
-			},
+		result, err := mgr.ExecuteUserPromptSubmit(ctx, "test", tempDir, UserPromptSubmitData{
+			Prompt: "test prompt",
 		})
 
 		require.NoError(t, err)
@@ -145,11 +141,7 @@ export CRUSH_MESSAGE="should not see this"
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.False(t, result.Continue)
@@ -180,11 +172,7 @@ export CRUSH_PERMISSION=deny
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "deny", result.Permission)
@@ -211,19 +199,14 @@ export CRUSH_MESSAGE="disabled"
 		require.NoError(t, err)
 
 		cfg := &Config{
-			Enabled:        true,
 			TimeoutSeconds: 30,
 			Directories:    []string{filepath.Join(dataDir, "hooks")},
-			Disabled:       []string{"pre-tool-use/02-disabled.sh"},
+			DisableHooks:   []string{"pre-tool-use/02-disabled.sh"},
 		}
 
 		mgr := NewManager(tempDir, dataDir, cfg)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "enabled", result.Message)
@@ -234,7 +217,6 @@ export CRUSH_MESSAGE="disabled"
 		dataDir := filepath.Join(tempDir, ".crush")
 
 		cfg := &Config{
-			Enabled:        true,
 			TimeoutSeconds: 30,
 			Directories:    []string{filepath.Join(dataDir, "hooks")},
 			Inline: map[string][]InlineHook{
@@ -251,11 +233,7 @@ export CRUSH_MESSAGE="inline hook executed"
 
 		mgr := NewManager(tempDir, dataDir, cfg)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecuteUserPromptSubmit(ctx, "test", tempDir, UserPromptSubmitData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "inline hook executed", result.Message)
@@ -265,17 +243,11 @@ export CRUSH_MESSAGE="inline hook executed"
 		tempDir := t.TempDir()
 		dataDir := filepath.Join(tempDir, ".crush")
 
-		cfg := &Config{
-			Enabled: false,
-		}
+		cfg := &Config{}
 
 		mgr := NewManager(tempDir, dataDir, cfg)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue)
@@ -288,11 +260,7 @@ export CRUSH_MESSAGE="inline hook executed"
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue)
@@ -313,11 +281,7 @@ exit 1
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.False(t, result.Continue)
@@ -372,22 +336,14 @@ export CRUSH_MESSAGE="$CRUSH_MESSAGE; specific hook"
 
 		// Test PreToolUse - should execute both catch-all and specific.
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.Contains(t, result.Message, "catch-all: pre-tool-use")
 		assert.Contains(t, result.Message, "specific hook")
 
 		// Test UserPromptSubmit - should only execute catch-all.
-		result2, err := mgr.ExecuteHooks(ctx, HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result2, err := mgr.ExecuteUserPromptSubmit(ctx, "test", tempDir, UserPromptSubmitData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "catch-all: user-prompt-submit", result2.Message)
@@ -412,7 +368,6 @@ fi
 		require.NoError(t, err)
 
 		cfg := &Config{
-			Enabled:        true,
 			TimeoutSeconds: 30,
 			Directories:    []string{filepath.Join(dataDir, "hooks")},
 			Environment: map[string]string{
@@ -423,11 +378,7 @@ fi
 
 		mgr := NewManager(tempDir, dataDir, cfg)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "config environment variables received", result.Message)
@@ -440,7 +391,6 @@ fi
 		require.NoError(t, os.MkdirAll(readOnlyDir, 0o555)) // Read-only
 
 		cfg := &Config{
-			Enabled:        true,
 			TimeoutSeconds: 30,
 			Directories:    []string{filepath.Join(readOnlyDir, "hooks")},
 			Inline: map[string][]InlineHook{
@@ -458,11 +408,7 @@ fi
 
 		// Should not error even though inline hook write fails.
 		// The hook will be skipped and logged.
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue) // Should continue despite write failure
@@ -511,11 +457,7 @@ export CRUSH_MESSAGE="auto-approved"
 
 		mgr := NewManager(tempDir, dataDir, nil)
 		ctx := context.Background()
-		result, err := mgr.ExecuteHooks(ctx, HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := mgr.ExecutePreToolUse(ctx, "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.Equal(t, "approve", result.Permission)

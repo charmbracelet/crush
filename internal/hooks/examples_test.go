@@ -35,15 +35,11 @@ fi
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
 		// Test: Should block "rm -rf /"
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{
 			ToolName:   "bash",
 			ToolCallID: "call-1",
-			Data: map[string]any{
-				"tool_input": map[string]any{
-					"command": "rm -rf /",
-				},
+			ToolInput: map[string]any{
+				"command": "rm -rf /",
 			},
 		})
 
@@ -53,15 +49,11 @@ fi
 		assert.Contains(t, result.Message, "Blocked dangerous command")
 
 		// Test: Should allow safe commands
-		result2, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result2, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{
 			ToolName:   "bash",
 			ToolCallID: "call-2",
-			Data: map[string]any{
-				"tool_input": map[string]any{
-					"command": "ls -la",
-				},
+			ToolInput: map[string]any{
+				"command": "ls -la",
 			},
 		})
 
@@ -94,12 +86,9 @@ esac
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
 		// Test: Should auto-approve view tool
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{
 			ToolName:   "view",
 			ToolCallID: "call-1",
-			Data:       map[string]any{},
 		})
 
 		require.NoError(t, err)
@@ -108,15 +97,11 @@ esac
 		assert.Contains(t, result.Message, "Auto-approved read-only tool")
 
 		// Test: Should auto-approve safe bash commands
-		result2, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result2, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{
 			ToolName:   "bash",
 			ToolCallID: "call-2",
-			Data: map[string]any{
-				"tool_input": map[string]any{
-					"command": "ls -la",
-				},
+			ToolInput: map[string]any{
+				"command": "ls -la",
 			},
 		})
 
@@ -156,12 +141,8 @@ fi
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data: map[string]any{
-				"prompt": "help me",
-			},
+		result, err := manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{
+			Prompt: "help me",
 		})
 
 		require.NoError(t, err)
@@ -188,12 +169,9 @@ echo "$TIMESTAMP|$CRUSH_TOOL_NAME|$CRUSH_TOOL_CALL_ID" >> "$AUDIT_FILE"
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPostToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result, err := manager.ExecutePostToolUse(context.Background(), "test", tempDir, PostToolUseData{
 			ToolName:   "bash",
 			ToolCallID: "call-123",
-			Data:       map[string]any{},
 		})
 
 		require.NoError(t, err)
@@ -221,18 +199,10 @@ echo "Hook: $CRUSH_HOOK_TYPE" >> "` + logFile + `"
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
 		// Test with different hook types
-		_, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		_, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 		require.NoError(t, err)
 
-		_, err = manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		_, err = manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{})
 		require.NoError(t, err)
 
 		// Verify both hook types were logged
@@ -271,11 +241,7 @@ fi
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.False(t, result.Continue, "Should stop execution when rate limit exceeded")
@@ -302,11 +268,7 @@ fi
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue)
@@ -330,15 +292,11 @@ echo "{\"modified_input\": {\"command\": \"$SAFE_CMD\"}}"
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{
 			ToolName:   "bash",
 			ToolCallID: "call-1",
-			Data: map[string]any{
-				"tool_input": map[string]any{
-					"command": "rm --force file.txt",
-				},
+			ToolInput: map[string]any{
+				"command": "rm --force file.txt",
 			},
 		})
 
@@ -363,11 +321,7 @@ export CRUSH_MESSAGE="Auto-approved"
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue)
@@ -403,11 +357,7 @@ fi
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.False(t, result.Continue, "Exit code 2 should stop execution")
@@ -442,13 +392,9 @@ export CRUSH_MODIFIED_PROMPT="Enhanced: $PROMPT"
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data: map[string]any{
-				"prompt": "original prompt",
-				"model":  "gpt-4",
-			},
+		result, err := manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{
+			Prompt: "original prompt",
+			Model:  "gpt-4",
 		})
 
 		require.NoError(t, err)
@@ -480,25 +426,17 @@ fi
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
 		// Test: First message
-		result1, err := manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data: map[string]any{
-				"prompt":           "first prompt",
-				"is_first_message": true,
-			},
+		result1, err := manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{
+			Prompt:         "first prompt",
+			IsFirstMessage: true,
 		})
 		require.NoError(t, err)
 		assert.Contains(t, result1.ContextContent, "This is the first message")
 
 		// Test: Follow-up message
-		result2, err := manager.ExecuteHooks(context.Background(), HookUserPromptSubmit, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data: map[string]any{
-				"prompt":           "follow-up prompt",
-				"is_first_message": false,
-			},
+		result2, err := manager.ExecuteUserPromptSubmit(context.Background(), "test", tempDir, UserPromptSubmitData{
+			Prompt:         "follow-up prompt",
+			IsFirstMessage: false,
 		})
 		require.NoError(t, err)
 		assert.Contains(t, result2.ContextContent, "This is a follow-up message")
@@ -532,11 +470,7 @@ export CRUSH_MESSAGE="${CRUSH_MESSAGE:-}; third"
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		// Messages should be merged in order
@@ -563,11 +497,7 @@ echo '{"message": "Combined output", "modified_input": {"key": "value"}}'
 
 		manager := NewManager(tempDir, filepath.Join(tempDir, ".crush"), nil)
 
-		result, err := manager.ExecuteHooks(context.Background(), HookPreToolUse, HookContext{
-			SessionID:  "test",
-			WorkingDir: tempDir,
-			Data:       map[string]any{},
-		})
+		result, err := manager.ExecutePreToolUse(context.Background(), "test", tempDir, PreToolUseData{})
 
 		require.NoError(t, err)
 		assert.True(t, result.Continue)

@@ -427,9 +427,6 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.recordRecentModel(modelType, model); err != nil {
 		return err
 	}
-	if err := c.ToggleFavoriteModel(modelType, model); err != nil {
-		return err
-	}
 	return nil
 }
 

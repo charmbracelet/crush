@@ -429,6 +429,11 @@
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
+        },
+        "disable_notifications": {
+          "type": "boolean",
+          "description": "Disable desktop notifications",
+          "default": false
         }
       },
       "additionalProperties": false,

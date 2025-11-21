@@ -67,6 +67,7 @@ chmod +x .crush/hooks/pre-tool-use/01-block-dangerous.sh
 - `prompt` - User's prompt text
 - `attachments` - List of attached files
 - `model` - Model name
+- `provider` - Provider name (e.g., "anthropic", "openai")
 - `is_first_message` - Boolean indicating if this is the first message in the conversation
 
 **Example**:
@@ -161,7 +162,9 @@ fi
 
 **Available data** (via stdin JSON):
 - `reason` - Why the loop stopped (e.g., "completed", "cancelled", "error")
-- `session_id` - The session ID that stopped
+
+**Environment variables**:
+- `$CRUSH_SESSION_ID` - The session ID that stopped
 
 **Example**:
 ```bash
@@ -169,13 +172,12 @@ fi
 # Save conversation summary when agent loop stops
 
 REASON=$(crush_get_input reason)
-SESSION_ID=$(crush_get_input session_id)
 
 # Archive session logs
-if [ -f ".crush/session-$SESSION_ID.log" ]; then
-  ARCHIVE="logs/session-$SESSION_ID-$(date +%Y%m%d-%H%M%S).log"
+if [ -f ".crush/session-$CRUSH_SESSION_ID.log" ]; then
+  ARCHIVE="logs/session-$CRUSH_SESSION_ID-$(date +%Y%m%d-%H%M%S).log"
   mkdir -p logs
-  mv ".crush/session-$SESSION_ID.log" "$ARCHIVE"
+  mv ".crush/session-$CRUSH_SESSION_ID.log" "$ARCHIVE"
   gzip "$ARCHIVE"
   crush_log "Archived session logs: $ARCHIVE.gz (reason: $REASON)"
 fi
@@ -467,13 +469,13 @@ Configure hooks in `crush.json`:
 ```json
 {
   "hooks": {
-    "enabled": true,
+    "disabled": false,
     "timeout_seconds": 30,
     "directories": [
       "/path/to/custom/hooks",
       ".crush/hooks"
     ],
-    "disabled": [
+    "disable_hooks": [
       "pre-tool-use/slow-check.sh",
       "user-prompt-submit/verbose.sh"
     ],
@@ -492,10 +494,10 @@ Configure hooks in `crush.json`:
 
 ### Configuration Options
 
-- **enabled** (bool) - Enable/disable the entire hooks system (default: `true`)
+- **disabled** (bool) - Disable hook execution entirely (default: `false`)
 - **timeout_seconds** (int) - Maximum execution time per hook (default: `30`)
-- **directories** ([]string) - Additional directories to search for hooks
-- **disabled** ([]string) - List of hook paths to skip (relative to hooks directory)
+- **directories** ([]string) - Directories to search for hook scripts (defaults to `[".crush/hooks"]`)
+- **disable_hooks** ([]string) - List of hook paths to skip (relative to hooks directory)
 - **environment** (map) - Environment variables to pass to all hooks
 - **inline** (map) - Hooks defined directly in config (by hook type)
 

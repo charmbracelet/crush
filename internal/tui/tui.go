@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
@@ -36,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/x/ansi"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"golang.org/x/mod/semver"
 	"golang.org/x/text/cases"
@@ -108,6 +110,9 @@ func (a appModel) Init() tea.Cmd {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
 
+	// Request focus event support from the terminal.
+	cmds = append(cmds, tea.Raw(ansi.RequestModeFocusEvent))
+
 	return tea.Batch(cmds...)
 }
 
@@ -118,6 +123,18 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case tea.ModeReportMsg:
+		if msg.Mode == ansi.ModeFocusEvent && !msg.Value.IsNotRecognized() {
+			notification.SetFocusSupport(true)
+			notification.SetFocused(true)
+		}
+		return a, nil
+	case tea.FocusMsg:
+		notification.SetFocused(true)
+		return a, nil
+	case tea.BlurMsg:
+		notification.SetFocused(false)
+		return a, nil
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !a.sendProgressBar {
@@ -317,6 +334,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, itemCmd
 	case pubsub.Event[permission.PermissionRequest]:
+		// Send notification if window is not focused.
+		notifBody := fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName)
+		_ = notification.Send("Crush is waiting...", notifBody)
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: permissions.NewPermissionDialogCmp(msg.Payload, &permissions.Options{
 				DiffMode: config.Get().Options.TUI.DiffMode,
@@ -594,6 +614,7 @@ func (a *appModel) View() tea.View {
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
 	view.WindowTitle = "crush " + home.Short(config.Get().WorkingDir())
+	view.ReportFocus = true
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Content = t.S().Base.Width(a.wWidth).Height(a.wHeight).
 			Align(lipgloss.Center, lipgloss.Center).

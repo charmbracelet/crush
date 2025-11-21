@@ -1,12 +1,11 @@
 package agent
 
-import (
-	"errors"
-)
+import "github.com/charmbracelet/crush/internal/errors"
 
+// Re-export centralized errors for backward compatibility and convenient access
 var (
-	ErrRequestCancelled = errors.New("request canceled by user")
-	ErrSessionBusy      = errors.New("session is currently processing another request")
-	ErrEmptyPrompt      = errors.New("prompt is empty")
-	ErrSessionMissing   = errors.New("session id is missing")
+	ErrRequestCancelled = errors.ErrRequestCancelled
+	ErrSessionBusy      = errors.ErrSessionBusy
+	ErrEmptyPrompt      = errors.ErrEmptyInput
+	ErrSessionMissing   = errors.ErrSessionMissing
 )

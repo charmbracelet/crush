@@ -1,9 +1,10 @@
 package enum
 
-import "errors"
+import "github.com/charmbracelet/crush/internal/errors"
 
+// Re-export centralized errors for backward compatibility and convenient access
 var (
-	ErrToolCallStateUnknown   = errors.New("unknown tool call state")
-	ErrAnimationStateUnknown  = errors.New("unknown animation state")
-	ErrToolResultStateUnknown = errors.New("unknown tool result state")
+	ErrToolCallStateUnknown   = errors.ErrToolCallStateUnknown
+	ErrAnimationStateUnknown  = errors.ErrAnimationStateUnknown
+	ErrToolResultStateUnknown = errors.ErrToolResultStateUnknown
 )

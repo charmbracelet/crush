@@ -1,5 +1,8 @@
 package message
 
-import "errors"
+import "github.com/charmbracelet/crush/internal/errors"
 
-var ErrToolCallIDEmpty = errors.New("tool call ID cannot be empty")
+// Re-export centralized errors for backward compatibility and convenient access
+var (
+	ErrToolCallIDEmpty = errors.ErrToolCallIDEmpty
+)

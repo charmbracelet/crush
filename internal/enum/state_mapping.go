@@ -100,3 +100,21 @@ func ToolCallStateToFinishReason(state ToolCallState) fantasy.FinishReason {
 func ResultStateToToolCallState(resultState ToolResultState) ToolCallState {
 	return StateMapping.ResultStateToToolCallState(resultState)
 }
+
+// IsErrorStateCentralized returns true if given state represents an error condition
+// Uses centralized logic instead of scattered IsError() calls
+func IsErrorStateCentralized(state ToolCallState) bool {
+	return StateMapping.IsErrorState(state)
+}
+
+// IsFinalStateCentralized returns true if state is terminal
+// Uses centralized logic instead of scattered IsFinalState() calls
+func IsFinalStateCentralized(state ToolCallState) bool {
+	return StateMapping.IsFinalState(state)
+}
+
+// IsSuccessStateCentralized returns true if given state represents success
+// Uses centralized logic instead of scattered implementations
+func IsSuccessStateCentralized(state ToolCallState) bool {
+	return StateMapping.IsSuccessState(state)
+}

@@ -2,7 +2,6 @@ package permission
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,12 +9,14 @@ import (
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/enum"
+	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
 
-var ErrorPermissionDenied = errors.New("user denied permission")
+// Re-export centralized error for backward compatibility and convenient access
+var ErrorPermissionDenied = errors.ErrUserDenied
 
 type CreatePermissionRequest struct {
 	SessionID   string             `json:"session_id"`

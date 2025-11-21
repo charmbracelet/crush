@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
@@ -47,7 +48,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	cfg, err := loadFromConfigPaths(configPaths)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
+		return nil, errors.Config("failed to load config from paths", configPaths, "", fmt.Sprintf("%v", configPaths))
 	}
 
 	cfg.dataConfigDir = GlobalConfigData()
@@ -86,7 +87,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	valueResolver := NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
 	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
-		return nil, fmt.Errorf("failed to configure providers: %w", err)
+		return nil, errors.Wrap(err, "failed to configure providers")
 	}
 
 	if !cfg.IsConfigured() {
@@ -95,7 +96,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 
 	if err := cfg.configureSelectedModels(cfg.knownProviders); err != nil {
-		return nil, fmt.Errorf("failed to configure selected models: %w", err)
+		return nil, errors.Wrap(err, "failed to configure selected models")
 	}
 	cfg.SetupAgents()
 	return cfg, nil
@@ -231,7 +232,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			}
 			for _, model := range p.Models {
 				if !strings.HasPrefix(model.ID, "anthropic.") {
-					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
+					return errors.Validation("model", model.ID, "bedrock provider only supports anthropic models for now")
 				}
 			}
 		default:
@@ -417,7 +418,7 @@ func (c *Config) applyLSPDefaults() {
 
 func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel, smallModel SelectedModel, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
-		err = fmt.Errorf("no providers configured, please configure at least one provider")
+		err = errors.ConfigSimple("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
 	}
 
@@ -430,7 +431,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		}
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
 		if defaultLargeModel == nil {
-			err = fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			err = errors.Provider("default large model not found", string(p.ID))
 			return largeModel, smallModel, err
 		}
 		largeModel = SelectedModel{
@@ -442,7 +443,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
-			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
+			err = errors.Provider("default small model not found", string(p.ID))
 			return largeModel, smallModel, err
 		}
 		smallModel = SelectedModel{
@@ -460,13 +461,13 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	})
 
 	if len(enabledProviders) == 0 {
-		err = fmt.Errorf("no providers configured, please configure at least one provider")
+		err = errors.ConfigSimple("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
 	}
 
 	providerConfig := enabledProviders[0]
 	if len(providerConfig.Models) == 0 {
-		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
+		err = errors.Provider("has no models configured", string(providerConfig.ID))
 		return largeModel, smallModel, err
 	}
 	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
@@ -487,7 +488,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) error {
 	defaultLarge, defaultSmall, err := c.defaultModelSelection(knownProviders)
 	if err != nil {
-		return fmt.Errorf("failed to select default models: %w", err)
+		return errors.Wrap(err, "failed to select default models")
 	}
 	large, small := defaultLarge, defaultSmall
 
@@ -505,7 +506,7 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			// override the model type to large
 			err := c.UpdatePreferredModel(SelectedModelTypeLarge, large)
 			if err != nil {
-				return fmt.Errorf("failed to update preferred large model: %w", err)
+				return errors.Wrap(err, "failed to update preferred large model")
 			}
 		} else {
 			if largeModelSelected.MaxTokens > 0 {
@@ -549,7 +550,7 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			// override the model type to small
 			err := c.UpdatePreferredModel(SelectedModelTypeSmall, small)
 			if err != nil {
-				return fmt.Errorf("failed to update preferred small model: %w", err)
+				return errors.Wrap(err, "failed to update preferred small model")
 			}
 		} else {
 			if smallModelSelected.MaxTokens > 0 {
@@ -614,7 +615,7 @@ func loadFromConfigPaths(configPaths []string) (*Config, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("failed to open config file %s: %w", path, err)
+			return nil, errors.Wrap(err, "failed to open config file")
 		}
 		defer fd.Close()
 
@@ -631,7 +632,7 @@ func loadFromReaders(readers []io.Reader) (*Config, error) {
 
 	merged, err := Merge(readers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration readers: %w", err)
+		return nil, errors.Wrap(err, "failed to merge configuration readers")
 	}
 
 	return LoadReader(merged)

@@ -3,10 +3,10 @@ package history
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -85,7 +85,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 		// Start a transaction
 		tx, txErr := s.db.BeginTx(ctx, nil)
 		if txErr != nil {
-			return File{}, fmt.Errorf("failed to begin transaction: %w", txErr)
+			return File{}, errors.TransactionBegin(txErr)
 		}
 
 		// Create a new queries instance with the transaction
@@ -116,7 +116,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 
 		// Commit the transaction
 		if txErr = tx.Commit(); txErr != nil {
-			return File{}, fmt.Errorf("failed to commit transaction: %w", txErr)
+			return File{}, errors.TransactionCommit(txErr)
 		}
 
 		file = s.fromDBItem(dbFile)

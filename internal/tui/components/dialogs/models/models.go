@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -13,6 +14,8 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/confirm"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/modeleditor"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -67,6 +70,12 @@ type modelDialogCmp struct {
 	selectedModelType config.SelectedModelType
 	isAPIKeyValid     bool
 	apiKeyValue       string
+
+
+	// Model editor state
+	showModelEditor bool
+	modelEditor     *modeleditor.ModelEditor
+	editingModelID  string
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -105,12 +114,71 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
 		m.help.SetWidth(m.width - 2)
+		if m.showModelEditor && m.modelEditor != nil {
+			m.modelEditor.SetSize(msg.Width, msg.Height)
+		}
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
+
+	case modeleditor.ModelEditorSaveMsg:
+		// Save model configuration
+		cfg := config.Get()
+		providerConfig, ok := cfg.Providers.Get(msg.ProviderID)
+		if !ok {
+			return m, util.ReportError(fmt.Errorf("provider %s not found", msg.ProviderID))
+		}
+
+		// Update the specific model in the provider config
+		for i, model := range providerConfig.Models {
+			if model.ID == m.editingModelID {
+				providerConfig.Models[i] = msg.Model
+				break
+			}
+		}
+
+		// Save updated provider config
+		err := cfg.SetConfigField("providers."+msg.ProviderID, providerConfig)
+		if err != nil {
+			return m, util.ReportError(fmt.Errorf("failed to save provider: %w", err))
+		}
+		cfg.Providers.Set(msg.ProviderID, providerConfig)
+
+		m.showModelEditor = false
+		m.modelEditor = nil
+		return m, m.modelList.SetModelType(m.modelList.GetModelType())
+
+	case modeleditor.ModelEditorCancelMsg:
+		m.showModelEditor = false
+		m.modelEditor = nil
+		return m, nil
+
+	case confirm.ResultMsg:
+		if m.showModelEditor && m.modelEditor != nil {
+			var cmd tea.Cmd
+			var mdl util.Model
+			mdl, cmd = m.modelEditor.Update(msg)
+			m.modelEditor = mdl.(*modeleditor.ModelEditor)
+			return m, cmd
+		}
+		return m, nil
+		
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
 	case tea.KeyPressMsg:
+		// If provider editor is shown, let it handle all key presses first
+		if m.showModelEditor {
+			if m.modelEditor == nil {
+				m.showModelEditor = false
+				return m, nil
+			}
+			var cmd tea.Cmd
+			var mdl util.Model
+			mdl, cmd = m.modelEditor.Update(msg)
+			m.modelEditor = mdl.(*modeleditor.ModelEditor)
+			return m, cmd
+		}
+		
 		switch {
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {
@@ -186,6 +254,30 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
 				return m, nil
 			}
+		case key.Matches(msg, m.keyMap.Edit):
+			if m.needsAPIKey {
+				return m, nil
+			}
+			// Enter model editor
+			selectedItem := m.modelList.SelectedModel()
+			if selectedItem == nil {
+				return m, nil
+			}
+			
+			// Load provider configuration
+			cfg := config.Get()
+			providerID := string(selectedItem.Provider.ID)
+			_, exists := cfg.Providers.Get(providerID)
+			if !exists {
+				return m, nil
+			}
+			
+			// Create and show editor
+			m.showModelEditor = true
+			m.editingModelID = selectedItem.Model.ID
+			m.modelEditor = modeleditor.NewModelEditor(selectedItem.Model, providerID)
+			m.modelEditor.SetSize(m.wWidth, m.wHeight)
+			return m, m.modelEditor.Init()			
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.needsAPIKey {
 				u, cmd := m.apiKeyInput.Update(msg)
@@ -245,6 +337,11 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (m *modelDialogCmp) View() string {
 	t := styles.CurrentTheme()
 
+	// Show provider editor if active - render it within the same dialog space
+	if m.showModelEditor && m.modelEditor != nil {
+		return m.modelEditor.View()
+	}
+
 	if m.needsAPIKey {
 		// Show API key input
 		m.keyMap.isAPIKeyHelp = true
@@ -256,7 +353,7 @@ func (m *modelDialogCmp) View() string {
 			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title(m.apiKeyInput.GetTitle(), m.width-4)),
 			apiKeyView,
 			"",
-			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.renderHelp(m.width-4)),
 		)
 		return m.style().Render(content)
 	}
@@ -269,12 +366,15 @@ func (m *modelDialogCmp) View() string {
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Switch Model", m.width-lipgloss.Width(radio)-5)+" "+radio),
 		listView,
 		"",
-		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.renderHelp(m.width-4)),
 	)
 	return m.style().Render(content)
 }
 
 func (m *modelDialogCmp) Cursor() *tea.Cursor {
+	if m.showModelEditor && m.modelEditor != nil {
+		return m.modelEditor.Cursor()
+	}
 	if m.needsAPIKey {
 		cursor := m.apiKeyInput.Cursor()
 		if cursor != nil {
@@ -308,6 +408,9 @@ func (m *modelDialogCmp) listHeight() int {
 }
 
 func (m *modelDialogCmp) Position() (int, int) {
+	if m.showModelEditor && m.modelEditor != nil {
+		return m.modelEditor.Position()
+	}
 	row := m.wHeight/4 - 2 // just a bit above the center
 	col := m.wWidth / 2
 	col -= m.width / 2
@@ -390,4 +493,23 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 			ModelType: m.selectedModelType,
 		}),
 	)
+}
+
+func (m *modelDialogCmp) renderHelp(width int) string {
+	t := styles.CurrentTheme()
+	bindings := m.keyMap.ShortHelp()
+
+	var sections []string
+	for _, b := range bindings {
+		if !b.Enabled() {
+			continue
+		}
+		k := m.help.Styles.ShortKey.Render(b.Help().Key)
+		d := m.help.Styles.ShortDesc.Render(b.Help().Desc)
+		sections = append(sections, k+" "+d)
+	}
+
+	fullHelp := strings.Join(sections, m.help.Styles.ShortSeparator.Render(" • "))
+
+	return t.S().Base.Width(width).Render(fullHelp)
 }

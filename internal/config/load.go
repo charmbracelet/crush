@@ -190,6 +190,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			SystemPromptPrefix: config.SystemPromptPrefix,
 			ExtraHeaders:       headers,
 			ExtraBody:          config.ExtraBody,
+			ProviderOptions:    config.ProviderOptions,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
 		}

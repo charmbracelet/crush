@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/message"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -112,9 +113,10 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 
 			p := permissions.Request(
 				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
-					ToolCallID:  call.ID,
+					SessionID: sessionID,
+					Path:      fsext.PathOrPrefix(filePath, workingDir),
+					// Note: fantasy uses strings for ToolCallID
+					ToolCallID:  message.ToolCallID(call.ID),
 					ToolName:    WriteToolName,
 					Action:      "write",
 					Description: fmt.Sprintf("Create file %s", filePath),

@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	message "github.com/charmbracelet/crush/internal/message"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -130,9 +131,10 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	)
 	p := edit.permissions.Request(
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
+			SessionID: sessionID,
+			Path:      fsext.PathOrPrefix(filePath, edit.workingDir),
+			// Note: fantasy uses strings for ToolCallID
+			ToolCallID:  message.ToolCallID(call.ID),
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
@@ -251,9 +253,10 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 
 	p := edit.permissions.Request(
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
+			SessionID: sessionID,
+			Path:      fsext.PathOrPrefix(filePath, edit.workingDir),
+			// Note: fantasy uses strings for ToolCallID
+			ToolCallID:  message.ToolCallID(call.ID),
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
@@ -386,9 +389,10 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 
 	p := edit.permissions.Request(
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
+			SessionID: sessionID,
+			Path:      fsext.PathOrPrefix(filePath, edit.workingDir),
+			// Note: fantasy uses strings for ToolCallID
+			ToolCallID:  message.ToolCallID(call.ID),
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),

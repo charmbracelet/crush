@@ -1,0 +1,99 @@
+```mermaid
+graph TB
+    %% CURRENT ARCHITECTURE - MUTEX-BASED EVENT FLOW
+    
+    %% EXTERNAL EVENT SOURCES
+    ExternalTool[External Tool Process]
+    User[User Input]
+    TeaFramework[BubbleTea Framework]
+    
+    %% MESSAGE LAYER
+    subgraph "Current Message Types"
+        StreamMsg[StreamOutputMsg<br/>Real-time tool output]
+        CompleteMsg[StreamCompleteMsg<br/>Tool execution finished]
+        AnimMsg[anim.StepMsg<br/>Animation ticks]
+        KeyMsg[tea.KeyPressMsg<br/>Keyboard input]
+    end
+    
+    %% TOOL CALL COMPONENT
+    subgraph "toolCallCmp"
+        TC[ToolCall Component]
+        
+        subgraph "Shared Mutable State"
+            StreamingContent[streamingContent[]<br/>Output lines buffer]
+            ToolResult[result<br/>Final execution result]
+            StreamingFlag[showStreaming<br/>Streaming enabled flag]
+            ToolState[call.State<br/>Current tool state]
+        end
+        
+        subgraph "Mutex Protection"
+            Lock[sync.RWMutex<br/>Thread safety locks]
+            ReadLock[mu.RLock() blocks<br/>State access locks]
+            WriteLock[mu.Lock() blocks<br/>State mutation locks]
+        end
+        
+        subgraph "State Calculation"
+            GetEffectiveState[getEffectiveDisplayState()<br/>Complex state derivation<br/>Potential race condition!]
+            CalcLogic[if result.isEmpty {<br/>  return call.State<br/>} else {<br/>  return result.getState()<br/>}]
+        end
+        
+        subgraph "Command Generation"
+            CopyCmd[copyTool()<br/>Clipboard operations]
+            AnimCmd[RefreshAnimation()<br/>Animation state sync]
+            BatchCmd[tea.Batch()<br/>Command batching]
+        end
+        
+        subgraph "Rendering"
+            Render[View() method<br/>UI generation]
+            Update[Update() method<br/>Event handling]
+        end
+    end
+    
+    %% FLOW RELATIONSHIPS
+    ExternalTool -->|writes output| StreamMsg
+    ExternalTool -->|execution complete| CompleteMsg
+    User --> KeyMsg
+    TeaFramework --> AnimMsg
+    
+    StreamMsg --> Update
+    CompleteMsg --> Update
+    AnimMsg --> Update
+    KeyMsg --> Update
+    
+    Update -->|lock acquisition| WriteLock
+    Update -->|state mutation| StreamingContent
+    Update -->|state mutation| ToolResult
+    Update -->|state mutation| StreamingFlag
+    Update -->|state mutation| ToolState
+    
+    Render -->|lock acquisition| ReadLock
+    Render -->|state access| StreamingContent
+    Render -->|state access| ToolResult
+    Render -->|state access| StreamingFlag
+    Render -->|state access| ToolState
+    Render -->|complex calculation| GetEffectiveState
+    
+    GetEffectiveState -->|reads both| ToolResult
+    GetEffectiveState -->|reads both| ToolState
+    GetEffectiveState -->|race condition!| CalcLogic
+    
+    Update -->|command generation| CopyCmd
+    Update -->|command generation| AnimCmd
+    Update -->|command generation| BatchCmd
+    
+    Render -->|UI output| TC
+    
+    %% CRITICAL ISSUES HIGHLIGHTED
+    classDef critical fill:#ff9999,stroke:#ff0000,stroke-width:3px
+    classDef warning fill:#ffff99,stroke:#ff9900,stroke-width:2px
+    classDef safe fill:#99ff99,stroke:#009900,stroke-width:2px
+    
+    class GetEffectiveState,CalcLogic critical
+    class StreamingContent,ToolResult,StreamingFlag,ToolState warning
+    class StreamMsg,CompleteMsg,AnimMsg,KeyMsg safe
+    
+    %% ISSUE ANNOTATIONS
+    GetEffectiveState:::issues["🚨 POTENTIAL RACE:<br/>Reads result.State and call.State<br/>non-atomically!"]
+    Lock:::issues["🔴 PERFORMANCE BOTTLENECK:<br/>All state access serialized<br/>High contention!"]
+    Update:::issues["🔴 COMPLEX MUTATION:<br/>Multiple lock acquisitions<br/>Deadlock risk!"]
+```

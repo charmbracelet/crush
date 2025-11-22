@@ -6,6 +6,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -91,8 +92,9 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
 	p := m.permissions.Request(
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  params.ID,
+			SessionID: sessionID,
+			// Note: fantasy uses strings for ToolCallID
+			ToolCallID:  message.ToolCallID(params.ID),
 			Path:        m.workingDir,
 			ToolName:    m.Info().Name,
 			Action:      "execute",

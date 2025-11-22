@@ -415,7 +415,7 @@ func (c *Config) applyLSPDefaults() {
 	}
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel, smallModel SelectedModel, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err

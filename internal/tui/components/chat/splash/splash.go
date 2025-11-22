@@ -119,7 +119,7 @@ func (s *splashCmp) Init() tea.Cmd {
 }
 
 // SetSize implements SplashPage.
-func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+func (s *splashCmp) SetSize(width, height int) tea.Cmd {
 	wasSmallScreen := s.isSmallScreen()
 	rerenderLogo := width != s.width
 	s.height = height

@@ -324,7 +324,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.sidebar = u.(sidebar.Sidebar)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		u, cmd := p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
@@ -615,7 +615,7 @@ func (p *chatPage) setCompactMode(compact bool) {
 	}
 }
 
-func (p *chatPage) handleCompactMode(newWidth int, newHeight int) {
+func (p *chatPage) handleCompactMode(newWidth, newHeight int) {
 	if p.forceCompact {
 		return
 	}

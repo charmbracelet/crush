@@ -7,10 +7,12 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -190,7 +192,7 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			cmds = append(cmds, m.CopySelectedText(true))
 			return m, tea.Batch(cmds...)
 		}
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		cmds = append(cmds, m.handlePermissionRequest(msg.Payload))
 		return m, tea.Batch(cmds...)
 	case SessionSelectedMsg:
@@ -243,14 +245,13 @@ func (m *messageListCmp) View() string {
 	return strings.Join(view, "\n")
 }
 
-func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
+func (m *messageListCmp) handlePermissionRequest(event permission.PermissionEvent) tea.Cmd {
 	items := m.listCmp.Items()
-	if toolCallIndex := m.findToolCallByID(items, permission.ToolCallID); toolCallIndex != NotFound {
+	if toolCallIndex := m.findToolCallByID(items, event.ToolCallID); toolCallIndex != NotFound {
 		toolCall := items[toolCallIndex].(messages.ToolCallCmp)
-		toolCall.SetPermissionRequested()
-		if permission.Granted {
-			toolCall.SetPermissionGranted()
-		}
+
+		toolCall.SetToolCallState(event.Status)
+
 		m.listCmp.UpdateItem(toolCall.ID(), toolCall)
 	}
 	return nil
@@ -412,7 +413,7 @@ func (m *messageListCmp) handleToolMessage(msg message.Message) tea.Cmd {
 
 // findToolCallByID searches for a tool call with the specified ID.
 // Returns the index if found, NotFound otherwise.
-func (m *messageListCmp) findToolCallByID(items []list.Item, toolCallID string) int {
+func (m *messageListCmp) findToolCallByID(items []list.Item, toolCallID message.ToolCallID) int {
 	// Search backwards as tool calls are more likely to be recent
 	for i := len(items) - 1; i >= 0; i-- {
 		if toolCall, ok := items[i].(messages.ToolCallCmp); ok && toolCall.GetToolCall().ID == toolCallID {
@@ -484,7 +485,7 @@ func (m *messageListCmp) updateAssistantMessageContent(msg message.Message, assi
 			items[assistantIndex].ID(),
 			uiMsg,
 		)
-		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+		if msg.FinishPart() != nil && msg.GetToolCallState().IsEndTurn() {
 			m.listCmp.AppendItem(
 				messages.NewAssistantSection(
 					msg,
@@ -524,10 +525,12 @@ func (m *messageListCmp) updateOrAddToolCall(msg message.Message, tc message.Too
 	for _, existingTC := range existingToolCalls {
 		if tc.ID == existingTC.GetToolCall().ID {
 			existingTC.SetToolCall(tc)
-			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-				existingTC.SetCancelled()
+
+			// TODO: revisit this logic!
+			if msg.FinishPart() != nil && msg.GetToolCallState().IsCanceled() {
+				existingTC.SetToolCallState(enum.ToolCallStateCancelled)
 			}
-			m.listCmp.UpdateItem(tc.ID, existingTC)
+			m.listCmp.UpdateItem(tc.ID.String(), existingTC)
 			return nil
 		}
 	}
@@ -592,7 +595,7 @@ func (m *messageListCmp) buildToolResultMap(messages []message.Message) map[stri
 	toolResultMap := make(map[string]message.ToolResult)
 	for _, msg := range messages {
 		for _, tr := range msg.ToolResults() {
-			toolResultMap[tr.ToolCallID] = tr
+			toolResultMap[tr.ToolCallID.String()] = tr
 		}
 	}
 	return toolResultMap
@@ -609,7 +612,7 @@ func (m *messageListCmp) convertMessagesToUI(sessionMessages []message.Message, 
 			uiMessages = append(uiMessages, messages.NewMessageCmp(msg))
 		case message.Assistant:
 			uiMessages = append(uiMessages, m.convertAssistantMessage(msg, toolResultMap)...)
-			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+			if msg.FinishPart() != nil && msg.GetToolCallState().IsEndTurn() {
 				uiMessages = append(uiMessages, messages.NewAssistantSection(msg, time.Unix(m.lastUserMessageTime, 0)))
 			}
 		}
@@ -661,13 +664,13 @@ func (m *messageListCmp) buildToolCallOptions(tc message.ToolCall, msg message.M
 	var options []messages.ToolCallOption
 
 	// Add tool result if available
-	if tr, ok := toolResultMap[tc.ID]; ok {
+	if tr, ok := toolResultMap[tc.ID.String()]; ok {
 		options = append(options, messages.WithToolCallResult(tr))
 	}
 
 	// Add cancelled status if applicable
-	if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonCanceled {
-		options = append(options, messages.WithToolCallCancelled())
+	if msg.FinishPart() != nil && msg.FinishPart().Reason == fantasy.FinishReasonStop {
+		options = append(options, messages.WithToolCallState(enum.ToolCallStateCancelled))
 	}
 
 	return options
@@ -679,7 +682,7 @@ func (m *messageListCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the component dimensions and propagates to the list component.
-func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
+func (m *messageListCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
 	if m.promptQueue > 0 {

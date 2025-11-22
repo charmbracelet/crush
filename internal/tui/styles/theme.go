@@ -76,6 +76,8 @@ type Theme struct {
 	RedLight color.Color
 	Cherry   color.Color
 
+	Paprika color.Color
+
 	// Text selection.
 	TextSelection lipgloss.Style
 

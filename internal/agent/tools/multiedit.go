@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -166,9 +167,10 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
 
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
+		SessionID: sessionID,
+		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		// Note: fantasy uses strings for ToolCallID
+		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: fmt.Sprintf("Create file %s with %d edits", params.FilePath, len(params.Edits)),
@@ -300,9 +302,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
+		SessionID: sessionID,
+		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		// Note: fantasy uses strings for ToolCallID
+		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: fmt.Sprintf("Apply %d edits to file %s", len(params.Edits), params.FilePath),

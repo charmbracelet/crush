@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -57,9 +58,10 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			p := permissions.Request(
 				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        workingDir,
-					ToolCallID:  call.ID,
+					SessionID: sessionID,
+					Path:      workingDir,
+					// Note: fantasy uses strings for ToolCallID
+					ToolCallID:  message.ToolCallID(call.ID),
 					ToolName:    FetchToolName,
 					Action:      "fetch",
 					Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),

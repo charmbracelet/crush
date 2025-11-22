@@ -2,14 +2,19 @@ package notification_test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSend_Disabled(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Setup a temporary config with DisableNotifications = true
 	tempDir := t.TempDir()
 	cfg, err := config.Init(tempDir, tempDir, false)
@@ -25,6 +30,9 @@ func TestSend_Disabled(t *testing.T) {
 }
 
 func TestSend_Focused(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Reset globals after test
 	defer func() {
 		notification.SetFocusSupport(false)
@@ -49,6 +57,9 @@ func TestSend_Focused(t *testing.T) {
 }
 
 func TestSend_Success(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Reset globals after test
 	defer func() {
 		notification.SetFocusSupport(false)
@@ -89,6 +100,9 @@ func TestSend_Success(t *testing.T) {
 }
 
 func TestSend_FocusNotSupported(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Reset globals after test
 	defer func() {
 		notification.SetFocusSupport(false)
@@ -123,6 +137,9 @@ func TestSend_FocusNotSupported(t *testing.T) {
 }
 
 func TestSend_Error(t *testing.T) {
+	// Pre-initialize logger to os.DevNull to prevent file lock on Windows.
+	log.Setup(os.DevNull, false)
+
 	// Reset globals after test
 	defer func() {
 		notification.SetFocusSupport(false)

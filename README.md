@@ -335,6 +335,25 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Desktop notifications
+
+Crush sends desktop notifications when a tool call requires permission and when
+the agent finishes its turn. They're only sent when the terminal window isn't
+focused _and_ your terminal supports reporting the focus state.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_notifications": true // default
+  }
+}
+```
+
+To disable desktop notifications, set `disable_notifications` to `true` in your
+configuration. On macOS, notifications currently lack icons due to platform
+limitations.
+
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates

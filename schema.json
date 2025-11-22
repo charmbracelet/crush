@@ -73,6 +73,16 @@
           "type": "object",
           "description": "Recently used models sorted by most recent first"
         },
+        "favorite_models": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/SelectedModel"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "Models favorited by the user"
+        },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/ProviderConfig"

@@ -313,6 +313,9 @@ type Config struct {
 	// Recently used models stored in the data directory config.
 	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
 
+	// User favorited models stored in the config
+	FavoritedModels map[SelectedModelType][]SelectedModel `json:"favorited_models,omitempty" jsonschema:"description=Models favorited by the user"`
+
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
@@ -529,6 +532,41 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 
 	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
 		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) ToggleFavoriteModel(selectedModelType SelectedModelType, selectedModel SelectedModel) error {
+	if selectedModel.Provider == "" || selectedModel.Model == "" {
+		return nil
+	}
+	if c.FavoritedModels == nil {
+		c.FavoritedModels = make(map[SelectedModelType][]SelectedModel)
+	}
+
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
+
+	selectedModelEntry := SelectedModel{
+		Model:    selectedModel.Model,
+		Provider: selectedModel.Provider,
+	}
+
+	current := c.FavoritedModels[selectedModelType]
+	var updated []SelectedModel
+
+	if idx := slices.IndexFunc(current, func(sm SelectedModel) bool { return eq(sm, selectedModelEntry) }); idx != -1 {
+		updated = slices.Delete(current, idx, idx+1)
+	} else {
+		updated = append([]SelectedModel{selectedModelEntry}, current...)
+	}
+
+	c.FavoritedModels[selectedModelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("favorited_models.%s", selectedModelType), updated); err != nil {
+		return fmt.Errorf("failed to toggle favorite model: %w", err)
 	}
 
 	return nil

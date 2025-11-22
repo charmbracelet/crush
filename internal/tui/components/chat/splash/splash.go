@@ -167,6 +167,30 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				s.apiKeyInput.Reset()
 				return s, nil
 			}
+		case key.Matches(msg, s.keyMap.Favorite):
+			selectedModel := s.modelList.SelectedModel()
+			if selectedModel == nil {
+				return s, nil
+			}
+
+			selectedModelID := selectedModel.Model.ID
+			selectedModelProviderID := string(selectedModel.Provider.ID)
+
+			selectedType := config.SelectedModelTypeLarge
+			if s.modelList.GetModelType() == models.SmallModelType {
+				selectedType = config.SelectedModelTypeSmall
+			}
+
+			sm := config.SelectedModel{
+				Model:    selectedModelID,
+				Provider: selectedModelProviderID,
+			}
+
+			err := config.Get().ToggleFavoriteModel(selectedType, sm)
+			if err != nil {
+				return s, util.ReportError(fmt.Errorf("failed to save model as favorite: %w", err))
+			}
+			return s, s.modelList.SetModelType(s.modelList.GetModelType(), selectedModelID)
 		case key.Matches(msg, s.keyMap.Select):
 			if s.isAPIKeyValid {
 				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)

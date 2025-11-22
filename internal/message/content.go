@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +23,49 @@ const (
 	System    MessageRole = "system"
 	Tool      MessageRole = "tool"
 )
+
+// IsValid checks if the role is one of the valid predefined roles
+func (mr MessageRole) IsValid() bool {
+	switch mr {
+	case Assistant, User, System, Tool:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate returns an error if the role is invalid
+func (mr MessageRole) Validate() error {
+	if !mr.IsValid() {
+		return fmt.Errorf("invalid message role: '%s', must be one of: assistant, user, system, tool", string(mr))
+	}
+	return nil
+}
+
+// IsUser checks if role is User
+func (mr MessageRole) IsUser() bool {
+	return mr == User
+}
+
+// IsAssistant checks if role is Assistant
+func (mr MessageRole) IsAssistant() bool {
+	return mr == Assistant
+}
+
+// IsSystem checks if role is System
+func (mr MessageRole) IsSystem() bool {
+	return mr == System
+}
+
+// IsTool checks if role is Tool
+func (mr MessageRole) IsTool() bool {
+	return mr == Tool
+}
+
+// AllRoles returns all valid message roles
+func AllRoles() []MessageRole {
+	return []MessageRole{User, Assistant, System, Tool}
+}
 
 type FinishReason string
 

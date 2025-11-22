@@ -149,7 +149,20 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           largeModel,
+		SmallModel:           smallModel,
+		SystemPromptPrefix:   "",
+		SystemPrompt:         systemPrompt,
+		DisableAutoSummarize: false,
+		IsYolo:               true,
+		IsSubAgent:           false,
+		HooksManager:         nil,
+		WorkingDir:           "",
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		Tools:                tools,
+	})
 	return agent
 }
 

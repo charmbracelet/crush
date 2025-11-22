@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
@@ -325,6 +326,8 @@ type Config struct {
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+
+	Hooks *hooks.Config `json:"hooks,omitempty" jsonschema:"description=Hook system configuration"`
 
 	Agents map[string]Agent `json:"-"`
 

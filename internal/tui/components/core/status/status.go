@@ -82,7 +82,11 @@ func (m *statusCmp) infoMsg() string {
 		info := ansi.Truncate(m.info.Msg, widthLeft, "…")
 		message = t.S().Base.Foreground(t.BgOverlay).Width(widthLeft+2).Background(t.Warning).Padding(0, 1).Render(info)
 	default:
-		infoType = t.S().Base.Foreground(t.BgSubtle).Background(t.Green).Padding(0, 1).Bold(true).Render("HEY!")
+		note := "OKAY!"
+		if m.info.Type == util.InfoTypeUpdate {
+			note = "HEY!"
+		}
+		infoType = t.S().Base.Foreground(t.BgSubtle).Background(t.Green).Padding(0, 1).Bold(true).Render(note)
 		widthLeft := m.width - (lipgloss.Width(infoType) + 2)
 		info := ansi.Truncate(m.info.Msg, widthLeft, "…")
 		message = t.S().Base.Background(t.GreenDark).Width(widthLeft+2).Foreground(t.BgSubtle).Padding(0, 1).Render(info)

@@ -376,10 +376,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.UpdateAvailableMsg:
 		// Show update notification in status bar
 		statusMsg := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		if msg.IsDevelopment {
+			statusMsg = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
+		}
 		s, statusCmd := a.status.Update(util.InfoMsg{
-			Type: util.InfoTypeInfo,
+			Type: util.InfoTypeUpdate,
 			Msg:  statusMsg,
-			TTL:  30 * time.Second,
+			TTL:  10 * time.Second,
 		})
 		a.status = s.(status.StatusCmp)
 		return a, statusCmd

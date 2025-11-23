@@ -400,6 +400,7 @@ func (app *App) Shutdown() {
 func (app *App) checkForUpdates(ctx context.Context) {
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
 	info, err := update.Check(checkCtx, version.Version, update.Default)
 	if err != nil || !info.Available() {
 		return
@@ -407,5 +408,6 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	app.events <- pubsub.UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
+		IsDevelopment:  info.IsDevelopment(),
 	}
 }

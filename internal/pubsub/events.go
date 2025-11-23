@@ -31,4 +31,5 @@ type (
 type UpdateAvailableMsg struct {
 	CurrentVersion string
 	LatestVersion  string
+	IsDevelopment  bool
 }

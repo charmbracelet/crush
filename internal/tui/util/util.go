@@ -38,6 +38,7 @@ const (
 	InfoTypeSuccess
 	InfoTypeWarn
 	InfoTypeError
+	InfoTypeUpdate
 )
 
 func ReportInfo(info string) tea.Cmd {

@@ -33,7 +33,6 @@ type WriteParams struct {
 // UnmarshalJSON custom unmarshaler to handle both string and array of strings
 // This fixes compatibility with GLM 4.6 and Qwen 3 Coder 480B models that send content as arrays
 func (w *WriteParams) UnmarshalJSON(data []byte) error {
-	type Alias WriteParams
 	aux := &struct {
 		FilePath string      `json:"file_path"`
 		Content  interface{} `json:"content"`

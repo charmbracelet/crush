@@ -147,13 +147,13 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				// User Manually changed the content store an intermediate version
 				_, err = files.CreateVersion(ctx, sessionID, filePath, oldContent)
 				if err != nil {
-					slog.Debug("Error creating file history version", "error", err)
+					slog.Error("Error creating file history version", "error", err)
 				}
 			}
 			// Store the new version
 			_, err = files.CreateVersion(ctx, sessionID, filePath, params.Content)
 			if err != nil {
-				slog.Debug("Error creating file history version", "error", err)
+				slog.Error("Error creating file history version", "error", err)
 			}
 
 			recordFileWrite(filePath)

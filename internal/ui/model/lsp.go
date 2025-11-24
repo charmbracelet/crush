@@ -108,7 +108,6 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, height int) string {
 		remaining := len(renderedLsps) - (height - 1)
 		visibleItems = append(visibleItems, t.Subtle.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
-
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderedLsps...)
 }

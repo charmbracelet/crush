@@ -46,7 +46,6 @@ func (m *UI) landingView() string {
 				formatter := cases.Title(language.English, cases.NoLower)
 				reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
 				reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
-
 			}
 			parts = append(parts, "", common.ModelInfo(t, model.CatwalkCfg.Name, reasoningInfo, nil, width))
 		}

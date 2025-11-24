@@ -403,7 +403,6 @@ func (m *UI) ShortHelp() []key.Binding {
 		// 		)
 		// 	}
 		// }
-
 	}
 
 	return binds
@@ -486,7 +485,6 @@ func (m *UI) updateFocused(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 			cmds = append(cmds, cmd)
 			return cmds
 		}
-
 	}
 	return cmds
 }

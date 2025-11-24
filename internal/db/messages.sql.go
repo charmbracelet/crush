@@ -110,6 +110,7 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 const listAllMessages = `-- name: ListAllMessages :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
 FROM messages
+WHERE role = 'user'
 ORDER BY created_at ASC
 `
 

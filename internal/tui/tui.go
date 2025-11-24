@@ -595,7 +595,7 @@ func (a *appModel) View() tea.View {
 								Render("Window too small!"),
 						),
 				),
-			),
+			).Render(),
 		)
 		return view
 	}
@@ -651,7 +651,7 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
-	view.Content = canvas
+	view.Content = canvas.Render()
 	view.Cursor = cursor
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {

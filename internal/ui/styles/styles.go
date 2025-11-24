@@ -132,6 +132,14 @@ type Styles struct {
 		Content lipgloss.Style
 		Accent  lipgloss.Style
 	}
+
+	// LSP
+	LSP struct {
+		ErrorDiagnostic   lipgloss.Style
+		WarningDiagnostic lipgloss.Style
+		HintDiagnostic    lipgloss.Style
+		InfoDiagnostic    lipgloss.Style
+	}
 }
 
 func DefaultStyles() Styles {
@@ -159,10 +167,8 @@ func DefaultStyles() Styles {
 		borderFocus = charmtone.Charple
 
 		// Status
-		// success = charmtone.Guac
-		// error   = charmtone.Sriracha
-		// warning = charmtone.Zest
-		// info    = charmtone.Malibu
+		warning = charmtone.Zest
+		info    = charmtone.Malibu
 
 		// Colors
 		white = charmtone.Butter
@@ -577,6 +583,18 @@ func DefaultStyles() Styles {
 	s.Initialize.Header = s.Base
 	s.Initialize.Content = s.Muted
 	s.Initialize.Accent = s.Base.Foreground(greenDark)
+
+	// LSP and MCP status.
+	s.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
+	s.ItemBusyIcon = s.ItemOfflineIcon.Foreground(charmtone.Citron)
+	s.ItemErrorIcon = s.ItemOfflineIcon.Foreground(charmtone.Coral)
+	s.ItemOnlineIcon = s.ItemOfflineIcon.Foreground(charmtone.Guac)
+
+	// LSP
+	s.LSP.ErrorDiagnostic = s.Base.Foreground(redDark)
+	s.LSP.WarningDiagnostic = s.Base.Foreground(warning)
+	s.LSP.HintDiagnostic = s.Base.Foreground(fgHalfMuted)
+	s.LSP.InfoDiagnostic = s.Base.Foreground(info)
 	return s
 }
 

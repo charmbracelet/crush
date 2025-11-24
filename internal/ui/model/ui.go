@@ -2,7 +2,6 @@ package model
 
 import (
 	"image"
-	"log/slog"
 	"math/rand"
 	"os"
 	"slices"
@@ -13,7 +12,9 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
@@ -89,6 +90,9 @@ type UI struct {
 	onboarding struct {
 		yesInitializeSelected bool
 	}
+
+	// lsp
+	lspStates map[string]app.LSPClientInfo
 }
 
 // New creates a new instance of the [UI] model.
@@ -151,6 +155,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sendProgressBar {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
+	case pubsub.Event[app.LSPEvent]:
+		m.lspStates = app.GetLSPStates()
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -329,7 +335,6 @@ func (m *UI) View() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = m.com.Styles.Background
 
-	slog.Info("Update view")
 	layout := generateLayout(m, m.width, m.height)
 	if m.focus == uiFocusEditor && m.textarea.Focused() {
 		cur := m.textarea.Cursor()

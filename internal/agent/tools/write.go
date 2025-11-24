@@ -50,9 +50,11 @@ func (w *WriteParams) UnmarshalJSON(data []byte) error {
 	case []interface{}:
 		// Handle array of strings - join with newlines
 		var lines []string
-		for _, item := range v {
+		for i, item := range v {
 			if str, ok := item.(string); ok {
 				lines = append(lines, str)
+			} else {
+				return fmt.Errorf("array element at index %d is not a string: got %T", i, item)
 			}
 		}
 		w.Content = strings.Join(lines, "\n")

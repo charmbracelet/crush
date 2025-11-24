@@ -24,10 +24,14 @@ func (m *UI) markProjectInitialized() tea.Msg {
 
 func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	switch {
+	case key.Matches(msg, m.keyMap.Initialize.Enter):
+		if m.onboarding.yesInitializeSelected {
+			cmds = append(cmds, m.initializeProject())
+		} else {
+			cmds = append(cmds, m.skipInitializeProject())
+		}
 	case key.Matches(msg, m.keyMap.Initialize.Switch):
-		slog.Info("Before", "yes", m.onboarding.yesInitializeSelected)
 		m.onboarding.yesInitializeSelected = !m.onboarding.yesInitializeSelected
-		slog.Info("After", "yes", m.onboarding.yesInitializeSelected)
 	case key.Matches(msg, m.keyMap.Initialize.Yes):
 		cmds = append(cmds, m.initializeProject())
 	case key.Matches(msg, m.keyMap.Initialize.No):
@@ -54,7 +58,6 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 }
 
 func (m *UI) initializeView() string {
-	slog.Info("initView")
 	cfg := m.com.Config()
 	s := m.com.Styles.Initialize
 	cwd := home.Short(cfg.WorkingDir())

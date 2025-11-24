@@ -20,6 +20,7 @@ type KeyMap struct {
 	Initialize struct {
 		Yes,
 		No,
+		Enter,
 		Switch key.Binding
 	}
 
@@ -116,6 +117,10 @@ func DefaultKeyMap() KeyMap {
 	km.Initialize.Switch = key.NewBinding(
 		key.WithKeys("left", "right", "tab"),
 		key.WithHelp("tab", "switch"),
+	)
+	km.Initialize.Enter = key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "select"),
 	)
 
 	return km

@@ -233,7 +233,6 @@ func (m *UI) routeKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 
 // Draw implements [tea.Layer] and draws the UI model.
 func (m *UI) Draw(scr tea.Screen, area tea.Rectangle) {
-	slog.Info("Draw")
 	layout := generateLayout(m, area.Dx(), area.Dy())
 
 	// Clear the screen first
@@ -261,12 +260,7 @@ func (m *UI) Draw(scr tea.Screen, area tea.Rectangle) {
 	case uiLanding:
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
-
-		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
-			Height(layout.main.Dy()).
-			Background(lipgloss.ANSIColor(rand.Intn(256))).
-			Render(" Landing Page ")
-		main := uv.NewStyledString(mainView)
+		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
 		editor := uv.NewStyledString(m.textarea.View())
@@ -558,7 +552,7 @@ func generateLayout(m *UI, w, h int) layout {
 	appRect.Max.X -= 1
 	appRect.Max.Y -= 1
 
-	if slices.Contains([]uiState{uiConfigure, uiInitialize}, m.state) {
+	if slices.Contains([]uiState{uiConfigure, uiInitialize, uiLanding}, m.state) {
 		// extra padding on left and right for these states
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
@@ -598,6 +592,9 @@ func generateLayout(m *UI, w, h int) layout {
 		// help
 		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(headerHeight))
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		// Remove extra padding from editor (but keep it for header and main)
+		editorRect.Min.X -= 1
+		editorRect.Max.X += 1
 		layout.header = headerRect
 		layout.main = mainRect
 		layout.editor = editorRect

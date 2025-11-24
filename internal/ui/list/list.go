@@ -2,97 +2,64 @@
 package list
 
 import (
-	"image"
+	"io"
 	"slices"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/ordered"
-	lru "github.com/hashicorp/golang-lru/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// List represents a component that display a list of [Item]s.
-type List struct {
-	// idx is the current focused index in the list. -1 means no item is focused.
-	idx int
+// ItemRenderer is an interface for rendering items in the list.
+type ItemRenderer interface {
+	// Render renders the item as a string.
+	Render(w io.Writer, l *List, index int, item Item)
+}
 
+// DefaultItemRenderer is the default implementation of [ItemRenderer].
+type DefaultItemRenderer struct{}
+
+// Render renders the item as a string using its content.
+func (r *DefaultItemRenderer) Render(w io.Writer, list *List, index int, item Item) {
+	_, _ = io.WriteString(w, item.Content())
+}
+
+// List represents a component that renders a list of [Item]s via
+// [ItemRenderer]s. It supports focus management and styling.
+type List struct {
+	// items is the master list of items.
 	items []Item
 
-	// yOffset is the current vertical offset for scrolling.
+	// rend is the item renderer for the list.
+	rend ItemRenderer
+
+	// width is the width of the list.
+	width int
+
+	// yOffset is the vertical scroll offset. -1 means scrolled to bottom.
 	yOffset int
-
-	// linesCount is the cached total number of rendered lines in the list.
-	linesCount int
-
-	// rect is the bounding rectangle of the list.
-	rect image.Rectangle
-
-	// reverse indicates if the list is in reverse order.
-	reverse bool
-
-	// hasFocus indicates if the list has focus.
-	hasFocus bool
-
-	styles Styles
-
-	cache *lru.Cache[string, RenderedItem]
 }
 
 // New creates a new [List] component with the given items.
-func New(items ...Item) *List {
-	cache, _ := lru.New[string, RenderedItem](256)
-	l := &List{
-		idx:    -1,
-		items:  items,
-		styles: DefaultStyles(),
-		cache:  cache,
+func New(rend ItemRenderer, items ...Item) *List {
+	if rend == nil {
+		rend = &DefaultItemRenderer{}
 	}
+	l := &List{
+		rend:    rend,
+		yOffset: -1,
+	}
+	l.Append(items...)
 	return l
 }
 
-// SetStyles sets the styles for the list.
-func (l *List) SetStyles(s Styles) {
-	l.styles = s
-}
-
-// SetReverse sets the reverse order of the list.
-func (l *List) SetReverse(reverse bool) {
-	l.reverse = reverse
-}
-
-// IsReverse returns true if the list is in reverse order.
-func (l *List) IsReverse() bool {
-	return l.reverse
-}
-
-// SetBounds sets the bounding rectangle of the list.
-func (l *List) SetBounds(rect image.Rectangle) {
-	if l.rect.Dx() != rect.Dx() {
-		// Clear the cache if the width has changed. This is necessary because
-		// the rendered items are wrapped to the width of the list.
-		l.cache.Purge()
-	}
-	l.rect = rect
+// SetWidth sets the width of the list.
+func (l *List) SetWidth(width int) {
+	l.width = width
 }
 
 // Width returns the width of the list.
 func (l *List) Width() int {
-	return l.rect.Dx()
-}
-
-// Height returns the height of the list.
-func (l *List) Height() int {
-	return l.rect.Dy()
-}
-
-// X returns the X position of the list.
-func (l *List) X() int {
-	return l.rect.Min.X
-}
-
-// Y returns the Y position of the list.
-func (l *List) Y() int {
-	return l.rect.Min.Y
+	return l.width
 }
 
 // Len returns the number of items in the list.
@@ -100,7 +67,7 @@ func (l *List) Len() int {
 	return len(l.items)
 }
 
-// Items returns the items in the list.
+// Items returns a new slice of all items in the list.
 func (l *List) Items() []Item {
 	return l.items
 }
@@ -136,186 +103,139 @@ func (l *List) Append(items ...Item) {
 	l.items = append(l.items, items...)
 }
 
-// Focus focuses the list
-func (l *List) Focus() {
-	l.hasFocus = true
-	if l.idx < 0 && len(l.items) > 0 {
-		l.FocusFirst()
+// GotoBottom scrolls the list to the bottom.
+func (l *List) GotoBottom() {
+	l.yOffset = -1
+}
+
+// GotoTop scrolls the list to the top.
+func (l *List) GotoTop() {
+	l.yOffset = 0
+}
+
+// TotalHeight returns the total height of all items in the list.
+func (l *List) TotalHeight() int {
+	total := 0
+	for _, item := range l.items {
+		total += item.Height()
+	}
+	return total
+}
+
+// ScrollUp scrolls the list up by the given number of lines.
+func (l *List) ScrollUp(lines int) {
+	if l.yOffset == -1 {
+		// Calculate total height
+		totalHeight := l.TotalHeight()
+		l.yOffset = totalHeight
+	}
+	l.yOffset -= lines
+	if l.yOffset < 0 {
+		l.yOffset = 0
 	}
 }
 
-// FocusFirst focuses the first item in the list.
-func (l *List) FocusFirst() {
-	if !l.hasFocus {
-		l.Focus()
-	}
-	if l.reverse {
-		l.idx = len(l.items) - 1
+// ScrollDown scrolls the list down by the given number of lines.
+func (l *List) ScrollDown(lines int) {
+	if l.yOffset == -1 {
+		// Already at bottom
 		return
 	}
-	l.idx = 0
-}
-
-// FocusLast focuses the last item in the list.
-func (l *List) FocusLast() {
-	if !l.hasFocus {
-		l.Focus()
-	}
-	if l.reverse {
-		l.idx = 0
-		return
-	}
-	l.idx = len(l.items) - 1
-}
-
-// focus moves the focus by n offset. Positive n moves down, negative n moves up.
-func (l *List) focus(n int) {
-	if l.reverse {
-		n = -n
-	}
-
-	if n < 0 {
-		if l.idx+n < 0 {
-			l.idx = 0
-		} else {
-			l.idx += n
-		}
-	} else if n > 0 {
-		if l.idx+n >= len(l.items) {
-			l.idx = len(l.items) - 1
-		} else {
-			l.idx += n
-		}
+	l.yOffset += lines
+	totalHeight := l.TotalHeight()
+	if l.yOffset >= totalHeight {
+		l.yOffset = -1 // Scroll to bottom
 	}
 }
 
-// FocusNext focuses the next item in the list.
-func (l *List) FocusNext() {
-	if !l.hasFocus {
-		l.Focus()
+// YOffset returns the current vertical scroll offset.
+func (l *List) YOffset() int {
+	if l.yOffset == -1 {
+		return l.TotalHeight()
 	}
-	l.focus(1)
+	return l.yOffset
 }
 
-// FocusPrev focuses the previous item in the list.
-func (l *List) FocusPrev() {
-	if !l.hasFocus {
-		l.Focus()
-	}
-	l.focus(-1)
-}
-
-// FocusedItem returns the currently focused item.
-func (l *List) FocusedItem() (Item, bool) {
-	return l.At(l.idx)
-}
-
-// Blur removes focus from the list.
-func (l *List) Blur() {
-	l.hasFocus = false
-}
-
-// ScrollUp scrolls the list up by n lines.
-func (l *List) ScrollUp(n int) {
-	l.scroll(-n)
-}
-
-// ScrollDown scrolls the list down by n lines.
-func (l *List) ScrollDown(n int) {
-	l.scroll(n)
-}
-
-// scroll scrolls the list by n lines. Positive n scrolls down, negative n scrolls up.
-func (l *List) scroll(n int) {
-	if l.reverse {
-		n = -n
-	}
-
-	if n > 0 {
-		l.yOffset += n
-		if l.linesCount > l.Height() && l.yOffset > l.linesCount-l.Height() {
-			l.yOffset = l.linesCount - l.Height()
-		}
-	} else if n < 0 {
-		l.yOffset += n
-		if l.yOffset < 0 {
-			l.yOffset = 0
-		}
-	}
-}
-
-// Render renders the first n items that fit within the list's height and
-// returns the rendered string.
+// Render renders the whole list as a string.
 func (l *List) Render() string {
-	var rendered []string
-	availableHeight := l.Height()
-	i := 0
-	if l.reverse {
-		i = len(l.items) - 1
-	}
+	return l.RenderRange(0, len(l.items))
+}
 
-	// Render items until we run out of space
-	for i >= 0 && i < len(l.items) {
-		itemStyle := l.styles.NormalItem
-		if l.hasFocus && l.idx == i {
-			itemStyle = l.styles.FocusedItem
+// Draw draws the list to the given [uv.Screen] in the specified area.
+func (l *List) Draw(scr uv.Screen, area uv.Rectangle) {
+	yOffset := l.YOffset()
+	rendered := l.RenderLines(yOffset, yOffset+area.Dy())
+	uv.NewStyledString(rendered).Draw(scr, area)
+}
+
+// RenderRange renders a range of items from start to end indices.
+func (l *List) RenderRange(start, end int) string {
+	var b strings.Builder
+	for i := start; i < end && i < len(l.items); i++ {
+		item, ok := l.At(i)
+		if !ok {
+			continue
 		}
 
-		listWidth := l.Width() - itemStyle.GetHorizontalFrameSize()
+		l.rend.Render(&b, l, i, item)
+		if i < end-1 && i < len(l.items)-1 {
+			b.WriteString("\n")
+		}
+	}
 
+	return b.String()
+}
+
+// RenderLines renders the list based on the start and end y offsets.
+func (l *List) RenderLines(startY, endY int) string {
+	var b strings.Builder
+	currentY := 0
+	for i := 0; i < len(l.items); i++ {
 		item, ok := l.At(i)
-		if ok {
-			cachedItem, ok := l.cache.Get(item.ID())
-			if !ok {
-				renderedItem := lipgloss.Wrap(item.Render(), listWidth, "")
-				cachedItem = NewCachedItem(item, renderedItem)
-				l.cache.Add(item.ID(), cachedItem)
+		if !ok {
+			continue
+		}
+
+		itemHeight := item.Height()
+		if currentY+itemHeight <= startY {
+			// Skip this item as it's above the startY
+			currentY += itemHeight
+			continue
+		}
+		if currentY >= endY {
+			// Stop rendering as we've reached endY
+			break
+		}
+
+		// Render the item to a temporary buffer if needed
+		if currentY < startY || currentY+itemHeight > endY {
+			var tempBuf strings.Builder
+			l.rend.Render(&tempBuf, l, i, item)
+			lines := strings.Split(tempBuf.String(), "\n")
+
+			// Calculate the visible lines
+			startLine := 0
+			if currentY < startY {
+				startLine = startY - currentY
+			}
+			endLine := itemHeight
+			if currentY+itemHeight > endY {
+				endLine = endY - currentY
 			}
 
-			renderedString := itemStyle.Render(cachedItem.Render())
-			rendered = append(rendered, renderedString)
-		}
-
-		if l.reverse {
-			i--
+			// Write only the visible lines
+			for j := startLine; j < endLine && j < len(lines); j++ {
+				b.WriteString(lines[j])
+				b.WriteString("\n")
+			}
 		} else {
-			i++
+			// Render the whole item directly
+			l.rend.Render(&b, l, i, item)
+			b.WriteString("\n")
 		}
+
+		currentY += itemHeight
 	}
 
-	if l.reverse {
-		slices.Reverse(rendered)
-	}
-
-	var sb strings.Builder
-	for i, item := range rendered {
-		sb.WriteString(item)
-		if i < len(rendered)-1 {
-			sb.WriteString("\n")
-		}
-	}
-
-	linesCount := strings.Count(sb.String(), "\n") + 1
-	l.linesCount = linesCount
-
-	if linesCount <= availableHeight {
-		return sb.String()
-	}
-
-	lines := strings.Split(sb.String(), "\n")
-	yOffset := ordered.Clamp(l.yOffset, 0, linesCount-availableHeight)
-	if l.reverse {
-		start := len(lines) - availableHeight - yOffset
-		end := max(availableHeight, len(lines)-l.yOffset)
-		return strings.Join(lines[start:end], "\n")
-	}
-
-	start := 0 + yOffset
-	end := min(len(lines), availableHeight+yOffset)
-	return strings.Join(lines[start:end], "\n")
-}
-
-// View returns the rendered view of the list.
-func (l *List) View() string {
-	return l.Render()
+	return strings.TrimRight(b.String(), "\n")
 }

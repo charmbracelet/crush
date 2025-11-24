@@ -1,101 +1,102 @@
 package list
 
-import "strings"
+import (
+	"io"
 
-// RenderedItem represents a rendered item as a string.
-type RenderedItem interface {
-	Item
-	// Height returns the height of the rendered item in lines.
-	Height() int
-}
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/glamour/v2"
+	"github.com/charmbracelet/glamour/v2/ansi"
+)
 
-// Item represents a single item in the [List] component.
+// Item represents a rendered item in the [List] component.
 type Item interface {
-	// ID returns the unique identifier of the item.
-	ID() string
-	// Render returns the rendered string representation of the item.
-	Render() string
-}
-
-// StringItem is a simple implementation of the [Item] interface that holds a
-// string.
-type StringItem struct {
-	ItemID  string
-	Content string
-}
-
-// NewStringItem creates a new StringItem with the given ID and content.
-func NewStringItem(id, content string) StringItem {
-	return StringItem{
-		ItemID:  id,
-		Content: content,
-	}
-}
-
-// ID returns the unique identifier of the string item.
-func (s StringItem) ID() string {
-	return s.ItemID
-}
-
-// Render returns the rendered string representation of the string item.
-func (s StringItem) Render() string {
-	return s.Content
+	// Content is the rendered content of the item.
+	Content() string
+	// Height returns the height of the item based on its content.
+	Height() int
 }
 
 // Gap is [GapItem] to be used as a vertical gap in the list.
 var Gap = GapItem{}
 
-// GapItem is a one-line vertical gap in the list.
+// GapItem represents a vertical gap in the list.
 type GapItem struct{}
 
-// ID returns the unique identifier of the gap.
-func (g GapItem) ID() string {
-	return "gap"
+// Content returns the content of the gap item.
+func (g GapItem) Content() string {
+	return ""
 }
 
-// Render returns the rendered string representation of the gap.
-func (g GapItem) Render() string {
-	return "\n"
-}
-
-// Height returns the height of the rendered gap in lines.
+// Height returns the height of the gap item.
 func (g GapItem) Height() int {
 	return 1
 }
 
-// CachedItem wraps an Item and caches its rendered string representation and height.
-type CachedItem struct {
-	item     Item
-	rendered string
-	height   int
+// StringItem represents a simple string item in the list.
+type StringItem struct {
+	content string
 }
 
-// NewCachedItem creates a new CachedItem from the given Item.
-func NewCachedItem(item Item, rendered string) CachedItem {
-	height := 1 + strings.Count(rendered, "\n")
-	return CachedItem{
-		item:     item,
-		rendered: rendered,
-		height:   height,
+// NewStringItem creates a new [StringItem] with the given id and content.
+func NewStringItem(content string) StringItem {
+	return StringItem{
+		content: content,
 	}
 }
 
-// ID returns the unique identifier of the cached item.
-func (c CachedItem) ID() string {
-	return c.item.ID()
+// Content returns the content of the string item.
+func (s StringItem) Content() string {
+	return s.content
 }
 
-// Item returns the underlying Item.
-func (c CachedItem) Item() Item {
-	return c.item
+// Height returns the height of the string item based on its content.
+func (s StringItem) Height() int {
+	return lipgloss.Height(s.content)
 }
 
-// Render returns the cached rendered string representation of the item.
-func (c CachedItem) Render() string {
-	return c.rendered
+// MarkdownItem represents a markdown item in the list.
+type MarkdownItem struct {
+	StringItem
 }
 
-// Height returns the cached height of the rendered item in lines.
-func (c CachedItem) Height() int {
-	return c.height
+// NewMarkdownItem creates a new [MarkdownItem] with the given id and content.
+func NewMarkdownItem(id, content string) MarkdownItem {
+	return MarkdownItem{
+		StringItem: StringItem{
+			content: content,
+		},
+	}
+}
+
+// Content returns the content of the markdown item.
+func (m MarkdownItem) Content() string {
+	return m.StringItem.Content()
+}
+
+// Height returns the height of the markdown item based on its content.
+func (m MarkdownItem) Height() int {
+	return m.StringItem.Height()
+}
+
+// MarkdownItemMaxWidth is the maximum width for rendering markdown items.
+const MarkdownItemMaxWidth = 120
+
+// MarkdownItemRenderer renders [MarkdownItem]s in a [List].
+type MarkdownItemRenderer struct {
+	Styles *ansi.StyleConfig
+}
+
+// Render implements [ItemRenderer].
+func (m *MarkdownItemRenderer) Render(w io.Writer, list *List, index int, item Item) {
+	width := min(list.Width(), MarkdownItemMaxWidth)
+	var r *glamour.TermRenderer
+	if m.Styles != nil {
+		r = common.MarkdownRenderer(*m.Styles, width)
+	} else {
+		r = common.PlainMarkdownRenderer(width)
+	}
+
+	rendered, _ := r.Render(item.Content())
+	_, _ = io.WriteString(w, rendered)
 }

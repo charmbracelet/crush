@@ -321,6 +321,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			case key.Matches(msg, m.keyMap.Next):
 				return m, util.CmdHandler(ScrollHistoryDown{})
 			}
+			// if any key other than history related controls we play it safe and close
+			// the history and reset the text input field to be the current value
 			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
 				valueToSet: m.textarea.Value(),
 			}))

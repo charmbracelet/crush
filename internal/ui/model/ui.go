@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -93,6 +94,9 @@ type UI struct {
 
 	// lsp
 	lspStates map[string]app.LSPClientInfo
+
+	// mcp
+	mcpStates map[string]mcp.ClientInfo
 }
 
 // New creates a new instance of the [UI] model.
@@ -134,6 +138,7 @@ func New(com *common.Common) *UI {
 	ui.setEditorPrompt()
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
+	ui.help.Styles = com.Styles.Help
 
 	return ui
 }
@@ -157,6 +162,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
+	case pubsub.Event[mcp.Event]:
+		m.mcpStates = mcp.GetStates()
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.

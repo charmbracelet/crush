@@ -49,7 +49,7 @@ func (m *UI) lspInfo(t *styles.Styles, width, height int) string {
 		list = lspList(t, lsps, width, height)
 	}
 
-	return fmt.Sprintf("%s\n\n%s", title, list)
+	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {

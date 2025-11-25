@@ -37,7 +37,8 @@ func ModelInfo(t *styles.Styles, modelName string, reasoningInfo string, context
 	}
 
 	if context != nil {
-		parts = append(parts, formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost))
+		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
+		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(
@@ -118,4 +119,15 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	}
 
 	return strings.Join(content, " ")
+}
+
+func Section(t *styles.Styles, text string, width int) string {
+	char := "─"
+	length := lipgloss.Width(text) + 1
+	remainingWidth := width - length
+	text = t.Section.Title.Render(text)
+	if remainingWidth > 0 {
+		text = text + " " + t.Section.Line.Render(strings.Repeat(char, remainingWidth))
+	}
+	return text
 }

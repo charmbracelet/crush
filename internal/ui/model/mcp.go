@@ -14,7 +14,7 @@ type MCPInfo struct {
 	mcp.ClientInfo
 }
 
-func (m *UI) mcpInfo(t *styles.Styles, width, height int) string {
+func (m *UI) mcpInfo(t *styles.Styles, width, maxItems int, isSection bool) string {
 	var mcps []MCPInfo
 
 	for _, state := range m.mcpStates {
@@ -22,10 +22,12 @@ func (m *UI) mcpInfo(t *styles.Styles, width, height int) string {
 	}
 
 	title := t.Subtle.Render("MCPs")
+	if isSection {
+		title = common.Section(t, title, width)
+	}
 	list := t.Subtle.Render("None")
 	if len(mcps) > 0 {
-		height = max(0, height-2) // remove title and space
-		list = mcpList(t, mcps, width, height)
+		list = mcpList(t, mcps, width, maxItems)
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
@@ -42,8 +44,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 	return strings.Join(parts, " ")
 }
 
-func mcpList(t *styles.Styles, mcps []MCPInfo, width, height int) string {
+func mcpList(t *styles.Styles, mcps []MCPInfo, width, maxItems int) string {
 	var renderedMcps []string
+
 	for _, m := range mcps {
 		var icon string
 		title := m.Name
@@ -78,9 +81,9 @@ func mcpList(t *styles.Styles, mcps []MCPInfo, width, height int) string {
 		}, width))
 	}
 
-	if len(renderedMcps) > height {
-		visibleItems := renderedMcps[:height-1]
-		remaining := len(renderedMcps) - (height - 1)
+	if len(renderedMcps) > maxItems {
+		visibleItems := renderedMcps[:maxItems-1]
+		remaining := len(renderedMcps) - maxItems
 		visibleItems = append(visibleItems, t.Subtle.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}

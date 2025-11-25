@@ -122,9 +122,11 @@ type Styles struct {
 	LogoCharmColor   color.Color
 	LogoVersionColor color.Color
 
-	// Sidebar
-	SidebarFull    lipgloss.Style
-	SidebarCompact lipgloss.Style
+	// Section Title
+	Section struct {
+		Title lipgloss.Style
+		Line  lipgloss.Style
+	}
 
 	// Initialize
 	Initialize struct {
@@ -139,6 +141,13 @@ type Styles struct {
 		WarningDiagnostic lipgloss.Style
 		HintDiagnostic    lipgloss.Style
 		InfoDiagnostic    lipgloss.Style
+	}
+
+	// Files
+	Files struct {
+		Path      lipgloss.Style
+		Additions lipgloss.Style
+		Deletions lipgloss.Style
 	}
 }
 
@@ -575,9 +584,9 @@ func DefaultStyles() Styles {
 	s.LogoCharmColor = secondary
 	s.LogoVersionColor = primary
 
-	// Sidebar
-	s.SidebarFull = lipgloss.NewStyle().Padding(1, 1)
-	s.SidebarCompact = s.SidebarFull.PaddingTop(0)
+	// Section
+	s.Section.Title = s.Subtle
+	s.Section.Line = s.Base.Foreground(charmtone.Charcoal)
 
 	// Initialize
 	s.Initialize.Header = s.Base
@@ -595,6 +604,10 @@ func DefaultStyles() Styles {
 	s.LSP.WarningDiagnostic = s.Base.Foreground(warning)
 	s.LSP.HintDiagnostic = s.Base.Foreground(fgHalfMuted)
 	s.LSP.InfoDiagnostic = s.Base.Foreground(info)
+
+	s.Files.Path = s.Muted
+	s.Files.Additions = s.Base.Foreground(greenDark)
+	s.Files.Deletions = s.Base.Foreground(redDark)
 	return s
 }
 

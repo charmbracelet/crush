@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"image"
 	"math/rand"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -48,10 +50,19 @@ const (
 	uiChatCompact
 )
 
+type sessionLoadedMsg struct {
+	sess session.Session
+}
+
+type sessionFilesLoadedMsg struct {
+	files []SessionFile
+}
+
 // UI represents the main user interface model.
 type UI struct {
-	com  *common.Common
-	sess *session.Session
+	com          *common.Common
+	session      *session.Session
+	sessionFiles []SessionFile
 
 	// The width and height of the terminal in cells.
 	width  int
@@ -65,7 +76,6 @@ type UI struct {
 	keyenh tea.KeyboardEnhancementsMsg
 
 	chat   *ChatModel
-	side   *SidebarModel
 	dialog *dialog.Overlay
 	help   help.Model
 
@@ -98,6 +108,9 @@ type UI struct {
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
+
+	// logo keeps a cached version of the sidebar logo
+	logo string
 }
 
 // New creates a new instance of the [UI] model.
@@ -114,7 +127,6 @@ func New(com *common.Common) *UI {
 		com:      com,
 		dialog:   dialog.NewOverlay(),
 		keyMap:   DefaultKeyMap(),
-		side:     NewSidebarModel(com),
 		help:     help.New(),
 		focus:    uiFocusNone,
 		state:    uiConfigure,
@@ -161,6 +173,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sendProgressBar {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
+	case sessionLoadedMsg:
+		m.state = uiChat
+		// update layout
+		m.updateLayoutAndSize()
+		m.session = &msg.sess
+	case sessionFilesLoadedMsg:
+		m.sessionFiles = msg.files
+	case pubsub.Event[history.File]:
+		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
@@ -201,6 +222,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *UI) loadSession(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		// TODO: handle error
+		session, _ := m.com.App.Sessions.Get(context.Background(), sessionID)
+		return sessionLoadedMsg{session}
+	}
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
@@ -283,13 +312,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 	case uiChat:
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
-
-		side := uv.NewStyledString(m.side.View())
+		side := uv.NewStyledString(m.sidebar())
 		side.Draw(scr, layout.sidebar)
 
 		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
 			Height(layout.main.Dy()).
-			Background(lipgloss.ANSIColor(rand.Intn(256))).
 			Render(" Chat Messages ")
 		main := uv.NewStyledString(mainView)
 		main.Draw(scr, layout.main)
@@ -385,16 +412,16 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(binds, k.Quit)
 	default:
 		// TODO: other states
-		if m.sess == nil {
-			// no session selected
-			binds = append(binds,
-				k.Commands,
-				k.Models,
-				k.Editor.Newline,
-				k.Quit,
-				k.Help,
-			)
-		}
+		// if m.session == nil {
+		// no session selected
+		binds = append(binds,
+			k.Commands,
+			k.Models,
+			k.Editor.Newline,
+			k.Quit,
+			k.Help,
+		)
+		// }
 		// else {
 		// we have a session
 		// }
@@ -436,7 +463,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Quit,
 			})
 	default:
-		if m.sess == nil {
+		if m.session == nil {
 			// no session selected
 			binds = append(binds,
 				[]key.Binding{
@@ -535,8 +562,7 @@ func (m *UI) updateSize() {
 		m.textarea.SetHeight(m.layout.editor.Dy())
 
 	case uiChat:
-		// TODO: set the width and heigh of the chat component
-		m.side.SetWidth(m.layout.sidebar.Dx())
+		m.renderSidebarLogo(m.layout.sidebar.Dx())
 		m.textarea.SetWidth(m.layout.editor.Dx())
 		m.textarea.SetHeight(m.layout.editor.Dy())
 
@@ -558,7 +584,7 @@ func generateLayout(m *UI, w, h int) layout {
 	// The editor height
 	editorHeight := 5
 	// The sidebar width
-	sidebarWidth := 40
+	sidebarWidth := 30
 	// The header height
 	// TODO: handle compact
 	headerHeight := 4
@@ -635,6 +661,8 @@ func generateLayout(m *UI, w, h int) layout {
 		// help
 
 		mainRect, sideRect := uv.SplitHorizontal(appRect, uv.Fixed(appRect.Dx()-sidebarWidth))
+		// Add padding left
+		sideRect.Min.X += 1
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 		layout.sidebar = sideRect
 		layout.main = mainRect
@@ -750,6 +778,10 @@ func (m *UI) renderHeader(compact bool, width int) {
 	m.header = renderLogo(m.com.Styles, compact, width)
 }
 
+func (m *UI) renderSidebarLogo(width int) {
+	m.logo = renderLogo(m.com.Styles, true, width)
+}
+
 func renderLogo(t *styles.Styles, compact bool, width int) string {
 	return logo.Render(version.Version, compact, logo.Opts{
 		FieldColor:   t.LogoFieldColor,
@@ -757,6 +789,6 @@ func renderLogo(t *styles.Styles, compact bool, width int) string {
 		TitleColorB:  t.LogoTitleColorB,
 		CharmColor:   t.LogoCharmColor,
 		VersionColor: t.LogoVersionColor,
-		Width:        max(0, width-2),
+		Width:        width,
 	})
 }

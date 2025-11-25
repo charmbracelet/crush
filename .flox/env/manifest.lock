@@ -1,0 +1,503 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "version": 1,
+    "install": {
+      "go": {
+        "pkg-path": "go"
+      },
+      "go-task": {
+        "pkg-path": "go-task"
+      },
+      "goreleaser": {
+        "pkg-path": "goreleaser"
+      },
+      "sqlc": {
+        "pkg-path": "sqlc"
+      }
+    },
+    "hook": {},
+    "profile": {},
+    "options": {},
+    "build": {
+      "crush": {
+        "command": "  # Copy vendored dependencies from stage 1 and make them writable\n  cp -rL ${vendor}/vendor ./ && chmod -R u+w vendor\n\n  # Get version for ldflags\n  VERSION=$(git describe --long 2>/dev/null || echo \"0.0.0-dev\")\n\n  # Build the binary with the same settings as Taskfile\n  # Using -ldflags=\"-s -w\" to strip debug symbols and reduce binary size\n  CGO_ENABLED=0 GOEXPERIMENT=greenteagc go build -mod=vendor -ldflags=\"-s -w -X github.com/charmbracelet/crush/internal/version.Version=$VERSION\" -o $out/bin/crush .\n",
+        "sandbox": "pure",
+        "version": {
+          "command": "git describe --long 2>/dev/null || echo '0.0.0-dev'"
+        },
+        "description": "Your new coding bestie, now available in your favourite terminal"
+      },
+      "vendor": {
+        "command": "  go mod download\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n",
+        "sandbox": "off"
+      }
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/lsrxqhgl1brmvw09kbkl5raxrqsm7gl3-go-1.25.4.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-1.25.4",
+      "pname": "go",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T17:33:05.754336Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.25.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/52f5kjcmgmvgrz3rij676b3rjmgg5l5g-go-1.25.4"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/6l483405mmkd3k26y378jg2c14dcpmsl-go-1.25.4.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-1.25.4",
+      "pname": "go",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:08:10.802460Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.25.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/2ajrlmz1qdpm9k9ankhnp3973wxg1gqs-go-1.25.4"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/rw7f4p68j6nckj5s9psj3bfa4k0mi7fr-go-1.25.4.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-1.25.4",
+      "pname": "go",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:41:43.838627Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.25.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/1rqpvp45rl4sr1l0czrlbmv8jqj9sa7r-go-1.25.4"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go",
+      "broken": false,
+      "derivation": "/nix/store/lkdbx6p848w5p0xg8k0fmhk8s734wsyd-go-1.25.4.drv",
+      "description": "Go Programming language",
+      "install_id": "go",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-1.25.4",
+      "pname": "go",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T19:18:41.962811Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.25.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/0a3dyfq09dnkw28ap2i450wjimvdmv6s-go-1.25.4"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go-task",
+      "broken": false,
+      "derivation": "/nix/store/xjl15ac1icc6bf9j76pwnwvdpp20s8z3-go-task-3.45.5.drv",
+      "description": "Task runner / simpler Make alternative written in Go",
+      "install_id": "go-task",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-task-3.45.5",
+      "pname": "go-task",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T17:33:05.773349Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.45.5",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/hq2nfh8sndri3x4z4k1j9g9wk6l0kp5q-go-task-3.45.5"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go-task",
+      "broken": false,
+      "derivation": "/nix/store/zkbcycfgsvafrd9a6drlbwb5p49r0ync-go-task-3.45.5.drv",
+      "description": "Task runner / simpler Make alternative written in Go",
+      "install_id": "go-task",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-task-3.45.5",
+      "pname": "go-task",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:08:10.835230Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.45.5",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/4ac3xjjbvapdifhzqn3cj012b685bysi-go-task-3.45.5"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go-task",
+      "broken": false,
+      "derivation": "/nix/store/j87k7yikigmil1x6ygvc8xf2mhswzhbm-go-task-3.45.5.drv",
+      "description": "Task runner / simpler Make alternative written in Go",
+      "install_id": "go-task",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-task-3.45.5",
+      "pname": "go-task",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:41:43.857748Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.45.5",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/57gnc0hahiawf2dmiiy6z6kxmaq2a41m-go-task-3.45.5"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "go-task",
+      "broken": false,
+      "derivation": "/nix/store/0gi0n4zs87d38x2nmx9lmw3jlvy3dzpz-go-task-3.45.5.drv",
+      "description": "Task runner / simpler Make alternative written in Go",
+      "install_id": "go-task",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "go-task-3.45.5",
+      "pname": "go-task",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T19:18:41.991006Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.45.5",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/8j7jr4fpjlmbcyb1crr8gy00z8d768vm-go-task-3.45.5"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "goreleaser",
+      "broken": false,
+      "derivation": "/nix/store/xbwdb0q9pb78chzwb0zvp71jxqz1hx4a-goreleaser-2.12.7.drv",
+      "description": "Deliver Go binaries as fast and easily as possible",
+      "install_id": "goreleaser",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "goreleaser-2.12.7",
+      "pname": "goreleaser",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T17:33:05.825276Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.12.7",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/il6x101sc3xj68rc6vpwxj3kzg70jn41-goreleaser-2.12.7"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "goreleaser",
+      "broken": false,
+      "derivation": "/nix/store/pg3495yrkwkwzjwl4yjlmksyzr7fnwhx-goreleaser-2.12.7.drv",
+      "description": "Deliver Go binaries as fast and easily as possible",
+      "install_id": "goreleaser",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "goreleaser-2.12.7",
+      "pname": "goreleaser",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:08:10.942660Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.12.7",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/gl13q08k5ic2y1j6zizrsshq6a6nr3i2-goreleaser-2.12.7"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "goreleaser",
+      "broken": false,
+      "derivation": "/nix/store/pl27b9dvx4x4bkmgaamqnrwj7fjrvhpy-goreleaser-2.12.7.drv",
+      "description": "Deliver Go binaries as fast and easily as possible",
+      "install_id": "goreleaser",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "goreleaser-2.12.7",
+      "pname": "goreleaser",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:41:43.909312Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.12.7",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/4aaqjzap4f65a1xgmgkjwix0ryi66crl-goreleaser-2.12.7"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "goreleaser",
+      "broken": false,
+      "derivation": "/nix/store/1hx0jhnji6kb3f1vaas0y21qy4safv30-goreleaser-2.12.7.drv",
+      "description": "Deliver Go binaries as fast and easily as possible",
+      "install_id": "goreleaser",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "goreleaser-2.12.7",
+      "pname": "goreleaser",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T19:18:42.089528Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.12.7",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/qbc1d4g9jyliz0jsrg9pnr608m305bjw-goreleaser-2.12.7"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "sqlc",
+      "broken": false,
+      "derivation": "/nix/store/jir45v1zfjj2imy5nqqmd9ynmihfd46d-sqlc-1.30.0.drv",
+      "description": "Generate type-safe code from SQL",
+      "install_id": "sqlc",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "sqlc-1.30.0",
+      "pname": "sqlc",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T17:34:50.442487Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.30.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/yvjcj4hcg2kshv16dv8niplkr0hwvfmc-sqlc-1.30.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "sqlc",
+      "broken": false,
+      "derivation": "/nix/store/nw4j6l2phvyzki8q7m14c999ncs4hrdc-sqlc-1.30.0.drv",
+      "description": "Generate type-safe code from SQL",
+      "install_id": "sqlc",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "sqlc-1.30.0",
+      "pname": "sqlc",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:10:47.450587Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.30.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/y2bcgpg0fp1qh24p7q50w2y1yb013cs2-sqlc-1.30.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "sqlc",
+      "broken": false,
+      "derivation": "/nix/store/m49v2jrswczw1fzvvzbjiqk5phr072gk-sqlc-1.30.0.drv",
+      "description": "Generate type-safe code from SQL",
+      "install_id": "sqlc",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "sqlc-1.30.0",
+      "pname": "sqlc",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T18:43:23.251373Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.30.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/jnlpcv1xd92b5fnxh7yrywb0989ii67r-sqlc-1.30.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "sqlc",
+      "broken": false,
+      "derivation": "/nix/store/hbwycf32mvk685bgzgkmxxwgwf11wz89-sqlc-1.30.0.drv",
+      "description": "Generate type-safe code from SQL",
+      "install_id": "sqlc",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=050e09e091117c3d7328c7b2b7b577492c43c134",
+      "name": "sqlc-1.30.0",
+      "pname": "sqlc",
+      "rev": "050e09e091117c3d7328c7b2b7b577492c43c134",
+      "rev_count": 900642,
+      "rev_date": "2025-11-22T18:20:33Z",
+      "scrape_date": "2025-11-24T19:21:15.910275Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.30.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/c5rz9zaxbzky25slvah9g24r8ckl47p4-sqlc-1.30.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    }
+  ]
+}

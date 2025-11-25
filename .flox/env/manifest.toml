@@ -1,0 +1,130 @@
+## Flox Environment Manifest -----------------------------------------
+##
+##   _Everything_ you need to know about the _manifest_ is here:
+##
+##   https://flox.dev/docs/reference/command-reference/manifest.toml/
+##
+## -------------------------------------------------------------------
+# Flox manifest version managed by Flox CLI
+version = 1
+
+
+## Install Packages --------------------------------------------------
+##  $ flox install gum  <- puts a package in [install] section below
+##  $ flox search gum   <- search for a package
+##  $ flox show gum     <- show all versions of a package
+## -------------------------------------------------------------------
+[install]
+go.pkg-path = "go"
+go-task.pkg-path = "go-task"
+sqlc.pkg-path = "sqlc"
+goreleaser.pkg-path = "goreleaser"
+# gum.pkg-path = "gum"
+# gum.version = "^0.14.5"
+
+
+## Environment Variables ---------------------------------------------
+##  ... available for use in the activated environment
+##      as well as [hook], [profile] scripts and [services] below.
+## -------------------------------------------------------------------
+[vars]
+# INTRO_MESSAGE = "It's gettin' Flox in here"
+
+
+## Activation Hook ---------------------------------------------------
+##  ... run by _bash_ shell when you run 'flox activate'.
+## -------------------------------------------------------------------
+[hook]
+# on-activate = '''
+#   # -> Set variables, create files and directories
+#   # -> Perform initialization steps, e.g. create a python venv
+#   # -> Useful environment variables:
+#   #      - FLOX_ENV_PROJECT=/home/user/example
+#   #      - FLOX_ENV=/home/user/example/.flox/run
+#   #      - FLOX_ENV_CACHE=/home/user/example/.flox/cache
+# '''
+
+
+## Profile script ----------------------------------------------------
+## ... sourced by _your shell_ when you run 'flox activate'.
+## -------------------------------------------------------------------
+[profile]
+# common = '''
+#   gum style \
+#   --foreground 212 --border-foreground 212 --border double \
+#   --align center --width 50 --margin "1 2" --padding "2 4" \
+#     $INTRO_MESSAGE
+# '''
+## Shell-specific customizations such as setting aliases go here:
+# bash = ...
+# zsh  = ...
+# fish = ...
+
+
+## Services ---------------------------------------------------------
+##  $ flox services start             <- Starts all services
+##  $ flox services status            <- Status of running services
+##  $ flox activate --start-services  <- Activates & starts all
+## ------------------------------------------------------------------
+[services]
+# myservice.command = "python3 -m http.server"
+
+
+## Include ----------------------------------------------------------
+## ... environments to create a composed environment
+## ------------------------------------------------------------------
+[include]
+# environments = [
+#     { dir = "../common" }
+# ]
+
+
+## Build and publish your own packages ------------------------------
+##  $ flox build
+##  $ flox publish
+## ------------------------------------------------------------------
+[build]
+
+# Stage 1: Vendor Go dependencies (requires network access)
+[build.vendor]
+command = """
+  go mod download
+  go mod vendor
+  mkdir -p $out/vendor
+  cp -r vendor/* $out/vendor/
+"""
+sandbox = "off"
+
+# Stage 2: Build the crush binary (reproducible, pure build)
+[build.crush]
+description = "Your new coding bestie, now available in your favourite terminal"
+version.command = "git describe --long 2>/dev/null || echo '0.0.0-dev'"
+command = """
+  # Copy vendored dependencies from stage 1 and make them writable
+  cp -rL ${vendor}/vendor ./ && chmod -R u+w vendor
+
+  # Get version for ldflags
+  VERSION=$(git describe --long 2>/dev/null || echo "0.0.0-dev")
+
+  # Build the binary with the same settings as Taskfile
+  # Using -ldflags="-s -w" to strip debug symbols and reduce binary size
+  CGO_ENABLED=0 GOEXPERIMENT=greenteagc go build \
+    -mod=vendor \
+    -ldflags="-s -w -X github.com/charmbracelet/crush/internal/version.Version=$VERSION" \
+    -o $out/bin/crush \
+    .
+"""
+sandbox = "pure"
+
+
+## Other Environment Options -----------------------------------------
+[options]
+# Systems that environment is compatible with
+# systems = [
+#   "aarch64-darwin",
+#   "aarch64-linux",
+#   "x86_64-darwin",
+#   "x86_64-linux",
+# ]
+# Uncomment to disable CUDA detection.
+# cuda-detection = false

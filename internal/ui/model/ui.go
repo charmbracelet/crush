@@ -394,9 +394,10 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Quit,
 				k.Help,
 			)
-		} else {
-			// we have a session
 		}
+		// else {
+		// we have a session
+		// }
 
 		// switch m.state {
 		// case uiChat:
@@ -453,9 +454,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 					help,
 				},
 			)
-		} else {
-			// we have a session
 		}
+		// else {
+		// we have a session
+		// }
 	}
 
 	// switch m.state {

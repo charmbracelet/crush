@@ -833,6 +833,10 @@ func (p *chatPage) Help() help.KeyMap {
 				key.WithKeys("ctrl+c"),
 				key.WithHelp("ctrl+c", "quit"),
 			),
+			key.NewBinding(
+				key.WithKeys("ctrl+t"),
+				key.WithHelp("ctrl+t", "favorite"),
+			),
 		)
 		// keep them the same
 		for _, v := range shortList {

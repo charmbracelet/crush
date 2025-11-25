@@ -182,7 +182,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
 		}
 	case tea.KeyPressMsg:
-		cmds = append(cmds, m.routeKeyPressMsg(msg)...)
+		cmds = append(cmds, m.handleKeyPressMsg(msg)...)
 	}
 
 	// This logic gets triggered on any message type, but should it?
@@ -203,7 +203,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *UI) routeKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
+func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	if m.dialog.HasDialogs() {
 		return m.updateDialogs(msg)
 	}

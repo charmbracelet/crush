@@ -117,9 +117,7 @@ type ProviderConfig struct {
 }
 
 func (pc *ProviderConfig) SetupClaudeCode() {
-	if !strings.HasPrefix(pc.APIKey, "Bearer ") {
-		pc.APIKey = fmt.Sprintf("Bearer %s", pc.APIKey)
-	}
+	pc.APIKey = fmt.Sprintf("Bearer %s", pc.OAuthToken.AccessToken)
 	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
 	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
 

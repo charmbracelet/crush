@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
 	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
@@ -41,6 +43,18 @@ type Splash interface {
 
 	// IsAPIKeyValid returns whether the API key is valid
 	IsAPIKeyValid() bool
+
+	// IsShowingClaudeAuthMethodChooser returns whether showing Claude auth method chooser
+	IsShowingClaudeAuthMethodChooser() bool
+
+	// IsShowingClaudeOAuth2 returns whether showing Claude OAuth2 flow
+	IsShowingClaudeOAuth2() bool
+
+	// IsClaudeOAuthURLState returns whether in OAuth URL state
+	IsClaudeOAuthURLState() bool
+
+	// IsClaudeOAuthComplete returns whether Claude OAuth flow is complete
+	IsClaudeOAuthComplete() bool
 }
 
 const (
@@ -72,6 +86,12 @@ type splashCmp struct {
 	selectedModel *models.ModelOption
 	isAPIKeyValid bool
 	apiKeyValue   string
+
+	// Claude state
+	claudeAuthMethodChooser     *claude.AuthMethodChooser
+	claudeOAuth2                *claude.OAuth2
+	showClaudeAuthMethodChooser bool
+	showClaudeOAuth2            bool
 }
 
 func New() Splash {
@@ -97,6 +117,9 @@ func New() Splash {
 		modelList:    modelList,
 		apiKeyInput:  apiKeyInput,
 		selectedNo:   false,
+
+		claudeAuthMethodChooser: claude.NewAuthMethodChooser(),
+		claudeOAuth2:            claude.NewOAuth2(),
 	}
 }
 
@@ -115,7 +138,12 @@ func (s *splashCmp) GetSize() (int, int) {
 
 // Init implements SplashPage.
 func (s *splashCmp) Init() tea.Cmd {
-	return tea.Batch(s.modelList.Init(), s.apiKeyInput.Init())
+	return tea.Batch(
+		s.modelList.Init(),
+		s.apiKeyInput.Init(),
+		s.claudeAuthMethodChooser.Init(),
+		s.claudeOAuth2.Init(),
+	)
 }
 
 // SetSize implements SplashPage.
@@ -131,6 +159,7 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
 	s.apiKeyInput.SetWidth(width - 2)
+	s.claudeAuthMethodChooser.SetWidth(min(width-2, 60))
 	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
@@ -139,6 +168,28 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)
+	case claude.ValidationCompletedMsg:
+		var cmds []tea.Cmd
+		u, cmd := s.claudeOAuth2.Update(msg)
+		s.claudeOAuth2 = u.(*claude.OAuth2)
+		cmds = append(cmds, cmd)
+
+		if msg.State == claude.OAuthValidationStateValid {
+			cmds = append(
+				cmds,
+				s.saveAPIKeyAndContinue(msg.Token, false),
+				func() tea.Msg {
+					time.Sleep(5 * time.Second)
+					return claude.AuthenticationCompleteMsg{}
+				},
+			)
+		}
+
+		return s, tea.Batch(cmds...)
+	case claude.AuthenticationCompleteMsg:
+		s.showClaudeAuthMethodChooser = false
+		s.showClaudeOAuth2 = false
+		return s, util.CmdHandler(OnboardingCompleteMsg{})
 	case models.APIKeyStateChangeMsg:
 		u, cmd := s.apiKeyInput.Update(msg)
 		s.apiKeyInput = u.(*models.APIKeyInput)
@@ -150,16 +201,48 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return s, cmd
 	case SubmitAPIKeyMsg:
 		if s.isAPIKeyValid {
-			return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+			return s, s.saveAPIKeyAndContinue(s.apiKeyValue, true)
 		}
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, s.keyMap.Copy):
+			if s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL {
+				return s, tea.Sequence(
+					tea.SetClipboard(s.claudeOAuth2.URL),
+					func() tea.Msg {
+						_ = clipboard.WriteAll(s.claudeOAuth2.URL)
+						return nil
+					},
+					util.ReportInfo("URL copied to clipboard"),
+				)
+			} else if s.showClaudeAuthMethodChooser {
+				u, cmd := s.claudeAuthMethodChooser.Update(msg)
+				s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
+				return s, cmd
+			} else if s.showClaudeOAuth2 {
+				u, cmd := s.claudeOAuth2.Update(msg)
+				s.claudeOAuth2 = u.(*claude.OAuth2)
+				return s, cmd
+			}
 		case key.Matches(msg, s.keyMap.Back):
+			if s.showClaudeAuthMethodChooser {
+				s.claudeAuthMethodChooser.SetDefaults()
+				s.showClaudeAuthMethodChooser = false
+				return s, nil
+			}
+			if s.showClaudeOAuth2 {
+				s.claudeOAuth2.SetDefaults()
+				s.showClaudeOAuth2 = false
+				s.showClaudeAuthMethodChooser = true
+				return s, nil
+			}
 			if s.isAPIKeyValid {
 				return s, nil
 			}
 			if s.needsAPIKey {
-				// Go back to model selection
+				if s.selectedModel.Provider.ID == catwalk.InferenceProviderAnthropic {
+					s.showClaudeAuthMethodChooser = true
+				}
 				s.needsAPIKey = false
 				s.selectedModel = nil
 				s.isAPIKeyValid = false
@@ -168,8 +251,32 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return s, nil
 			}
 		case key.Matches(msg, s.keyMap.Select):
+			if s.showClaudeAuthMethodChooser {
+				selectedItem := s.modelList.SelectedModel()
+				if selectedItem == nil {
+					return s, nil
+				}
+
+				switch s.claudeAuthMethodChooser.State {
+				case claude.AuthMethodAPIKey:
+					s.showClaudeAuthMethodChooser = false
+					s.needsAPIKey = true
+					s.selectedModel = selectedItem
+					s.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+				case claude.AuthMethodOAuth2:
+					s.selectedModel = selectedItem
+					s.showClaudeAuthMethodChooser = false
+					s.showClaudeOAuth2 = true
+				}
+				return s, nil
+			}
+			if s.showClaudeOAuth2 {
+				m2, cmd2 := s.claudeOAuth2.ValidationConfirm()
+				s.claudeOAuth2 = m2.(*claude.OAuth2)
+				return s, cmd2
+			}
 			if s.isAPIKeyValid {
-				return s, s.saveAPIKeyAndContinue(s.apiKeyValue)
+				return s, s.saveAPIKeyAndContinue(s.apiKeyValue, true)
 			}
 			if s.isOnboarding && !s.needsAPIKey {
 				selectedItem := s.modelList.SelectedModel()
@@ -181,6 +288,10 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					s.isOnboarding = false
 					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 				} else {
+					if selectedItem.Provider.ID == catwalk.InferenceProviderAnthropic {
+						s.showClaudeAuthMethodChooser = true
+						return s, nil
+					}
 					// Provider not configured, show API key input
 					s.needsAPIKey = true
 					s.selectedModel = selectedItem
@@ -232,6 +343,10 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
+			if s.showClaudeAuthMethodChooser {
+				s.claudeAuthMethodChooser.ToggleChoice()
+				return s, nil
+			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
@@ -272,7 +387,15 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return s, s.initializeProject()
 			}
 		default:
-			if s.needsAPIKey {
+			if s.showClaudeAuthMethodChooser {
+				u, cmd := s.claudeAuthMethodChooser.Update(msg)
+				s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
+				return s, cmd
+			} else if s.showClaudeOAuth2 {
+				u, cmd := s.claudeOAuth2.Update(msg)
+				s.claudeOAuth2 = u.(*claude.OAuth2)
+				return s, cmd
+			} else if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
 				return s, cmd
@@ -283,7 +406,11 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		}
 	case tea.PasteMsg:
-		if s.needsAPIKey {
+		if s.showClaudeOAuth2 {
+			u, cmd := s.claudeOAuth2.Update(msg)
+			s.claudeOAuth2 = u.(*claude.OAuth2)
+			return s, cmd
+		} else if s.needsAPIKey {
 			u, cmd := s.apiKeyInput.Update(msg)
 			s.apiKeyInput = u.(*models.APIKeyInput)
 			return s, cmd
@@ -293,14 +420,20 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return s, cmd
 		}
 	case spinner.TickMsg:
-		u, cmd := s.apiKeyInput.Update(msg)
-		s.apiKeyInput = u.(*models.APIKeyInput)
-		return s, cmd
+		if s.showClaudeOAuth2 {
+			u, cmd := s.claudeOAuth2.Update(msg)
+			s.claudeOAuth2 = u.(*claude.OAuth2)
+			return s, cmd
+		} else {
+			u, cmd := s.apiKeyInput.Update(msg)
+			s.apiKeyInput = u.(*models.APIKeyInput)
+			return s, cmd
+		}
 	}
 	return s, nil
 }
 
-func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
+func (s *splashCmp) saveAPIKeyAndContinue(apiKey any, close bool) tea.Cmd {
 	if s.selectedModel == nil {
 		return nil
 	}
@@ -318,7 +451,10 @@ func (s *splashCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 	s.selectedModel = nil
 	s.isAPIKeyValid = false
 
-	return tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
+	if close {
+		return tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
+	}
+	return cmd
 }
 
 func (s *splashCmp) initializeProject() tea.Cmd {
@@ -426,7 +562,39 @@ func (s *splashCmp) isProviderConfigured(providerID string) bool {
 func (s *splashCmp) View() string {
 	t := styles.CurrentTheme()
 	var content string
-	if s.needsAPIKey {
+	if s.showClaudeAuthMethodChooser {
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		chooserView := s.claudeAuthMethodChooser.View()
+		authMethodSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth Anthropic"),
+				"",
+				chooserView,
+			),
+		)
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			s.logoRendered,
+			authMethodSelector,
+		)
+	} else if s.showClaudeOAuth2 {
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		oauth2View := s.claudeOAuth2.View()
+		oauthSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
+			lipgloss.JoinVertical(
+				lipgloss.Left,
+				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth Anthropic"),
+				"",
+				oauth2View,
+			),
+		)
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			s.logoRendered,
+			oauthSelector,
+		)
+	} else if s.needsAPIKey {
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
 		apiKeyView := t.S().Base.PaddingLeft(1).Render(s.apiKeyInput.View())
 		apiKeySelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
@@ -524,6 +692,16 @@ func (s *splashCmp) View() string {
 }
 
 func (s *splashCmp) Cursor() *tea.Cursor {
+	if s.showClaudeAuthMethodChooser {
+		return nil
+	}
+	if s.showClaudeOAuth2 {
+		if cursor := s.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
+			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
+			return s.moveCursor(cursor)
+		}
+		return nil
+	}
 	if s.needsAPIKey {
 		cursor := s.apiKeyInput.Cursor()
 		if cursor != nil {
@@ -596,17 +774,23 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	}
 	// Calculate the correct Y offset based on current state
 	logoHeight := lipgloss.Height(s.logoRendered)
-	if s.needsAPIKey {
+	if s.needsAPIKey || s.showClaudeOAuth2 {
+		var view string
+		if s.needsAPIKey {
+			view = s.apiKeyInput.View()
+		} else {
+			view = s.claudeOAuth2.View()
+		}
 		infoSectionHeight := lipgloss.Height(s.infoSection())
 		baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
-		remainingHeight := s.height - baseOffset - lipgloss.Height(s.apiKeyInput.View()) - SplashScreenPaddingY
+		remainingHeight := s.height - baseOffset - lipgloss.Height(view) - SplashScreenPaddingY
 		offset := baseOffset + remainingHeight
 		cursor.Y += offset
-		cursor.X = cursor.X + 1
+		cursor.X += 1
 	} else if s.isOnboarding {
 		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 2
 		cursor.Y += offset
-		cursor.X = cursor.X + 1
+		cursor.X += 1
 	}
 
 	return cursor
@@ -621,7 +805,21 @@ func (s *splashCmp) logoGap() int {
 
 // Bindings implements SplashPage.
 func (s *splashCmp) Bindings() []key.Binding {
-	if s.needsAPIKey {
+	if s.showClaudeAuthMethodChooser {
+		return []key.Binding{
+			s.keyMap.Select,
+			s.keyMap.Tab,
+			s.keyMap.Back,
+		}
+	} else if s.showClaudeOAuth2 {
+		bindings := []key.Binding{
+			s.keyMap.Select,
+		}
+		if s.claudeOAuth2.State == claude.OAuthStateURL {
+			bindings = append(bindings, s.keyMap.Copy)
+		}
+		return bindings
+	} else if s.needsAPIKey {
 		return []key.Binding{
 			s.keyMap.Select,
 			s.keyMap.Back,
@@ -725,4 +923,20 @@ func (s *splashCmp) IsShowingAPIKey() bool {
 
 func (s *splashCmp) IsAPIKeyValid() bool {
 	return s.isAPIKeyValid
+}
+
+func (s *splashCmp) IsShowingClaudeAuthMethodChooser() bool {
+	return s.showClaudeAuthMethodChooser
+}
+
+func (s *splashCmp) IsShowingClaudeOAuth2() bool {
+	return s.showClaudeOAuth2
+}
+
+func (s *splashCmp) IsClaudeOAuthURLState() bool {
+	return s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL
+}
+
+func (s *splashCmp) IsClaudeOAuthComplete() bool {
+	return s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateCode && s.claudeOAuth2.ValidationState == claude.OAuthValidationStateValid
 }

@@ -51,19 +51,21 @@ type BlockFunc func(args []string) bool
 
 // Shell provides cross-platform shell execution with optional state persistence
 type Shell struct {
-	env        []string
-	cwd        string
-	mu         sync.Mutex
-	logger     Logger
-	blockFuncs []BlockFunc
+	env                []string
+	cwd                string
+	mu                 sync.Mutex
+	logger             Logger
+	blockFuncs         []BlockFunc
+	customExecHandlers []func(interp.ExecHandlerFunc) interp.ExecHandlerFunc
 }
 
 // Options for creating a new shell
 type Options struct {
-	WorkingDir string
-	Env        []string
-	Logger     Logger
-	BlockFuncs []BlockFunc
+	WorkingDir   string
+	Env          []string
+	Logger       Logger
+	BlockFuncs   []BlockFunc
+	ExecHandlers []func(interp.ExecHandlerFunc) interp.ExecHandlerFunc
 }
 
 // NewShell creates a new shell instance with the given options
@@ -88,10 +90,11 @@ func NewShell(opts *Options) *Shell {
 	}
 
 	return &Shell{
-		cwd:        cwd,
-		env:        env,
-		logger:     logger,
-		blockFuncs: opts.BlockFuncs,
+		cwd:                cwd,
+		env:                env,
+		logger:             logger,
+		blockFuncs:         opts.BlockFuncs,
+		customExecHandlers: opts.ExecHandlers,
 	}
 }
 
@@ -100,7 +103,15 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.exec(ctx, command)
+	return s.exec(ctx, command, nil)
+}
+
+// ExecWithStdin executes a command in the shell with provided stdin
+func (s *Shell) ExecWithStdin(ctx context.Context, command string, stdin io.Reader) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.exec(ctx, command, stdin)
 }
 
 // ExecStream executes a command in the shell with streaming output to provided writers
@@ -237,14 +248,16 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 }
 
 // newInterp creates a new interpreter with the current shell state
-func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
-	return interp.New(
-		interp.StdIO(nil, stdout, stderr),
+func (s *Shell) newInterp(stdin io.Reader, stdout, stderr io.Writer) (*interp.Runner, error) {
+	opts := []interp.RunnerOption{
+		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(s.env...)),
 		interp.Dir(s.cwd),
 		interp.ExecHandlers(s.execHandlers()...),
-	)
+	}
+
+	return interp.New(opts...)
 }
 
 // updateShellFromRunner updates the shell from the interpreter after execution
@@ -257,13 +270,13 @@ func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 }
 
 // execCommon is the shared implementation for executing commands
-func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) error {
+func (s *Shell) execCommon(ctx context.Context, command string, stdin io.Reader, stdout, stderr io.Writer) error {
 	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err := s.newInterp(stdout, stderr)
+	runner, err := s.newInterp(stdin, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}
@@ -275,21 +288,23 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 }
 
 // exec executes commands using a cross-platform shell interpreter.
-func (s *Shell) exec(ctx context.Context, command string) (string, string, error) {
+func (s *Shell) exec(ctx context.Context, command string, stdin io.Reader) (string, string, error) {
 	var stdout, stderr bytes.Buffer
-	err := s.execCommon(ctx, command, &stdout, &stderr)
+	err := s.execCommon(ctx, command, stdin, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
 }
 
 // execStream executes commands using POSIX shell emulation with streaming output
 func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
-	return s.execCommon(ctx, command, stdout, stderr)
+	return s.execCommon(ctx, command, nil, stdout, stderr)
 }
 
 func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
 		s.blockHandler(),
 	}
+	// Add custom exec handlers first (they get priority)
+	handlers = append(handlers, s.customExecHandlers...)
 	if useGoCoreUtils {
 		handlers = append(handlers, coreutils.ExecHandler)
 	}

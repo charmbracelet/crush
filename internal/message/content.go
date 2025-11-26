@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/hooks"
 )
 
 type MessageRole string
@@ -134,6 +136,11 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	Metadata         MessageMetadata
+}
+
+type MessageMetadata struct {
+	Hooks *hooks.HookResult `json:"hooks,omitempty"`
 }
 
 func (m *Message) Content() TextContent {
@@ -143,6 +150,30 @@ func (m *Message) Content() TextContent {
 		}
 	}
 	return TextContent{}
+}
+
+func (m *Message) ContentWithHookContext() string {
+	text := strings.TrimSpace(m.Content().Text)
+	if m.Metadata.Hooks == nil {
+		return text
+	}
+
+	hookContext := strings.TrimSpace(m.Metadata.Hooks.ContextContent)
+	if hookContext != "" {
+		text += fmt.Sprintf("## Additional Context\n %s", hookContext)
+	}
+
+	if len(m.Metadata.Hooks.ContextFiles) > 0 {
+		text += "\n## Additional Context Files\n"
+
+		for _, file := range m.Metadata.Hooks.ContextFiles {
+			text += fmt.Sprintf("- %s\n", file)
+		}
+
+		text += "**Note: Read these files if needed**"
+	}
+
+	return text
 }
 
 func (m *Message) ReasoningContent() ReasoningContent {
@@ -239,6 +270,11 @@ func (m *Message) AppendContent(delta string) {
 	if !found {
 		m.Parts = append(m.Parts, TextContent{Text: delta})
 	}
+}
+
+// AddHookResult adds the result of the hooks for this message
+func (m *Message) AddHookResult(hooks hooks.HookResult) {
+	m.Metadata.Hooks = &hooks
 }
 
 func (m *Message) AppendReasoningContent(delta string) {
@@ -431,7 +467,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	switch m.Role {
 	case User:
 		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
+		text := strings.TrimSpace(m.ContentWithHookContext())
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}

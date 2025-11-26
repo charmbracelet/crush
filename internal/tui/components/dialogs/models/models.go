@@ -154,11 +154,9 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					util.ReportInfo("URL copied to clipboard"),
 				)
 			}
-		case key.Matches(msg, m.keyMap.Choose):
-			if m.showClaudeAuthMethodChooser {
-				m.claudeAuthMethodChooser.ToggleChoice()
-				return m, nil
-			}
+		case key.Matches(msg, m.keyMap.Choose) && m.showClaudeAuthMethodChooser:
+			m.claudeAuthMethodChooser.ToggleChoice()
+			return m, nil
 		case key.Matches(msg, m.keyMap.Select):
 			selectedItem := m.modelList.SelectedModel()
 

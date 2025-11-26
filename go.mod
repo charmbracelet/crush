@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1
-	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251124184313-5de0f1f67562
+	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251126220703-2a0096c500a7
 	charm.land/fantasy v0.3.2
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca
 	charm.land/x/vcr v0.1.1

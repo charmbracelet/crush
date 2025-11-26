@@ -36,6 +36,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().Bool("super-yolo", false, "Super YOLO mode: yolo + allows sudo/doas/su (run 'sudo -v' first to cache credentials)")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -73,6 +74,10 @@ crush run "Explain the use of context in Go"
 
 # Run in dangerous mode (auto-accept all permissions)
 crush -y
+
+# Run in super YOLO mode (yolo + sudo/doas/su allowed)
+# Tip: run 'sudo -v' first to cache credentials, or configure NOPASSWD in sudoers
+crush --super-yolo
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := setupAppWithProgressBar(cmd)
@@ -164,6 +169,7 @@ func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
 func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	superYolo, _ := cmd.Flags().GetBool("super-yolo")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -180,7 +186,8 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
-	cfg.Permissions.SkipRequests = yolo
+	cfg.Permissions.SkipRequests = yolo || superYolo
+	cfg.Permissions.SuperYolo = superYolo
 
 	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err

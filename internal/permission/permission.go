@@ -51,6 +51,8 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	SetSuperYolo(superYolo bool)
+	SuperYolo() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -65,6 +67,7 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
+	superYolo             bool
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -220,7 +223,15 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+func (s *permissionService) SetSuperYolo(superYolo bool) {
+	s.superYolo = superYolo
+}
+
+func (s *permissionService) SuperYolo() bool {
+	return s.superYolo
+}
+
+func NewPermissionService(workingDir string, skip bool, superYolo bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -228,6 +239,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
+		superYolo:           superYolo,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

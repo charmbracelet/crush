@@ -83,6 +83,7 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	ToggleSuperYoloModeMsg struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -441,6 +442,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Toggle yolo mode",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(ToggleYoloModeMsg{})
+			},
+		},
+		{
+			ID:          "toggle_super_yolo",
+			Title:       "Toggle Super Yolo Mode",
+			Description: "Toggle super yolo mode (allows sudo/doas/su)",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(ToggleSuperYoloModeMsg{})
 			},
 		},
 		{

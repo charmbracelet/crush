@@ -88,11 +88,6 @@ var bannedCommands = []string{
 	"wget",
 	"xh",
 
-	// System administration
-	"doas",
-	"su",
-	"sudo",
-
 	// Package managers
 	"apk",
 	"apt",
@@ -139,6 +134,14 @@ var bannedCommands = []string{
 	"ufw",
 }
 
+// superYoloBannedCommands are commands that are only banned when NOT in super-yolo mode.
+// These allow privilege escalation and are extremely dangerous.
+var superYoloBannedCommands = []string{
+	"doas",
+	"su",
+	"sudo",
+}
+
 func bashDescription(attribution *config.Attribution, modelName string) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
@@ -154,9 +157,15 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+func blockFuncs(superYolo bool) []shell.BlockFunc {
+	// Start with the base banned commands
+	banned := bannedCommands
+	// If not in super-yolo mode, also ban privilege escalation commands
+	if !superYolo {
+		banned = append(banned, superYoloBannedCommands...)
+	}
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(banned),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -237,7 +246,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(permissions.SuperYolo()), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -292,7 +301,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(permissions.SuperYolo()), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

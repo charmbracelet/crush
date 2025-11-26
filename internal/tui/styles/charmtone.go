@@ -72,5 +72,11 @@ func NewCharmtoneTheme() *Theme {
 	t.YoloDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Zest).SetString(":::")
 	t.YoloDotsBlurred = t.YoloDotsFocused.Foreground(charmtone.Squid)
 
+	// Super Yolo Mode - more intense/dangerous styling using red/cherry colors.
+	t.SuperYoloIconFocused = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Sriracha).Bold(true).SetString("!!")
+	t.SuperYoloIconBlurred = t.SuperYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	t.SuperYoloDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Coral).SetString("!!!")
+	t.SuperYoloDotsBlurred = t.SuperYoloDotsFocused.Foreground(charmtone.Squid)
+
 	return t
 }

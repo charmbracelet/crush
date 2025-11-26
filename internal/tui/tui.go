@@ -257,6 +257,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
+	case commands.ToggleSuperYoloModeMsg:
+		newSuperYolo := !a.app.Permissions.SuperYolo()
+		a.app.Permissions.SetSuperYolo(newSuperYolo)
+		// Super yolo mode implies yolo mode
+		if newSuperYolo {
+			a.app.Permissions.SetSkipRequests(true)
+		}
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp

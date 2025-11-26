@@ -91,6 +91,12 @@ type Theme struct {
 	YoloDotsFocused lipgloss.Style
 	YoloDotsBlurred lipgloss.Style
 
+	// Editor: Super Yolo Mode
+	SuperYoloIconFocused lipgloss.Style
+	SuperYoloIconBlurred lipgloss.Style
+	SuperYoloDotsFocused lipgloss.Style
+	SuperYoloDotsBlurred lipgloss.Style
+
 	styles *Styles
 }
 

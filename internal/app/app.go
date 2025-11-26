@@ -68,6 +68,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
+	superYolo := cfg.Permissions != nil && cfg.Permissions.SuperYolo
 	allowedTools := []string{}
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
@@ -77,7 +78,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, superYolo, allowedTools),
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,

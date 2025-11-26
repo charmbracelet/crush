@@ -371,6 +371,10 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 }
 
 func (m *editorCmp) setEditorPrompt() {
+	if m.app.Permissions.SuperYolo() {
+		m.textarea.SetPromptFunc(4, superYoloPromptFunc)
+		return
+	}
 	if m.app.Permissions.SkipRequests() {
 		m.textarea.SetPromptFunc(4, yoloPromptFunc)
 		return
@@ -426,7 +430,9 @@ func (m *editorCmp) View() string {
 	} else {
 		m.textarea.Placeholder = m.readyPlaceholder
 	}
-	if m.app.Permissions.SkipRequests() {
+	if m.app.Permissions.SuperYolo() {
+		m.textarea.Placeholder = "Super YOLO mode!"
+	} else if m.app.Permissions.SkipRequests() {
 		m.textarea.Placeholder = "Yolo mode!"
 	}
 	if len(m.attachments) == 0 {
@@ -570,6 +576,21 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 		return fmt.Sprintf("%s ", t.YoloDotsFocused)
 	}
 	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
+}
+
+func superYoloPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return fmt.Sprintf("%s ", t.SuperYoloIconFocused)
+		} else {
+			return fmt.Sprintf("%s ", t.SuperYoloIconBlurred)
+		}
+	}
+	if info.Focused {
+		return fmt.Sprintf("%s ", t.SuperYoloDotsFocused)
+	}
+	return fmt.Sprintf("%s ", t.SuperYoloDotsBlurred)
 }
 
 func New(app *app.App) Editor {

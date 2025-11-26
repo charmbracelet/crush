@@ -36,6 +36,12 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockPermissionService) SetSuperYolo(superYolo bool) {}
+
+func (m *mockPermissionService) SuperYolo() bool {
+	return false
+}
+
 func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }

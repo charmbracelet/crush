@@ -316,9 +316,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 	case uiChat:
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
-		side := uv.NewStyledString(m.sidebar())
-		side.Draw(scr, layout.sidebar)
-
+		m.drawSidebar(scr, layout.sidebar)
 		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
 			Height(layout.main.Dy()).
 			Render(" Chat Messages ")

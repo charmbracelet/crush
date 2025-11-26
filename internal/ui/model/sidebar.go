@@ -96,12 +96,12 @@ func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int
 
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
-func (m *UI) sidebar() string {
+func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	const logoHeightBreakpoint = 30
 
 	t := m.com.Styles
-	width := m.layout.sidebar.Dx()
-	height := m.layout.sidebar.Dy()
+	width := area.Dx()
+	height := area.Dy()
 
 	title := t.Muted.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
@@ -131,15 +131,21 @@ func (m *UI) sidebar() string {
 	lspSection := m.lspInfo(t, width, maxLSPs, true)
 	mcpSection := m.mcpInfo(t, width, maxMCPs, true)
 	filesSection := m.filesInfo(t, m.com.Config().WorkingDir(), width, maxFiles)
-	return lipgloss.NewStyle().Width(width).Render(
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			sidebarHeader,
-			filesSection,
-			"",
-			lspSection,
-			"",
-			mcpSection,
-		),
-	)
+
+	uv.NewStyledString(
+		lipgloss.NewStyle().
+			MaxWidth(width).
+			MaxHeight(height).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Left,
+					sidebarHeader,
+					filesSection,
+					"",
+					lspSection,
+					"",
+					mcpSection,
+				),
+			),
+	).Draw(scr, area)
 }

@@ -143,7 +143,8 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 
 // filesInfo renders the modified files section for the sidebar, showing files
 // with their addition/deletion counts.
-func (m *UI) filesInfo(t *styles.Styles, cwd string, width, maxItems int) string {
+func (m *UI) filesInfo(cwd string, width, maxItems int) string {
+	t := m.com.Styles
 	title := common.Section(t, "Modified Files", width)
 	list := t.Subtle.Render("None")
 

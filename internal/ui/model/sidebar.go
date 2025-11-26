@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -16,7 +15,7 @@ import (
 
 // modelInfo renders the current model information including reasoning
 // settings and context usage/cost for the sidebar.
-func (m *UI) modelInfo(t *styles.Styles, width int) string {
+func (m *UI) modelInfo(width int) string {
 	model := m.selectedLargeModel()
 	reasoningInfo := ""
 	if model != nil && model.CatwalkCfg.CanReason {
@@ -44,7 +43,7 @@ func (m *UI) modelInfo(t *styles.Styles, width int) string {
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
 	}
-	return common.ModelInfo(t, model.CatwalkCfg.Name, reasoningInfo, modelContext, width)
+	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, reasoningInfo, modelContext, width)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight
@@ -115,7 +114,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		"",
 		cwd,
 		"",
-		m.modelInfo(t, width),
+		m.modelInfo(width),
 		"",
 	}
 
@@ -128,9 +127,9 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := remainingHeightArea.Dy() - 10
 	maxFiles, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
 
-	lspSection := m.lspInfo(t, width, maxLSPs, true)
-	mcpSection := m.mcpInfo(t, width, maxMCPs, true)
-	filesSection := m.filesInfo(t, m.com.Config().WorkingDir(), width, maxFiles)
+	lspSection := m.lspInfo(width, maxLSPs, true)
+	mcpSection := m.mcpInfo(width, maxMCPs, true)
+	filesSection := m.filesInfo(m.com.Config().WorkingDir(), width, maxFiles)
 
 	uv.NewStyledString(
 		lipgloss.NewStyle().

@@ -28,15 +28,15 @@ func (m *UI) landingView() string {
 		cwd,
 	}
 
-	parts = append(parts, "", m.modelInfo(t, width))
+	parts = append(parts, "", m.modelInfo(width))
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	_, remainingHeightArea := uv.SplitVertical(m.layout.main, uv.Fixed(lipgloss.Height(infoSection)+1))
 
 	mcpLspSectionWidth := min(30, (width-1)/2)
 
-	lspSection := m.lspInfo(t, mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	mcpSection := m.mcpInfo(t, mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection)
 

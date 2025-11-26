@@ -20,8 +20,9 @@ type LSPInfo struct {
 
 // lspInfo renders the LSP status section showing active LSP clients and their
 // diagnostic counts.
-func (m *UI) lspInfo(t *styles.Styles, width, maxItems int, isSection bool) string {
+func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	var lsps []LSPInfo
+	t := m.com.Styles
 
 	for _, state := range m.lspStates {
 		client, ok := m.com.App.LSPClients.Get(state.Name)

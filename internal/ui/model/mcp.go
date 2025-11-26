@@ -12,8 +12,9 @@ import (
 
 // mcpInfo renders the MCP status section showing active MCP clients and their
 // tool/prompt counts.
-func (m *UI) mcpInfo(t *styles.Styles, width, maxItems int, isSection bool) string {
+func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	var mcps []mcp.ClientInfo
+	t := m.com.Styles
 
 	for _, state := range m.mcpStates {
 		mcps = append(mcps, state)

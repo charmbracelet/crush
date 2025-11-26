@@ -31,6 +31,8 @@ const (
 
 	BorderThin  string = "│"
 	BorderThick string = "▌"
+
+	SectionSeparator string = "─"
 )
 
 const (

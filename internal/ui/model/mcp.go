@@ -10,15 +10,13 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
-type MCPInfo struct {
-	mcp.ClientInfo
-}
-
+// mcpInfo renders the MCP status section showing active MCP clients and their
+// tool/prompt counts.
 func (m *UI) mcpInfo(t *styles.Styles, width, maxItems int, isSection bool) string {
-	var mcps []MCPInfo
+	var mcps []mcp.ClientInfo
 
 	for _, state := range m.mcpStates {
-		mcps = append(mcps, MCPInfo{ClientInfo: state})
+		mcps = append(mcps, state)
 	}
 
 	title := t.Subtle.Render("MCPs")
@@ -33,6 +31,7 @@ func (m *UI) mcpInfo(t *styles.Styles, width, maxItems int, isSection bool) stri
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
+// mcpCounts formats tool and prompt counts for display.
 func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 	parts := []string{}
 	if counts.Tools > 0 {
@@ -44,7 +43,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 	return strings.Join(parts, " ")
 }
 
-func mcpList(t *styles.Styles, mcps []MCPInfo, width, maxItems int) string {
+// mcpList renders a list of MCP clients with their status and counts,
+// truncating to maxItems if needed.
+func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
 	var renderedMcps []string
 
 	for _, m := range mcps {

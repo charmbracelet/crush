@@ -14,6 +14,8 @@ import (
 	"golang.org/x/text/language"
 )
 
+// modelInfo renders the current model information including reasoning
+// settings and context usage/cost for the sidebar.
 func (m *UI) modelInfo(t *styles.Styles, width int) string {
 	model := m.selectedLargeModel()
 	reasoningInfo := ""
@@ -48,13 +50,16 @@ func (m *UI) modelInfo(t *styles.Styles, width int) string {
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight
 // some items are more important than others.
 func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int) {
-	minItemsPerSection := 2
-	defaultMaxFilesShown := 10
-	defaultMaxLSPsShown := 8
-	defaultMaxMCPsShown := 8
+	const (
+		minItemsPerSection      = 2
+		defaultMaxFilesShown    = 10
+		defaultMaxLSPsShown     = 8
+		defaultMaxMCPsShown     = 8
+		minAvailableHeightLimit = 10
+	)
 
 	// If we have very little space, use minimum values
-	if availableHeight < 10 {
+	if availableHeight < minAvailableHeightLimit {
 		return minItemsPerSection, minItemsPerSection, minItemsPerSection
 	}
 
@@ -89,16 +94,18 @@ func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int
 	return maxFiles, maxLSPs, maxMCPs
 }
 
+// sidebar renders the chat sidebar containing session title, working
+// directory, model info, file list, LSP status, and MCP status.
 func (m *UI) sidebar() string {
-	// tells us when to use the smal logo
-	logoHeightBreakpoint := 30
+	const logoHeightBreakpoint = 30
+
 	t := m.com.Styles
 	width := m.layout.sidebar.Dx()
 	height := m.layout.sidebar.Dy()
 
 	title := t.Muted.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
-	sidebarLogo := m.logo
+	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(width)
 	}

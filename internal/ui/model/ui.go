@@ -109,8 +109,8 @@ type UI struct {
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
 
-	// logo keeps a cached version of the sidebar logo
-	logo string
+	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
+	sidebarLogo string
 }
 
 // New creates a new instance of the [UI] model.
@@ -175,8 +175,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case sessionLoadedMsg:
 		m.state = uiChat
-		// update layout
-		m.updateLayoutAndSize()
 		m.session = &msg.sess
 	case sessionFilesLoadedMsg:
 		m.sessionFiles = msg.files
@@ -277,6 +275,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 // Draw implements [tea.Layer] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 	layout := generateLayout(m, area.Dx(), area.Dy())
+
+	// Update cached layout and component sizes if needed.
+	if m.layout != layout {
+		m.layout = layout
+		m.updateSize()
+	}
 
 	// Clear the screen first
 	screen.Clear(scr)
@@ -574,7 +578,8 @@ func (m *UI) updateSize() {
 	}
 }
 
-// generateLayout generates a [layout] for the given rectangle.
+// generateLayout calculates the layout rectangles for all UI components based
+// on the current UI state and terminal dimensions.
 func generateLayout(m *UI, w, h int) layout {
 	// The screen area we're working with
 	area := image.Rect(0, 0, w, h)
@@ -718,6 +723,8 @@ type layout struct {
 	help uv.Rectangle
 }
 
+// setEditorPrompt configures the textarea prompt function based on whether
+// yolo mode is enabled.
 func (m *UI) setEditorPrompt() {
 	if m.com.App.Permissions.SkipRequests() {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
@@ -726,6 +733,8 @@ func (m *UI) setEditorPrompt() {
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
+// normalPromptFunc returns the normal editor prompt style ("  > " on first
+// line, "::: " on subsequent lines).
 func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
@@ -737,6 +746,8 @@ func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 	return t.EditorPromptNormalBlurred.Render()
 }
 
+// yoloPromptFunc returns the yolo mode editor prompt style with warning icon
+// and colored dots.
 func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
@@ -768,20 +779,26 @@ var workingPlaceholders = [...]string{
 	"Thinking...",
 }
 
+// randomizePlaceholders selects random placeholder text for the textarea's
+// ready and working states.
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
+// renderHeader renders and caches the header logo at the specified width.
 func (m *UI) renderHeader(compact bool, width int) {
 	// TODO: handle the compact case differently
 	m.header = renderLogo(m.com.Styles, compact, width)
 }
 
+// renderSidebarLogo renders and caches the sidebar logo at the specified
+// width.
 func (m *UI) renderSidebarLogo(width int) {
-	m.logo = renderLogo(m.com.Styles, true, width)
+	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
+// renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact bool, width int) string {
 	return logo.Render(version.Version, compact, logo.Opts{
 		FieldColor:   t.LogoFieldColor,

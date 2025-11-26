@@ -17,6 +17,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// SessionFile tracks the first and latest versions of a file in a session,
+// along with the total additions and deletions.
 type SessionFile struct {
 	FirstVersion  history.File
 	LatestVersion history.File
@@ -24,6 +26,8 @@ type SessionFile struct {
 	Deletions     int
 }
 
+// loadSessionFiles loads all files modified during a session and calculates
+// their diff statistics.
 func (m *UI) loadSessionFiles(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		files, err := m.com.App.History.ListBySession(context.Background(), sessionID)
@@ -78,6 +82,8 @@ func (m *UI) loadSessionFiles(sessionID string) tea.Cmd {
 	}
 }
 
+// handleFileEvent processes file change events and updates the session file
+// list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	if m.session == nil || file.SessionID != m.session.ID {
 		return nil
@@ -135,6 +141,8 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	}
 }
 
+// filesInfo renders the modified files section for the sidebar, showing files
+// with their addition/deletion counts.
 func (m *UI) filesInfo(t *styles.Styles, cwd string, width, maxItems int) string {
 	title := common.Section(t, "Modified Files", width)
 	list := t.Subtle.Render("None")
@@ -146,6 +154,8 @@ func (m *UI) filesInfo(t *styles.Styles, cwd string, width, maxItems int) string
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
+// fileList renders a list of files with their diff statistics, truncating to
+// maxItems and showing a "...and N more" message if needed.
 func fileList(t *styles.Styles, cwd string, files []SessionFile, width, maxItems int) string {
 	var renderedFiles []string
 	filesShown := 0

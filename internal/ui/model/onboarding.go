@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 )
 
+// markProjectInitialized marks the current project as initialized in the config.
 func (m *UI) markProjectInitialized() tea.Msg {
 	// TODO: handle error so we show it in the tui footer
 	err := config.MarkProjectInitialized()
@@ -22,6 +23,7 @@ func (m *UI) markProjectInitialized() tea.Msg {
 	return nil
 }
 
+// updateInitializeView handles keyboard input for the project initialization prompt.
 func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Initialize.Enter):
@@ -40,6 +42,7 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	return cmds
 }
 
+// initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
 	// TODO: initialize the project
 	// for now we just go to the landing page
@@ -49,6 +52,7 @@ func (m *UI) initializeProject() tea.Cmd {
 	return m.markProjectInitialized
 }
 
+// skipInitializeProject skips project initialization and transitions to the landing view.
 func (m *UI) skipInitializeProject() tea.Cmd {
 	// TODO: initialize the project
 	m.state = uiLanding
@@ -57,6 +61,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 	return m.markProjectInitialized
 }
 
+// initializeView renders the project initialization prompt with Yes/No buttons.
 func (m *UI) initializeView() string {
 	cfg := m.com.Config()
 	s := m.com.Styles.Initialize

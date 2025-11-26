@@ -12,11 +12,14 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
+// LSPInfo wraps LSP client information with diagnostic counts by severity.
 type LSPInfo struct {
 	app.LSPClientInfo
 	Diagnostics map[protocol.DiagnosticSeverity]int
 }
 
+// lspInfo renders the LSP status section showing active LSP clients and their
+// diagnostic counts.
 func (m *UI) lspInfo(t *styles.Styles, width, maxItems int, isSection bool) string {
 	var lsps []LSPInfo
 
@@ -54,6 +57,7 @@ func (m *UI) lspInfo(t *styles.Styles, width, maxItems int, isSection bool) stri
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
+// lspDiagnostics formats diagnostic counts with appropriate icons and colors.
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
 	errs := []string{}
 	if diagnostics[protocol.SeverityError] > 0 {
@@ -71,6 +75,8 @@ func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverit
 	return strings.Join(errs, " ")
 }
 
+// lspList renders a list of LSP clients with their status and diagnostics,
+// truncating to maxItems if needed.
 func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 	var renderedLsps []string
 	for _, l := range lsps {

@@ -12,17 +12,22 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// PrettyPath formats a file path with home directory shortening and applies
+// muted styling.
 func PrettyPath(t *styles.Styles, path string, width int) string {
 	formatted := home.Short(path)
 	return t.Muted.Width(width).Render(formatted)
 }
 
+// ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
 	ContextUsed  int64
 	ModelContext int64
 	Cost         float64
 }
 
+// ModelInfo renders model information including name, reasoning settings, and
+// optional context usage/cost.
 func ModelInfo(t *styles.Styles, modelName string, reasoningInfo string, context *ModelContextInfo, width int) string {
 	modelIcon := t.Subtle.Render(styles.ModelIcon)
 	modelName = t.Base.Render(modelName)
@@ -46,6 +51,8 @@ func ModelInfo(t *styles.Styles, modelName string, reasoningInfo string, context
 	)
 }
 
+// formatTokensAndCost formats token usage and cost with appropriate units
+// (K/M) and percentage of context window.
 func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
 	var formattedTokens string
 	switch {
@@ -78,6 +85,8 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 
+// StatusOpts defines options for rendering a status line with icon, title,
+// description, and optional extra content.
 type StatusOpts struct {
 	Icon             string // if empty no icon will be shown
 	Title            string
@@ -87,6 +96,8 @@ type StatusOpts struct {
 	ExtraContent     string // additional content to append after the description
 }
 
+// Status renders a status line with icon, title, description, and extra
+// content. The description is truncated if it exceeds the available width.
 func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	icon := opts.Icon
 	title := opts.Title
@@ -121,8 +132,10 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	return strings.Join(content, " ")
 }
 
+// Section renders a section header with a title and a horizontal line filling
+// the remaining width.
 func Section(t *styles.Styles, text string, width int) string {
-	char := "─"
+	char := styles.SectionSeparator
 	length := lipgloss.Width(text) + 1
 	remainingWidth := width - length
 	text = t.Section.Title.Render(text)

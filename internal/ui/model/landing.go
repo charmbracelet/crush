@@ -7,6 +7,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
+// selectedLargeModel returns the currently selected large language model from
+// the agent coordinator, if one exists.
 func (m *UI) selectedLargeModel() *agent.Model {
 	if m.com.App.AgentCoordinator != nil {
 		model := m.com.App.AgentCoordinator.Model()
@@ -15,6 +17,8 @@ func (m *UI) selectedLargeModel() *agent.Model {
 	return nil
 }
 
+// landingView renders the landing page view showing the current working
+// directory, model information, and LSP/MCP status in a two-column layout.
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()

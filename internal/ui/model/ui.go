@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"math/rand"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
@@ -75,7 +77,7 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	chat   *ChatModel
+	chat   *list.List
 	dialog *dialog.Overlay
 	help   help.Model
 
@@ -123,6 +125,8 @@ func New(com *common.Common) *UI {
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
+	l := list.New()
+
 	ui := &UI{
 		com:      com,
 		dialog:   dialog.NewOverlay(),
@@ -131,6 +135,7 @@ func New(com *common.Common) *UI {
 		focus:    uiFocusNone,
 		state:    uiConfigure,
 		textarea: ta,
+		chat:     l,
 	}
 
 	// set onboarding state defaults
@@ -194,6 +199,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
+		m.chat.ScrollToBottom()
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -236,6 +242,23 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	}
 
 	switch {
+	case msg.String() == "ctrl+shift+t":
+		m.chat.SelectPrev()
+	case msg.String() == "ctrl+t":
+		m.focus = uiFocusMain
+		m.state = uiChat
+		if m.chat.Len() > 0 {
+			m.chat.AppendItem(list.Gap)
+		}
+		m.chat.AppendItem(
+			list.NewStringItem(
+				fmt.Sprintf("%d", m.chat.Len()),
+				fmt.Sprintf("Welcome to Crush Chat! %d", rand.Intn(1000)),
+			).WithFocusStyles(&m.com.Styles.BorderFocus, &m.com.Styles.BorderBlur),
+		)
+		m.chat.SetSelectedIndex(m.chat.Len() - 1)
+		m.chat.Focus()
+		m.chat.ScrollToBottom()
 	case key.Matches(msg, m.keyMap.Tab):
 		switch m.state {
 		case uiChat:
@@ -317,11 +340,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
 		m.drawSidebar(scr, layout.sidebar)
-		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
-			Height(layout.main.Dy()).
-			Render(" Chat Messages ")
-		main := uv.NewStyledString(mainView)
-		main.Draw(scr, layout.main)
+
+		m.chat.Draw(scr, layout.main)
 
 		editor := uv.NewStyledString(m.textarea.View())
 		editor.Draw(scr, layout.editor)
@@ -517,7 +537,6 @@ func (m *UI) updateFocused(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	case uiChat, uiLanding, uiChatCompact:
 		switch m.focus {
 		case uiFocusMain:
-			cmds = append(cmds, m.updateChat(msg)...)
 		case uiFocusEditor:
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.Newline):
@@ -530,15 +549,6 @@ func (m *UI) updateFocused(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 			return cmds
 		}
 	}
-	return cmds
-}
-
-// updateChat updates the chat model with the given message and appends any
-// resulting commands to the cmds slice.
-func (m *UI) updateChat(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
-	updatedChat, cmd := m.chat.Update(msg)
-	m.chat = updatedChat
-	cmds = append(cmds, cmd)
 	return cmds
 }
 
@@ -567,6 +577,7 @@ func (m *UI) updateSize() {
 		m.renderSidebarLogo(m.layout.sidebar.Dx())
 		m.textarea.SetWidth(m.layout.editor.Dx())
 		m.textarea.SetHeight(m.layout.editor.Dy())
+		m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 
 	case uiChatCompact:
 		// TODO: set the width and heigh of the chat component
@@ -667,6 +678,8 @@ func generateLayout(m *UI, w, h int) layout {
 		// Add padding left
 		sideRect.Min.X += 1
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		// Add bottom margin to main
+		mainRect.Max.Y -= 1
 		layout.sidebar = sideRect
 		layout.main = mainRect
 		layout.editor = editorRect

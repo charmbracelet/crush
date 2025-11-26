@@ -55,19 +55,19 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
-			p := permissions.Request(
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        workingDir,
-					ToolCallID:  call.ID,
-					ToolName:    FetchToolName,
-					Action:      "fetch",
-					Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),
-					Params:      FetchPermissionsParams(params),
-				},
-			)
-
-			if !p {
+			granted, err := CheckHookPermission(ctx, permissions, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        workingDir,
+				ToolCallID:  call.ID,
+				ToolName:    FetchToolName,
+				Action:      "fetch",
+				Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),
+				Params:      FetchPermissionsParams(params),
+			})
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 

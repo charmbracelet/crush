@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -196,6 +197,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
+	// Track completion reason for stop hook
+	var stopReason string
+	defer func() {
+		if stopReason != "" {
+			a.executeStopHook(ctx, call.SessionID, stopReason)
+		}
+	}()
+
 	// create the agent message asap to show loading
 	var currentAssistant *message.Message
 	assistantMessage, err := a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
@@ -212,6 +221,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	hookErr := a.executePromptSubmitHook(genCtx, &msg, len(msgs) == 0)
 	if hookErr != nil {
+		stopReason = "error"
 		// Delete the assistant message
 		// use the ctx since this could be a cancellation
 		deleteErr := a.messages.Delete(ctx, currentAssistant.ID)
@@ -222,6 +232,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
+
+	// Map to store post-tool-use hook results for OnToolResult callback
+	postToolHookResults := csync.NewMap[string, hooks.HookResult]()
 
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -359,6 +372,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
+		PreToolExecute: func(ctx context.Context, toolCall fantasy.ToolCall) (context.Context, *fantasy.ToolCall, error) {
+			return a.executePreToolUseHook(ctx, call.SessionID, toolCall, currentAssistant)
+		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			var resultContent string
 			isError := false
@@ -384,6 +400,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				IsError:    isError,
 				Metadata:   result.ClientMetadata,
 			}
+			// Attach hook result if available
+			if hookRes, ok := postToolHookResults.Get(result.ToolCallID); ok {
+				toolResult.HookResult = &hookRes
+			}
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
@@ -394,6 +414,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return createMsgErr
 			}
 			return nil
+		},
+		PostToolExecute: func(ctx context.Context, toolCall fantasy.ToolCall, response fantasy.ToolResponse, executionTimeMs int64) (*fantasy.ToolResponse, error) {
+			modifiedResponse, hookResult, err := a.executePostToolUseHook(ctx, call.SessionID, toolCall, response, executionTimeMs)
+			if hookResult != nil {
+				// Store for OnToolResult callback
+				postToolHookResults.Set(toolCall.ID, *hookResult)
+			}
+			return modifiedResponse, err
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
 			finishReason := message.FinishReasonUnknown
@@ -440,6 +468,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+		isHookDenied := errors.Is(err, ErrHookDenied)
+
+		// Set stop reason for defer
+		if isCancelErr {
+			stopReason = "cancelled"
+		} else if isPermissionErr || isHookDenied {
+			stopReason = "permission_denied"
+		} else {
+			stopReason = "error"
+		}
+
 		if currentAssistant == nil {
 			return result, err
 		}
@@ -484,6 +523,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				content = "Tool execution canceled by user"
 			} else if isPermissionErr {
 				content = "User denied permission"
+			} else if isHookDenied {
+				content = "Hook denied execution"
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -508,6 +549,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+		} else if isHookDenied {
+			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "Hook denied execution", "")
 		} else if errors.As(err, &providerErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 		} else if errors.As(err, &fantasyErr) {
@@ -524,6 +567,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, err
 	}
 	wg.Wait()
+
+	// Set completion reason for stop hook
+	stopReason = "completed"
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
@@ -966,4 +1012,150 @@ func (a *sessionAgent) executePromptSubmitHook(ctx context.Context, msg *message
 		return ErrHookExecutionStop
 	}
 	return nil
+}
+
+// executePreToolUseHook executes the pre-tool-use hook and applies modifications.
+// Only runs for main agent (not sub-agents).
+func (a *sessionAgent) executePreToolUseHook(ctx context.Context, sessionID string, toolCall fantasy.ToolCall, currentAssistant *message.Message) (context.Context, *fantasy.ToolCall, error) {
+	// Skip if sub-agent or no hooks manager.
+	if a.isSubAgent || a.hooksManager == nil {
+		return ctx, nil, nil
+	}
+
+	// Parse tool input to map
+	var toolInput map[string]any
+	if err := json.Unmarshal([]byte(toolCall.Input), &toolInput); err != nil {
+		// If we can't parse the input, skip the hook
+		return ctx, nil, nil
+	}
+
+	hookResult, err := a.hooksManager.ExecutePreToolUse(ctx, sessionID, a.workingDir, hooks.PreToolUseData{
+		ToolName:   toolCall.Name,
+		ToolCallID: toolCall.ID,
+		ToolInput:  toolInput,
+	})
+	if err != nil {
+		return ctx, nil, fmt.Errorf("pre-tool-use hook execution failed: %w", err)
+	}
+
+	// Store hook result in the current assistant's tool call
+	for _, tc := range currentAssistant.ToolCalls() {
+		if tc.ID == toolCall.ID {
+			tc.HookResult = &hookResult
+			currentAssistant.AddToolCall(tc)
+			if updateErr := a.messages.Update(ctx, *currentAssistant); updateErr != nil {
+				slog.Error("failed to update assistant message with pre-hook result", "error", updateErr)
+			}
+			break
+		}
+	}
+
+	// If hook returned Continue: false, deny execution.
+	if !hookResult.Continue {
+		return ctx, nil, ErrHookDenied
+	}
+
+	// Set permission in context for tools to use
+	if hookResult.Permission != "" {
+		ctx = tools.SetHookPermissionInContext(ctx, hookResult.Permission)
+	}
+
+	// Apply modified input if present.
+	if len(hookResult.ModifiedInput) > 0 {
+		// Merge modified input with original
+		for k, v := range hookResult.ModifiedInput {
+			toolInput[k] = v
+		}
+
+		modifiedInputJSON, err := json.Marshal(toolInput)
+		if err != nil {
+			return ctx, nil, fmt.Errorf("failed to marshal modified input: %w", err)
+		}
+
+		modifiedCall := toolCall
+		modifiedCall.Input = string(modifiedInputJSON)
+		return ctx, &modifiedCall, nil
+	}
+
+	return ctx, nil, nil
+}
+
+// executePostToolUseHook executes the post-tool-use hook and applies modifications.
+// Only runs for main agent (not sub-agents).
+func (a *sessionAgent) executePostToolUseHook(ctx context.Context, sessionID string, toolCall fantasy.ToolCall, response fantasy.ToolResponse, executionTimeMs int64) (*fantasy.ToolResponse, *hooks.HookResult, error) {
+	// Skip if sub-agent or no hooks manager.
+	if a.isSubAgent || a.hooksManager == nil {
+		return nil, nil, nil
+	}
+
+	// Parse tool input to map
+	var toolInput map[string]any
+	if err := json.Unmarshal([]byte(toolCall.Input), &toolInput); err != nil {
+		return nil, nil, nil
+	}
+
+	// Parse tool output to map
+	toolOutput := map[string]any{
+		"success": !response.IsError,
+		"content": response.Content,
+	}
+	if response.Metadata != "" {
+		toolOutput["metadata"] = response.Metadata
+	}
+
+	hookResult, err := a.hooksManager.ExecutePostToolUse(ctx, sessionID, a.workingDir, hooks.PostToolUseData{
+		ToolName:        toolCall.Name,
+		ToolCallID:      toolCall.ID,
+		ToolInput:       toolInput,
+		ToolOutput:      toolOutput,
+		ExecutionTimeMs: executionTimeMs,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("post-tool-use hook execution failed: %w", err)
+	}
+
+	// If hook returned Continue: false, return error to stop execution.
+	if !hookResult.Continue {
+		return nil, &hookResult, ErrHookDenied
+	}
+
+	// Apply modified output if present.
+	if len(hookResult.ModifiedOutput) > 0 {
+		modifiedResponse := response
+
+		// Apply modifications
+		if content, ok := hookResult.ModifiedOutput["content"].(string); ok {
+			modifiedResponse.Content = content
+		}
+		if success, ok := hookResult.ModifiedOutput["success"].(bool); ok {
+			modifiedResponse.IsError = !success
+		}
+		if metadata, ok := hookResult.ModifiedOutput["metadata"].(string); ok {
+			modifiedResponse.Metadata = metadata
+		}
+
+		return &modifiedResponse, &hookResult, nil
+	}
+
+	return nil, &hookResult, nil
+}
+
+// executeStopHook executes the stop hook when agent loop ends.
+// Only runs for main agent (not sub-agents). Errors are logged but don't fail.
+func (a *sessionAgent) executeStopHook(ctx context.Context, sessionID, reason string) {
+	// Skip if sub-agent or no hooks manager.
+	if a.isSubAgent || a.hooksManager == nil {
+		return
+	}
+
+	// Use a fresh context with timeout to ensure hook runs even if parent is cancelled
+	hookCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := a.hooksManager.ExecuteStop(hookCtx, sessionID, a.workingDir, hooks.StopData{
+		Reason: reason,
+	})
+	if err != nil {
+		slog.Error("stop hook execution failed", "session_id", sessionID, "reason", reason, "error", err)
+	}
 }

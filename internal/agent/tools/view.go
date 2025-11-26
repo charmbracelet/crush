@@ -82,7 +82,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 				}
 
-				granted := permissions.Request(
+				granted, err := CheckHookPermission(ctx, permissions,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -91,8 +91,10 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 						Action:      "read",
 						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
 						Params:      ViewPermissionsParams(params),
-					},
-				)
+					})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
 
 				if !granted {
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied

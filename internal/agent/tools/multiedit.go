@@ -165,7 +165,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Check permissions
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
 
-	p := edit.permissions.Request(permission.CreatePermissionRequest{
+	granted, err := CheckHookPermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -178,12 +178,12 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 			NewContent: currentContent,
 		},
 	})
-	if !p {
+	if !granted {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
 	// Write the file
-	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -219,8 +219,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 			Removals:     removals,
 			EditsApplied: editsApplied,
 			EditsFailed:  failedEdits,
-		},
-	), nil
+		}), nil
 }
 
 func processMultiEditExistingFile(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -299,7 +298,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 
 	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
-	p := edit.permissions.Request(permission.CreatePermissionRequest{
+	granted, err := CheckHookPermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -312,7 +311,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			NewContent: currentContent,
 		},
 	})
-	if !p {
+	if !granted {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -368,8 +367,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			Removals:     removals,
 			EditsApplied: editsApplied,
 			EditsFailed:  failedEdits,
-		},
-	), nil
+		}), nil
 }
 
 func applyEditToContent(content string, edit MultiEditOperation) (string, error) {

@@ -70,18 +70,18 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
 			}
 
-			p := permissions.Request(
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        filePath,
-					ToolName:    DownloadToolName,
-					Action:      "download",
-					Description: fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath),
-					Params:      DownloadPermissionsParams(params),
-				},
-			)
-
-			if !p {
+			granted, err := CheckHookPermission(ctx, permissions, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        filePath,
+				ToolName:    DownloadToolName,
+				Action:      "download",
+				Description: fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath),
+				Params:      DownloadPermissionsParams(params),
+			})
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 

@@ -97,6 +97,15 @@ type Manager interface {
 
 	// ExecuteUserPromptSubmit executes the UserPromptSubmit event
 	ExecuteUserPromptSubmit(ctx context.Context, sessionID, workingDir string, data UserPromptSubmitData) (HookResult, error)
+
+	// ExecutePreToolUse executes the PreToolUse event
+	ExecutePreToolUse(ctx context.Context, sessionID, workingDir string, data PreToolUseData) (HookResult, error)
+
+	// ExecutePostToolUse executes the PostToolUse event
+	ExecutePostToolUse(ctx context.Context, sessionID, workingDir string, data PostToolUseData) (HookResult, error)
+
+	// ExecuteStop executes the Stop event
+	ExecuteStop(ctx context.Context, sessionID, workingDir string, data StopData) (HookResult, error)
 }
 
 type UserPromptSubmitData struct {

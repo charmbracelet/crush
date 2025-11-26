@@ -110,22 +110,23 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p := permissions.Request(
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
-					ToolCallID:  call.ID,
-					ToolName:    WriteToolName,
-					Action:      "write",
-					Description: fmt.Sprintf("Create file %s", filePath),
-					Params: WritePermissionsParams{
-						FilePath:   filePath,
-						OldContent: oldContent,
-						NewContent: params.Content,
-					},
+			granted, err := CheckHookPermission(ctx, permissions, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        fsext.PathOrPrefix(filePath, workingDir),
+				ToolCallID:  call.ID,
+				ToolName:    WriteToolName,
+				Action:      "write",
+				Description: fmt.Sprintf("Create file %s", filePath),
+				Params: WritePermissionsParams{
+					FilePath:   filePath,
+					OldContent: oldContent,
+					NewContent: params.Content,
 				},
-			)
-			if !p {
+			})
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			if !granted {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 

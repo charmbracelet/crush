@@ -79,7 +79,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
 				}
 
-				granted := permissions.Request(
+				granted, err := CheckHookPermission(ctx, permissions,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absSearchPath,
@@ -88,8 +88,10 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 						Action:      "list",
 						Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
 						Params:      LSPermissionsParams(params),
-					},
-				)
+					})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
 
 				if !granted {
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied

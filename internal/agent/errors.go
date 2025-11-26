@@ -11,6 +11,7 @@ var (
 	ErrEmptyPrompt       = errors.New("prompt is empty")
 	ErrSessionMissing    = errors.New("session id is missing")
 	ErrHookExecutionStop = errors.New("hook stopped execution")
+	ErrHookDenied        = errors.New("hook denied execution")
 )
 
 func isCancelledErr(err error) bool {

@@ -241,8 +241,6 @@ func (m *manager) mergeResults(accumulated *HookResult, new *HookResult) {
 	if new.Permission != "" {
 		if new.Permission == "deny" {
 			accumulated.Permission = "deny"
-		} else if new.Permission == "ask" && accumulated.Permission != "deny" {
-			accumulated.Permission = "ask"
 		} else if new.Permission == "approve" && accumulated.Permission == "" {
 			accumulated.Permission = "approve"
 		}

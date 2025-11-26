@@ -96,23 +96,25 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Input            string `json:"input"`
-	ProviderExecuted bool   `json:"provider_executed"`
-	Finished         bool   `json:"finished"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Input            string            `json:"input"`
+	ProviderExecuted bool              `json:"provider_executed"`
+	Finished         bool              `json:"finished"`
+	HookResult       *hooks.HookResult `json:"hook_result,omitempty"`
 }
 
 func (ToolCall) isPart() {}
 
 type ToolResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-	Data       string `json:"data"`
-	MIMEType   string `json:"mime_type"`
-	Metadata   string `json:"metadata"`
-	IsError    bool   `json:"is_error"`
+	ToolCallID string            `json:"tool_call_id"`
+	Name       string            `json:"name"`
+	Content    string            `json:"content"`
+	Data       string            `json:"data"`
+	MIMEType   string            `json:"mime_type"`
+	Metadata   string            `json:"metadata"`
+	IsError    bool              `json:"is_error"`
+	HookResult *hooks.HookResult `json:"hook_result,omitempty"`
 }
 
 func (ToolResult) isPart() {}

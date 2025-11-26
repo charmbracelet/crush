@@ -128,22 +128,23 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		content,
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
-	p := edit.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: "",
-				NewContent: content,
-			},
+	granted, err := CheckHookPermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Create file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: "",
+			NewContent: content,
 		},
-	)
-	if !p {
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if !granted {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -176,8 +177,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 			NewContent: content,
 			Additions:  additions,
 			Removals:   removals,
-		},
-	), nil
+		}), nil
 }
 
 func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -249,22 +249,23 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
-	p := edit.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Delete content from file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
+	granted, err := CheckHookPermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Delete content from file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: oldContent,
+			NewContent: newContent,
 		},
-	)
-	if !p {
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if !granted {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -309,8 +310,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 			NewContent: newContent,
 			Additions:  additions,
 			Removals:   removals,
-		},
-	), nil
+		}), nil
 }
 
 func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -384,22 +384,23 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
-	p := edit.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Replace content in file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
+	granted, err := CheckHookPermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Replace content in file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: oldContent,
+			NewContent: newContent,
 		},
-	)
-	if !p {
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	if !granted {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 

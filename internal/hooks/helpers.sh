@@ -21,13 +21,6 @@ crush_deny() {
   exit 2
 }
 
-# Ask user for permission (default behavior).
-# Usage: crush_ask ["message"]
-crush_ask() {
-  export CRUSH_PERMISSION=ask
-  [ -n "$1" ] && export CRUSH_MESSAGE="$1"
-}
-
 # Context helpers
 
 # Add raw text content to LLM context.

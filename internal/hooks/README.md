@@ -222,13 +222,6 @@ crush_deny "Blocked dangerous operation"
 # Script exits immediately with code 2
 ```
 
-#### `crush_ask [message]`
-Ask user for permission (default behavior).
-
-```bash
-crush_ask "This command modifies files, please review"
-```
-
 ### Context Helpers
 
 #### `crush_add_context "content"`
@@ -373,7 +366,7 @@ export CRUSH_CONTEXT_FILES="/path/to/file1.md:/path/to/file2.md"
 ```
 
 **Available variables**:
-- `CRUSH_PERMISSION` - `approve`, `ask`, or `deny`
+- `CRUSH_PERMISSION` - `approve` or `deny`
 - `CRUSH_MESSAGE` - User-facing message
 - `CRUSH_CONTINUE` - `true` or `false` (stop execution)
 - `CRUSH_MODIFIED_PROMPT` - New prompt text
@@ -401,7 +394,7 @@ echo '{
 
 **JSON fields**:
 - `continue` (bool) - Continue execution
-- `permission` (string) - `approve`, `ask`, `deny`
+- `permission` (string) - `approve` or `deny`
 - `message` (string) - User-facing message
 - `modified_prompt` (string) - New prompt
 - `modified_input` (object) - Modified tool parameters
@@ -444,8 +437,10 @@ Hooks execute **sequentially** in alphabetical order. Use numeric prefixes to co
 When multiple hooks execute, their results are merged:
 
 ### Permission (Most Restrictive Wins)
-- `deny` > `ask` > `approve`
+- `deny` > `approve`
 - If any hook denies, the final result is deny
+- If any hook approves and no denials, the result is approve
+- If no hooks set permission, normal permission flow applies
 
 ### Continue (AND Logic)
 - All hooks must set `Continue=true` (or not set it)

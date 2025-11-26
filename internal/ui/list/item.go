@@ -9,6 +9,50 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
+// toUVStyle converts a lipgloss.Style to a uv.Style, stripping multiline attributes.
+func toUVStyle(lgStyle lipgloss.Style) uv.Style {
+	var uvStyle uv.Style
+
+	// Colors are already color.Color
+	uvStyle.Fg = lgStyle.GetForeground()
+	uvStyle.Bg = lgStyle.GetBackground()
+
+	// Build attributes using bitwise OR
+	var attrs uint8
+
+	if lgStyle.GetBold() {
+		attrs |= uv.AttrBold
+	}
+
+	if lgStyle.GetItalic() {
+		attrs |= uv.AttrItalic
+	}
+
+	if lgStyle.GetUnderline() {
+		uvStyle.Underline = uv.UnderlineSingle
+	}
+
+	if lgStyle.GetStrikethrough() {
+		attrs |= uv.AttrStrikethrough
+	}
+
+	if lgStyle.GetFaint() {
+		attrs |= uv.AttrFaint
+	}
+
+	if lgStyle.GetBlink() {
+		attrs |= uv.AttrBlink
+	}
+
+	if lgStyle.GetReverse() {
+		attrs |= uv.AttrReverse
+	}
+
+	uvStyle.Attrs = attrs
+
+	return uvStyle
+}
+
 // Item represents a list item that can draw itself to a UV buffer.
 // Items implement the uv.Drawable interface.
 type Item interface {
@@ -30,35 +74,88 @@ type Focusable interface {
 	IsFocused() bool
 }
 
+// Highlightable is an optional interface for items that support text highlighting.
+// When implemented, items can highlight specific regions (e.g., from mouse selection).
+// Coordinates are relative to the item's drawing area (0,0 = top-left of item).
+type Highlightable interface {
+	// SetHighlight sets the highlight region from (startLine, startCol) to (endLine, endCol).
+	// Pass startLine=-1 to clear highlighting.
+	SetHighlight(startLine, startCol, endLine, endCol int)
+
+	// GetHighlight returns the current highlight region.
+	GetHighlight() (startLine, startCol, endLine, endCol int)
+}
+
 // StringItem is a simple string-based item with optional text wrapping.
 // It caches rendered content by width for efficient repeated rendering.
+// StringItem implements Highlightable for text selection support.
 type StringItem struct {
 	id      string
 	content string // Raw content string (may contain ANSI styles)
 	wrap    bool   // Whether to wrap text
+
+	// Highlight state (line, col coordinates)
+	highlightStartLine int
+	highlightStartCol  int
+	highlightEndLine   int
+	highlightEndCol    int
+	highlightStyle     func(s uv.Style) uv.Style
 
 	// Cache for rendered content at specific widths
 	// Key: width, Value: string
 	cache map[int]string
 }
 
+// CellStyler is a function that applies styles to UV cells.
+type CellStyler = func(s uv.Style) uv.Style
+
+var noColor = lipgloss.NoColor{}
+
+// LipglossStyleToCellStyler converts a Lip Gloss style to a CellStyler function.
+func LipglossStyleToCellStyler(lgStyle lipgloss.Style) CellStyler {
+	uvStyle := toUVStyle(lgStyle)
+	return func(s uv.Style) uv.Style {
+		if uvStyle.Fg != nil && lgStyle.GetForeground() != noColor {
+			s.Fg = uvStyle.Fg
+		}
+		if uvStyle.Bg != nil && lgStyle.GetBackground() != noColor {
+			s.Bg = uvStyle.Bg
+		}
+		s.Attrs |= uvStyle.Attrs
+		if uvStyle.Underline != 0 {
+			s.Underline = uvStyle.Underline
+		}
+		return s
+	}
+}
+
 // NewStringItem creates a new string item with the given ID and content.
 func NewStringItem(id, content string) *StringItem {
 	return &StringItem{
-		id:      id,
-		content: content,
-		wrap:    false,
-		cache:   make(map[int]string),
+		id:                 id,
+		content:            content,
+		wrap:               false,
+		cache:              make(map[int]string),
+		highlightStartLine: -1,
+		highlightStartCol:  -1,
+		highlightEndLine:   -1,
+		highlightEndCol:    -1,
+		highlightStyle:     LipglossStyleToCellStyler(lipgloss.NewStyle().Reverse(true)),
 	}
 }
 
 // NewWrappingStringItem creates a new string item that wraps text to fit width.
 func NewWrappingStringItem(id, content string) *StringItem {
 	return &StringItem{
-		id:      id,
-		content: content,
-		wrap:    true,
-		cache:   make(map[int]string),
+		id:                 id,
+		content:            content,
+		wrap:               true,
+		cache:              make(map[int]string),
+		highlightStartLine: -1,
+		highlightStartCol:  -1,
+		highlightEndLine:   -1,
+		highlightEndCol:    -1,
+		highlightStyle:     LipglossStyleToCellStyler(lipgloss.NewStyle().Reverse(true)),
 	}
 }
 
@@ -83,6 +180,7 @@ func (s *StringItem) Height(width int) int {
 // Draw implements Item and uv.Drawable.
 func (s *StringItem) Draw(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
+	height := area.Dy()
 
 	// Check cache first
 	content, ok := s.cache[width]
@@ -96,9 +194,87 @@ func (s *StringItem) Draw(scr uv.Screen, area uv.Rectangle) {
 		s.cache[width] = content
 	}
 
-	// Draw the cached styled string
+	// Create temp buffer to draw content with highlighting
+	tempBuf := uv.NewScreenBuffer(width, height)
+
+	// Draw content to temp buffer first
 	styled := uv.NewStyledString(content)
-	styled.Draw(scr, area)
+	styled.Draw(&tempBuf, uv.Rect(0, 0, width, height))
+
+	// Apply highlighting directly to buffer cells if active
+	if s.highlightStartLine >= 0 {
+		for y := s.highlightStartLine; y <= s.highlightEndLine && y < height; y++ {
+			if y >= len(tempBuf.Buffer.Lines) {
+				break
+			}
+
+			line := tempBuf.Buffer.Lines[y]
+
+			// Determine column range for this line
+			startCol := 0
+			if y == s.highlightStartLine {
+				startCol = min(s.highlightStartCol, len(line))
+			}
+
+			endCol := len(line)
+			if y == s.highlightEndLine {
+				endCol = min(s.highlightEndCol, len(line))
+			}
+
+			// Track last non-empty position as we go
+			lastContentX := -1
+
+			// Single pass: check content and track last non-empty position
+			for x := startCol; x < endCol; x++ {
+				cell := line.At(x)
+
+				// Update last content position if non-empty
+				if cell.Content != "" && cell.Content != " " {
+					lastContentX = x
+				}
+			}
+
+			// Only apply highlight up to last content position
+			highlightEnd := endCol
+			if lastContentX >= 0 {
+				highlightEnd = lastContentX + 1
+			}
+
+			// Apply highlight style only to cells with content
+			for x := startCol; x < highlightEnd; x++ {
+				cell := line.At(x)
+
+				cell.Style = s.highlightStyle(cell.Style)
+			}
+		}
+	}
+
+	// Copy temp buffer to actual screen at the target area
+	for y := 0; y < height && y < len(tempBuf.Buffer.Lines); y++ {
+		srcLine := tempBuf.Buffer.Lines[y]
+		dstY := area.Min.Y + y
+
+		for x := 0; x < width && x < len(srcLine); x++ {
+			dstX := area.Min.X + x
+			cell := srcLine.At(x)
+			scr.SetCell(dstX, dstY, cell)
+		}
+	}
+}
+
+// SetHighlight implements Highlightable.
+func (s *StringItem) SetHighlight(startLine, startCol, endLine, endCol int) {
+	s.highlightStartLine = startLine
+	s.highlightStartCol = startCol
+	s.highlightEndLine = endLine
+	s.highlightEndCol = endCol
+	// Clear cache when highlight changes
+	s.cache = make(map[int]string)
+}
+
+// GetHighlight implements Highlightable.
+func (s *StringItem) GetHighlight() (startLine, startCol, endLine, endCol int) {
+	return s.highlightStartLine, s.highlightStartCol, s.highlightEndLine, s.highlightEndCol
 }
 
 // MarkdownItem renders markdown content using Glamour.

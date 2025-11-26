@@ -32,6 +32,15 @@ type List struct {
 	// Viewport state
 	offset int // Scroll offset in lines from top
 
+	// Mouse state
+	mouseDown     bool
+	mouseDownItem string // Item ID where mouse was pressed
+	mouseDownX    int    // X position in item content (character offset)
+	mouseDownY    int    // Y position in item (line offset)
+	mouseDragItem string // Current item being dragged over
+	mouseDragX    int    // Current X in item content
+	mouseDragY    int    // Current Y in item
+
 	// Dirty tracking
 	dirty      bool
 	dirtyItems map[string]bool
@@ -362,6 +371,16 @@ func (l *List) SetSize(width, height int) {
 	}
 }
 
+// Height returns the current viewport height.
+func (l *List) Height() int {
+	return l.height
+}
+
+// Width returns the current viewport width.
+func (l *List) Width() int {
+	return l.width
+}
+
 // GetSize returns the current viewport size.
 func (l *List) GetSize() (int, int) {
 	return l.width, l.height
@@ -569,8 +588,8 @@ func (l *List) Blur() {
 	l.blurSelectedItem()
 }
 
-// IsFocused returns whether the list is focused.
-func (l *List) IsFocused() bool {
+// Focused returns whether the list is focused.
+func (l *List) Focused() bool {
 	return l.focused
 }
 
@@ -792,4 +811,280 @@ func (l *List) blurSelectedItem() {
 		f.Blur()
 		l.dirtyItems[item.ID()] = true
 	}
+}
+
+// HandleMouseDown handles mouse button press events.
+// x and y are viewport-relative coordinates (0,0 = top-left of visible area).
+// Returns true if the event was handled.
+func (l *List) HandleMouseDown(x, y int) bool {
+	l.ensureBuilt()
+
+	// Convert viewport y to master buffer y
+	bufferY := y + l.offset
+
+	// Find which item was clicked
+	itemID, itemY := l.findItemAtPosition(bufferY)
+	if itemID == "" {
+		return false
+	}
+
+	// Calculate x position within item content
+	// For now, x is just the viewport x coordinate
+	// Items can interpret this as character offset in their content
+
+	l.mouseDown = true
+	l.mouseDownItem = itemID
+	l.mouseDownX = x
+	l.mouseDownY = itemY
+	l.mouseDragItem = itemID
+	l.mouseDragX = x
+	l.mouseDragY = itemY
+
+	// Select the clicked item
+	if idx, ok := l.indexMap[itemID]; ok {
+		l.SetSelectedIndex(idx)
+	}
+
+	return true
+}
+
+// HandleMouseDrag handles mouse drag events during selection.
+// x and y are viewport-relative coordinates.
+// Returns true if the event was handled.
+func (l *List) HandleMouseDrag(x, y int) bool {
+	if !l.mouseDown {
+		return false
+	}
+
+	l.ensureBuilt()
+
+	// Convert viewport y to master buffer y
+	bufferY := y + l.offset
+
+	// Find which item we're dragging over
+	itemID, itemY := l.findItemAtPosition(bufferY)
+	if itemID == "" {
+		return false
+	}
+
+	l.mouseDragItem = itemID
+	l.mouseDragX = x
+	l.mouseDragY = itemY
+
+	// Update highlight if item supports it
+	l.updateHighlight()
+
+	return true
+}
+
+// HandleMouseUp handles mouse button release events.
+// Returns true if the event was handled.
+func (l *List) HandleMouseUp(x, y int) bool {
+	if !l.mouseDown {
+		return false
+	}
+
+	l.mouseDown = false
+
+	// Final highlight update
+	l.updateHighlight()
+
+	return true
+}
+
+// ClearHighlight clears any active text highlighting.
+func (l *List) ClearHighlight() {
+	for _, item := range l.items {
+		if h, ok := item.(Highlightable); ok {
+			h.SetHighlight(-1, -1, -1, -1)
+			l.dirtyItems[item.ID()] = true
+		}
+	}
+}
+
+// findItemAtPosition finds the item at the given master buffer y coordinate.
+// Returns the item ID and the y offset within that item.
+func (l *List) findItemAtPosition(bufferY int) (itemID string, itemY int) {
+	if bufferY < 0 || bufferY >= l.totalHeight {
+		return "", 0
+	}
+
+	// Linear search through items to find which one contains this y
+	// This could be optimized with binary search if needed
+	for _, item := range l.items {
+		pos, ok := l.itemPositions[item.ID()]
+		if !ok {
+			continue
+		}
+
+		if bufferY >= pos.startLine && bufferY < pos.startLine+pos.height {
+			return item.ID(), bufferY - pos.startLine
+		}
+	}
+
+	return "", 0
+}
+
+// updateHighlight updates the highlight range for highlightable items.
+// Supports highlighting across multiple items and respects drag direction.
+func (l *List) updateHighlight() {
+	if l.mouseDownItem == "" {
+		return
+	}
+
+	// Get start and end item indices
+	downItemIdx := l.indexMap[l.mouseDownItem]
+	dragItemIdx := l.indexMap[l.mouseDragItem]
+
+	// Determine selection direction
+	draggingDown := dragItemIdx > downItemIdx ||
+		(dragItemIdx == downItemIdx && l.mouseDragY > l.mouseDownY) ||
+		(dragItemIdx == downItemIdx && l.mouseDragY == l.mouseDownY && l.mouseDragX >= l.mouseDownX)
+
+	// Determine actual start and end based on direction
+	var startItemIdx, endItemIdx int
+	var startLine, startCol, endLine, endCol int
+
+	if draggingDown {
+		// Normal forward selection
+		startItemIdx = downItemIdx
+		endItemIdx = dragItemIdx
+		startLine = l.mouseDownY
+		startCol = l.mouseDownX
+		endLine = l.mouseDragY
+		endCol = l.mouseDragX
+	} else {
+		// Backward selection (dragging up)
+		startItemIdx = dragItemIdx
+		endItemIdx = downItemIdx
+		startLine = l.mouseDragY
+		startCol = l.mouseDragX
+		endLine = l.mouseDownY
+		endCol = l.mouseDownX
+	}
+
+	// Clear all highlights first
+	for _, item := range l.items {
+		if h, ok := item.(Highlightable); ok {
+			h.SetHighlight(-1, -1, -1, -1)
+			l.dirtyItems[item.ID()] = true
+		}
+	}
+
+	// Highlight all items in range
+	for idx := startItemIdx; idx <= endItemIdx; idx++ {
+		item, ok := l.items[idx].(Highlightable)
+		if !ok {
+			continue
+		}
+
+		if idx == startItemIdx && idx == endItemIdx {
+			// Single item selection
+			item.SetHighlight(startLine, startCol, endLine, endCol)
+		} else if idx == startItemIdx {
+			// First item - from start position to end of item
+			pos := l.itemPositions[l.items[idx].ID()]
+			item.SetHighlight(startLine, startCol, pos.height-1, 9999) // 9999 = end of line
+		} else if idx == endItemIdx {
+			// Last item - from start of item to end position
+			item.SetHighlight(0, 0, endLine, endCol)
+		} else {
+			// Middle item - fully highlighted
+			pos := l.itemPositions[l.items[idx].ID()]
+			item.SetHighlight(0, 0, pos.height-1, 9999)
+		}
+
+		l.dirtyItems[l.items[idx].ID()] = true
+	}
+}
+
+// GetHighlightedText returns the plain text content of all highlighted regions
+// across items, without any styling. Returns empty string if no highlights exist.
+func (l *List) GetHighlightedText() string {
+	l.ensureBuilt()
+
+	if l.masterBuffer == nil {
+		return ""
+	}
+
+	var result strings.Builder
+
+	// Iterate through items to find highlighted ones
+	for _, item := range l.items {
+		h, ok := item.(Highlightable)
+		if !ok {
+			continue
+		}
+
+		startLine, startCol, endLine, endCol := h.GetHighlight()
+		if startLine < 0 {
+			continue
+		}
+
+		pos, ok := l.itemPositions[item.ID()]
+		if !ok {
+			continue
+		}
+
+		// Extract text from highlighted region in master buffer
+		for y := startLine; y <= endLine && y < pos.height; y++ {
+			bufferY := pos.startLine + y
+			if bufferY >= len(l.masterBuffer.Buffer.Lines) {
+				break
+			}
+
+			line := l.masterBuffer.Buffer.Lines[bufferY]
+
+			// Determine column range for this line
+			colStart := 0
+			if y == startLine {
+				colStart = startCol
+			}
+
+			colEnd := len(line)
+			if y == endLine {
+				colEnd = min(endCol, len(line))
+			}
+
+			// Track last non-empty position to trim trailing spaces
+			lastContentX := -1
+			for x := colStart; x < colEnd && x < len(line); x++ {
+				cell := line.At(x)
+				if cell.IsZero() {
+					continue
+				}
+				if cell.Content != "" && cell.Content != " " {
+					lastContentX = x
+				}
+			}
+
+			// Extract text from cells using String() method, up to last content
+			endX := colEnd
+			if lastContentX >= 0 {
+				endX = lastContentX + 1
+			}
+
+			for x := colStart; x < endX && x < len(line); x++ {
+				cell := line.At(x)
+				if cell.IsZero() {
+					continue
+				}
+				result.WriteString(cell.String())
+			}
+
+			// Add newline between lines (but not after the last line)
+			if y < endLine && y < pos.height-1 {
+				result.WriteRune('\n')
+			}
+		}
+
+		// Add newline between items if there are more highlighted items
+		if result.Len() > 0 {
+			result.WriteRune('\n')
+		}
+	}
+
+	// Trim trailing newline if present
+	text := result.String()
+	return strings.TrimSuffix(text, "\n")
 }

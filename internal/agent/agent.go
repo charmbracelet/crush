@@ -242,7 +242,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				var assistantMsg message.Message
 				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 					Role:     message.Assistant,
-					Parts:    []message.ContentPart{},
 					Model:    a.largeModel.ModelCfg.Model,
 					Provider: a.largeModel.ModelCfg.Provider,
 				})

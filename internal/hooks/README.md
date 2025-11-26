@@ -14,10 +14,10 @@ The hooks package provides a flexible, shell-based system for customizing Crush 
 
 ### Cross-Platform Support
 
-The hooks system works on **Windows, macOS, and Linux**:
+The hooks system works on **Windows**, **macOS**, and **Linux**:
 
 - **Hook Files**: All hooks must be `.sh` files (shell scripts)
-- **Shell Execution**: Uses Crush's internal POSIX shell emulator (`mvdan.cc/sh`) on all platforms
+- **Shell Execution**: Uses Crush's internal POSIX shell emulator ([mvdan.cc/sh](https://mvdan.cc/sh)) on all platforms
 - **Hook Discovery**:
   - **Unix/macOS**: `.sh` files must have execute permission (`chmod +x hook.sh`)
   - **Windows**: `.sh` files are automatically recognized (no permission needed)

@@ -15,7 +15,7 @@ func crushGetInput(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 
 	if len(args) != 2 {
-		fmt.Fprintln(hc.Stderr, "Usage: crush_get_input <field_name>")
+		fmt.Fprintf(hc.Stderr, "Wrong number of arguments to `crush_get_input`. Expected 2, got %d.\n", len(args))
 		return interp.ExitStatus(1)
 	}
 
@@ -40,7 +40,7 @@ func crushGetInput(ctx context.Context, args []string) error {
 func crushGetToolInput(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 	if len(args) != 2 {
-		fmt.Fprintln(hc.Stderr, "Usage: crush_get_tool_input <param_name>")
+		fmt.Fprintf(hc.Stderr, "Wrong number of arguments to `crush_get_tool_input`. Expected 2, got %d.\n", len(args))
 		return interp.ExitStatus(1)
 	}
 
@@ -70,6 +70,11 @@ func crushGetToolInput(ctx context.Context, args []string) error {
 func crushGetPrompt(ctx context.Context, args []string) error {
 	hc := interp.HandlerCtx(ctx)
 
+	if len(args) != 1 {
+		fmt.Fprintf(hc.Stderr, "Wrong number of arguments to `crush_get_prompt`. Expected 1, got %d.\n", len(args))
+		return interp.ExitStatus(1)
+	}
+
 	stdin := hc.Env.Get("_CRUSH_STDIN").Str
 
 	var data map[string]any
@@ -88,12 +93,13 @@ func crushGetPrompt(ctx context.Context, args []string) error {
 // crushLog writes a log message using slog.Debug.
 // Usage: crush_log "debug message"
 func crushLog(ctx context.Context, args []string) error {
-	if len(args) < 2 {
+	switch len(args) {
+	case 0, 1:
+		return nil
+	default:
+		slog.Debug(joinArgs(args[1:]))
 		return nil
 	}
-
-	slog.Debug(joinArgs(args[1:]))
-	return nil
 }
 
 // formatJSONValue converts a JSON value to a string suitable for shell output.

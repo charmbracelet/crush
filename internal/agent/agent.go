@@ -238,8 +238,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			if a.systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			if promptPrefix := a.promptPrefix(); promptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
 			var assistantMsg message.Message
@@ -789,6 +789,10 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
+	if a.isClaudeCode() {
+		cost = 0
+	}
+
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
 	if overrideCost != nil {
@@ -881,4 +885,17 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel
+}
+
+func (a *sessionAgent) promptPrefix() string {
+	if a.isClaudeCode() {
+		return "You are Claude Code, Anthropic's official CLI for Claude."
+	}
+	return a.systemPromptPrefix
+}
+
+func (a *sessionAgent) isClaudeCode() bool {
+	cfg := config.Get()
+	pc, ok := cfg.Providers.Get(a.largeModel.ModelCfg.Provider)
+	return ok && pc.ID == string(catwalk.InferenceProviderAnthropic) && pc.OAuthToken != nil
 }

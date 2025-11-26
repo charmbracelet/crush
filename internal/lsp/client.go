@@ -417,7 +417,7 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 		if _, err := os.Stat(file); err == nil {
 			// File exists, try to open it
 			if err := c.OpenFile(ctx, file); err != nil {
-				slog.Debug("Failed to open key config file", "file", file, "error", err)
+				slog.Error("Failed to open key config file", "file", file, "error", err)
 			} else {
 				slog.Debug("Opened key config file for initialization", "file", file)
 			}

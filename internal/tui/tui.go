@@ -380,9 +380,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			statusMsg = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
 		}
 		s, statusCmd := a.status.Update(util.InfoMsg{
-			Type: util.InfoTypeInfo,
+			Type: util.InfoTypeUpdate,
 			Msg:  statusMsg,
-			TTL:  30 * time.Second,
+			TTL:  10 * time.Second,
 		})
 		a.status = s.(status.StatusCmp)
 		return a, statusCmd
@@ -595,7 +595,7 @@ func (a *appModel) View() tea.View {
 								Render("Window too small!"),
 						),
 				),
-			),
+			).Render(),
 		)
 		return view
 	}
@@ -651,7 +651,7 @@ func (a *appModel) View() tea.View {
 		layers...,
 	)
 
-	view.Content = canvas
+	view.Content = canvas.Render()
 	view.Cursor = cursor
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {

@@ -9,10 +9,12 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -67,6 +69,12 @@ type modelDialogCmp struct {
 	selectedModelType config.SelectedModelType
 	isAPIKeyValid     bool
 	apiKeyValue       string
+
+	// Claude state
+	claudeAuthMethodChooser     *claude.AuthMethodChooser
+	claudeOAuth2                *claude.OAuth2
+	showClaudeAuthMethodChooser bool
+	showClaudeOAuth2            bool
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -91,11 +99,19 @@ func NewModelDialogCmp() ModelDialog {
 		width:       defaultWidth,
 		keyMap:      DefaultKeyMap(),
 		help:        help,
+
+		claudeAuthMethodChooser: claude.NewAuthMethodChooser(),
+		claudeOAuth2:            claude.NewOAuth2(),
 	}
 }
 
 func (m *modelDialogCmp) Init() tea.Cmd {
-	return tea.Batch(m.modelList.Init(), m.apiKeyInput.Init())
+	return tea.Batch(
+		m.modelList.Init(),
+		m.apiKeyInput.Init(),
+		m.claudeAuthMethodChooser.Init(),
+		m.claudeOAuth2.Init(),
+	)
 }
 
 func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
@@ -105,16 +121,84 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
 		m.help.SetWidth(m.width - 2)
+		m.claudeAuthMethodChooser.SetWidth(m.width - 2)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
+	case claude.ValidationCompletedMsg:
+		var cmds []tea.Cmd
+		u, cmd := m.claudeOAuth2.Update(msg)
+		m.claudeOAuth2 = u.(*claude.OAuth2)
+		cmds = append(cmds, cmd)
+
+		if msg.State == claude.OAuthValidationStateValid {
+			cmds = append(cmds, m.saveAPIKeyAndContinue(msg.Token, false))
+			m.keyMap.isClaudeOAuthHelpComplete = true
+		}
+
+		return m, tea.Batch(cmds...)
+	case claude.AuthenticationCompleteMsg:
+		return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 	case tea.KeyPressMsg:
 		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))):
+			if m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL {
+				return m, tea.Sequence(
+					tea.SetClipboard(m.claudeOAuth2.URL),
+					func() tea.Msg {
+						_ = clipboard.WriteAll(m.claudeOAuth2.URL)
+						return nil
+					},
+					util.ReportInfo("URL copied to clipboard"),
+				)
+			}
+		case key.Matches(msg, m.keyMap.Choose):
+			if m.showClaudeAuthMethodChooser {
+				m.claudeAuthMethodChooser.ToggleChoice()
+				return m, nil
+			}
 		case key.Matches(msg, m.keyMap.Select):
+			selectedItem := m.modelList.SelectedModel()
+
+			modelType := config.SelectedModelTypeLarge
+			if m.modelList.GetModelType() == SmallModelType {
+				modelType = config.SelectedModelTypeSmall
+			}
+
+			askForApiKey := func() {
+				m.keyMap.isClaudeAuthChoiseHelp = false
+				m.keyMap.isClaudeOAuthHelp = false
+				m.keyMap.isAPIKeyHelp = true
+				m.showClaudeAuthMethodChooser = false
+				m.needsAPIKey = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+			}
+
+			if m.showClaudeAuthMethodChooser {
+				switch m.claudeAuthMethodChooser.State {
+				case claude.AuthMethodAPIKey:
+					askForApiKey()
+				case claude.AuthMethodOAuth2:
+					m.selectedModel = selectedItem
+					m.selectedModelType = modelType
+					m.showClaudeAuthMethodChooser = false
+					m.showClaudeOAuth2 = true
+					m.keyMap.isClaudeAuthChoiseHelp = false
+					m.keyMap.isClaudeOAuthHelp = true
+				}
+				return m, nil
+			}
+			if m.showClaudeOAuth2 {
+				m2, cmd2 := m.claudeOAuth2.ValidationConfirm()
+				m.claudeOAuth2 = m2.(*claude.OAuth2)
+				return m, cmd2
+			}
 			if m.isAPIKeyValid {
-				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
+				return m, m.saveAPIKeyAndContinue(m.apiKeyValue, true)
 			}
 			if m.needsAPIKey {
 				// Handle API key submission
@@ -154,15 +238,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					},
 				)
 			}
-			// Normal model selection
-			selectedItem := m.modelList.SelectedModel()
-
-			var modelType config.SelectedModelType
-			if m.modelList.GetModelType() == LargeModelType {
-				modelType = config.SelectedModelTypeLarge
-			} else {
-				modelType = config.SelectedModelTypeSmall
-			}
 
 			// Check if provider is configured
 			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
@@ -179,27 +254,38 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					}),
 				)
 			} else {
-				// Provider not configured, show API key input
-				m.needsAPIKey = true
-				m.selectedModel = selectedItem
-				m.selectedModelType = modelType
-				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+				if selectedItem.Provider.ID == catwalk.InferenceProviderAnthropic {
+					m.showClaudeAuthMethodChooser = true
+					m.keyMap.isClaudeAuthChoiseHelp = true
+					return m, nil
+				}
+				askForApiKey()
 				return m, nil
 			}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.needsAPIKey {
+			switch {
+			case m.showClaudeAuthMethodChooser:
+				m.claudeAuthMethodChooser.ToggleChoice()
+				return m, nil
+			case m.needsAPIKey:
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
 				return m, cmd
-			}
-			if m.modelList.GetModelType() == LargeModelType {
+			case m.modelList.GetModelType() == LargeModelType:
 				m.modelList.SetInputPlaceholder(smallModelInputPlaceholder)
 				return m, m.modelList.SetModelType(SmallModelType)
-			} else {
+			default:
 				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
 		case key.Matches(msg, m.keyMap.Close):
+			if m.showClaudeAuthMethodChooser {
+				m.claudeAuthMethodChooser.SetDefaults()
+				m.showClaudeAuthMethodChooser = false
+				m.keyMap.isClaudeAuthChoiseHelp = false
+				m.keyMap.isClaudeOAuthHelp = false
+				return m, nil
+			}
 			if m.needsAPIKey {
 				if m.isAPIKeyValid {
 					return m, nil
@@ -214,7 +300,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
-			if m.needsAPIKey {
+			if m.showClaudeAuthMethodChooser {
+				u, cmd := m.claudeAuthMethodChooser.Update(msg)
+				m.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
+				return m, cmd
+			} else if m.showClaudeOAuth2 {
+				u, cmd := m.claudeOAuth2.Update(msg)
+				m.claudeOAuth2 = u.(*claude.OAuth2)
+				return m, cmd
+			} else if m.needsAPIKey {
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
 				return m, cmd
@@ -225,7 +319,11 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		}
 	case tea.PasteMsg:
-		if m.needsAPIKey {
+		if m.showClaudeOAuth2 {
+			u, cmd := m.claudeOAuth2.Update(msg)
+			m.claudeOAuth2 = u.(*claude.OAuth2)
+			return m, cmd
+		} else if m.needsAPIKey {
 			u, cmd := m.apiKeyInput.Update(msg)
 			m.apiKeyInput = u.(*APIKeyInput)
 			return m, cmd
@@ -235,9 +333,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case spinner.TickMsg:
-		u, cmd := m.apiKeyInput.Update(msg)
-		m.apiKeyInput = u.(*APIKeyInput)
-		return m, cmd
+		if m.showClaudeOAuth2 {
+			u, cmd := m.claudeOAuth2.Update(msg)
+			m.claudeOAuth2 = u.(*claude.OAuth2)
+			return m, cmd
+		} else {
+			u, cmd := m.apiKeyInput.Update(msg)
+			m.apiKeyInput = u.(*APIKeyInput)
+			return m, cmd
+		}
 	}
 	return m, nil
 }
@@ -245,7 +349,29 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (m *modelDialogCmp) View() string {
 	t := styles.CurrentTheme()
 
-	if m.needsAPIKey {
+	switch {
+	case m.showClaudeAuthMethodChooser:
+		chooserView := m.claudeAuthMethodChooser.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Let's Auth Anthropic", m.width-4)),
+			chooserView,
+			"",
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		)
+		return m.style().Render(content)
+	case m.showClaudeOAuth2:
+		m.keyMap.isClaudeOAuthURLState = m.claudeOAuth2.State == claude.OAuthStateURL
+		oauth2View := m.claudeOAuth2.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Let's Auth Anthropic", m.width-4)),
+			oauth2View,
+			"",
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		)
+		return m.style().Render(content)
+	case m.needsAPIKey:
 		// Show API key input
 		m.keyMap.isAPIKeyHelp = true
 		m.keyMap.isAPIKeyValid = m.isAPIKeyValid
@@ -275,6 +401,16 @@ func (m *modelDialogCmp) View() string {
 }
 
 func (m *modelDialogCmp) Cursor() *tea.Cursor {
+	if m.showClaudeAuthMethodChooser {
+		return nil
+	}
+	if m.showClaudeOAuth2 {
+		if cursor := m.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
+			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
+			return m.moveCursor(cursor)
+		}
+		return nil
+	}
 	if m.needsAPIKey {
 		cursor := m.apiKeyInput.Cursor()
 		if cursor != nil {
@@ -365,7 +501,7 @@ func (m *modelDialogCmp) getProvider(providerID catwalk.InferenceProvider) (*cat
 	return nil, nil
 }
 
-func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
+func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey any, close bool) tea.Cmd {
 	if m.selectedModel == nil {
 		return util.ReportError(fmt.Errorf("no model selected"))
 	}
@@ -378,8 +514,12 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 
 	// Reset API key state and continue with model selection
 	selectedModel := *m.selectedModel
-	return tea.Sequence(
-		util.CmdHandler(dialogs.CloseDialogMsg{}),
+	var cmds []tea.Cmd
+	if close {
+		cmds = append(cmds, util.CmdHandler(dialogs.CloseDialogMsg{}))
+	}
+	cmds = append(
+		cmds,
 		util.CmdHandler(ModelSelectedMsg{
 			Model: config.SelectedModel{
 				Model:           selectedModel.Model.ID,
@@ -390,4 +530,5 @@ func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey string) tea.Cmd {
 			ModelType: m.selectedModelType,
 		}),
 	)
+	return tea.Sequence(cmds...)
 }

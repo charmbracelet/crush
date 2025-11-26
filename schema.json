@@ -484,6 +484,10 @@
             "$OPENAI_API_KEY"
           ]
         },
+        "oauth": {
+          "$ref": "#/$defs/Token",
+          "description": "OAuth2 token for authentication with the provider"
+        },
         "disable": {
           "type": "boolean",
           "description": "Whether this provider is disabled",
@@ -623,6 +627,30 @@
       "type": "object",
       "required": [
         "completions"
+      ]
+    },
+    "Token": {
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "refresh_token": {
+          "type": "string"
+        },
+        "expires_in": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "access_token",
+        "refresh_token",
+        "expires_in",
+        "expires_at"
       ]
     },
     "ToolLs": {

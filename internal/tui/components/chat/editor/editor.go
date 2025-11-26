@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -95,7 +96,7 @@ type OpenEditorMsg struct {
 func (m *editorCmp) openEditor(value string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
-		// Use platform-appropriate default editor.
+		// Use platform-appropriate default editor
 		if runtime.GOOS == "windows" {
 			editor = "notepad"
 		} else {
@@ -111,11 +112,11 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
-
-	// Build the full shell command with the file argument.
-	cmdStr := fmt.Sprintf("%s %s", editor, tmpfile.Name())
-
-	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	c := exec.CommandContext(context.TODO(), editor, tmpfile.Name())
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			return util.ReportError(err)
 		}

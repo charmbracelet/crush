@@ -73,17 +73,24 @@ type permissionService struct {
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
 	s.sessionPermissions.Append(permission)
-	s.noLongerActiveRequest(permission)
+	s.noLongerActiveRequestUnsafe(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
-	s.noLongerActiveRequest(permission)
+	s.noLongerActiveRequestUnsafe(permission)
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionDenied)
-	s.noLongerActiveRequest(permission)
+	s.noLongerActiveRequestUnsafe(permission)
+}
+
+// noLongerActiveRequestUnsafe clears active request (MUST be called under lock)
+func (s *permissionService) noLongerActiveRequestUnsafe(permission PermissionRequest) {
+	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
+		s.activeRequest = nil
+	}
 }
 
 func (s *permissionService) publishUnsafe(permission PermissionRequest, status enum.ToolCallState) {
@@ -108,13 +115,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
 	// tell the UI that a permission was requested
 	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: opts.ToolCallID,
 		Status:     enum.ToolCallStatePermissionPending,
 	})
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action

@@ -71,17 +71,26 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
 	s.sessionPermissions.Append(permission)
 	s.noLongerActiveRequestUnsafe(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
 	s.noLongerActiveRequestUnsafe(permission)
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionDenied)
 	s.noLongerActiveRequestUnsafe(permission)
 }

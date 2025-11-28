@@ -475,27 +475,15 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
-	hasBearerAuth := false
-	for key := range headers {
-		if strings.ToLower(key) == "authorization" {
-			hasBearerAuth = true
-			break
-		}
-	}
-
-	isBearerToken := strings.HasPrefix(apiKey, "Bearer ")
-
 	var opts []anthropic.Option
-	if apiKey != "" && !hasBearerAuth {
-		if isBearerToken {
-			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
-			headers["Authorization"] = apiKey
-			apiKey = "" // clear apiKey to avoid using X-Api-Key header
-		}
-	}
 
-	if apiKey != "" {
-		// Use standard X-Api-Key header
+	if strings.HasPrefix(apiKey, "Bearer ") {
+		// NOTE: Prevent the SDK from picking up the API key from env.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+
+		headers["Authorization"] = apiKey
+	} else if apiKey != "" {
+		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
 	}
 

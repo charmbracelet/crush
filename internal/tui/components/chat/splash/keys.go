@@ -12,7 +12,8 @@ type KeyMap struct {
 	No,
 	Tab,
 	LeftRight,
-	Back key.Binding
+	Back,
+	Copy key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -48,6 +49,10 @@ func DefaultKeyMap() KeyMap {
 		Back: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),
 			key.WithHelp("esc", "back"),
+		),
+		Copy: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "copy url"),
 		),
 	}
 }

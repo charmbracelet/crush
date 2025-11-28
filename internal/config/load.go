@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,9 +20,11 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/errors"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/oauth/claude"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
@@ -134,6 +137,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
+
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -186,6 +190,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Name:               p.Name,
 			BaseURL:            p.APIEndpoint,
 			APIKey:             p.APIKey,
+			OAuthToken:         config.OAuthToken,
 			Type:               p.Type,
 			Disable:            config.Disable,
 			SystemPromptPrefix: config.SystemPromptPrefix,
@@ -193,6 +198,29 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			ExtraBody:          config.ExtraBody,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
+		}
+
+		if p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil {
+			if config.OAuthToken.IsExpired() {
+				newToken, err := claude.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Anthropic OAuth token")
+					config.OAuthToken = newToken
+					prepared.OAuthToken = newToken
+					if err := cmp.Or(
+						c.SetConfigField("providers.anthropic.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.anthropic.oauth", newToken),
+					); err != nil {
+						return err
+					}
+				} else {
+					slog.Error("Failed to refresh Anthropic OAuth token", "error", err)
+					event.Error(err)
+				}
+			} else {
+				slog.Info("Using existing non-expired Anthropic OAuth token")
+			}
+			prepared.SetupClaudeCode()
 		}
 
 		switch p.ID {

@@ -199,7 +199,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 
 	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
 	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
+		slog.Error("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(params.FilePath)
@@ -342,14 +342,14 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		// User manually changed the content, store an intermediate version
 		_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, oldContent)
 		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
+			slog.Error("Error creating file history version", "error", err)
 		}
 	}
 
 	// Store the new version
 	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
 	if err != nil {
-		slog.Debug("Error creating file history version", "error", err)
+		slog.Error("Error creating file history version", "error", err)
 	}
 
 	recordFileWrite(params.FilePath)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -130,7 +131,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
-	return c.currentAgent.Run(ctx, SessionAgentCall{
+	result, err := c.currentAgent.Run(ctx, SessionAgentCall{
 		SessionID:        sessionID,
 		Prompt:           prompt,
 		Attachments:      attachments,
@@ -142,6 +143,49 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		FrequencyPenalty: freqPenalty,
 		PresencePenalty:  presPenalty,
 	})
+
+	// Check if error is due to expired OAuth token
+	if err != nil && c.isOAuthTokenExpiredError(err, providerCfg) {
+		slog.Info("Detected expired OAuth token, attempting refresh", "provider", providerCfg.ID)
+
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if refreshErr := c.cfg.RefreshOAuthToken(refreshCtx, providerCfg.ID); refreshErr != nil {
+			slog.Error("Failed to refresh OAuth token", "provider", providerCfg.ID, "error", refreshErr)
+			return result, err
+		}
+
+		// Rebuild models with refreshed token
+		if updateErr := c.UpdateModels(ctx); updateErr != nil {
+			slog.Error("Failed to update models after token refresh", "error", updateErr)
+			return result, err
+		}
+
+		// Retry the request with refreshed token
+		slog.Info("Retrying request with refreshed token", "provider", providerCfg.ID)
+		return c.Run(ctx, sessionID, prompt, attachments...)
+	}
+
+	return result, err
+}
+
+func (c *coordinator) isOAuthTokenExpiredError(err error, providerCfg config.ProviderConfig) bool {
+	// cannot check if token doesn't exist then we drop
+	if providerCfg.OAuthToken == nil {
+		return false
+	}
+
+	// we only have checks for Anthropic
+	if providerCfg.Type == anthropic.Name {
+		errStr := err.Error()
+		return strings.Contains(errStr, "401") &&
+			(strings.Contains(errStr, "expired") ||
+				strings.Contains(errStr, "OAuth token has expired") ||
+				strings.Contains(errStr, "unauthorized"))
+	}
+
+	return false
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {

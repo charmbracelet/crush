@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
@@ -465,6 +466,43 @@ func (c *Config) SetConfigField(key string, value any) error {
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+	return nil
+}
+
+func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
+	providerConfig, exists := c.Providers.Get(providerID)
+	if !exists {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+
+	if providerConfig.OAuthToken == nil {
+		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
+	}
+
+	// Only Anthropic provider uses OAuth for now
+	if providerID != string(catwalk.InferenceProviderAnthropic) {
+		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
+	}
+
+	newToken, err := claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	if err != nil {
+		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
+	}
+
+	slog.Info("Successfully refreshed OAuth token in background", "provider", providerID)
+	providerConfig.OAuthToken = newToken
+	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
+	providerConfig.SetupClaudeCode()
+
+	c.Providers.Set(providerID, providerConfig)
+
+	if err := cmp.Or(
+		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
+		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
+	); err != nil {
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
+
 	return nil
 }
 

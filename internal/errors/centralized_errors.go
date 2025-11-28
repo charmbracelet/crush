@@ -13,12 +13,12 @@ import (
 
 // Validation Errors - Used for input validation failures
 var (
-	ErrInvalidInput     = errors.New("invalid input")
-	ErrMissingRequired  = errors.New("missing required field")
-	ErrInvalidFormat    = errors.New("invalid format")
-	ErrEmptyInput       = errors.New("empty input")
-	ErrInputTooLong     = errors.New("input too long")
-	ErrInputTooShort    = errors.New("input too short")
+	ErrInvalidInput    = errors.New("invalid input")
+	ErrMissingRequired = errors.New("missing required field")
+	ErrInvalidFormat   = errors.New("invalid format")
+	ErrEmptyInput      = errors.New("empty input")
+	ErrInputTooLong    = errors.New("input too long")
+	ErrInputTooShort   = errors.New("input too short")
 )
 
 // Permission and Authorization Errors
@@ -30,11 +30,11 @@ var (
 
 // Session Management Errors
 var (
-	ErrSessionNotFound   = errors.New("session not found")
-	ErrSessionMissing    = errors.New("session id is missing")
-	ErrSessionExpired    = errors.New("session expired")
-	ErrSessionBusy       = errors.New("session is currently processing another request")
-	ErrRequestCancelled  = errors.New("request canceled by user")
+	ErrSessionNotFound  = errors.New("session not found")
+	ErrSessionMissing   = errors.New("session id is missing")
+	ErrSessionExpired   = errors.New("session expired")
+	ErrSessionBusy      = errors.New("session is currently processing another request")
+	ErrRequestCancelled = errors.New("request canceled by user")
 )
 
 // Tool and Command Errors
@@ -68,16 +68,16 @@ var (
 
 // Configuration and Setup Errors
 var (
-	ErrInvalidConfig     = errors.New("invalid configuration")
-	ErrMissingConfig     = errors.New("missing configuration")
-	ErrConfigLoadFailed  = errors.New("failed to load configuration")
-	ErrProviderNotFound  = errors.New("provider not found")
-	ErrProviderFailed    = errors.New("provider initialization failed")
+	ErrInvalidConfig    = errors.New("invalid configuration")
+	ErrMissingConfig    = errors.New("missing configuration")
+	ErrConfigLoadFailed = errors.New("failed to load configuration")
+	ErrProviderNotFound = errors.New("provider not found")
+	ErrProviderFailed   = errors.New("provider initialization failed")
 )
 
 // Network and Communication Errors
 var (
-	ErrConnectionFailed    = errors.New("connection failed")
+	ErrConnectionFailed   = errors.New("connection failed")
 	ErrTimeout            = errors.New("operation timed out")
 	ErrRateLimited        = errors.New("rate limit exceeded")
 	ErrServiceUnavailable = errors.New("service unavailable")
@@ -99,9 +99,9 @@ var (
 
 // ValidationError provides detailed information about validation failures
 type ValidationError struct {
-	Field   string      // The field that failed validation
-	Value   any         // The value that was provided
-	Message string      // Specific validation message
+	Field   string // The field that failed validation
+	Value   any    // The value that was provided
+	Message string // Specific validation message
 }
 
 func (e *ValidationError) Error() string {
@@ -355,8 +355,8 @@ func IsValidationError(err error) bool {
 // IsPermissionError checks if an error is a PermissionError or wraps one
 func IsPermissionError(err error) bool {
 	var permissionErr *PermissionError
-	return errors.As(err, &permissionErr) || 
-		errors.Is(err, ErrPermissionDenied) || 
+	return errors.As(err, &permissionErr) ||
+		errors.Is(err, ErrPermissionDenied) ||
 		errors.Is(err, ErrUnauthorized) ||
 		errors.Is(err, ErrUserDenied)
 }
@@ -384,7 +384,7 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Check for retryable base errors
 	retryableErrors := []error{
 		ErrTimeout,
@@ -393,20 +393,20 @@ func IsRetryable(err error) bool {
 		ErrServiceUnavailable,
 		ErrSessionBusy,
 	}
-	
+
 	for _, retryableErr := range retryableErrors {
 		if errors.Is(err, retryableErr) {
 			return true
 		}
 	}
-	
+
 	// Check structured error types
 	var toolErr *ToolError
 	if errors.As(err, &toolErr) {
 		// Tool errors might be retryable if they're connection/timeout related
 		return IsRetryable(toolErr.Cause)
 	}
-	
+
 	return false
 }
 
@@ -415,7 +415,7 @@ func IsPermanent(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Permanent errors typically shouldn't be retried
 	permanentErrors := []error{
 		ErrPermissionDenied,
@@ -428,17 +428,17 @@ func IsPermanent(err error) bool {
 		ErrFileNotFound,
 		ErrInvalidPath,
 	}
-	
+
 	for _, permanentErr := range permanentErrors {
 		if errors.Is(err, permanentErr) {
 			return true
 		}
 	}
-	
+
 	// Structured permanent errors
 	if IsValidationError(err) || IsPermissionError(err) || IsConfigError(err) {
 		return true
 	}
-	
+
 	return false
 }

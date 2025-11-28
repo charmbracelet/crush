@@ -26,10 +26,11 @@ func TestCacheManagerInterface(t *testing.T) {
 	if _, ok := cm.GetUIComponent("test"); ok {
 		t.Fatal("GetUIComponent should return false for non-existent key")
 	}
-	
-	// Note: We expect 1 hit (from GetUIComponent) and 1 miss (from GetSession)
+
+	// GetSession for non-existing key = 1 miss.
+	// GetUIComponent doesn't track stats when EnableUICache=false (default).
 	stats := cm.Stats()
-	if stats.Hits != 1 || stats.Misses != 1 {
+	if stats.Hits != 0 || stats.Misses != 1 {
 		t.Fatalf("Unexpected stats: %+v", stats)
 	}
 	

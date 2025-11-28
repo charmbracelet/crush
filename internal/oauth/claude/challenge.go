@@ -8,7 +8,7 @@ import (
 )
 
 // GetChallenge generates a PKCE verifier and its corresponding challenge.
-func GetChallenge() (verifier string, challenge string, err error) {
+func GetChallenge() (verifier, challenge string, err error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", "", err

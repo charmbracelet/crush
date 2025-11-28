@@ -13,7 +13,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -148,10 +147,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if err != nil && c.isOAuthTokenExpiredError(err, providerCfg) {
 		slog.Info("Detected expired OAuth token, attempting refresh", "provider", providerCfg.ID)
 
-		refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if refreshErr := c.cfg.RefreshOAuthToken(refreshCtx, providerCfg.ID); refreshErr != nil {
+		if refreshErr := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); refreshErr != nil {
 			slog.Error("Failed to refresh OAuth token", "provider", providerCfg.ID, "error", refreshErr)
 			return result, err
 		}

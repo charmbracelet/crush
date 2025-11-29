@@ -245,7 +245,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 
 	f.selectedItemIdx = -1
 	if query == "" || len(f.items) == 0 {
-		return f.list.SetItems(f.items)
+		return f.list.SetItems(f.visibleItems(f.items))
 	}
 
 	matches := fuzzy.FindFrom(query, f)
@@ -274,7 +274,7 @@ func (f *filterableList[T]) Filter(query string) tea.Cmd {
 
 func (f *filterableList[T]) SetItems(items []T) tea.Cmd {
 	f.items = items
-	return f.list.SetItems(items)
+	return f.list.SetItems(f.visibleItems(items))
 }
 
 func (f *filterableList[T]) Cursor() *tea.Cursor {
@@ -316,4 +316,14 @@ func (f *filterableList[T]) String(i int) string {
 
 func (f *filterableList[T]) Len() int {
 	return len(f.items)
+}
+
+// visibleItems returns the subset of items that should be rendered based on
+// the configured resultsSize limit. The underlying source (f.items) remains
+// intact so filtering still searches the full set.
+func (f *filterableList[T]) visibleItems(items []T) []T {
+	if f.resultsSize > 0 && len(items) > f.resultsSize {
+		return items[:f.resultsSize]
+	}
+	return items
 }

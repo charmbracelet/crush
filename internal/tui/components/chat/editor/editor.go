@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
@@ -67,6 +69,8 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	history History
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -88,6 +92,16 @@ const (
 	maxAttachments = 5
 	maxFileResults = 25
 )
+
+type LoadHistoryMsg struct{}
+
+type CloseHistoryMsg struct {
+	valueToSet string
+}
+
+type ScrollHistoryUp struct{}
+
+type ScrollHistoryDown struct{}
 
 type OpenEditorMsg struct {
 	Text string
@@ -172,10 +186,43 @@ func (m *editorCmp) repositionCompletions() tea.Msg {
 	return completions.RepositionCompletionsMsg{X: x, Y: y}
 }
 
+func (m *editorCmp) inHistoryMode() bool {
+	return m.history != nil
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case LoadHistoryMsg:
+		if m.inHistoryMode() {
+			return m, nil
+		}
+		msgs, err := m.getUserMessagesAsText()
+		if err != nil {
+			slog.Error("failed to acquire all sessions message history", "error", err)
+			return m, nil
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		m.history = InitialiseHistory(m.textarea.Value(), msgs)
+		m.textarea.SetValue(m.history.Value())
+		return m, nil
+	case CloseHistoryMsg:
+		m.textarea.SetValue(msg.valueToSet)
+		m.history = nil
+		return m, nil
+	case ScrollHistoryUp:
+		if m.inHistoryMode() {
+			m.history.ScrollUp()
+			m.textarea.SetValue(m.history.Value())
+		}
+	case ScrollHistoryDown:
+		if m.inHistoryMode() {
+			m.history.ScrollDown()
+			m.textarea.SetValue(m.history.Value())
+		}
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -263,6 +310,24 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
+
+		// history
+		if m.inHistoryMode() {
+			switch true {
+			case key.Matches(msg, m.keyMap.Escape):
+				return m, util.CmdHandler(CloseHistoryMsg{valueToSet: m.history.ExistingValue()})
+			case key.Matches(msg, m.keyMap.Previous):
+				return m, util.CmdHandler(ScrollHistoryUp{})
+			case key.Matches(msg, m.keyMap.Next):
+				return m, util.CmdHandler(ScrollHistoryDown{})
+			}
+			// if any key other than history related controls we play it safe and close
+			// the history and reset the text input field to be the current value
+			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
+				valueToSet: m.textarea.Value(),
+			}))
+		}
+
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
 		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
@@ -280,6 +345,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
+
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
 			return m, nil
@@ -288,6 +354,17 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.deleteMode = false
 			m.attachments = nil
 			return m, nil
+		}
+		if key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			if !m.inHistoryMode() {
+				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+			} else {
+				if key.Matches(msg, m.keyMap.Previous) {
+					cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+				} else if key.Matches(msg, m.keyMap.Next) {
+					cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
+				}
+			}
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -308,7 +385,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return m, m.openEditor(m.textarea.Value())
 		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
+		if key.Matches(msg, DeleteKeyMaps.Escape) && m.deleteMode {
 			m.deleteMode = false
 			return m, nil
 		}
@@ -442,6 +519,25 @@ func (m *editorCmp) View() string {
 		),
 	)
 	return content
+}
+
+func (m *editorCmp) getUserMessagesAsText() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	allMessages, err := m.app.Messages.FullList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var userMessages []string
+	for _, msg := range allMessages {
+		if msg.Role == message.User {
+			userMessages = append(userMessages, msg.Content().Text)
+		}
+	}
+
+	return userMessages, nil
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {

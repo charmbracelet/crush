@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -152,7 +154,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case mcp.EventPromptsListChanged:
 			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
 		case mcp.EventToolsListChanged:
-			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name, a.app.AgentCoordinator)
 		}
 
 	// Completions messages
@@ -255,6 +257,36 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	case commands.EnableDockerMCPMsg:
+		return a, func() tea.Msg {
+			cfg := config.Get()
+			if err := cfg.EnableDockerMCP(); err != nil {
+				return util.ReportError(err)()
+			}
+
+			// Initialize the Docker MCP client immediately.
+			ctx := context.Background()
+			if err := mcp.InitializeSingle(ctx, config.DockerMCPName, cfg); err != nil {
+				return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+			}
+
+			return util.ReportInfo("Docker MCP enabled and started successfully")()
+		}
+	case commands.DisableDockerMCPMsg:
+		return a, func() tea.Msg {
+			// Close the Docker MCP client.
+			if err := mcp.DisableSingle(config.DockerMCPName); err != nil {
+				return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+			}
+
+			// Remove from config and persist.
+			cfg := config.Get()
+			if err := cfg.DisableDockerMCP(); err != nil {
+				return util.ReportError(err)()
+			}
+
+			return util.ReportInfo("Docker MCP disabled successfully")()
+		}
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
 	case commands.ToggleHelpMsg:
@@ -676,9 +708,15 @@ func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
 	}
 }
 
-func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
+func handleMCPToolsEvent(ctx context.Context, name string, coordinator agent.Coordinator) tea.Cmd {
 	return func() tea.Msg {
 		mcp.RefreshTools(ctx, name)
+		// Refresh agent tools to pick up the new MCP tools.
+		if coordinator != nil {
+			if err := coordinator.RefreshTools(ctx); err != nil {
+				slog.Error("failed to refresh agent tools", "error", err)
+			}
+		}
 		return nil
 	}
 }

@@ -52,6 +52,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	RefreshTools(ctx context.Context) error
 }
 
 type coordinator struct {
@@ -739,6 +740,21 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+	return nil
+}
+
+func (c *coordinator) RefreshTools(ctx context.Context) error {
+	agentCfg, ok := c.cfg.Agents[config.AgentCoder]
+	if !ok {
+		return errors.New("coder agent not configured")
+	}
+
+	tools, err := c.buildTools(ctx, agentCfg)
+	if err != nil {
+		return err
+	}
+	c.currentAgent.SetTools(tools)
+	slog.Debug("refreshed agent tools", "count", len(tools))
 	return nil
 }
 

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -152,7 +154,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case mcp.EventPromptsListChanged:
 			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
 		case mcp.EventToolsListChanged:
-			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name, a.app.AgentCoordinator)
 		}
 
 	// Completions messages
@@ -706,9 +708,15 @@ func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {
 	}
 }
 
-func handleMCPToolsEvent(ctx context.Context, name string) tea.Cmd {
+func handleMCPToolsEvent(ctx context.Context, name string, coordinator agent.Coordinator) tea.Cmd {
 	return func() tea.Msg {
 		mcp.RefreshTools(ctx, name)
+		// Refresh agent tools to pick up the new MCP tools.
+		if coordinator != nil {
+			if err := coordinator.RefreshTools(ctx); err != nil {
+				slog.Error("failed to refresh agent tools", "error", err)
+			}
+		}
 		return nil
 	}
 }

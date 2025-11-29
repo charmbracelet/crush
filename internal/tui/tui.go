@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/stringext"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -123,7 +124,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
 		if !a.sendProgressBar {
-			a.sendProgressBar = strings.Contains(termVersion, "ghostty")
+			a.sendProgressBar = stringext.ContainsAny(termVersion, "ghostty", "iterm2", "rio")
 		}
 		return a, nil
 	case tea.KeyboardEnhancementsMsg:

@@ -83,6 +83,8 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	EnableDockerMCPMsg     struct{}
+	DisableDockerMCPMsg    struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -430,6 +432,30 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Open external editor to compose message",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(OpenExternalEditorMsg{})
+			},
+		})
+	}
+
+	// Add Docker MCP command if available and not already enabled
+	if config.IsDockerMCPAvailable() && !cfg.IsDockerMCPEnabled() {
+		commands = append(commands, Command{
+			ID:          "enable_docker_mcp",
+			Title:       "Enable Docker MCP",
+			Description: "Enable Docker MCP integration",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(EnableDockerMCPMsg{})
+			},
+		})
+	}
+
+	// Add disable Docker MCP command if it's currently enabled
+	if cfg.IsDockerMCPEnabled() {
+		commands = append(commands, Command{
+			ID:          "disable_docker_mcp",
+			Title:       "Disable Docker MCP",
+			Description: "Disable Docker MCP integration",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(DisableDockerMCPMsg{})
 			},
 		})
 	}

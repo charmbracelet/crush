@@ -255,6 +255,36 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
+	case commands.EnableDockerMCPMsg:
+		return a, func() tea.Msg {
+			cfg := config.Get()
+			if err := cfg.EnableDockerMCP(); err != nil {
+				return util.ReportError(err)()
+			}
+
+			// Initialize the Docker MCP client immediately.
+			ctx := context.Background()
+			if err := mcp.InitializeSingle(ctx, config.DockerMCPName, cfg); err != nil {
+				return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+			}
+
+			return util.ReportInfo("Docker MCP enabled and started successfully")()
+		}
+	case commands.DisableDockerMCPMsg:
+		return a, func() tea.Msg {
+			// Close the Docker MCP client.
+			if err := mcp.DisableSingle(config.DockerMCPName); err != nil {
+				return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+			}
+
+			// Remove from config and persist.
+			cfg := config.Get()
+			if err := cfg.DisableDockerMCP(); err != nil {
+				return util.ReportError(err)()
+			}
+
+			return util.ReportInfo("Docker MCP disabled successfully")()
+		}
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
 	case commands.ToggleHelpMsg:

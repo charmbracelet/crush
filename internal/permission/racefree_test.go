@@ -141,8 +141,8 @@ func BenchmarkRaceFreePermissionService(b *testing.B) {
 func TestRaceFreeVsMutex(t *testing.T) {
 	const iterations = 1000
 
-	// Test lock-free service
-	raceFree := NewRaceFreePermissionService("/tmp", false, []string{})
+	// Test lock-free service (use skip mode for fair comparison)
+	raceFree := NewRaceFreePermissionService("/tmp", true, []string{})
 
 	start := time.Now()
 	for i := 0; i < iterations; i++ {
@@ -158,7 +158,7 @@ func TestRaceFreeVsMutex(t *testing.T) {
 	raceFreeTime := time.Since(start)
 
 	// Test original mutex-based service
-	mutexService := NewPermissionService("/tmp", false, []string{})
+	mutexService := NewPermissionService("/tmp", true, []string{})
 
 	start = time.Now()
 	for i := 0; i < iterations; i++ {

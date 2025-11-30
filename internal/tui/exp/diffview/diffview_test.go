@@ -339,11 +339,3 @@ func assertLineWidth(t *testing.T, expected int, output string) {
 		t.Errorf("expected output width to be == %d, got %d", expected, lineWidth)
 	}
 }
-
-func assertHeight(t *testing.T, expected int, output string) {
-	output = strings.TrimSuffix(output, "\n")
-	lines := strings.Count(output, "\n") + 1
-	if lines != expected {
-		t.Errorf("expected output height to be == %d, got %d", expected, lines)
-	}
-}

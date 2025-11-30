@@ -148,8 +148,8 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 		Attribution:     *attribution,
 		ModelName:       modelName,
 	}); err != nil {
-		// this should never happen.
-		panic("failed to execute bash description template: " + err.Error())
+		// Return proper error instead of panic - this prevents application crashes
+		return fmt.Sprintf("Error: failed to generate bash tool description: %s", err.Error())
 	}
 	return out.String()
 }

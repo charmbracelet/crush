@@ -40,7 +40,6 @@ type completionItemCmp[T any] struct {
 
 type options struct {
 	id           string
-	text         string
 	bgColor      color.Color
 	matchIndexes []int
 	shortcut     string

@@ -185,7 +185,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		events := service.Subscribe(t.Context())
 
 		var wg sync.WaitGroup
-		results := make([]bool, 0)
+		results := make([]bool, 3) // Pre-sized to avoid race on append
 
 		requests := []CreatePermissionRequest{
 			{
@@ -215,7 +215,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			wg.Add(1)
 			go func(index int, request CreatePermissionRequest) {
 				defer wg.Done()
-				results = append(results, service.Request(request))
+				results[index] = service.Request(request) // Write to specific index
 			}(i, req)
 		}
 

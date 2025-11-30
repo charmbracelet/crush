@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/message"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -56,8 +57,9 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "New Agent Session")
+			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, message.ToolCallID(call.ID))
+			// TODO: This is off agentToolSessionID is a message.ToolCallID??
+			session, err := c.sessions.CreateTaskSession(ctx, message.ToolCallID(agentToolSessionID), sessionID, "New Agent Session")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}

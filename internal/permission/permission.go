@@ -124,27 +124,24 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-
-	// tell the UI that a permission was requested
+	// Tell the UI that a permission was requested (thread-safe pubsub)
 	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: opts.ToolCallID,
 		Status:     enum.ToolCallStatePermissionPending,
 	})
 
-	// Check if the tool/action combination is in the allowlist
+	// Fast path checks (no lock needed - read-only or thread-safe)
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return true
 	}
 
 	autoApprove, _ := s.autoApproveSessions.Get(opts.SessionID)
-
 	if autoApprove {
 		return true
 	}
 
+	// Build permission request
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path
 	if err == nil {
@@ -158,12 +155,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if dir == "." {
 		dir = s.workingDir
 	}
+
 	permission := PermissionRequest{
 		ID:                      uuid.New().String(),
 		CreatePermissionRequest: opts,
 	}
 	permission.CreatePermissionRequest.Path = dir
 
+	// Check session permissions (thread-safe iteration)
 	for request := range s.sessionPermissions.Seq() {
 		if request.ToolName == permission.ToolName &&
 			request.Action == permission.Action &&
@@ -173,16 +172,24 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		}
 	}
 
-	s.activeRequest = &permission
-
+	// Setup response channel and active request under lock
 	respCh := make(chan enum.ToolCallState, 1)
-	s.pendingRequests.Set(permission.ID, respCh)
-	defer s.pendingRequests.Del(permission.ID)
 
-	// Publish the request
+	s.requestMu.Lock()
+	s.activeRequest = &permission
+	s.pendingRequests.Set(permission.ID, respCh)
+	s.requestMu.Unlock()
+
+	// Publish the request (thread-safe pubsub)
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	return <-respCh == enum.ToolCallStatePermissionApproved
+	// Wait for response WITHOUT holding the lock (prevents deadlock)
+	result := <-respCh == enum.ToolCallStatePermissionApproved
+
+	// Cleanup
+	s.pendingRequests.Del(permission.ID)
+
+	return result
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {

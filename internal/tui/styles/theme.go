@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -100,6 +102,7 @@ type Theme struct {
 	AuthTextUnselected   lipgloss.Style
 
 	styles *Styles
+	mu     sync.RWMutex
 }
 
 type Styles struct {
@@ -136,9 +139,25 @@ type Styles struct {
 }
 
 func (t *Theme) S() *Styles {
-	if t.styles == nil {
-		t.styles = t.buildStyles()
+	// Fast path: if styles already built, return with read lock
+	t.mu.RLock()
+	if t.styles != nil {
+		s := t.styles
+		t.mu.RUnlock()
+		return s
 	}
+	t.mu.RUnlock()
+
+	// Slow path: acquire write lock and build styles
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Double-check: another goroutine might have built it while we waited
+	if t.styles != nil {
+		return t.styles
+	}
+
+	t.styles = t.buildStyles()
 	return t.styles
 }
 
@@ -499,27 +518,44 @@ func (t *Theme) buildStyles() *Styles {
 
 type Manager struct {
 	themes  map[string]*Theme
-	current *Theme
+	current atomic.Value // stores *Theme
+	mu      sync.RWMutex
 }
 
-var defaultManager *Manager
+var (
+	defaultManager     *Manager
+	defaultManagerOnce sync.Once
+	defaultManagerMu   sync.RWMutex
+)
 
 func SetDefaultManager(m *Manager) {
+	defaultManagerMu.Lock()
+	defer defaultManagerMu.Unlock()
 	defaultManager = m
 }
 
 func DefaultManager() *Manager {
-	if defaultManager == nil {
-		defaultManager = NewManager()
+	defaultManagerMu.RLock()
+	if defaultManager != nil {
+		m := defaultManager
+		defaultManagerMu.RUnlock()
+		return m
 	}
+	defaultManagerMu.RUnlock()
+
+	// Use sync.Once to ensure thread-safe initialization
+	defaultManagerOnce.Do(func() {
+		defaultManagerMu.Lock()
+		defer defaultManagerMu.Unlock()
+		defaultManager = NewManager()
+	})
+
 	return defaultManager
 }
 
 func CurrentTheme() *Theme {
-	if defaultManager == nil {
-		defaultManager = NewManager()
-	}
-	return defaultManager.Current()
+	m := DefaultManager()
+	return m.Current()
 }
 
 func NewManager() *Manager {
@@ -529,28 +565,49 @@ func NewManager() *Manager {
 
 	t := NewCharmtoneTheme() // default theme
 	m.Register(t)
-	m.current = m.themes[t.Name]
+	m.current.Store(t)
 
 	return m
 }
 
 func (m *Manager) Register(theme *Theme) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.themes[theme.Name] = theme
 }
 
 func (m *Manager) Current() *Theme {
-	return m.current
+	if theme := m.current.Load(); theme != nil {
+		return theme.(*Theme)
+	}
+	// Fallback - this shouldn't happen with proper initialization
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.themes) > 0 {
+		for _, theme := range m.themes {
+			m.current.Store(theme)
+			return theme
+		}
+	}
+	return nil
 }
 
 func (m *Manager) SetTheme(name string) error {
-	if theme, ok := m.themes[name]; ok {
-		m.current = theme
+	m.mu.Lock()
+	theme, ok := m.themes[name]
+	m.mu.Unlock()
+
+	if ok {
+		m.current.Store(theme)
 		return nil
 	}
 	return fmt.Errorf("theme %s not found", name)
 }
 
 func (m *Manager) List() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	names := make([]string, 0, len(m.themes))
 	for name := range m.themes {
 		names = append(names, name)

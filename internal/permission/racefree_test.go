@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
 )
 
 // TestRaceFreePermissionService validates lock-free design
 func TestRaceFreePermissionService(t *testing.T) {
 	t.Run("Lock-free concurrent requests", func(t *testing.T) {
-		service := NewRaceFreePermissionService("/tmp", false, []string{})
+		service := NewRaceFreePermissionService("/tmp", true, []string{})
 
 		var wg sync.WaitGroup
 		results := make([]bool, 100)
@@ -25,7 +26,7 @@ func TestRaceFreePermissionService(t *testing.T) {
 				defer wg.Done()
 				results[index] = service.Request(CreatePermissionRequest{
 					SessionID:   "session-" + string(rune(index%10)),
-					ToolCallID:  "tool-" + string(rune(index%10)),
+					ToolCallID:  message.ToolCallID("tool-" + string(rune(index%10))),
 					ToolName:    "bash",
 					Action:      "execute",
 					Description: "Test command",
@@ -188,11 +189,11 @@ func TestEventualConsistency(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Subscribe to events
-	events := service.SubscribeNotifications(ctx)
+	// Subscribe to permission requests
+	events := service.Subscribe(ctx)
 
 	var wg sync.WaitGroup
-	completedRequests := 0
+	completedRequests := int32(0)
 	totalRequests := 200
 
 	// Start many concurrent requests
@@ -203,7 +204,7 @@ func TestEventualConsistency(t *testing.T) {
 
 			req := CreatePermissionRequest{
 				SessionID:   "consistency-test",
-				ToolCallID:  "tool-" + string(rune(index%10)),
+				ToolCallID:  message.ToolCallID("tool-" + string(rune(index%10))),
 				ToolName:    "bash",
 				Action:      "execute",
 				Description: "Consistency test",

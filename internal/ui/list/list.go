@@ -631,16 +631,44 @@ func (l *List) SetSelectedIndex(idx int) {
 	l.SetSelected(l.items[idx].ID())
 }
 
-// SelectNext selects the next item in the list (wraps to beginning).
+// SelectFirst selects the first item in the list.
+func (l *List) SelectFirst() {
+	l.SetSelectedIndex(0)
+}
+
+// SelectLast selects the last item in the list.
+func (l *List) SelectLast() {
+	l.SetSelectedIndex(len(l.items) - 1)
+}
+
+// SelectNextWrap selects the next item in the list (wraps to beginning).
+// When the list is focused, skips non-focusable items.
+func (l *List) SelectNextWrap() {
+	l.selectNext(true)
+}
+
+// SelectNext selects the next item in the list (no wrap).
 // When the list is focused, skips non-focusable items.
 func (l *List) SelectNext() {
+	l.selectNext(false)
+}
+
+func (l *List) selectNext(wrap bool) {
 	if len(l.items) == 0 {
 		return
 	}
 
 	startIdx := l.selectedIdx
 	for i := 0; i < len(l.items); i++ {
-		nextIdx := (startIdx + 1 + i) % len(l.items)
+		var nextIdx int
+		if wrap {
+			nextIdx = (startIdx + 1 + i) % len(l.items)
+		} else {
+			nextIdx = startIdx + 1 + i
+			if nextIdx >= len(l.items) {
+				return
+			}
+		}
 
 		// If list is focused and item is not focusable, skip it
 		if l.focused {
@@ -651,21 +679,38 @@ func (l *List) SelectNext() {
 
 		// Select and scroll to this item
 		l.SetSelected(l.items[nextIdx].ID())
-		l.ScrollToSelected()
 		return
 	}
 }
 
-// SelectPrev selects the previous item in the list (wraps to end).
+// SelectPrevWrap selects the previous item in the list (wraps to end).
+// When the list is focused, skips non-focusable items.
+func (l *List) SelectPrevWrap() {
+	l.selectPrev(true)
+}
+
+// SelectPrev selects the previous item in the list (no wrap).
 // When the list is focused, skips non-focusable items.
 func (l *List) SelectPrev() {
+	l.selectPrev(false)
+}
+
+func (l *List) selectPrev(wrap bool) {
 	if len(l.items) == 0 {
 		return
 	}
 
 	startIdx := l.selectedIdx
 	for i := 0; i < len(l.items); i++ {
-		prevIdx := (startIdx - 1 - i + len(l.items)) % len(l.items)
+		var prevIdx int
+		if wrap {
+			prevIdx = (startIdx - 1 - i + len(l.items)) % len(l.items)
+		} else {
+			prevIdx = startIdx - 1 - i
+			if prevIdx < 0 {
+				return
+			}
+		}
 
 		// If list is focused and item is not focusable, skip it
 		if l.focused {
@@ -676,7 +721,6 @@ func (l *List) SelectPrev() {
 
 		// Select and scroll to this item
 		l.SetSelected(l.items[prevIdx].ID())
-		l.ScrollToSelected()
 		return
 	}
 }
@@ -771,6 +815,27 @@ func (l *List) Offset() int {
 // TotalHeight returns the total height of all items including gaps.
 func (l *List) TotalHeight() int {
 	return l.totalHeight
+}
+
+// SelectedItemInView returns true if the selected item is currently visible in the viewport.
+func (l *List) SelectedItemInView() bool {
+	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {
+		return false
+	}
+
+	// Get selected item ID and position
+	item := l.items[l.selectedIdx]
+	pos, ok := l.itemPositions[item.ID()]
+	if !ok {
+		return false
+	}
+
+	// Check if item is within viewport bounds
+	viewportStart := l.offset
+	viewportEnd := l.offset + l.height
+
+	// Item is visible if any part of it overlaps with the viewport
+	return pos.startLine < viewportEnd && (pos.startLine+pos.height) > viewportStart
 }
 
 // clampOffset ensures offset is within valid bounds.

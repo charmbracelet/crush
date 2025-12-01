@@ -555,7 +555,6 @@
         "max_tokens": {
           "type": "integer",
           "maximum": 200000,
-          "minimum": 1,
           "description": "Maximum number of tokens for model responses",
           "examples": [
             4096

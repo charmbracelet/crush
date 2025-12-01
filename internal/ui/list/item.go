@@ -1,6 +1,7 @@
 package list
 
 import (
+	"image"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -179,17 +180,44 @@ func (b *BaseHighlightable) InitHighlight() {
 
 // ApplyHighlight applies highlighting to a screen buffer.
 // This should be called after drawing content to the buffer.
-func (b *BaseHighlightable) ApplyHighlight(buf *uv.ScreenBuffer, width, height int) {
+func (b *BaseHighlightable) ApplyHighlight(buf *uv.ScreenBuffer, width, height int, style *lipgloss.Style) {
 	if b.highlightStartLine < 0 {
 		return
 	}
 
+	var (
+		topMargin, topBorder, topPadding          int
+		rightMargin, rightBorder, rightPadding    int
+		bottomMargin, bottomBorder, bottomPadding int
+		leftMargin, leftBorder, leftPadding       int
+	)
+	if style != nil {
+		topMargin, rightMargin, bottomMargin, leftMargin = style.GetMargin()
+		topBorder, rightBorder, bottomBorder, leftBorder = style.GetBorderTopSize(),
+			style.GetBorderRightSize(),
+			style.GetBorderBottomSize(),
+			style.GetBorderLeftSize()
+		topPadding, rightPadding, bottomPadding, leftPadding = style.GetPadding()
+	}
+
+	// Calculate content area offsets
+	contentArea := image.Rectangle{
+		Min: image.Point{
+			X: leftMargin + leftBorder + leftPadding,
+			Y: topMargin + topBorder + topPadding,
+		},
+		Max: image.Point{
+			X: width - (rightMargin + rightBorder + rightPadding),
+			Y: height - (bottomMargin + bottomBorder + bottomPadding),
+		},
+	}
+
 	for y := b.highlightStartLine; y <= b.highlightEndLine && y < height; y++ {
-		if y >= len(buf.Buffer.Lines) {
+		if y >= buf.Height() {
 			break
 		}
 
-		line := buf.Buffer.Lines[y]
+		line := buf.Line(y)
 
 		// Determine column range for this line
 		startCol := 0
@@ -208,6 +236,9 @@ func (b *BaseHighlightable) ApplyHighlight(buf *uv.ScreenBuffer, width, height i
 		// Single pass: check content and track last non-empty position
 		for x := startCol; x < endCol; x++ {
 			cell := line.At(x)
+			if cell == nil {
+				continue
+			}
 
 			// Update last content position if non-empty
 			if cell.Content != "" && cell.Content != " " {
@@ -225,6 +256,9 @@ func (b *BaseHighlightable) ApplyHighlight(buf *uv.ScreenBuffer, width, height i
 
 		// Apply highlight style only to cells with content
 		for x := startCol; x < highlightEnd; x++ {
+			if !image.Pt(x, y).In(contentArea) {
+				continue
+			}
 			cell := line.At(x)
 			cell.Style = b.highlightStyle(cell.Style)
 		}
@@ -354,7 +388,8 @@ func (s *StringItem) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	// Apply focus/blur styling if configured
-	if style := s.CurrentStyle(); style != nil {
+	style := s.CurrentStyle()
+	if style != nil {
 		content = style.Width(width).Render(content)
 	}
 
@@ -366,7 +401,7 @@ func (s *StringItem) Draw(scr uv.Screen, area uv.Rectangle) {
 	styled.Draw(&tempBuf, uv.Rect(0, 0, width, height))
 
 	// Apply highlighting if active
-	s.ApplyHighlight(&tempBuf, width, height)
+	s.ApplyHighlight(&tempBuf, width, height, style)
 
 	// Copy temp buffer to actual screen at the target area
 	tempBuf.Draw(scr, area)
@@ -458,7 +493,8 @@ func (m *MarkdownItem) Draw(scr uv.Screen, area uv.Rectangle) {
 	rendered := m.renderMarkdown(width)
 
 	// Apply focus/blur styling if configured
-	if style := m.CurrentStyle(); style != nil {
+	style := m.CurrentStyle()
+	if style != nil {
 		rendered = style.Render(rendered)
 	}
 
@@ -470,7 +506,7 @@ func (m *MarkdownItem) Draw(scr uv.Screen, area uv.Rectangle) {
 	styled.Draw(&tempBuf, uv.Rect(0, 0, width, height))
 
 	// Apply highlighting if active
-	m.ApplyHighlight(&tempBuf, width, height)
+	m.ApplyHighlight(&tempBuf, width, height, style)
 
 	// Copy temp buffer to actual screen at the target area
 	tempBuf.Draw(scr, area)

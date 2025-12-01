@@ -1094,11 +1094,11 @@ func (l *List) GetHighlightedText() string {
 		// Extract text from highlighted region in master buffer
 		for y := startLine; y <= endLine && y < pos.height; y++ {
 			bufferY := pos.startLine + y
-			if bufferY >= len(l.masterBuffer.Buffer.Lines) {
+			if bufferY >= l.masterBuffer.Height() {
 				break
 			}
 
-			line := l.masterBuffer.Buffer.Lines[bufferY]
+			line := l.masterBuffer.Line(bufferY)
 
 			// Determine column range for this line
 			colStart := 0
@@ -1115,7 +1115,7 @@ func (l *List) GetHighlightedText() string {
 			lastContentX := -1
 			for x := colStart; x < colEnd && x < len(line); x++ {
 				cell := line.At(x)
-				if cell.IsZero() {
+				if cell == nil || cell.IsZero() {
 					continue
 				}
 				if cell.Content != "" && cell.Content != " " {
@@ -1131,7 +1131,7 @@ func (l *List) GetHighlightedText() string {
 
 			for x := colStart; x < endX && x < len(line); x++ {
 				cell := line.At(x)
-				if cell.IsZero() {
+				if cell == nil || cell.IsZero() {
 					continue
 				}
 				result.WriteString(cell.String())

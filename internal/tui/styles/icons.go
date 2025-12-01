@@ -10,6 +10,7 @@ const (
 	LoadingIcon  string = "⟳"
 	DocumentIcon string = "🖼"
 	ModelIcon    string = "◇"
+	ArrowIcon           = "→"
 
 	// Tool call icons
 	ToolPending string = "●"

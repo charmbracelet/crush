@@ -71,10 +71,11 @@ type Theme struct {
 	GreenLight color.Color
 
 	// Reds
-	Red      color.Color
-	RedDark  color.Color
-	RedLight color.Color
-	Cherry   color.Color
+	Red        color.Color
+	RedDark    color.Color
+	RedLight   color.Color
+	RedLighter color.Color
+	Cherry     color.Color
 
 	// Text selection.
 	TextSelection lipgloss.Style

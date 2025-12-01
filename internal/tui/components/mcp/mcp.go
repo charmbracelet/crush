@@ -85,12 +85,15 @@ func RenderMCPList(opts RenderOptions) []string {
 		} else if l.MCP.Disabled {
 			description = t.S().Subtle.Render("disabled")
 		}
-
+		name := l.Name
+		if l.Name == "crush_docker" {
+			name = "Docker MCP"
+		}
 		mcpList = append(mcpList,
 			core.Status(
 				core.StatusOpts{
 					Icon:         icon.String(),
-					Title:        l.Name,
+					Title:        name,
 					Description:  description,
 					ExtraContent: strings.Join(extraContent, " "),
 				},

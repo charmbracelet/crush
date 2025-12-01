@@ -3,11 +3,18 @@ package tools
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
+
+var whitelistCrushDockerTools = []string{
+	"mcp_crush_docker_mcp-find",
+	"mcp_crush_docker_mcp-add",
+	"mcp_crush_docker_mcp-remove",
+}
 
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, wd string) []*Tool {
@@ -88,20 +95,22 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
-	permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
-	p := m.permissions.Request(
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  params.ID,
-			Path:        m.workingDir,
-			ToolName:    m.Info().Name,
-			Action:      "execute",
-			Description: permissionDescription,
-			Params:      params.Input,
-		},
-	)
-	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+	if !slices.Contains(whitelistCrushDockerTools, params.Name) {
+		permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
+		p := m.permissions.Request(
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				ToolCallID:  params.ID,
+				Path:        m.workingDir,
+				ToolName:    m.Info().Name,
+				Action:      "execute",
+				Description: permissionDescription,
+				Params:      params.Input,
+			},
+		)
+		if !p {
+			return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		}
 	}
 
 	content, err := mcp.RunTool(ctx, m.mcpName, m.tool.Name, params.Input)

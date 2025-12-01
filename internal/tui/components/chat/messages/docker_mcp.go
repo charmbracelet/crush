@@ -123,7 +123,6 @@ func (dr dockerMCPRenderer) renderMCPServers(v *toolCallCmp) string {
 			break
 		}
 		rows = append(rows, []string{t.S().Base.Render(server.Name), t.S().Muted.Render(server.Description)})
-
 	}
 	serverTable := table.New().
 		Wrap(false).
@@ -165,8 +164,8 @@ func (dr dockerMCPRenderer) makeHeader(v *toolCallCmp, tool string, width int, p
 		actionStyle = t.S().Base.Foreground(t.RedLighter)
 	default:
 		action = strings.ReplaceAll(tool, "-", " ")
-		action = strings.ReplaceAll(tool, "_", " ")
-		action = stringext.Capitalize(tool)
+		action = strings.ReplaceAll(action, "_", " ")
+		action = stringext.Capitalize(action)
 	}
 	if v.isNested {
 		return dr.makeNestedHeader(v, tool, width, params...)

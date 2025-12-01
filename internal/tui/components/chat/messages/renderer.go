@@ -1020,7 +1020,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
-	width := v.textWidth() - 2
+	width := min(120, v.textWidth()) - 2
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
@@ -1053,8 +1053,7 @@ func renderMarkdownContent(v *toolCallCmp, content string) string {
 	content = strings.ReplaceAll(content, "\t", "    ")
 	content = strings.TrimSpace(content)
 
-	width := v.textWidth() - 2
-	width = min(width, 120)
+	width := min(120, v.textWidth()) - 2
 
 	renderer := styles.GetPlainMarkdownRenderer(width)
 	rendered, err := renderer.Render(content)
@@ -1165,15 +1164,7 @@ func truncateHeight(s string, h int) string {
 func mcpToolName(name string) string {
 	if strings.HasPrefix(name, "mcp_crush_docker") {
 		name = strings.ReplaceAll(name, "mcp_crush_docker_", "")
-		if name == "mcp-find" {
-			name = "find"
-		}
-		if name == "mcp-add" {
-			name = "add"
-		}
-		if name == "mcp-remove" {
-			name = "remove"
-		}
+		name = strings.ReplaceAll(name, "mcp-", "")
 		name = strings.ReplaceAll(name, "_", " ")
 		name = strings.ReplaceAll(name, "-", " ")
 		return "Docker MCP: " + stringext.Capitalize(name)

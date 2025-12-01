@@ -114,7 +114,7 @@ func (dr dockerMCPRenderer) renderMCPServers(v *toolCallCmp) string {
 	if len(result.Servers) == 0 {
 		return t.S().Muted.Render("No MCP servers found.")
 	}
-	width := min(120, v.textWidth())
+	width := min(120, v.textWidth()) - 2
 	rows := [][]string{}
 	moreServers := ""
 	for i, server := range result.Servers {
@@ -154,6 +154,10 @@ func (dr dockerMCPRenderer) makeHeader(v *toolCallCmp, tool string, width int, p
 	action := tool
 	actionStyle := t.S().Base.Foreground(t.BlueDark)
 	switch tool {
+	case "mcp-exec":
+		action = "Exec"
+	case "mcp-config-set":
+		action = "Config Set"
 	case "mcp-find":
 		action = "Find"
 	case "mcp-add":

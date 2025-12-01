@@ -213,7 +213,7 @@ func TestListFocus(t *testing.T) {
 	// Focus the list
 	l.Focus()
 
-	if !l.IsFocused() {
+	if !l.Focused() {
 		t.Error("expected list to be focused")
 	}
 
@@ -236,7 +236,7 @@ func TestListFocus(t *testing.T) {
 
 	// Blur the list
 	l.Blur()
-	if l.IsFocused() {
+	if l.Focused() {
 		t.Error("expected list to be blurred")
 	}
 }

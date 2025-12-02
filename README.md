@@ -355,6 +355,8 @@ completely hidden from the agent.
 }
 ```
 
+To disable tools from MCP servers, see the [MCP config section](#mcps).
+
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates

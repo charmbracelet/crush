@@ -151,6 +151,20 @@ type Styles struct {
 		Additions lipgloss.Style
 		Deletions lipgloss.Style
 	}
+
+	// Chat
+	Chat struct {
+		UserMessageBlurred      lipgloss.Style
+		UserMessageFocused      lipgloss.Style
+		AssistantMessageBlurred lipgloss.Style
+		AssistantMessageFocused lipgloss.Style
+		NoContentMessage        lipgloss.Style
+		ThinkingMessage         lipgloss.Style
+
+		ErrorTag     lipgloss.Style
+		ErrorTitle   lipgloss.Style
+		ErrorDetails lipgloss.Style
+	}
 }
 
 func DefaultStyles() Styles {
@@ -194,11 +208,13 @@ func DefaultStyles() Styles {
 		greenDark = charmtone.Guac
 		// greenLight = charmtone.Bok
 
-		// red      = charmtone.Coral
+		red     = charmtone.Coral
 		redDark = charmtone.Sriracha
 		// redLight = charmtone.Salmon
 		// cherry   = charmtone.Cherry
 	)
+
+	normalBorder := lipgloss.NormalBorder()
 
 	base := lipgloss.NewStyle().Foreground(fgBase)
 
@@ -607,9 +623,33 @@ func DefaultStyles() Styles {
 	s.LSP.HintDiagnostic = s.Base.Foreground(fgHalfMuted)
 	s.LSP.InfoDiagnostic = s.Base.Foreground(info)
 
+	// Files
 	s.Files.Path = s.Muted
 	s.Files.Additions = s.Base.Foreground(greenDark)
 	s.Files.Deletions = s.Base.Foreground(redDark)
+
+	// Chat
+	messageFocussedBorder := lipgloss.Border{
+		Left: "▌",
+	}
+
+	s.Chat.NoContentMessage = lipgloss.NewStyle().Foreground(fgBase)
+	s.Chat.UserMessageBlurred = s.Chat.NoContentMessage.PaddingLeft(1).BorderLeft(true).
+		BorderForeground(primary).BorderStyle(normalBorder)
+	s.Chat.UserMessageFocused = s.Chat.NoContentMessage.PaddingLeft(1).BorderLeft(true).
+		BorderForeground(primary).BorderStyle(messageFocussedBorder)
+	s.Chat.AssistantMessageBlurred = s.Chat.NoContentMessage.PaddingLeft(2)
+	s.Chat.AssistantMessageFocused = s.Chat.NoContentMessage.PaddingLeft(1).BorderLeft(true).
+		BorderForeground(greenDark).BorderStyle(messageFocussedBorder)
+	s.Chat.ThinkingMessage = lipgloss.NewStyle().MaxHeight(10)
+	s.Chat.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
+		Background(red).Foreground(white)
+	s.Chat.ErrorTitle = lipgloss.NewStyle().Foreground(fgHalfMuted)
+	s.Chat.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
+
+	// Text selection.
+	s.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
+
 	return s
 }
 

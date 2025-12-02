@@ -17,6 +17,14 @@ type KeyMap struct {
 		DeleteAllAttachments key.Binding
 	}
 
+	Chat struct {
+		NewSession    key.Binding
+		AddAttachment key.Binding
+		Cancel        key.Binding
+		Tab           key.Binding
+		Details       key.Binding
+	}
+
 	Initialize struct {
 		Yes,
 		No,
@@ -104,6 +112,27 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.DeleteAllAttachments = key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("ctrl+r+r", "delete all attachments"),
+	)
+
+	km.Chat.NewSession = key.NewBinding(
+		key.WithKeys("ctrl+n"),
+		key.WithHelp("ctrl+n", "new session"),
+	)
+	km.Chat.AddAttachment = key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "add attachment"),
+	)
+	km.Chat.Cancel = key.NewBinding(
+		key.WithKeys("esc", "alt+esc"),
+		key.WithHelp("esc", "cancel"),
+	)
+	km.Chat.Tab = key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "change focus"),
+	)
+	km.Chat.Details = key.NewBinding(
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "toggle details"),
 	)
 
 	km.Initialize.Yes = key.NewBinding(

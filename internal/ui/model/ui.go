@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"fmt"
 	"image"
 	"math/rand"
 	"os"
@@ -22,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
-	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
@@ -77,7 +75,6 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	chat   *list.List
 	dialog *dialog.Overlay
 	help   help.Model
 
@@ -100,6 +97,9 @@ type UI struct {
 	readyPlaceholder   string
 	workingPlaceholder string
 
+	// Chat components
+	chat *Chat
+
 	// onboarding state
 	onboarding struct {
 		yesInitializeSelected bool
@@ -113,6 +113,9 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+
+	// Canvas for rendering
+	canvas *uv.ScreenBuffer
 }
 
 // New creates a new instance of the [UI] model.
@@ -125,7 +128,11 @@ func New(com *common.Common) *UI {
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	l := list.New()
+	ch := NewChat(com)
+
+	// TODO: Switch to lipgloss.Canvas when available
+	canvas := uv.NewScreenBuffer(0, 0)
+	canvas.Method = ansi.GraphemeWidth
 
 	ui := &UI{
 		com:      com,
@@ -135,7 +142,8 @@ func New(com *common.Common) *UI {
 		focus:    uiFocusNone,
 		state:    uiConfigure,
 		textarea: ta,
-		chat:     l,
+		chat:     ch,
+		canvas:   &canvas,
 	}
 
 	// set onboarding state defaults
@@ -167,6 +175,10 @@ func (m *UI) Init() tea.Cmd {
 	if m.QueryVersion {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
+	allSessions, _ := m.com.App.Sessions.List(context.Background())
+	if len(allSessions) > 0 {
+		cmds = append(cmds, m.loadSession(allSessions[0].ID))
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -182,6 +194,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionLoadedMsg:
 		m.state = uiChat
 		m.session = &msg.sess
+		// Load the last 20 messages from this session.
+		msgs, _ := m.com.App.Messages.List(context.Background(), m.session.ID)
+		for _, message := range msgs {
+			m.chat.AppendMessage(message)
+		}
+		m.chat.ScrollToBottom()
 	case sessionFilesLoadedMsg:
 		m.sessionFiles = msg.files
 	case pubsub.Event[history.File]:
@@ -200,12 +218,52 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
-		m.chat.ScrollToBottom()
+		m.canvas.Resize(msg.Width, msg.Height)
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
 			m.keyMap.Models.SetHelp("ctrl+m", "models")
 			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+		}
+	case tea.MouseClickMsg:
+		switch m.state {
+		case uiChat:
+			m.chat.HandleMouseDown(msg.X, msg.Y)
+		}
+
+	case tea.MouseMotionMsg:
+		switch m.state {
+		case uiChat:
+			if msg.Y <= 0 {
+				m.chat.ScrollBy(-1)
+			} else if msg.Y >= m.chat.Height()-1 {
+				m.chat.ScrollBy(1)
+			}
+			m.chat.HandleMouseDrag(msg.X, msg.Y)
+		}
+
+	case tea.MouseReleaseMsg:
+		switch m.state {
+		case uiChat:
+			m.chat.HandleMouseUp(msg.X, msg.Y)
+		}
+	case tea.MouseWheelMsg:
+		switch m.state {
+		case uiChat:
+			switch msg.Button {
+			case tea.MouseWheelUp:
+				m.chat.ScrollBy(-5)
+				if !m.chat.SelectedItemInView() {
+					m.chat.SelectPrev()
+					m.chat.ScrollToSelected()
+				}
+			case tea.MouseWheelDown:
+				m.chat.ScrollBy(5)
+				if !m.chat.SelectedItemInView() {
+					m.chat.SelectNext()
+					m.chat.ScrollToSelected()
+				}
+			}
 		}
 	case tea.KeyPressMsg:
 		cmds = append(cmds, m.handleKeyPressMsg(msg)...)
@@ -243,32 +301,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	}
 
 	switch {
-	case msg.String() == "ctrl+shift+t":
-		m.chat.SelectPrev()
-	case msg.String() == "ctrl+t":
-		m.focus = uiFocusMain
-		m.state = uiChat
-		if m.chat.Len() > 0 {
-			m.chat.AppendItem(list.Gap)
-		}
-		m.chat.AppendItem(
-			list.NewStringItem(
-				fmt.Sprintf("%d", m.chat.Len()),
-				fmt.Sprintf("Welcome to Crush Chat! %d", rand.Intn(1000)),
-			).WithFocusStyles(&m.com.Styles.BorderFocus, &m.com.Styles.BorderBlur),
-		)
-		m.chat.SetSelectedIndex(m.chat.Len() - 1)
-		m.chat.Focus()
-		m.chat.ScrollToBottom()
 	case key.Matches(msg, m.keyMap.Tab):
 		switch m.state {
 		case uiChat:
 			if m.focus == uiFocusMain {
 				m.focus = uiFocusEditor
 				cmds = append(cmds, m.textarea.Focus())
+				m.chat.Blur()
 			} else {
 				m.focus = uiFocusMain
 				m.textarea.Blur()
+				m.chat.Focus()
+				m.chat.SetSelectedIndex(m.chat.Len() - 1)
 			}
 		}
 	case key.Matches(msg, m.keyMap.Help):
@@ -298,65 +342,72 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 
 // Draw implements [tea.Layer] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
+	layout := generateLayout(m, area.Dx(), area.Dy())
+
+	if m.layout != layout {
+		m.layout = layout
+		m.updateSize()
+	}
+
 	// Clear the screen first
 	screen.Clear(scr)
 
 	switch m.state {
 	case uiConfigure:
 		header := uv.NewStyledString(m.header)
-		header.Draw(scr, m.layout.header)
+		header.Draw(scr, layout.header)
 
-		mainView := lipgloss.NewStyle().Width(m.layout.main.Dx()).
-			Height(m.layout.main.Dy()).
+		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
+			Height(layout.main.Dy()).
 			Background(lipgloss.ANSIColor(rand.Intn(256))).
 			Render(" Configure ")
 		main := uv.NewStyledString(mainView)
-		main.Draw(scr, m.layout.main)
+		main.Draw(scr, layout.main)
 
 	case uiInitialize:
 		header := uv.NewStyledString(m.header)
-		header.Draw(scr, m.layout.header)
+		header.Draw(scr, layout.header)
 
 		main := uv.NewStyledString(m.initializeView())
-		main.Draw(scr, m.layout.main)
+		main.Draw(scr, layout.main)
 
 	case uiLanding:
 		header := uv.NewStyledString(m.header)
-		header.Draw(scr, m.layout.header)
+		header.Draw(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
-		main.Draw(scr, m.layout.main)
+		main.Draw(scr, layout.main)
 
 		editor := uv.NewStyledString(m.textarea.View())
-		editor.Draw(scr, m.layout.editor)
+		editor.Draw(scr, layout.editor)
 
 	case uiChat:
 		header := uv.NewStyledString(m.header)
-		header.Draw(scr, m.layout.header)
-		m.drawSidebar(scr, m.layout.sidebar)
+		header.Draw(scr, layout.header)
+		m.drawSidebar(scr, layout.sidebar)
 
-		m.chat.Draw(scr, m.layout.main)
+		m.chat.Draw(scr, layout.main)
 
 		editor := uv.NewStyledString(m.textarea.View())
-		editor.Draw(scr, m.layout.editor)
+		editor.Draw(scr, layout.editor)
 
 	case uiChatCompact:
 		header := uv.NewStyledString(m.header)
-		header.Draw(scr, m.layout.header)
+		header.Draw(scr, layout.header)
 
-		mainView := lipgloss.NewStyle().Width(m.layout.main.Dx()).
-			Height(m.layout.main.Dy()).
+		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
+			Height(layout.main.Dy()).
 			Background(lipgloss.ANSIColor(rand.Intn(256))).
 			Render(" Compact Chat Messages ")
 		main := uv.NewStyledString(mainView)
-		main.Draw(scr, m.layout.main)
+		main.Draw(scr, layout.main)
 
 		editor := uv.NewStyledString(m.textarea.View())
-		editor.Draw(scr, m.layout.editor)
+		editor.Draw(scr, layout.editor)
 	}
 
 	// Add help layer
 	help := uv.NewStyledString(m.help.View(m))
-	help.Draw(scr, m.layout.help)
+	help.Draw(scr, layout.help)
 
 	// Debugging rendering (visually see when the tui rerenders)
 	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
@@ -401,14 +452,11 @@ func (m *UI) View() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = m.com.Styles.Background
 	v.Cursor = m.Cursor()
+	v.MouseMode = tea.MouseModeCellMotion
 
-	// TODO: Switch to lipgloss.Canvas when available
-	canvas := uv.NewScreenBuffer(m.width, m.height)
-	canvas.Method = ansi.GraphemeWidth
+	m.Draw(m.canvas, m.canvas.Bounds())
 
-	m.Draw(canvas, canvas.Bounds())
-
-	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
+	content := strings.ReplaceAll(m.canvas.Render(), "\r\n", "\n") // normalize newlines
 	contentLines := strings.Split(content, "\n")
 	for i, line := range contentLines {
 		// Trim trailing spaces for concise rendering
@@ -680,6 +728,7 @@ func generateLayout(m *UI, w, h int) layout {
 		// Add padding left
 		sideRect.Min.X += 1
 		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		mainRect.Max.X -= 1 // Add padding right
 		// Add bottom margin to main
 		mainRect.Max.Y -= 1
 		layout.sidebar = sideRect

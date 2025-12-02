@@ -5,6 +5,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/exp/ordered"
 )
 
 // List is a scrollable list component that implements uv.Drawable.
@@ -160,7 +161,7 @@ func (l *List) renderViewport() string {
 		for i := range lines {
 			lines[i] = emptyLine
 		}
-		return strings.Join(lines, "\r\n")
+		return strings.Join(lines, "\n")
 	}
 	if srcEndY > len(buf.Lines) {
 		srcEndY = len(buf.Lines)
@@ -182,7 +183,7 @@ func (l *List) renderViewport() string {
 		lines[lineIdx] = emptyLine
 	}
 
-	return strings.Join(lines, "\r\n")
+	return strings.Join(lines, "\n")
 }
 
 // drawViewport draws the visible portion from master buffer to target screen.
@@ -199,18 +200,18 @@ func (l *List) drawViewport(scr uv.Screen, area uv.Rectangle) {
 	srcEndY := l.offset + area.Dy()
 
 	// Clamp to actual buffer bounds
-	if srcStartY >= len(buf.Lines) {
+	if srcStartY >= buf.Height() {
 		screen.ClearArea(scr, area)
 		return
 	}
-	if srcEndY > len(buf.Lines) {
-		srcEndY = len(buf.Lines)
+	if srcEndY > buf.Height() {
+		srcEndY = buf.Height()
 	}
 
 	// Copy visible lines to target screen
 	destY := area.Min.Y
 	for srcY := srcStartY; srcY < srcEndY && destY < area.Max.Y; srcY++ {
-		line := buf.Lines[srcY]
+		line := buf.Line(srcY)
 		destX := area.Min.X
 
 		for x := 0; x < len(line) && x < area.Dx() && destX < area.Max.X; x++ {
@@ -840,16 +841,7 @@ func (l *List) SelectedItemInView() bool {
 
 // clampOffset ensures offset is within valid bounds.
 func (l *List) clampOffset() {
-	maxOffset := l.totalHeight - l.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-
-	if l.offset < 0 {
-		l.offset = 0
-	} else if l.offset > maxOffset {
-		l.offset = maxOffset
-	}
+	l.offset = ordered.Clamp(l.offset, 0, l.totalHeight-l.height)
 }
 
 // focusSelectedItem focuses the currently selected item if it's focusable.

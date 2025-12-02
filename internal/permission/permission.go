@@ -113,11 +113,7 @@ func (s *permissionService) publishUnsafe(permission PermissionRequest, status e
 	}
 }
 
-func (s *permissionService) noLongerActiveRequest(permission PermissionRequest) {
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-}
+
 
 func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if s.skip {
@@ -160,7 +156,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		ID:                      uuid.New().String(),
 		CreatePermissionRequest: opts,
 	}
-	permission.CreatePermissionRequest.Path = dir
+	permission.Path = dir
 
 	// Check session permissions (thread-safe iteration)
 	for request := range s.sessionPermissions.Seq() {

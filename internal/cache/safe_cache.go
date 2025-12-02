@@ -280,28 +280,28 @@ func (cm *safeCacheManager) Stats() CacheStats {
 }
 
 func (cm *safeCacheManager) GetSessionStats() any {
-	return map[string]interface{}{
+	return map[string]any{
 		"items": cm.sessionCache.Len(),
 		"type":  "csync.Map",
 	}
 }
 
 func (cm *safeCacheManager) GetFileStats() any {
-	return map[string]interface{}{
+	return map[string]any{
 		"items": cm.fileCache.Len(),
 		"type":  "csync.Map",
 	}
 }
 
 func (cm *safeCacheManager) GetUIStats() any {
-	return map[string]interface{}{
+	return map[string]any{
 		"items": cm.uiCache.Len(),
 		"type":  "csync.Map",
 	}
 }
 
 func (cm *safeCacheManager) GetConfigStats() any {
-	return map[string]interface{}{
+	return map[string]any{
 		"items": cm.configCache.Len(),
 		"type":  "csync.Map",
 	}

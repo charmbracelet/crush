@@ -20,7 +20,7 @@ func TestRaceFreePermissionService(t *testing.T) {
 		results := make([]bool, 100)
 
 		// Simulate 100 concurrent permission requests
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
@@ -58,7 +58,7 @@ func TestRaceFreePermissionService(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Test concurrent grant operations
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
@@ -93,7 +93,7 @@ func TestRaceFreePermissionService(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Test concurrent deny operations
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()

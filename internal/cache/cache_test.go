@@ -55,7 +55,7 @@ func BenchmarkCacheManagerVsDirect(b *testing.B) {
 	cm.SetSession(ctx, "bench", testSession, time.Hour)
 
 	b.Run("CacheHit", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, ok, err := cm.GetSession(ctx, "bench")
 			if err != nil || !ok {
 				b.Fatal("Cache hit failed")
@@ -64,7 +64,7 @@ func BenchmarkCacheManagerVsDirect(b *testing.B) {
 	})
 
 	b.Run("DirectAccess", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			// Simulate direct access cost
 			session := &session.Session{
 				ID:    "test-session",

@@ -113,8 +113,6 @@ func (s *permissionService) publishUnsafe(permission PermissionRequest, status e
 	}
 }
 
-
-
 func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if s.skip {
 		return true

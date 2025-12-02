@@ -25,6 +25,11 @@ Available platforms are: claude.`,
 # Authenticate with Claude Code Max
 crush login claude
   `,
+	ValidArgs: []cobra.Completion{
+		"claude",
+		"anthropic",
+	},
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 1 {
 			return fmt.Errorf("wrong number of arguments")

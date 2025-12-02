@@ -181,11 +181,13 @@ func (m *toolCallCmp) View() string {
 		return box.Render(m.renderPending())
 	}
 
-	r := registry.lookup(m.call.Name)
-
-	if m.isNested {
+	if strings.HasPrefix(m.call.Name, "mcp_crush_docker") {
+		r := dockerMCPRenderer{}
 		return box.Render(r.Render(m))
 	}
+
+	r := registry.lookup(m.call.Name)
+
 	return box.Render(r.Render(m))
 }
 

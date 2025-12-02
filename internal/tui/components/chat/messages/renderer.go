@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -946,7 +947,7 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	}
 
 	if len(params) == 1 {
-		return t.S().Subtle.Render(mainParam)
+		return t.S().Muted.Render(mainParam)
 	}
 	otherParams := params[1:]
 	// create pairs of key/value
@@ -968,14 +969,16 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	remainingWidth := paramsWidth - lipgloss.Width(partsRendered) - 3 // count for " ()"
 	if remainingWidth < 30 {
 		// No space for the params, just show the main
-		return t.S().Subtle.Render(mainParam)
+		return t.S().Muted.Render(mainParam)
 	}
 
 	if len(parts) > 0 {
-		mainParam = fmt.Sprintf("%s (%s)", mainParam, strings.Join(parts, ", "))
+		paramsStyles := t.S().Subtle.Render(fmt.Sprintf("(%s)", strings.Join(parts, ", ")))
+		mainParam = t.S().Muted.Render(mainParam)
+		mainParam = fmt.Sprintf("%s %s", mainParam, paramsStyles)
 	}
 
-	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
+	return ansi.Truncate(mainParam, paramsWidth, "…")
 }
 
 // earlyState returns immediately‑rendered error/cancelled/ongoing states.
@@ -1017,7 +1020,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.TrimSpace(content)
 	lines := strings.Split(content, "\n")
 
-	width := v.textWidth() - 2
+	width := min(120, v.textWidth()) - 2
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
@@ -1050,8 +1053,7 @@ func renderMarkdownContent(v *toolCallCmp, content string) string {
 	content = strings.ReplaceAll(content, "\t", "    ")
 	content = strings.TrimSpace(content)
 
-	width := v.textWidth() - 2
-	width = min(width, 120)
+	width := min(120, v.textWidth()) - 2
 
 	renderer := styles.GetPlainMarkdownRenderer(width)
 	rendered, err := renderer.Render(content)
@@ -1159,6 +1161,17 @@ func truncateHeight(s string, h int) string {
 	return s
 }
 
+func mcpToolName(name string) string {
+	if strings.HasPrefix(name, "mcp_crush_docker") {
+		name = strings.ReplaceAll(name, "mcp_crush_docker_", "")
+		name = strings.ReplaceAll(name, "mcp-", "")
+		name = strings.ReplaceAll(name, "_", " ")
+		name = strings.ReplaceAll(name, "-", " ")
+		return "Docker MCP: " + stringext.Capitalize(name)
+	}
+	return name
+}
+
 func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
@@ -1194,6 +1207,9 @@ func prettifyToolName(name string) string {
 	case tools.WriteToolName:
 		return "Write"
 	default:
+		if strings.HasPrefix(name, "mcp_") {
+			return mcpToolName(name)
+		}
 		return name
 	}
 }

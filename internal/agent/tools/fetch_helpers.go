@@ -80,7 +80,7 @@ func ConvertHTMLToMarkdown(html string) (string, error) {
 
 // FormatJSON formats JSON content with proper indentation.
 func FormatJSON(content string) (string, error) {
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(content), &data); err != nil {
 		return "", err
 	}

@@ -202,7 +202,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.activeRequests.Set(call.SessionID, cancel)
 
 	defer cancel()
-	defer a.activeRequests.Del(call.SessionID)
+	defer a.cleanupActiveRequests(call.SessionID)
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
@@ -603,7 +603,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	// Release active request before processing queued messages.
-	a.activeRequests.Del(call.SessionID)
+	a.cleanupActiveRequests(call.SessionID)
 	cancel()
 
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
@@ -614,6 +614,31 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+// cleanupActiveRequests removes session ID from activeRequests.
+// If the session is an agent tool session (format "messageID$$toolCallID"),
+// it also attempts to clean up the parent session to prevent deadlock.
+func (a *sessionAgent) cleanupActiveRequests(sessionID string) {
+	// Always clean up the current session
+	a.activeRequests.Del(sessionID)
+	
+	// Check if this is an agent tool session
+	if a.sessions.IsAgentToolSession(sessionID) {
+		// Extract parent session ID from nested session
+		messageID, _, ok := a.sessions.ParseAgentToolSessionID(sessionID)
+		if ok {
+			// The parent session ID is the message ID (before the $$ separator)
+			// This parent session might still be marked as busy, causing deadlock
+			if a.IsSessionBusy(messageID) {
+				// Clean up the parent session's active request to prevent deadlock
+				a.activeRequests.Del(messageID)
+				slog.Debug("Cleaned up parent session busy state to prevent agent tool deadlock", 
+					"nested_session", sessionID, 
+					"parent_session", messageID)
+			}
+		}
+	}
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1
-	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251126220703-2a0096c500a7
+	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251202162339-5fa38b798f16
 	charm.land/fantasy v0.3.2
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca
 	charm.land/x/vcr v0.1.1
@@ -21,7 +21,7 @@ require (
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930
 	github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0
-	github.com/charmbracelet/ultraviolet v0.0.0-20251116181749-377898bcce38
+	github.com/charmbracelet/ultraviolet v0.0.0-20251202162030-ecc8c1ae4b2b
 	github.com/charmbracelet/x/ansi v0.11.2
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f

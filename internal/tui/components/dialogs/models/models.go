@@ -143,17 +143,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))):
-			if m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL {
-				return m, tea.Sequence(
-					tea.SetClipboard(m.claudeOAuth2.URL),
-					func() tea.Msg {
-						_ = clipboard.WriteAll(m.claudeOAuth2.URL)
-						return nil
-					},
-					util.ReportInfo("URL copied to clipboard"),
-				)
-			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL:
+			return m, tea.Sequence(
+				tea.SetClipboard(m.claudeOAuth2.URL),
+				func() tea.Msg {
+					_ = clipboard.WriteAll(m.claudeOAuth2.URL)
+					return nil
+				},
+				util.ReportInfo("URL copied to clipboard"),
+			)
 		case key.Matches(msg, m.keyMap.Choose) && m.showClaudeAuthMethodChooser:
 			m.claudeAuthMethodChooser.ToggleChoice()
 			return m, nil

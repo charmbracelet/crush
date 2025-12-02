@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
@@ -73,7 +74,7 @@ type SelectedModel struct {
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
 
 	// Overrides the default model configuration.
-	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
+	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
 	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
 	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
@@ -466,6 +467,43 @@ func (c *Config) SetConfigField(key string, value any) error {
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
 		return errors.Wrap(err, "failed to write config file")
 	}
+	return nil
+}
+
+func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
+	providerConfig, exists := c.Providers.Get(providerID)
+	if !exists {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+
+	if providerConfig.OAuthToken == nil {
+		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
+	}
+
+	// Only Anthropic provider uses OAuth for now
+	if providerID != string(catwalk.InferenceProviderAnthropic) {
+		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
+	}
+
+	newToken, err := claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	if err != nil {
+		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
+	}
+
+	slog.Info("Successfully refreshed OAuth token in background", "provider", providerID)
+	providerConfig.OAuthToken = newToken
+	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
+	providerConfig.SetupClaudeCode()
+
+	c.Providers.Set(providerID, providerConfig)
+
+	if err := cmp.Or(
+		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
+		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
+	); err != nil {
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
+
 	return nil
 }
 

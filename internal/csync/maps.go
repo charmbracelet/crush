@@ -45,9 +45,7 @@ func NewLazyMap[K comparable, V any](load func() map[K]V) *Map[K, V] {
 		data := load()
 		m.mu.Lock()
 		// Update existing map instead of replacing it to avoid race conditions
-		for k, v := range data {
-			m.inner[k] = v
-		}
+		maps.Copy(m.inner, data)
 		m.mu.Unlock()
 	}()
 

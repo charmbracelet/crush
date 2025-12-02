@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -177,7 +178,10 @@ func (m *UI) Init() tea.Cmd {
 	}
 	allSessions, _ := m.com.App.Sessions.List(context.Background())
 	if len(allSessions) > 0 {
-		cmds = append(cmds, m.loadSession(allSessions[0].ID))
+		cmds = append(cmds, func() tea.Msg {
+			time.Sleep(2 * time.Second)
+			return m.loadSession(allSessions[0].ID)()
+		})
 	}
 	return tea.Batch(cmds...)
 }
@@ -300,10 +304,30 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 		return m.updateDialogs(msg)
 	}
 
-	switch {
-	case key.Matches(msg, m.keyMap.Tab):
-		switch m.state {
-		case uiChat:
+	handleGlobalKeys := func(msg tea.KeyPressMsg) {
+		switch {
+		case key.Matches(msg, m.keyMap.Tab):
+		case key.Matches(msg, m.keyMap.Help):
+			m.help.ShowAll = !m.help.ShowAll
+			m.updateLayoutAndSize()
+		case key.Matches(msg, m.keyMap.Quit):
+			if !m.dialog.ContainsDialog(dialog.QuitDialogID) {
+				m.dialog.AddDialog(dialog.NewQuit(m.com))
+				return
+			}
+		case key.Matches(msg, m.keyMap.Commands):
+			// TODO: Implement me
+		case key.Matches(msg, m.keyMap.Models):
+			// TODO: Implement me
+		case key.Matches(msg, m.keyMap.Sessions):
+			// TODO: Implement me
+		}
+	}
+
+	switch m.state {
+	case uiChat:
+		switch {
+		case key.Matches(msg, m.keyMap.Tab):
 			if m.focus == uiFocusMain {
 				m.focus = uiFocusEditor
 				cmds = append(cmds, m.textarea.Focus())
@@ -314,26 +338,47 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 				m.chat.Focus()
 				m.chat.SetSelectedIndex(m.chat.Len() - 1)
 			}
+		case key.Matches(msg, m.keyMap.Chat.Up):
+			m.chat.ScrollBy(-1)
+			if !m.chat.SelectedItemInView() {
+				m.chat.SelectPrev()
+				m.chat.ScrollToSelected()
+			}
+		case key.Matches(msg, m.keyMap.Chat.Down):
+			m.chat.ScrollBy(1)
+			if !m.chat.SelectedItemInView() {
+				m.chat.SelectNext()
+				m.chat.ScrollToSelected()
+			}
+		case key.Matches(msg, m.keyMap.Chat.UpOneItem):
+			m.chat.SelectPrev()
+			m.chat.ScrollToSelected()
+		case key.Matches(msg, m.keyMap.Chat.DownOneItem):
+			m.chat.SelectNext()
+			m.chat.ScrollToSelected()
+		case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
+			m.chat.ScrollBy(-m.chat.Height() / 2)
+			m.chat.SelectFirstInView()
+		case key.Matches(msg, m.keyMap.Chat.HalfPageDown):
+			m.chat.ScrollBy(m.chat.Height() / 2)
+			m.chat.SelectLastInView()
+		case key.Matches(msg, m.keyMap.Chat.PageUp):
+			m.chat.ScrollBy(-m.chat.Height())
+			m.chat.SelectFirstInView()
+		case key.Matches(msg, m.keyMap.Chat.PageDown):
+			m.chat.ScrollBy(m.chat.Height())
+			m.chat.SelectLastInView()
+		case key.Matches(msg, m.keyMap.Chat.Home):
+			m.chat.ScrollToTop()
+			m.chat.SelectFirst()
+		case key.Matches(msg, m.keyMap.Chat.End):
+			m.chat.ScrollToBottom()
+			m.chat.SelectLast()
+		default:
+			handleGlobalKeys(msg)
 		}
-	case key.Matches(msg, m.keyMap.Help):
-		m.help.ShowAll = !m.help.ShowAll
-		m.updateLayoutAndSize()
-		return cmds
-	case key.Matches(msg, m.keyMap.Quit):
-		if !m.dialog.ContainsDialog(dialog.QuitDialogID) {
-			m.dialog.AddDialog(dialog.NewQuit(m.com))
-			return
-		}
-		return cmds
-	case key.Matches(msg, m.keyMap.Commands):
-		// TODO: Implement me
-		return cmds
-	case key.Matches(msg, m.keyMap.Models):
-		// TODO: Implement me
-		return cmds
-	case key.Matches(msg, m.keyMap.Sessions):
-		// TODO: Implement me
-		return cmds
+	default:
+		handleGlobalKeys(msg)
 	}
 
 	cmds = append(cmds, m.updateFocused(msg)...)

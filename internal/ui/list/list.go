@@ -818,6 +818,49 @@ func (l *List) TotalHeight() int {
 	return l.totalHeight
 }
 
+// SelectFirstInView selects the first item that is fully visible in the viewport.
+func (l *List) SelectFirstInView() {
+	l.ensureBuilt()
+
+	viewportStart := l.offset
+	viewportEnd := l.offset + l.height
+
+	for i, item := range l.items {
+		pos, ok := l.itemPositions[item.ID()]
+		if !ok {
+			continue
+		}
+
+		// Check if item is fully within viewport bounds
+		if pos.startLine >= viewportStart && (pos.startLine+pos.height) <= viewportEnd {
+			l.SetSelectedIndex(i)
+			return
+		}
+	}
+}
+
+// SelectLastInView selects the last item that is fully visible in the viewport.
+func (l *List) SelectLastInView() {
+	l.ensureBuilt()
+
+	viewportStart := l.offset
+	viewportEnd := l.offset + l.height
+
+	for i := len(l.items) - 1; i >= 0; i-- {
+		item := l.items[i]
+		pos, ok := l.itemPositions[item.ID()]
+		if !ok {
+			continue
+		}
+
+		// Check if item is fully within viewport bounds
+		if pos.startLine >= viewportStart && (pos.startLine+pos.height) <= viewportEnd {
+			l.SetSelectedIndex(i)
+			return
+		}
+	}
+}
+
 // SelectedItemInView returns true if the selected item is currently visible in the viewport.
 func (l *List) SelectedItemInView() bool {
 	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {

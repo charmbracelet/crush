@@ -23,6 +23,16 @@ type KeyMap struct {
 		Cancel        key.Binding
 		Tab           key.Binding
 		Details       key.Binding
+		Down          key.Binding
+		Up            key.Binding
+		DownOneItem   key.Binding
+		UpOneItem     key.Binding
+		PageDown      key.Binding
+		PageUp        key.Binding
+		HalfPageDown  key.Binding
+		HalfPageUp    key.Binding
+		Home          key.Binding
+		End           key.Binding
 	}
 
 	Initialize struct {
@@ -133,6 +143,47 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),
 		key.WithHelp("ctrl+d", "toggle details"),
+	)
+
+	km.Chat.Down = key.NewBinding(
+		key.WithKeys("down", "ctrl+j", "ctrl+n", "j"),
+		key.WithHelp("↓", "down"),
+	)
+	km.Chat.Up = key.NewBinding(
+		key.WithKeys("up", "ctrl+k", "ctrl+p", "k"),
+		key.WithHelp("↑", "up"),
+	)
+	km.Chat.UpOneItem = key.NewBinding(
+		key.WithKeys("shift+up", "K"),
+		key.WithHelp("shift+↑", "up one item"),
+	)
+	km.Chat.DownOneItem = key.NewBinding(
+		key.WithKeys("shift+down", "J"),
+		key.WithHelp("shift+↓", "down one item"),
+	)
+	km.Chat.HalfPageDown = key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "half page down"),
+	)
+	km.Chat.PageDown = key.NewBinding(
+		key.WithKeys("pgdown", " ", "f"),
+		key.WithHelp("f/pgdn", "page down"),
+	)
+	km.Chat.PageUp = key.NewBinding(
+		key.WithKeys("pgup", "b"),
+		key.WithHelp("b/pgup", "page up"),
+	)
+	km.Chat.HalfPageUp = key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "half page up"),
+	)
+	km.Chat.Home = key.NewBinding(
+		key.WithKeys("g", "home"),
+		key.WithHelp("g", "home"),
+	)
+	km.Chat.End = key.NewBinding(
+		key.WithKeys("G", "end"),
+		key.WithHelp("G", "end"),
 	)
 
 	km.Initialize.Yes = key.NewBinding(

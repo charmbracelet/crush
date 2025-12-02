@@ -77,9 +77,6 @@ func NewChatNoContentItem(t *styles.Styles, id string) *ChatNoContentItem {
 
 // ChatMessageItem represents a chat message item in the chat UI.
 type ChatMessageItem struct {
-	list.BaseFocusable
-	list.BaseHighlightable
-
 	item list.Item
 	msg  message.Message
 }
@@ -167,6 +164,43 @@ func (c *ChatMessageItem) Height(width int) int {
 // ID implements list.Item.
 func (c *ChatMessageItem) ID() string {
 	return c.item.ID()
+}
+
+// Blur implements list.Focusable.
+func (c *ChatMessageItem) Blur() {
+	if blurable, ok := c.item.(list.Focusable); ok {
+		blurable.Blur()
+	}
+}
+
+// Focus implements list.Focusable.
+func (c *ChatMessageItem) Focus() {
+	if focusable, ok := c.item.(list.Focusable); ok {
+		focusable.Focus()
+	}
+}
+
+// IsFocused implements list.Focusable.
+func (c *ChatMessageItem) IsFocused() bool {
+	if focusable, ok := c.item.(list.Focusable); ok {
+		return focusable.IsFocused()
+	}
+	return false
+}
+
+// GetHighlight implements list.Highlightable.
+func (c *ChatMessageItem) GetHighlight() (startLine int, startCol int, endLine int, endCol int) {
+	if highlightable, ok := c.item.(list.Highlightable); ok {
+		return highlightable.GetHighlight()
+	}
+	return 0, 0, 0, 0
+}
+
+// SetHighlight implements list.Highlightable.
+func (c *ChatMessageItem) SetHighlight(startLine int, startCol int, endLine int, endCol int) {
+	if highlightable, ok := c.item.(list.Highlightable); ok {
+		highlightable.SetHighlight(startLine, startCol, endLine, endCol)
+	}
 }
 
 // Chat represents the chat UI model that handles chat interactions and
@@ -277,6 +311,26 @@ func (m *Chat) SelectPrev() {
 // SelectNext selects the next message in the chat list.
 func (m *Chat) SelectNext() {
 	m.list.SelectNext()
+}
+
+// SelectFirst selects the first message in the chat list.
+func (m *Chat) SelectFirst() {
+	m.list.SelectFirst()
+}
+
+// SelectLast selects the last message in the chat list.
+func (m *Chat) SelectLast() {
+	m.list.SelectLast()
+}
+
+// SelectFirstInView selects the first message currently in view.
+func (m *Chat) SelectFirstInView() {
+	m.list.SelectFirstInView()
+}
+
+// SelectLastInView selects the last message currently in view.
+func (m *Chat) SelectLastInView() {
+	m.list.SelectLastInView()
 }
 
 // HandleMouseDown handles mouse down events for the chat component.

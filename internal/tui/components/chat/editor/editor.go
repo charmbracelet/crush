@@ -217,6 +217,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if m.inHistoryMode() {
 			m.history.ScrollUp()
 			m.textarea.SetValue(m.history.Value())
+			m.textarea.CursorStart()
 		}
 	case ScrollHistoryDown:
 		if m.inHistoryMode() {
@@ -312,20 +313,18 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 
 		// history
-		if m.inHistoryMode() {
+		if m.textarea.Focused() && m.inHistoryMode() {
 			switch true {
 			case key.Matches(msg, m.keyMap.Escape):
 				return m, util.CmdHandler(CloseHistoryMsg{valueToSet: m.history.ExistingValue()})
-			case key.Matches(msg, m.keyMap.Previous):
-				return m, util.CmdHandler(ScrollHistoryUp{})
-			case key.Matches(msg, m.keyMap.Next):
-				return m, util.CmdHandler(ScrollHistoryDown{})
 			}
 			// if any key other than history related controls we play it safe and close
 			// the history and reset the text input field to be the current value
-			cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
-				valueToSet: m.textarea.Value(),
-			}))
+			if !key.Matches(msg, m.keyMap.Previous) && !key.Matches(msg, m.keyMap.Next) {
+				cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
+					valueToSet: m.textarea.Value(),
+				}))
+			}
 		}
 
 		switch {
@@ -355,16 +354,27 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.attachments = nil
 			return m, nil
 		}
-		if key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
-			if !m.inHistoryMode() {
-				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
-			} else {
-				if key.Matches(msg, m.keyMap.Previous) {
-					cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
-				} else if key.Matches(msg, m.keyMap.Next) {
-					cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
-				}
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			switch true {
+			case key.Matches(msg, m.keyMap.Previous):
+				cmds = append(cmds, m.handlePreviousKeypressSideEffect()...)
+				// if cursor is on top line move cursor to start of line
+				// if cursor is at start of line already, then scroll history up
+			case key.Matches(msg, m.keyMap.Next):
+				cmds = append(cmds, m.handleNextKeypressSideEffect()...)
 			}
+			/*
+				if m.textarea.LineCount()
+				if !m.inHistoryMode() {
+					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				} else {
+					if key.Matches(msg, m.keyMap.Previous) {
+						cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+					} else if key.Matches(msg, m.keyMap.Next) {
+						cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
+					}
+				}
+			*/
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -445,6 +455,33 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *editorCmp) handlePreviousKeypressSideEffect() []tea.Cmd {
+	cmds := []tea.Cmd{}
+	lineInfo := m.textarea.LineInfo()
+
+	// Check if cursor is on the first row (actual line in the buffer)
+	if m.textarea.Line() == 0 {
+		// On the first row - check if we're at the start
+		if lineInfo.RowOffset == 0 && lineInfo.ColumnOffset == 0 {
+			// Already at the very start of the textarea - emit your event
+			if !m.inHistoryMode() {
+				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+			}
+			cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+		} else {
+			// On first row but not at start - jump to start
+			m.textarea.CursorStart()
+		}
+	}
+
+	return cmds
+}
+
+func (m *editorCmp) handleNextKeypressSideEffect() []tea.Cmd {
+	cmds := []tea.Cmd{}
+	return cmds
 }
 
 func (m *editorCmp) setEditorPrompt() {

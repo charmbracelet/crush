@@ -1014,6 +1014,117 @@ func (a *sessionAgent) QueuedPrompts(sessionID string) int {
 	return len(l)
 }
 
+// handleNonFinalToolCalls processes tool calls in non-final states during error handling
+func (a *sessionAgent) handleNonFinalToolCalls(ctx context.Context, currentAssistant *message.Message, toolCalls []message.ToolCall) error {
+	for _, tc := range toolCalls {
+		if tc.State.IsNonFinalState() {
+			// Set non-final tool calls to completed state
+			// This ensures tools without explicit results are marked as finished
+			tc.Input = "{}"
+			currentAssistant.AddToolCall(tc)
+			updateErr := a.messages.Update(ctx, *currentAssistant)
+			if updateErr != nil {
+				return updateErr
+			}
+		}
+	}
+	return nil
+}
+
+// findExistingToolResult searches for existing tool results in message list
+func (a *sessionAgent) findExistingToolResult(msgs []message.Message, toolCallID message.ToolCallID) bool {
+	for _, msg := range msgs {
+		if msg.Role == message.Tool {
+			for _, tr := range msg.ToolResults() {
+				if tr.ToolCallID == toolCallID {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// setToolCallStateFromError sets tool call state based on error type and returns content
+func (a *sessionAgent) setToolCallStateFromError(tc *message.ToolCall, isCancelErr, isPermissionErr bool) string {
+	content := "There was an error while executing the tool"
+	switch {
+	case isCancelErr:
+		tc.State = enum.ToolCallStateCancelled
+		content = "Tool execution canceled by user"
+	case isPermissionErr:
+		tc.State = enum.ToolCallStatePermissionDenied
+		content = "User denied permission"
+	default:
+		tc.State = enum.ToolCallStateFailed
+		// Note: content already set to default error message above
+	}
+	return content
+}
+
+// mapToolCallStateToResultState converts tool call state to result state
+func (a *sessionAgent) mapToolCallStateToResultState(state enum.ToolCallState) enum.ToolResultState {
+	switch state {
+	case enum.ToolCallStateCancelled:
+		return enum.ToolResultStateCancelled
+	case enum.ToolCallStatePermissionDenied:
+		return enum.ToolResultStateError
+	case enum.ToolCallStateFailed:
+		return enum.ToolResultStateError
+	default:
+		return enum.ToolResultStateSuccess
+	}
+}
+
+// createAndPersistToolResult creates and saves a tool result message
+func (a *sessionAgent) createAndPersistToolResult(ctx context.Context, currentAssistant *message.Message, tc message.ToolCall, content string, resultState enum.ToolResultState) error {
+	toolResult := message.ToolResult{
+		ToolCallID:  tc.ID,
+		Name:        tc.Name,
+		Content:     content,
+		ResultState: resultState,
+	}
+
+	_, createErr := a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			toolResult,
+		},
+	})
+	return createErr
+}
+
+// handleErrorToolCalls processes tool calls during error conditions
+func (a *sessionAgent) handleErrorToolCalls(ctx context.Context, currentAssistant *message.Message, toolCalls []message.ToolCall, msgs []message.Message, isCancelErr, isPermissionErr bool) error {
+	// Handle non-final tool calls first
+	if err := a.handleNonFinalToolCalls(ctx, currentAssistant, toolCalls); err != nil {
+		return err
+	}
+
+	// Process each tool call
+	for _, tc := range toolCalls {
+		if tc.State.IsNonFinalState() {
+			continue // Already handled above
+		}
+
+		// Check if tool result already exists
+		if a.findExistingToolResult(msgs, tc.ID) {
+			tc.State = enum.ToolCallStateCompleted
+			continue
+		}
+
+		// Set tool call state based on error type
+		content := a.setToolCallStateFromError(&tc, isCancelErr, isPermissionErr)
+		
+		// Map to result state and create tool result
+		resultState := a.mapToolCallStateToResultState(tc.State)
+		if createErr := a.createAndPersistToolResult(ctx, currentAssistant, tc, content, resultState); createErr != nil {
+			return createErr
+		}
+	}
+	return nil
+}
+
 func (a *sessionAgent) SetModels(large, small Model) {
 	a.largeModel = large
 	a.smallModel = small

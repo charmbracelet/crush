@@ -571,8 +571,9 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	if a.app.AgentCoordinator.IsBusy() {
-		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
-		return util.ReportWarn("Agent is busy, please wait...")
+		// Allow navigation but show warning for agent-sensitive operations
+		// This prevents UI deadlocks while maintaining user freedom
+		return util.ReportWarn("Agent is busy, some features may be limited...")
 	}
 
 	var cmds []tea.Cmd

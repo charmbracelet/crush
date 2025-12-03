@@ -27,7 +27,6 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // uiFocusState represents the current focus state of the UI.
@@ -114,9 +113,6 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
-
-	// Canvas for rendering
-	canvas *uv.ScreenBuffer
 }
 
 // New creates a new instance of the [UI] model.
@@ -131,10 +127,6 @@ func New(com *common.Common) *UI {
 
 	ch := NewChat(com)
 
-	// TODO: Switch to lipgloss.Canvas when available
-	canvas := uv.NewScreenBuffer(0, 0)
-	canvas.Method = ansi.GraphemeWidth
-
 	ui := &UI{
 		com:      com,
 		dialog:   dialog.NewOverlay(),
@@ -144,7 +136,6 @@ func New(com *common.Common) *UI {
 		state:    uiConfigure,
 		textarea: ta,
 		chat:     ch,
-		canvas:   &canvas,
 	}
 
 	// set onboarding state defaults
@@ -222,7 +213,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
-		m.canvas.Resize(msg.Width, msg.Height)
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -499,9 +489,10 @@ func (m *UI) View() tea.View {
 	v.Cursor = m.Cursor()
 	v.MouseMode = tea.MouseModeCellMotion
 
-	m.Draw(m.canvas, m.canvas.Bounds())
+	canvas := uv.NewScreenBuffer(m.width, m.height)
+	m.Draw(canvas, canvas.Bounds())
 
-	content := strings.ReplaceAll(m.canvas.Render(), "\r\n", "\n") // normalize newlines
+	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
 	contentLines := strings.Split(content, "\n")
 	for i, line := range contentLines {
 		// Trim trailing spaces for concise rendering
@@ -509,6 +500,7 @@ func (m *UI) View() tea.View {
 	}
 
 	content = strings.Join(contentLines, "\n")
+
 	v.Content = content
 	if m.sendProgressBar && m.com.App != nil && m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
@@ -658,27 +650,21 @@ func (m *UI) updateSize() {
 	// Set help width
 	m.help.SetWidth(m.layout.help.Dx())
 
+	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
+	m.textarea.SetWidth(m.layout.editor.Dx())
+	m.textarea.SetHeight(m.layout.editor.Dy())
+
 	// Handle different app states
 	switch m.state {
-	case uiConfigure, uiInitialize:
+	case uiConfigure, uiInitialize, uiLanding:
 		m.renderHeader(false, m.layout.header.Dx())
-
-	case uiLanding:
-		m.renderHeader(false, m.layout.header.Dx())
-		m.textarea.SetWidth(m.layout.editor.Dx())
-		m.textarea.SetHeight(m.layout.editor.Dy())
 
 	case uiChat:
 		m.renderSidebarLogo(m.layout.sidebar.Dx())
-		m.textarea.SetWidth(m.layout.editor.Dx())
-		m.textarea.SetHeight(m.layout.editor.Dy())
-		m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 
 	case uiChatCompact:
 		// TODO: set the width and heigh of the chat component
 		m.renderHeader(true, m.layout.header.Dx())
-		m.textarea.SetWidth(m.layout.editor.Dx())
-		m.textarea.SetHeight(m.layout.editor.Dy())
 	}
 }
 

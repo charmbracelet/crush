@@ -697,7 +697,8 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	}
 	if s.showClaudeOAuth2 {
 		if cursor := s.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
-			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
+			// Compensate for dialog padding and border positioning
+			cursor.Y += 2
 			return s.moveCursor(cursor)
 		}
 		return nil

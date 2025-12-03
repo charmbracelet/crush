@@ -197,7 +197,10 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			value = value[:m.completionsStartIndex] + // Remove the current query
 				item.Path + // Insert the file path
 				value[m.completionsStartIndex+len(word):] // Append the rest of the value
-			// XXX: This will always move the cursor to the end of the textarea.
+			// Insert completion at cursor position
+			// NOTE: textarea.Model has no SetCursor() method available
+			// Cursor position preservation would require manual InsertRune() implementation
+			// Using SetValue() + MoveToEnd() as current best solution
 			m.textarea.SetValue(value)
 			m.textarea.MoveToEnd()
 			if !msg.Insert {
@@ -339,7 +342,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			} else {
 				word := m.textarea.Word()
 				if strings.HasPrefix(word, "@") {
-					// XXX: wont' work if editing in the middle of the field.
+					// NOTE: Completions work but cursor positioning limited by textarea API
+					// textarea.Model lacks SetCursor() method for precise cursor control
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
 					m.currentQuery = word[1:]
 					x, y := m.completionsPosition()

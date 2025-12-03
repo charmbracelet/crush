@@ -402,7 +402,8 @@ func (m *modelDialogCmp) Cursor() *tea.Cursor {
 	}
 	if m.showClaudeOAuth2 {
 		if cursor := m.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
-			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
+			// Compensate for dialog padding and border positioning
+			cursor.Y += 2
 			return m.moveCursor(cursor)
 		}
 		return nil

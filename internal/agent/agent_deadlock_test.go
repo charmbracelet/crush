@@ -194,7 +194,7 @@ func TestParseAgentToolSessionID(t *testing.T) {
 	parsedMessageID, parsedToolCallID, ok := sessions.ParseAgentToolSessionID(agentToolSessionID)
 	require.True(t, ok)
 	require.Equal(t, messageID, parsedMessageID)
-	require.Equal(t, toolCallID, string(parsedToolCallID))
+	require.Equal(t, toolCallID, parsedToolCallID) // Compare ToolCallID types directly
 	
 	// Test invalid session ID
 	_, _, ok = sessions.ParseAgentToolSessionID("invalid-session-id")

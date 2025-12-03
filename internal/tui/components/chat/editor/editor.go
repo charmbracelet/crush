@@ -112,7 +112,7 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 		return util.ReportError(err)
 	}
 	cmdStr := editor + " " + tmpfile.Name()
-	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	return util.ExecShell(context.Background(), cmdStr, func(err error) tea.Msg {
 		if err != nil {
 			return util.ReportError(err)
 		}

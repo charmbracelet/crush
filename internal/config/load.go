@@ -89,7 +89,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
-	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
+	if err := cfg.configureProviders(context.Background(), env, valueResolver, cfg.knownProviders); err != nil {
 		return nil, errors.Wrap(err, "failed to configure providers")
 	}
 
@@ -133,7 +133,7 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(ctx context.Context, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
@@ -202,7 +202,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		if p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil {
 			if config.OAuthToken.IsExpired() {
-				newToken, err := claude.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
+				newToken, err := claude.RefreshToken(ctx, config.OAuthToken.RefreshToken)
 				if err == nil {
 					slog.Info("Successfully refreshed Anthropic OAuth token")
 					config.OAuthToken = newToken

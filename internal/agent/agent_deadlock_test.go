@@ -170,7 +170,7 @@ func TestAgentToolDeadlockPrevention(t *testing.T) {
 		}
 		
 		// Wait for all cleanup to complete
-		for i := 0; i < len(sessionIDs); i++ {
+		for range len(sessionIDs) {
 			<-done
 		}
 		

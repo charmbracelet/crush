@@ -284,7 +284,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.ReportError(err)
 		}
 
-		go a.app.UpdateAgentModel(context.TODO())
+		go a.app.UpdateAgentModel(context.Background())
 
 		modelTypeName := "large"
 		if msg.ModelType == config.SelectedModelTypeSmall {

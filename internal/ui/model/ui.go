@@ -177,6 +177,10 @@ func (m *UI) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// sessionLoadedDoneMsg indicates that session loading and message appending is
+// done.
+type sessionLoadedDoneMsg struct{}
+
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -194,7 +198,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, message := range msgs {
 			m.chat.AppendMessage(message)
 		}
+		// Notify that session loading is done to scroll to bottom. This is
+		// needed because we need to draw the chat list first before we can
+		// scroll to bottom.
+		cmds = append(cmds, func() tea.Msg {
+			return sessionLoadedDoneMsg{}
+		})
+	case sessionLoadedDoneMsg:
 		m.chat.ScrollToBottom()
+		m.chat.SelectLast()
 	case sessionFilesLoadedMsg:
 		m.sessionFiles = msg.files
 	case pubsub.Event[history.File]:

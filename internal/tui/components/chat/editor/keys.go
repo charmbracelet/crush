@@ -36,12 +36,12 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			key.WithHelp("ctrl+j", "newline"),
 		),
 		Next: key.NewBinding(
-			key.WithKeys("shift+down"),
-			key.WithHelp("shift+↓", "down"),
+			key.WithKeys("down"),
+			key.WithHelp("↓", "down"),
 		),
 		Previous: key.NewBinding(
-			key.WithKeys("shift+up"),
-			key.WithHelp("shift+↑", "up"),
+			key.WithKeys("up"),
+			key.WithHelp("↑", "up"),
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),

@@ -207,22 +207,23 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			break
 		}
 		m.history = InitialiseHistory(m.textarea.Value(), msgs)
-		m.textarea.SetValue(m.history.Value())
+		// m.textarea.SetValue(m.history.Value())
 		return m, nil
 	case CloseHistoryMsg:
 		m.textarea.SetValue(msg.valueToSet)
 		m.history = nil
-		return m, nil
+		// return m, nil
 	case ScrollHistoryUp:
 		if m.inHistoryMode() {
 			m.history.ScrollUp()
 			m.textarea.SetValue(m.history.Value())
-			m.textarea.CursorStart()
+			m.textarea.MoveToBegin()
 		}
 	case ScrollHistoryDown:
 		if m.inHistoryMode() {
 			m.history.ScrollDown()
 			m.textarea.SetValue(m.history.Value())
+			m.textarea.MoveToEnd()
 		}
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
@@ -358,23 +359,9 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			switch true {
 			case key.Matches(msg, m.keyMap.Previous):
 				cmds = append(cmds, m.handlePreviousKeypressSideEffect()...)
-				// if cursor is on top line move cursor to start of line
-				// if cursor is at start of line already, then scroll history up
 			case key.Matches(msg, m.keyMap.Next):
 				cmds = append(cmds, m.handleNextKeypressSideEffect()...)
 			}
-			/*
-				if m.textarea.LineCount()
-				if !m.inHistoryMode() {
-					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
-				} else {
-					if key.Matches(msg, m.keyMap.Previous) {
-						cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
-					} else if key.Matches(msg, m.keyMap.Next) {
-						cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
-					}
-				}
-			*/
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -461,18 +448,20 @@ func (m *editorCmp) handlePreviousKeypressSideEffect() []tea.Cmd {
 	cmds := []tea.Cmd{}
 	lineInfo := m.textarea.LineInfo()
 
-	// Check if cursor is on the first row (actual line in the buffer)
+	// NOTE(tauraamui):	Check if we're on first line (actual first line in the buffer),
+	// not visually. The line method returns the current line the cursor is on, IGNORING
+	// whether there are mutliple lines due to wrapping
 	if m.textarea.Line() == 0 {
-		// On the first row - check if we're at the start
-		if lineInfo.RowOffset == 0 && lineInfo.ColumnOffset == 0 {
-			// Already at the very start of the textarea - emit your event
-			if !m.inHistoryMode() {
-				cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+		// NOTE(tauraamui):
+		if lineInfo.RowOffset == 0 {
+			if lineInfo.ColumnOffset == 0 {
+				if !m.inHistoryMode() {
+					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				}
+				cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+				return cmds
 			}
-			cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
-		} else {
-			// On first row but not at start - jump to start
-			m.textarea.CursorStart()
+			m.textarea.MoveToBegin()
 		}
 	}
 
@@ -481,6 +470,25 @@ func (m *editorCmp) handlePreviousKeypressSideEffect() []tea.Cmd {
 
 func (m *editorCmp) handleNextKeypressSideEffect() []tea.Cmd {
 	cmds := []tea.Cmd{}
+	lineInfo := m.textarea.LineInfo()
+
+	// NOTE(tauraamui):	Check if we're on the last line (actual last line in the buffer),
+	// not visually. The line method returns the current line the cursor is on, IGNORING
+	// whether there are mutliple lines due to wrapping
+	if m.textarea.Line() == m.textarea.LineCount()-1 {
+		// NOTE(tauraamui):
+		if lineInfo.RowOffset == lineInfo.Height-1 {
+			if lineInfo.ColumnOffset == lineInfo.Width {
+				if !m.inHistoryMode() {
+					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				}
+				cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
+				return cmds
+			}
+			m.textarea.MoveToEnd()
+		}
+	}
+
 	return cmds
 }
 

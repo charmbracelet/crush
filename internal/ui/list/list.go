@@ -16,8 +16,7 @@ type List struct {
 	width, height int
 
 	// Data
-	items    []Item
-	indexMap map[string]int // ID -> index for fast lookup
+	items []Item
 
 	// Focus & Selection
 	focused     bool
@@ -28,23 +27,23 @@ type List struct {
 	totalHeight  int
 
 	// Item positioning in master buffer
-	itemPositions map[string]itemPosition
+	itemPositions []itemPosition
 
 	// Viewport state
 	offset int // Scroll offset in lines from top
 
 	// Mouse state
 	mouseDown     bool
-	mouseDownItem string // Item ID where mouse was pressed
-	mouseDownX    int    // X position in item content (character offset)
-	mouseDownY    int    // Y position in item (line offset)
-	mouseDragItem string // Current item being dragged over
-	mouseDragX    int    // Current X in item content
-	mouseDragY    int    // Current Y in item
+	mouseDownItem int // Item index where mouse was pressed
+	mouseDownX    int // X position in item content (character offset)
+	mouseDownY    int // Y position in item (line offset)
+	mouseDragItem int // Current item index being dragged over
+	mouseDragX    int // Current X in item content
+	mouseDragY    int // Current Y in item
 
 	// Dirty tracking
 	dirty      bool
-	dirtyItems map[string]bool
+	dirtyItems map[int]bool
 }
 
 type itemPosition struct {
@@ -56,15 +55,11 @@ type itemPosition struct {
 func New(items ...Item) *List {
 	l := &List{
 		items:         items,
-		indexMap:      make(map[string]int, len(items)),
-		itemPositions: make(map[string]itemPosition, len(items)),
-		dirtyItems:    make(map[string]bool),
+		itemPositions: make([]itemPosition, len(items)),
+		dirtyItems:    make(map[int]bool),
 		selectedIdx:   -1,
-	}
-
-	// Build index map
-	for i, item := range items {
-		l.indexMap[item.ID()] = i
+		mouseDownItem: -1,
+		mouseDragItem: -1,
 	}
 
 	l.dirty = true
@@ -251,7 +246,7 @@ func (l *List) rebuildMasterBuffer() {
 
 	// Draw each item
 	currentY := 0
-	for _, item := range l.items {
+	for i, item := range l.items {
 		itemHeight := item.Height(l.width)
 
 		// Draw item to master buffer
@@ -259,7 +254,7 @@ func (l *List) rebuildMasterBuffer() {
 		item.Draw(l.masterBuffer, area)
 
 		// Store position
-		l.itemPositions[item.ID()] = itemPosition{
+		l.itemPositions[i] = itemPosition{
 			startLine: currentY,
 			height:    itemHeight,
 		}
@@ -269,7 +264,7 @@ func (l *List) rebuildMasterBuffer() {
 	}
 
 	l.dirty = false
-	l.dirtyItems = make(map[string]bool)
+	l.dirtyItems = make(map[int]bool)
 }
 
 // updateDirtyItems efficiently updates only changed items using slice operations.
@@ -280,21 +275,9 @@ func (l *List) updateDirtyItems() {
 
 	// Check if all dirty items have unchanged heights
 	allSameHeight := true
-	for id := range l.dirtyItems {
-		idx, ok := l.indexMap[id]
-		if !ok {
-			continue
-		}
-
+	for idx := range l.dirtyItems {
 		item := l.items[idx]
-		pos, ok := l.itemPositions[id]
-		if !ok {
-			l.dirty = true
-			l.dirtyItems = make(map[string]bool)
-			l.rebuildMasterBuffer()
-			return
-		}
-
+		pos := l.itemPositions[idx]
 		newHeight := item.Height(l.width)
 		if newHeight != pos.height {
 			allSameHeight = false
@@ -305,10 +288,9 @@ func (l *List) updateDirtyItems() {
 	// Optimization: If all dirty items have unchanged heights, re-render in place
 	if allSameHeight {
 		buf := l.masterBuffer.Buffer
-		for id := range l.dirtyItems {
-			idx := l.indexMap[id]
+		for idx := range l.dirtyItems {
 			item := l.items[idx]
-			pos := l.itemPositions[id]
+			pos := l.itemPositions[idx]
 
 			// Clear the item's area
 			for y := pos.startLine; y < pos.startLine+pos.height && y < len(buf.Lines); y++ {
@@ -320,23 +302,22 @@ func (l *List) updateDirtyItems() {
 			item.Draw(l.masterBuffer, area)
 		}
 
-		l.dirtyItems = make(map[string]bool)
+		l.dirtyItems = make(map[int]bool)
 		return
 	}
 
 	// Height changed - full rebuild
 	l.dirty = true
-	l.dirtyItems = make(map[string]bool)
+	l.dirtyItems = make(map[int]bool)
 	l.rebuildMasterBuffer()
 }
 
 // updatePositionsBelow updates the startLine for all items below the given index.
 func (l *List) updatePositionsBelow(fromIdx int, delta int) {
 	for i := fromIdx + 1; i < len(l.items); i++ {
-		item := l.items[i]
-		pos := l.itemPositions[item.ID()]
+		pos := l.itemPositions[i]
 		pos.startLine += delta
-		l.itemPositions[item.ID()] = pos
+		l.itemPositions[i] = pos
 	}
 }
 
@@ -395,13 +376,7 @@ func (l *List) Len() int {
 // SetItems replaces all items in the list.
 func (l *List) SetItems(items []Item) {
 	l.items = items
-	l.indexMap = make(map[string]int, len(items))
-	l.itemPositions = make(map[string]itemPosition, len(items))
-
-	for i, item := range items {
-		l.indexMap[item.ID()] = i
-	}
-
+	l.itemPositions = make([]itemPosition, len(items))
 	l.dirty = true
 }
 
@@ -410,15 +385,15 @@ func (l *List) Items() []Item {
 	return l.items
 }
 
-// AppendItem adds an item to the end of the list.
-func (l *List) AppendItem(item Item) {
+// AppendItem adds an item to the end of the list. Returns true if successful.
+func (l *List) AppendItem(item Item) bool {
 	l.items = append(l.items, item)
-	l.indexMap[item.ID()] = len(l.items) - 1
+	l.itemPositions = append(l.itemPositions, itemPosition{})
 
 	// If buffer not built yet, mark dirty for full rebuild
 	if l.masterBuffer == nil || l.width <= 0 {
 		l.dirty = true
-		return
+		return true
 	}
 
 	// Process any pending dirty items before modifying buffer structure
@@ -442,23 +417,20 @@ func (l *List) AppendItem(item Item) {
 	item.Draw(l.masterBuffer, area)
 
 	// Update tracking
-	l.itemPositions[item.ID()] = itemPosition{
+	l.itemPositions[len(l.items)-1] = itemPosition{
 		startLine: startLine,
 		height:    itemHeight,
 	}
 	l.totalHeight += itemHeight
+
+	return true
 }
 
-// PrependItem adds an item to the beginning of the list.
-func (l *List) PrependItem(item Item) {
+// PrependItem adds an item to the beginning of the list. Returns true if
+// successful.
+func (l *List) PrependItem(item Item) bool {
 	l.items = append([]Item{item}, l.items...)
-
-	// Rebuild index map (all indices shifted)
-	l.indexMap = make(map[string]int, len(l.items))
-	for i, itm := range l.items {
-		l.indexMap[itm.ID()] = i
-	}
-
+	l.itemPositions = append([]itemPosition{{}}, l.itemPositions...)
 	if l.selectedIdx >= 0 {
 		l.selectedIdx++
 	}
@@ -466,7 +438,7 @@ func (l *List) PrependItem(item Item) {
 	// If buffer not built yet, mark dirty for full rebuild
 	if l.masterBuffer == nil || l.width <= 0 {
 		l.dirty = true
-		return
+		return true
 	}
 
 	// Process any pending dirty items before modifying buffer structure
@@ -492,42 +464,41 @@ func (l *List) PrependItem(item Item) {
 	item.Draw(l.masterBuffer, area)
 
 	// Update all positions (shift everything down)
-	for i := 1; i < len(l.items); i++ {
-		itm := l.items[i]
-		if pos, ok := l.itemPositions[itm.ID()]; ok {
-			pos.startLine += itemHeight
-			l.itemPositions[itm.ID()] = pos
-		}
+	for i := range l.itemPositions {
+		pos := l.itemPositions[i]
+		pos.startLine += itemHeight
+		l.itemPositions[i] = pos
 	}
 
-	// Add position for new item
-	l.itemPositions[item.ID()] = itemPosition{
+	// Add position for new item at start
+	l.itemPositions[0] = itemPosition{
 		startLine: 0,
 		height:    itemHeight,
 	}
+
 	l.totalHeight += itemHeight
+
+	return true
 }
 
-// UpdateItem replaces an item with the same ID.
-func (l *List) UpdateItem(id string, item Item) {
-	idx, ok := l.indexMap[id]
-	if !ok {
-		return
+// UpdateItem replaces an item with the same index. Returns true if successful.
+func (l *List) UpdateItem(idx int, item Item) bool {
+	if idx < 0 || idx >= len(l.items) {
+		return false
 	}
-
 	l.items[idx] = item
-	l.dirtyItems[id] = true
+	l.dirtyItems[idx] = true
+	return true
 }
 
-// DeleteItem removes an item by ID.
-func (l *List) DeleteItem(id string) {
-	idx, ok := l.indexMap[id]
-	if !ok {
-		return
+// DeleteItem removes an item by index. Returns true if successful.
+func (l *List) DeleteItem(idx int) bool {
+	if idx < 0 || idx >= len(l.items) {
+		return false
 	}
 
 	// Get position before deleting
-	pos, hasPos := l.itemPositions[id]
+	pos := l.itemPositions[idx]
 
 	// Process any pending dirty items before modifying buffer structure
 	if len(l.dirtyItems) > 0 {
@@ -535,13 +506,7 @@ func (l *List) DeleteItem(id string) {
 	}
 
 	l.items = append(l.items[:idx], l.items[idx+1:]...)
-	delete(l.indexMap, id)
-	delete(l.itemPositions, id)
-
-	// Rebuild index map for items after deleted one
-	for i := idx; i < len(l.items); i++ {
-		l.indexMap[l.items[i].ID()] = i
-	}
+	l.itemPositions = append(l.itemPositions[:idx], l.itemPositions[idx+1:]...)
 
 	// Adjust selection
 	if l.selectedIdx == idx {
@@ -557,9 +522,9 @@ func (l *List) DeleteItem(id string) {
 	}
 
 	// If buffer not built yet, mark dirty for full rebuild
-	if l.masterBuffer == nil || !hasPos {
+	if l.masterBuffer == nil {
 		l.dirty = true
-		return
+		return true
 	}
 
 	// Efficient delete: remove lines from buffer
@@ -575,6 +540,8 @@ func (l *List) DeleteItem(id string) {
 		// Position data corrupt, rebuild
 		l.dirty = true
 	}
+
+	return true
 }
 
 // Focus focuses the list and the selected item (if focusable).
@@ -595,12 +562,10 @@ func (l *List) Focused() bool {
 }
 
 // SetSelected sets the selected item by ID.
-func (l *List) SetSelected(id string) {
-	idx, ok := l.indexMap[id]
-	if !ok {
+func (l *List) SetSelected(idx int) {
+	if idx < 0 || idx >= len(l.items) {
 		return
 	}
-
 	if l.selectedIdx == idx {
 		return
 	}
@@ -613,33 +578,25 @@ func (l *List) SetSelected(id string) {
 		if prevIdx >= 0 && prevIdx < len(l.items) {
 			if f, ok := l.items[prevIdx].(Focusable); ok {
 				f.Blur()
-				l.dirtyItems[l.items[prevIdx].ID()] = true
+				l.dirtyItems[prevIdx] = true
 			}
 		}
 
 		if f, ok := l.items[idx].(Focusable); ok {
 			f.Focus()
-			l.dirtyItems[l.items[idx].ID()] = true
+			l.dirtyItems[idx] = true
 		}
 	}
 }
 
-// SetSelectedIndex sets the selected item by index.
-func (l *List) SetSelectedIndex(idx int) {
-	if idx < 0 || idx >= len(l.items) {
-		return
-	}
-	l.SetSelected(l.items[idx].ID())
-}
-
 // SelectFirst selects the first item in the list.
 func (l *List) SelectFirst() {
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 }
 
 // SelectLast selects the last item in the list.
 func (l *List) SelectLast() {
-	l.SetSelectedIndex(len(l.items) - 1)
+	l.SetSelected(len(l.items) - 1)
 }
 
 // SelectNextWrap selects the next item in the list (wraps to beginning).
@@ -679,7 +636,7 @@ func (l *List) selectNext(wrap bool) {
 		}
 
 		// Select and scroll to this item
-		l.SetSelected(l.items[nextIdx].ID())
+		l.SetSelected(nextIdx)
 		return
 	}
 }
@@ -721,7 +678,7 @@ func (l *List) selectPrev(wrap bool) {
 		}
 
 		// Select and scroll to this item
-		l.SetSelected(l.items[prevIdx].ID())
+		l.SetSelected(prevIdx)
 		return
 	}
 }
@@ -773,13 +730,9 @@ func (l *List) ScrollToBottom() {
 }
 
 // ScrollToItem scrolls to make the item with the given ID visible.
-func (l *List) ScrollToItem(id string) {
+func (l *List) ScrollToItem(idx int) {
 	l.ensureBuilt()
-	pos, ok := l.itemPositions[id]
-	if !ok {
-		return
-	}
-
+	pos := l.itemPositions[idx]
 	itemStart := pos.startLine
 	itemEnd := pos.startLine + pos.height
 	viewStart := l.offset
@@ -805,7 +758,7 @@ func (l *List) ScrollToSelected() {
 	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {
 		return
 	}
-	l.ScrollToItem(l.items[l.selectedIdx].ID())
+	l.ScrollToItem(l.selectedIdx)
 }
 
 // Offset returns the current scroll offset.
@@ -825,15 +778,12 @@ func (l *List) SelectFirstInView() {
 	viewportStart := l.offset
 	viewportEnd := l.offset + l.height
 
-	for i, item := range l.items {
-		pos, ok := l.itemPositions[item.ID()]
-		if !ok {
-			continue
-		}
+	for i := range l.items {
+		pos := l.itemPositions[i]
 
 		// Check if item is fully within viewport bounds
 		if pos.startLine >= viewportStart && (pos.startLine+pos.height) <= viewportEnd {
-			l.SetSelectedIndex(i)
+			l.SetSelected(i)
 			return
 		}
 	}
@@ -847,15 +797,11 @@ func (l *List) SelectLastInView() {
 	viewportEnd := l.offset + l.height
 
 	for i := len(l.items) - 1; i >= 0; i-- {
-		item := l.items[i]
-		pos, ok := l.itemPositions[item.ID()]
-		if !ok {
-			continue
-		}
+		pos := l.itemPositions[i]
 
 		// Check if item is fully within viewport bounds
 		if pos.startLine >= viewportStart && (pos.startLine+pos.height) <= viewportEnd {
-			l.SetSelectedIndex(i)
+			l.SetSelected(i)
 			return
 		}
 	}
@@ -868,11 +814,7 @@ func (l *List) SelectedItemInView() bool {
 	}
 
 	// Get selected item ID and position
-	item := l.items[l.selectedIdx]
-	pos, ok := l.itemPositions[item.ID()]
-	if !ok {
-		return false
-	}
+	pos := l.itemPositions[l.selectedIdx]
 
 	// Check if item is within viewport bounds
 	viewportStart := l.offset
@@ -896,7 +838,7 @@ func (l *List) focusSelectedItem() {
 	item := l.items[l.selectedIdx]
 	if f, ok := item.(Focusable); ok {
 		f.Focus()
-		l.dirtyItems[item.ID()] = true
+		l.dirtyItems[l.selectedIdx] = true
 	}
 }
 
@@ -909,7 +851,7 @@ func (l *List) blurSelectedItem() {
 	item := l.items[l.selectedIdx]
 	if f, ok := item.(Focusable); ok {
 		f.Blur()
-		l.dirtyItems[item.ID()] = true
+		l.dirtyItems[l.selectedIdx] = true
 	}
 }
 
@@ -923,8 +865,8 @@ func (l *List) HandleMouseDown(x, y int) bool {
 	bufferY := y + l.offset
 
 	// Find which item was clicked
-	itemID, itemY := l.findItemAtPosition(bufferY)
-	if itemID == "" {
+	itemIdx, itemY := l.findItemAtPosition(bufferY)
+	if itemIdx < 0 {
 		return false
 	}
 
@@ -933,17 +875,15 @@ func (l *List) HandleMouseDown(x, y int) bool {
 	// Items can interpret this as character offset in their content
 
 	l.mouseDown = true
-	l.mouseDownItem = itemID
+	l.mouseDownItem = itemIdx
 	l.mouseDownX = x
 	l.mouseDownY = itemY
-	l.mouseDragItem = itemID
+	l.mouseDragItem = itemIdx
 	l.mouseDragX = x
 	l.mouseDragY = itemY
 
 	// Select the clicked item
-	if idx, ok := l.indexMap[itemID]; ok {
-		l.SetSelectedIndex(idx)
-	}
+	l.SetSelected(itemIdx)
 
 	return true
 }
@@ -962,12 +902,12 @@ func (l *List) HandleMouseDrag(x, y int) bool {
 	bufferY := y + l.offset
 
 	// Find which item we're dragging over
-	itemID, itemY := l.findItemAtPosition(bufferY)
-	if itemID == "" {
+	itemIdx, itemY := l.findItemAtPosition(bufferY)
+	if itemIdx < 0 {
 		return false
 	}
 
-	l.mouseDragItem = itemID
+	l.mouseDragItem = itemIdx
 	l.mouseDragX = x
 	l.mouseDragY = itemY
 
@@ -994,47 +934,46 @@ func (l *List) HandleMouseUp(x, y int) bool {
 
 // ClearHighlight clears any active text highlighting.
 func (l *List) ClearHighlight() {
-	for _, item := range l.items {
+	for i, item := range l.items {
 		if h, ok := item.(Highlightable); ok {
 			h.SetHighlight(-1, -1, -1, -1)
-			l.dirtyItems[item.ID()] = true
+			l.dirtyItems[i] = true
 		}
 	}
+	l.mouseDownItem = -1
+	l.mouseDragItem = -1
 }
 
 // findItemAtPosition finds the item at the given master buffer y coordinate.
-// Returns the item ID and the y offset within that item.
-func (l *List) findItemAtPosition(bufferY int) (itemID string, itemY int) {
+// Returns the item index and the y offset within that item. It returns -1, -1
+// if no item is found.
+func (l *List) findItemAtPosition(bufferY int) (itemIdx int, itemY int) {
 	if bufferY < 0 || bufferY >= l.totalHeight {
-		return "", 0
+		return -1, -1
 	}
 
 	// Linear search through items to find which one contains this y
 	// This could be optimized with binary search if needed
-	for _, item := range l.items {
-		pos, ok := l.itemPositions[item.ID()]
-		if !ok {
-			continue
-		}
-
+	for i := range l.items {
+		pos := l.itemPositions[i]
 		if bufferY >= pos.startLine && bufferY < pos.startLine+pos.height {
-			return item.ID(), bufferY - pos.startLine
+			return i, bufferY - pos.startLine
 		}
 	}
 
-	return "", 0
+	return -1, -1
 }
 
 // updateHighlight updates the highlight range for highlightable items.
 // Supports highlighting across multiple items and respects drag direction.
 func (l *List) updateHighlight() {
-	if l.mouseDownItem == "" {
+	if l.mouseDownItem < 0 {
 		return
 	}
 
 	// Get start and end item indices
-	downItemIdx := l.indexMap[l.mouseDownItem]
-	dragItemIdx := l.indexMap[l.mouseDragItem]
+	downItemIdx := l.mouseDownItem
+	dragItemIdx := l.mouseDragItem
 
 	// Determine selection direction
 	draggingDown := dragItemIdx > downItemIdx ||
@@ -1064,10 +1003,10 @@ func (l *List) updateHighlight() {
 	}
 
 	// Clear all highlights first
-	for _, item := range l.items {
+	for i, item := range l.items {
 		if h, ok := item.(Highlightable); ok {
 			h.SetHighlight(-1, -1, -1, -1)
-			l.dirtyItems[item.ID()] = true
+			l.dirtyItems[i] = true
 		}
 	}
 
@@ -1083,18 +1022,18 @@ func (l *List) updateHighlight() {
 			item.SetHighlight(startLine, startCol, endLine, endCol)
 		} else if idx == startItemIdx {
 			// First item - from start position to end of item
-			pos := l.itemPositions[l.items[idx].ID()]
+			pos := l.itemPositions[idx]
 			item.SetHighlight(startLine, startCol, pos.height-1, 9999) // 9999 = end of line
 		} else if idx == endItemIdx {
 			// Last item - from start of item to end position
 			item.SetHighlight(0, 0, endLine, endCol)
 		} else {
 			// Middle item - fully highlighted
-			pos := l.itemPositions[l.items[idx].ID()]
+			pos := l.itemPositions[idx]
 			item.SetHighlight(0, 0, pos.height-1, 9999)
 		}
 
-		l.dirtyItems[l.items[idx].ID()] = true
+		l.dirtyItems[idx] = true
 	}
 }
 
@@ -1110,7 +1049,7 @@ func (l *List) GetHighlightedText() string {
 	var result strings.Builder
 
 	// Iterate through items to find highlighted ones
-	for _, item := range l.items {
+	for i, item := range l.items {
 		h, ok := item.(Highlightable)
 		if !ok {
 			continue
@@ -1121,10 +1060,7 @@ func (l *List) GetHighlightedText() string {
 			continue
 		}
 
-		pos, ok := l.itemPositions[item.ID()]
-		if !ok {
-			continue
-		}
+		pos := l.itemPositions[i]
 
 		// Extract text from highlighted region in master buffer
 		for y := startLine; y <= endLine && y < pos.height; y++ {

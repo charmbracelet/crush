@@ -12,15 +12,15 @@ import (
 func Example_basic() {
 	// Create some items
 	items := []list.Item{
-		list.NewStringItem("1", "First item"),
-		list.NewStringItem("2", "Second item"),
-		list.NewStringItem("3", "Third item"),
+		list.NewStringItem("First item"),
+		list.NewStringItem("Second item"),
+		list.NewStringItem("Third item"),
 	}
 
 	// Create a list with options
 	l := list.New(items...)
 	l.SetSize(80, 10)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 	if true {
 		l.Focus()
 	}
@@ -109,7 +109,7 @@ func Example_focusable() {
 	// Create list with first item selected and focused
 	l := list.New(items...)
 	l.SetSize(80, 20)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 	if true {
 		l.Focus()
 	}
@@ -127,8 +127,8 @@ func Example_focusable() {
 // Example demonstrates dynamic item updates.
 func Example_dynamicUpdates() {
 	items := []list.Item{
-		list.NewStringItem("1", "Item 1"),
-		list.NewStringItem("2", "Item 2"),
+		list.NewStringItem("Item 1"),
+		list.NewStringItem("Item 2"),
 	}
 
 	l := list.New(items...)
@@ -140,13 +140,13 @@ func Example_dynamicUpdates() {
 	l.Draw(&screen, area)
 
 	// Update an item
-	l.UpdateItem("2", list.NewStringItem("2", "Updated Item 2"))
+	l.UpdateItem(2, list.NewStringItem("Updated Item 2"))
 
 	// Draw again - only changed item is re-rendered
 	l.Draw(&screen, area)
 
 	// Append a new item
-	l.AppendItem(list.NewStringItem("3", "New Item 3"))
+	l.AppendItem(list.NewStringItem("New Item 3"))
 
 	// Draw again - master buffer grows efficiently
 	l.Draw(&screen, area)
@@ -161,7 +161,6 @@ func Example_scrolling() {
 	items := make([]list.Item, 100)
 	for i := range items {
 		items[i] = list.NewStringItem(
-			fmt.Sprintf("%d", i),
 			fmt.Sprintf("Item %d", i),
 		)
 	}
@@ -169,7 +168,7 @@ func Example_scrolling() {
 	// Create list with small viewport
 	l := list.New(items...)
 	l.SetSize(80, 10)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 
 	// Draw initial view (shows items 0-9)
 	screen := uv.NewScreenBuffer(80, 10)
@@ -181,7 +180,7 @@ func Example_scrolling() {
 	l.Draw(&screen, area) // Now shows items 5-14
 
 	// Jump to specific item
-	l.ScrollToItem("50")
+	l.ScrollToItem(50)
 	l.Draw(&screen, area) // Now shows item 50 and neighbors
 
 	// Scroll to bottom
@@ -258,9 +257,9 @@ func Example_variableHeights() {
 func Example_markdown() {
 	// Create markdown items
 	items := []list.Item{
-		list.NewMarkdownItem("1", "# Welcome\n\nThis is a **markdown** item."),
-		list.NewMarkdownItem("2", "## Features\n\n- Supports **bold**\n- Supports *italic*\n- Supports `code`"),
-		list.NewMarkdownItem("3", "### Code Block\n\n```go\nfunc main() {\n    fmt.Println(\"Hello\")\n}\n```"),
+		list.NewMarkdownItem("# Welcome\n\nThis is a **markdown** item."),
+		list.NewMarkdownItem("## Features\n\n- Supports **bold**\n- Supports *italic*\n- Supports `code`"),
+		list.NewMarkdownItem("### Code Block\n\n```go\nfunc main() {\n    fmt.Println(\"Hello\")\n}\n```"),
 	}
 
 	// Create list

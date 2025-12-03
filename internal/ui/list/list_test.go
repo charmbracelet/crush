@@ -11,9 +11,9 @@ import (
 
 func TestNewList(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
@@ -30,9 +30,9 @@ func TestNewList(t *testing.T) {
 
 func TestListDraw(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
@@ -54,52 +54,44 @@ func TestListDraw(t *testing.T) {
 
 func TestListAppendItem(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
+		NewStringItem("Item 1"),
 	}
 
 	l := New(items...)
-	l.AppendItem(NewStringItem("2", "Item 2"))
+	l.AppendItem(NewStringItem("Item 2"))
 
 	if len(l.items) != 2 {
 		t.Errorf("expected 2 items after append, got %d", len(l.items))
-	}
-
-	if l.items[1].ID() != "2" {
-		t.Errorf("expected item ID '2', got '%s'", l.items[1].ID())
 	}
 }
 
 func TestListDeleteItem(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
-	l.DeleteItem("2")
+	l.DeleteItem(2)
 
 	if len(l.items) != 2 {
 		t.Errorf("expected 2 items after delete, got %d", len(l.items))
-	}
-
-	if l.items[1].ID() != "3" {
-		t.Errorf("expected item ID '3', got '%s'", l.items[1].ID())
 	}
 }
 
 func TestListUpdateItem(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
 	}
 
 	l := New(items...)
 	l.SetSize(80, 10)
 
 	// Update item
-	newItem := NewStringItem("2", "Updated Item 2")
-	l.UpdateItem("2", newItem)
+	newItem := NewStringItem("Updated Item 2")
+	l.UpdateItem(1, newItem)
 
 	if l.items[1].(*StringItem).content != "Updated Item 2" {
 		t.Errorf("expected updated content, got '%s'", l.items[1].(*StringItem).content)
@@ -108,13 +100,13 @@ func TestListUpdateItem(t *testing.T) {
 
 func TestListSelection(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 
 	if l.SelectedIndex() != 0 {
 		t.Errorf("expected selected index 0, got %d", l.SelectedIndex())
@@ -133,11 +125,11 @@ func TestListSelection(t *testing.T) {
 
 func TestListScrolling(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
-		NewStringItem("4", "Item 4"),
-		NewStringItem("5", "Item 5"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
+		NewStringItem("Item 4"),
+		NewStringItem("Item 5"),
 	}
 
 	l := New(items...)
@@ -208,7 +200,7 @@ func TestListFocus(t *testing.T) {
 
 	l := New(items...)
 	l.SetSize(80, 10)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 
 	// Focus the list
 	l.Focus()
@@ -256,12 +248,12 @@ func TestFocusNavigationAfterAppendingToViewportHeight(t *testing.T) {
 
 	// Start with one item
 	items := []Item{
-		NewStringItem("1", "Item 1").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 1").WithFocusStyles(&focusStyle, &blurStyle),
 	}
 
 	l := New(items...)
 	l.SetSize(20, 15) // 15 lines viewport height
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 	l.Focus()
 
 	// Initial draw to build buffer
@@ -271,12 +263,12 @@ func TestFocusNavigationAfterAppendingToViewportHeight(t *testing.T) {
 	// Append items until we exceed viewport height
 	// Each focusable item with border is 5 lines tall
 	for i := 2; i <= 4; i++ {
-		item := NewStringItem(string(rune('0'+i)), "Item "+string(rune('0'+i))).WithFocusStyles(&focusStyle, &blurStyle)
+		item := NewStringItem("Item "+string(rune('0'+i))).WithFocusStyles(&focusStyle, &blurStyle)
 		l.AppendItem(item)
 	}
 
 	// Select the last item
-	l.SetSelectedIndex(3)
+	l.SetSelected(3)
 
 	// Draw
 	screen = uv.NewScreenBuffer(20, 15)
@@ -318,7 +310,7 @@ func TestFocusableItemUpdate(t *testing.T) {
 		BorderForeground(lipgloss.Color("240"))
 
 	// Create a focusable item
-	item := NewStringItem("1", "Test Item").WithFocusStyles(&focusStyle, &blurStyle)
+	item := NewStringItem("Test Item").WithFocusStyles(&focusStyle, &blurStyle)
 
 	// Initially not focused - render with blur style
 	screen1 := uv.NewScreenBuffer(20, 5)
@@ -369,14 +361,14 @@ func TestFocusableItemHeightWithBorder(t *testing.T) {
 		Border(lipgloss.RoundedBorder())
 
 	// Item without styles has height 1
-	plainItem := NewStringItem("1", "Test")
+	plainItem := NewStringItem("Test")
 	plainHeight := plainItem.Height(20)
 	if plainHeight != 1 {
 		t.Errorf("expected plain height 1, got %d", plainHeight)
 	}
 
 	// Item with border should add border height (2 lines)
-	item := NewStringItem("2", "Test").WithFocusStyles(&borderStyle, &borderStyle)
+	item := NewStringItem("Test").WithFocusStyles(&borderStyle, &borderStyle)
 	itemHeight := item.Height(20)
 	expectedHeight := 1 + 2 // content + border
 	if itemHeight != expectedHeight {
@@ -396,14 +388,14 @@ func TestFocusableItemInList(t *testing.T) {
 
 	// Create list with focusable items
 	items := []Item{
-		NewStringItem("1", "Item 1").WithFocusStyles(&focusStyle, &blurStyle),
-		NewStringItem("2", "Item 2").WithFocusStyles(&focusStyle, &blurStyle),
-		NewStringItem("3", "Item 3").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 1").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 2").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 3").WithFocusStyles(&focusStyle, &blurStyle),
 	}
 
 	l := New(items...)
 	l.SetSize(80, 20)
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 
 	// Focus the list
 	l.Focus()
@@ -421,7 +413,7 @@ func TestFocusableItemInList(t *testing.T) {
 	}
 
 	// Select second item
-	l.SetSelectedIndex(1)
+	l.SetSelected(1)
 
 	// First item should be blurred, second focused
 	if firstItem.IsFocused() {
@@ -447,7 +439,7 @@ func TestFocusableItemInList(t *testing.T) {
 
 func TestFocusableItemWithNilStyles(t *testing.T) {
 	// Test with nil styles - should render inner item directly
-	item := NewStringItem("1", "Plain Item").WithFocusStyles(nil, nil)
+	item := NewStringItem("Plain Item").WithFocusStyles(nil, nil)
 
 	// Height should be based on content (no border since styles are nil)
 	itemHeight := item.Height(20)
@@ -488,7 +480,7 @@ func TestFocusableItemWithOnlyFocusStyle(t *testing.T) {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("86"))
 
-	item := NewStringItem("1", "Test").WithFocusStyles(&focusStyle, nil)
+	item := NewStringItem("Test").WithFocusStyles(&focusStyle, nil)
 
 	// When not focused, should use nil blur style (no border)
 	screen1 := uv.NewScreenBuffer(20, 5)
@@ -519,15 +511,15 @@ func TestFocusableItemLastLineNotEaten(t *testing.T) {
 		BorderForeground(lipgloss.Color("240"))
 
 	items := []Item{
-		NewStringItem("1", "Item 1").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 1").WithFocusStyles(&focusStyle, &blurStyle),
 		Gap,
-		NewStringItem("2", "Item 2").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 2").WithFocusStyles(&focusStyle, &blurStyle),
 		Gap,
-		NewStringItem("3", "Item 3").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 3").WithFocusStyles(&focusStyle, &blurStyle),
 		Gap,
-		NewStringItem("4", "Item 4").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 4").WithFocusStyles(&focusStyle, &blurStyle),
 		Gap,
-		NewStringItem("5", "Item 5").WithFocusStyles(&focusStyle, &blurStyle),
+		NewStringItem("Item 5").WithFocusStyles(&focusStyle, &blurStyle),
 	}
 
 	// Items with padding(1) and border are 5 lines each
@@ -543,7 +535,7 @@ func TestFocusableItemLastLineNotEaten(t *testing.T) {
 	l.Focus()
 
 	// Select last item
-	l.SetSelectedIndex(len(items) - 1)
+	l.SetSelected(len(items) - 1)
 
 	// Scroll to bottom
 	l.ScrollToBottom()

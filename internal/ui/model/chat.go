@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/google/uuid"
 )
 
 // ChatAnimItem represents a chat animation item in the chat UI.
@@ -57,20 +56,15 @@ func (c *ChatAnimItem) Height(int) int {
 	return 1
 }
 
-// ID implements list.Item.
-func (c *ChatAnimItem) ID() string {
-	return "anim"
-}
-
 // ChatNoContentItem represents a chat item with no content.
 type ChatNoContentItem struct {
 	*list.StringItem
 }
 
 // NewChatNoContentItem creates a new instance of [ChatNoContentItem].
-func NewChatNoContentItem(t *styles.Styles, id string) *ChatNoContentItem {
+func NewChatNoContentItem(t *styles.Styles) *ChatNoContentItem {
 	c := new(ChatNoContentItem)
-	c.StringItem = list.NewStringItem(id, "No message content").
+	c.StringItem = list.NewStringItem("No message content").
 		WithFocusStyles(&t.Chat.NoContentMessage, &t.Chat.NoContentMessage)
 	return c
 }
@@ -93,7 +87,7 @@ func NewChatMessageItem(t *styles.Styles, msg message.Message) *ChatMessageItem 
 
 	switch msg.Role {
 	case message.User:
-		item := list.NewMarkdownItem(msg.ID, msg.Content().String()).
+		item := list.NewMarkdownItem(msg.Content().String()).
 			WithFocusStyles(&t.Chat.UserMessageFocused, &t.Chat.UserMessageBlurred)
 		item.SetHighlightStyle(list.LipglossStyleToCellStyler(t.TextSelection))
 		// TODO: Add attachments
@@ -113,7 +107,7 @@ func NewChatMessageItem(t *styles.Styles, msg message.Message) *ChatMessageItem 
 			details := t.Chat.ErrorDetails.Render(finishedData.Details)
 			errContent := fmt.Sprintf("%s %s\n\n%s", tag, title, details)
 
-			item := list.NewStringItem(msg.ID, errContent).
+			item := list.NewStringItem(errContent).
 				WithFocusStyles(&t.Chat.AssistantMessageFocused, &t.Chat.AssistantMessageBlurred)
 
 			c.item = item
@@ -141,7 +135,7 @@ func NewChatMessageItem(t *styles.Styles, msg message.Message) *ChatMessageItem 
 			parts = append(parts, content)
 		}
 
-		item := list.NewMarkdownItem(msg.ID, strings.Join(parts, "\n")).
+		item := list.NewMarkdownItem(strings.Join(parts, "\n")).
 			WithFocusStyles(&t.Chat.AssistantMessageFocused, &t.Chat.AssistantMessageBlurred)
 		item.SetHighlightStyle(list.LipglossStyleToCellStyler(t.TextSelection))
 
@@ -159,11 +153,6 @@ func (c *ChatMessageItem) Draw(scr uv.Screen, area uv.Rectangle) {
 // Height implements list.Item.
 func (c *ChatMessageItem) Height(width int) int {
 	return c.item.Height(width)
-}
-
-// ID implements list.Item.
-func (c *ChatMessageItem) ID() string {
-	return c.item.ID()
 }
 
 // Blur implements list.Focusable.
@@ -248,7 +237,7 @@ func (m *Chat) PrependItem(item list.Item) {
 // AppendMessage appends a new message item to the chat list.
 func (m *Chat) AppendMessage(msg message.Message) {
 	if msg.ID == "" {
-		m.AppendItem(NewChatNoContentItem(m.com.Styles, uuid.NewString()))
+		m.AppendItem(NewChatNoContentItem(m.com.Styles))
 	} else {
 		m.AppendItem(NewChatMessageItem(m.com.Styles, msg))
 	}
@@ -258,7 +247,7 @@ func (m *Chat) AppendMessage(msg message.Message) {
 func (m *Chat) AppendItem(item list.Item) {
 	if m.Len() > 0 {
 		// Always add a spacer between messages
-		m.list.AppendItem(list.NewSpacerItem(uuid.NewString(), 1))
+		m.list.AppendItem(list.NewSpacerItem(1))
 	}
 	m.list.AppendItem(item)
 }
@@ -298,9 +287,9 @@ func (m *Chat) SelectedItemInView() bool {
 	return m.list.SelectedItemInView()
 }
 
-// SetSelectedIndex sets the selected message index in the chat list.
-func (m *Chat) SetSelectedIndex(index int) {
-	m.list.SetSelectedIndex(index)
+// SetSelected sets the selected message index in the chat list.
+func (m *Chat) SetSelected(index int) {
+	m.list.SetSelected(index)
 }
 
 // SelectPrev selects the previous message in the chat list.

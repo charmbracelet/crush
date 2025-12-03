@@ -60,9 +60,6 @@ func toUVStyle(lgStyle lipgloss.Style) uv.Style {
 type Item interface {
 	uv.Drawable
 
-	// ID returns unique identifier for this item.
-	ID() string
-
 	// Height returns the item's height in lines for the given width.
 	// This allows items to calculate height based on text wrapping and available space.
 	Height(width int) int
@@ -272,7 +269,6 @@ func (b *BaseHighlightable) ApplyHighlight(buf *uv.ScreenBuffer, width, height i
 type StringItem struct {
 	BaseFocusable
 	BaseHighlightable
-	id      string
 	content string // Raw content string (may contain ANSI styles)
 	wrap    bool   // Whether to wrap text
 
@@ -305,9 +301,8 @@ func LipglossStyleToCellStyler(lgStyle lipgloss.Style) CellStyler {
 }
 
 // NewStringItem creates a new string item with the given ID and content.
-func NewStringItem(id, content string) *StringItem {
+func NewStringItem(content string) *StringItem {
 	s := &StringItem{
-		id:      id,
 		content: content,
 		wrap:    false,
 		cache:   make(map[int]string),
@@ -317,9 +312,8 @@ func NewStringItem(id, content string) *StringItem {
 }
 
 // NewWrappingStringItem creates a new string item that wraps text to fit width.
-func NewWrappingStringItem(id, content string) *StringItem {
+func NewWrappingStringItem(content string) *StringItem {
 	s := &StringItem{
-		id:      id,
 		content: content,
 		wrap:    true,
 		cache:   make(map[int]string),
@@ -333,11 +327,6 @@ func NewWrappingStringItem(id, content string) *StringItem {
 func (s *StringItem) WithFocusStyles(focusStyle, blurStyle *lipgloss.Style) *StringItem {
 	s.SetFocusStyles(focusStyle, blurStyle)
 	return s
-}
-
-// ID implements Item.
-func (s *StringItem) ID() string {
-	return s.id
 }
 
 // Height implements Item.
@@ -423,7 +412,6 @@ func (s *StringItem) SetHighlight(startLine, startCol, endLine, endCol int) {
 type MarkdownItem struct {
 	BaseFocusable
 	BaseHighlightable
-	id          string
 	markdown    string            // Raw markdown content
 	styleConfig *ansi.StyleConfig // Optional style configuration
 	maxWidth    int               // Maximum wrap width (default 120)
@@ -438,9 +426,8 @@ const DefaultMarkdownMaxWidth = 120
 
 // NewMarkdownItem creates a new markdown item with the given ID and markdown content.
 // If focusStyle and blurStyle are both non-nil, the item will implement Focusable.
-func NewMarkdownItem(id, markdown string) *MarkdownItem {
+func NewMarkdownItem(markdown string) *MarkdownItem {
 	m := &MarkdownItem{
-		id:       id,
 		markdown: markdown,
 		maxWidth: DefaultMarkdownMaxWidth,
 		cache:    make(map[int]string),
@@ -466,11 +453,6 @@ func (m *MarkdownItem) WithMaxWidth(maxWidth int) *MarkdownItem {
 func (m *MarkdownItem) WithFocusStyles(focusStyle, blurStyle *lipgloss.Style) *MarkdownItem {
 	m.SetFocusStyles(focusStyle, blurStyle)
 	return m
-}
-
-// ID implements Item.
-func (m *MarkdownItem) ID() string {
-	return m.id
 }
 
 // Height implements Item.
@@ -563,28 +545,21 @@ func (m *MarkdownItem) SetHighlight(startLine, startCol, endLine, endCol int) {
 }
 
 // Gap is a 1-line spacer item used to add gaps between items.
-var Gap = NewSpacerItem("spacer-gap", 1)
+var Gap = NewSpacerItem(1)
 
 // SpacerItem is an empty item that takes up vertical space.
 // Useful for adding gaps between items in a list.
 type SpacerItem struct {
-	id     string
 	height int
 }
 
 var _ Item = (*SpacerItem)(nil)
 
 // NewSpacerItem creates a new spacer item with the given ID and height in lines.
-func NewSpacerItem(id string, height int) *SpacerItem {
+func NewSpacerItem(height int) *SpacerItem {
 	return &SpacerItem{
-		id:     id,
 		height: height,
 	}
-}
-
-// ID implements Item.
-func (s *SpacerItem) ID() string {
-	return s.id
 }
 
 // Height implements Item.

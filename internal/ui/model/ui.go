@@ -326,7 +326,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 				m.focus = uiFocusMain
 				m.textarea.Blur()
 				m.chat.Focus()
-				m.chat.SetSelectedIndex(m.chat.Len() - 1)
+				m.chat.SetSelected(m.chat.Len() - 1)
 			}
 		case key.Matches(msg, m.keyMap.Chat.Up):
 			m.chat.ScrollBy(-1)

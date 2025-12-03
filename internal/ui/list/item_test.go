@@ -10,9 +10,9 @@ import (
 
 func TestRenderHelper(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
@@ -39,11 +39,11 @@ func TestRenderHelper(t *testing.T) {
 
 func TestRenderWithScrolling(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
-		NewStringItem("4", "Item 4"),
-		NewStringItem("5", "Item 5"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
+		NewStringItem("Item 4"),
+		NewStringItem("Item 5"),
 	}
 
 	l := New(items...)
@@ -89,8 +89,8 @@ func TestRenderEmptyList(t *testing.T) {
 
 func TestRenderVsDrawConsistency(t *testing.T) {
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
 	}
 
 	l := New(items...)
@@ -119,7 +119,7 @@ func TestRenderVsDrawConsistency(t *testing.T) {
 func BenchmarkRender(b *testing.B) {
 	items := make([]Item, 100)
 	for i := range items {
-		items[i] = NewStringItem(string(rune(i)), "Item content here")
+		items[i] = NewStringItem("Item content here")
 	}
 
 	l := New(items...)
@@ -135,7 +135,7 @@ func BenchmarkRender(b *testing.B) {
 func BenchmarkRenderWithScrolling(b *testing.B) {
 	items := make([]Item, 1000)
 	for i := range items {
-		items[i] = NewStringItem(string(rune(i)), "Item content here")
+		items[i] = NewStringItem("Item content here")
 	}
 
 	l := New(items...)
@@ -150,7 +150,7 @@ func BenchmarkRenderWithScrolling(b *testing.B) {
 }
 
 func TestStringItemCache(t *testing.T) {
-	item := NewStringItem("1", "Test content")
+	item := NewStringItem("Test content")
 
 	// First draw at width 80 should populate cache
 	screen1 := uv.NewScreenBuffer(80, 5)
@@ -188,14 +188,14 @@ func TestStringItemCache(t *testing.T) {
 
 func TestWrappingItemHeight(t *testing.T) {
 	// Short text that fits in one line
-	item1 := NewWrappingStringItem("1", "Short")
+	item1 := NewWrappingStringItem("Short")
 	if h := item1.Height(80); h != 1 {
 		t.Errorf("expected height 1 for short text, got %d", h)
 	}
 
 	// Long text that wraps
 	longText := "This is a very long line that will definitely wrap when constrained to a narrow width"
-	item2 := NewWrappingStringItem("2", longText)
+	item2 := NewWrappingStringItem(longText)
 
 	// At width 80, should be fewer lines than width 20
 	height80 := item2.Height(80)
@@ -207,7 +207,7 @@ func TestWrappingItemHeight(t *testing.T) {
 	}
 
 	// Non-wrapping version should always be 1 line
-	item3 := NewStringItem("3", longText)
+	item3 := NewStringItem(longText)
 	if h := item3.Height(20); h != 1 {
 		t.Errorf("expected height 1 for non-wrapping item, got %d", h)
 	}
@@ -215,11 +215,7 @@ func TestWrappingItemHeight(t *testing.T) {
 
 func TestMarkdownItemBasic(t *testing.T) {
 	markdown := "# Hello\n\nThis is a **test**."
-	item := NewMarkdownItem("1", markdown)
-
-	if item.ID() != "1" {
-		t.Errorf("expected ID '1', got '%s'", item.ID())
-	}
+	item := NewMarkdownItem(markdown)
 
 	// Test that height is calculated
 	height := item.Height(80)
@@ -241,7 +237,7 @@ func TestMarkdownItemBasic(t *testing.T) {
 
 func TestMarkdownItemCache(t *testing.T) {
 	markdown := "# Test\n\nSome content."
-	item := NewMarkdownItem("1", markdown)
+	item := NewMarkdownItem(markdown)
 
 	// First render at width 80 should populate cache
 	height1 := item.Height(80)
@@ -267,7 +263,7 @@ func TestMarkdownItemCache(t *testing.T) {
 
 func TestMarkdownItemMaxCacheWidth(t *testing.T) {
 	markdown := "# Test\n\nSome content."
-	item := NewMarkdownItem("1", markdown).WithMaxWidth(50)
+	item := NewMarkdownItem(markdown).WithMaxWidth(50)
 
 	// Render at width 40 (below limit) - should cache at width 40
 	_ = item.Height(40)
@@ -302,7 +298,7 @@ func TestMarkdownItemWithStyleConfig(t *testing.T) {
 		},
 	}
 
-	item := NewMarkdownItem("1", markdown).WithStyleConfig(styleConfig)
+	item := NewMarkdownItem(markdown).WithStyleConfig(styleConfig)
 
 	// Render should use the custom style
 	height := item.Height(80)
@@ -323,9 +319,9 @@ func TestMarkdownItemWithStyleConfig(t *testing.T) {
 
 func TestMarkdownItemInList(t *testing.T) {
 	items := []Item{
-		NewMarkdownItem("1", "# First\n\nMarkdown item."),
-		NewMarkdownItem("2", "# Second\n\nAnother item."),
-		NewStringItem("3", "Regular string item"),
+		NewMarkdownItem("# First\n\nMarkdown item."),
+		NewMarkdownItem("# Second\n\nAnother item."),
+		NewStringItem("Regular string item"),
 	}
 
 	l := New(items...)
@@ -353,7 +349,7 @@ func TestMarkdownItemHeightWithWidth(t *testing.T) {
 	// Test that widths are capped to maxWidth
 	markdown := "This is a paragraph with some text."
 
-	item := NewMarkdownItem("1", markdown).WithMaxWidth(50)
+	item := NewMarkdownItem(markdown).WithMaxWidth(50)
 
 	// At width 30 (below limit), should cache and render at width 30
 	height30 := item.Height(30)
@@ -381,7 +377,7 @@ func TestMarkdownItemHeightWithWidth(t *testing.T) {
 
 func BenchmarkMarkdownItemRender(b *testing.B) {
 	markdown := "# Heading\n\nThis is a paragraph with **bold** and *italic* text.\n\n- Item 1\n- Item 2\n- Item 3"
-	item := NewMarkdownItem("1", markdown)
+	item := NewMarkdownItem(markdown)
 
 	// Prime the cache
 	screen := uv.NewScreenBuffer(80, 10)
@@ -401,7 +397,7 @@ func BenchmarkMarkdownItemUncached(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		item := NewMarkdownItem("1", markdown)
+		item := NewMarkdownItem(markdown)
 		screen := uv.NewScreenBuffer(80, 10)
 		area := uv.Rect(0, 0, 80, 10)
 		item.Draw(&screen, area)
@@ -409,12 +405,7 @@ func BenchmarkMarkdownItemUncached(b *testing.B) {
 }
 
 func TestSpacerItem(t *testing.T) {
-	spacer := NewSpacerItem("spacer1", 3)
-
-	// Check ID
-	if spacer.ID() != "spacer1" {
-		t.Errorf("expected ID 'spacer1', got %q", spacer.ID())
-	}
+	spacer := NewSpacerItem(3)
 
 	// Check height
 	if h := spacer.Height(80); h != 3 {
@@ -444,11 +435,11 @@ func TestSpacerItem(t *testing.T) {
 func TestSpacerItemInList(t *testing.T) {
 	// Create a list with items separated by spacers
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewSpacerItem("spacer1", 1),
-		NewStringItem("2", "Item 2"),
-		NewSpacerItem("spacer2", 2),
-		NewStringItem("3", "Item 3"),
+		NewStringItem("Item 1"),
+		NewSpacerItem(1),
+		NewStringItem("Item 2"),
+		NewSpacerItem(2),
+		NewStringItem("Item 3"),
 	}
 
 	l := New(items...)
@@ -477,28 +468,28 @@ func TestSpacerItemInList(t *testing.T) {
 func TestSpacerItemNavigation(t *testing.T) {
 	// Spacers should not be selectable (they're not focusable)
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewSpacerItem("spacer1", 1),
-		NewStringItem("2", "Item 2"),
+		NewStringItem("Item 1"),
+		NewSpacerItem(1),
+		NewStringItem("Item 2"),
 	}
 
 	l := New(items...)
 	l.SetSize(20, 10)
 
 	// Select first item
-	l.SetSelectedIndex(0)
+	l.SetSelected(0)
 	if l.SelectedIndex() != 0 {
 		t.Errorf("expected selected index 0, got %d", l.SelectedIndex())
 	}
 
 	// Can select the spacer (it's a valid item, just not focusable)
-	l.SetSelectedIndex(1)
+	l.SetSelected(1)
 	if l.SelectedIndex() != 1 {
 		t.Errorf("expected selected index 1, got %d", l.SelectedIndex())
 	}
 
 	// Can select item after spacer
-	l.SetSelectedIndex(2)
+	l.SetSelected(2)
 	if l.SelectedIndex() != 2 {
 		t.Errorf("expected selected index 2, got %d", l.SelectedIndex())
 	}
@@ -512,11 +503,11 @@ func uintPtr(v uint) *uint {
 func TestListDoesNotEatLastLine(t *testing.T) {
 	// Create items that exactly fill the viewport
 	items := []Item{
-		NewStringItem("1", "Line 1"),
-		NewStringItem("2", "Line 2"),
-		NewStringItem("3", "Line 3"),
-		NewStringItem("4", "Line 4"),
-		NewStringItem("5", "Line 5"),
+		NewStringItem("Line 1"),
+		NewStringItem("Line 2"),
+		NewStringItem("Line 3"),
+		NewStringItem("Line 4"),
+		NewStringItem("Line 5"),
 	}
 
 	// Create list with height exactly matching content (5 lines, no gaps)
@@ -527,7 +518,7 @@ func TestListDoesNotEatLastLine(t *testing.T) {
 	output := l.Render()
 
 	// Count actual lines in output
-	lines := strings.Split(strings.TrimRight(output, "\r\n"), "\r\n")
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	actualLineCount := 0
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
@@ -560,13 +551,13 @@ func TestListDoesNotEatLastLine(t *testing.T) {
 func TestListWithScrollDoesNotEatLastLine(t *testing.T) {
 	// Create more items than viewport height
 	items := []Item{
-		NewStringItem("1", "Item 1"),
-		NewStringItem("2", "Item 2"),
-		NewStringItem("3", "Item 3"),
-		NewStringItem("4", "Item 4"),
-		NewStringItem("5", "Item 5"),
-		NewStringItem("6", "Item 6"),
-		NewStringItem("7", "Item 7"),
+		NewStringItem("Item 1"),
+		NewStringItem("Item 2"),
+		NewStringItem("Item 3"),
+		NewStringItem("Item 4"),
+		NewStringItem("Item 5"),
+		NewStringItem("Item 6"),
+		NewStringItem("Item 7"),
 	}
 
 	// Viewport shows 3 items at a time

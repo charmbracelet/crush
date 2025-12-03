@@ -559,27 +559,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return nil, createErr
 			}
 		}
-		var fantasyErr *fantasy.Error
-		var providerErr *fantasy.ProviderError
-		const defaultTitle = "Provider Error"
-		switch {
-		// TODO: Extract this whole switch logic into it's own function!
-		case isCancelErr:
-			currentAssistant.AddFinish(mapErrorConditionToFinishReason(true, false), "User canceled request", "")
-		case isPermissionErr:
-			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, true), "User denied permission", "")
-		case errors.As(err, &providerErr):
-			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-		case errors.As(err, &fantasyErr):
-			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		default:
-			currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), defaultTitle, err.Error())
-		}
-		// Note: we use the parent context here because the genCtx has been
-		// cancelled.
-		updateErr := a.messages.Update(ctx, *currentAssistant)
-		if updateErr != nil {
-			return nil, updateErr
+		// Handle error with finish message using extracted function
+		if err := a.handleErrorWithFinishMessage(ctx, currentAssistant, err); err != nil {
+			return nil, err
 		}
 		return nil, err
 	}
@@ -614,6 +596,34 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+// handleErrorWithFinishMessage adds appropriate finish message to currentAssistant based on error type
+func (a *sessionAgent) handleErrorWithFinishMessage(ctx context.Context, currentAssistant *message.Message, err error) error {
+	var fantasyErr *fantasy.Error
+	var providerErr *fantasy.ProviderError
+	const defaultTitle = "Provider Error"
+	
+	// Handle different error types with appropriate finish messages
+	switch {
+	case errors.Is(err, context.Canceled):
+		currentAssistant.AddFinish(mapErrorConditionToFinishReason(true, false), "User canceled request", "")
+	case errors.Is(err, permission.ErrorPermissionDenied):
+		currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, true), "User denied permission", "")
+	case errors.As(err, &providerErr):
+		currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+	case errors.As(err, &fantasyErr):
+		currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+	default:
+		currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), defaultTitle, err.Error())
+	}
+	
+	// Update assistant message with error information
+	updateErr := a.messages.Update(ctx, *currentAssistant)
+	if updateErr != nil {
+		return updateErr
+	}
+	return nil
 }
 
 // cleanupActiveRequests removes session ID from activeRequests.

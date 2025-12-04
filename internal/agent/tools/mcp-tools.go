@@ -104,9 +104,27 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	content, err := mcp.RunTool(ctx, m.mcpName, m.tool.Name, params.Input)
+	result, err := mcp.RunTool(ctx, m.mcpName, m.tool.Name, params.Input)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
-	return fantasy.NewTextResponse(content), nil
+
+	switch result.Type {
+	case "image", "media":
+		if !GetSupportsImagesFromContext(ctx) {
+			modelName := GetModelNameFromContext(ctx)
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
+		}
+
+		var response fantasy.ToolResponse
+		if result.Type == "image" {
+			response = fantasy.NewImageResponse(result.Data, result.MediaType)
+		} else {
+			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
+		}
+		response.Content = result.Content
+		return response, nil
+	default:
+		return fantasy.NewTextResponse(result.Content), nil
+	}
 }

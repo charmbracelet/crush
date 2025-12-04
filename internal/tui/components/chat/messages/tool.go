@@ -397,6 +397,13 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 }
 
 func (m *toolCallCmp) formatResultForCopy() string {
+	if m.result.Data != "" {
+		if strings.HasPrefix(m.result.MIMEType, "image/") {
+			return fmt.Sprintf("[Image: %s]", m.result.MIMEType)
+		}
+		return fmt.Sprintf("[Media: %s]", m.result.MIMEType)
+	}
+
 	switch m.call.Name {
 	case tools.BashToolName:
 		return m.formatBashResultForCopy()

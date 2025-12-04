@@ -3,7 +3,9 @@
 package image
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"image"
 	"image/png"
 	"io"
@@ -142,5 +144,26 @@ func svgToImage(width uint, height uint, r io.Reader) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return imageToString(width, height, img)
+}
+
+// ImageFromBase64 renders an image from base64-encoded data.
+func ImageFromBase64(width, height uint, data, mediaType string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", err
+	}
+
+	r := bytes.NewReader(decoded)
+
+	if strings.Contains(mediaType, "svg") {
+		return svgToImage(width, height, r)
+	}
+
+	img, _, err := imageorient.Decode(r)
+	if err != nil {
+		return "", err
+	}
+
 	return imageToString(width, height, img)
 }

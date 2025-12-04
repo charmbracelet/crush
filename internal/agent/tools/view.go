@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,7 @@ type ViewResponseMetadata struct {
 
 const (
 	ViewToolName     = "view"
-	MaxReadSize      = 250 * 1024
+	MaxReadSize      = 5 * 1024 * 1024 // 5MB
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
@@ -147,11 +148,20 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				params.Limit = DefaultReadLimit
 			}
 
-			// Check if it's an image file
-			isImage, imageType := isImageFile(filePath)
-			// TODO: handle images
+			isImage, mimeType := getImageMimeType(filePath)
 			if isImage {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("This is an image file of type: %s\n", imageType)), nil
+				if !GetSupportsImagesFromContext(ctx) {
+					modelName := GetModelNameFromContext(ctx)
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
+				}
+
+				imageData, err := os.ReadFile(filePath)
+				if err != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", err)
+				}
+
+				encoded := base64.StdEncoding.EncodeToString(imageData)
+				return fantasy.NewImageResponse([]byte(encoded), mimeType), nil
 			}
 
 			// Read the file content
@@ -263,21 +273,21 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 	return strings.Join(lines, "\n"), lineCount, nil
 }
 
-func isImageFile(filePath string) (bool, string) {
+func getImageMimeType(filePath string) (bool, string) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".jpg", ".jpeg":
-		return true, "JPEG"
+		return true, "image/jpeg"
 	case ".png":
-		return true, "PNG"
+		return true, "image/png"
 	case ".gif":
-		return true, "GIF"
+		return true, "image/gif"
 	case ".bmp":
-		return true, "BMP"
+		return true, "image/bmp"
 	case ".svg":
-		return true, "SVG"
+		return true, "image/svg+xml"
 	case ".webp":
-		return true, "WebP"
+		return true, "image/webp"
 	default:
 		return false, ""
 	}

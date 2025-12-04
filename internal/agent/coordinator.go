@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
@@ -63,6 +64,8 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	readyWg errgroup.Group
 }
 
 func NewCoordinator(
@@ -106,27 +109,11 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
-	model := c.currentAgent.Model()
-
-	if model.ModelCfg.Provider == "github-copilot" {
-		newToken, err := config.LoadCopilotAuthToken(c.cfg.Options.DataDirectory)
-		if err == nil {
-			providerCfg, ok := c.cfg.Providers.Get("github-copilot")
-			if ok && providerCfg.APIKey != newToken {
-				slog.Info("------------Refreshing GitHub Copilot token")
-				providerCfg.APIKey = newToken
-				c.cfg.Providers.Set("github-copilot", providerCfg)
-				if err := c.UpdateModels(ctx); err != nil {
-					slog.Error("Failed to update models after token refresh", "error", err)
-				} else {
-					// Update model reference after refreshing
-					model = c.currentAgent.Model()
-				}
-			}
-		} else {
-			slog.Warn("Failed to refresh GitHub Copilot token", "error", err)
-		}
+	if err := c.readyWg.Wait(); err != nil {
+		return nil, err
 	}
+
+	model := c.currentAgent.Model()
 
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -144,7 +131,20 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
-	return c.currentAgent.Run(ctx, SessionAgentCall{
+	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
+		slog.Info("Detected expired OAuth token, attempting refresh", "provider", providerCfg.ID)
+		if refreshErr := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); refreshErr != nil {
+			slog.Error("Failed to refresh OAuth token", "provider", providerCfg.ID, "error", refreshErr)
+			return nil, refreshErr
+		}
+
+		// Rebuild models with refreshed token
+		if updateErr := c.UpdateModels(ctx); updateErr != nil {
+			slog.Error("Failed to update models after token refresh", "error", updateErr)
+			return nil, updateErr
+		}
+	}
+	result, err := c.currentAgent.Run(ctx, SessionAgentCall{
 		SessionID:        sessionID,
 		Prompt:           prompt,
 		Attachments:      attachments,
@@ -156,6 +156,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		FrequencyPenalty: freqPenalty,
 		PresencePenalty:  presPenalty,
 	})
+	return result, err
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
@@ -207,7 +208,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	switch providerCfg.Type {
-	case openai.Name:
+	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
@@ -264,16 +265,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		}
-		// azure uses the same options as openaicompat
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
-		if err == nil {
-			options[azure.Name] = parsed
-		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
@@ -321,14 +312,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.messages,
 		nil,
 	})
-	go func() {
+	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {
-			slog.Error("could not init agent tools", "err", err)
-			return
+			return err
 		}
 		result.SetTools(tools)
-	}()
+		return nil
+	})
+
 	return result, nil
 }
 
@@ -342,8 +334,26 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, agentTool)
 	}
 
+	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
+		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, agenticFetchTool)
+	}
+
+	// Get the model name for the agent
+	modelName := ""
+	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {
+		if model := c.cfg.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+			modelName = model.Name
+		}
+	}
+
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewJobOutputTool(),
+		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
@@ -367,30 +377,27 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	mcpTools := tools.GetMCPTools(context.Background(), c.permissions, c.cfg)
-
-	for _, mcpTool := range mcpTools {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
-			filteredTools = append(filteredTools, mcpTool)
-		} else if len(agent.AllowedMCP) == 0 {
-			// no mcps allowed
+			filteredTools = append(filteredTools, tool)
+			continue
+		}
+		if len(agent.AllowedMCP) == 0 {
+			// No MCPs allowed
+			slog.Debug("no MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
 			break
 		}
 
 		for mcp, tools := range agent.AllowedMCP {
-			if mcp == mcpTool.MCP() {
-				if len(tools) == 0 {
-					filteredTools = append(filteredTools, mcpTool)
-				}
-				for _, t := range tools {
-					if t == mcpTool.MCPToolName() {
-						filteredTools = append(filteredTools, mcpTool)
-					}
-				}
-				break
+			if mcp != tool.MCP() {
+				continue
+			}
+			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
+				filteredTools = append(filteredTools, tool)
 			}
 		}
+		slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
@@ -483,27 +490,15 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
-	hasBearerAuth := false
-	for key := range headers {
-		if strings.ToLower(key) == "authorization" {
-			hasBearerAuth = true
-			break
-		}
-	}
-
-	isBearerToken := strings.HasPrefix(apiKey, "Bearer ")
-
 	var opts []anthropic.Option
-	if apiKey != "" && !hasBearerAuth {
-		if isBearerToken {
-			slog.Debug("API key starts with 'Bearer ', using as Authorization header")
-			headers["Authorization"] = apiKey
-			apiKey = "" // clear apiKey to avoid using X-Api-Key header
-		}
-	}
 
-	if apiKey != "" {
-		// Use standard X-Api-Key header
+	if strings.HasPrefix(apiKey, "Bearer ") {
+		// NOTE: Prevent the SDK from picking up the API key from env.
+		os.Setenv("ANTHROPIC_API_KEY", "")
+
+		headers["Authorization"] = apiKey
+	} else if apiKey != "" {
+		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
 	}
 
@@ -579,6 +574,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
+		azure.WithUseResponsesAPI(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -667,6 +663,9 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
@@ -677,7 +676,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	// TODO: make sure we have
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 

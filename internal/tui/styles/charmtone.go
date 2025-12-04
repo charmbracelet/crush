@@ -1,7 +1,7 @@
 package styles
 
 import (
-	"github.com/charmbracelet/lipgloss/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -42,6 +42,7 @@ func NewCharmtoneTheme() *Theme {
 		White: charmtone.Butter,
 
 		BlueLight: charmtone.Sardine,
+		BlueDark:  charmtone.Damson,
 		Blue:      charmtone.Malibu,
 
 		Yellow: charmtone.Mustard,
@@ -66,10 +67,17 @@ func NewCharmtoneTheme() *Theme {
 	t.ItemErrorIcon = t.ItemOfflineIcon.Foreground(charmtone.Coral)
 	t.ItemOnlineIcon = t.ItemOfflineIcon.Foreground(charmtone.Guac)
 
+	// Editor: Yolo Mode.
 	t.YoloIconFocused = lipgloss.NewStyle().Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" ! ")
 	t.YoloIconBlurred = t.YoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
 	t.YoloDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Zest).SetString(":::")
 	t.YoloDotsBlurred = t.YoloDotsFocused.Foreground(charmtone.Squid)
+
+	// oAuth Chooser.
+	t.AuthBorderSelected = lipgloss.NewStyle().BorderForeground(charmtone.Guac)
+	t.AuthTextSelected = lipgloss.NewStyle().Foreground(charmtone.Julep)
+	t.AuthBorderUnselected = lipgloss.NewStyle().BorderForeground(charmtone.Iron)
+	t.AuthTextUnselected = lipgloss.NewStyle().Foreground(charmtone.Squid)
 
 	return t
 }

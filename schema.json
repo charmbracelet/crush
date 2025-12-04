@@ -5,10 +5,20 @@
   "$defs": {
     "Attribution": {
       "properties": {
+        "trailer_style": {
+          "type": "string",
+          "enum": [
+            "none",
+            "co-authored-by",
+            "assisted-by"
+          ],
+          "description": "Style of attribution trailer to add to commits",
+          "default": "assisted-by"
+        },
         "co_authored_by": {
           "type": "boolean",
-          "description": "Add Co-Authored-By trailer to commit messages",
-          "default": true
+          "description": "Deprecated: use trailer_style instead",
+          "deprecated": true
         },
         "generated_with": {
           "type": "boolean",
@@ -52,6 +62,16 @@
           },
           "type": "object",
           "description": "Model configurations for different model types"
+        },
+        "recent_models": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/SelectedModel"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "Recently used models sorted by most recent first"
         },
         "providers": {
           "additionalProperties": {
@@ -384,6 +404,17 @@
           "type": "boolean",
           "description": "Disable sending metrics",
           "default": false
+        },
+        "initialize_as": {
+          "type": "string",
+          "description": "Name of the context file to create/update during project initialization",
+          "default": "AGENTS.md",
+          "examples": [
+            "AGENTS.md",
+            "CRUSH.md",
+            "CLAUDE.md",
+            "docs/LLMs.md"
+          ]
         }
       },
       "additionalProperties": false,
@@ -437,6 +468,7 @@
           "type": "string",
           "enum": [
             "openai",
+            "openai-compat",
             "anthropic",
             "gemini",
             "azure",
@@ -451,6 +483,10 @@
           "examples": [
             "$OPENAI_API_KEY"
           ]
+        },
+        "oauth": {
+          "$ref": "#/$defs/Token",
+          "description": "OAuth2 token for authentication with the provider"
         },
         "disable": {
           "type": "boolean",
@@ -519,7 +555,6 @@
         "max_tokens": {
           "type": "integer",
           "maximum": 200000,
-          "minimum": 1,
           "description": "Maximum number of tokens for model responses",
           "examples": [
             4096
@@ -591,6 +626,30 @@
       "type": "object",
       "required": [
         "completions"
+      ]
+    },
+    "Token": {
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "refresh_token": {
+          "type": "string"
+        },
+        "expires_in": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "access_token",
+        "refresh_token",
+        "expires_in",
+        "expires_at"
       ]
     },
     "ToolLs": {

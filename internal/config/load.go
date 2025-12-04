@@ -1,13 +1,13 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,14 +15,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
@@ -135,6 +137,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
+
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -187,6 +190,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Name:               p.Name,
 			BaseURL:            p.APIEndpoint,
 			APIKey:             p.APIKey,
+			OAuthToken:         config.OAuthToken,
 			Type:               p.Type,
 			Disable:            config.Disable,
 			SystemPromptPrefix: config.SystemPromptPrefix,
@@ -196,19 +200,55 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Models:             p.Models,
 		}
 
+		if p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil {
+			if config.OAuthToken.IsExpired() {
+				newToken, err := claude.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Anthropic OAuth token")
+					config.OAuthToken = newToken
+					prepared.OAuthToken = newToken
+					if err := cmp.Or(
+						c.SetConfigField("providers.anthropic.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.anthropic.oauth", newToken),
+					); err != nil {
+						return err
+					}
+				} else {
+					slog.Error("Failed to refresh Anthropic OAuth token", "error", err)
+					event.Error(err)
+				}
+			} else {
+				slog.Info("Using existing non-expired Anthropic OAuth token")
+			}
+			prepared.SetupClaudeCode()
+		}
+
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case "github-copilot":
-			// Try to load token from auth file if environment variable is not set
-			token, err := LoadCopilotAuthToken(c.Options.DataDirectory)
-			if err != nil {
+			if config.OAuthToken == nil {
 				if configExists {
-					slog.Warn("Skipping GitHub Copilot provider due to missing or invalid auth", "error", err)
+					slog.Warn("Skipping GitHub Copilot provider: not authenticated. Run 'crush login github-copilot'")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
 			}
-			prepared.APIKey = token
+			if config.OAuthToken.IsExpired() {
+				newToken, err := copilot.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Copilot OAuth token")
+					config.OAuthToken = newToken
+					prepared.OAuthToken = newToken
+					_ = cmp.Or(
+						c.SetConfigField("providers.github-copilot.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.github-copilot.oauth", newToken),
+					)
+				} else {
+					slog.Error("Failed to refresh Copilot OAuth token", "error", err)
+					event.Error(err)
+				}
+			}
+			prepared.APIKey = config.OAuthToken.AccessToken
 		case catwalk.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {
@@ -290,13 +330,25 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		// Special handling for github-copilot custom provider
 		if id == "github-copilot" {
-			token, err := LoadCopilotAuthToken(c.Options.DataDirectory)
-			if err != nil {
-				slog.Warn("Skipping GitHub Copilot provider due to missing or invalid auth", "error", err)
+			if providerConfig.OAuthToken == nil {
+				slog.Warn("Skipping GitHub Copilot provider: not authenticated. Run 'crush login github-copilot'")
 				c.Providers.Del(id)
 				continue
 			}
-			providerConfig.APIKey = token
+			if providerConfig.OAuthToken.IsExpired() {
+				newToken, err := copilot.RefreshToken(context.TODO(), providerConfig.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Copilot OAuth token")
+					providerConfig.OAuthToken = newToken
+					_ = cmp.Or(
+						c.SetConfigField("providers.github-copilot.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.github-copilot.oauth", newToken),
+					)
+				} else {
+					slog.Error("Failed to refresh Copilot OAuth token", "error", err)
+				}
+			}
+			providerConfig.APIKey = providerConfig.OAuthToken.AccessToken
 			c.Providers.Set(id, providerConfig)
 			continue
 		}
@@ -330,131 +382,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	return nil
 }
 
-// LoadCopilotAuthToken loads the GitHub Copilot token from the auth file if it exists and is valid.
-// If the token is expired, it automatically refreshes it using the GitHub access token.
-// It first checks the global data directory (~/.crush/), then falls back to the local dataDir.
-func LoadCopilotAuthToken(dataDir string) (string, error) {
-	// Try global data directory first, then fall back to local
-	authFiles := []string{
-		filepath.Join(home.Dir(), ".crush", "copilot-auth.json"),
-		filepath.Join(dataDir, "copilot-auth.json"),
-	}
-
-	var (
-		data     []byte
-		err      error
-		authFile string
-	)
-
-	for _, file := range authFiles {
-		data, err = os.ReadFile(file)
-		if err == nil {
-			authFile = file
-			break
-		}
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("failed to read auth file: %w", err)
-		}
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("not authenticated. Run 'crush auth login github-copilot' to authenticate")
-	}
-
-	// Define auth data structure inline
-	var authData struct {
-		RefreshToken string `json:"refresh_token"`
-		AccessToken  string `json:"access_token"`
-		ExpiresAt    int64  `json:"expires_at"`
-	}
-
-	if err := json.Unmarshal(data, &authData); err != nil {
-		return "", fmt.Errorf("failed to parse auth file: %w", err)
-	}
-
-	// Check if token is expired or will expire in the next 5 minutes
-	expiresAt := time.Unix(authData.ExpiresAt, 0)
-	bufferTime := 5 * time.Minute
-	if time.Now().Add(bufferTime).After(expiresAt) {
-		// Token is expired or about to expire, refresh it
-		slog.Debug("Copilot token expired or expiring soon, refreshing", "expires_at", expiresAt)
-
-		newToken, newExpiresAt, err := refreshCopilotToken(authData.RefreshToken)
-		if err != nil {
-			return "", fmt.Errorf("failed to refresh token: %w. Run 'crush auth login github-copilot' to re-authenticate", err)
-		}
-
-		// Update auth data
-		authData.AccessToken = newToken
-		authData.ExpiresAt = newExpiresAt
-
-		// Save the refreshed token
-		updatedData, err := json.MarshalIndent(authData, "", "  ")
-		if err == nil {
-			if writeErr := os.WriteFile(authFile, updatedData, 0o600); writeErr != nil {
-				slog.Warn("Failed to save refreshed token", "error", writeErr)
-			} else {
-				slog.Debug("Copilot token refreshed successfully", "new_expires_at", time.Unix(newExpiresAt, 0))
-			}
-		}
-	}
-
-	if authData.AccessToken == "" {
-		return "", fmt.Errorf("no access token found in auth file")
-	}
-
-	return authData.AccessToken, nil
-}
-
-// refreshCopilotToken refreshes the GitHub Copilot token using the GitHub access token.
-func refreshCopilotToken(githubToken string) (token string, expiresAt int64, err error) {
-	const (
-		copilotTokenURL      = "https://api.github.com/copilot_internal/v2/token"
-		copilotUserAgent     = "GitHubCopilotChat/0.32.4"
-		copilotEditorVersion = "vscode/1.105.1"
-		copilotEditorPlugin  = "copilot-chat/0.32.4"
-		copilotIntegrationID = "vscode-chat"
-	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", copilotTokenURL, nil)
-	if err != nil {
-		return "", 0, err
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+githubToken)
-	req.Header.Set("User-Agent", copilotUserAgent)
-	req.Header.Set("Editor-Version", copilotEditorVersion)
-	req.Header.Set("Editor-Plugin-Version", copilotEditorPlugin)
-	req.Header.Set("Copilot-Integration-Id", copilotIntegrationID)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", 0, fmt.Errorf("failed to refresh token: %s - %s", resp.Status, string(body))
-	}
-
-	var tokenResp struct {
-		Token     string `json:"token"`
-		ExpiresAt int64  `json:"expires_at"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", 0, err
-	}
-
-	return tokenResp.Token, tokenResp.ExpiresAt, nil
-}
-
 func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.workingDir = workingDir
 	if c.Options == nil {
@@ -481,6 +408,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
@@ -502,9 +432,23 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
-			CoAuthoredBy:  true,
+			TrailerStyle:  TrailerStyleAssistedBy,
 			GeneratedWith: true,
 		}
+	} else if c.Options.Attribution.TrailerStyle == "" {
+		// Migrate deprecated co_authored_by or apply default
+		if c.Options.Attribution.CoAuthoredBy != nil {
+			if *c.Options.Attribution.CoAuthoredBy {
+				c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+			} else {
+				c.Options.Attribution.TrailerStyle = TrailerStyleNone
+			}
+		} else {
+			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
+		}
+	}
+	if c.Options.InitializeAs == "" {
+		c.Options.InitializeAs = defaultInitializeAs
 	}
 }
 
@@ -812,17 +756,6 @@ func GlobalConfig() string {
 	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
 	if xdgConfigHome != "" {
 		return filepath.Join(xdgConfigHome, appName, fmt.Sprintf("%s.json", appName))
-	}
-
-	// return the path to the main config directory
-	// for windows, it should be in `%LOCALAPPDATA%/crush/`
-	// for linux and macOS, it should be in `$HOME/.config/crush/`
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
-		}
-		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
 	}
 
 	return filepath.Join(home.Dir(), ".config", appName, fmt.Sprintf("%s.json", appName))

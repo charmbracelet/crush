@@ -16,24 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
-type FetchParams struct {
-	URL     string `json:"url" description:"The URL to fetch content from"`
-	Format  string `json:"format" description:"The format to return the content in (text, markdown, or html)"`
-	Timeout int    `json:"timeout,omitempty" description:"Optional timeout in seconds (max 120)"`
-}
-
-type FetchPermissionsParams struct {
-	URL     string `json:"url"`
-	Format  string `json:"format"`
-	Timeout int    `json:"timeout,omitempty"`
-}
-
-type fetchTool struct {
-	client      *http.Client
-	permissions permission.Service
-	workingDir  string
-}
-
 const FetchToolName = "fetch"
 
 //go:embed fetch.md

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -14,12 +15,17 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
 
 const (
 	appName              = "crush"
 	defaultDataDirectory = ".crush"
+	defaultInitializeAs  = "AGENTS.md"
 )
 
 var defaultContextPaths = []string{
@@ -68,7 +74,7 @@ type SelectedModel struct {
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
 
 	// Overrides the default model configuration.
-	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,minimum=1,maximum=200000,example=4096"`
+	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
 	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
 	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
@@ -87,9 +93,11 @@ type ProviderConfig struct {
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
+	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=openai-compat,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
+	// OAuthToken for providers that use OAuth2 authentication.
+	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
@@ -108,6 +116,22 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+}
+
+func (pc *ProviderConfig) SetupClaudeCode() {
+	pc.APIKey = fmt.Sprintf("Bearer %s", pc.OAuthToken.AccessToken)
+	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
+	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
+
+	value := pc.ExtraHeaders["anthropic-beta"]
+	const want = "oauth-2025-04-20"
+	if !strings.Contains(value, want) {
+		if value != "" {
+			value += ","
+		}
+		value += want
+	}
+	pc.ExtraHeaders["anthropic-beta"] = value
 }
 
 type MCPType string
@@ -166,9 +190,27 @@ type Permissions struct {
 	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
 }
 
+type TrailerStyle string
+
+const (
+	TrailerStyleNone         TrailerStyle = "none"
+	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
+	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
+)
+
 type Attribution struct {
-	CoAuthoredBy  bool `json:"co_authored_by,omitempty" jsonschema:"description=Add Co-Authored-By trailer to commit messages,default=true"`
-	GeneratedWith bool `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=assisted-by"`
+	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+}
+
+// JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
+func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		if prop, ok := schema.Properties.Get("co_authored_by"); ok {
+			prop.Deprecated = true
+		}
+	}
 }
 
 type Options struct {
@@ -182,6 +224,7 @@ type Options struct {
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 }
 
 type MCPs map[string]MCPConfig
@@ -289,6 +332,8 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+	// Recently used models stored in the data directory config.
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -398,6 +443,9 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
+	if err := c.recordRecentModel(modelType, model); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -422,16 +470,81 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
-func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
-	// First save to the config file
-	err := c.SetConfigField("providers."+providerID+".api_key", apiKey)
-	if err != nil {
-		return fmt.Errorf("failed to save API key to config file: %w", err)
+func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
+	providerConfig, exists := c.Providers.Get(providerID)
+	if !exists {
+		return fmt.Errorf("provider %s not found", providerID)
 	}
 
-	providerConfig, exists := c.Providers.Get(providerID)
+	if providerConfig.OAuthToken == nil {
+		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
+	}
+
+	var newToken *oauth.Token
+	var err error
+
+	switch providerID {
+	case string(catwalk.InferenceProviderAnthropic):
+		newToken, err = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case "github-copilot", "github", "copilot":
+		newToken, err = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	default:
+		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
+	}
+
+	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
+	providerConfig.OAuthToken = newToken
+	providerConfig.APIKey = newToken.AccessToken
+
+	if providerID == string(catwalk.InferenceProviderAnthropic) {
+		providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
+		providerConfig.SetupClaudeCode()
+	}
+
+	c.Providers.Set(providerID, providerConfig)
+
+	if err := cmp.Or(
+		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
+		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
+	); err != nil {
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
+	var providerConfig ProviderConfig
+	var exists bool
+	var setKeyOrToken func()
+
+	switch v := apiKey.(type) {
+	case string:
+		if err := c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
+			return fmt.Errorf("failed to save api key to config file: %w", err)
+		}
+		setKeyOrToken = func() { providerConfig.APIKey = v }
+	case *oauth.Token:
+		if err := cmp.Or(
+			c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v.AccessToken),
+			c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), v),
+		); err != nil {
+			return err
+		}
+		setKeyOrToken = func() {
+			providerConfig.APIKey = v.AccessToken
+			providerConfig.OAuthToken = v
+			providerConfig.SetupClaudeCode()
+		}
+	}
+
+	providerConfig, exists = c.Providers.Get(providerID)
 	if exists {
-		providerConfig.APIKey = apiKey
+		setKeyOrToken()
 		c.Providers.Set(providerID, providerConfig)
 		return nil
 	}
@@ -451,12 +564,12 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 			Name:         foundProvider.Name,
 			BaseURL:      foundProvider.APIEndpoint,
 			Type:         foundProvider.Type,
-			APIKey:       apiKey,
 			Disable:      false,
 			ExtraHeaders: make(map[string]string),
 			ExtraParams:  make(map[string]string),
 			Models:       foundProvider.Models,
 		}
+		setKeyOrToken()
 	} else {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
@@ -465,16 +578,62 @@ func (c *Config) SetProviderAPIKey(providerID, apiKey string) error {
 	return nil
 }
 
+const maxRecentModelsPerType = 5
+
+func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
+	if model.Provider == "" || model.Model == "" {
+		return nil
+	}
+
+	if c.RecentModels == nil {
+		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+
+	eq := func(a, b SelectedModel) bool {
+		return a.Provider == b.Provider && a.Model == b.Model
+	}
+
+	entry := SelectedModel{
+		Provider: model.Provider,
+		Model:    model.Model,
+	}
+
+	current := c.RecentModels[modelType]
+	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
+		return eq(existing, entry)
+	})
+
+	updated := append([]SelectedModel{entry}, withoutCurrent...)
+	if len(updated) > maxRecentModelsPerType {
+		updated = updated[:maxRecentModelsPerType]
+	}
+
+	if slices.EqualFunc(current, updated, eq) {
+		return nil
+	}
+
+	c.RecentModels[modelType] = updated
+
+	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
+	return nil
+}
+
 func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"job_output",
+		"job_kill",
 		"download",
 		"edit",
 		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",
 		"fetch",
+		"agentic_fetch",
 		"glob",
 		"grep",
 		"ls",
@@ -563,6 +722,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://api.anthropic.com/v1"
 		}
 		testURL = baseURL + "/models"
+		// TODO: replace with const when catwalk is released
+		if c.ID == "kimi-coding" {
+			testURL = baseURL + "/v1/models"
+		}
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:

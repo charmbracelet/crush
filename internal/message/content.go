@@ -45,6 +45,7 @@ type ReasoningContent struct {
 	Thinking         string                             `json:"thinking"`
 	Signature        string                             `json:"signature"`
 	ThoughtSignature string                             `json:"thought_signature"` // Used for google
+	ToolID           string                             `json:"tool_id"`           // Used for openrouter google models
 	ResponsesData    *openai.ResponsesReasoningMetadata `json:"responses_data"`
 	StartedAt        int64                              `json:"started_at,omitempty"`
 	FinishedAt       int64                              `json:"finished_at,omitempty"`
@@ -261,12 +262,13 @@ func (m *Message) AppendReasoningContent(delta string) {
 	}
 }
 
-func (m *Message) AppendThoughtSignature(signature string) {
+func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
 				Thinking:         c.Thinking,
 				ThoughtSignature: c.ThoughtSignature + signature,
+				ToolID:           toolCallID,
 				Signature:        c.Signature,
 				StartedAt:        c.StartedAt,
 				FinishedAt:       c.FinishedAt,
@@ -464,6 +466,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			if reasoning.ThoughtSignature != "" {
 				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
 					Signature: reasoning.ThoughtSignature,
+					ToolID:    reasoning.ToolID,
 				}
 			}
 			parts = append(parts, reasoningPart)

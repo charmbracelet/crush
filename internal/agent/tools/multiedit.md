@@ -17,7 +17,8 @@ Makes multiple edits to a single file in one operation. Built on Edit tool for e
 <operation>
 - Edits applied sequentially in provided order.
 - Each edit operates on result of previous edit.
-- ATOMIC: If any single edit fails, the entire operation fails and no changes are applied.
+- PARTIAL SUCCESS: If some edits fail, successful edits are still applied. Failed edits are returned in the response.
+- File is modified if at least one edit succeeds.
 - Ideal for several changes to different parts of same file.
 </operation>
 
@@ -31,9 +32,10 @@ Use the same level of precision as Edit. Multiedit often fails due to formatting
 
 <critical_requirements>
 1. Apply Edit tool rules to EACH edit (see edit.md).
-2. Edits are atomic—either all succeed or none are applied.
+2. Edits are applied in order; successful edits are kept even if later edits fail.
 3. Plan sequence carefully: earlier edits change the file content that later edits must match.
 4. Ensure each old_string is unique at its application time (after prior edits).
+5. Check the response for failed edits and retry them if needed.
 </critical_requirements>
 
 <verification_before_using>
@@ -45,26 +47,27 @@ Use the same level of precision as Edit. Multiedit often fails due to formatting
 </verification_before_using>
 
 <warnings>
-- Operation fails if any old_string doesn’t match exactly (including whitespace) or equals new_string.
+- Operation continues even if some edits fail; check response for failed edits.
 - Earlier edits can invalidate later matches (added/removed spaces, lines, or reordered text).
 - Mixed tabs/spaces, trailing spaces, or missing blank lines commonly cause failures.
 - replace_all may affect unintended regions—use carefully or provide more context.
 </warnings>
 
 <recovery_steps>
-If the operation fails:
-1. Identify the first failing edit (start from top; test subsets to isolate).
-2. View the file again and copy more surrounding context for that edit.
-3. Recalculate later old_string values based on the file state AFTER preceding edits.
-4. Reduce the batch (apply earlier stable edits first), then follow up with the rest.
+If some edits fail:
+1. Check the response metadata for the list of failed edits with their error messages.
+2. View the file again to see the current state after successful edits.
+3. Adjust the failed edits based on the new file content.
+4. Retry the failed edits with corrected old_string values.
+5. Consider breaking complex batches into smaller, independent operations.
 </recovery_steps>
 
 <best_practices>
-- Ensure all edits result in correct, idiomatic code; don’t leave code broken.
+- Ensure all edits result in correct, idiomatic code; don't leave code broken.
 - Use absolute file paths (starting with /).
-- Use replace_all only when you’re certain; otherwise provide unique context.
+- Use replace_all only when you're certain; otherwise provide unique context.
 - Match existing style exactly (spaces, tabs, blank lines).
-- Test after the operation; if it fails, fix and retry in smaller chunks.
+- Review failed edits in the response and retry with corrections.
 </best_practices>
 
 <whitespace_checklist>
@@ -108,5 +111,15 @@ edits: [
     new_string: "func A() {\n    doNew()\n    logChange()\n}",
   },
 ]
+```
+
+✅ Correct: Handling partial success
+
+```
+// If edit 2 fails, edit 1 is still applied
+// Response will indicate:
+// - edits_applied: 1
+// - edits_failed: [{index: 2, error: "...", edit: {...}}]
+// You can then retry edit 2 with corrected context
 ```
 </examples>

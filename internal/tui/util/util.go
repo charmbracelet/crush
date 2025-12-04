@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 )
 
 type Cursor interface {
@@ -35,8 +35,10 @@ type InfoType int
 
 const (
 	InfoTypeInfo InfoType = iota
+	InfoTypeSuccess
 	InfoTypeWarn
 	InfoTypeError
+	InfoTypeUpdate
 )
 
 func ReportInfo(info string) tea.Cmd {

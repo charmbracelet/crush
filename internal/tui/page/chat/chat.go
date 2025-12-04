@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charmbracelet/bubbles/v2/help"
-	"github.com/charmbracelet/bubbles/v2/key"
-	"github.com/charmbracelet/bubbles/v2/spinner"
-	tea "github.com/charmbracelet/bubbletea/v2"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
@@ -28,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -36,7 +38,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 var ChatPageID page.PageID = "chat"
@@ -144,7 +145,7 @@ func (p *chatPage) Init() tea.Cmd {
 		p.isOnboarding = true
 		p.splashFullScreen = true
 	} else if b, _ := config.ProjectNeedsInitialization(); b {
-		// Project needs CRUSH.md initialization
+		// Project needs context initialization
 		p.splash.SetProjectInit(true)
 		p.isProjectInit = true
 		p.splashFullScreen = true
@@ -293,6 +294,13 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
+	case claude.ValidationCompletedMsg, claude.AuthenticationCompleteMsg:
+		if p.focusedPane == PanelTypeSplash {
+			u, cmd := p.splash.Update(msg)
+			p.splash = u.(splash.Splash)
+			cmds = append(cmds, cmd)
+		}
+		return p, tea.Batch(cmds...)
 	case models.APIKeyStateChangeMsg:
 		if p.focusedPane == PanelTypeSplash {
 			u, cmd := p.splash.Update(msg)
@@ -816,6 +824,71 @@ func (p *chatPage) Help() help.KeyMap {
 	var shortList []key.Binding
 	var fullList [][]key.Binding
 	switch {
+	case p.isOnboarding && p.splash.IsShowingClaudeAuthMethodChooser():
+		shortList = append(shortList,
+			// Choose auth method
+			key.NewBinding(
+				key.WithKeys("left", "right", "tab"),
+				key.WithHelp("←→/tab", "choose"),
+			),
+			// Accept selection
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "accept"),
+			),
+			// Go back
+			key.NewBinding(
+				key.WithKeys("esc", "alt+esc"),
+				key.WithHelp("esc", "back"),
+			),
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
+	case p.isOnboarding && p.splash.IsShowingClaudeOAuth2():
+		if p.splash.IsClaudeOAuthURLState() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "open"),
+				),
+				key.NewBinding(
+					key.WithKeys("c"),
+					key.WithHelp("c", "copy url"),
+				),
+			)
+		} else if p.splash.IsClaudeOAuthComplete() {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "continue"),
+				),
+			)
+		} else {
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "submit"),
+				),
+			)
+		}
+		shortList = append(shortList,
+			// Quit
+			key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		)
+		// keep them the same
+		for _, v := range shortList {
+			fullList = append(fullList, []key.Binding{v})
+		}
 	case p.isOnboarding && !p.splash.IsShowingAPIKey():
 		shortList = append(shortList,
 			// Choose model
@@ -942,11 +1015,19 @@ func (p *chatPage) Help() help.KeyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		)
+		modelsBinding := key.NewBinding(
+			key.WithKeys("ctrl+m", "ctrl+l"),
+			key.WithHelp("ctrl+l", "models"),
+		)
+		if p.keyboardEnhancements.Flags > 0 {
+			// non-zero flags mean we have at least key disambiguation
+			modelsBinding.SetHelp("ctrl+m", "models")
+		}
 		helpBinding := key.NewBinding(
 			key.WithKeys("ctrl+g"),
 			key.WithHelp("ctrl+g", "more"),
 		)
-		globalBindings = append(globalBindings, commandsBinding)
+		globalBindings = append(globalBindings, commandsBinding, modelsBinding)
 		globalBindings = append(globalBindings,
 			key.NewBinding(
 				key.WithKeys("ctrl+s"),
@@ -963,6 +1044,7 @@ func (p *chatPage) Help() help.KeyMap {
 		shortList = append(shortList,
 			// Commands
 			commandsBinding,
+			modelsBinding,
 		)
 		fullList = append(fullList, globalBindings)
 
@@ -1025,7 +1107,8 @@ func (p *chatPage) Help() help.KeyMap {
 				// to reflect that.
 				key.WithHelp("ctrl+j", "newline"),
 			)
-			if p.keyboardEnhancements.SupportsKeyDisambiguation() {
+			if p.keyboardEnhancements.Flags > 0 {
+				// Non-zero flags mean we have at least key disambiguation.
 				newLineBinding.SetHelp("shift+enter", newLineBinding.Help().Desc)
 			}
 			shortList = append(shortList, newLineBinding)
@@ -1037,8 +1120,8 @@ func (p *chatPage) Help() help.KeyMap {
 						key.WithHelp("ctrl+f", "add image"),
 					),
 					key.NewBinding(
-						key.WithKeys("/"),
-						key.WithHelp("/", "add file"),
+						key.WithKeys("@"),
+						key.WithHelp("@", "mention file"),
 					),
 					key.NewBinding(
 						key.WithKeys("ctrl+o"),

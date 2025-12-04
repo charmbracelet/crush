@@ -42,7 +42,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			},
 		}
 	}
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
 		string(sourcegraphDescription),
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

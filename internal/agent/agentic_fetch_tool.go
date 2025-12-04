@@ -66,7 +66,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 		}
 	}
 
-	return fantasy.WithParallel(
+	return fantasy.NewParallelAgentTool(
 		fantasy.NewAgentTool(
 			tools.AgenticFetchToolName,
 			string(agenticFetchToolDescription),
@@ -214,6 +214,5 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				}
 
 				return fantasy.NewTextResponse(result.Response.Content.Text()), nil
-			}),
-		true), nil
+			})), nil
 }

@@ -45,7 +45,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			},
 		}
 	}
-	return fantasy.WithParallel(fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(fantasy.NewAgentTool(
 		DownloadToolName,
 		string(downloadDescription),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -153,5 +153,5 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			}
 
 			return fantasy.NewTextResponse(responseMsg), nil
-		}), true)
+		}))
 }

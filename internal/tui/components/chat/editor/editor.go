@@ -207,12 +207,17 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			break
 		}
 		m.history = InitialiseHistory(m.textarea.Value(), msgs)
-		// m.textarea.SetValue(m.history.Value())
 		return m, nil
 	case CloseHistoryMsg:
+		cursorCurrentLine := m.textarea.Line()
+		cursorLineInfo := m.textarea.LineInfo()
 		m.textarea.SetValue(msg.valueToSet)
+		m.textarea.MoveToBegin()
+		for range cursorCurrentLine {
+			m.textarea.CursorDown()
+		}
+		m.textarea.SetCursorColumn(cursorLineInfo.ColumnOffset - cursorLineInfo.StartColumn)
 		m.history = nil
-		// return m, nil
 	case ScrollHistoryUp:
 		if m.inHistoryMode() {
 			m.history.ScrollUp()
@@ -325,6 +330,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
 					valueToSet: m.textarea.Value(),
 				}))
+				cmds = append(cmds, util.CmdHandler(msg))
+				return m, tea.Sequence(cmds...)
 			}
 		}
 

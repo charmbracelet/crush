@@ -38,7 +38,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
-	return fantasy.NewParallelAgentTool(fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		AgentToolName,
 		string(agentToolDescription),
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -101,5 +101,5 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
 			}
 			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
-		})), nil
+		}), nil
 }

@@ -28,7 +28,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 		}
 	}
 
-	return fantasy.NewParallelAgentTool(fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
 		string(webFetchToolDescription),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -68,5 +68,5 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(result.String()), nil
-		}))
+		})
 }

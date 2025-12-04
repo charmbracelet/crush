@@ -33,7 +33,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 		}
 	}
 
-	return fantasy.NewParallelAgentTool(fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		FetchToolName,
 		string(fetchDescription),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -160,7 +160,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			}
 
 			return fantasy.NewTextResponse(content), nil
-		}))
+		})
 }
 
 func extractTextFromHTML(html string) (string, error) {

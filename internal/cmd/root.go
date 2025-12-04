@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/stringext"
 	termutil "github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/version"
@@ -275,9 +276,5 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 	return (!okTermProg && !okSSHTTY) ||
 		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
-		strings.Contains(termType, "ghostty") ||
-		strings.Contains(termType, "wezterm") ||
-		strings.Contains(termType, "alacritty") ||
-		strings.Contains(termType, "kitty") ||
-		strings.Contains(termType, "rio")
+		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
 }

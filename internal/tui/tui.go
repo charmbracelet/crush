@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/stringext"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -34,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"golang.org/x/mod/semver"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -120,10 +123,19 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 	case tea.TerminalVersionMsg:
+		if a.sendProgressBar {
+			return a, nil
+		}
 		termVersion := strings.ToLower(msg.Name)
-		// Only enable progress bar for the following terminals.
-		if !a.sendProgressBar {
-			a.sendProgressBar = strings.Contains(termVersion, "ghostty")
+		switch {
+		case stringext.ContainsAny(termVersion, "ghostty", "rio"):
+			a.sendProgressBar = true
+		case strings.Contains(termVersion, "iterm2"):
+			// iTerm2 supports progress bars from version v3.6.6
+			matches := regexp.MustCompile(`^iterm2 (\d+\.\d+\.\d+)$`).FindStringSubmatch(termVersion)
+			if len(matches) == 2 && semver.Compare("v"+matches[1], "v3.6.6") >= 0 {
+				a.sendProgressBar = true
+			}
 		}
 		return a, nil
 	case tea.KeyboardEnhancementsMsg:

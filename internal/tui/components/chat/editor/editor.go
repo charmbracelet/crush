@@ -330,6 +330,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
 					valueToSet: m.textarea.Value(),
 				}))
+				// we want to process whatever the key press is but only after coming out of history mode
 				cmds = append(cmds, util.CmdHandler(msg))
 				return m, tea.Sequence(cmds...)
 			}

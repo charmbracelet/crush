@@ -321,7 +321,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			// if any key other than history related controls we play it safe and close
 			// the history and reset the text input field to be the current value
-			if !key.Matches(msg, m.keyMap.Previous) && !key.Matches(msg, m.keyMap.Next) {
+			if !key.Matches(msg, m.keyMap.Previous) && !key.Matches(msg, m.keyMap.Next) && msg.Key().String() != "left" && msg.Key().String() != "right" {
 				cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
 					valueToSet: m.textarea.Value(),
 				}))
@@ -478,7 +478,7 @@ func (m *editorCmp) handleNextKeypressSideEffect() []tea.Cmd {
 	if m.textarea.Line() == m.textarea.LineCount()-1 {
 		// NOTE(tauraamui):
 		if lineInfo.RowOffset == lineInfo.Height-1 {
-			if lineInfo.ColumnOffset == lineInfo.Width {
+			if lineInfo.ColumnOffset == lineInfo.Width-1 {
 				if !m.inHistoryMode() {
 					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
 				}

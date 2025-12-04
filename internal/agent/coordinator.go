@@ -107,6 +107,27 @@ func NewCoordinator(
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	model := c.currentAgent.Model()
+
+	if model.ModelCfg.Provider == "github-copilot" {
+		newToken, err := config.LoadCopilotAuthToken(c.cfg.Options.DataDirectory)
+		if err == nil {
+			providerCfg, ok := c.cfg.Providers.Get("github-copilot")
+			if ok && providerCfg.APIKey != newToken {
+				slog.Info("------------Refreshing GitHub Copilot token")
+				providerCfg.APIKey = newToken
+				c.cfg.Providers.Set("github-copilot", providerCfg)
+				if err := c.UpdateModels(ctx); err != nil {
+					slog.Error("Failed to update models after token refresh", "error", err)
+				} else {
+					// Update model reference after refreshing
+					model = c.currentAgent.Model()
+				}
+			}
+		} else {
+			slog.Warn("Failed to refresh GitHub Copilot token", "error", err)
+		}
+	}
+
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens

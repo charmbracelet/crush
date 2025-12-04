@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -196,6 +198,17 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
+		case "github-copilot":
+			// Try to load token from auth file if environment variable is not set
+			token, err := LoadCopilotAuthToken(c.Options.DataDirectory)
+			if err != nil {
+				if configExists {
+					slog.Warn("Skipping GitHub Copilot provider due to missing or invalid auth", "error", err)
+					c.Providers.Del(string(p.ID))
+				}
+				continue
+			}
+			prepared.APIKey = token
 		case catwalk.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {
@@ -274,6 +287,20 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
+
+		// Special handling for github-copilot custom provider
+		if id == "github-copilot" {
+			token, err := LoadCopilotAuthToken(c.Options.DataDirectory)
+			if err != nil {
+				slog.Warn("Skipping GitHub Copilot provider due to missing or invalid auth", "error", err)
+				c.Providers.Del(id)
+				continue
+			}
+			providerConfig.APIKey = token
+			c.Providers.Set(id, providerConfig)
+			continue
+		}
+
 		if providerConfig.APIKey == "" {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
@@ -301,6 +328,131 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		c.Providers.Set(id, providerConfig)
 	}
 	return nil
+}
+
+// LoadCopilotAuthToken loads the GitHub Copilot token from the auth file if it exists and is valid.
+// If the token is expired, it automatically refreshes it using the GitHub access token.
+// It first checks the global data directory (~/.crush/), then falls back to the local dataDir.
+func LoadCopilotAuthToken(dataDir string) (string, error) {
+	// Try global data directory first, then fall back to local
+	authFiles := []string{
+		filepath.Join(home.Dir(), ".crush", "copilot-auth.json"),
+		filepath.Join(dataDir, "copilot-auth.json"),
+	}
+
+	var (
+		data     []byte
+		err      error
+		authFile string
+	)
+
+	for _, file := range authFiles {
+		data, err = os.ReadFile(file)
+		if err == nil {
+			authFile = file
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to read auth file: %w", err)
+		}
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("not authenticated. Run 'crush auth login github-copilot' to authenticate")
+	}
+
+	// Define auth data structure inline
+	var authData struct {
+		RefreshToken string `json:"refresh_token"`
+		AccessToken  string `json:"access_token"`
+		ExpiresAt    int64  `json:"expires_at"`
+	}
+
+	if err := json.Unmarshal(data, &authData); err != nil {
+		return "", fmt.Errorf("failed to parse auth file: %w", err)
+	}
+
+	// Check if token is expired or will expire in the next 5 minutes
+	expiresAt := time.Unix(authData.ExpiresAt, 0)
+	bufferTime := 5 * time.Minute
+	if time.Now().Add(bufferTime).After(expiresAt) {
+		// Token is expired or about to expire, refresh it
+		slog.Debug("Copilot token expired or expiring soon, refreshing", "expires_at", expiresAt)
+
+		newToken, newExpiresAt, err := refreshCopilotToken(authData.RefreshToken)
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh token: %w. Run 'crush auth login github-copilot' to re-authenticate", err)
+		}
+
+		// Update auth data
+		authData.AccessToken = newToken
+		authData.ExpiresAt = newExpiresAt
+
+		// Save the refreshed token
+		updatedData, err := json.MarshalIndent(authData, "", "  ")
+		if err == nil {
+			if writeErr := os.WriteFile(authFile, updatedData, 0o600); writeErr != nil {
+				slog.Warn("Failed to save refreshed token", "error", writeErr)
+			} else {
+				slog.Debug("Copilot token refreshed successfully", "new_expires_at", time.Unix(newExpiresAt, 0))
+			}
+		}
+	}
+
+	if authData.AccessToken == "" {
+		return "", fmt.Errorf("no access token found in auth file")
+	}
+
+	return authData.AccessToken, nil
+}
+
+// refreshCopilotToken refreshes the GitHub Copilot token using the GitHub access token.
+func refreshCopilotToken(githubToken string) (token string, expiresAt int64, err error) {
+	const (
+		copilotTokenURL      = "https://api.github.com/copilot_internal/v2/token"
+		copilotUserAgent     = "GitHubCopilotChat/0.32.4"
+		copilotEditorVersion = "vscode/1.105.1"
+		copilotEditorPlugin  = "copilot-chat/0.32.4"
+		copilotIntegrationID = "vscode-chat"
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", copilotTokenURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+githubToken)
+	req.Header.Set("User-Agent", copilotUserAgent)
+	req.Header.Set("Editor-Version", copilotEditorVersion)
+	req.Header.Set("Editor-Plugin-Version", copilotEditorPlugin)
+	req.Header.Set("Copilot-Integration-Id", copilotIntegrationID)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", 0, fmt.Errorf("failed to refresh token: %s - %s", resp.Status, string(body))
+	}
+
+	var tokenResp struct {
+		Token     string `json:"token"`
+		ExpiresAt int64  `json:"expires_at"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", 0, err
+	}
+
+	return tokenResp.Token, tokenResp.ExpiresAt, nil
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

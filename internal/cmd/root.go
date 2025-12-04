@@ -40,6 +40,7 @@ func init() {
 		updateProvidersCmd,
 		logsCmd,
 		schemaCmd,
+		authCmd,
 	)
 }
 

@@ -3,7 +3,6 @@ package editor
 type historyState struct {
 	previouslyScrollingPromptHistory bool
 	promptHistoryIndex               int
-	existingValue                    string
 	historyCache                     []string
 }
 
@@ -15,22 +14,27 @@ type History interface {
 }
 
 func InitialiseHistory(existingValue string, messages []string) History {
+	msgs := messages
+	msgs = append(msgs, existingValue)
 	return &historyState{
-		existingValue:      existingValue,
-		historyCache:       messages,
-		promptHistoryIndex: len(messages) - 1,
+		historyCache:       msgs,
+		promptHistoryIndex: len(msgs) - 1,
 	}
 }
 
 func (h *historyState) Value() string {
-	if len(h.historyCache) == 0 {
-		return h.existingValue
+	if len(h.historyCache) > 1 {
+		return h.historyCache[h.promptHistoryIndex]
 	}
-	return h.historyCache[h.promptHistoryIndex]
+	return h.ExistingValue()
 }
 
 func (h *historyState) ExistingValue() string {
-	return h.existingValue
+	index := len(h.historyCache) - 1
+	if index < 0 {
+		return ""
+	}
+	return h.historyCache[index]
 }
 
 func (h *historyState) ScrollUp() {

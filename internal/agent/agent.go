@@ -54,6 +54,7 @@ type SessionAgentCall struct {
 	TopK             *int64
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
+	NonInteractive   bool
 }
 
 type SessionAgent interface {
@@ -486,9 +487,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 	wg.Wait()
 
-	// Send notification that agent has finished its turn.
-	notifBody := fmt.Sprintf("Agent's turn completed in \"%s\"", currentSession.Title)
-	_ = notification.Send("Crush is waiting...", notifBody)
+	// Send notification that agent has finished its turn (skip for nested/non-interactive sessions).
+	if !call.NonInteractive {
+		notifBody := fmt.Sprintf("Agent's turn completed in \"%s\"", currentSession.Title)
+		_ = notification.Send("Crush is waiting...", notifBody)
+	}
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)

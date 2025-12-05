@@ -45,6 +45,8 @@
   - "/(aws|bedrock)/i"
 "provider: azure":
   - "/azure/i"
+"provider: github copilot":
+  - "/copilot/i"
 "provider: google gemini":
   - "/gemini/i"
 "provider: google vertex":

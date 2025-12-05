@@ -323,8 +323,15 @@ type ToolLs struct {
 }
 
 type ToolBash struct {
-	DisableDefaults bool     `json:"disable_banned_defaults,omitempty"`
-	BannedCommands  []string `json:"banned_commands,omitempty"`
+	DisableDefaults bool                      `json:"disable_banned_defaults,omitempty"`
+	BannedCommands  []string                  `json:"banned_commands,omitempty"`
+	SubCommands     BannedToolArgsAndOrParams `json:"banned_sub_commands"`
+}
+
+type BannedToolArgsAndOrParams struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Params  []string `json:"params"`
 }
 
 func (t ToolLs) Limits() (depth, items int) {

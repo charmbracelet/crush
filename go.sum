@@ -2,8 +2,8 @@ charm.land/bubbles/v2 v2.0.0-rc.1 h1:EiIFVAc3Zi/yY86td+79mPhHR7AqZ1OxF+6ztpOCRaM
 charm.land/bubbles/v2 v2.0.0-rc.1/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251202162339-5fa38b798f16 h1:9iVAss7WF8Ax5QBzmZE77aA08JbOMuDpbEhl/Uvc3Eo=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251202162339-5fa38b798f16/go.mod h1:Vsh7/MLC7LQ2Ab8H63SXm6yD/L6o4HDvhdD/IrIRXrU=
-charm.land/fantasy v0.3.4-0.20251204141207-c0d2c86a12f1 h1:lhLvJejrq4f2pMFumqfd9d0wNxZPaNs4Z3UprMhpg/k=
-charm.land/fantasy v0.3.4-0.20251204141207-c0d2c86a12f1/go.mod h1:mGwXNfKUyRm+npj1LLr2mQZorkc8rgVOGWAV/l0fqMk=
+charm.land/fantasy v0.4.0 h1:q2Yy3uu5Fh8GMZXO12zemuOMQt1czd3NO0OwVqfzcdg=
+charm.land/fantasy v0.4.0/go.mod h1:mGwXNfKUyRm+npj1LLr2mQZorkc8rgVOGWAV/l0fqMk=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca h1:6bVc8OFotCS4sS7HKqxTudP7yn8Y0ODR6df2pdlY/+s=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca/go.mod h1:XSJjv7DaH4zd1Y27kZis295RkEj9OFR9zh2WffQQsKQ=
 charm.land/x/vcr v0.1.1 h1:PXCFMUG0rPtyk35rhfzYCJEduOzWXCIbrXTFq4OF/9Q=
@@ -199,8 +199,8 @@ github.com/kaptinlin/go-i18n v0.2.0 h1:8iwjAERQbCVF78c3HxC4MxUDxDRFvQVQlMDvlsO43
 github.com/kaptinlin/go-i18n v0.2.0/go.mod h1:gRHEMrTHtQLsAFwulPbJG71TwHjXxkagn88O8FI8FuA=
 github.com/kaptinlin/jsonpointer v0.4.6 h1:hAett1YROLwxAOKZS08hsJueXr1w0fTMSvWq2x1IoUA=
 github.com/kaptinlin/jsonpointer v0.4.6/go.mod h1:5pHXLIYd2FgV0rUEsChp6xTOvcC2OFk7kF/cjhHzL4g=
-github.com/kaptinlin/jsonschema v0.6.1 h1:RNUQ11ZCHTtM80YcVwRm033H5OJS+MpO06d9x7Yk25o=
-github.com/kaptinlin/jsonschema v0.6.1/go.mod h1:T8SNWNTRLDS1w+ogMZpGYqIfUXn/8DK9r06mf8XbNLE=
+github.com/kaptinlin/jsonschema v0.6.2 h1:+c9W6I2k/8+yMrwYb9fZCQGAROJTMGM9ZSqLducrBlg=
+github.com/kaptinlin/jsonschema v0.6.2/go.mod h1:N7rMNv64BLaLPa7IA6ul5FqVlwzeIn6dSm5cqVpNCmM=
 github.com/kaptinlin/messageformat-go v0.4.6 h1:57DUC9en40mGZR7MvqOS+5EYogAl465fjo+loAA1KPg=
 github.com/kaptinlin/messageformat-go v0.4.6/go.mod h1:r0PH7FsxJX8jS/n6LAYZon5w3X+yfCLUrquqYd2H7ks=
 github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zttxdo=

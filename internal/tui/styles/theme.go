@@ -22,7 +22,6 @@ import (
 
 const (
 	defaultListIndent      = 2
-	defaultListLevelIndent = 4
 	defaultMargin          = 2
 )
 

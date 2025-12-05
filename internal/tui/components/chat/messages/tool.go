@@ -186,7 +186,10 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			// Keep only last N lines to prevent memory issues
 			if len(m.streamingContent) > m.maxStreamLines {
 				excess := len(m.streamingContent) - m.maxStreamLines
-				m.streamingContent = m.streamingContent[excess:]
+				// Use copy to avoid memory leak from underlying array retention
+				newContent := make([]string, m.maxStreamLines)
+				copy(newContent, m.streamingContent[excess:])
+				m.streamingContent = newContent
 			}
 			m.mu.Unlock()
 		}
@@ -245,73 +248,62 @@ func (m *toolCallCmp) View() string {
 }
 
 func (m *toolCallCmp) viewUnboxed() string {
-	// Do ALL state access within the locked region to eliminate race conditions
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	// Determine effective display state atomically
-	effectiveState := enum.ToolCallState(m.call.State)
-	if !m.result.ToolCallID.IsEmpty() {
-		// We have a result - use result outcome
-		if m.result.ResultState.IsError() {
-			effectiveState = enum.ToolCallStateFailed
-		} else {
-			effectiveState = enum.ToolCallStateCompleted
-		}
-	}
-
-	switch effectiveState {
-	case enum.ToolCallStatePending:
-		// Render with current state, no need for snapshot methods
+	m.mu.RLock()
+	effectiveState := m.call.State
+	isNested := m.isNested
+	toolName := m.call.Name
+	
+	// Fast path for pending state - render immediately
+	if effectiveState == enum.ToolCallStatePending {
+		// Render with current state
+		defer m.mu.RUnlock()
 		t := styles.CurrentTheme()
 		icon := effectiveState.ToIconColored()
-		if m.isNested {
-			tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
+		if isNested {
+			tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(toolName))
 			return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
 		}
-		tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
+		tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(toolName))
 		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-
-	default:
-		// Show streaming content if available and enabled
-		if m.showStreaming && len(m.streamingContent) > 0 {
-			if len(m.streamingContent) == 0 {
-				return ""
-			}
-
-			t := styles.CurrentTheme()
-			width := m.textWidth() - 2
-
-			// Copy streaming content to avoid race conditions during rendering
-			streamingCopy := append([]string{}, m.streamingContent...)
-			content := strings.Join(streamingCopy, "\n")
-			return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
-				var processed []string
-				for _, ln := range lines {
-					ln = ansiext.Escape(ln)
-					ln = " " + ln
-					if len(ln) > width {
-						ln = v.fit(ln, width)
-					}
-					processed = append(processed, t.S().Muted.
-						Width(width).
-						Background(t.BgBaseLighter).
-						Render(ln))
-				}
-				return processed
-			})
-		}
-
-		// Show final result
-		{
-			r := registry.lookup(m.call.Name)
-
-			if m.isNested {
-				return r.Render(m)
-			}
-			return r.Render(m)
-		}
 	}
+
+	// For streaming, we need to capture content safely then render outside lock
+	var streamingLines []string
+	showStreaming := m.showStreaming
+	if showStreaming {
+		streamingLines = append([]string{}, m.streamingContent...)
+	}
+	m.mu.RUnlock()
+
+	// Now we are outside the lock - safe to call methods that might re-acquire lock
+	
+	// Show streaming content if available and enabled
+	if showStreaming && len(streamingLines) > 0 {
+		t := styles.CurrentTheme()
+		width := m.textWidth() - 2
+
+		content := strings.Join(streamingLines, "\n")
+		return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
+			var processed []string
+			for _, ln := range lines {
+				ln = ansiext.Escape(ln)
+				ln = " " + ln
+				if len(ln) > width {
+					ln = v.fit(ln, width)
+				}
+				processed = append(processed, t.S().Muted.
+					Width(width).
+					Background(t.BgBaseLighter).
+					Render(ln))
+			}
+			return processed
+		})
+	}
+
+	// Show final result
+	r := registry.lookup(toolName)
+	return r.Render(m)
 }
 
 func (m *toolCallCmp) copyTool() tea.Cmd {
@@ -950,34 +942,6 @@ func (m *toolCallCmp) SetSize(width, height int) tea.Cmd {
 	return nil
 }
 
-// renderStreamingContent renders real-time streaming output from running tools
-func (m *toolCallCmp) renderStreamingContent() string {
-	if len(m.streamingContent) == 0 {
-		return ""
-	}
-
-	t := styles.CurrentTheme()
-	width := m.textWidth() - 2
-
-	// Use our unified rendering pipeline with streaming content
-	content := strings.Join(m.streamingContent, "\n")
-	return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
-		// For streaming, apply basic styling without truncation (we already truncate in Update)
-		var processed []string
-		for _, ln := range lines {
-			ln = ansiext.Escape(ln)
-			ln = " " + ln
-			if len(ln) > width {
-				ln = v.fit(ln, width)
-			}
-			processed = append(processed, t.S().Muted.
-				Width(width).
-				Background(t.BgBaseLighter).
-				Render(ln))
-		}
-		return processed
-	})
-}
 
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.

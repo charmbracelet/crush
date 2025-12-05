@@ -118,12 +118,6 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
-	// Tell the UI that a permission was requested (thread-safe pubsub)
-	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
-		ToolCallID: opts.ToolCallID,
-		Status:     enum.ToolCallStatePermissionPending,
-	})
-
 	// Fast path checks (no lock needed - read-only or thread-safe)
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
@@ -170,6 +164,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	respCh := make(chan enum.ToolCallState, 1)
 
 	s.requestMu.Lock()
+	// Tell the UI that a permission was requested (thread-safe pubsub)
+	// We do this inside the lock to ensure the UI doesn't see a pending state
+	// before the request is actually registered as active.
+	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
+		ToolCallID: opts.ToolCallID,
+		Status:     enum.ToolCallStatePermissionPending,
+	})
+
 	s.activeRequest = &permission
 	s.pendingRequests.Set(permission.ID, respCh)
 	s.requestMu.Unlock()

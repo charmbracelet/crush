@@ -525,7 +525,7 @@ func (p *chatPage) View() string {
 		)
 		layers = append(layers, lipgloss.NewLayer(details).X(1).Y(1))
 	}
-	canvas := lipgloss.NewCanvas(
+	canvas := lipgloss.NewCompositor(
 		layers...,
 	)
 	return canvas.Render()

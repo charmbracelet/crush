@@ -651,3 +651,69 @@ func execCmd(m util.Model, cmd tea.Cmd) {
 		m, cmd = m.Update(msg)
 	}
 }
+
+func TestSelectionViewWideCharacters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should correctly extract Japanese text from selection", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{NewSelectableItem("こんにちは世界")}
+		l := New(items, WithDirectionForward(), WithSize(30, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		// Select the entire first line.
+		l.StartSelection(0, 0)
+		l.EndSelection(30, 0)
+		l.SelectionStop()
+
+		selectedText := l.GetSelectedText(0)
+		assert.Contains(t, selectedText, "こんにちは世界")
+	})
+
+	t.Run("should correctly extract mixed ASCII and CJK content", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{NewSelectableItem("Hello 世界 test")}
+		l := New(items, WithDirectionForward(), WithSize(30, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		l.StartSelection(0, 0)
+		l.EndSelection(30, 0)
+		l.SelectionStop()
+
+		selectedText := l.GetSelectedText(0)
+		assert.Contains(t, selectedText, "Hello")
+		assert.Contains(t, selectedText, "世界")
+		assert.Contains(t, selectedText, "test")
+	})
+
+	t.Run("should correctly extract Chinese text from selection", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{NewSelectableItem("你好世界测试")}
+		l := New(items, WithDirectionForward(), WithSize(30, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		l.StartSelection(0, 0)
+		l.EndSelection(30, 0)
+		l.SelectionStop()
+
+		selectedText := l.GetSelectedText(0)
+		assert.Contains(t, selectedText, "你好世界测试")
+	})
+
+	t.Run("should correctly extract emoji from selection", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{NewSelectableItem("Hello 👋 World 🌍")}
+		l := New(items, WithDirectionForward(), WithSize(30, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		l.StartSelection(0, 0)
+		l.EndSelection(30, 0)
+		l.SelectionStop()
+
+		selectedText := l.GetSelectedText(0)
+		assert.Contains(t, selectedText, "Hello")
+		assert.Contains(t, selectedText, "👋")
+		assert.Contains(t, selectedText, "World")
+		assert.Contains(t, selectedText, "🌍")
+	})
+}

@@ -453,20 +453,30 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 		scanStart := max(textBounds.start, selBounds.startX)
 		scanEnd := min(textBounds.end, selBounds.endX)
 
-		for x := scanStart; x < scanEnd; x++ {
+		for x := scanStart; x < scanEnd; {
 			cell := scr.CellAt(x, y)
 			if cell == nil {
+				x++
+				continue
+			}
+
+			cellWidth := cell.Width
+			// Skip placeholder cells (second column of wide characters, Width=0).
+			if cellWidth == 0 {
+				x++
 				continue
 			}
 
 			cellStr := cell.String()
 			if len(cellStr) > 0 {
 				if _, isSpecial := specialChars[cellStr]; isSpecial {
+					x += max(1, cellWidth)
 					continue
 				}
 				if textOnly {
-					// Collect selected text without styles
-					selectedText.WriteString(cell.String())
+					// Collect selected text without styles.
+					selectedText.WriteString(cellStr)
+					x += max(1, cellWidth)
 					continue
 				}
 
@@ -479,6 +489,7 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				cell.Style.Fg = ts.GetForeground()
 				scr.SetCell(x, y, cell)
 			}
+			x += max(1, cellWidth)
 		}
 
 		if textOnly {

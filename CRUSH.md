@@ -74,7 +74,7 @@ func TestYourFunction(t *testing.T) {
 ## Project Tracking
 
 Crush maintains a centralized list of projects at `~/.local/share/crush/projects.json`.
-This enables external tools (like Splitrail) to analyze Crush usage across projects
+This enables external tools (like [Splitrail](https://github.com/Piebald-AI/splitrail)) to analyze Crush usage across projects
 without scanning the entire filesystem for `.crush` folders.
 
 ### How It Works

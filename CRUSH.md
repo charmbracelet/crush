@@ -70,3 +70,46 @@ func TestYourFunction(t *testing.T) {
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
+
+## Project Tracking
+
+Crush maintains a centralized list of projects at `~/.local/share/crush/projects.json`.
+This enables external tools (like Splitrail) to analyze Crush usage across projects
+without scanning the entire filesystem for `.crush` folders.
+
+### How It Works
+
+- Projects are registered automatically when Crush starts in a directory.
+- Each entry tracks the working directory, data directory path, and last accessed time.
+- The `data_dir` field points to the actual `.crush` folder location (handles custom
+  `-D` paths and inherited `.crush` folders from parent directories).
+
+### Commands
+
+```bash
+# List all tracked projects (table view in TTY, plain text otherwise)
+crush projects
+
+# Output as JSON (for external tools like Splitrail)
+crush projects --json
+```
+
+### JSON Schema
+
+```json
+{
+  "projects": [
+    {
+      "path": "/home/user/myproject",
+      "data_dir": "/home/user/myproject/.crush",
+      "last_accessed": "2025-12-04T14:30:00Z"
+    }
+  ]
+}
+```
+
+### Key Functions
+
+- `projects.Register(workingDir, dataDir)` - Add or update a project in the list.
+- `projects.List()` - Get all tracked projects sorted by last accessed.
+- `projects.Load()` / `projects.Save()` - Low-level file operations.

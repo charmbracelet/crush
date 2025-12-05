@@ -458,7 +458,7 @@ func (m *editorCmp) handlePreviousKeypressSideEffect() []tea.Cmd {
 
 	// NOTE(tauraamui):	Check if we're on first line (actual first line in the buffer),
 	// not visually. The line method returns the current line the cursor is on, IGNORING
-	// whether there are mutliple lines due to wrapping
+	// whether there are multiple lines due to wrapping
 	if m.textarea.Line() == 0 {
 		// NOTE(tauraamui):
 		if lineInfo.RowOffset == 0 {
@@ -482,7 +482,7 @@ func (m *editorCmp) handleNextKeypressSideEffect() []tea.Cmd {
 
 	// NOTE(tauraamui):	Check if we're on the last line (actual last line in the buffer),
 	// not visually. The line method returns the current line the cursor is on, IGNORING
-	// whether there are mutliple lines due to wrapping
+	// whether there are multiple lines due to wrapping
 	if m.textarea.Line() == m.textarea.LineCount()-1 {
 		// NOTE(tauraamui):
 		if lineInfo.RowOffset == lineInfo.Height-1 {

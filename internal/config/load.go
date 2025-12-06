@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -24,10 +25,30 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
+
+// LoadOption is a functional option for configuring Load behavior.
+type LoadOption func(*Config)
+
+// WithDebug enables debug mode.
+func WithDebug() LoadOption {
+	return func(cfg *Config) {
+		cfg.Options.Debug = true
+	}
+}
+
+// WithCopilot enables GitHub Copilot provider auto-detection.
+// When enabled, Crush will look for existing OAuth tokens from VSCode/JetBrains
+// in ~/.config/github-copilot/apps.json and add Copilot as a provider if found.
+func WithCopilot() LoadOption {
+	return func(cfg *Config) {
+		cfg.initCopilot()
+	}
+}
 
 // LoadReader config via io.Reader.
 func LoadReader(fd io.Reader) (*Config, error) {
@@ -45,7 +66,7 @@ func LoadReader(fd io.Reader) (*Config, error) {
 }
 
 // Load loads the configuration from the default paths.
-func Load(workingDir, dataDir string, debug bool) (*Config, error) {
+func Load(workingDir, dataDir string, opts ...LoadOption) (*Config, error) {
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, err := loadFromConfigPaths(configPaths)
@@ -57,8 +78,9 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	cfg.setDefaults(workingDir, dataDir)
 
-	if debug {
-		cfg.Options.Debug = true
+	// Apply options before setting up logs (so WithDebug takes effect).
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
 	// Setup logs
@@ -88,6 +110,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
+
 	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -329,6 +352,71 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		c.Providers.Set(id, providerConfig)
 	}
 	return nil
+}
+
+// initCopilot detects and configures GitHub Copilot provider if a valid token exists.
+func (c *Config) initCopilot() {
+	// Skip if Copilot is already configured (user may have set it manually).
+	if _, exists := c.Providers.Get(CopilotProviderID); exists {
+		return
+	}
+
+	if !copilot.HasGitHubToken() {
+		return
+	}
+
+	githubToken, err := copilot.ReadGitHubToken()
+	if err != nil {
+		return
+	}
+
+	// Exchange GitHub token for Copilot token to fetch models.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	copilotToken, err := copilot.GetCopilotToken(ctx, githubToken)
+	if err != nil {
+		return
+	}
+
+	// Fetch available models from Copilot API.
+	copilotModels, err := copilot.GetModels(ctx, copilotToken.Token)
+	if err != nil {
+		return
+	}
+
+	// Convert Copilot models to catwalk models.
+	models := make([]catwalk.Model, 0, len(copilotModels))
+	for _, m := range copilotModels {
+		// Skip models that aren't enabled in the model picker.
+		if !m.ModelPickerEnabled {
+			continue
+		}
+		model := catwalk.Model{
+			ID:   m.ID,
+			Name: m.Name,
+		}
+		if m.Capabilities.Limits.MaxOutputTokens > 0 {
+			model.DefaultMaxTokens = int64(m.Capabilities.Limits.MaxOutputTokens)
+		}
+		if m.Capabilities.Limits.MaxContextWindowTokens > 0 {
+			model.ContextWindow = int64(m.Capabilities.Limits.MaxContextWindowTokens)
+		}
+		models = append(models, model)
+	}
+
+	if len(models) == 0 {
+		return
+	}
+
+	c.Providers.Set(CopilotProviderID, ProviderConfig{
+		ID:                 CopilotProviderID,
+		Name:               "GitHub Copilot",
+		Type:               catwalk.TypeOpenAICompat,
+		BaseURL:            copilot.CopilotBaseURL(),
+		CopilotGitHubToken: githubToken,
+		Models:             models,
+	})
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

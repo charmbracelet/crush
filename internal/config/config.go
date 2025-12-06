@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/invopop/jsonschema"
+	"github.com/tidwall/sjson"
+
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
-	"github.com/invopop/jsonschema"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -84,6 +85,9 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+// CopilotProviderID is the provider ID for GitHub Copilot.
+const CopilotProviderID = "copilot"
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
@@ -97,6 +101,9 @@ type ProviderConfig struct {
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
+	// CopilotGitHubToken is the GitHub OAuth token for Copilot authentication.
+	// This is read from the IDE's apps.json file and used to obtain Copilot API tokens.
+	CopilotGitHubToken string `json:"-"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 

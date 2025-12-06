@@ -42,6 +42,13 @@ type PermissionEvent struct {
 
 type PermissionRequestId = string
 
+type permissionKey struct {
+	SessionID string
+	ToolName  string
+	Action    string
+	Path      string
+}
+
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
 	GrantPersistent(permission PermissionRequest)
@@ -59,9 +66,10 @@ type permissionService struct {
 
 	uiBroker            *pubsub.Broker[PermissionEvent]
 	workingDir          string
-	sessionPermissions  *csync.Slice[PermissionRequest]
+	sessionPermissions  *csync.Map[permissionKey, PermissionRequest]
 	pendingRequests     *csync.Map[PermissionRequestId, chan enum.ToolCallState]
 	autoApproveSessions *csync.Map[string, bool]
+	pathCache           *csync.Map[string, string]
 	skip                bool
 	allowedTools        []string
 
@@ -75,7 +83,12 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	defer s.requestMu.Unlock()
 
 	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
-	s.sessionPermissions.Append(permission)
+	s.sessionPermissions.Set(permissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}, permission)
 	s.noLongerActiveRequestUnsafe(permission)
 }
 
@@ -150,14 +163,14 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	}
 	permission.Path = dir
 
-	// Check session permissions (thread-safe iteration)
-	for request := range s.sessionPermissions.Seq() {
-		if request.ToolName == permission.ToolName &&
-			request.Action == permission.Action &&
-			request.SessionID == permission.SessionID &&
-			request.Path == permission.Path {
-			return true
-		}
+	// Check session permissions (O(1) map lookup)
+	if _, ok := s.sessionPermissions.Get(permissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}); ok {
+		return true
 	}
 
 	// Setup response channel and active request under lock
@@ -209,7 +222,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		uiBroker:            pubsub.NewBroker[PermissionEvent](),
 		workingDir:          workingDir,
-		sessionPermissions:  csync.NewSlice[PermissionRequest](),
+		sessionPermissions:  csync.NewMap[permissionKey, PermissionRequest](),
 		autoApproveSessions: csync.NewMap[string, bool](),
 		skip:                skip,
 		allowedTools:        allowedTools,

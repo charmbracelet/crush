@@ -9,6 +9,9 @@ type EditorKeyMap struct {
 	SendMessage key.Binding
 	OpenEditor  key.Binding
 	Newline     key.Binding
+	Next        key.Binding
+	Previous    key.Binding
+	Escape      key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -31,6 +34,18 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			// the terminal supports "shift+enter", we substitute the help text
 			// to reflect that.
 			key.WithHelp("ctrl+j", "newline"),
+		),
+		Next: key.NewBinding(
+			key.WithKeys("down"),
+			key.WithHelp("↓", "down"),
+		),
+		Previous: key.NewBinding(
+			key.WithKeys("up"),
+			key.WithHelp("↑", "up"),
+		),
+		Escape: key.NewBinding(
+			key.WithKeys("esc", "alt+esc"),
+			key.WithHelp("esc", "cancel history mode"),
 		),
 	}
 }

@@ -306,6 +306,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		largeProviderCfg.SystemPromptPrefix,
 		systemPrompt,
 		c.cfg.Options.DisableAutoSummarize,
+		c.cfg.Options.ToonConversion,
 		c.permissions.SkipRequests(),
 		c.sessions,
 		c.messages,

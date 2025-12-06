@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
@@ -792,7 +791,7 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		// terminal emulators and environments.
 		tea.SetClipboard(selectedText),
 		func() tea.Msg {
-			_ = clipboard.WriteAll(selectedText)
+			_ = util.WriteClipboard(selectedText)
 			return nil
 		},
 		util.ReportInfo("Selected text copied to clipboard"),

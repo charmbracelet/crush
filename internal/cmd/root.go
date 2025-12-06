@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/stringext"
 	termutil "github.com/charmbracelet/crush/internal/term"
@@ -41,6 +42,7 @@ func init() {
 	rootCmd.AddCommand(
 		runCmd,
 		dirsCmd,
+		projectsCmd,
 		updateProvidersCmd,
 		logsCmd,
 		schemaCmd,
@@ -186,6 +188,12 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 
 	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err
+	}
+
+	// Register this project in the centralized projects list.
+	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
+		slog.Warn("Failed to register project", "error", err)
+		// Non-fatal: continue even if registration fails
 	}
 
 	// Connect to DB; this will also run migrations.

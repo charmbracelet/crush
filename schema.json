@@ -229,6 +229,16 @@
           "description": "Whether this MCP server is disabled",
           "default": false
         },
+        "disabled_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "get-library-doc"
+            ]
+          },
+          "type": "array",
+          "description": "List of tools from this MCP server to disable"
+        },
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",
@@ -386,10 +396,14 @@
         },
         "disabled_tools": {
           "items": {
-            "type": "string"
+            "type": "string",
+            "examples": [
+              "bash",
+              "sourcegraph"
+            ]
           },
           "type": "array",
-          "description": "Tools to disable"
+          "description": "List of built-in tools to disable and hide from the agent"
         },
         "disable_provider_auto_update": {
           "type": "boolean",
@@ -418,10 +432,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "disabled_tools"
-      ]
+      "type": "object"
     },
     "Permissions": {
       "properties": {

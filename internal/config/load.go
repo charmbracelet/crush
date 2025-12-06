@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
@@ -224,6 +225,30 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
+		case "github-copilot":
+			if config.OAuthToken == nil {
+				if configExists {
+					slog.Warn("Skipping GitHub Copilot provider: not authenticated. Run 'crush login github-copilot'")
+					c.Providers.Del(string(p.ID))
+				}
+				continue
+			}
+			if config.OAuthToken.IsExpired() {
+				newToken, err := copilot.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Copilot OAuth token")
+					config.OAuthToken = newToken
+					prepared.OAuthToken = newToken
+					_ = cmp.Or(
+						c.SetConfigField("providers.github-copilot.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.github-copilot.oauth", newToken),
+					)
+				} else {
+					slog.Error("Failed to refresh Copilot OAuth token", "error", err)
+					event.Error(err)
+				}
+			}
+			prepared.APIKey = config.OAuthToken.AccessToken
 		case catwalk.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {
@@ -302,6 +327,32 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			c.Providers.Del(id)
 			continue
 		}
+
+		// Special handling for github-copilot custom provider
+		if id == "github-copilot" {
+			if providerConfig.OAuthToken == nil {
+				slog.Warn("Skipping GitHub Copilot provider: not authenticated. Run 'crush login github-copilot'")
+				c.Providers.Del(id)
+				continue
+			}
+			if providerConfig.OAuthToken.IsExpired() {
+				newToken, err := copilot.RefreshToken(context.TODO(), providerConfig.OAuthToken.RefreshToken)
+				if err == nil {
+					slog.Info("Successfully refreshed Copilot OAuth token")
+					providerConfig.OAuthToken = newToken
+					_ = cmp.Or(
+						c.SetConfigField("providers.github-copilot.api_key", newToken.AccessToken),
+						c.SetConfigField("providers.github-copilot.oauth", newToken),
+					)
+				} else {
+					slog.Error("Failed to refresh Copilot OAuth token", "error", err)
+				}
+			}
+			providerConfig.APIKey = providerConfig.OAuthToken.AccessToken
+			c.Providers.Set(id, providerConfig)
+			continue
+		}
+
 		if providerConfig.APIKey == "" {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}

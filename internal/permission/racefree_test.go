@@ -9,10 +9,14 @@ import (
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 )
 
 // TestRaceFreePermissionService validates lock-free design
 func TestRaceFreePermissionService(t *testing.T) {
+	// Verify no goroutine leaks after test completes
+	defer goleak.VerifyNone(t)
+
 	t.Run("Lock-free concurrent requests", func(t *testing.T) {
 		service := NewRaceFreePermissionService("/tmp", true, []string{})
 

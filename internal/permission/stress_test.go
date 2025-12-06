@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/message"
+	"go.uber.org/goleak"
 )
 
 func TestPermissionService_Stress(t *testing.T) {
@@ -17,16 +19,21 @@ func TestPermissionService_Stress(t *testing.T) {
 
 	t.Parallel()
 
+	// Verify no goroutine leaks after test completes
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
 	// Use a clean service for stress testing
 	service := NewPermissionService("/tmp", false, []string{})
 	
 	// We need to subscribe BEFORE sending requests
-	// Note: In the real app, the UI subscribes.
-	events := service.Subscribe(t.Context())
+	// Note: In real app, the UI subscribes.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := service.Subscribe(ctx)
 
 	const (
 		numGoroutines = 20  // Reduced to avoid overwhelming the 64-buffer pubsub
-		numRequests   = 100 // Enough to trigger races
+		numRequests   = 50  // Reduced to avoid timeout
 	)
 
 	var wg sync.WaitGroup

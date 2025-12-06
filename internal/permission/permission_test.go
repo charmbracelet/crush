@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 )
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
@@ -95,6 +96,9 @@ func TestPermissionService_SkipMode(t *testing.T) {
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {
+	// Verify no goroutine leaks after test completes
+	defer goleak.VerifyNone(t)
+
 	t.Run("Sequential permission requests with persistent grants", func(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
 

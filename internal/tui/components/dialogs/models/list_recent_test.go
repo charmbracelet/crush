@@ -89,7 +89,7 @@ func TestModelList_RecentlyUsedSectionAndPrunesInvalid(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataConfDir, "providers.json"), emptyProviders, 0o644))
 
 	// Initialize global config instance (no network due to auto-update disabled)
-	_, err = config.Init(cfgDir, dataDir, false)
+	_, err = config.Init(cfgDir, dataDir)
 	require.NoError(t, err)
 
 	// Build a small provider set for the list component
@@ -198,7 +198,7 @@ func TestModelList_PrunesInvalidModelWithinValidProvider(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataConfDir, "providers.json"), emptyProviders, 0o644))
 
 	// Initialize global config instance
-	_, err = config.Init(cfgDir, dataDir, false)
+	_, err = config.Init(cfgDir, dataDir)
 	require.NoError(t, err)
 
 	// Build provider set that only includes m1, not "missing"
@@ -313,7 +313,7 @@ func TestModelList_AllRecentsInvalid(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataConfDir, "providers.json"), emptyProviders, 0o644))
 
 	// Initialize global config instance with isolated dataDir
-	_, err = config.Init(cfgDir, dataDir, false)
+	_, err = config.Init(cfgDir, dataDir)
 	require.NoError(t, err)
 
 	// Build provider set (doesn't include unknown1 or unknown2)

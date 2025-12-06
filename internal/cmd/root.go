@@ -174,7 +174,11 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	opts := []config.LoadOption{config.WithCopilot()}
+	if debug {
+		opts = append(opts, config.WithDebug())
+	}
+	cfg, err := config.Init(cwd, dataDir, opts...)
 	if err != nil {
 		return nil, err
 	}

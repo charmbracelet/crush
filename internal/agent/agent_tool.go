@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/message"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -56,11 +57,19 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "New Agent Session")
+			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, message.ToolCallID(call.ID))
+			// TODO: This is off agentToolSessionID is a message.ToolCallID??
+			session, err := c.sessions.CreateTaskSession(ctx, message.ToolCallID(agentToolSessionID), sessionID, "New Agent Session")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
+
+			// Create a dedicated context for the nested agent with proper cancellation
+			nestedAgentCtx, cancelNestedAgent := context.WithCancel(ctx)
+
+			// Ensure we always clean up the nested agent context
+			defer cancelNestedAgent()
+
 			model := agent.Model()
 			maxTokens := model.CatwalkCfg.DefaultMaxTokens
 			if model.ModelCfg.MaxTokens != 0 {
@@ -71,7 +80,9 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("model provider not configured")
 			}
-			result, err := agent.Run(ctx, SessionAgentCall{
+
+			// Run the nested agent with its own context
+			result, err := agent.Run(nestedAgentCtx, SessionAgentCall{
 				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,

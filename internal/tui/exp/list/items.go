@@ -190,7 +190,7 @@ func (c *completionItemCmp[T]) IsFocused() bool {
 }
 
 // SetSize implements CommandItem.
-func (c *completionItemCmp[T]) SetSize(width int, height int) tea.Cmd {
+func (c *completionItemCmp[T]) SetSize(width, height int) tea.Cmd {
 	c.width = width
 	return nil
 }
@@ -375,7 +375,7 @@ func (m *itemSectionModel) GetSize() (int, int) {
 	return m.width, 1
 }
 
-func (m *itemSectionModel) SetSize(width int, height int) tea.Cmd {
+func (m *itemSectionModel) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	return nil
 }

@@ -178,7 +178,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		GeneratedWith: true,
 	}
 
-	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)
+	systemPrompt, err := prompt.Build(context.Background(), large.Provider(), large.Model(), *cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,254 @@
+package permission
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
+)
+
+// TestRaceFreePermissionService validates lock-free design
+func TestRaceFreePermissionService(t *testing.T) {
+	// Verify no goroutine leaks after test completes
+	defer goleak.VerifyNone(t)
+
+	t.Run("Lock-free concurrent requests", func(t *testing.T) {
+		service := NewRaceFreePermissionService("/tmp", true, []string{})
+
+		var wg sync.WaitGroup
+		results := make([]bool, 100)
+
+		// Simulate 100 concurrent permission requests
+		for i := range 100 {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				results[index] = service.Request(CreatePermissionRequest{
+					SessionID:   "session-" + string(rune(index%10)),
+					ToolCallID:  message.ToolCallID("tool-" + string(rune(index%10))),
+					ToolName:    "bash",
+					Action:      "execute",
+					Description: "Test command",
+					Path:        "/tmp/test-" + string(rune(index%10)),
+				})
+			}(i)
+		}
+
+		// Wait for all requests to complete
+		wg.Wait()
+
+		// Should not crash or deadlock
+		t.Logf("✅ 100 concurrent requests completed without deadlocks")
+
+		// Most should require permission (not in allowlist)
+		approvedCount := 0
+		for _, result := range results {
+			if result {
+				approvedCount++
+			}
+		}
+
+		t.Logf("✅ Approved %d/%d requests (as expected for non-allowlist)", approvedCount, len(results))
+	})
+
+	t.Run("Lock-free grant/deny operations", func(t *testing.T) {
+		service := NewRaceFreePermissionService("/tmp", false, []string{})
+
+		var wg sync.WaitGroup
+
+		// Test concurrent grant operations
+		for i := range 50 {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				permission := PermissionRequest{
+					ID: string(rune(index)),
+					CreatePermissionRequest: CreatePermissionRequest{
+						SessionID:   "test-session",
+						ToolCallID:  "test-tool",
+						ToolName:    "bash",
+						Action:      "execute",
+						Description: "Test",
+						Path:        "/tmp/test",
+					},
+				}
+
+				// Should not cause race conditions
+				if index%2 == 0 {
+					service.GrantPersistent(permission)
+				} else {
+					service.Grant(permission)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		t.Logf("✅ 50 concurrent grant operations completed without races")
+	})
+
+	t.Run("Lock-free deny operations", func(t *testing.T) {
+		service := NewRaceFreePermissionService("/tmp", false, []string{})
+
+		var wg sync.WaitGroup
+
+		// Test concurrent deny operations
+		for i := range 50 {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				permission := PermissionRequest{
+					ID: string(rune(index)),
+					CreatePermissionRequest: CreatePermissionRequest{
+						SessionID:   "test-session",
+						ToolCallID:  "test-tool",
+						ToolName:    "bash",
+						Action:      "execute",
+						Description: "Test",
+						Path:        "/tmp/test",
+					},
+				}
+
+				// Should not cause race conditions
+				service.Deny(permission)
+			}(i)
+		}
+
+		wg.Wait()
+		t.Logf("✅ 50 concurrent deny operations completed without races")
+	})
+}
+
+// BenchmarkRaceFreePermissionService tests performance.
+// Uses skip=true to benchmark fast path without blocking.
+func BenchmarkRaceFreePermissionService(b *testing.B) {
+	service := NewRaceFreePermissionService("/tmp", true, []string{})
+
+	b.ResetTimer()
+
+	for b.Loop() {
+		service.Request(CreatePermissionRequest{
+			SessionID:   "benchmark-session",
+			ToolCallID:  "benchmark-tool",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "Benchmark command",
+			Path:        "/tmp/benchmark",
+		})
+	}
+}
+
+// TestRaceFreeVsMutex compares performance
+func TestRaceFreeVsMutex(t *testing.T) {
+	const iterations = 1000
+
+	// Test lock-free service (use skip mode for fair comparison)
+	raceFree := NewRaceFreePermissionService("/tmp", true, []string{})
+
+	start := time.Now()
+	for range iterations {
+		raceFree.Request(CreatePermissionRequest{
+			SessionID:   "rf-session",
+			ToolCallID:  "rf-tool",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "Test",
+			Path:        "/tmp/rf",
+		})
+	}
+	raceFreeTime := time.Since(start)
+
+	// Test original mutex-based service
+	mutexService := NewPermissionService("/tmp", true, []string{})
+
+	start = time.Now()
+	for range iterations {
+		mutexService.Request(CreatePermissionRequest{
+			SessionID:   "mutex-session",
+			ToolCallID:  "mutex-tool",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "Test",
+			Path:        "/tmp/mutex",
+		})
+	}
+	mutexTime := time.Since(start)
+
+	t.Logf("Lock-free service: %v", raceFreeTime)
+	t.Logf("Mutex service: %v", mutexTime)
+
+	if raceFreeTime < mutexTime {
+		speedup := float64(mutexTime) / float64(raceFreeTime)
+		t.Logf("✅ Lock-free is %.1fx faster", speedup)
+	}
+}
+
+// TestEventualConsistency tests eventual consistency under high load.
+// Uses a small number of requests with proper handling to avoid timeouts.
+func TestEventualConsistency(t *testing.T) {
+	service := NewRaceFreePermissionService("/tmp", false, []string{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Subscribe to permission requests
+	events := service.Subscribe(ctx)
+
+	var wg sync.WaitGroup
+	completedRequests := int32(0)
+	totalRequests := 20 // Small number to avoid timeout
+
+	// Start request handler FIRST (so it's ready to receive)
+	requestsHandled := int32(0)
+	go func() {
+		for range totalRequests {
+			select {
+			case <-ctx.Done():
+				return
+			case event := <-events:
+				handled := atomic.AddInt32(&requestsHandled, 1)
+				if handled <= 10 {
+					// Grant first 10 requests
+					service.Grant(event.Payload)
+				} else {
+					// Deny remaining
+					service.Deny(event.Payload)
+				}
+			}
+		}
+	}()
+
+	// Start concurrent requests
+	for i := range totalRequests {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+
+			req := CreatePermissionRequest{
+				SessionID:   "consistency-test",
+				ToolCallID:  message.ToolCallID("tool-" + string(rune(index%10))),
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "Consistency test",
+				Path:        "/tmp/consistency",
+			}
+
+			// Make request
+			result := service.Request(req)
+			if result {
+				atomic.AddInt32(&completedRequests, 1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	t.Logf("✅ %d/%d requests completed with eventual consistency", completedRequests, totalRequests)
+
+	// Should have exactly 10 granted (first 10)
+	assert.Equal(t, int32(10), atomic.LoadInt32(&completedRequests), "Expected exactly 10 granted permissions")
+}

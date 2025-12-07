@@ -486,7 +486,7 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	switch providerID {
 	case string(catwalk.InferenceProviderAnthropic):
 		newToken, err = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case "github-copilot", "github", "copilot":
+	case "copilot", "github", "github-copilot":
 		newToken, err = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)

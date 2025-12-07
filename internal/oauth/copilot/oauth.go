@@ -26,7 +26,6 @@ const (
 	integrationID       = "vscode-chat"
 )
 
-// DeviceCode holds the GitHub device code response.
 type DeviceCode struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -35,7 +34,6 @@ type DeviceCode struct {
 	Interval        int    `json:"interval"`
 }
 
-// RequestDeviceCode requests a device code from GitHub.
 func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 	data := url.Values{}
 	data.Set("client_id", clientID)
@@ -134,8 +132,6 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 		return nil, err
 	}
 
-	fmt.Println("result", result)
-
 	switch result.Error {
 	case "":
 		if result.AccessToken == "" {
@@ -192,14 +188,16 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		return nil, err
 	}
 
-	return &oauth.Token{
+	copilotToken := &oauth.Token{
 		AccessToken:  result.Token,
 		RefreshToken: githubToken,
 		ExpiresAt:    result.ExpiresAt,
-	}, nil
+	}
+	copilotToken.SetExpiresIn()
+
+	return copilotToken, nil
 }
 
-// RefreshToken refreshes the Copilot token using the stored GitHub token.
 func RefreshToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
 	return getCopilotToken(ctx, githubToken)
 }

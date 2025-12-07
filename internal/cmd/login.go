@@ -9,10 +9,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/spf13/cobra"
+
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/spf13/cobra"
 )
 
 var loginCmd = &cobra.Command{
@@ -51,7 +52,7 @@ crush login claude
 		switch args[0] {
 		case "anthropic", "claude":
 			return loginClaude()
-		case "copilot", "github-copilot", "github":
+		case "copilot", "github", "github-copilot":
 			return loginCopilot()
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
@@ -143,6 +144,7 @@ func loginCopilot() error {
 
 	cfg := config.Get()
 	if err := cmp.Or(
+		cfg.SetConfigField("providers.github-copilot.name", "GitHub Copilot"),
 		cfg.SetConfigField("providers.github-copilot.api_key", token.AccessToken),
 		cfg.SetConfigField("providers.github-copilot.refresh_token", token.RefreshToken),
 		cfg.SetConfigField("providers.github-copilot.oauth", token),

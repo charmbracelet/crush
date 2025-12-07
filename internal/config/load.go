@@ -224,31 +224,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		}
 
 		switch p.ID {
-		// Handle specific providers that require additional configuration
-		case "github-copilot":
-			if config.OAuthToken == nil {
-				if configExists {
-					slog.Warn("Skipping GitHub Copilot provider: not authenticated. Run 'crush login github-copilot'")
-					c.Providers.Del(string(p.ID))
-				}
-				continue
-			}
-			if config.OAuthToken.IsExpired() {
-				newToken, err := copilot.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
-				if err == nil {
-					slog.Info("Successfully refreshed Copilot OAuth token")
-					config.OAuthToken = newToken
-					prepared.OAuthToken = newToken
-					_ = cmp.Or(
-						c.SetConfigField("providers.github-copilot.api_key", newToken.AccessToken),
-						c.SetConfigField("providers.github-copilot.oauth", newToken),
-					)
-				} else {
-					slog.Error("Failed to refresh Copilot OAuth token", "error", err)
-					event.Error(err)
-				}
-			}
-			prepared.APIKey = config.OAuthToken.AccessToken
 		case catwalk.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {
@@ -349,6 +324,16 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				}
 			}
 			providerConfig.APIKey = providerConfig.OAuthToken.AccessToken
+
+			if len(providerConfig.Models) == 0 {
+				models, err := FetchCopilotModels()
+				if err != nil {
+					slog.Warn("Failed to fetch Copilot models from GitHub Copilot API", "error", err)
+				} else {
+					providerConfig.Models = models
+					slog.Info("Loaded Copilot models from GitHub Copilot API", "count", len(models))
+				}
+			}
 			c.Providers.Set(id, providerConfig)
 			continue
 		}

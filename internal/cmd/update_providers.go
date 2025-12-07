@@ -5,9 +5,10 @@ import (
 	"log/slog"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 var updateProvidersCmd = &cobra.Command{
@@ -38,6 +39,9 @@ crush update-providers embedded
 
 		if err := config.UpdateProviders(pathOrUrl); err != nil {
 			return err
+		}
+		if err := config.UpdateCopilotModels(); err != nil {
+			slog.Warn("Failed to update Copilot models", "err", err)
 		}
 
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's

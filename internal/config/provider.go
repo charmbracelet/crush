@@ -2,22 +2,51 @@ package config
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/home"
 )
 
-type ProviderClient interface {
-	GetProviders() ([]catwalk.Provider, error)
+const copilotModelsURL = "https://models.dev/api.json"
+
+type modelsDevResponse map[string]modelsDevProvider
+
+type modelsDevProvider struct {
+	ID     string                    `json:"id"`
+	Name   string                    `json:"name"`
+	API    string                    `json:"api"`
+	Doc    string                    `json:"doc"`
+	Models map[string]modelsDevModel `json:"models"`
+}
+
+type modelsDevModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Attachment  bool   `json:"attachment"`
+	Reasoning   bool   `json:"reasoning"`
+	ToolCall    bool   `json:"tool_call"`
+	Temperature bool   `json:"temperature"`
+	Cost        struct {
+		Input  float64 `json:"input"`
+		Output float64 `json:"output"`
+	} `json:"cost"`
+	Limit struct {
+		Context int `json:"context"`
+		Output  int `json:"output"`
+	} `json:"limit"`
+	Status string `json:"status"`
 }
 
 var (
@@ -25,6 +54,10 @@ var (
 	providerList []catwalk.Provider
 	providerErr  error
 )
+
+type ProviderClient interface {
+	GetProviders() ([]catwalk.Provider, error)
+}
 
 // file to cache provider data
 func providerCacheFileData() string {
@@ -165,4 +198,76 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 		}
 		return providers, nil
 	}
+}
+
+func FetchCopilotModels() ([]catwalk.Model, error) {
+	req, err := http.NewRequestWithContext(context.TODO(), "GET", copilotModelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch models: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("models.dev returned status %d", resp.StatusCode)
+	}
+
+	var data modelsDevResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode models: %w", err)
+	}
+
+	provider, ok := data["github-copilot"]
+	if !ok {
+		return nil, fmt.Errorf("github-copilot not found in models.dev")
+	}
+
+	var models []catwalk.Model
+	for _, m := range provider.Models {
+		if m.Status == "deprecated" {
+			continue
+		}
+
+		models = append(models, catwalk.Model{
+			ID:               m.ID,
+			Name:             m.Name,
+			CostPer1MIn:      m.Cost.Input,
+			CostPer1MOut:     m.Cost.Output,
+			ContextWindow:    int64(m.Limit.Context),
+			DefaultMaxTokens: int64(m.Limit.Output),
+			CanReason:        m.Reasoning,
+			SupportsImages:   m.Attachment,
+		})
+	}
+
+	return models, nil
+}
+
+func UpdateCopilotModels() error {
+	cfg := Get()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	providerCfg, ok := cfg.Providers.Get("github-copilot")
+	if !ok || providerCfg.OAuthToken == nil {
+		return fmt.Errorf("github-copilot not authenticated")
+	}
+
+	models, err := FetchCopilotModels()
+	if err != nil {
+		return err
+	}
+
+	providerCfg.Models = models
+	cfg.Providers.Set("github-copilot", providerCfg)
+
+	slog.Info("Updated GitHub Copilot models", "count", len(models))
+	return nil
 }

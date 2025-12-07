@@ -92,8 +92,14 @@ func NewCoordinator(
 		return nil, errors.New("coder agent not configured")
 	}
 
+	// Get the provider for prompt selection.
+	largeModelCfg, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if !ok {
+		return nil, errors.New("large model not selected")
+	}
+
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := coderPrompt(largeModelCfg.Provider, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}

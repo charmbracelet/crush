@@ -66,7 +66,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 		}
 	}
 
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
 		string(agenticFetchToolDescription),
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

@@ -165,6 +165,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				webSearchTool,
 				tools.NewGlobTool(tmpDir),
 				tools.NewGrepTool(tmpDir),
+				tools.NewSourcegraphTool(client),
 				tools.NewViewTool(c.lspClients, c.permissions, tmpDir),
 			}
 

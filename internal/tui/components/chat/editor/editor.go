@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -42,6 +41,12 @@ type Editor interface {
 	IsCompletionsOpen() bool
 	HasAttachments() bool
 	Cursor() *tea.Cursor
+
+	// Text selection methods
+	SelectAll()
+	ClearSelection()
+	GetSelectedText() string
+	HasSelection() bool
 }
 
 type FileCompletionItem struct {
@@ -61,6 +66,9 @@ type editorCmp struct {
 	workingPlaceholder string
 
 	keyMap EditorKeyMap
+
+	// Text selection manager
+	selection *SelectionManager
 
 	// File path completions
 	currentQuery          string
@@ -257,76 +265,43 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.setEditorPrompt()
 		return m, nil
 	case tea.KeyPressMsg:
+		// Process selection-related key bindings first
+		model, cmd := m.handleSelectionKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
+		}
+		m = model.(*editorCmp)
+
+		// Get cursor position for other handlers
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
-		switch {
-		// Open command palette when "/" is pressed on empty prompt
-		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
-			return m, util.CmdHandler(dialogs.OpenDialogMsg{
-				Model: commands.NewCommandDialog(m.session.ID),
-			})
-		// Completions
-		case msg.String() == "@" && !m.isCompletionsOpen &&
-			// only show if beginning of prompt, or if previous char is a space or newline:
-			(len(m.textarea.Value()) == 0 || unicode.IsSpace(rune(m.textarea.Value()[len(m.textarea.Value())-1]))):
-			m.isCompletionsOpen = true
-			m.currentQuery = ""
-			m.completionsStartIndex = curIdx
-			cmds = append(cmds, m.startCompletions)
-		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+
+		// Process completions key bindings
+		if cmd, handled := m.handleCompletionsKeyBindings(msg, curIdx); handled {
+			cmds = append(cmds, cmd)
 		}
-		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
-			m.deleteMode = true
-			return m, nil
+
+		// Process attachment key bindings
+		model, cmd = m.handleAttachmentKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
 		}
-		if key.Matches(msg, DeleteKeyMaps.DeleteAllAttachments) && m.deleteMode {
-			m.deleteMode = false
-			m.attachments = nil
-			return m, nil
+		m = model.(*editorCmp)
+
+		// Process editor key bindings
+		model, cmd = m.handleEditorKeyBindings(msg)
+		if cmd != nil {
+			return model, cmd
 		}
-		rune := msg.Code
-		if m.deleteMode && unicode.IsDigit(rune) {
-			num := int(rune - '0')
-			m.deleteMode = false
-			if num < 10 && len(m.attachments) > num {
-				if num == 0 {
-					m.attachments = m.attachments[num+1:]
-				} else {
-					m.attachments = slices.Delete(m.attachments, num, num+1)
-				}
-				return m, nil
-			}
-		}
-		if key.Matches(msg, m.keyMap.OpenEditor) {
-			if m.app.AgentCoordinator.IsSessionBusy(m.session.ID) {
-				return m, util.ReportWarn("Agent is working, please wait...")
-			}
-			return m, m.openEditor(m.textarea.Value())
-		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
-			m.deleteMode = false
-			return m, nil
-		}
-		if key.Matches(msg, m.keyMap.Newline) {
-			m.textarea.InsertRune('\n')
-			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
-		}
-		// Handle Enter key
-		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
-			value := m.textarea.Value()
-			if strings.HasSuffix(value, "\\") {
-				// If the last character is a backslash, remove it and add a newline.
-				m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
-			} else {
-				// Otherwise, send the message
-				return m, m.send()
-			}
-		}
+		m = model.(*editorCmp)
 	}
 
-	m.textarea, cmd = m.textarea.Update(msg)
-	cmds = append(cmds, cmd)
+	// IMPORTANT: Only update textarea if key wasn't handled by our handlers
+	// This prevents textarea from overriding our SelectAll/Copy behavior
+	if !m.isHandledKey(msg) {
+		m.textarea, cmd = m.textarea.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
@@ -414,32 +389,7 @@ func (m *editorCmp) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
-func (m *editorCmp) View() string {
-	t := styles.CurrentTheme()
-	// Update placeholder
-	if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.IsBusy() {
-		m.textarea.Placeholder = m.workingPlaceholder
-	} else {
-		m.textarea.Placeholder = m.readyPlaceholder
-	}
-	if m.app.Permissions.SkipRequests() {
-		m.textarea.Placeholder = "Yolo mode!"
-	}
-	if len(m.attachments) == 0 {
-		content := t.S().Base.Padding(1).Render(
-			m.textarea.View(),
-		)
-		return content
-	}
-	content := t.S().Base.Padding(0, 1, 1, 1).Render(
-		lipgloss.JoinVertical(lipgloss.Top,
-			m.attachmentsContent(),
-			m.textarea.View(),
-		),
-	)
-	return content
-}
-
+// SetSize sets the size of the editor component
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
@@ -450,29 +400,6 @@ func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 
 func (m *editorCmp) GetSize() (int, int) {
 	return m.textarea.Width(), m.textarea.Height()
-}
-
-func (m *editorCmp) attachmentsContent() string {
-	var styledAttachments []string
-	t := styles.CurrentTheme()
-	attachmentStyles := t.S().Base.
-		MarginLeft(1).
-		Background(t.FgMuted).
-		Foreground(t.FgBase)
-	for i, attachment := range m.attachments {
-		var filename string
-		if len(attachment.FileName) > 10 {
-			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, attachment.FileName[0:7])
-		} else {
-			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, attachment.FileName)
-		}
-		if m.deleteMode {
-			filename = fmt.Sprintf("%d%s", i, filename)
-		}
-		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
-	}
-	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
-	return content
 }
 
 func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
@@ -568,6 +495,47 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
 }
 
+// SelectAll selects all text in the textarea.
+func (c *editorCmp) SelectAll() {
+	c.selection.SelectAll()
+}
+
+// ClearSelection clears any text selection.
+func (c *editorCmp) ClearSelection() {
+	c.selection.Clear()
+}
+
+// GetSelectedText returns the currently selected text.
+func (c *editorCmp) GetSelectedText() string {
+	return c.selection.GetSelectedText()
+}
+
+// HasSelection returns whether there is any text selected.
+func (c *editorCmp) HasSelection() bool {
+	return c.selection.HasSelection()
+}
+
+// isHandledKey checks if key was handled by our custom handlers
+func (c *editorCmp) isHandledKey(msg tea.Msg) bool {
+	kp, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return false
+	}
+	
+	// Check if this key matches any of our custom bindings
+	if key.Matches(kp, c.keyMap.SelectAll) {
+		return true
+	}
+	if key.Matches(kp, c.keyMap.Copy) {
+		return true
+	}
+	if key.Matches(kp, c.keyMap.LineStart) {
+		return true
+	}
+	
+	return false
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
@@ -578,9 +546,10 @@ func New(app *app.App) Editor {
 	ta.Focus()
 	e := &editorCmp{
 		// TODO: remove the app instance from here
-		app:      app,
-		textarea: ta,
-		keyMap:   DefaultEditorKeyMap(),
+		app:       app,
+		textarea:  ta,
+		keyMap:    DefaultEditorKeyMap(),
+		selection: NewSelectionManager(ta),
 	}
 	e.setEditorPrompt()
 

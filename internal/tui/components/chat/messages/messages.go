@@ -29,6 +29,9 @@ import (
 // CopyKey is the key binding for copying message content to the clipboard.
 var CopyKey = key.NewBinding(key.WithKeys("c", "y", "C", "Y"), key.WithHelp("c/y", "copy"))
 
+// SelectAllKey is the key binding for selecting all messages in the chat interface.
+var SelectAllKey = key.NewBinding(key.WithKeys("ctrl+a", "cmd+a"), key.WithHelp("ctrl+a", "select all messages"))
+
 // ClearSelectionKey is the key binding for clearing the current selection in the chat interface.
 var ClearSelectionKey = key.NewBinding(key.WithKeys("esc", "alt+esc"), key.WithHelp("esc", "clear selection"))
 

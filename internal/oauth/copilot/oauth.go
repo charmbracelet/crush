@@ -103,6 +103,15 @@ var (
 	errSlowDown = fmt.Errorf("slow_down")
 )
 
+func GetExtraHeaders() map[string]string {
+	return map[string]string{
+		"User-Agent":             userAgent,
+		"Editor-Version":         editorVersion,
+		"Editor-Plugin-Version":  editorPluginVersion,
+		"Copilot-Integration-Id": integrationID,
+	}
+}
+
 func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	data := url.Values{}
 	data.Set("client_id", clientID)

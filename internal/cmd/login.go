@@ -142,15 +142,13 @@ func loginCopilot() error {
 		return err
 	}
 
-	cfg := config.Get()
-	if err := cmp.Or(
-		cfg.SetConfigField("providers.github-copilot.name", "GitHub Copilot"),
-		cfg.SetConfigField("providers.github-copilot.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.github-copilot.refresh_token", token.RefreshToken),
-		cfg.SetConfigField("providers.github-copilot.oauth", token),
-	); err != nil {
+	provider, err := config.GenerateCopilotProviderConfig(token)
+	if err != nil {
 		return err
 	}
+
+	cfg := config.Get()
+	cfg.SetConfigField("providers.github-copilot", *provider)
 
 	fmt.Println()
 	fmt.Println("You're now authenticated with GitHub Copilot!")

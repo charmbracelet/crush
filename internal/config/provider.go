@@ -17,6 +17,8 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 )
 
 const copilotModelsURL = "https://models.dev/api.json"
@@ -270,4 +272,23 @@ func UpdateCopilotModels() error {
 
 	slog.Info("Updated GitHub Copilot models", "count", len(models))
 	return nil
+}
+
+func GenerateCopilotProviderConfig(token *oauth.Token) (*ProviderConfig, error) {
+	models, err := FetchCopilotModels()
+	if err != nil {
+		return nil, err
+	}
+
+	providerCfg := &ProviderConfig{
+		Name:         "Github Copilot",
+		ID:           "github-copilot",
+		Type:         catwalk.TypeOpenAICompat,
+		BaseURL:      "https://api.githubcopilot.com",
+		ExtraHeaders: copilot.GetExtraHeaders(),
+		APIKey:       token.AccessToken,
+		OAuthToken:   token,
+		Models:       models,
+	}
+	return providerCfg, nil
 }

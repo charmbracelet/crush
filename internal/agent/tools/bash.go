@@ -186,15 +186,19 @@ func blockFuncs(bannedCommands []string) []shell.BlockFunc {
 	}
 }
 
-func resolveBlockFuncs(cfg config.ToolBash) []shell.BlockFunc {
+func resolveBannedCommandsList(cfg config.ToolBash) []string {
 	bannedCommands := cfg.BannedCommands
 	if !cfg.DisableDefaults {
 		if len(bannedCommands) == 0 {
-			return blockFuncs(defaultBannedCommands)
+			return defaultBannedCommands
 		}
 		bannedCommands = append(bannedCommands, defaultBannedCommands...)
 	}
-	return blockFuncs(bannedCommands)
+	return bannedCommands
+}
+
+func resolveBlockFuncs(cfg config.ToolBash) []shell.BlockFunc {
+	return blockFuncs(resolveBannedCommandsList(cfg))
 }
 
 func NewBashTool(

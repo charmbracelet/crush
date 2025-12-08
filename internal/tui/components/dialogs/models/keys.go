@@ -61,6 +61,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Select,
 		k.Next,
 		k.Previous,
+		k.Edit,
 		k.Tab,
 		k.Close,
 	}
@@ -150,6 +151,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Tab,
+		k.Edit,
 		k.Select,
 		k.Close,
 	}

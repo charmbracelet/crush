@@ -274,27 +274,35 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
-		case key.Matches(msg, m.keyMap.Close):
-			if m.showClaudeAuthMethodChooser {
-				m.claudeAuthMethodChooser.SetDefaults()
-				m.showClaudeAuthMethodChooser = false
-				m.keyMap.isClaudeAuthChoiseHelp = false
-				m.keyMap.isClaudeOAuthHelp = false
-				return m, nil
-			}
-			if m.needsAPIKey {
-				if m.isAPIKeyValid {
-					return m, nil
+		case key.Matches(msg, m.keyMap.Edit):
+			// Only handle edit key in the main model selection view
+			if !m.showClaudeAuthMethodChooser && !m.showClaudeOAuth2 && !m.needsAPIKey {
+				selectedItem := m.modelList.SelectedModel()
+				if selectedItem != nil {
+					// Check if provider is configured
+					if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
+						// Trigger API key editing flow
+						m.keyMap.isClaudeAuthChoiseHelp = false
+						m.keyMap.isClaudeOAuthHelp = false
+						m.keyMap.isAPIKeyHelp = true
+						m.showClaudeAuthMethodChooser = false
+						m.needsAPIKey = true
+						m.selectedModel = selectedItem
+						m.selectedModelType = config.SelectedModelTypeLarge
+						if m.modelList.GetModelType() == SmallModelType {
+							m.selectedModelType = config.SelectedModelTypeSmall
+						}
+						m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+						// Pre-fill with existing API key if available
+						if providerConfig, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok && providerConfig.APIKey != "" {
+							m.apiKeyInput.input.SetValue(providerConfig.APIKey)
+						}
+						return m, nil
+					}
 				}
-				// Go back to model selection
-				m.needsAPIKey = false
-				m.selectedModel = nil
-				m.isAPIKeyValid = false
-				m.apiKeyValue = ""
-				m.apiKeyInput.Reset()
-				return m, nil
 			}
-			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
+			return m, nil
+		case key.Matches(msg, m.keyMap.Close):
 		default:
 			if m.showClaudeAuthMethodChooser {
 				u, cmd := m.claudeAuthMethodChooser.Update(msg)

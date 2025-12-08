@@ -370,30 +370,42 @@ func (app *App) Subscribe(program *tea.Program) {
 
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
+	start := time.Now()
+	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
+	var wg sync.WaitGroup
 	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.CancelAll()
+		wg.Go(func() {
+			app.AgentCoordinator.CancelAll()
+		})
 	}
 
 	// Kill all background shells.
-	shell.GetBackgroundShellManager().KillAll()
+	wg.Go(func() {
+		shell.GetBackgroundShellManager().KillAll()
+	})
 
 	// Shutdown all LSP clients.
 	for name, client := range app.LSPClients.Seq2() {
-		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-		if err := client.Close(shutdownCtx); err != nil {
-			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
-		}
-		cancel()
+		wg.Go(func() {
+			shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+			defer cancel()
+			if err := client.Close(shutdownCtx); err != nil {
+				slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
+			}
+		})
 	}
 
 	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
-			if err := cleanup(); err != nil {
-				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
-			}
+			wg.Go(func() {
+				if err := cleanup(); err != nil {
+					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+				}
+			})
 		}
 	}
+	wg.Wait()
 }
 
 // checkForUpdates checks for available updates.

@@ -322,7 +322,7 @@ func NewBashTool(
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(defaultBannedCommands, []config.BannedToolArgsAndOrParams{}, true), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, resolveBlockFuncs(bashConfig), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

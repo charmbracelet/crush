@@ -52,6 +52,23 @@ var registry = renderRegistry{}
 // baseRenderer provides common functionality for all tool renderers
 type baseRenderer struct{}
 
+func (br baseRenderer) Render(v *toolCallCmp) string {
+	if v.result.Data != "" {
+		if strings.HasPrefix(v.result.MIMEType, "image/") {
+			return br.renderWithParams(v, v.call.Name, nil, func() string {
+				return renderImageContent(v, v.result.Data, v.result.MIMEType, v.result.Content)
+			})
+		}
+		return br.renderWithParams(v, v.call.Name, nil, func() string {
+			return renderMediaContent(v, v.result.MIMEType, v.result.Content)
+		})
+	}
+
+	return br.renderWithParams(v, v.call.Name, nil, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
+}
+
 // paramBuilder helps construct parameter lists for tool headers
 type paramBuilder struct {
 	args []string
@@ -191,8 +208,18 @@ type genericRenderer struct {
 	baseRenderer
 }
 
-// Render displays the tool call with its raw input and plain content output
 func (gr genericRenderer) Render(v *toolCallCmp) string {
+	if v.result.Data != "" {
+		if strings.HasPrefix(v.result.MIMEType, "image/") {
+			return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
+				return renderImageContent(v, v.result.Data, v.result.MIMEType, v.result.Content)
+			})
+		}
+		return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
+			return renderMediaContent(v, v.result.MIMEType, v.result.Content)
+		})
+	}
+
 	return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
 		return renderPlainContent(v, v.result.Content)
 	})
@@ -408,6 +435,10 @@ func (vr viewRenderer) Render(v *toolCallCmp) string {
 		build()
 
 	return vr.renderWithParams(v, "View", args, func() string {
+		if v.result.Data != "" && strings.HasPrefix(v.result.MIMEType, "image/") {
+			return renderImageContent(v, v.result.Data, v.result.MIMEType, "")
+		}
+
 		var meta tools.ViewResponseMetadata
 		if err := vr.unmarshalParams(v.result.Metadata, &meta); err != nil {
 			return renderPlainContent(v, v.result.Content)
@@ -1141,6 +1172,55 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// renderImageContent renders image data with optional text content (for MCP tools).
+func renderImageContent(v *toolCallCmp, data, mediaType, textContent string) string {
+	t := styles.CurrentTheme()
+
+	dataSize := len(data) * 3 / 4
+	sizeStr := formatSize(dataSize)
+
+	loaded := t.S().Base.Foreground(t.Green).Render("Loaded")
+	arrow := t.S().Base.Foreground(t.GreenDark).Render("→")
+	typeStyled := t.S().Base.Render(mediaType)
+	sizeStyled := t.S().Subtle.Render(sizeStr)
+
+	imageDisplay := fmt.Sprintf("%s %s %s %s", loaded, arrow, typeStyled, sizeStyled)
+	if strings.TrimSpace(textContent) != "" {
+		textDisplay := renderPlainContent(v, textContent)
+		return lipgloss.JoinVertical(lipgloss.Left, textDisplay, "", imageDisplay)
+	}
+
+	return imageDisplay
+}
+
+// renderMediaContent renders non-image media content.
+func renderMediaContent(v *toolCallCmp, mediaType, textContent string) string {
+	t := styles.CurrentTheme()
+
+	loaded := t.S().Base.Foreground(t.Green).Render("Loaded")
+	arrow := t.S().Base.Foreground(t.GreenDark).Render("→")
+	typeStyled := t.S().Base.Render(mediaType)
+	mediaDisplay := fmt.Sprintf("%s %s %s", loaded, arrow, typeStyled)
+
+	if strings.TrimSpace(textContent) != "" {
+		textDisplay := renderPlainContent(v, textContent)
+		return lipgloss.JoinVertical(lipgloss.Left, textDisplay, "", mediaDisplay)
+	}
+
+	return mediaDisplay
+}
+
+// formatSize formats byte count as human-readable size.
+func formatSize(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
 }
 
 func (v *toolCallCmp) renderToolError() string {

@@ -11,6 +11,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -204,10 +205,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
-		// Before each step create a new assistant message.
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
-			// Reset all cached items.
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}
@@ -221,6 +220,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
+
+			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -253,6 +254,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return callContext, prepared, err
 			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, a.largeModel.CatwalkCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.ModelNameContextKey, a.largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -320,40 +323,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
-			var resultContent string
-			isError := false
-			switch result.Result.GetType() {
-			case fantasy.ToolResultContentTypeText:
-				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result)
-				if ok {
-					resultContent = r.Text
-				}
-			case fantasy.ToolResultContentTypeError:
-				r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result)
-				if ok {
-					isError = true
-					resultContent = r.Error.Error()
-				}
-			case fantasy.ToolResultContentTypeMedia:
-				// TODO: handle this message type
-			}
-			toolResult := message.ToolResult{
-				ToolCallID: result.ToolCallID,
-				Name:       result.ToolName,
-				Content:    resultContent,
-				IsError:    isError,
-				Metadata:   result.ClientMetadata,
-			}
+			toolResult := a.convertToToolResult(result)
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
 				},
 			})
-			if createMsgErr != nil {
-				return createMsgErr
-			}
-			return nil
+			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
 			finishReason := message.FinishReasonUnknown
@@ -898,4 +875,126 @@ func (a *sessionAgent) isClaudeCode() bool {
 	cfg := config.Get()
 	pc, ok := cfg.Providers.Get(a.largeModel.ModelCfg.Provider)
 	return ok && pc.ID == string(catwalk.InferenceProviderAnthropic) && pc.OAuthToken != nil
+}
+
+// convertToToolResult converts a fantasy tool result to a message tool result.
+func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
+	baseResult := message.ToolResult{
+		ToolCallID: result.ToolCallID,
+		Name:       result.ToolName,
+		Metadata:   result.ClientMetadata,
+	}
+
+	switch result.Result.GetType() {
+	case fantasy.ToolResultContentTypeText:
+		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result); ok {
+			baseResult.Content = r.Text
+		}
+	case fantasy.ToolResultContentTypeError:
+		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
+			baseResult.Content = r.Error.Error()
+			baseResult.IsError = true
+		}
+	case fantasy.ToolResultContentTypeMedia:
+		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
+			content := r.Text
+			if content == "" {
+				content = fmt.Sprintf("Loaded %s content", r.MediaType)
+			}
+			baseResult.Content = content
+			baseResult.Data = r.Data
+			baseResult.MIMEType = r.MediaType
+		}
+	}
+
+	return baseResult
+}
+
+// workaroundProviderMediaLimitations converts media content in tool results to
+// user messages for providers that don't natively support images in tool results.
+//
+// Problem: OpenAI, Google, OpenRouter, and other OpenAI-compatible providers
+// don't support sending images/media in tool result messages - they only accept
+// text in tool results. However, they DO support images in user messages.
+//
+// If we send media in tool results to these providers, the API returns an error.
+//
+// Solution: For these providers, we:
+//  1. Replace the media in the tool result with a text placeholder
+//  2. Inject a user message immediately after with the image as a file attachment
+//  3. This maintains the tool execution flow while working around API limitations
+//
+// Anthropic and Bedrock support images natively in tool results, so we skip
+// this workaround for them.
+//
+// Example transformation:
+//
+//	BEFORE: [tool result: image data]
+//	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message) []fantasy.Message {
+	providerSupportsMedia := a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
+		a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
+
+	if providerSupportsMedia {
+		return messages
+	}
+
+	convertedMessages := make([]fantasy.Message, 0, len(messages))
+
+	for _, msg := range messages {
+		if msg.Role != fantasy.MessageRoleTool {
+			convertedMessages = append(convertedMessages, msg)
+			continue
+		}
+
+		textParts := make([]fantasy.MessagePart, 0, len(msg.Content))
+		var mediaFiles []fantasy.FilePart
+
+		for _, part := range msg.Content {
+			toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
+			if !ok {
+				textParts = append(textParts, part)
+				continue
+			}
+
+			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
+				decoded, err := base64.StdEncoding.DecodeString(media.Data)
+				if err != nil {
+					slog.Warn("failed to decode media data", "error", err)
+					textParts = append(textParts, part)
+					continue
+				}
+
+				mediaFiles = append(mediaFiles, fantasy.FilePart{
+					Data:      decoded,
+					MediaType: media.MediaType,
+					Filename:  fmt.Sprintf("tool-result-%s", toolResult.ToolCallID),
+				})
+
+				textParts = append(textParts, fantasy.ToolResultPart{
+					ToolCallID: toolResult.ToolCallID,
+					Output: fantasy.ToolResultOutputContentText{
+						Text: "[Image/media content loaded - see attached file]",
+					},
+					ProviderOptions: toolResult.ProviderOptions,
+				})
+			} else {
+				textParts = append(textParts, part)
+			}
+		}
+
+		convertedMessages = append(convertedMessages, fantasy.Message{
+			Role:    fantasy.MessageRoleTool,
+			Content: textParts,
+		})
+
+		if len(mediaFiles) > 0 {
+			convertedMessages = append(convertedMessages, fantasy.NewUserMessage(
+				"Here is the media content from the tool result:",
+				mediaFiles...,
+			))
+		}
+	}
+
+	return convertedMessages
 }

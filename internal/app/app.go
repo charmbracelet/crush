@@ -260,6 +260,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
+	if app.AgentCoordinator == nil {
+		return fmt.Errorf("agent configuration is missing")
+	}
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 

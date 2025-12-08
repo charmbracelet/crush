@@ -303,6 +303,26 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return m, nil
 		case key.Matches(msg, m.keyMap.Close):
+			if m.showClaudeAuthMethodChooser {
+				m.claudeAuthMethodChooser.SetDefaults()
+				m.showClaudeAuthMethodChooser = false
+				m.keyMap.isClaudeAuthChoiseHelp = false
+				m.keyMap.isClaudeOAuthHelp = false
+				return m, nil
+			}
+			if m.needsAPIKey {
+				if m.isAPIKeyValid {
+					return m, nil
+				}
+				// Go back to model selection
+				m.needsAPIKey = false
+				m.selectedModel = nil
+				m.isAPIKeyValid = false
+				m.apiKeyValue = ""
+				m.apiKeyInput.Reset()
+				return m, nil
+			}
+			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
 			if m.showClaudeAuthMethodChooser {
 				u, cmd := m.claudeAuthMethodChooser.Update(msg)

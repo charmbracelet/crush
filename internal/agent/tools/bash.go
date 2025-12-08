@@ -139,8 +139,9 @@ var defaultBannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelName string) string {
-	bannedCommandsStr := strings.Join(defaultBannedCommands, ", ")
+func bashDescription(attribution *config.Attribution, modelName string, bashConfig config.ToolBash) string {
+	bannedCommandsList := resolveBannedCommandsList(bashConfig)
+	bannedCommandsStr := strings.Join(bannedCommandsList, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -219,7 +220,7 @@ func NewBashTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelName)),
+		string(bashDescription(attribution, modelName, bashConfig)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil

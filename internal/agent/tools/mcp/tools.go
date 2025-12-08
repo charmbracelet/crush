@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -80,11 +79,12 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 	textContent := strings.Join(textParts, "\n")
 
+	// MCP SDK returns Data as already base64-encoded, so we use it directly.
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      ensureBase64(imageData),
+			Data:      imageData,
 			MediaType: imageMimeType,
 		}, nil
 	}
@@ -93,7 +93,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      ensureBase64(audioData),
+			Data:      audioData,
 			MediaType: audioMimeType,
 		}, nil
 	}
@@ -102,17 +102,6 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		Type:    "text",
 		Content: textContent,
 	}, nil
-}
-
-// ensureBase64 ensures data is base64 encoded.
-// If data is already base64, returns it as-is. Otherwise encodes it.
-func ensureBase64(data []byte) []byte {
-	str := string(data)
-	if _, err := base64.StdEncoding.DecodeString(str); err == nil && len(str) > 0 {
-		return data
-	}
-	encoded := base64.StdEncoding.EncodeToString(data)
-	return []byte(encoded)
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

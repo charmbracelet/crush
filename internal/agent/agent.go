@@ -932,8 +932,8 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message) []fantasy.Message {
-	providerSupportsMedia := a.largeModel.ModelCfg.Provider == "anthropic" ||
-		a.largeModel.ModelCfg.Provider == "bedrock"
+	providerSupportsMedia := a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
+		a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
 
 	if providerSupportsMedia {
 		return messages

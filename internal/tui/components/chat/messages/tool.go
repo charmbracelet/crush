@@ -790,6 +790,9 @@ func (m *toolCallCmp) textWidth() int {
 
 // fit truncates content to fit within the specified width with ellipsis
 func (m *toolCallCmp) fit(content string, width int) string {
+	if lipgloss.Width(content) <= width {
+		return content
+	}
 	t := styles.CurrentTheme()
 	lineStyle := t.S().Muted
 	dots := lineStyle.Render("…")

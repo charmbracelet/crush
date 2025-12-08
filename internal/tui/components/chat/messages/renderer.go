@@ -1025,7 +1025,7 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		}
 		ln = ansiext.Escape(ln)
 		ln = " " + ln
-		if len(ln) > width {
+		if lipgloss.Width(ln) > width {
 			ln = v.fit(ln, width)
 		}
 		out = append(out, t.S().Muted.

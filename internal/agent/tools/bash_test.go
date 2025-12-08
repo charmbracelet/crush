@@ -10,9 +10,9 @@ import (
 
 func TestResolveBlockFuncsFromEmptyConfig(t *testing.T) {
 	cfg := config.ToolBash{
-		DisableDefaults:   false,
-		BannedCommands:    []string{},
-		BannedSubCommands: []config.BannedToolArgsAndOrParams{},
+		DisableDefaultCommands: false,
+		BannedCommands:         []string{},
+		BannedSubCommands:      []config.BannedToolArgsAndOrParams{},
 	}
 
 	bannedCmds := resolveBannedCommandsList(cfg)
@@ -22,9 +22,9 @@ func TestResolveBlockFuncsFromEmptyConfig(t *testing.T) {
 
 func TestResolveBlockFuncsFromEmptyConfigWithDefaultDisabled(t *testing.T) {
 	cfg := config.ToolBash{
-		DisableDefaults:   true,
-		BannedCommands:    []string{},
-		BannedSubCommands: []config.BannedToolArgsAndOrParams{},
+		DisableDefaultCommands: true,
+		BannedCommands:         []string{},
+		BannedSubCommands:      []config.BannedToolArgsAndOrParams{},
 	}
 
 	bannedCmds := resolveBannedCommandsList(cfg)
@@ -34,7 +34,7 @@ func TestResolveBlockFuncsFromEmptyConfigWithDefaultDisabled(t *testing.T) {
 
 func TestResolveBlockFuncsDefaultDisabledWithBannedCommands(t *testing.T) {
 	cfg := config.ToolBash{
-		DisableDefaults: true,
+		DisableDefaultCommands: true,
 		BannedCommands: []string{
 			"pacman",
 			"mount",
@@ -50,9 +50,9 @@ func TestResolveBlockFuncsDefaultDisabledWithBannedCommands(t *testing.T) {
 func TestResolveBlockFuncsWithDefaultAndAddtionalBannedCommands(t *testing.T) {
 	additionalBannedCommands := []string{"lazygit", "btop"}
 	cfg := config.ToolBash{
-		DisableDefaults:   false,
-		BannedCommands:    additionalBannedCommands,
-		BannedSubCommands: []config.BannedToolArgsAndOrParams{},
+		DisableDefaultCommands: false,
+		BannedCommands:         additionalBannedCommands,
+		BannedSubCommands:      []config.BannedToolArgsAndOrParams{},
 	}
 
 	bannedCmds := resolveBannedCommandsList(cfg)

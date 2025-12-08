@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -247,6 +248,9 @@ func FetchCopilotModels() ([]catwalk.Model, error) {
 			SupportsImages:   m.Attachment,
 		})
 	}
+	slices.SortFunc(models, func(a, b catwalk.Model) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 
 	return models, nil
 }
@@ -269,6 +273,8 @@ func UpdateCopilotModels() error {
 
 	providerCfg.Models = models
 	cfg.Providers.Set("github-copilot", providerCfg)
+	// Save updated config
+	cfg.SetConfigField("providers.github-copilot", providerCfg)
 
 	slog.Info("Updated GitHub Copilot models", "count", len(models))
 	return nil

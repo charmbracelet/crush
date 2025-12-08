@@ -40,8 +40,21 @@ crush update-providers embedded
 		if err := config.UpdateProviders(pathOrUrl); err != nil {
 			return err
 		}
-		if err := config.UpdateCopilotModels(); err != nil {
-			slog.Warn("Failed to update Copilot models", "err", err)
+
+		// Initialize config so UpdateCopilotModels can access it
+		debug, _ := cmd.Flags().GetBool("debug")
+		dataDir, _ := cmd.Flags().GetString("data-dir")
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return err
+		}
+		if _, err := config.Init(cwd, dataDir, debug); err != nil {
+			slog.Warn("Failed to initialize config for Copilot models update", "err", err)
+		} else {
+			err := config.UpdateCopilotModels()
+			if err != nil {
+				slog.Warn("Failed to update Copilot models", "err", err)
+			}
 		}
 
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's

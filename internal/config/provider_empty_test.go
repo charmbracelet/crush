@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 type emptyProviderClient struct{}
 
-func (m *emptyProviderClient) GetProviders() ([]catwalk.Provider, error) {
+func (m *emptyProviderClient) GetProviders(context.Context, string) ([]catwalk.Provider, error) {
 	return []catwalk.Provider{}, nil
 }
 

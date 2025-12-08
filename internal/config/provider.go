@@ -2,7 +2,9 @@ package config
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
@@ -17,7 +20,7 @@ import (
 )
 
 type ProviderClient interface {
-	GetProviders() ([]catwalk.Provider, error)
+	GetProviders(context.Context, string) ([]catwalk.Provider, error)
 }
 
 var (
@@ -53,7 +56,7 @@ func saveProvidersInCache(path string, providers []catwalk.Provider) error {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
 
-	data, err := json.MarshalIndent(providers, "", "  ")
+	data, err := json.Marshal(providers)
 	if err != nil {
 		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}
@@ -64,34 +67,35 @@ func saveProvidersInCache(path string, providers []catwalk.Provider) error {
 	return nil
 }
 
-func loadProvidersFromCache(path string) ([]catwalk.Provider, error) {
+func loadProvidersFromCache(path string) ([]catwalk.Provider, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read provider cache file: %w", err)
+		return nil, "", fmt.Errorf("failed to read provider cache file: %w", err)
 	}
 
 	var providers []catwalk.Provider
 	if err := json.Unmarshal(data, &providers); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
+		return nil, "", fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
-	return providers, nil
+
+	return providers, catwalk.Etag(data), nil
 }
 
-func UpdateProviders(pathOrUrl string) error {
+func UpdateProviders(pathOrURL string) error {
 	var providers []catwalk.Provider
-	pathOrUrl = cmp.Or(pathOrUrl, os.Getenv("CATWALK_URL"), defaultCatwalkURL)
+	pathOrURL = cmp.Or(pathOrURL, os.Getenv("CATWALK_URL"), defaultCatwalkURL)
 
 	switch {
-	case pathOrUrl == "embedded":
+	case pathOrURL == "embedded":
 		providers = embedded.GetAll()
-	case strings.HasPrefix(pathOrUrl, "http://") || strings.HasPrefix(pathOrUrl, "https://"):
+	case strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://"):
 		var err error
-		providers, err = catwalk.NewWithURL(pathOrUrl).GetProviders()
+		providers, err = catwalk.NewWithURL(pathOrURL).GetProviders(context.Background(), "")
 		if err != nil {
 			return fmt.Errorf("failed to fetch providers from Catwalk: %w", err)
 		}
 	default:
-		content, err := os.ReadFile(pathOrUrl)
+		content, err := os.ReadFile(pathOrURL)
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
@@ -108,25 +112,34 @@ func UpdateProviders(pathOrUrl string) error {
 		return fmt.Errorf("failed to save providers to cache: %w", err)
 	}
 
-	slog.Info("Providers updated successfully", "count", len(providers), "from", pathOrUrl, "to", cachePath)
+	slog.Info("Providers updated successfully", "count", len(providers), "from", pathOrURL, "to", cachePath)
 	return nil
 }
 
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
+		start := time.Now()
+		defer func() { slog.Info("Catwalk update took " + time.Since(start).String()) }()
 		catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
 		client := catwalk.NewWithURL(catwalkURL)
 		path := providerCacheFileData()
 
+		cached, etag, cachedErr := loadProvidersFromCache(path)
+
 		autoUpdateDisabled := cfg.Options.DisableProviderAutoUpdate
-		providerList, providerErr = loadProviders(autoUpdateDisabled, client, path)
+		providerList, providerErr = loadProviders(autoUpdateDisabled, client, etag, path)
+
+		if errors.Is(providerErr, catwalk.ErrNotModified) {
+			slog.Info("Catwalk providers not modified, using previously cached data")
+			providerList, providerErr = cached, cachedErr
+		}
 	})
 	return providerList, providerErr
 }
 
-func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) ([]catwalk.Provider, error) {
+func loadProviders(autoUpdateDisabled bool, client ProviderClient, etag, path string) ([]catwalk.Provider, error) {
 	catwalkGetAndSave := func() ([]catwalk.Provider, error) {
-		providers, err := client.GetProviders()
+		providers, err := client.GetProviders(context.Background(), etag)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch providers from catwalk: %w", err)
 		}
@@ -141,27 +154,15 @@ func loadProviders(autoUpdateDisabled bool, client ProviderClient, path string) 
 
 	switch {
 	case autoUpdateDisabled:
-		slog.Warn("Providers auto-update is disabled")
-
-		if _, err := os.Stat(path); err == nil {
-			slog.Warn("Using locally cached providers")
-			return loadProvidersFromCache(path)
-		}
-
-		slog.Warn("Saving embedded providers to cache")
-		providers := embedded.GetAll()
-		if err := saveProvidersInCache(path, providers); err != nil {
-			return nil, err
-		}
-		return providers, nil
-
+		slog.Warn("Providers auto-update is disabled, using embedded")
+		return embedded.GetAll(), nil
 	default:
 		slog.Info("Fetching providers from Catwalk.", "path", path)
 
 		providers, err := catwalkGetAndSave()
 		if err != nil {
-			catwalkUrl := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-			return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkUrl, err) //nolint:staticcheck
+			catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
+			return nil, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help. %w", catwalkURL, err) //nolint:staticcheck
 		}
 		return providers, nil
 	}

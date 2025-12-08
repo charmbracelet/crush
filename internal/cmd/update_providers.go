@@ -31,12 +31,12 @@ crush update-providers embedded
 		// NOTE(@andreynering): We want to skip logging output do stdout here.
 		slog.SetDefault(slog.New(slog.DiscardHandler))
 
-		var pathOrUrl string
+		var pathOrURL string
 		if len(args) > 0 {
-			pathOrUrl = args[0]
+			pathOrURL = args[0]
 		}
 
-		if err := config.UpdateProviders(pathOrUrl); err != nil {
+		if err := config.UpdateProviders(pathOrURL); err != nil {
 			return err
 		}
 

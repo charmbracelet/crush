@@ -109,14 +109,26 @@ func GetState(name string) (ClientInfo, bool) {
 // Close closes all MCP clients. This should be called during application shutdown.
 func Close() error {
 	var errs []error
+	var wg sync.WaitGroup
 	for name, session := range sessions.Seq2() {
-		if err := session.Close(); err != nil &&
-			!errors.Is(err, io.EOF) &&
-			!errors.Is(err, context.Canceled) &&
-			err.Error() != "signal: killed" {
-			errs = append(errs, fmt.Errorf("close mcp: %s: %w", name, err))
-		}
+		wg.Go(func() {
+			done := make(chan bool, 1)
+			go func() {
+				if err := session.Close(); err != nil &&
+					!errors.Is(err, io.EOF) &&
+					!errors.Is(err, context.Canceled) &&
+					err.Error() != "signal: killed" {
+					errs = append(errs, fmt.Errorf("close mcp: %s: %w", name, err))
+				}
+				done <- true
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Millisecond * 250):
+			}
+		})
 	}
+	wg.Wait()
 	broker.Shutdown()
 	return errors.Join(errs...)
 }
@@ -279,9 +291,8 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 				})
 			},
 			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
-				slog.Info("mcp log", "name", name, "data", req.Params.Data)
+				slog.Info("MCP log", "name", name, "data", req.Params.Data)
 			},
-			KeepAlive: time.Minute * 10,
 		},
 	)
 
@@ -289,14 +300,14 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	if err != nil {
 		err = maybeStdioErr(err, transport)
 		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
-		slog.Error("error starting mcp client", "error", err, "name", name)
+		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
 		return nil, err
 	}
 
 	cancelTimer.Stop()
-	slog.Info("Initialized mcp client", "name", name)
+	slog.Info("MCP client initialized", "name", name)
 	return session, nil
 }
 

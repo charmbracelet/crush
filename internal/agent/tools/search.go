@@ -20,8 +20,8 @@ type SearchResult struct {
 	Position int
 }
 
-// SearchDuckDuckGo performs a web search using DuckDuckGo's HTML endpoint.
-func SearchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {
+// searchDuckDuckGo performs a web search using DuckDuckGo's HTML endpoint.
+func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 10
 	}
@@ -164,8 +164,8 @@ func cleanDuckDuckGoURL(rawURL string) string {
 	return rawURL
 }
 
-// FormatSearchResults formats search results for LLM consumption.
-func FormatSearchResults(results []SearchResult) string {
+// formatSearchResults formats search results for LLM consumption.
+func formatSearchResults(results []SearchResult) string {
 	if len(results) == 0 {
 		return "No results were found for your search query. This could be due to DuckDuckGo's bot detection or the query returned no matches. Please try rephrasing your search or try again in a few minutes."
 	}

@@ -41,11 +41,11 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 				maxResults = 20
 			}
 
-			results, err := SearchDuckDuckGo(ctx, client, params.Query, maxResults)
+			results, err := searchDuckDuckGo(ctx, client, params.Query, maxResults)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to search: " + err.Error()), nil
 			}
 
-			return fantasy.NewTextResponse(FormatSearchResults(results)), nil
+			return fantasy.NewTextResponse(formatSearchResults(results)), nil
 		})
 }

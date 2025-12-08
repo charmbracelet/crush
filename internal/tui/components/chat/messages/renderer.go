@@ -191,6 +191,7 @@ func init() {
 	registry.register(tools.FetchToolName, func() renderer { return simpleFetchRenderer{} })
 	registry.register(tools.AgenticFetchToolName, func() renderer { return agenticFetchRenderer{} })
 	registry.register(tools.WebFetchToolName, func() renderer { return webFetchRenderer{} })
+	registry.register(tools.WebSearchToolName, func() renderer { return webSearchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
 	registry.register(tools.GrepToolName, func() renderer { return grepRenderer{} })
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
@@ -636,15 +637,17 @@ type agenticFetchRenderer struct {
 	baseRenderer
 }
 
-// Render displays the fetched URL with prompt parameter and nested tool calls
+// Render displays the fetched URL or web search with prompt parameter and nested tool calls
 func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params tools.AgenticFetchParams
 	var args []string
 	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
-		args = newParamBuilder().
-			addMain(params.URL).
-			build()
+		if params.URL != "" {
+			args = newParamBuilder().
+				addMain(params.URL).
+				build()
+		}
 	}
 
 	prompt := params.Prompt
@@ -727,6 +730,30 @@ func (wfr webFetchRenderer) Render(v *toolCallCmp) string {
 	}
 
 	return wfr.renderWithParams(v, "Fetch", args, func() string {
+		return renderMarkdownContent(v, v.result.Content)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Web search renderer
+// -----------------------------------------------------------------------------
+
+// webSearchRenderer handles web search with query display
+type webSearchRenderer struct {
+	baseRenderer
+}
+
+// Render displays a compact view of web_search with just the query
+func (wsr webSearchRenderer) Render(v *toolCallCmp) string {
+	var params tools.WebSearchParams
+	var args []string
+	if err := wsr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.Query).
+			build()
+	}
+
+	return wsr.renderWithParams(v, "Search", args, func() string {
 		return renderMarkdownContent(v, v.result.Content)
 	})
 }
@@ -1260,7 +1287,9 @@ func prettifyToolName(name string) string {
 	case tools.AgenticFetchToolName:
 		return "Agentic Fetch"
 	case tools.WebFetchToolName:
-		return "Fetching"
+		return "Fetch"
+	case tools.WebSearchToolName:
+		return "Search"
 	case tools.GlobToolName:
 		return "Glob"
 	case tools.GrepToolName:

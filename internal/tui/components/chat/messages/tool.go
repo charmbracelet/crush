@@ -301,7 +301,9 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 		var params tools.AgenticFetchParams
 		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
 			var parts []string
-			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			if params.URL != "" {
+				parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			}
 			if params.Prompt != "" {
 				parts = append(parts, fmt.Sprintf("**Prompt:** %s", params.Prompt))
 			}

@@ -27,10 +27,6 @@ type agenticFetchValidationResult struct {
 
 // validateAgenticFetchParams validates the tool call parameters and extracts required context values.
 func validateAgenticFetchParams(ctx context.Context, params tools.AgenticFetchParams) (agenticFetchValidationResult, error) {
-	if params.URL == "" {
-		return agenticFetchValidationResult{}, errors.New("url is required")
-	}
-
 	if params.Prompt == "" {
 		return agenticFetchValidationResult{}, errors.New("prompt is required")
 	}
@@ -75,6 +71,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
+			// Determine description based on mode.
+			var description string
+			if params.URL != "" {
+				description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
+			} else {
+				description = "Search the web and analyze results"
+			}
+
 			p := c.permissions.Request(
 				permission.CreatePermissionRequest{
 					SessionID:   validationResult.SessionID,
@@ -82,7 +86,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					ToolCallID:  call.ID,
 					ToolName:    tools.AgenticFetchToolName,
 					Action:      "fetch",
-					Description: fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL),
+					Description: description,
 					Params:      tools.AgenticFetchPermissionsParams(params),
 				},
 			)
@@ -91,36 +95,43 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
-			content, err := tools.FetchURLAndConvert(ctx, client, params.URL)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
-			}
-
 			tmpDir, err := os.MkdirTemp(c.cfg.Options.DataDirectory, "crush-fetch-*")
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary directory: %s", err)), nil
 			}
 			defer os.RemoveAll(tmpDir)
 
-			hasLargeContent := len(content) > tools.LargeContentThreshold
 			var fullPrompt string
 
-			if hasLargeContent {
-				tempFile, err := os.CreateTemp(tmpDir, "page-*.md")
+			if params.URL != "" {
+				// URL mode: fetch the URL content first.
+				content, err := tools.FetchURLAndConvert(ctx, client, params.URL)
 				if err != nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary file: %s", err)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 				}
-				tempFilePath := tempFile.Name()
 
-				if _, err := tempFile.WriteString(content); err != nil {
+				hasLargeContent := len(content) > tools.LargeContentThreshold
+
+				if hasLargeContent {
+					tempFile, err := os.CreateTemp(tmpDir, "page-*.md")
+					if err != nil {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary file: %s", err)), nil
+					}
+					tempFilePath := tempFile.Name()
+
+					if _, err := tempFile.WriteString(content); err != nil {
+						tempFile.Close()
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write content to file: %s", err)), nil
+					}
 					tempFile.Close()
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write content to file: %s", err)), nil
-				}
-				tempFile.Close()
 
-				fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, tempFilePath)
+					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, tempFilePath)
+				} else {
+					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
+				}
 			} else {
-				fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
+				// Search mode: let the sub-agent search and fetch as needed.
+				fullPrompt = fmt.Sprintf("%s\n\nUse the web_search tool to find relevant information. Break down the question into smaller, focused searches if needed. After searching, use web_fetch to get detailed content from the most relevant results.", params.Prompt)
 			}
 
 			promptOpts := []prompt.Option{
@@ -148,10 +159,13 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			}
 
 			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
+			webSearchTool := tools.NewWebSearchTool(client)
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
+				webSearchTool,
 				tools.NewGlobTool(tmpDir),
 				tools.NewGrepTool(tmpDir),
+				tools.NewSourcegraphTool(client),
 				tools.NewViewTool(c.lspClients, c.permissions, tmpDir),
 			}
 

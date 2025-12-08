@@ -130,7 +130,7 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		providerList, providerErr = loadProviders(autoUpdateDisabled, client, etag, path)
 
 		if errors.Is(providerErr, catwalk.ErrNotModified) {
-			slog.Info("Catwalk providers not modified, using previously cached data")
+			slog.Info("Catwalk providers not modified, using previously cached data", "path", path)
 			providerList, providerErr = cached, cachedErr
 		}
 	})

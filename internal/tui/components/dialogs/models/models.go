@@ -320,6 +320,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.isAPIKeyValid = false
 				m.apiKeyValue = ""
 				m.apiKeyInput.Reset()
+				m.keyMap.isAPIKeyHelp = false
 				return m, nil
 			}
 			return m, util.CmdHandler(dialogs.CloseDialogMsg{})

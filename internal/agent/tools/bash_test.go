@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolveBlockFuncsFromEmptyConfig(t *testing.T) {
+func TestResolveBannedCommandsListWithEmptyConfig(t *testing.T) {
 	cfg := config.ToolBash{
 		DisableDefaultCommands: false,
 		BannedCommands:         []string{},
@@ -20,7 +20,7 @@ func TestResolveBlockFuncsFromEmptyConfig(t *testing.T) {
 	assert.Equal(t, defaultBannedCommands, bannedCmds)
 }
 
-func TestResolveBlockFuncsFromEmptyConfigWithDefaultDisabled(t *testing.T) {
+func TestResolveBannedCommandsListWithEmptyConfigWithDefaultDisabled(t *testing.T) {
 	cfg := config.ToolBash{
 		DisableDefaultCommands: true,
 		BannedCommands:         []string{},
@@ -32,7 +32,7 @@ func TestResolveBlockFuncsFromEmptyConfigWithDefaultDisabled(t *testing.T) {
 	assert.Equal(t, []string{}, bannedCmds)
 }
 
-func TestResolveBlockFuncsDefaultDisabledWithBannedCommands(t *testing.T) {
+func TestResolveBannedCommandsListWithDefaultDisabledWithBannedCommands(t *testing.T) {
 	cfg := config.ToolBash{
 		DisableDefaultCommands: true,
 		BannedCommands: []string{
@@ -47,7 +47,7 @@ func TestResolveBlockFuncsDefaultDisabledWithBannedCommands(t *testing.T) {
 	assert.Equal(t, []string{"pacman", "mount"}, bannedCmds)
 }
 
-func TestResolveBlockFuncsWithDefaultAndAddtionalBannedCommands(t *testing.T) {
+func TestResolveBannedCommandsListWithDefaultAndAddtionalBannedCommands(t *testing.T) {
 	additionalBannedCommands := []string{"lazygit", "btop"}
 	cfg := config.ToolBash{
 		DisableDefaultCommands: false,
@@ -57,4 +57,7 @@ func TestResolveBlockFuncsWithDefaultAndAddtionalBannedCommands(t *testing.T) {
 
 	bannedCmds := resolveBannedCommandsList(cfg)
 	require.Len(t, bannedCmds, len(defaultBannedCommands)+len(additionalBannedCommands))
+}
+
+func TestResolveBlockFuncsWithDefaultDisabledSubCommands(t *testing.T) {
 }

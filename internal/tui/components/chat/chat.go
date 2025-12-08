@@ -783,11 +783,7 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		return util.ReportInfo("No text selected")
 	}
 
-	if clear {
-		defer func() { m.SelectionClear() }()
-	}
-
-	return tea.Sequence(
+	cmds := []tea.Cmd{
 		// We use both OSC 52 and native clipboard for compatibility with different
 		// terminal emulators and environments.
 		tea.SetClipboard(selectedText),
@@ -796,7 +792,12 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 			return nil
 		},
 		util.ReportInfo("Selected text copied to clipboard"),
-	)
+	}
+	if clear {
+		cmds = append(cmds, m.SelectionClear())
+	}
+
+	return tea.Sequence(cmds...)
 }
 
 // abs returns the absolute value of an integer.

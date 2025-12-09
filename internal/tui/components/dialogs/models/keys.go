@@ -15,7 +15,7 @@ type KeyMap struct {
 	isAPIKeyHelp  bool
 	isAPIKeyValid bool
 
-	isClaudeAuthChoiseHelp    bool
+	isClaudeAuthChoiceHelp    bool
 	isClaudeOAuthHelp         bool
 	isClaudeOAuthURLState     bool
 	isClaudeOAuthHelpComplete bool
@@ -74,7 +74,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	if k.isClaudeAuthChoiseHelp {
+	if k.isClaudeAuthChoiceHelp {
 		return []key.Binding{
 			key.NewBinding(
 				key.WithKeys("left", "right", "h", "l"),

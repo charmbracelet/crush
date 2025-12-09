@@ -164,7 +164,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 
 			askForApiKey := func() {
-				m.keyMap.isClaudeAuthChoiseHelp = false
+				m.keyMap.isClaudeAuthChoiceHelp = false
 				m.keyMap.isClaudeOAuthHelp = false
 				m.keyMap.isAPIKeyHelp = true
 				m.showClaudeAuthMethodChooser = false
@@ -183,7 +183,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					m.selectedModelType = modelType
 					m.showClaudeAuthMethodChooser = false
 					m.showClaudeOAuth2 = true
-					m.keyMap.isClaudeAuthChoiseHelp = false
+					m.keyMap.isClaudeAuthChoiceHelp = false
 					m.keyMap.isClaudeOAuthHelp = true
 				}
 				return m, nil
@@ -252,7 +252,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			} else {
 				if selectedItem.Provider.ID == catwalk.InferenceProviderAnthropic {
 					m.showClaudeAuthMethodChooser = true
-					m.keyMap.isClaudeAuthChoiseHelp = true
+					m.keyMap.isClaudeAuthChoiceHelp = true
 					return m, nil
 				}
 				askForApiKey()
@@ -278,7 +278,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if m.showClaudeAuthMethodChooser {
 				m.claudeAuthMethodChooser.SetDefaults()
 				m.showClaudeAuthMethodChooser = false
-				m.keyMap.isClaudeAuthChoiseHelp = false
+				m.keyMap.isClaudeAuthChoiceHelp = false
 				m.keyMap.isClaudeOAuthHelp = false
 				return m, nil
 			}

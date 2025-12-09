@@ -24,6 +24,11 @@ func Escape(content string) string {
 	return sb.String()
 }
 
+// isLetter returns true if the rune is an ASCII letter (A-Z or a-z).
+func isLetter(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+}
+
 // EscapePreservingANSI escapes control characters while preserving ANSI escape
 // sequences for color/style rendering. This is useful for terminal output that
 // contains intentional ANSI color codes (e.g., bash command output).
@@ -38,26 +43,29 @@ func EscapePreservingANSI(content string) string {
 		if r == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
 			// Find the end of the ANSI sequence (terminated by a letter)
 			j := i + 2
+			foundTerminator := false
 			for j < len(runes) {
 				c := runes[j]
-				if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+				if isLetter(c) {
 					// Found sequence terminator, preserve the entire sequence
 					for k := i; k <= j; k++ {
 						sb.WriteRune(runes[k])
 					}
 					i = j + 1
+					foundTerminator = true
 					break
 				}
-				// Valid ANSI sequence characters: digits and semicolons
+				// Valid ANSI sequence characters: digits, semicolons, and question mark
 				if (c >= '0' && c <= '9') || c == ';' || c == '?' {
 					j++
 					continue
 				}
-				// Invalid character in sequence, escape the ESC and continue
+				// Invalid character in sequence, stop searching
 				break
 			}
-			if j >= len(runes) || !((runes[j] >= 'A' && runes[j] <= 'Z') || (runes[j] >= 'a' && runes[j] <= 'z')) {
-				// Incomplete or invalid sequence, escape the ESC character
+			if !foundTerminator {
+				// Incomplete or invalid sequence, escape the ESC character only
+				// and let the rest be processed normally
 				sb.WriteRune('\u241B')
 				i++
 			}

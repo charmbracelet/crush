@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -108,6 +109,11 @@ func NewCoordinator(
 }
 
 // Run implements Coordinator.
+// It executes a prompt with the current agent. If the provider uses OAuth
+// authentication, it will automatically refresh expired tokens before making
+// the request. If the request fails with a 401 authentication error, it will
+// attempt to refresh the OAuth token or re-resolve shell substitution API keys
+// and retry once.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
@@ -155,6 +161,75 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		FrequencyPenalty: freqPenalty,
 		PresencePenalty:  presPenalty,
 	})
+	// Check if we got a 401 authentication error (token expired mid-flight or rotated).
+	if err != nil {
+		var providerErr *fantasy.ProviderError
+		if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+			// Try OAuth token refresh first.
+			if providerCfg.OAuthToken != nil {
+				slog.Info("Received 401 authentication error, attempting OAuth token refresh and retry", "provider", providerCfg.ID)
+				if refreshErr := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); refreshErr != nil {
+					slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", refreshErr)
+					return nil, err // Return original error
+				}
+
+				// Rebuild models with refreshed token.
+				if updateErr := c.UpdateModels(ctx); updateErr != nil {
+					slog.Error("Failed to update models after token refresh", "error", updateErr)
+					return nil, err // Return original error
+				}
+
+				// Retry the request with refreshed token.
+				slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
+				result, err = c.currentAgent.Run(ctx, SessionAgentCall{
+					SessionID:        sessionID,
+					Prompt:           prompt,
+					Attachments:      attachments,
+					MaxOutputTokens:  maxTokens,
+					ProviderOptions:  mergedOptions,
+					Temperature:      temp,
+					TopP:             topP,
+					TopK:             topK,
+					FrequencyPenalty: freqPenalty,
+					PresencePenalty:  presPenalty,
+				})
+			} else if strings.Contains(providerCfg.APIKeyTemplate, "$") {
+				// Try re-resolving shell substitution API key.
+				slog.Info("Received 401 authentication error, re-resolving shell substitution API key and retry", "provider", providerCfg.ID)
+				newAPIKey, resolveErr := c.cfg.Resolve(providerCfg.APIKeyTemplate)
+				if resolveErr != nil {
+					slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", resolveErr)
+					return nil, err // Return original error
+				}
+
+				// Update provider config with new API key.
+				providerCfg.APIKey = newAPIKey
+				c.cfg.Providers.Set(providerCfg.ID, providerCfg)
+
+				// Rebuild models with new API key.
+				if updateErr := c.UpdateModels(ctx); updateErr != nil {
+					slog.Error("Failed to update models after API key refresh", "error", updateErr)
+					return nil, err // Return original error
+				}
+
+				// Retry the request with new API key.
+				slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
+				result, err = c.currentAgent.Run(ctx, SessionAgentCall{
+					SessionID:        sessionID,
+					Prompt:           prompt,
+					Attachments:      attachments,
+					MaxOutputTokens:  maxTokens,
+					ProviderOptions:  mergedOptions,
+					Temperature:      temp,
+					TopP:             topP,
+					TopK:             topK,
+					FrequencyPenalty: freqPenalty,
+					PresencePenalty:  presPenalty,
+				})
+			}
+		}
+	}
+
 	return result, err
 }
 

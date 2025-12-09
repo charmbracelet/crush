@@ -471,9 +471,7 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
-// RefreshOAuthToken refreshes an expired OAuth token and updates the
-// in-memory provider configuration. The refreshed token is not persisted to
-// disk to preserve immutability of the user config file.
+// RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	providerConfig, exists := c.Providers.Get(providerID)
 	if !exists {
@@ -500,6 +498,13 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	providerConfig.SetupClaudeCode()
 
 	c.Providers.Set(providerID, providerConfig)
+
+	if err := cmp.Or(
+		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
+		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
+	); err != nil {
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
 
 	return nil
 }

@@ -265,7 +265,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 				return res
 			}
 			content := "Command: " + params.Command + "\n" + v.result.Content
-			body := renderPlainContent(v, content)
+			body := renderPlainContentWithColors(v, content)
 			return joinHeaderBody(header, body)
 		}
 	}
@@ -273,7 +273,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 	return br.renderWithParams(v, "Bash", args, func() string {
 		var meta tools.BashResponseMetadata
 		if err := br.unmarshalParams(v.result.Metadata, &meta); err != nil {
-			return renderPlainContent(v, v.result.Content)
+			return renderPlainContentWithColors(v, v.result.Content)
 		}
 		// for backwards compatibility with older tool calls.
 		if meta.Output == "" && v.result.Content != tools.BashNoOutput {
@@ -283,7 +283,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		if meta.Output == "" {
 			return ""
 		}
-		return renderPlainContent(v, meta.Output)
+		return renderPlainContentWithColors(v, meta.Output)
 	})
 }
 
@@ -365,7 +365,7 @@ func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
 	if res, done := earlyState(header, v); done {
 		return res
 	}
-	body := renderPlainContent(v, v.result.Content)
+	body := renderPlainContentWithColors(v, v.result.Content)
 	return joinHeaderBody(header, body)
 }
 
@@ -1069,6 +1069,17 @@ func joinHeaderBody(header, body string) string {
 }
 
 func renderPlainContent(v *toolCallCmp, content string) string {
+	return renderPlainContentInternal(v, content, false)
+}
+
+// renderPlainContentWithColors renders plain content while preserving ANSI color codes.
+// This is useful for terminal output that contains intentional color formatting
+// (e.g., bash command output with colored ls, grep --color, etc.)
+func renderPlainContentWithColors(v *toolCallCmp, content string) string {
+	return renderPlainContentInternal(v, content, true)
+}
+
+func renderPlainContentInternal(v *toolCallCmp, content string, preserveColors bool) string {
 	t := styles.CurrentTheme()
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
@@ -1081,7 +1092,11 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 		if i >= responseContextHeight {
 			break
 		}
-		ln = ansiext.Escape(ln)
+		if preserveColors {
+			ln = ansiext.EscapePreservingANSI(ln)
+		} else {
+			ln = ansiext.Escape(ln)
+		}
 		ln = " " + ln
 		if lipgloss.Width(ln) > width {
 			ln = v.fit(ln, width)

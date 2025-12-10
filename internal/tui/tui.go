@@ -593,22 +593,15 @@ func (a *appModel) View() tea.View {
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
 	if a.wWidth < 25 || a.wHeight < 15 {
-		view.SetContent(
-			lipgloss.NewCanvas(
-				lipgloss.NewLayer(
-					t.S().Base.Width(a.wWidth).Height(a.wHeight).
-						Align(lipgloss.Center, lipgloss.Center).
-						Render(
-							t.S().Base.
-								Padding(1, 4).
-								Foreground(t.White).
-								BorderStyle(lipgloss.RoundedBorder()).
-								BorderForeground(t.Primary).
-								Render("Window too small!"),
-						),
-				),
-			).Render(),
-		)
+		view.Content = t.S().Base.Width(a.wWidth).Height(a.wHeight).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(t.S().Base.
+				Padding(1, 4).
+				Foreground(t.White).
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(t.Primary).
+				Render("Window too small!"),
+			)
 		return view
 	}
 
@@ -659,11 +652,8 @@ func (a *appModel) View() tea.View {
 		)
 	}
 
-	canvas := lipgloss.NewCanvas(
-		layers...,
-	)
-
-	view.Content = canvas.Render()
+	comp := lipgloss.NewCompositor(layers...)
+	view.Content = comp.Render()
 	view.Cursor = cursor
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {

@@ -120,10 +120,12 @@ func (q *quitDialogCmp) ID() dialogs.DialogID {
 	return QuitDialogID
 }
 
-// quitWithCursorAtBottom moves the cursor to the bottom of the screen before
-// quitting to prevent the terminal from clearing content below the quit dialog.
+// quitWithCursorAtBottom clears the quit dialog, moves the cursor to the
+// bottom of the screen, then quits to prevent the terminal from clearing
+// content below the quit dialog and to reveal any obscured information.
 func (q *quitDialogCmp) quitWithCursorAtBottom() tea.Cmd {
 	return tea.Sequence(
+		util.CmdHandler(dialogs.CloseDialogMsg{}),
 		tea.Raw(ansi.CursorPosition(1, q.wHeight)),
 		tea.Quit,
 	)

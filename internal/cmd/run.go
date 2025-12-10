@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -29,6 +31,10 @@ crush run --quiet "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
+
+		// Cancel on SIGINT or SIGTERM.
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+		defer cancel()
 
 		app, err := setupApp(cmd)
 		if err != nil {
@@ -57,8 +63,7 @@ crush run --quiet "Generate a README for this project"
 		//     crush run "Do something fancy" > output.txt
 		//     echo "Do something fancy" | crush run > output.txt
 		//
-		// TODO: We currently need to press ^c twice to cancel. Fix that.
-		return app.RunNonInteractive(cmd.Context(), os.Stdout, prompt, quiet)
+		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)
 	},
 }
 

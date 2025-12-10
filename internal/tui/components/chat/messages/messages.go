@@ -188,13 +188,13 @@ func (msg *messageCmp) style() lipgloss.Style {
 func (m *messageCmp) renderAssistantMessage() string {
 	t := styles.CurrentTheme()
 	parts := []string{}
-	content := m.message.Content().String()
+	content := strings.TrimSpace(m.message.Content().String())
 	thinking := m.message.IsThinking()
+	thinkingContent := strings.TrimSpace(m.message.ReasoningContent().Thinking)
 	finished := m.message.IsFinished()
 	finishedData := m.message.FinishPart()
-	thinkingContent := ""
 
-	if thinking || strings.TrimSpace(m.message.ReasoningContent().Thinking) != "" {
+	if thinking || thinkingContent != "" {
 		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
 	} else if finished && content == "" && m.message.GetToolCallState().IsEndTurn() {
@@ -317,7 +317,11 @@ func (m *messageCmp) renderThinkingContent() string {
 		}
 	}
 	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
-	return lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View()) + "\n\n" + footer
+	result := lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View())
+	if footer != "" {
+		result += "\n\n" + footer
+	}
+	return result
 }
 
 // determineAnimationState calculates the appropriate animation state for a message.

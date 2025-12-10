@@ -1,11 +1,13 @@
 package agent
 
-import "github.com/charmbracelet/crush/internal/errors"
+import (
+	"errors"
+)
 
-// Re-export centralized errors for backward compatibility and convenient access
+// Define error types locally since we're using the standard errors package
 var (
-	ErrRequestCancelled = errors.ErrRequestCancelled
-	ErrSessionBusy      = errors.ErrSessionBusy
-	ErrEmptyPrompt      = errors.ErrEmptyInput
-	ErrSessionMissing   = errors.ErrSessionMissing
+	ErrRequestCancelled = errors.New("request cancelled")
+	ErrSessionBusy      = errors.New("session busy")
+	ErrEmptyPrompt      = errors.New("empty prompt")
+	ErrSessionMissing   = errors.New("session missing")
 )

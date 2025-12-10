@@ -181,7 +181,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
-		if p.isOnboarding {
+		if p.isOnboarding || p.isProjectInit {
 			return p, nil
 		}
 		if p.compact {
@@ -210,7 +210,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
-		if p.isOnboarding {
+		if p.isOnboarding || p.isProjectInit {
 			return p, nil
 		}
 		if p.compact {
@@ -379,8 +379,17 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
+			// Skip attachment handling during onboarding/splash screen
+			if p.focusedPane == PanelTypeSplash || p.isOnboarding {
+				u, cmd := p.splash.Update(msg)
+				p.splash = u.(splash.Splash)
+				return p, cmd
+			}
 			agentCfg := config.Get().Agents[config.AgentCoder]
 			model := config.Get().GetModelByType(agentCfg.Model)
+			if model == nil {
+				return p, util.ReportWarn("No model configured yet")
+			}
 			if model.SupportsImages {
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
 			} else {

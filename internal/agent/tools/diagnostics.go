@@ -94,7 +94,7 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) strin
 	}
 
 	out := output.String()
-	slog.Info("Diagnostics", "output", out)
+	slog.Debug("Diagnostics", "output", out)
 	return out
 }
 

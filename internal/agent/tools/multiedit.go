@@ -167,6 +167,13 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Check permissions
 	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
 
+	editsApplied := len(params.Edits) - len(failedEdits)
+	var description string
+	if len(failedEdits) > 0 {
+		description = fmt.Sprintf("Create file %s with %d of %d edits (%d failed)", params.FilePath, editsApplied, len(params.Edits), len(failedEdits))
+	} else {
+		description = fmt.Sprintf("Create file %s with %d edits", params.FilePath, editsApplied)
+	}
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
 		SessionID: sessionID,
 		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
@@ -174,7 +181,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
-		Description: fmt.Sprintf("Create file %s with %d edits", params.FilePath, len(params.Edits)),
+		Description: description,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: "",
@@ -205,7 +212,6 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
-	editsApplied := len(params.Edits) - len(failedEdits)
 	var message string
 	if len(failedEdits) > 0 {
 		message = fmt.Sprintf("File created with %d of %d edits: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
@@ -302,6 +308,14 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 
 	// Generate diff and check permissions
 	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
+
+	editsApplied := len(params.Edits) - len(failedEdits)
+	var description string
+	if len(failedEdits) > 0 {
+		description = fmt.Sprintf("Apply %d of %d edits to file %s (%d failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
+	} else {
+		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
+	}
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
 		SessionID: sessionID,
 		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
@@ -309,7 +323,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
-		Description: fmt.Sprintf("Apply %d edits to file %s", len(params.Edits), params.FilePath),
+		Description: description,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: oldContent,
@@ -355,7 +369,6 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
-	editsApplied := len(params.Edits) - len(failedEdits)
 	var message string
 	if len(failedEdits) > 0 {
 		message = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))

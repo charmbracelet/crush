@@ -85,6 +85,24 @@ func (dr defensiveRenderer) Render(v *toolCallCmp) string {
 	return dr.inner.Render(v)
 }
 
+// Render method for baseRenderer handles direct rendering when defensive wrapper not used
+func (br baseRenderer) Render(v *toolCallCmp) string {
+	if v.result.Data != "" {
+		if strings.HasPrefix(v.result.MIMEType, "image/") {
+			return br.renderWithParams(v, v.call.Name, nil, func() string {
+				return renderImageContent(v, v.result.Data, v.result.MIMEType, v.result.Content)
+			})
+		}
+		return br.renderWithParams(v, v.call.Name, nil, func() string {
+			return renderMediaContent(v, v.result.MIMEType, v.result.Content)
+		})
+	}
+
+	return br.renderWithParams(v, v.call.Name, nil, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
+}
+
 // paramBuilder helps construct parameter lists for tool headers
 type paramBuilder struct {
 	args []string
@@ -186,6 +204,7 @@ func init() {
 	registry.register(tools.FetchToolName, func() renderer { return simpleFetchRenderer{} })
 	registry.register(tools.AgenticFetchToolName, func() renderer { return agenticFetchRenderer{} })
 	registry.register(tools.WebFetchToolName, func() renderer { return webFetchRenderer{} })
+	registry.register(tools.WebSearchToolName, func() renderer { return webSearchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
 	registry.register(tools.GrepToolName, func() renderer { return grepRenderer{} })
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
@@ -203,8 +222,18 @@ type genericRenderer struct {
 	baseRenderer
 }
 
-// Render displays the tool call with its raw input and plain content output
 func (gr genericRenderer) Render(v *toolCallCmp) string {
+	if v.result.Data != "" {
+		if strings.HasPrefix(v.result.MIMEType, "image/") {
+			return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
+				return renderImageContent(v, v.result.Data, v.result.MIMEType, v.result.Content)
+			})
+		}
+		return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
+			return renderMediaContent(v, v.result.MIMEType, v.result.Content)
+		})
+	}
+
 	return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
 		return renderPlainContent(v, v.result.Content)
 	})
@@ -407,6 +436,10 @@ func (vr viewRenderer) Render(v *toolCallCmp) string {
 		build()
 
 	return vr.renderWithParams(v, "View", args, func() string {
+		if v.result.Data != "" && strings.HasPrefix(v.result.MIMEType, "image/") {
+			return renderImageContent(v, v.result.Data, v.result.MIMEType, "")
+		}
+
 		var meta tools.ViewResponseMetadata
 		if err := vr.unmarshalParams(v.result.Metadata, &meta); err != nil {
 			return renderPlainContent(v, v.result.Content)
@@ -604,8 +637,20 @@ type agenticFetchRenderer struct {
 	baseRenderer
 }
 
-// renderNestedToolWithPrompt handles common rendering pattern for tools with prompts and nested calls
-func renderNestedToolWithPrompt(v *toolCallCmp, toolName string, args []string, prompt string, taskTagStyle lipgloss.Style) string {
+// Render displays the fetched URL or web search with prompt parameter and nested tool calls
+func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.AgenticFetchParams
+	var args []string
+	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
+		if params.URL != "" {
+			args = newParamBuilder().
+				addMain(params.URL).
+				build()
+		}
+	}
+
+	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	// Create base renderer for header functionality
@@ -706,6 +751,30 @@ func (wfr webFetchRenderer) Render(v *toolCallCmp) string {
 	}
 
 	return wfr.renderWithParams(v, "Fetch", args, func() string {
+		return renderMarkdownContent(v, v.result.Content)
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Web search renderer
+// -----------------------------------------------------------------------------
+
+// webSearchRenderer handles web search with query display
+type webSearchRenderer struct {
+	baseRenderer
+}
+
+// Render displays a compact view of web_search with just the query
+func (wsr webSearchRenderer) Render(v *toolCallCmp) string {
+	var params tools.WebSearchParams
+	var args []string
+	if err := wsr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.Query).
+			build()
+	}
+
+	return wsr.renderWithParams(v, "Search", args, func() string {
 		return renderMarkdownContent(v, v.result.Content)
 	})
 }
@@ -1018,7 +1087,15 @@ func renderContentUnified(v *toolCallCmp, content string, processor ContentProce
 		if i >= responseContextHeight {
 			break
 		}
-		out = append(out, ln)
+		ln = ansiext.Escape(ln)
+		ln = " " + ln
+		if lipgloss.Width(ln) > width {
+			ln = v.fit(ln, width)
+		}
+		out = append(out, t.S().Muted.
+			Width(width).
+			Background(t.BgBaseLighter).
+			Render(ln))
 	}
 
 	// Add truncation message if needed
@@ -1153,7 +1230,56 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (v *toolCallCmp) renderToolCallError() string {
+// renderImageContent renders image data with optional text content (for MCP tools).
+func renderImageContent(v *toolCallCmp, data, mediaType, textContent string) string {
+	t := styles.CurrentTheme()
+
+	dataSize := len(data) * 3 / 4
+	sizeStr := formatSize(dataSize)
+
+	loaded := t.S().Base.Foreground(t.Green).Render("Loaded")
+	arrow := t.S().Base.Foreground(t.GreenDark).Render("→")
+	typeStyled := t.S().Base.Render(mediaType)
+	sizeStyled := t.S().Subtle.Render(sizeStr)
+
+	imageDisplay := fmt.Sprintf("%s %s %s %s", loaded, arrow, typeStyled, sizeStyled)
+	if strings.TrimSpace(textContent) != "" {
+		textDisplay := renderPlainContent(v, textContent)
+		return lipgloss.JoinVertical(lipgloss.Left, textDisplay, "", imageDisplay)
+	}
+
+	return imageDisplay
+}
+
+// renderMediaContent renders non-image media content.
+func renderMediaContent(v *toolCallCmp, mediaType, textContent string) string {
+	t := styles.CurrentTheme()
+
+	loaded := t.S().Base.Foreground(t.Green).Render("Loaded")
+	arrow := t.S().Base.Foreground(t.GreenDark).Render("→")
+	typeStyled := t.S().Base.Render(mediaType)
+	mediaDisplay := fmt.Sprintf("%s %s %s", loaded, arrow, typeStyled)
+
+	if strings.TrimSpace(textContent) != "" {
+		textDisplay := renderPlainContent(v, textContent)
+		return lipgloss.JoinVertical(lipgloss.Left, textDisplay, "", mediaDisplay)
+	}
+
+	return mediaDisplay
+}
+
+// formatSize formats byte count as human-readable size.
+func formatSize(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
+}
+
+func (v *toolCallCmp) renderToolError() string {
 	t := styles.CurrentTheme()
 	err := strings.ReplaceAll(v.result.Content, "\n", " ")
 	errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
@@ -1190,7 +1316,9 @@ func prettifyToolName(name string) string {
 	case tools.AgenticFetchToolName:
 		return "Agentic Fetch"
 	case tools.WebFetchToolName:
-		return "Fetching"
+		return "Fetch"
+	case tools.WebSearchToolName:
+		return "Search"
 	case tools.GlobToolName:
 		return "Glob"
 	case tools.GrepToolName:

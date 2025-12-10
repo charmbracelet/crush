@@ -411,7 +411,9 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 		var params tools.AgenticFetchParams
 		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
 			var parts []string
-			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			if params.URL != "" {
+				parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
+			}
 			if params.Prompt != "" {
 				parts = append(parts, fmt.Sprintf("**Prompt:** %s", params.Prompt))
 			}
@@ -507,6 +509,13 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 }
 
 func (m *toolCallCmp) formatResultForCopy() string {
+	if m.result.Data != "" {
+		if strings.HasPrefix(m.result.MIMEType, "image/") {
+			return fmt.Sprintf("[Image: %s]", m.result.MIMEType)
+		}
+		return fmt.Sprintf("[Media: %s]", m.result.MIMEType)
+	}
+
 	switch m.call.Name {
 	case tools.BashToolName:
 		return m.formatBashResultForCopy()
@@ -901,6 +910,9 @@ func (m *toolCallCmp) textWidth() int {
 
 // fit truncates content to fit within the specified width with ellipsis
 func (m *toolCallCmp) fit(content string, width int) string {
+	if lipgloss.Width(content) <= width {
+		return content
+	}
 	t := styles.CurrentTheme()
 	lineStyle := t.S().Muted
 	dots := lineStyle.Render("…")

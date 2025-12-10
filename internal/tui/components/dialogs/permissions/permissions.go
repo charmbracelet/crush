@@ -389,7 +389,7 @@ func (p *permissionDialogCmp) renderHeader() string {
 	case tools.AgenticFetchToolName:
 		headerParts = append(headerParts,
 			baseStyle.Render(strings.Repeat(" ", p.width)),
-			t.S().Muted.Width(p.width).Bold(true).Render("URL"),
+			t.S().Muted.Width(p.width).Bold(true).Render("Web"),
 		)
 	case tools.ViewToolName:
 		params := p.permission.Params.(tools.ViewPermissionsParams)
@@ -605,7 +605,12 @@ func (p *permissionDialogCmp) generateAgenticFetchContent() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base.Background(t.BgSubtle)
 	if pr, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams); ok {
-		content := fmt.Sprintf("URL: %s\n\nPrompt: %s", pr.URL, pr.Prompt)
+		var content string
+		if pr.URL != "" {
+			content = fmt.Sprintf("URL: %s\n\nPrompt: %s", pr.URL, pr.Prompt)
+		} else {
+			content = fmt.Sprintf("Prompt: %s", pr.Prompt)
+		}
 		finalContent := baseStyle.
 			Padding(1, 2).
 			Width(p.contentViewPort.Width()).

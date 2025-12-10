@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	uv "github.com/charmbracelet/ultraviolet"
 	"golang.org/x/mod/semver"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -87,6 +88,10 @@ type appModel struct {
 	// QueryVersion instructs the TUI to query for the terminal version when it
 	// starts.
 	QueryVersion bool
+
+	// store a reusable canvas for rendering and lazy resizing
+	canvas     *uv.ScreenBuffer
+	resizeTime time.Time
 }
 
 // Init initializes the application model and returns initial commands.
@@ -109,6 +114,8 @@ func (a appModel) Init() tea.Cmd {
 
 	return tea.Batch(cmds...)
 }
+
+type lazyWindowSizeMsg struct{ width, height int }
 
 // Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -153,9 +160,21 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		const debounceDuration = 50 * time.Millisecond
 		a.wWidth, a.wHeight = msg.Width, msg.Height
+		// Lazily update all components on resize after 150ms
+		// to avoid excessive updates during window resizing.
+		a.resizeTime = time.Now()
+		return a, tea.Tick(debounceDuration, func(t time.Time) tea.Msg {
+			if time.Since(a.resizeTime) >= debounceDuration {
+				return lazyWindowSizeMsg{msg.Width, msg.Height}
+			}
+			return nil
+		})
+
+	case lazyWindowSizeMsg:
 		a.completions.Update(msg)
-		return a, a.handleWindowResize(msg.Width, msg.Height)
+		return a, a.handleWindowResize(msg.width, msg.height)
 
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
@@ -426,6 +445,9 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
 
+	// Resize canvas
+	a.canvas.Resize(width, height)
+
 	// TODO: clean up these magic numbers.
 	if a.showingFullHelp {
 		height -= 5
@@ -593,22 +615,17 @@ func (a *appModel) View() tea.View {
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
 	if a.wWidth < 25 || a.wHeight < 15 {
-		view.SetContent(
-			lipgloss.NewCanvas(
-				lipgloss.NewLayer(
-					t.S().Base.Width(a.wWidth).Height(a.wHeight).
-						Align(lipgloss.Center, lipgloss.Center).
-						Render(
-							t.S().Base.
-								Padding(1, 4).
-								Foreground(t.White).
-								BorderStyle(lipgloss.RoundedBorder()).
-								BorderForeground(t.Primary).
-								Render("Window too small!"),
-						),
-				),
-			).Render(),
-		)
+		content := t.S().Base.Width(a.wWidth).Height(a.wHeight).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(
+				t.S().Base.
+					Padding(1, 4).
+					Foreground(t.White).
+					BorderStyle(lipgloss.RoundedBorder()).
+					BorderForeground(t.Primary).
+					Render("Window too small!"),
+			)
+		view.SetContent(content)
 		return view
 	}
 
@@ -659,11 +676,11 @@ func (a *appModel) View() tea.View {
 		)
 	}
 
-	canvas := lipgloss.NewCanvas(
-		layers...,
-	)
+	a.canvas.Clear()
+	comp := lipgloss.NewCompositor(layers...)
+	comp.Draw(a.canvas, a.canvas.Bounds())
 
-	view.Content = canvas.Render()
+	view.Content = a.canvas.Render()
 	view.Cursor = cursor
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
@@ -701,6 +718,8 @@ func New(app *app.App) *appModel {
 	keyMap := DefaultKeyMap()
 	keyMap.pageBindings = chatPage.Bindings()
 
+	canvas := uv.NewScreenBuffer(0, 0)
+
 	model := &appModel{
 		currentPage: chat.ChatPageID,
 		app:         app,
@@ -714,6 +733,8 @@ func New(app *app.App) *appModel {
 
 		dialog:      dialogs.NewDialogCmp(),
 		completions: completions.New(),
+
+		canvas: &canvas,
 	}
 
 	return model

@@ -388,6 +388,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+		// Check MCP-specific disabled tools.
+		if mcpCfg, ok := c.cfg.MCP[tool.MCP()]; ok {
+			if slices.Contains(mcpCfg.DisabledTools, tool.MCPToolName()) {
+				continue
+			}
+		}
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

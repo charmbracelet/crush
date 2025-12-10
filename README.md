@@ -275,6 +275,7 @@ using `$(echo $VAR)` syntax.
       "args": ["/path/to/mcp-server.js"],
       "timeout": 120,
       "disabled": false,
+      "disabled_tools": ["some-tool-name"],
       "env": {
         "NODE_ENV": "production"
       }
@@ -284,6 +285,7 @@ using `$(echo $VAR)` syntax.
       "url": "https://api.githubcopilot.com/mcp/",
       "timeout": 120,
       "disabled": false,
+      "disabled_tools": ["create_issue", "create_pull_request"],
       "headers": {
         "Authorization": "Bearer $GH_PAT"
       }
@@ -334,6 +336,26 @@ permissions. Use this with care.
 
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
+
+### Disabling Built-In Tools
+
+If you'd like to prevent Crush from using certain built-in tools entirely, you
+can disable them via the `options.disabled_tools` list. Disabled tools are
+completely hidden from the agent.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": [
+      "bash",
+      "sourcegraph"
+    ]
+  }
+}
+```
+
+To disable tools from MCP servers, see the [MCP config section](#mcps).
 
 ### Initialization
 

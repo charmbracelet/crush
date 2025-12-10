@@ -1,6 +1,7 @@
 package quit
 
 import (
+	"math/rand"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -16,6 +17,27 @@ const (
 	question                      = "Are you sure you want to quit?"
 	QuitDialogID dialogs.DialogID = "quit"
 )
+
+var goodbyeQuips = []string{
+	"So long, and thanks for all the fish!",
+	"Catch you on the flip side!",
+	"May the source be with you!",
+	"I'll be back... (but you won't)",
+	"Goodbye, world!",
+	"Exit stage left, pursued by a bear",
+	"Later, tater!",
+	"Peace out, scout!",
+	"Smell ya later!",
+	"Adios, muchachos!",
+	"You can resume a session by pressing ctrl+s after relaunching Crush",
+	"Time to touch grass, I see",
+	"Was it something I said?",
+	"You can't quit me!",
+	"Leaving so soon?",
+	"I have a Crush on you!",
+	"That's all, folks!",
+	"All these moments will be lost, in time ... like tears, in rain.",
+}
 
 // QuitDialog represents a confirmation dialog for quitting the application.
 type QuitDialog interface {
@@ -135,7 +157,9 @@ type quitMsg struct{}
 // bottom of the screen, then quits to prevent the terminal from clearing
 // content below the quit dialog and to reveal any obscured information.
 func (q *quitDialogCmp) quitWithCursorAtBottom() tea.Cmd {
+	quip := goodbyeQuips[rand.Intn(len(goodbyeQuips))]
 	return tea.Sequence(
+		util.ReportInfo(quip),
 		util.CmdHandler(dialogs.CloseDialogMsg{}),
 		tea.Tick(10*time.Millisecond, func(time.Time) tea.Msg {
 			return quitMsg{}

@@ -29,9 +29,23 @@ type BackgroundShell struct {
 	cancel      context.CancelFunc
 	stdout      *bytes.Buffer
 	stderr      *bytes.Buffer
+	bufMu       sync.RWMutex // Protects stdout/stderr buffer access
 	done        chan struct{}
 	exitErr     error
 	completedAt int64 // Unix timestamp when job completed (0 if still running)
+}
+
+// syncWriter wraps a bytes.Buffer with mutex protection for concurrent writes.
+type syncWriter struct {
+	buf *bytes.Buffer
+	mu  *sync.RWMutex
+}
+
+// Write implements io.Writer with mutex protection.
+func (s *syncWriter) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -56,7 +70,7 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 }
 
 // Start creates and starts a new background shell with the given command.
-func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command, description string) (*BackgroundShell, error) {
 	// Check job limit
 	if m.shells.Len() >= MaxBackgroundJobs {
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
@@ -86,10 +100,14 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	m.shells.Set(id, bgShell)
 
+	// Create thread-safe writers for concurrent buffer access.
+	stdoutWriter := &syncWriter{buf: bgShell.stdout, mu: &bgShell.bufMu}
+	stderrWriter := &syncWriter{buf: bgShell.stderr, mu: &bgShell.bufMu}
+
 	go func() {
 		defer close(bgShell.done)
 
-		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
+		err := shell.ExecStream(shellCtx, command, stdoutWriter, stderrWriter)
 
 		bgShell.exitErr = err
 		atomic.StoreInt64(&bgShell.completedAt, time.Now().Unix())
@@ -176,7 +194,10 @@ func (m *BackgroundShellManager) KillAll() {
 }
 
 // GetOutput returns the current output of a background shell.
-func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool, err error) {
+func (bs *BackgroundShell) GetOutput() (stdout, stderr string, done bool, err error) {
+	bs.bufMu.RLock()
+	defer bs.bufMu.RUnlock()
+
 	select {
 	case <-bs.done:
 		return bs.stdout.String(), bs.stderr.String(), true, bs.exitErr

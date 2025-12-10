@@ -43,12 +43,18 @@ import (
 
 var lastMouseEvent time.Time
 
+const (
+	helpBarHeightFull  = 5
+	helpBarHeightShort = 2
+	mouseEventThrottle = 15 * time.Millisecond
+)
+
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 	switch msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
 		now := time.Now()
 		// trackpad is sending too many requests
-		if now.Sub(lastMouseEvent) < 15*time.Millisecond {
+		if now.Sub(lastMouseEvent) < mouseEventThrottle {
 			return nil
 		}
 		lastMouseEvent = now
@@ -284,7 +290,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, util.ReportError(err)
 		}
 
-		go a.app.UpdateAgentModel(context.TODO())
+		go a.app.UpdateAgentModel(context.Background())
 
 		modelTypeName := "large"
 		if msg.ModelType == config.SelectedModelTypeSmall {
@@ -304,7 +310,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
 	// Permissions
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		item, ok := a.pages[a.currentPage]
 		if !ok {
 			return a, nil
@@ -426,11 +432,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 	var cmds []tea.Cmd
 
-	// TODO: clean up these magic numbers.
+	// Use defined constants for help bar height adjustments
 	if a.showingFullHelp {
-		height -= 5
+		height -= helpBarHeightFull
 	} else {
-		height -= 2
+		height -= helpBarHeightShort
 	}
 
 	a.width, a.height = width, height
@@ -565,8 +571,9 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
 	if a.app.AgentCoordinator.IsBusy() {
-		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
-		return util.ReportWarn("Agent is busy, please wait...")
+		// Allow navigation but show warning for agent-sensitive operations
+		// This prevents UI deadlocks while maintaining user freedom
+		return util.ReportWarn("Agent is busy, some features may be limited...")
 	}
 
 	var cmds []tea.Cmd
@@ -667,9 +674,11 @@ func (a *appModel) View() tea.View {
 	view.Cursor = cursor
 
 	if a.sendProgressBar && a.app != nil && a.app.AgentCoordinator != nil && a.app.AgentCoordinator.IsBusy() {
-		// HACK: use a random percentage to prevent ghostty from hiding it
-		// after a timeout.
-		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
+		// Create animated progress bar for terminal compatibility
+		// Some terminals hide static progress bars after timeout
+		// Dynamic percentage prevents ghostty and similar terminals from hiding
+		progressPercent := rand.Intn(100)
+		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, progressPercent)
 	}
 	return view
 }

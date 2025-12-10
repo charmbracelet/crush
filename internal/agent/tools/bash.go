@@ -15,12 +15,13 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
 type BashParams struct {
-	Description     string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
+	Description     string `json:"description,omitempty" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
 	Command         string `json:"command" description:"The command to execute"`
 	WorkingDir      string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
 	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
@@ -217,9 +218,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if !isSafeReadOnly {
 				p := permissions.Request(
 					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        execWorkingDir,
-						ToolCallID:  call.ID,
+						SessionID: sessionID,
+						Path:      execWorkingDir,
+						// Note: fantasy uses strings for ToolCallID
+						ToolCallID:  message.ToolCallID(call.ID),
 						ToolName:    BashToolName,
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),

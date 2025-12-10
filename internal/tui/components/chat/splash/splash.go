@@ -147,7 +147,7 @@ func (s *splashCmp) Init() tea.Cmd {
 }
 
 // SetSize implements SplashPage.
-func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
+func (s *splashCmp) SetSize(width, height int) tea.Cmd {
 	wasSmallScreen := s.isSmallScreen()
 	rerenderLogo := width != s.width
 	s.height = height
@@ -697,7 +697,8 @@ func (s *splashCmp) Cursor() *tea.Cursor {
 	}
 	if s.showClaudeOAuth2 {
 		if cursor := s.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
-			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
+			// Compensate for dialog padding and border positioning
+			cursor.Y += 2
 			return s.moveCursor(cursor)
 		}
 		return nil

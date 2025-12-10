@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -13,7 +14,9 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -21,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/log/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -34,15 +38,40 @@ type ToolCallCmp interface {
 	GetToolResult() message.ToolResult // Access to tool result data
 	SetToolResult(message.ToolResult)  // Update tool result
 	SetToolCall(message.ToolCall)      // Update tool call
-	SetCancelled()                     // Mark as cancelled
 	ParentMessageID() string           // Get parent message ID
-	Spinning() bool                    // Animation state for pending tools
+	IsAnimating() bool                 // Animation state for pending tools
 	GetNestedToolCalls() []ToolCallCmp // Get nested tool calls
 	SetNestedToolCalls([]ToolCallCmp)  // Set nested tool calls
 	SetIsNested(bool)                  // Set whether this tool call is nested
-	ID() string
-	SetPermissionRequested() // Mark permission request
-	SetPermissionGranted()   // Mark permission granted
+	ID() string                        // Access to tool call ID (as string for Item interface)
+	GetToolCallID() message.ToolCallID // Access to strongly-typed tool call ID
+	SetToolCallState(state enum.ToolCallState)
+}
+
+// ========== EVENT-DRIVEN TOOL CALL MESSAGES (LOCK-FREE!) ==========
+
+// ToolCallStreamMsg represents real-time output streaming
+type ToolCallStreamMsg struct {
+	ToolCallID message.ToolCallID
+	Output     string
+	Timestamp  time.Time
+	IsPartial  bool // Whether this is a partial chunk
+}
+
+// ToolCallCompleteMsg represents final completion
+type ToolCallCompleteMsg struct {
+	ToolCallID  message.ToolCallID
+	FinalResult message.ToolResult
+	Duration    time.Duration
+	Timestamp   time.Time
+}
+
+// ToolCallStateChangeMsg represents immutable state transition
+type ToolCallStateChangeMsg struct {
+	ToolCallID message.ToolCallID
+	NewState   enum.ToolCallState
+	OldState   enum.ToolCallState
+	Timestamp  time.Time
 }
 
 // toolCallCmp implements the ToolCallCmp interface for displaying tool calls.
@@ -53,27 +82,30 @@ type toolCallCmp struct {
 	isNested bool // Whether this tool call is nested within another
 
 	// Tool call data and state
-	parentMessageID     string             // ID of the message that initiated this tool call
-	call                message.ToolCall   // The tool call being executed
-	result              message.ToolResult // The result of the tool execution
-	cancelled           bool               // Whether the tool call was cancelled
-	permissionRequested bool
-	permissionGranted   bool
+	parentMessageID string             // ID of the message that initiated this tool call
+	call            message.ToolCall   // The tool call being executed
+	result          message.ToolResult // The result of the tool execution
 
 	// Animation state for pending tool calls
-	spinning bool       // Whether to show loading animation
-	anim     util.Model // Animation component for pending states
+	animationState enum.AnimationState // Type-safe animation state
+	anim           util.Model          // Animation component for pending states
+
+	// Streaming display for real-time tool output
+	streamingContent []string // Accumulated output lines from running tools
+	maxStreamLines   int      // Maximum lines to keep in stream buffer
+	showStreaming    bool     // Whether to show streaming output vs final result
 
 	nestedToolCalls []ToolCallCmp // Nested tool calls for hierarchical display
+	mu              sync.RWMutex  // Mutex for thread-safe access to mutable fields
 }
 
 // ToolCallOption provides functional options for configuring tool call components
 type ToolCallOption func(*toolCallCmp)
 
-// WithToolCallCancelled marks the tool call as cancelled
-func WithToolCallCancelled() ToolCallOption {
+// WithToolCallState sets the tool call state
+func WithToolCallState(state enum.ToolCallState) ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.cancelled = true
+		m.call.State = state
 	}
 }
 
@@ -96,15 +128,24 @@ func WithToolCallNestedCalls(calls []ToolCallCmp) ToolCallOption {
 	}
 }
 
-func WithToolPermissionRequested() ToolCallOption {
-	return func(m *toolCallCmp) {
-		m.permissionRequested = true
-	}
+// StreamOutputMsg represents real-time output from a running tool
+type StreamOutputMsg struct {
+	ToolCallID message.ToolCallID
+	Output     string
+	Timestamp  time.Time
 }
 
-func WithToolPermissionGranted() ToolCallOption {
+// StreamCompleteMsg indicates that tool execution has finished and streaming should stop
+type StreamCompleteMsg struct {
+	ToolCallID  message.ToolCallID
+	FinalResult message.ToolResult
+}
+
+// WithStreamingOutput enables real-time streaming display for tool output
+func WithStreamingOutput(enabled bool) ToolCallOption {
 	return func(m *toolCallCmp) {
-		m.permissionGranted = true
+		m.showStreaming = enabled
+		m.maxStreamLines = 100 // Keep last 100 lines for streaming display
 	}
 }
 
@@ -118,30 +159,15 @@ func NewToolCallCmp(parentMessageID string, tc message.ToolCall, permissions per
 	for _, opt := range opts {
 		opt(m)
 	}
-	t := styles.CurrentTheme()
-	m.anim = anim.New(anim.Settings{
-		Size:        15,
-		Label:       "Working",
-		GradColorA:  t.Primary,
-		GradColorB:  t.Secondary,
-		LabelColor:  t.FgBase,
-		CycleColors: true,
-	})
-	if m.isNested {
-		m.anim = anim.New(anim.Settings{
-			Size:        10,
-			GradColorA:  t.Primary,
-			GradColorB:  t.Secondary,
-			CycleColors: true,
-		})
-	}
+	m.RefreshAnimation()
 	return m
 }
 
 // Init initializes the tool call component and starts animations if needed.
+// Init initializes tool call component and starts animations if needed.
 // Returns a command to start the animation for pending tool calls.
 func (m *toolCallCmp) Init() tea.Cmd {
-	m.spinning = m.shouldSpin()
+	m.RefreshAnimation()
 	return m.anim.Init()
 }
 
@@ -149,16 +175,59 @@ func (m *toolCallCmp) Init() tea.Cmd {
 // Manages animation updates for pending tool calls.
 func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case StreamOutputMsg:
+		// Handle real-time streaming output
+		if msg.ToolCallID == m.call.ID && m.showStreaming {
+			m.mu.Lock()
+			// Split output into lines and append to streaming buffer
+			lines := strings.Split(msg.Output, "\n")
+			m.streamingContent = append(m.streamingContent, lines...)
+
+			// Keep only last N lines to prevent memory issues
+			if len(m.streamingContent) > m.maxStreamLines {
+				excess := len(m.streamingContent) - m.maxStreamLines
+				// Use copy to avoid memory leak from underlying array retention
+				newContent := make([]string, m.maxStreamLines)
+				copy(newContent, m.streamingContent[excess:])
+				m.streamingContent = newContent
+			}
+			m.mu.Unlock()
+		}
+		return m, nil
+
+	case StreamCompleteMsg:
+		// Handle streaming completion - switch to final result
+		if msg.ToolCallID == m.call.ID {
+			m.mu.Lock()
+			m.result = msg.FinalResult
+			m.showStreaming = false  // Disable streaming, show final result
+			m.streamingContent = nil // Clear streaming buffer
+
+			// CRITICAL: Update call.State to reflect result - eliminates need for getEffectiveDisplayState()
+			if msg.FinalResult.ResultState.IsError() {
+				m.call.State = enum.ToolCallStateFailed
+			} else {
+				m.call.State = enum.ToolCallStateCompleted
+			}
+			m.mu.Unlock()
+			m.RefreshAnimation()
+		}
+		return m, nil
+
 	case anim.StepMsg:
+		// Performance optimization: skip updates if no active animations
+		if !m.IsAnimating() {
+			return m, nil
+		}
 		var cmds []tea.Cmd
 		for i, nested := range m.nestedToolCalls {
-			if nested.Spinning() {
+			if nested.IsAnimating() {
 				u, cmd := nested.Update(msg)
 				m.nestedToolCalls[i] = u.(ToolCallCmp)
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.spinning {
+		if m.animationState.IsActive() {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u
 			cmds = append(cmds, cmd)
@@ -175,25 +244,66 @@ func (m *toolCallCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the tool call component based on its current state.
 // Shows either a pending animation or the tool-specific rendered result.
 func (m *toolCallCmp) View() string {
-	box := m.style()
-
-	if !m.call.Finished && !m.cancelled {
-		return box.Render(m.renderPending())
-	}
-
-	r := registry.lookup(m.call.Name)
-
-	if m.isNested {
-		return box.Render(r.Render(m))
-	}
-	return box.Render(r.Render(m))
+	return m.style().Render(m.viewUnboxed())
 }
 
-// State management methods
+func (m *toolCallCmp) viewUnboxed() string {
+	// Determine effective display state atomically
+	m.mu.RLock()
+	effectiveState := m.call.State
+	isNested := m.isNested
+	toolName := m.call.Name
 
-// SetCancelled marks the tool call as cancelled
-func (m *toolCallCmp) SetCancelled() {
-	m.cancelled = true
+	// Fast path for pending state - render immediately
+	if effectiveState == enum.ToolCallStatePending {
+		// Render with current state
+		defer m.mu.RUnlock()
+		t := styles.CurrentTheme()
+		icon := effectiveState.ToIconColored()
+		if isNested {
+			tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(toolName))
+			return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
+		}
+		tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(toolName))
+		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
+	}
+
+	// For streaming, we need to capture content safely then render outside lock
+	var streamingLines []string
+	showStreaming := m.showStreaming
+	if showStreaming {
+		streamingLines = append([]string{}, m.streamingContent...)
+	}
+	m.mu.RUnlock()
+
+	// Now we are outside the lock - safe to call methods that might re-acquire lock
+
+	// Show streaming content if available and enabled
+	if showStreaming && len(streamingLines) > 0 {
+		t := styles.CurrentTheme()
+		width := m.textWidth() - 2
+
+		content := strings.Join(streamingLines, "\n")
+		return renderContentUnified(m, content, func(lines []string, v *toolCallCmp) []string {
+			var processed []string
+			for _, ln := range lines {
+				ln = ansiext.Escape(ln)
+				ln = " " + ln
+				if len(ln) > width {
+					ln = v.fit(ln, width)
+				}
+				processed = append(processed, t.S().Muted.
+					Width(width).
+					Background(t.BgBaseLighter).
+					Render(ln))
+			}
+			return processed
+		})
+	}
+
+	// Show final result
+	r := registry.lookup(toolName)
+	return r.Render(m)
 }
 
 func (m *toolCallCmp) copyTool() tea.Cmd {
@@ -222,8 +332,11 @@ func (m *toolCallCmp) formatToolForCopy() string {
 		}
 	}
 
-	if m.result.ToolCallID != "" {
-		if m.result.IsError {
+	if m.call.State == enum.ToolCallStateCompleted {
+		if m.result.ToolCallID.IsEmpty() {
+			log.Error("Unknown state: ToolCallState = Completed and ToolCallID is empty")
+		}
+		if m.result.ResultState.IsError() {
 			parts = append(parts, "### Error:")
 			parts = append(parts, m.result.Content)
 		} else {
@@ -233,12 +346,9 @@ func (m *toolCallCmp) formatToolForCopy() string {
 				parts = append(parts, content)
 			}
 		}
-	} else if m.cancelled {
-		parts = append(parts, "### Status:")
-		parts = append(parts, "Cancelled")
 	} else {
 		parts = append(parts, "### Status:")
-		parts = append(parts, "Pending...")
+		parts = append(parts, m.call.State.FormatToolForCopy())
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -711,12 +821,10 @@ func (m *toolCallCmp) formatAgentResultForCopy() string {
 	return result.String()
 }
 
-// SetToolCall updates the tool call data and stops spinning if finished
+// SetToolCall updates the tool call data and updates animation state
 func (m *toolCallCmp) SetToolCall(call message.ToolCall) {
 	m.call = call
-	if m.call.Finished {
-		m.spinning = false
-	}
+	m.updateAnimationState()
 }
 
 // ParentMessageID returns the ID of the message that initiated this tool call
@@ -724,30 +832,45 @@ func (m *toolCallCmp) ParentMessageID() string {
 	return m.parentMessageID
 }
 
-// SetToolResult updates the tool result and stops the spinning animation
+// SetToolResult updates the tool result and updates the animation state
 func (m *toolCallCmp) SetToolResult(result message.ToolResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.result = result
-	m.spinning = false
+	m.updateAnimationState()
 }
 
 // GetToolCall returns the current tool call data
+// Thread-safe read-only access
 func (m *toolCallCmp) GetToolCall() message.ToolCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.call
 }
 
 // GetToolResult returns the current tool result data
+// GetToolResult returns current tool result data
+// Thread-safe read-only access
 func (m *toolCallCmp) GetToolResult() message.ToolResult {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.result
 }
 
-// GetNestedToolCalls returns the nested tool calls
+// GetNestedToolCalls returns nested tool calls
+// Thread-safe read-only access
 func (m *toolCallCmp) GetNestedToolCalls() []ToolCallCmp {
-	return m.nestedToolCalls
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]ToolCallCmp{}, m.nestedToolCalls...) // Return copy to prevent mutation
 }
 
-// SetNestedToolCalls sets the nested tool calls
+// SetNestedToolCalls sets nested tool calls
+// Thread-safe implementation using copy-on-write semantics
 func (m *toolCallCmp) SetNestedToolCalls(calls []ToolCallCmp) {
-	m.nestedToolCalls = calls
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nestedToolCalls = append([]ToolCallCmp{}, calls...) // Create copy
 	for _, nested := range m.nestedToolCalls {
 		nested.SetSize(m.width, 0)
 	}
@@ -759,18 +882,6 @@ func (m *toolCallCmp) SetIsNested(isNested bool) {
 }
 
 // Rendering methods
-
-// renderPending displays the tool name with a loading animation for pending tool calls
-func (m *toolCallCmp) renderPending() string {
-	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if m.isNested {
-		tool := t.S().Base.Foreground(t.FgHalfMuted).Render(prettifyToolName(m.call.Name))
-		return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-	}
-	tool := t.S().Base.Foreground(t.Blue).Render(prettifyToolName(m.call.Name))
-	return fmt.Sprintf("%s %s %s", icon, tool, m.anim.View())
-}
 
 // style returns the lipgloss style for the tool call component.
 // Applies muted colors and focus-dependent border styles.
@@ -835,7 +946,7 @@ func (m *toolCallCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the width of the tool call component for text wrapping
-func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
+func (m *toolCallCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	for _, nested := range m.nestedToolCalls {
 		nested.SetSize(width, height)
@@ -843,35 +954,56 @@ func (m *toolCallCmp) SetSize(width int, height int) tea.Cmd {
 	return nil
 }
 
-// shouldSpin determines whether the tool call should show a loading animation.
-// Returns true if the tool call is not finished or if the result doesn't match the call ID.
-func (m *toolCallCmp) shouldSpin() bool {
-	return !m.call.Finished && !m.cancelled
+// RefreshAnimation updates both visual animation and animation state for consistency.
+// This is the preferred public method for updating all animation-related state.
+func (m *toolCallCmp) RefreshAnimation() {
+	// Use call.State directly - it's now always authoritative
+	m.anim = anim.New(m.call.State.ToAnimationSettings(m.isNested))
+
+	// Update animation state based on new state
+	m.updateAnimationState()
 }
 
-// Spinning returns whether the tool call is currently showing a loading animation
-func (m *toolCallCmp) Spinning() bool {
-	if m.spinning {
+// updateAnimationState updates the animation state enum (m.animationState) based on
+// current tool call and result data. This determines logical animation behavior.
+// This is an internal method - use RefreshAnimation() for public updates.
+func (m *toolCallCmp) updateAnimationState() {
+	// Use call.State directly - it's now always authoritative
+	m.animationState = m.call.State.ToAnimationState()
+}
+
+// IsAnimating returns whether the tool call is currently showing a loading animation
+func (m *toolCallCmp) IsAnimating() bool {
+	if m.animationState.IsActive() {
 		return true
 	}
 	for _, nested := range m.nestedToolCalls {
-		if nested.Spinning() {
+		if nested.IsAnimating() {
 			return true
 		}
 	}
-	return m.spinning
+	return false
+}
+
+// GetAnimationState returns current animation state
+func (m *toolCallCmp) GetAnimationState() enum.AnimationState {
+	return m.animationState
 }
 
 func (m *toolCallCmp) ID() string {
+	return m.GetToolCallID().String()
+}
+
+// GetToolCallID returns the strongly-typed ToolCallID
+func (m *toolCallCmp) GetToolCallID() message.ToolCallID {
 	return m.call.ID
 }
 
-// SetPermissionRequested marks that a permission request was made for this tool call
-func (m *toolCallCmp) SetPermissionRequested() {
-	m.permissionRequested = true
-}
-
-// SetPermissionGranted marks that permission was granted for this tool call
-func (m *toolCallCmp) SetPermissionGranted() {
-	m.permissionGranted = true
+// SetToolCallState sets tool call state and updates animation accordingly
+// Thread-safe implementation using copy-on-write semantics
+func (m *toolCallCmp) SetToolCallState(state enum.ToolCallState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.call.State = state
+	m.RefreshAnimation()
 }

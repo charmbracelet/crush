@@ -15,6 +15,7 @@ const (
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
+	ToolCancel  string = "⊗"
 
 	BorderThin  string = "│"
 	BorderThick string = "▌"

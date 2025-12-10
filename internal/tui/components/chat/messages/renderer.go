@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
@@ -39,11 +40,12 @@ type renderRegistry map[string]rendererFactory
 func (rr renderRegistry) register(name string, f rendererFactory) { rr[name] = f }
 
 // lookup retrieves a renderer for the given tool name, falling back to generic renderer
+// Returns defensive renderer that handles nil/invalid inputs gracefully
 func (rr renderRegistry) lookup(name string) renderer {
 	if f, ok := rr[name]; ok {
-		return f()
+		return defensiveRenderer{f()}
 	}
-	return genericRenderer{} // sensible fallback
+	return defensiveRenderer{genericRenderer{}} // sensible fallback with defensive wrapper
 }
 
 // registry holds all registered tool renderers
@@ -52,6 +54,38 @@ var registry = renderRegistry{}
 // baseRenderer provides common functionality for all tool renderers
 type baseRenderer struct{}
 
+// defensiveRenderer wraps other renderers to provide nil/invalid input protection
+type defensiveRenderer struct {
+	inner renderer
+}
+
+// Render provides defensive wrapper around inner renderer
+func (dr defensiveRenderer) Render(v *toolCallCmp) string {
+	// Defensive checks to prevent crashes from corrupted data
+	if v == nil {
+		return "⚠️  Tool call component is nil"
+	}
+
+	// Use read lock to get consistent state
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	// Check for corrupted/zero values
+	if v.call.Name == "" {
+		return "⚠️  Tool call has empty name"
+	}
+
+	// Check for extremely large content that could cause memory issues
+	const maxSafeContent = 10 * 1024 * 1024 // 10MB limit
+	if len(v.result.Content) > maxSafeContent {
+		return "⚠️  Tool output too large to display safely"
+	}
+
+	// Call inner renderer with our protections
+	return dr.inner.Render(v)
+}
+
+// Render method for baseRenderer handles direct rendering when defensive wrapper not used
 func (br baseRenderer) Render(v *toolCallCmp) string {
 	if v.result.Data != "" {
 		if strings.HasPrefix(v.result.MIMEType, "image/") {
@@ -118,11 +152,15 @@ func (br baseRenderer) renderWithParams(v *toolCallCmp, toolName string, args []
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
-		return res
+
+	// Only render body if the tool state allows content visibility
+	if v.GetToolCall().State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+		body := contentRenderer()
+		return joinHeaderBody(header, body)
 	}
-	body := contentRenderer()
-	return joinHeaderBody(header, body)
+
+	// Return header-only for states where content shouldn't be shown
+	return header
 }
 
 // unmarshalParams safely unmarshal JSON parameters
@@ -130,47 +168,22 @@ func (br baseRenderer) unmarshalParams(input string, target any) error {
 	return json.Unmarshal([]byte(input), target)
 }
 
-// makeHeader builds the tool call header with status icon and parameters for a nested tool call.
-func (br baseRenderer) makeNestedHeader(v *toolCallCmp, tool string, width int, params ...string) string {
-	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
-	tool = t.S().Base.Foreground(t.FgHalfMuted).Render(tool)
-	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(true, width-lipgloss.Width(prefix), params...)
-}
-
 // makeHeader builds "<Tool>: param (key=value)" and truncates as needed.
 func (br baseRenderer) makeHeader(v *toolCallCmp, tool string, width int, params ...string) string {
-	if v.isNested {
-		return br.makeNestedHeader(v, tool, width, params...)
-	}
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
+	icon := v.GetToolCall().State.ToIconColored()
+	fgColor := t.Blue
+	if v.isNested {
+		fgColor = t.FgHalfMuted
 	}
-	tool = t.S().Base.Foreground(t.Blue).Render(tool)
+	tool = t.S().Base.Foreground(fgColor).Render(tool)
 	prefix := fmt.Sprintf("%s %s ", icon, tool)
-	return prefix + renderParamList(false, width-lipgloss.Width(prefix), params...)
+	return prefix + renderParamList(width-lipgloss.Width(prefix), params...)
 }
 
 // renderError provides consistent error rendering
 func (br baseRenderer) renderError(v *toolCallCmp, message string) string {
+	// TODO: This should be replace with the normal rendering process.
 	t := styles.CurrentTheme()
 	header := br.makeHeader(v, prettifyToolName(v.call.Name), v.textWidth(), "")
 	errorTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
@@ -248,7 +261,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 		addMain(cmd).
 		addFlag("background", params.RunInBackground).
 		build()
-	if v.call.Finished {
+	if v.call.State == enum.ToolCallStateCompleted {
 		var meta tools.BashResponseMetadata
 		_ = br.unmarshalParams(v.result.Metadata, &meta)
 		if meta.Background {
@@ -261,9 +274,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 			if v.isNested {
 				return v.style().Render(header)
 			}
-			if res, done := earlyState(header, v); done {
-				return res
-			}
+			// For background jobs, show content regardless of state
 			content := "Command: " + params.Command + "\n" + v.result.Content
 			body := renderPlainContent(v, content)
 			return joinHeaderBody(header, body)
@@ -293,16 +304,7 @@ func (br bashRenderer) Render(v *toolCallCmp) string {
 
 func makeJobHeader(v *toolCallCmp, subcommand, pid, description string, width int) string {
 	t := styles.CurrentTheme()
-	icon := t.S().Base.Foreground(t.GreenDark).Render(styles.ToolPending)
-	if v.result.ToolCallID != "" {
-		if v.result.IsError {
-			icon = t.S().Base.Foreground(t.RedDark).Render(styles.ToolError)
-		} else {
-			icon = t.S().Base.Foreground(t.Green).Render(styles.ToolSuccess)
-		}
-	} else if v.cancelled {
-		icon = t.S().Muted.Render(styles.ToolPending)
-	}
+	icon := v.GetToolCall().State.ToIconColored()
 
 	jobPart := t.S().Base.Foreground(t.Blue).Render("Job")
 	subcommandPart := t.S().Base.Foreground(t.BlueDark).Render("(" + subcommand + ")")
@@ -362,11 +364,10 @@ func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
-		return res
-	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+
+	return renderStatusOrContent(header, v, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -405,11 +406,10 @@ func (bkr bashKillRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		return v.style().Render(header)
 	}
-	if res, done := earlyState(header, v); done {
-		return res
-	}
-	body := renderPlainContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+
+	return renderStatusOrContent(header, v, func() string {
+		return renderPlainContent(v, v.result.Content)
+	})
 }
 
 // -----------------------------------------------------------------------------
@@ -653,15 +653,19 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); v.cancelled && done {
-		return res
-	}
+	// Create base renderer for header functionality
+	baseRenderer := baseRenderer{}
+	header := baseRenderer.makeHeader(v, toolName, v.textWidth(), args...)
 
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border).Render("Prompt")
-	remainingWidth := v.textWidth() - (lipgloss.Width(taskTag) + 1)
-	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(taskTag)+1))
-	prompt = t.S().Base.Width(remainingWidth).Render(prompt)
+	// Create task tag
+	taskTag := taskTagStyle.Render("Prompt")
+
+	// Calculate remaining width for prompt
+	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
+	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
+
+	// Style and assemble header with prompt
+	prompt = styles.CurrentTheme().S().Muted.Width(remainingWidth).Render(prompt)
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
@@ -673,33 +677,50 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 			prompt,
 		),
 	)
-	childTools := tree.Root(header)
 
+	// Handle nested tool calls
+	childTools := tree.Root(header)
 	for _, call := range v.nestedToolCalls {
 		call.SetSize(remainingWidth, 1)
 		childTools.Child(call.View())
 	}
+
 	parts := []string{
 		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
 	}
 
-	if v.result.ToolCallID == "" {
-		v.spinning = true
+	if v.result.ToolCallID.IsEmpty() {
 		parts = append(parts, "", v.anim.View())
-	} else {
-		v.spinning = false
 	}
+	v.updateAnimationState()
 
 	header = lipgloss.JoinVertical(
 		lipgloss.Left,
 		parts...,
 	)
 
-	if v.result.ToolCallID == "" {
+	if v.result.ToolCallID.IsEmpty() {
 		return header
 	}
+
 	body := renderMarkdownContent(v, v.result.Content)
 	return joinHeaderBody(header, body)
+}
+
+// Render displays the fetched URL with prompt parameter and nested tool calls
+func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
+	var params tools.AgenticFetchParams
+	var args []string
+	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
+		args = newParamBuilder().
+			addMain(params.URL).
+			build()
+	}
+
+	t := styles.CurrentTheme()
+	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border)
+
+	return renderNestedToolWithPrompt(v, "Agentic Fetch", args, params.Prompt, taskTagStyle)
 }
 
 // formatTimeout converts timeout seconds to duration string
@@ -936,64 +957,17 @@ func RoundedEnumeratorWithWidth(lPadding, width int) tree.Enumerator {
 
 // Render displays agent task parameters and result content
 func (tr agentRenderer) Render(v *toolCallCmp) string {
-	t := styles.CurrentTheme()
 	var params agent.AgentParams
 	tr.unmarshalParams(v.call.Input, &params)
 
-	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	t := styles.CurrentTheme()
+	taskTagStyle := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White)
 
-	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); v.cancelled && done {
-		return res
-	}
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
-	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
-	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
-	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			prompt,
-		),
-	)
-	childTools := tree.Root(header)
-
-	for _, call := range v.nestedToolCalls {
-		call.SetSize(remainingWidth, 1)
-		childTools.Child(call.View())
-	}
-	parts := []string{
-		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
-	}
-
-	if v.result.ToolCallID == "" {
-		v.spinning = true
-		parts = append(parts, "", v.anim.View())
-	} else {
-		v.spinning = false
-	}
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		parts...,
-	)
-
-	if v.result.ToolCallID == "" {
-		return header
-	}
-
-	body := renderMarkdownContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return renderNestedToolWithPrompt(v, "Agent", []string{}, params.Prompt, taskTagStyle)
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
-func renderParamList(nested bool, paramsWidth int, params ...string) string {
+func renderParamList(paramsWidth int, params ...string) string {
 	t := styles.CurrentTheme()
 	if len(params) == 0 {
 		return ""
@@ -1036,27 +1010,30 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 	return t.S().Subtle.Render(ansi.Truncate(mainParam, paramsWidth, "…"))
 }
 
-// earlyState returns immediately‑rendered error/cancelled/ongoing states.
-func earlyState(header string, v *toolCallCmp) (string, bool) {
-	t := styles.CurrentTheme()
-	message := ""
-	switch {
-	case v.result.IsError:
-		message = v.renderToolError()
-	case v.cancelled:
-		message = t.S().Base.Foreground(t.FgSubtle).Render("Canceled.")
-	case v.result.ToolCallID == "":
-		if v.permissionRequested && !v.permissionGranted {
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Requesting permission...")
+// renderStatusOrContent determines whether to render status-only or full content
+// This replaces the old renderStatusOnly function by using ShouldShowContentForState
+func renderStatusOrContent(header string, v *toolCallCmp, contentRenderer func() string) string {
+	// Check if content should be shown based on state
+	if !v.GetToolCall().State.ShouldShowContentForState(v.isNested, len(v.nestedToolCalls) > 0) {
+		// Don't show content, render status message only
+		t := styles.CurrentTheme()
+		message := ""
+		if v.call.State == enum.ToolCallStateFailed {
+			message = v.renderToolCallError()
 		} else {
-			message = t.S().Base.Foreground(t.FgSubtle).Render("Waiting for tool response...")
+			m, err := v.GetToolCall().State.RenderTUIMessageColored()
+			if err != nil {
+				return header // Fallback to header-only on error
+			}
+			message = m
 		}
-	default:
-		return "", false
+		message = t.S().Base.PaddingLeft(2).Render(message)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", message)
 	}
 
-	message = t.S().Base.PaddingLeft(2).Render(message)
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", message), true
+	// Show content
+	body := contentRenderer()
+	return joinHeaderBody(header, body)
 }
 
 func joinHeaderBody(header, body string) string {
@@ -1068,14 +1045,43 @@ func joinHeaderBody(header, body string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 }
 
-func renderPlainContent(v *toolCallCmp, content string) string {
-	t := styles.CurrentTheme()
+// truncateContentEarly performs early truncation of large content to avoid processing overhead
+// This is a performance optimization to prevent the UI from being overwhelmed by massive outputs
+func truncateContentEarly(content string) string {
+	const maxContentSize = 50000 // ~500KB of text should be more than enough for display
+	if len(content) > maxContentSize {
+		lines := strings.Split(content, "\n")
+		if len(lines) > responseContextHeight {
+			content = strings.Join(lines[len(lines)-responseContextHeight:], "\n")
+		}
+	}
+	return content
+}
+
+// ContentProcessor defines how to process content lines before final rendering
+type ContentProcessor func(lines []string, v *toolCallCmp) []string
+
+// renderContentUnified provides common rendering pipeline for all content types
+// Eliminates duplication between renderPlainContent, renderMarkdownContent, renderCodeContent
+func renderContentUnified(v *toolCallCmp, content string, processor ContentProcessor) string {
+	// === COMMON CONTENT PREPROCESSING ===
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	content = strings.TrimSpace(content)
+
+	t := styles.CurrentTheme()
+	width := v.textWidth() - 2
+
+	// === COMMON LINE PROCESSING ===
 	lines := strings.Split(content, "\n")
 
-	width := v.textWidth() - 2
+	// Apply type-specific processing
+	if processor != nil {
+		lines = processor(lines, v)
+	}
+
+	// === COMMON TRUNCATION ===
 	var out []string
 	for i, ln := range lines {
 		if i >= responseContextHeight {
@@ -1092,32 +1098,52 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 			Render(ln))
 	}
 
+	// Add truncation message if needed
 	if len(lines) > responseContextHeight {
+		truncateMsg := fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)
 		out = append(out, t.S().Muted.
 			Background(t.BgBaseLighter).
 			Width(width).
-			Render(fmt.Sprintf("… (%d lines)", len(lines)-responseContextHeight)))
+			Render(truncateMsg))
 	}
 
 	return strings.Join(out, "\n")
 }
 
+// renderPlainContent renders plain text content using unified pipeline
+func renderPlainContent(v *toolCallCmp, content string) string {
+	return renderContentUnified(v, content, func(lines []string, v *toolCallCmp) []string {
+		width := v.textWidth() - 2
+		var processed []string
+		for _, ln := range lines {
+			ln = ansiext.Escape(ln)
+			ln = " " + ln
+			if len(ln) > width {
+				ln = v.fit(ln, width)
+			}
+			processed = append(processed, ln)
+		}
+		return processed
+	})
+}
+
 func renderMarkdownContent(v *toolCallCmp, content string) string {
-	t := styles.CurrentTheme()
+	// First try markdown rendering
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\t", "    ")
 	content = strings.TrimSpace(content)
 
-	width := v.textWidth() - 2
-	width = min(width, 120)
-
+	width := min(v.textWidth()-2, 120)
 	renderer := styles.GetPlainMarkdownRenderer(width)
 	rendered, err := renderer.Render(content)
 	if err != nil {
+		// Fallback to plain content if markdown rendering fails
 		return renderPlainContent(v, content)
 	}
 
 	lines := strings.Split(rendered, "\n")
+	t := styles.CurrentTheme()
 
 	var out []string
 	for i, ln := range lines {
@@ -1155,7 +1181,9 @@ func getDigits(n int) int {
 }
 
 func renderCodeContent(v *toolCallCmp, path, content string, offset int) string {
-	t := styles.CurrentTheme()
+	// Note: This is more complex as it needs line numbers and syntax highlighting
+	// but we still use the common preprocessing
+	content = truncateContentEarly(content)
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	truncated := truncateHeight(content, responseContextHeight)
@@ -1165,6 +1193,7 @@ func renderCodeContent(v *toolCallCmp, path, content string, offset int) string 
 		lines[i] = ansiext.Escape(ln)
 	}
 
+	t := styles.CurrentTheme()
 	bg := t.BgBase
 	highlighted, _ := highlight.SyntaxHighlight(strings.Join(lines, "\n"), path, bg)
 	lines = strings.Split(highlighted, "\n")

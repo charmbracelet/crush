@@ -332,7 +332,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.sidebar = u.(sidebar.Sidebar)
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
-	case pubsub.Event[permission.PermissionNotification]:
+	case pubsub.Event[permission.PermissionEvent]:
 		u, cmd := p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
@@ -354,7 +354,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.splashFullScreen = true
 			return p, p.SetSize(p.width, p.height)
 		}
-		err := p.app.InitCoderAgent(context.TODO())
+		err := p.app.InitCoderAgent(context.Background())
 		if err != nil {
 			return p, util.ReportError(err)
 		}
@@ -560,7 +560,7 @@ func (p *chatPage) toggleThinking() tea.Cmd {
 		}
 
 		// Update the agent with the new configuration
-		go p.app.UpdateAgentModel(context.TODO())
+		go p.app.UpdateAgentModel(context.Background())
 
 		status := "disabled"
 		if currentModel.Think {
@@ -606,7 +606,7 @@ func (p *chatPage) handleReasoningEffortSelected(effort string) tea.Cmd {
 		}
 
 		// Update the agent with the new configuration
-		if err := p.app.UpdateAgentModel(context.TODO()); err != nil {
+		if err := p.app.UpdateAgentModel(context.Background()); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  "Failed to update reasoning effort: " + err.Error(),
@@ -632,7 +632,7 @@ func (p *chatPage) setCompactMode(compact bool) {
 	}
 }
 
-func (p *chatPage) handleCompactMode(newWidth int, newHeight int) {
+func (p *chatPage) handleCompactMode(newWidth, newHeight int) {
 	if p.forceCompact {
 		return
 	}

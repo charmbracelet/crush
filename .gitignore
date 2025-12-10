@@ -45,6 +45,7 @@ Thumbs.db
 **/.crush/**
 
 /crush
+/crush-with-better-permissions
 /tmp/
 
 manpages/

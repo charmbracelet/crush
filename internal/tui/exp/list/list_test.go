@@ -616,7 +616,7 @@ func (l *simpleItem) GetSize() (int, int) {
 }
 
 // SetSize implements Item.
-func (s *simpleItem) SetSize(width int, height int) tea.Cmd {
+func (s *simpleItem) SetSize(width, height int) tea.Cmd {
 	s.width = width
 	return nil
 }

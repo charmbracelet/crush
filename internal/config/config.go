@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/invopop/jsonschema"
@@ -432,7 +433,7 @@ func (c *Config) SetCompactMode(enabled bool) error {
 
 func (c *Config) Resolve(key string) (string, error) {
 	if c.resolver == nil {
-		return "", fmt.Errorf("no variable resolver configured")
+		return "", errors.ConfigSimple("no variable resolver configured")
 	}
 	return c.resolver.ResolveValue(key)
 }
@@ -440,7 +441,7 @@ func (c *Config) Resolve(key string) (string, error) {
 func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
 	c.Models[modelType] = model
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
+		return errors.Wrap(err, "failed to update preferred model")
 	}
 	if err := c.recordRecentModel(modelType, model); err != nil {
 		return err
@@ -455,16 +456,16 @@ func (c *Config) SetConfigField(key string, value any) error {
 		if os.IsNotExist(err) {
 			data = []byte("{}")
 		} else {
-			return fmt.Errorf("failed to read config file: %w", err)
+			return errors.Wrap(err, "failed to read config file")
 		}
 	}
 
 	newValue, err := sjson.Set(string(data), key, value)
 	if err != nil {
-		return fmt.Errorf("failed to set config field %s: %w", key, err)
+		return errors.WithField(err, key, "config field")
 	}
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+		return errors.Wrap(err, "failed to write config file")
 	}
 	return nil
 }
@@ -522,7 +523,7 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v.AccessToken),
 			c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), v),
 		); err != nil {
-			return err
+			return errors.Wrap(err, "failed to save API key to config file")
 		}
 		setKeyOrToken = func() {
 			providerConfig.APIKey = v.AccessToken
@@ -560,7 +561,7 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 		}
 		setKeyOrToken()
 	} else {
-		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+		return errors.Provider("provider with ID not found in known providers", providerID)
 	}
 	// Store the updated provider config
 	c.Providers.Set(providerID, providerConfig)
@@ -604,13 +605,14 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 	c.RecentModels[modelType] = updated
 
 	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
+		return errors.Wrap(err, "failed to persist recent models")
 	}
 
 	return nil
 }
 
 func allToolNames() []string {
+	// TODO: Consider making this a type safe enum
 	return []string{
 		"agent",
 		"bash",
@@ -632,7 +634,7 @@ func allToolNames() []string {
 	}
 }
 
-func resolveAllowedTools(allTools []string, disabledTools []string) []string {
+func resolveAllowedTools(allTools, disabledTools []string) []string {
 	if disabledTools == nil {
 		return allTools
 	}
@@ -646,7 +648,7 @@ func resolveReadOnlyTools(tools []string) []string {
 	return filterSlice(tools, readOnlyTools, true)
 }
 
-func filterSlice(data []string, mask []string, include bool) []string {
+func filterSlice(data, mask []string, include bool) []string {
 	filtered := []string{}
 	for _, s := range data {
 		// if include is true, we include items that ARE in the mask
@@ -729,7 +731,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return errors.ProviderWithCause("failed to create request", string(c.ID), err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -739,16 +741,16 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	}
 	b, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return errors.ProviderWithCause("failed to create request", string(c.ID), err)
 	}
 	if c.ID == string(catwalk.InferenceProviderZAI) {
 		if b.StatusCode == http.StatusUnauthorized {
 			// for z.ai just check if the http response is not 401
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+			return errors.Provider("failed to connect", fmt.Sprintf("%s: %s", c.ID, b.Status))
 		}
 	} else {
 		if b.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+			return errors.Provider("failed to connect", fmt.Sprintf("%s: %s", c.ID, b.Status))
 		}
 	}
 	_ = b.Body.Close()

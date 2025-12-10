@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 )
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
@@ -95,6 +96,9 @@ func TestPermissionService_SkipMode(t *testing.T) {
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {
+	// Verify no goroutine leaks after test completes
+	defer goleak.VerifyNone(t)
+
 	t.Run("Sequential permission requests with persistent grants", func(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
 
@@ -185,7 +189,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		events := service.Subscribe(t.Context())
 
 		var wg sync.WaitGroup
-		results := make([]bool, 0)
+		results := make([]bool, 3) // Pre-sized to avoid race on append
 
 		requests := []CreatePermissionRequest{
 			{
@@ -215,7 +219,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			wg.Add(1)
 			go func(index int, request CreatePermissionRequest) {
 				defer wg.Done()
-				results = append(results, service.Request(request))
+				results[index] = service.Request(request) // Write to specific index
 			}(i, req)
 		}
 

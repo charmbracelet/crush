@@ -15,7 +15,9 @@ type LazySlice[K any] struct {
 // NewLazySlice creates a new slice and runs the [load] function in a goroutine
 // to populate it.
 func NewLazySlice[K any](load func() []K) *LazySlice[K] {
-	s := &LazySlice[K]{}
+	s := &LazySlice[K]{
+		inner: make([]K, 0), // Initialize with empty slice
+	}
 	s.wg.Go(func() {
 		s.inner = load()
 	})

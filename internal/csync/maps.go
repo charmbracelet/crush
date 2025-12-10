@@ -7,6 +7,12 @@ import (
 	"sync"
 )
 
+// LazyMap is a thread-safe map that supports lazy loading.
+type LazyMap[K comparable, V any] struct {
+	*Map[K, V]
+	wg sync.WaitGroup
+}
+
 // Map is a concurrent map implementation that provides thread-safe access.
 type Map[K comparable, V any] struct {
 	inner map[K]V
@@ -30,12 +36,19 @@ func NewMapFrom[K comparable, V any](m map[K]V) *Map[K, V] {
 // NewLazyMap creates a new lazy-loaded map. The provided load function is
 // executed in a separate goroutine to populate the map.
 func NewLazyMap[K comparable, V any](load func() map[K]V) *Map[K, V] {
-	m := &Map[K, V]{}
-	m.mu.Lock()
+	m := &Map[K, V]{
+		inner: make(map[K]V),
+	}
+
+	// Start loading in background
 	go func() {
-		m.inner = load()
+		data := load()
+		m.mu.Lock()
+		// Update existing map instead of replacing it to avoid race conditions
+		maps.Copy(m.inner, data)
 		m.mu.Unlock()
 	}()
+
 	return m
 }
 
@@ -78,12 +91,15 @@ func (m *Map[K, V]) Len() int {
 // GetOrSet gets and returns the key if it exists, otherwise, it executes the
 // given function, set its return value for the given key, and returns it.
 func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
-	got, ok := m.Get(key)
-	if ok {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if got, ok := m.inner[key]; ok {
 		return got
 	}
+
 	value := fn()
-	m.Set(key, value)
+	m.inner[key] = value
 	return value
 }
 
@@ -127,9 +143,9 @@ var (
 	_ json.Marshaler   = &Map[string, any]{}
 )
 
-func (Map[K, V]) JSONSchemaAlias() any { //nolint
-	m := map[K]V{}
-	return m
+func (m *Map[K, V]) JSONSchemaAlias() any {
+	mapValue := map[K]V{}
+	return mapValue
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

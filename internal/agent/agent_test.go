@@ -86,7 +86,7 @@ func TestCoderAgent(t *testing.T) {
 				msgs, err := env.messages.List(t.Context(), session.ID)
 				require.NoError(t, err)
 				foundFile := false
-				var tcID string
+				var tcID message.ToolCallID
 			out:
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -128,7 +128,7 @@ func TestCoderAgent(t *testing.T) {
 
 				foundRead := false
 				foundWrite := false
-				var readTCID, writeTCID string
+				var readTCID, writeTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -179,7 +179,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundBash := false
-				var bashTCID string
+				var bashTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -223,7 +223,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundDownload := false
-				var downloadTCID string
+				var downloadTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -266,7 +266,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundFetch := false
-				var fetchTCID string
+				var fetchTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -305,7 +305,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundGlob := false
-				var globTCID string
+				var globTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -345,7 +345,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundGrep := false
-				var grepTCID string
+				var grepTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -385,7 +385,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundLS := false
-				var lsTCID string
+				var lsTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -426,7 +426,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundMultiEdit := false
-				var multiEditTCID string
+				var multiEditTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -470,7 +470,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundSourcegraph := false
-				var sourcegraphTCID string
+				var sourcegraphTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -509,7 +509,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				foundWrite := false
-				var writeTCID string
+				var writeTCID message.ToolCallID
 
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
@@ -573,7 +573,7 @@ func TestCoderAgent(t *testing.T) {
 
 				foundGlob := false
 				foundLS := false
-				var globTCID, lsTCID string
+				var globTCID, lsTCID message.ToolCallID
 
 				for _, tc := range toolCalls {
 					if tc.Name == tools.GlobToolName {
@@ -599,12 +599,12 @@ func TestCoderAgent(t *testing.T) {
 						if tr.ToolCallID == globTCID {
 							foundGlobResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
-							require.False(t, tr.IsError, "Expected glob result to not be an error")
+							require.False(t, tr.ResultState.IsError(), "Expected glob result to not be an error")
 						}
 						if tr.ToolCallID == lsTCID {
 							foundLSResult = true
 							require.Contains(t, tr.Content, "main.go", "Expected ls result to contain main.go")
-							require.False(t, tr.IsError, "Expected ls result to not be an error")
+							require.False(t, tr.ResultState.IsError(), "Expected ls result to not be an error")
 						}
 					}
 				}

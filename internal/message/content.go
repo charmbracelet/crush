@@ -12,7 +12,35 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/enum"
 )
+
+// ToolCallID represents a strongly-typed tool call identifier
+type ToolCallID string
+
+const EmptyToolCallId ToolCallID = ""
+
+// Validate ensures tool call ID is not empty
+func (id ToolCallID) Validate() error {
+	if id.IsEmpty() {
+		return ErrToolCallIDEmpty
+	}
+	return nil
+}
+
+// String returns string representation of ToolCallID
+func (id ToolCallID) String() string {
+	return string(id)
+}
+
+// IsEmpty returns true if tool call ID is empty or only whitespace
+func (id ToolCallID) IsEmpty() bool {
+	return id == EmptyToolCallId
+}
+
+func (id ToolCallID) IsNotEmpty() bool {
+	return !id.IsEmpty()
+}
 
 type MessageRole string
 
@@ -21,20 +49,6 @@ const (
 	User      MessageRole = "user"
 	System    MessageRole = "system"
 	Tool      MessageRole = "tool"
-)
-
-type FinishReason string
-
-const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
-
-	// Should never happen
-	FinishReasonUnknown FinishReason = "unknown"
 )
 
 type ContentPart interface {
@@ -94,32 +108,32 @@ func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 func (BinaryContent) isPart() {}
 
 type ToolCall struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Input            string `json:"input"`
-	ProviderExecuted bool   `json:"provider_executed"`
-	Finished         bool   `json:"finished"`
+	ID               ToolCallID         `json:"id"`
+	Name             string             `json:"name"`
+	Input            string             `json:"input"`
+	ProviderExecuted bool               `json:"provider_executed"`
+	State            enum.ToolCallState `json:"state"`
 }
 
 func (ToolCall) isPart() {}
 
 type ToolResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-	Data       string `json:"data"`
-	MIMEType   string `json:"mime_type"`
-	Metadata   string `json:"metadata"`
-	IsError    bool   `json:"is_error"`
+	ToolCallID  ToolCallID           `json:"tool_call_id"`
+	Name        string               `json:"name"`
+	Content     string               `json:"content"`
+	Data        string               `json:"data"`
+	MIMEType    string               `json:"mime_type"`
+	Metadata    string               `json:"metadata"`
+	ResultState enum.ToolResultState `json:"result_state"`
 }
 
 func (ToolResult) isPart() {}
 
 type Finish struct {
-	Reason  FinishReason `json:"reason"`
-	Time    int64        `json:"time"`
-	Message string       `json:"message,omitempty"`
-	Details string       `json:"details,omitempty"`
+	Reason  fantasy.FinishReason `json:"reason"`
+	Time    int64                `json:"time"`
+	Message string               `json:"message,omitempty"`
+	Details string               `json:"details,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -212,13 +226,44 @@ func (m *Message) FinishPart() *Finish {
 	return nil
 }
 
-func (m *Message) FinishReason() FinishReason {
+func (m *Message) FinishReason() fantasy.FinishReason {
 	for _, part := range m.Parts {
 		if c, ok := part.(Finish); ok {
 			return c.Reason
 		}
 	}
 	return ""
+}
+
+// GetToolCallState derives ToolCallState from FinishReason for TUI compatibility
+// This allows TUI to use ToolCallState methods instead of FinishReason enums
+func (m *Message) GetToolCallState() enum.ToolCallState {
+	reason := m.FinishReason()
+	switch reason {
+	// FinishReasonStop indicates the model generated a stop sequence.
+	case fantasy.FinishReasonStop:
+		return enum.ToolCallStateCompleted
+		// FinishReasonLength indicates the model generated maximum number of tokens.
+	case fantasy.FinishReasonLength:
+		return enum.ToolCallStateCompleted
+		// FinishReasonContentFilter indicates content filter violation stopped the model.
+	case fantasy.FinishReasonContentFilter:
+		return enum.ToolCallStateFailed
+		// FinishReasonToolCalls indicates the model triggered tool calls.
+	case fantasy.FinishReasonToolCalls:
+		return enum.ToolCallStatePending
+		// FinishReasonError indicates the model stopped because of an error.
+	case fantasy.FinishReasonError:
+		return enum.ToolCallStateFailed
+		// FinishReasonOther indicates the model stopped for other reasons.
+	case fantasy.FinishReasonOther:
+		return enum.ToolCallStateFailed
+		// FinishReasonUnknown indicates the model has not transmitted a finish reason.
+	case fantasy.FinishReasonUnknown:
+		return enum.ToolCallStateFailed
+	default:
+		return enum.ToolCallStateFailed
+	}
 }
 
 func (m *Message) IsThinking() bool {
@@ -262,7 +307,7 @@ func (m *Message) AppendReasoningContent(delta string) {
 	}
 }
 
-func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {
+func (m *Message) AppendThoughtSignature(signature, toolCallID string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
@@ -338,15 +383,15 @@ func (m *Message) ThinkingDuration() time.Duration {
 	return time.Duration(endTime-reasoning.StartedAt) * time.Second
 }
 
-func (m *Message) FinishToolCall(toolCallID string) {
+func (m *Message) FinishToolCall(toolCallID ToolCallID) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: true,
+					ID:    c.ID,
+					Name:  c.Name,
+					Input: c.Input,
+					State: enum.ToolCallStateCompleted,
 				}
 				return
 			}
@@ -354,15 +399,15 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
+func (m *Message) AppendToolCallInput(toolCallID ToolCallID, inputDelta string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
+					ID:    c.ID,
+					Name:  c.Name,
+					Input: c.Input + inputDelta,
+					State: c.State,
 				}
 				return
 			}
@@ -407,7 +452,7 @@ func (m *Message) SetToolResults(tr []ToolResult) {
 	}
 }
 
-func (m *Message) AddFinish(reason FinishReason, message, details string) {
+func (m *Message) AddFinish(reason fantasy.FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -466,14 +511,14 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			if reasoning.ThoughtSignature != "" {
 				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
 					Signature: reasoning.ThoughtSignature,
-					ToolID:    reasoning.ToolID,
 				}
 			}
 			parts = append(parts, reasoningPart)
 		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{
-				ToolCallID:       call.ID,
+				// Note: fantasy uses strings for ToolCallID
+				ToolCallID:       call.ID.String(),
 				ToolName:         call.Name,
 				Input:            call.Input,
 				ProviderExecuted: call.ProviderExecuted,
@@ -487,7 +532,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		var parts []fantasy.MessagePart
 		for _, result := range m.ToolResults() {
 			var content fantasy.ToolResultOutputContent
-			if result.IsError {
+			if result.ResultState.IsError() {
 				content = fantasy.ToolResultOutputContentError{
 					Error: errors.New(result.Content),
 				}
@@ -502,7 +547,8 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				}
 			}
 			parts = append(parts, fantasy.ToolResultPart{
-				ToolCallID: result.ToolCallID,
+				// Note: fantasy uses a plain string ToolCallID
+				ToolCallID: result.ToolCallID.String(),
 				Output:     content,
 			})
 		}

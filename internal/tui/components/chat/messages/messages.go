@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/enum"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -40,7 +42,7 @@ type MessageCmp interface {
 	layout.Focusable                // Focus state management
 	GetMessage() message.Message    // Access to underlying message data
 	SetMessage(msg message.Message) // Update the message content
-	Spinning() bool                 // Animation state for loading messages
+	IsAnimating() bool              // Animation state for loading messages
 	ID() string
 }
 
@@ -48,13 +50,14 @@ type MessageCmp interface {
 // It handles rendering of user and assistant messages with proper styling,
 // animations, and state management.
 type messageCmp struct {
-	width   int  // Component width for text wrapping
-	focused bool // Focus state for border styling
+	mu      sync.RWMutex // Thread-safe access to message state
+	width   int          // Component width for text wrapping
+	focused bool         // Focus state for border styling
 
 	// Core message data and state
-	message  message.Message // The underlying message content
-	spinning bool            // Whether to show loading animation
-	anim     *anim.Anim      // Animation component for loading states
+	message        message.Message     // The underlying message content
+	animationState enum.AnimationState // Current animation state
+	anim           *anim.Anim          // Animation component for loading states
 
 	// Thinking viewport for displaying reasoning content
 	thinkingViewport viewport.Model
@@ -88,7 +91,8 @@ func NewMessageCmp(msg message.Message) MessageCmp {
 // Init initializes the message component and starts animations if needed.
 // Returns a command to start the animation for spinning messages.
 func (m *messageCmp) Init() tea.Cmd {
-	m.spinning = m.shouldSpin()
+	// Determine animation state for the message
+	m.animationState = m.determineAnimationState()
 	return m.anim.Init()
 }
 
@@ -97,8 +101,9 @@ func (m *messageCmp) Init() tea.Cmd {
 func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case anim.StepMsg:
-		m.spinning = m.shouldSpin()
-		if m.spinning {
+		// Determine animation state for the message
+		m.animationState = m.determineAnimationState()
+		if m.animationState.IsActive() {
 			u, cmd := m.anim.Update(msg)
 			m.anim = u.(*anim.Anim)
 			return m, cmd
@@ -121,7 +126,7 @@ func (m *messageCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the message component based on its current state.
 // Returns different views for spinning, user, and assistant messages.
 func (m *messageCmp) View() string {
-	if m.spinning && m.message.ReasoningContent().Thinking == "" {
+	if m.animationState.IsActive() && m.message.ReasoningContent().Thinking == "" {
 		if m.message.IsSummaryMessage {
 			m.anim.SetLabel("Summarizing")
 		}
@@ -145,6 +150,8 @@ func (m *messageCmp) GetMessage() message.Message {
 }
 
 func (m *messageCmp) SetMessage(msg message.Message) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.message = msg
 }
 
@@ -190,12 +197,11 @@ func (m *messageCmp) renderAssistantMessage() string {
 	if thinking || thinkingContent != "" {
 		m.anim.SetLabel("Thinking")
 		thinkingContent = m.renderThinkingContent()
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonEndTurn {
-		// Don't render empty assistant messages with EndTurn
-		return ""
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonCanceled {
+	} else if finished && content == "" && m.message.GetToolCallState().IsEndTurn() {
+		content = ""
+	} else if finished && content == "" && m.message.GetToolCallState().IsCanceled() {
 		content = "*Canceled*"
-	} else if finished && content == "" && finishedData.Reason == message.FinishReasonError {
+	} else if finished && content == "" && m.message.GetToolCallState().IsError() {
 		errTag := t.S().Base.Padding(0, 1).Background(t.Red).Foreground(t.White).Render("ERROR")
 		truncated := ansi.Truncate(finishedData.Message, m.textWidth()-2-lipgloss.Width(errTag), "...")
 		title := fmt.Sprintf("%s %s", errTag, t.S().Base.Foreground(t.FgHalfMuted).Render(truncated))
@@ -304,7 +310,7 @@ func (m *messageCmp) renderThinkingContent() string {
 			if duration.String() != "0s" {
 				footer = t.S().Base.PaddingLeft(1).Render(core.Status(opts, m.textWidth()-1))
 			}
-		} else if finishReason != nil && finishReason.Reason == message.FinishReasonCanceled {
+		} else if finishReason != nil && m.message.GetToolCallState().IsCanceled() {
 			footer = t.S().Base.PaddingLeft(1).Render(m.toMarkdown("*Canceled*"))
 		} else {
 			footer = m.anim.View()
@@ -318,24 +324,28 @@ func (m *messageCmp) renderThinkingContent() string {
 	return result
 }
 
-// shouldSpin determines whether the message should show a loading animation.
-// Only assistant messages without content that aren't finished should spin.
-func (m *messageCmp) shouldSpin() bool {
+// determineAnimationState calculates the appropriate animation state for a message.
+// Only assistant messages without content that aren't finished should animate.
+func (m *messageCmp) determineAnimationState() enum.AnimationState {
+	// Protect concurrent access to message fields
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if m.message.Role != message.Assistant {
-		return false
+		return enum.AnimationStateStatic
 	}
 
 	if m.message.IsFinished() {
-		return false
+		return enum.AnimationStateStatic
 	}
 
 	if strings.TrimSpace(m.message.Content().Text) != "" {
-		return false
+		return enum.AnimationStateStatic
 	}
 	if len(m.message.ToolCalls()) > 0 {
-		return false
+		return enum.AnimationStateStatic
 	}
-	return true
+	return enum.AnimationStateSpinner
 }
 
 // Blur removes focus from the message component
@@ -363,15 +373,20 @@ func (m *messageCmp) GetSize() (int, int) {
 }
 
 // SetSize updates the width of the message component for text wrapping
-func (m *messageCmp) SetSize(width int, height int) tea.Cmd {
+func (m *messageCmp) SetSize(width, height int) tea.Cmd {
 	m.width = ordered.Clamp(width, 1, 120)
 	m.thinkingViewport.SetWidth(m.width - 4)
 	return nil
 }
 
-// Spinning returns whether the message is currently showing a loading animation
-func (m *messageCmp) Spinning() bool {
-	return m.spinning
+// IsAnimating returns whether the message is currently showing a loading animation
+func (m *messageCmp) IsAnimating() bool {
+	return m.animationState.IsActive()
+}
+
+// GetAnimationState returns the current animation state
+func (m *messageCmp) GetAnimationState() enum.AnimationState {
+	return m.animationState
 }
 
 type AssistantSection interface {
@@ -432,7 +447,7 @@ func (m *assistantSectionModel) GetSize() (int, int) {
 	return m.width, 1
 }
 
-func (m *assistantSectionModel) SetSize(width int, height int) tea.Cmd {
+func (m *assistantSectionModel) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	return nil
 }

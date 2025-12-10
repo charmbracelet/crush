@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -32,12 +33,6 @@ type ViewPermissionsParams struct {
 	FilePath string `json:"file_path"`
 	Offset   int    `json:"offset"`
 	Limit    int    `json:"limit"`
-}
-
-type viewTool struct {
-	lspClients  *csync.Map[string, *lsp.Client]
-	workingDir  string
-	permissions permission.Service
 }
 
 type ViewResponseMetadata struct {
@@ -85,9 +80,10 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 
 				granted := permissions.Request(
 					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        absFilePath,
-						ToolCallID:  call.ID,
+						SessionID: sessionID,
+						Path:      absFilePath,
+						// Note: fantasy uses strings for ToolCallID
+						ToolCallID:  message.ToolCallID(call.ID),
 						ToolName:    ViewToolName,
 						Action:      "read",
 						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),

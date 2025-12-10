@@ -13,10 +13,12 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
+	"github.com/charmbracelet/crush/internal/errors"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -111,7 +113,7 @@ func validateEdits(edits []MultiEditOperation) error {
 	for i, edit := range edits {
 		// Only the first edit can have empty old_string (for file creation)
 		if i > 0 && edit.OldString == "" {
-			return fmt.Errorf("edit %d: only the first edit can have empty old_string (for file creation)", i+1)
+			return errors.Validation("old_string", "", fmt.Sprintf("edit %d: only the first edit can have empty old_string (for file creation)", i+1))
 		}
 	}
 	return nil
@@ -128,13 +130,13 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	if _, err := os.Stat(params.FilePath); err == nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", params.FilePath)), nil
 	} else if !os.IsNotExist(err) {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.ToolResponse{}, errors.File("access", params.FilePath, err)
 	}
 
 	// Create parent directories
 	dir := filepath.Dir(params.FilePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
+		return fantasy.ToolResponse{}, errors.File("create parent directories", dir, err)
 	}
 
 	// Start with the content from the first edit
@@ -159,7 +161,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, errors.Session("session ID is required for creating a new file")
 	}
 
 	// Check permissions
@@ -173,9 +175,10 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		description = fmt.Sprintf("Create file %s with %d edits", params.FilePath, editsApplied)
 	}
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
+		SessionID: sessionID,
+		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		// Note: fantasy uses strings for ToolCallID
+		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
@@ -192,13 +195,13 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	// Write the file
 	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+		return fantasy.ToolResponse{}, errors.File("write", params.FilePath, err)
 	}
 
 	// Update file history
 	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "")
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+		return fantasy.ToolResponse{}, errors.FileSimple("create file history", err)
 	}
 
 	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
@@ -236,7 +239,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		if os.IsNotExist(err) {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", params.FilePath)), nil
 		}
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.ToolResponse{}, errors.File("access", params.FilePath, err)
 	}
 
 	if fileInfo.IsDir() {
@@ -261,7 +264,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Read current file content
 	content, err := os.ReadFile(params.FilePath)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return fantasy.ToolResponse{}, errors.File("read", params.FilePath, err)
 	}
 
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
@@ -300,7 +303,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
+		return fantasy.ToolResponse{}, errors.Session("session ID is required for editing file")
 	}
 
 	// Generate diff and check permissions
@@ -314,9 +317,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
 	}
 	p := edit.permissions.Request(permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
+		SessionID: sessionID,
+		Path:      fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		// Note: fantasy uses strings for ToolCallID
+		ToolCallID:  message.ToolCallID(call.ID),
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
@@ -337,7 +341,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Write the updated content
 	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+		return fantasy.ToolResponse{}, errors.File("write", params.FilePath, err)
 	}
 
 	// Update file history
@@ -345,7 +349,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	if err != nil {
 		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent)
 		if err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
+			return fantasy.ToolResponse{}, errors.FileSimple("create file history", err)
 		}
 	}
 	if file.Content != oldContent {
@@ -391,7 +395,7 @@ func applyEditToContent(content string, edit MultiEditOperation) (string, error)
 	}
 
 	if edit.OldString == "" {
-		return "", fmt.Errorf("old_string cannot be empty for content replacement")
+		return "", errors.Validation("old_string", "", "cannot be empty for content replacement")
 	}
 
 	var newContent string
@@ -401,17 +405,17 @@ func applyEditToContent(content string, edit MultiEditOperation) (string, error)
 		newContent = strings.ReplaceAll(content, edit.OldString, edit.NewString)
 		replacementCount = strings.Count(content, edit.OldString)
 		if replacementCount == 0 {
-			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
+			return "", errors.Validation("old_string", edit.OldString, "not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}
 	} else {
 		index := strings.Index(content, edit.OldString)
 		if index == -1 {
-			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
+			return "", errors.Validation("old_string", edit.OldString, "not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}
 
 		lastIndex := strings.LastIndex(content, edit.OldString)
 		if index != lastIndex {
-			return "", fmt.Errorf("old_string appears multiple times in the content. Please provide more context to ensure a unique match, or set replace_all to true")
+			return "", errors.Validation("old_string", edit.OldString, "appears multiple times in the content. Please provide more context to ensure a unique match, or set replace_all to true")
 		}
 
 		newContent = content[:index] + edit.NewString + content[index+len(edit.OldString):]

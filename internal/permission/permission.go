@@ -2,48 +2,55 @@ package permission
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/enum"
+	"github.com/charmbracelet/crush/internal/errors"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
 
-var ErrorPermissionDenied = errors.New("user denied permission")
+// Re-export centralized error for backward compatibility and convenient access
+var ErrorPermissionDenied = errors.ErrUserDenied
 
 type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	SessionID   string             `json:"session_id"`
+	ToolCallID  message.ToolCallID `json:"tool_call_id"`
+	ToolName    string             `json:"tool_name"`
+	Description string             `json:"description"`
+	Action      string             `json:"action"`
+	Params      any                `json:"params"`
+	Path        string             `json:"path"`
 }
 
-type PermissionNotification struct {
-	ToolCallID string `json:"tool_call_id"`
-	Granted    bool   `json:"granted"`
-	Denied     bool   `json:"denied"`
-}
-
+// PermissionRequest represents a permission request for tool execution
+// This eliminates split-brain states like {granted: true, denied: true}
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID PermissionRequestId `json:"id"`
+	CreatePermissionRequest
+}
+
+type PermissionEvent struct {
+	ToolCallID message.ToolCallID `json:"tool_call_id"`
+	Status     enum.ToolCallState `json:"status"`
+}
+
+type PermissionRequestId = string
+
+type permissionKey struct {
+	SessionID string
+	ToolName  string
+	Action    string
+	Path      string
 }
 
 type Service interface {
-	pubsub.Suscriber[PermissionRequest]
+	pubsub.Subscriber[PermissionRequest]
 	GrantPersistent(permission PermissionRequest)
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
@@ -51,21 +58,20 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
-	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionEvent]
 }
 
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	notificationBroker    *pubsub.Broker[PermissionNotification]
-	workingDir            string
-	sessionPermissions    []PermissionRequest
-	sessionPermissionsMu  sync.RWMutex
-	pendingRequests       *csync.Map[string, chan bool]
-	autoApproveSessions   map[string]bool
-	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
-	allowedTools          []string
+	uiBroker            *pubsub.Broker[PermissionEvent]
+	workingDir          string
+	sessionPermissions  *csync.Map[permissionKey, PermissionRequest]
+	pendingRequests     *csync.Map[PermissionRequestId, chan enum.ToolCallState]
+	autoApproveSessions *csync.Map[string, bool]
+	pathCache           *csync.Map[string, string]
+	skip                bool
+	allowedTools        []string
 
 	// used to make sure we only process one request at a time
 	requestMu     sync.Mutex
@@ -73,52 +79,50 @@ type permissionService struct {
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
-		Granted:    true,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
-	}
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
 
-	s.sessionPermissionsMu.Lock()
-	s.sessionPermissions = append(s.sessionPermissions, permission)
-	s.sessionPermissionsMu.Unlock()
-
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
+	s.sessionPermissions.Set(permissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}, permission)
+	s.noLongerActiveRequestUnsafe(permission)
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
-		Granted:    true,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
-	}
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
 
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionApproved)
+	s.noLongerActiveRequestUnsafe(permission)
+}
+
+func (s *permissionService) Deny(permission PermissionRequest) {
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
+	s.publishUnsafe(permission, enum.ToolCallStatePermissionDenied)
+	s.noLongerActiveRequestUnsafe(permission)
+}
+
+// noLongerActiveRequestUnsafe clears active request (MUST be called under lock)
+func (s *permissionService) noLongerActiveRequestUnsafe(permission PermissionRequest) {
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
 }
 
-func (s *permissionService) Deny(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+func (s *permissionService) publishUnsafe(permission PermissionRequest, status enum.ToolCallState) {
+	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
 		ToolCallID: permission.ToolCallID,
-		Granted:    false,
-		Denied:     true,
+		Status:     status,
 	})
 	respCh, ok := s.pendingRequests.Get(permission.ID)
 	if ok {
-		respCh <- false
-	}
-
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
+		respCh <- status
 	}
 }
 
@@ -127,27 +131,18 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
-	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-
-	// Check if the tool/action combination is in the allowlist
+	// Fast path checks (no lock needed - read-only or thread-safe)
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return true
 	}
 
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
-
+	autoApprove, _ := s.autoApproveSessions.Get(opts.SessionID)
 	if autoApprove {
 		return true
 	}
 
+	// Build permission request
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path
 	if err == nil {
@@ -161,55 +156,57 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if dir == "." {
 		dir = s.workingDir
 	}
+
 	permission := PermissionRequest{
-		ID:          uuid.New().String(),
-		Path:        dir,
-		SessionID:   opts.SessionID,
-		ToolCallID:  opts.ToolCallID,
-		ToolName:    opts.ToolName,
-		Description: opts.Description,
-		Action:      opts.Action,
-		Params:      opts.Params,
+		ID:                      uuid.New().String(),
+		CreatePermissionRequest: opts,
+	}
+	permission.Path = dir
+
+	// Check session permissions (O(1) map lookup)
+	if _, ok := s.sessionPermissions.Get(permissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}); ok {
+		return true
 	}
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
+	// Setup response channel and active request under lock
+	respCh := make(chan enum.ToolCallState, 1)
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
+	s.requestMu.Lock()
+	// Tell the UI that a permission was requested (thread-safe pubsub)
+	// We do this inside the lock to ensure the UI doesn't see a pending state
+	// before the request is actually registered as active.
+	s.uiBroker.Publish(pubsub.CreatedEvent, PermissionEvent{
+		ToolCallID: opts.ToolCallID,
+		Status:     enum.ToolCallStatePermissionPending,
+	})
 
 	s.activeRequest = &permission
-
-	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
-	defer s.pendingRequests.Del(permission.ID)
+	s.requestMu.Unlock()
 
-	// Publish the request
+	// Publish the request (thread-safe pubsub)
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	return <-respCh
+	// Wait for response WITHOUT holding the lock (prevents deadlock)
+	result := <-respCh == enum.ToolCallStatePermissionApproved
+
+	// Cleanup
+	s.pendingRequests.Del(permission.ID)
+
+	return result
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
-	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
-	s.autoApproveSessionsMu.Unlock()
+	s.autoApproveSessions.Set(sessionID, true)
 }
 
-func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
-	return s.notificationBroker.Subscribe(ctx)
+func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionEvent] {
+	return s.uiBroker.Subscribe(ctx)
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
@@ -223,12 +220,12 @@ func (s *permissionService) SkipRequests() bool {
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
-		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		uiBroker:            pubsub.NewBroker[PermissionEvent](),
 		workingDir:          workingDir,
-		sessionPermissions:  make([]PermissionRequest, 0),
-		autoApproveSessions: make(map[string]bool),
+		sessionPermissions:  csync.NewMap[permissionKey, PermissionRequest](),
+		autoApproveSessions: csync.NewMap[string, bool](),
 		skip:                skip,
 		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[string, chan bool](),
+		pendingRequests:     csync.NewMap[PermissionRequestId, chan enum.ToolCallState](),
 	}
 }

@@ -36,8 +36,8 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
-func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-	return make(<-chan pubsub.Event[permission.PermissionNotification])
+func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionEvent] {
+	return make(<-chan pubsub.Event[permission.PermissionEvent])
 }
 
 type mockHistoryService struct {

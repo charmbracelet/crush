@@ -1024,6 +1024,9 @@ func (p *chatPage) Help() help.KeyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		)
+		if p.focusedPane == PanelTypeEditor && p.editor.IsEmpty() {
+			commandsBinding.SetHelp("/ or ctrl+p", "commands")
+		}
 		modelsBinding := key.NewBinding(
 			key.WithKeys("ctrl+m", "ctrl+l"),
 			key.WithHelp("ctrl+l", "models"),

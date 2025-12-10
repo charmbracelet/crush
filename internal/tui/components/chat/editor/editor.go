@@ -41,6 +41,7 @@ type Editor interface {
 	SetSession(session session.Session) tea.Cmd
 	IsCompletionsOpen() bool
 	HasAttachments() bool
+	IsEmpty() bool
 	Cursor() *tea.Cursor
 }
 
@@ -261,7 +262,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		curIdx := m.textarea.Width()*cur.Y + cur.X
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
-		case msg.String() == "/" && len(strings.TrimSpace(m.textarea.Value())) == 0:
+		case msg.String() == "/" && m.IsEmpty():
 			return m, util.CmdHandler(dialogs.OpenDialogMsg{
 				Model: commands.NewCommandDialog(m.session.ID),
 			})
@@ -540,6 +541,10 @@ func (c *editorCmp) IsCompletionsOpen() bool {
 
 func (c *editorCmp) HasAttachments() bool {
 	return len(c.attachments) > 0
+}
+
+func (c *editorCmp) IsEmpty() bool {
+	return strings.TrimSpace(c.textarea.Value()) == ""
 }
 
 func normalPromptFunc(info textarea.PromptInfo) string {

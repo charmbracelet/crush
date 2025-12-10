@@ -35,6 +35,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -62,8 +63,9 @@ type coordinator struct {
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
-	currentAgent SessionAgent
-	agents       map[string]SessionAgent
+	currentAgent  SessionAgent
+	agents        map[string]SessionAgent
+	copilotKeeper *copilot.TokenKeeper
 
 	readyWg errgroup.Group
 }
@@ -85,6 +87,11 @@ func NewCoordinator(
 		history:     history,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
+	}
+
+	// Initialize Copilot token keeper if Copilot provider is configured.
+	if copilotCfg, ok := cfg.Providers.Get(config.CopilotProviderID); ok && copilotCfg.CopilotGitHubToken != "" {
+		c.copilotKeeper = copilot.NewTokenKeeper(copilotCfg.CopilotGitHubToken)
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -143,6 +150,16 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			return nil, updateErr
 		}
 	}
+
+	// Check if Copilot token needs refresh (rebuilds provider with fresh headers).
+	if providerCfg.ID == config.CopilotProviderID && c.copilotKeeper != nil && !c.copilotKeeper.HasValidToken() {
+		slog.Debug("copilot: token expired, rebuilding models with fresh token")
+		if updateErr := c.UpdateModels(ctx); updateErr != nil {
+			slog.Error("Failed to update models for Copilot token refresh", "error", updateErr)
+			return nil, updateErr
+		}
+	}
+
 	result, err := c.currentAgent.Run(ctx, SessionAgentCall{
 		SessionID:        sessionID,
 		Prompt:           prompt,
@@ -420,7 +437,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg)
+	largeProvider, err := c.buildProvider(ctx, largeProviderCfg, largeModelCfg)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
@@ -430,7 +447,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
 
-	smallProvider, err := c.buildProvider(smallProviderCfg, largeModelCfg)
+	smallProvider, err := c.buildProvider(ctx, smallProviderCfg, largeModelCfg)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
@@ -641,6 +658,40 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
+func (c *coordinator) buildCopilotProvider(ctx context.Context, baseURL string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+	if c.copilotKeeper == nil {
+		return nil, errors.New("copilot token keeper not initialized")
+	}
+
+	// Get Copilot headers with fresh token (refreshes if needed).
+	copilotHeaders, err := c.copilotKeeper.GetHeaders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get copilot headers: %w", err)
+	}
+
+	// Merge Copilot headers with any extra headers.
+	allHeaders := maps.Clone(copilotHeaders)
+	maps.Copy(allHeaders, headers)
+
+	opts := []openaicompat.Option{
+		openaicompat.WithBaseURL(baseURL),
+		openaicompat.WithAPIKey(""), // Token is in headers.
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
+	}
+	if len(allHeaders) > 0 {
+		opts = append(opts, openaicompat.WithHeaders(allHeaders))
+	}
+
+	for extraKey, extraValue := range extraBody {
+		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
+	}
+
+	return openaicompat.New(opts...)
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -660,10 +711,16 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return false
 }
 
-func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
+func (c *coordinator) buildProvider(ctx context.Context, providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
+	}
+
+	// Handle Copilot provider (uses OpenAI-compat internally but needs dynamic token).
+	if providerCfg.ID == config.CopilotProviderID {
+		baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+		return c.buildCopilotProvider(ctx, baseURL, headers, providerCfg.ExtraBody)
 	}
 
 	// handle special headers for anthropic

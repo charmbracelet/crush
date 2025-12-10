@@ -22,8 +22,8 @@ type ProjectInitFlag struct {
 // TODO: we need to remove the global config instance keeping it now just until everything is migrated
 var instance atomic.Pointer[Config]
 
-func Init(workingDir, dataDir string, debug bool) (*Config, error) {
-	cfg, err := Load(workingDir, dataDir, debug)
+func Init(workingDir, dataDir string, opts ...LoadOption) (*Config, error) {
+	cfg, err := Load(workingDir, dataDir, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,6 @@
 module github.com/charmbracelet/crush
 
-go 1.25.0
+go 1.25.5
 
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1
@@ -16,7 +16,7 @@ require (
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/charlievieth/fastwalk v1.0.14
-	github.com/charmbracelet/catwalk v0.9.5
+	github.com/charmbracelet/catwalk v0.9.7-0.20251208190755-350e2a004c74
 	github.com/charmbracelet/colorprofile v0.3.3
 	github.com/charmbracelet/fang v0.4.4
 	github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930

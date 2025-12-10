@@ -1,8 +1,7 @@
 package config
 
 import (
-	"encoding/json"
-	"os"
+	"context"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -11,37 +10,22 @@ import (
 
 type emptyProviderClient struct{}
 
-func (m *emptyProviderClient) GetProviders() ([]catwalk.Provider, error) {
+func (m *emptyProviderClient) GetProviders(context.Context, string) ([]catwalk.Provider, error) {
 	return []catwalk.Provider{}, nil
 }
 
+// TestProvider_loadProvidersEmptyResult tests that loadProviders returns an
+// error when the client returns an empty list. This ensures we don't cache
+// empty provider lists.
 func TestProvider_loadProvidersEmptyResult(t *testing.T) {
 	client := &emptyProviderClient{}
 	tmpPath := t.TempDir() + "/providers.json"
 
-	providers, err := loadProviders(false, client, tmpPath)
-	require.Contains(t, err.Error(), "Crush was unable to fetch an updated list of providers")
+	providers, err := loadProviders(client, "", tmpPath)
+	require.Contains(t, err.Error(), "empty providers list from catwalk")
 	require.Empty(t, providers)
 	require.Len(t, providers, 0)
 
 	// Check that no cache file was created for empty results
 	require.NoFileExists(t, tmpPath, "Cache file should not exist for empty results")
-}
-
-func TestProvider_loadProvidersEmptyCache(t *testing.T) {
-	client := &mockProviderClient{shouldFail: false}
-	tmpPath := t.TempDir() + "/providers.json"
-
-	// Create an empty cache file
-	emptyProviders := []catwalk.Provider{}
-	data, err := json.Marshal(emptyProviders)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(tmpPath, data, 0o644))
-
-	// Should refresh and get real providers instead of using empty cache
-	providers, err := loadProviders(false, client, tmpPath)
-	require.NoError(t, err)
-	require.NotNil(t, providers)
-	require.Len(t, providers, 1)
-	require.Equal(t, "Mock", providers[0].Name)
 }

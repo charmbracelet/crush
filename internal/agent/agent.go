@@ -355,6 +355,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(a.largeModel.CatwalkCfg.ContextWindow)
+				slog.Debug("checking context window", "cw", cw, "model", a.largeModel.CatwalkCfg.ID)
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64

@@ -170,7 +170,10 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 					// If the context window is 0, try to find it in the known models
 					if model.ContextWindow == 0 {
 						if known, ok := knownModels[model.ID]; ok {
+							slog.Debug("restoring context window from known model", "model", model.ID, "context_window", known.ContextWindow)
 							model.ContextWindow = known.ContextWindow
+						} else {
+							slog.Debug("context window is 0 and model not found in known models", "model", model.ID)
 						}
 					}
 

@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -67,11 +66,6 @@ func (q *quitDialogCmp) Init() tea.Cmd {
 // Update handles keyboard input for the quit dialog.
 func (q *quitDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case quitMsg:
-		return q, tea.Sequence(
-			tea.Raw(ansi.CursorPosition(1, q.wHeight)),
-			tea.Quit,
-		)
 	case tea.WindowSizeMsg:
 		q.wWidth = msg.Width
 		q.wHeight = msg.Height
@@ -149,20 +143,24 @@ func (q *quitDialogCmp) ID() dialogs.DialogID {
 	return QuitDialogID
 }
 
-// quitMsg is an internal message to complete the quit sequence after the
-// dialog has been cleared.
-type quitMsg struct{}
+// QuitMsg is sent to complete the quit sequence after the dialog has been
+// cleared. It must be handled by the top-level app since the dialog is closed
+// by the time this message arrives.
+type QuitMsg struct {
+	Height int
+}
 
 // quitWithCursorAtBottom clears the quit dialog, moves the cursor to the
 // bottom of the screen, then quits to prevent the terminal from clearing
 // content below the quit dialog and to reveal any obscured information.
 func (q *quitDialogCmp) quitWithCursorAtBottom() tea.Cmd {
 	quip := goodbyeQuips[rand.Intn(len(goodbyeQuips))]
+	height := q.wHeight
 	return tea.Sequence(
 		util.ReportInfo(quip),
 		util.CmdHandler(dialogs.CloseDialogMsg{}),
 		tea.Tick(10*time.Millisecond, func(time.Time) tea.Msg {
-			return quitMsg{}
+			return QuitMsg{Height: height}
 		}),
 	)
 }

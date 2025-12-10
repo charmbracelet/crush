@@ -5,9 +5,10 @@ import (
 	"log/slog"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 var updateProvidersCmd = &cobra.Command{
@@ -38,6 +39,22 @@ crush update-providers embedded
 
 		if err := config.UpdateProviders(pathOrUrl); err != nil {
 			return err
+		}
+
+		// Initialize config so UpdateCopilotModels can access it
+		debug, _ := cmd.Flags().GetBool("debug")
+		dataDir, _ := cmd.Flags().GetString("data-dir")
+		cwd, err := ResolveCwd(cmd)
+		if err != nil {
+			return err
+		}
+		if _, err := config.Init(cwd, dataDir, debug); err != nil {
+			slog.Warn("Failed to initialize config for Copilot models update", "err", err)
+		} else {
+			err := config.UpdateCopilotModels()
+			if err != nil {
+				slog.Warn("Failed to update Copilot models", "err", err)
+			}
 		}
 
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's

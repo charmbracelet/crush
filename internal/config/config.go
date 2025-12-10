@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
@@ -479,20 +480,30 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
-	// Only Anthropic provider uses OAuth for now
-	if providerID != string(catwalk.InferenceProviderAnthropic) {
+	var newToken *oauth.Token
+	var err error
+
+	switch providerID {
+	case string(catwalk.InferenceProviderAnthropic):
+		newToken, err = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case "copilot", "github", "github-copilot":
+		newToken, err = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
 
-	newToken, err := claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	if err != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
 	}
 
-	slog.Info("Successfully refreshed OAuth token in background", "provider", providerID)
+	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = newToken
-	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
-	providerConfig.SetupClaudeCode()
+	providerConfig.APIKey = newToken.AccessToken
+
+	if providerID == string(catwalk.InferenceProviderAnthropic) {
+		providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
+		providerConfig.SetupClaudeCode()
+	}
 
 	c.Providers.Set(providerID, providerConfig)
 

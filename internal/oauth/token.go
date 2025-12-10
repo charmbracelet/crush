@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// Token represents an OAuth2 token from Claude Code Max.
+// Token represents an OAuth2 token from a provider
 type Token struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -15,6 +15,11 @@ type Token struct {
 // SetExpiresAt calculates and sets the ExpiresAt field based on the current time and ExpiresIn.
 func (t *Token) SetExpiresAt() {
 	t.ExpiresAt = time.Now().Add(time.Duration(t.ExpiresIn) * time.Second).Unix()
+}
+
+// SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.
+func (t *Token) SetExpiresIn() {
+	t.ExpiresIn = int(time.Until(time.Unix(t.ExpiresAt, 0)).Seconds())
 }
 
 // IsExpired checks if the token is expired or about to expire (within 10% of its lifetime).

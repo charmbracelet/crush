@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/spf13/cobra"
+
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
-	"github.com/spf13/cobra"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 )
 
 var loginCmd = &cobra.Command{
@@ -20,7 +22,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: claude.`,
+Available platforms are: claude, github.`,
 	Example: `
 # Authenticate with Claude Code Max
 crush login claude
@@ -28,6 +30,9 @@ crush login claude
 	ValidArgs: []cobra.Completion{
 		"claude",
 		"anthropic",
+		"copilot",
+		"github",
+		"github-copilot",
 	},
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,6 +52,8 @@ crush login claude
 		switch args[0] {
 		case "anthropic", "claude":
 			return loginClaude()
+		case "copilot", "github", "github-copilot":
+			return loginCopilot()
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -104,5 +111,46 @@ func loginClaude() error {
 
 	fmt.Println()
 	fmt.Println("You're now authenticated with Claude Code Max!")
+	return nil
+}
+
+func loginCopilot() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	go func() {
+		<-ctx.Done()
+		cancel()
+		os.Exit(1)
+	}()
+
+	fmt.Println("Requesting device code from GitHub...")
+	dc, err := copilot.RequestDeviceCode(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("Open the following URL and enter the code to authenticate:")
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+	fmt.Println()
+	fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+	fmt.Println()
+	fmt.Println("Waiting for authorization...")
+
+	token, err := copilot.PollForToken(ctx, dc)
+	if err != nil {
+		return err
+	}
+
+	provider, err := config.GenerateCopilotProviderConfig(token)
+	if err != nil {
+		return err
+	}
+
+	cfg := config.Get()
+	cfg.SetConfigField("providers.github-copilot", *provider)
+
+	fmt.Println()
+	fmt.Println("You're now authenticated with GitHub Copilot!")
 	return nil
 }

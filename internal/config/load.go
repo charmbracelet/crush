@@ -152,6 +152,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				models := []catwalk.Model{}
 				seen := make(map[string]bool)
 
+				// Create a map of known models for easy lookup
+				knownModels := make(map[string]catwalk.Model)
+				for _, m := range p.Models {
+					knownModels[m.ID] = m
+				}
+
 				for _, model := range config.Models {
 					if seen[model.ID] {
 						continue
@@ -160,6 +166,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 					if model.Name == "" {
 						model.Name = model.ID
 					}
+
+					// If the context window is 0, try to find it in the known models
+					if model.ContextWindow == 0 {
+						if known, ok := knownModels[model.ID]; ok {
+							model.ContextWindow = known.ContextWindow
+						}
+					}
+
 					models = append(models, model)
 				}
 				for _, model := range p.Models {

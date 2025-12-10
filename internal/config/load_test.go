@@ -1248,3 +1248,42 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+func TestConfig_configureProvidersContextWindowRecovery(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{
+				ID:            "gpt-4o",
+				ContextWindow: 128000,
+			}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"openai": {
+				APIKey: "key",
+				Models: []catwalk.Model{{
+					ID: "gpt-4o",
+					// ContextWindow is 0 by default
+				}},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.Len(t, pc.Models, 1)
+	require.Equal(t, int(128000), int(pc.Models[0].ContextWindow))
+}

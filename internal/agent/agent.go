@@ -358,7 +358,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				// add a protective layer for the context window size
 				if cw <= 0 {
 					// use default value or skit Summarize check
-					cw = 128000 // Set the default to 128k?
+					cw = 131072 // Set the default to 128k?
 				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens

@@ -26,3 +26,8 @@ type (
 		Publish(EventType, T)
 	}
 )
+
+// MessageDroppedMsg is sent when a message is dropped due to a slow consumer.
+type MessageDroppedMsg struct {
+	Name string
+}

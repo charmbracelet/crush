@@ -1,11 +1,9 @@
 charm.land/bubbles/v2 v2.0.0-rc.1 h1:EiIFVAc3Zi/yY86td+79mPhHR7AqZ1OxF+6ztpOCRaM=
 charm.land/bubbles/v2 v2.0.0-rc.1/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
-charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251202162339-5fa38b798f16 h1:9iVAss7WF8Ax5QBzmZE77aA08JbOMuDpbEhl/Uvc3Eo=
-charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251202162339-5fa38b798f16/go.mod h1:Vsh7/MLC7LQ2Ab8H63SXm6yD/L6o4HDvhdD/IrIRXrU=
+charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251210204018-9e01328aa1c2 h1:QahY9g3huOCwZ/ZuAiWSUv4s2dKM/3Vi/TxKdMpawrc=
+charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251210204018-9e01328aa1c2/go.mod h1:wpZRAsybUT9yTweAS/DF5jts3M83sQAxbCYF+JjOrwI=
 charm.land/fantasy v0.5.1 h1:Svi/UpI4/DwVjTqNYceDXoJJYn6SVEM5dnLH92UBiEs=
 charm.land/fantasy v0.5.1/go.mod h1:SPOsnIlkBKnhw2Wnasv+wZ82EmCMIGesx0je3tgR6+M=
-charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca h1:6bVc8OFotCS4sS7HKqxTudP7yn8Y0ODR6df2pdlY/+s=
-charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251119143523-0334bb4562ca/go.mod h1:XSJjv7DaH4zd1Y27kZis295RkEj9OFR9zh2WffQQsKQ=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971 h1:xZFcNsJMiIDbFtWRyDmkKNk1sjojfaom4Zoe0cyH/8c=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971/go.mod h1:i61Y3FmdbcBNSKa+pKB3DaE4uVQmBLMs/xlvRyHcXAE=
 charm.land/x/vcr v0.1.1 h1:PXCFMUG0rPtyk35rhfzYCJEduOzWXCIbrXTFq4OF/9Q=
@@ -100,10 +98,8 @@ github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930 h1:+47Z2j
 github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930/go.mod h1:izs11tnkYaT3DTEH2E0V/lCb18VGZ7k9HLYEGuvgXGA=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0 h1:lxHzxsHd4P7o7+5D5OcEItYkQ1xY3ovNg8Dc5ftd3rI=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0/go.mod h1:Q7oMtlboDPnnrYiJDXNwdWmJblOmuOnycPKczlVju6I=
-github.com/charmbracelet/ultraviolet v0.0.0-20251202162030-ecc8c1ae4b2b h1:jY1J0PcfetoB1uJ+w8rd86gUFSpKpJJI35gnfpKF5hg=
-github.com/charmbracelet/ultraviolet v0.0.0-20251202162030-ecc8c1ae4b2b/go.mod h1:Y6kE2GzHfkyQQVCSL9r2hwokSrIlHGzZG+71+wDYSZI=
-github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 h1:OqDqxQZliC7C8adA7KjelW3OjtAxREfeHkNcd66wpeI=
-github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318/go.mod h1:Y6kE2GzHfkyQQVCSL9r2hwokSrIlHGzZG+71+wDYSZI=
+github.com/charmbracelet/ultraviolet v0.0.0-20251210202004-13071eeb1ab8 h1:GnKQNM07z6oeOVDeEBzeaCI2ZVgolCR+jARTk5gCo+8=
+github.com/charmbracelet/ultraviolet v0.0.0-20251210202004-13071eeb1ab8/go.mod h1:Y6kE2GzHfkyQQVCSL9r2hwokSrIlHGzZG+71+wDYSZI=
 github.com/charmbracelet/x/ansi v0.11.2 h1:XAG3FSjiVtFvgEgGrNBkCNNYrsucAt8c6bfxHyROLLs=
 github.com/charmbracelet/x/ansi v0.11.2/go.mod h1:9tY2bzX5SiJCU0iWyskjBeI2BRQfvPqI+J760Mjf+Rg=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=

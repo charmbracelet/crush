@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -52,11 +53,11 @@ func (q *quitDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return q, nil
 		case key.Matches(msg, q.keymap.EnterSpace):
 			if !q.selectedNo {
-				return q, tea.Quit
+				return q, q.quitWithCursorAtBottom()
 			}
 			return q, util.CmdHandler(dialogs.CloseDialogMsg{})
 		case key.Matches(msg, q.keymap.Yes):
-			return q, tea.Quit
+			return q, q.quitWithCursorAtBottom()
 		case key.Matches(msg, q.keymap.No, q.keymap.Close):
 			return q, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
@@ -117,4 +118,13 @@ func (q *quitDialogCmp) Position() (int, int) {
 
 func (q *quitDialogCmp) ID() dialogs.DialogID {
 	return QuitDialogID
+}
+
+// quitWithCursorAtBottom moves the cursor to the bottom of the screen before
+// quitting to prevent the terminal from clearing content below the quit dialog.
+func (q *quitDialogCmp) quitWithCursorAtBottom() tea.Cmd {
+	return tea.Sequence(
+		tea.Raw(ansi.CursorPosition(1, q.wHeight)),
+		tea.Quit,
+	)
 }

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,11 +18,9 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
@@ -189,6 +186,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			Name:               p.Name,
 			BaseURL:            p.APIEndpoint,
 			APIKey:             p.APIKey,
+			APIKeyTemplate:     p.APIKey, // Store original template for re-resolution
 			OAuthToken:         config.OAuthToken,
 			Type:               p.Type,
 			Disable:            config.Disable,
@@ -200,25 +198,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		}
 
 		if p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil {
-			if config.OAuthToken.IsExpired() {
-				newToken, err := claude.RefreshToken(context.TODO(), config.OAuthToken.RefreshToken)
-				if err == nil {
-					slog.Info("Successfully refreshed Anthropic OAuth token")
-					config.OAuthToken = newToken
-					prepared.OAuthToken = newToken
-					if err := cmp.Or(
-						c.SetConfigField("providers.anthropic.api_key", newToken.AccessToken),
-						c.SetConfigField("providers.anthropic.oauth", newToken),
-					); err != nil {
-						return err
-					}
-				} else {
-					slog.Error("Failed to refresh Anthropic OAuth token", "error", err)
-					event.Error(err)
-				}
-			} else {
-				slog.Info("Using existing non-expired Anthropic OAuth token")
-			}
 			prepared.SetupClaudeCode()
 		}
 

@@ -95,6 +95,8 @@ type ProviderConfig struct {
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=openai-compat,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
+	// The original API key template before resolution (for re-resolution on auth errors).
+	APIKeyTemplate string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
@@ -469,6 +471,7 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
+// RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	providerConfig, exists := c.Providers.Get(providerID)
 	if !exists {
@@ -479,7 +482,7 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
-	// Only Anthropic provider uses OAuth for now
+	// Only Anthropic provider uses OAuth for now.
 	if providerID != string(catwalk.InferenceProviderAnthropic) {
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
@@ -489,7 +492,7 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
 	}
 
-	slog.Info("Successfully refreshed OAuth token in background", "provider", providerID)
+	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = newToken
 	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
 	providerConfig.SetupClaudeCode()

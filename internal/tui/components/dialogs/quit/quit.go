@@ -1,6 +1,8 @@
 package quit
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -43,6 +45,11 @@ func (q *quitDialogCmp) Init() tea.Cmd {
 // Update handles keyboard input for the quit dialog.
 func (q *quitDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case quitMsg:
+		return q, tea.Sequence(
+			tea.Raw(ansi.CursorPosition(1, q.wHeight)),
+			tea.Quit,
+		)
 	case tea.WindowSizeMsg:
 		q.wWidth = msg.Width
 		q.wHeight = msg.Height
@@ -120,13 +127,18 @@ func (q *quitDialogCmp) ID() dialogs.DialogID {
 	return QuitDialogID
 }
 
+// quitMsg is an internal message to complete the quit sequence after the
+// dialog has been cleared.
+type quitMsg struct{}
+
 // quitWithCursorAtBottom clears the quit dialog, moves the cursor to the
 // bottom of the screen, then quits to prevent the terminal from clearing
 // content below the quit dialog and to reveal any obscured information.
 func (q *quitDialogCmp) quitWithCursorAtBottom() tea.Cmd {
 	return tea.Sequence(
 		util.CmdHandler(dialogs.CloseDialogMsg{}),
-		tea.Raw(ansi.CursorPosition(1, q.wHeight)),
-		tea.Quit,
+		tea.Tick(10*time.Millisecond, func(time.Time) tea.Msg {
+			return quitMsg{}
+		}),
 	)
 }

@@ -34,7 +34,6 @@ type ViewPermissionsParams struct {
 	Limit    int    `json:"limit"`
 }
 
-
 type ViewResponseMetadata struct {
 	FilePath string `json:"file_path"`
 	Content  string `json:"content"`

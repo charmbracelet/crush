@@ -253,7 +253,7 @@ func (m *toolCallCmp) viewUnboxed() string {
 	effectiveState := m.call.State
 	isNested := m.isNested
 	toolName := m.call.Name
-	
+
 	// Fast path for pending state - render immediately
 	if effectiveState == enum.ToolCallStatePending {
 		// Render with current state
@@ -277,7 +277,7 @@ func (m *toolCallCmp) viewUnboxed() string {
 	m.mu.RUnlock()
 
 	// Now we are outside the lock - safe to call methods that might re-acquire lock
-	
+
 	// Show streaming content if available and enabled
 	if showStreaming && len(streamingLines) > 0 {
 		t := styles.CurrentTheme()
@@ -941,7 +941,6 @@ func (m *toolCallCmp) SetSize(width, height int) tea.Cmd {
 	}
 	return nil
 }
-
 
 // RefreshAnimation updates both visual animation and animation state for consistency.
 // This is the preferred public method for updating all animation-related state.

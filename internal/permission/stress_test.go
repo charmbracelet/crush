@@ -24,7 +24,7 @@ func TestPermissionService_Stress(t *testing.T) {
 
 	// Use a clean service for stress testing
 	service := NewPermissionService("/tmp", false, []string{})
-	
+
 	// We need to subscribe BEFORE sending requests
 	// Note: In real app, the UI subscribes.
 	ctx, cancel := context.WithCancel(t.Context())
@@ -32,8 +32,8 @@ func TestPermissionService_Stress(t *testing.T) {
 	events := service.Subscribe(ctx)
 
 	const (
-		numGoroutines = 20  // Reduced to avoid overwhelming the 64-buffer pubsub
-		numRequests   = 50  // Reduced to avoid timeout
+		numGoroutines = 20 // Reduced to avoid overwhelming the 64-buffer pubsub
+		numRequests   = 50 // Reduced to avoid timeout
 	)
 
 	var wg sync.WaitGroup
@@ -44,7 +44,7 @@ func TestPermissionService_Stress(t *testing.T) {
 		for event := range events {
 			// Determine action based on random chance or tool name
 			req := event.Payload
-			
+
 			// Simulate user reaction time
 			time.Sleep(time.Millisecond)
 
@@ -52,7 +52,7 @@ func TestPermissionService_Stress(t *testing.T) {
 			// 1. Grant Persistent (should populate map)
 			// 2. Grant Once
 			// 3. Deny
-			
+
 			action := rand.Intn(3)
 			switch action {
 			case 0:
@@ -66,18 +66,18 @@ func TestPermissionService_Stress(t *testing.T) {
 	}()
 
 	// Producer goroutines (Simulate Agents)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < numRequests; j++ {
+			for j := range numRequests {
 				req := CreatePermissionRequest{
-					SessionID:   fmt.Sprintf("session-%d", id), // Unique session per goroutine to avoid auto-approve cross-talk
-					ToolName:    fmt.Sprintf("tool-%d", j%5),   // 5 tools, so we hit the same ones repeatedly
-					Action:      "execute",
-					Path:        "/tmp",
-					ToolCallID:  message.ToolCallID(fmt.Sprintf("call-%d-%d", id, j)),
+					SessionID:  fmt.Sprintf("session-%d", id), // Unique session per goroutine to avoid auto-approve cross-talk
+					ToolName:   fmt.Sprintf("tool-%d", j%5),   // 5 tools, so we hit the same ones repeatedly
+					Action:     "execute",
+					Path:       "/tmp",
+					ToolCallID: message.ToolCallID(fmt.Sprintf("call-%d-%d", id, j)),
 				}
-				
+
 				// This blocks until Granted/Denied
 				// If we have a race or deadlock, this will hang
 				service.Request(req)

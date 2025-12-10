@@ -44,7 +44,7 @@ import (
 var lastMouseEvent time.Time
 
 const (
-	helpBarHeightFull = 5
+	helpBarHeightFull  = 5
 	helpBarHeightShort = 2
 	mouseEventThrottle = 15 * time.Millisecond
 )

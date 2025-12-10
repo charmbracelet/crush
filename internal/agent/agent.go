@@ -608,7 +608,7 @@ func (a *sessionAgent) handleErrorWithFinishMessage(ctx context.Context, current
 	var fantasyErr *fantasy.Error
 	var providerErr *fantasy.ProviderError
 	const defaultTitle = "Provider Error"
-	
+
 	// Handle different error types with appropriate finish messages
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -622,7 +622,7 @@ func (a *sessionAgent) handleErrorWithFinishMessage(ctx context.Context, current
 	default:
 		currentAssistant.AddFinish(mapErrorConditionToFinishReason(false, false), defaultTitle, err.Error())
 	}
-	
+
 	// Update assistant message with error information
 	updateErr := a.messages.Update(ctx, *currentAssistant)
 	if updateErr != nil {
@@ -637,7 +637,7 @@ func (a *sessionAgent) handleErrorWithFinishMessage(ctx context.Context, current
 func (a *sessionAgent) cleanupActiveRequests(sessionID string) {
 	// Always clean up the current session
 	a.activeRequests.Del(sessionID)
-	
+
 	// Check if this is an agent tool session
 	if a.sessions.IsAgentToolSession(sessionID) {
 		// Extract parent session ID from nested session
@@ -648,8 +648,8 @@ func (a *sessionAgent) cleanupActiveRequests(sessionID string) {
 			if a.IsSessionBusy(messageID) {
 				// Clean up the parent session's active request to prevent deadlock
 				a.activeRequests.Del(messageID)
-				slog.Debug("Cleaned up parent session busy state to prevent agent tool deadlock", 
-					"nested_session", sessionID, 
+				slog.Debug("Cleaned up parent session busy state to prevent agent tool deadlock",
+					"nested_session", sessionID,
 					"parent_session", messageID)
 			}
 		}
@@ -1115,7 +1115,7 @@ func (a *sessionAgent) handleErrorToolCalls(ctx context.Context, currentAssistan
 
 		// Set tool call state based on error type
 		content := a.setToolCallStateFromError(&tc, isCancelErr, isPermissionErr)
-		
+
 		// Map to result state and create tool result
 		resultState := a.mapToolCallStateToResultState(tc.State)
 		if createErr := a.createAndPersistToolResult(ctx, currentAssistant, tc, content, resultState); createErr != nil {

@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	defaultListIndent      = 2
-	defaultMargin          = 2
+	defaultListIndent = 2
+	defaultMargin     = 2
 )
 
 type Theme struct {

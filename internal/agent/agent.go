@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -194,6 +195,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	// Use math.MaxInt for effectively infinite retries on rate limit errors (429).
+	// The fantasy library will keep retrying as long as tryNumber <= MaxRetries.
+	// Retry delays use exponential backoff (2s, 4s, 8s, 16s, 32s...) but are
+	// capped at 60 seconds maximum per retry. The library also respects
+	// Retry-After headers from providers when available.
+	maxRetries := math.MaxInt
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           call.Prompt,
 		Files:            files,
@@ -205,6 +212,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		MaxRetries:       &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -309,7 +317,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Info("Retrying request after error",
+				"status_code", err.StatusCode,
+				"title", err.Title,
+				"delay", delay.String(),
+				"session_id", call.SessionID)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -531,16 +543,25 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	maxRetries := math.MaxInt
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          "Provide a detailed summary of our conversation above.",
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
+		MaxRetries:      &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if a.systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
 			}
 			return callContext, prepared, nil
+		},
+		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
+			slog.Info("Retrying summarize request after error",
+				"status_code", err.StatusCode,
+				"title", err.Title,
+				"delay", delay.String(),
+				"session_id", sessionID)
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
@@ -694,8 +715,17 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		fantasy.WithMaxOutputTokens(maxOutput),
 	)
 
+	maxRetries := math.MaxInt
 	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", prompt),
+		Prompt:     fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", prompt),
+		MaxRetries: &maxRetries,
+		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
+			slog.Info("Retrying title generation after error",
+				"status_code", err.StatusCode,
+				"title", err.Title,
+				"delay", delay.String(),
+				"session_id", session.ID)
+		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if a.systemPromptPrefix != "" {

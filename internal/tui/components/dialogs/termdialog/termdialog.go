@@ -32,7 +32,8 @@ type Config struct {
 	// Term is the terminal to embed.
 	Term *terminal.Terminal
 	// OnClose is called when the dialog is closed (optional).
-	OnClose func()
+	// Can return a tea.Cmd to emit messages after close.
+	OnClose func() tea.Cmd
 }
 
 // Dialog is a dialog that embeds a terminal application.
@@ -41,7 +42,7 @@ type Dialog struct {
 	title      string
 	loadingMsg string
 	term       *terminal.Terminal
-	onClose    func()
+	onClose    func() tea.Cmd
 
 	wWidth     int
 	wHeight    int
@@ -243,7 +244,7 @@ func (d *Dialog) Close() tea.Cmd {
 	_ = d.term.Close()
 
 	if d.onClose != nil {
-		d.onClose()
+		return d.onClose()
 	}
 
 	return nil

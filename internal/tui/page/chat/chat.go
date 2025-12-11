@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
+	tuieditor "github.com/charmbracelet/crush/internal/tui/components/dialogs/tui_editor"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -265,6 +266,17 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, p.handleReasoningEffortSelected(msg.Effort)
 	case commands.OpenExternalEditorMsg:
 		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
+	case tuieditor.EditorResultMsg:
+		if msg.Err != nil {
+			return p, util.ReportError(msg.Err)
+		}
+		if msg.Content == "" {
+			return p, util.ReportWarn("Message is empty")
+		}
+		// Forward the result to the editor as OpenEditorMsg.
+		u, cmd := p.editor.Update(editor.OpenEditorMsg{Text: msg.Content})
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case pubsub.Event[session.Session]:

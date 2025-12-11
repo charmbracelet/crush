@@ -2,8 +2,8 @@ charm.land/bubbles/v2 v2.0.0-rc.1 h1:EiIFVAc3Zi/yY86td+79mPhHR7AqZ1OxF+6ztpOCRaM
 charm.land/bubbles/v2 v2.0.0-rc.1/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251211195757-9ed8357ca936 h1:xXvpr/Eqb4Z15Nc+8Z6WDtkFfuGSSyxl0SHMOStlmKU=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251211195757-9ed8357ca936/go.mod h1:DEQeUhIWWTiVSb2gDgjzvuPIW4Pz8eSMlbfyxzEMopI=
-charm.land/fantasy v0.5.1 h1:Svi/UpI4/DwVjTqNYceDXoJJYn6SVEM5dnLH92UBiEs=
-charm.land/fantasy v0.5.1/go.mod h1:SPOsnIlkBKnhw2Wnasv+wZ82EmCMIGesx0je3tgR6+M=
+charm.land/fantasy v0.5.2 h1:4zlNsIcsyF3Jr+1onEuhHqZRzuH1LlxBle/gInS00QY=
+charm.land/fantasy v0.5.2/go.mod h1:SPOsnIlkBKnhw2Wnasv+wZ82EmCMIGesx0je3tgR6+M=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971 h1:xZFcNsJMiIDbFtWRyDmkKNk1sjojfaom4Zoe0cyH/8c=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971/go.mod h1:i61Y3FmdbcBNSKa+pKB3DaE4uVQmBLMs/xlvRyHcXAE=
 charm.land/x/vcr v0.1.1 h1:PXCFMUG0rPtyk35rhfzYCJEduOzWXCIbrXTFq4OF/9Q=
@@ -88,8 +88,8 @@ github.com/charlievieth/fastwalk v1.0.14 h1:3Eh5uaFGwHZd8EGwTjJnSpBkfwfsak9h6ICg
 github.com/charlievieth/fastwalk v1.0.14/go.mod h1:diVcUreiU1aQ4/Wu3NbxxH4/KYdKpLDojrQ1Bb2KgNY=
 github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 h1:rwLdEpG9wE6kL69KkEKDiWprO8pQOZHZXeod6+9K+mw=
 github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904/go.mod h1:8TIYxZxsuCqqeJ0lga/b91tBwrbjoHDC66Sq5t8N2R4=
-github.com/charmbracelet/catwalk v0.9.7-0.20251208190755-350e2a004c74 h1:pJI8ivIgSWOeCNnZFXeZzL6px1vZVS3LU4Cqk3Gx37I=
-github.com/charmbracelet/catwalk v0.9.7-0.20251208190755-350e2a004c74/go.mod h1:ReU4SdrLfe63jkEjWMdX2wlZMV3k9r11oQAmzN0m+KY=
+github.com/charmbracelet/catwalk v0.10.1 h1:Yov/bEni8eDU+uP68YuqgHo0UW1sDozVHwHdlWbklJ4=
+github.com/charmbracelet/catwalk v0.10.1/go.mod h1:qg+Yl9oaZTkTvRscqbxfttzOFQ4v0pOT5XwC7b5O0NQ=
 github.com/charmbracelet/colorprofile v0.4.1 h1:a1lO03qTrSIRaK8c3JRxJDZOvhvIeSco3ej+ngLk1kk=
 github.com/charmbracelet/colorprofile v0.4.1/go.mod h1:U1d9Dljmdf9DLegaJ0nGZNJvoXAhayhmidOdcBwAvKk=
 github.com/charmbracelet/fang v0.4.4 h1:G4qKxF6or/eTPgmAolwPuRNyuci3hTUGGX1rj1YkHJY=
@@ -102,6 +102,8 @@ github.com/charmbracelet/ultraviolet v0.0.0-20251211195649-3a51f4048cae h1:njFQJ
 github.com/charmbracelet/ultraviolet v0.0.0-20251211195649-3a51f4048cae/go.mod h1:VWATWLRwYP06VYCEur7FsNR2B1xAo7Y+xl1PTbd1ePc=
 github.com/charmbracelet/x/ansi v0.11.3 h1:6DcVaqWI82BBVM/atTyq6yBoRLZFBsnoDoX9GCu2YOI=
 github.com/charmbracelet/x/ansi v0.11.3/go.mod h1:yI7Zslym9tCJcedxz5+WBq+eUGMJT0bM06Fqy1/Y4dI=
+github.com/charmbracelet/x/etag v0.2.0 h1:Euj1VkheoHfTYA9y+TCwkeXF/hN8Fb9l4LqZl79pt04=
+github.com/charmbracelet/x/etag v0.2.0/go.mod h1:C1B7/bsgvzzxpfu0Rabbd+rTHJa5TmC/qgTseCf6DF0=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3 h1:1xwHZg6eMZ9Wv5TE1UGub6ARubyOd1Lo5kPUI/6VL50=
 github.com/charmbracelet/x/exp/charmtone v0.0.0-20250708181618-a60a724ba6c3/go.mod h1:T9jr8CzFpjhFVHjNjKwbAD7KwBNyFnj2pntAO7F2zw0=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f h1:pk6gmGpCE7F3FcjaOEKYriCvpmIN4+6OS/RD0vm4uIA=

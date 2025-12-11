@@ -581,20 +581,7 @@ func (p *chatPage) View() string {
 		if len(pills) > 0 {
 			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
 
-			// Add section line only when expanded
-			if p.pillsExpanded {
-				// Calculate available width for section line after pills
-				totalWidth := p.width - SideBarWidth - 4 // -4 for left padding
-				pillsRowWidth := lipgloss.Width(pillsRow)
-				availableWidth := totalWidth - pillsRowWidth
 
-				if availableWidth > 0 {
-					section := sectionLine(availableWidth, t)
-					// Center the section line vertically with the pills by adding padding
-					centeredSection := t.S().Base.PaddingTop(1).PaddingBottom(1).Render(section)
-					pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", centeredSection)
-				}
-			}
 
 			if expandedList != "" {
 				pillsArea = lipgloss.JoinVertical(
@@ -606,7 +593,7 @@ func (p *chatPage) View() string {
 				pillsArea = pillsRow
 			}
 
-			style := t.S().Base.MarginTop(1).PaddingLeft(4)
+			style := t.S().Base.MarginTop(1).PaddingLeft(3)
 			pillsArea = style.Render(pillsArea)
 		}
 

@@ -95,7 +95,7 @@ func todoPill(todos []session.Todo, spinnerView string, focused, pillsPanelFocus
 }
 
 func todoList(sessionTodos []session.Todo, spinnerView string, t *styles.Theme, width int) string {
-	return t.S().Base.PaddingLeft(1).Render(todos.FormatTodosList(sessionTodos, spinnerView, t, width-1))
+	return todos.FormatTodosList(sessionTodos, spinnerView, t, width)
 }
 
 func queueList(queueItems []string, t *styles.Theme) string {

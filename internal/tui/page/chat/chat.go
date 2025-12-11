@@ -584,8 +584,7 @@ func (p *chatPage) View() string {
 			// Add section line only when expanded
 			if p.pillsExpanded {
 				// Calculate available width for section line after pills
-				totalWidth := p.width - SideBarWidth - 2 // -2 for left padding
-				totalWidth -= 2                          // Additional padding when expanded
+				totalWidth := p.width - SideBarWidth - 4 // -4 for left padding
 				pillsRowWidth := lipgloss.Width(pillsRow)
 				availableWidth := totalWidth - pillsRowWidth
 
@@ -607,12 +606,7 @@ func (p *chatPage) View() string {
 				pillsArea = pillsRow
 			}
 
-			style := t.S().Base.MarginTop(1)
-			if p.pillsExpanded {
-				style = style.PaddingLeft(1).MarginLeft(1).BorderLeft(true).BorderStyle(lipgloss.ThickBorder()).BorderForeground(t.GreenDark)
-			} else {
-				style = style.PaddingLeft(4)
-			}
+			style := t.S().Base.MarginTop(1).PaddingLeft(4)
 			pillsArea = style.Render(pillsArea)
 		}
 
@@ -1230,10 +1224,18 @@ func (p *chatPage) Help() help.KeyMap {
 			hasQueue := p.promptQueue > 0
 			if hasTodos || hasQueue {
 				toggleBinding := p.keyMap.TogglePills
-				if hasTodos {
-					toggleBinding.SetHelp("ctrl+space", "toggle todos")
+				if p.pillsExpanded {
+					if hasTodos {
+						toggleBinding.SetHelp("ctrl+space", "hide todos")
+					} else {
+						toggleBinding.SetHelp("ctrl+space", "hide queued")
+					}
 				} else {
-					toggleBinding.SetHelp("ctrl+space", "toggle queued")
+					if hasTodos {
+						toggleBinding.SetHelp("ctrl+space", "show todos")
+					} else {
+						toggleBinding.SetHelp("ctrl+space", "show queued")
+					}
 				}
 				shortList = append(shortList, toggleBinding)
 				globalBindings = append(globalBindings, toggleBinding)

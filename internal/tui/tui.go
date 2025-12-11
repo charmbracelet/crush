@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
+	tuieditor "github.com/charmbracelet/crush/internal/tui/components/dialogs/tui_editor"
 	"github.com/charmbracelet/crush/internal/tui/page"
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -321,6 +322,27 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: ghdash.NewDialog(a.app.Context(), a.app.Config().WorkingDir()),
 		})
+	// Embedded TUI Editor
+	case commands.OpenEmbeddedEditorMsg:
+		if a.dialog.ActiveDialogID() == tuieditor.DialogID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: tuieditor.NewDialog(a.app.Context(), tuieditor.Config{
+				FilePath:   msg.FilePath,
+				Editor:     msg.Editor,
+				WorkingDir: a.app.Config().WorkingDir(),
+			}),
+		})
+	// Editor result - forward to page
+	case tuieditor.EditorResultMsg:
+		item, ok := a.pages[a.currentPage]
+		if !ok {
+			return a, nil
+		}
+		updated, itemCmd := item.Update(msg)
+		a.pages[a.currentPage] = updated
+		return a, itemCmd
 	// Permissions
 	case pubsub.Event[permission.PermissionNotification]:
 		item, ok := a.pages[a.currentPage]

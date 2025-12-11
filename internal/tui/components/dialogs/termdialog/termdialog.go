@@ -34,8 +34,8 @@ type Config struct {
 	LoadingMsg string
 	// Term is the terminal to embed.
 	Term *terminal.Terminal
-	// OnClose is called when the dialog is closed (optional).
-	OnClose func()
+	// Can return a tea.Cmd to emit messages after close.
+	OnClose func() tea.Cmd
 	// QuitHint is shown in the header (e.g., "q to close"). If empty, no hint is shown.
 	QuitHint string
 }
@@ -46,7 +46,7 @@ type Dialog struct {
 	title      string
 	loadingMsg string
 	term       *terminal.Terminal
-	onClose    func()
+	onClose    func() tea.Cmd
 	quitHint   string
 
 	wWidth     int
@@ -263,7 +263,7 @@ func (d *Dialog) Close() tea.Cmd {
 	_ = d.term.Close()
 
 	if d.onClose != nil {
-		d.onClose()
+		return d.onClose()
 	}
 
 	return nil

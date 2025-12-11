@@ -85,10 +85,14 @@ type (
 	ToggleThinkingMsg      struct{}
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
-	ToggleYoloModeMsg      struct{}
-	OpenLazygitMsg         struct{}
-	OpenGhDashMsg          struct{}
-	CompactMsg             struct {
+	OpenEmbeddedEditorMsg  struct {
+		FilePath string
+		Editor   string
+	}
+	ToggleYoloModeMsg struct{}
+	OpenLazygitMsg    struct{}
+	OpenGhDashMsg     struct{}
+	CompactMsg        struct {
 		SessionID string
 	}
 )

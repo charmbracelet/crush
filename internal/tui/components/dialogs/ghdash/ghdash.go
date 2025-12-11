@@ -7,6 +7,8 @@ import (
 	"image/color"
 	"os"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/termdialog"
@@ -35,10 +37,11 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		LoadingMsg: "Starting gh-dash...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
 		QuitHint:   "q to close",
-		OnClose: func() {
+		OnClose: func() tea.Cmd {
 			if configFile != "" {
 				_ = os.Remove(configFile)
 			}
+			return nil
 		},
 	})
 }

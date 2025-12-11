@@ -581,8 +581,6 @@ func (p *chatPage) View() string {
 		if len(pills) > 0 {
 			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
 
-
-
 			if expandedList != "" {
 				pillsArea = lipgloss.JoinVertical(
 					lipgloss.Left,

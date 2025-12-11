@@ -540,8 +540,18 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	summaryPromptText := "Provide a detailed summary of our conversation above."
+	if len(currentSession.Todos) > 0 {
+		summaryPromptText += "\n\n## Current Todo List\n\n"
+		for _, t := range currentSession.Todos {
+			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
+		}
+		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
+		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          "Provide a detailed summary of our conversation above.",
+		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {

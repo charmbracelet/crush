@@ -121,6 +121,12 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
+// Context returns the application's global context. When cancelled, all
+// child processes and goroutines should terminate.
+func (app *App) Context() context.Context {
+	return app.globalCtx
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {

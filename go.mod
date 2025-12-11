@@ -29,6 +29,8 @@ require (
 	github.com/charmbracelet/x/exp/slice v0.0.0-20251201173703-9f73bfd934ff
 	github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4
 	github.com/charmbracelet/x/term v0.2.2
+	github.com/charmbracelet/x/vt v0.0.0-20251210182518-b3d4d1ed2373
+	github.com/charmbracelet/x/xpty v0.1.3
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/google/uuid v1.6.0
@@ -91,6 +93,8 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 // indirect
+	github.com/charmbracelet/x/conpty v0.1.1 // indirect
+	github.com/charmbracelet/x/errors v0.0.0-20240508181413-e8d8b6e2de86 // indirect
 	github.com/charmbracelet/x/etag v0.2.0 // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -98,6 +102,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.6.1 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect

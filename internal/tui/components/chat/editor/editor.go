@@ -264,7 +264,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		// Open command palette when "/" is pressed on empty prompt
 		case msg.String() == "/" && m.IsEmpty():
 			return m, util.CmdHandler(dialogs.OpenDialogMsg{
-				Model: commands.NewCommandDialog(m.session.ID),
+				Model: commands.NewCommandDialog(m.app.Context(), m.session.ID),
 			})
 		// Completions
 		case msg.String() == "@" && !m.isCompletionsOpen &&

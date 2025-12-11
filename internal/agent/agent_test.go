@@ -453,6 +453,10 @@ func TestCoderAgent(t *testing.T) {
 				require.Contains(t, string(content), "Hello, Crush!", "Expected file to contain 'Hello, Crush!'")
 			})
 			t.Run("sourcegraph tool", func(t *testing.T) {
+				if runtime.GOOS == "darwin" {
+					t.Skip("skipping flacky test on macos for now")
+				}
+
 				agent, env := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")

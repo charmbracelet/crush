@@ -223,10 +223,23 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
+
+	// Always check current queue size in View to ensure accurate display
+	// This prevents stale queue numbers from being displayed
+	var currentQueueSize int
+	if m.app.AgentCoordinator != nil && m.session.ID != "" {
+		currentQueueSize = m.app.AgentCoordinator.QueuedPrompts(m.session.ID)
+		// Update cached value for consistency
+		m.promptQueue = currentQueueSize
+	} else {
+		currentQueueSize = m.promptQueue
+	}
+
 	height := m.height
-	if m.promptQueue > 0 {
+	if currentQueueSize > 0 {
 		height -= 4 // pill height and padding
 	}
+
 	view := []string{
 		t.S().Base.
 			Padding(1, 1, 0, 1).
@@ -236,10 +249,13 @@ func (m *messageListCmp) View() string {
 				m.listCmp.View(),
 			),
 	}
-	if m.app.AgentCoordinator != nil && m.promptQueue > 0 {
-		queuePill := queuePill(m.promptQueue, t)
-		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
+
+	if currentQueueSize > 0 {
+		queuePill := queuePill(currentQueueSize, t)
+		// queuePill already includes padding, don't re-render to avoid number splitting
+		view = append(view, queuePill)
 	}
+
 	return strings.Join(view, "\n")
 }
 

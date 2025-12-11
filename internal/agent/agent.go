@@ -54,6 +54,7 @@ type SessionAgentCall struct {
 	TopK             *int64
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
+	DeferredQueue    bool // If true, queue message to run after task completes instead of interrupting
 }
 
 type SessionAgent interface {
@@ -87,7 +88,8 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
+	messageQueue   *csync.Map[string, []SessionAgentCall] // Immediate queue: processed in PrepareStep
+	deferredQueue  *csync.Map[string, []SessionAgentCall] // Deferred queue: processed after task completes
 	activeRequests *csync.Map[string, context.CancelFunc]
 }
 
@@ -117,8 +119,30 @@ func NewSessionAgent(
 		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
+		deferredQueue:        csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
+}
+
+// processNextQueuedMessage processes the next message from a queue.
+// It returns the result, error, and a boolean indicating if a message was processed.
+func (a *sessionAgent) processNextQueuedMessage(ctx context.Context, sessionID string, queue *csync.Map[string, []SessionAgentCall]) (*fantasy.AgentResult, error, bool) {
+	messages, ok := queue.Get(sessionID)
+	if !ok || len(messages) == 0 {
+		return nil, nil, false
+	}
+
+	firstMessage := messages[0]
+	remaining := messages[1:]
+	if len(remaining) > 0 {
+		queue.Set(sessionID, remaining)
+	} else {
+		// Remove the key when queue is empty to ensure accurate counting
+		queue.Del(sessionID)
+	}
+
+	result, err := a.Run(ctx, firstMessage)
+	return result, err, true
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -131,13 +155,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
-		existing, ok := a.messageQueue.Get(call.SessionID)
-		if !ok {
-			existing = []SessionAgentCall{}
+		slog.Debug("Session is busy, queuing message", "session_id", call.SessionID, "deferred_queue", call.DeferredQueue)
+		if call.DeferredQueue {
+			// Add to deferred queue: will be processed after task completes
+			existing, ok := a.deferredQueue.Get(call.SessionID)
+			if !ok {
+				existing = []SessionAgentCall{}
+			}
+			existing = append(existing, call)
+			a.deferredQueue.Set(call.SessionID, existing)
+			slog.Info("Message added to deferred queue", "session_id", call.SessionID, "queue_size", len(existing))
+			return nil, nil
+		} else {
+			// Add to immediate queue: cancel current task and process immediately
+			existing, ok := a.messageQueue.Get(call.SessionID)
+			if !ok {
+				existing = []SessionAgentCall{}
+			}
+			existing = append(existing, call)
+			a.messageQueue.Set(call.SessionID, existing)
+
+			// Cancel the current task to interrupt it and process the queued message
+			if cancel, ok := a.activeRequests.Get(call.SessionID); ok && cancel != nil {
+				slog.Info("Cancelling current task to process immediate queue", "session_id", call.SessionID)
+				cancel()
+			}
+			return nil, nil
 		}
-		existing = append(existing, call)
-		a.messageQueue.Set(call.SessionID, existing)
-		return nil, nil
 	}
 
 	if len(a.tools) > 0 {
@@ -211,14 +255,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
-			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
-			a.messageQueue.Del(call.SessionID)
-			for _, queued := range queuedCalls {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
+			// Check if context is cancelled before processing immediate queue
+			// If cancelled, leave the queue for error handling to process
+			if callContext.Err() != nil {
+				// Context is cancelled, don't process queue here
+				// It will be processed in error handling
+			} else {
+				queuedCalls, _ := a.messageQueue.Get(call.SessionID)
+				a.messageQueue.Del(call.SessionID)
+				for _, queued := range queuedCalls {
+					userMessage, createErr := a.createUserMessage(callContext, queued)
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages)
@@ -378,6 +429,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {
+			// If no assistant message was created, check both queues
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+
+			// Wait for any background goroutines (e.g., title generation) to complete
+			wg.Wait()
+
+			// First check deferred queue (messages queued to run after task completes)
+			if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.deferredQueue); processed {
+				return result, err
+			}
+
+			// Then check immediate queue (messages queued to interrupt current task)
+			if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.messageQueue); processed {
+				return result, err
+			}
 			return result, err
 		}
 		// Ensure we finish thinking on error to close the reasoning state.
@@ -458,6 +525,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if updateErr != nil {
 			return nil, updateErr
 		}
+
+		// Release active request before processing queued messages.
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+
+		// Wait for any background goroutines (e.g., title generation) to complete
+		wg.Wait()
+
+		// If canceled, check both queues
+		if isCancelErr {
+			// First check deferred queue (messages queued to run after task completes)
+			// This handles the case where DeferredQueue=true and task was canceled
+			if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.deferredQueue); processed {
+				return result, err
+			}
+
+			// Then check immediate queue (messages queued to interrupt current task)
+			if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.messageQueue); processed {
+				return result, err
+			}
+		}
+
 		return nil, err
 	}
 	wg.Wait()
@@ -483,14 +572,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.activeRequests.Del(call.SessionID)
 	cancel()
 
-	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
-	if !ok || len(queuedMessages) == 0 {
+	// Process deferred queue first (messages queued to run after task completes)
+	if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.deferredQueue); processed {
 		return result, err
 	}
-	// There are queued messages restart the loop.
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
-	return a.Run(ctx, firstQueuedMessage)
+
+	// Process immediate queue (messages queued to interrupt current task)
+	if result, err, processed := a.processNextQueuedMessage(ctx, call.SessionID, a.messageQueue); processed {
+		return result, err
+	}
+	return result, err
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
@@ -798,6 +889,7 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Info("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
+		a.deferredQueue.Del(sessionID)
 	}
 }
 
@@ -805,6 +897,7 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Info("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
+		a.deferredQueue.Del(sessionID)
 	}
 }
 
@@ -844,11 +937,15 @@ func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
 }
 
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return 0
+	immediateCount := 0
+	if l, ok := a.messageQueue.Get(sessionID); ok {
+		immediateCount = len(l)
 	}
-	return len(l)
+	deferredCount := 0
+	if l, ok := a.deferredQueue.Get(sessionID); ok {
+		deferredCount = len(l)
+	}
+	return immediateCount + deferredCount
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

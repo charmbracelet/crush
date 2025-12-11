@@ -52,7 +52,28 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 
 	cfg.dataConfigDir = GlobalConfigData()
 
+	// Save DeferredQueue value before setDefaults
+	// If Options exists, it means it was loaded from config file, so we preserve the value
+	// If Options is nil, it will be created in setDefaults with default values
+	var savedDeferredQueue *bool
+	if cfg.Options != nil {
+		// Options exists, so DeferredQueue was loaded from config (even if false)
+		// Save it to restore after setDefaults in case Options gets recreated
+		savedDeferredQueue = &cfg.Options.DeferredQueue
+	}
+
 	cfg.setDefaults(workingDir, dataDir)
+
+	// Restore DeferredQueue value if it was loaded from config
+	// This handles the case where Options was nil and got recreated, but we had a value from config
+	if cfg.Options != nil && savedDeferredQueue != nil {
+		cfg.Options.DeferredQueue = *savedDeferredQueue
+	}
+
+	// Log deferred_queue setting for debugging
+	if cfg.Options != nil {
+		slog.Debug("Loaded deferred_queue setting", "deferred_queue", cfg.Options.DeferredQueue, "working_dir", workingDir)
+	}
 
 	if debug {
 		cfg.Options.Debug = true

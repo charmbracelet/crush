@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
@@ -611,6 +612,158 @@ func TestCoderAgent(t *testing.T) {
 
 				require.True(t, foundGlobResult, "Expected to find glob tool result")
 				require.True(t, foundLSResult, "Expected to find ls tool result")
+			})
+			t.Run("deferred queue", func(t *testing.T) {
+				// Check if VCR cassette exists for this test
+				cassettePath := filepath.Join("internal/agent/testdata/TestCoderAgent", pair.name, "deferred_queue.yaml")
+				if _, err := os.Stat(cassettePath); os.IsNotExist(err) {
+					// Skip if no cassette and no API keys (VCR will try to record but will fail without keys)
+					if os.Getenv("CRUSH_ANTHROPIC_API_KEY") == "" &&
+						os.Getenv("CRUSH_OPENAI_API_KEY") == "" &&
+						os.Getenv("CRUSH_OPENROUTER_API_KEY") == "" &&
+						os.Getenv("CRUSH_ZAI_API_KEY") == "" {
+						t.Skip("Skipping test: VCR cassette not found and no API keys available")
+					}
+				}
+				agent, env := setupAgent(t, pair)
+
+				session, err := env.sessions.Create(t.Context(), "New Session")
+				require.NoError(t, err)
+
+				// Start first message (will take some time)
+				firstCall := SessionAgentCall{
+					Prompt:          "Say 'First message' and wait",
+					SessionID:       session.ID,
+					MaxOutputTokens: 1000,
+					DeferredQueue:   false, // First message uses immediate queue
+				}
+
+				// Start the first message in a goroutine
+				firstDone := make(chan bool, 1)
+				go func() {
+					_, err := agent.Run(t.Context(), firstCall)
+					require.NoError(t, err)
+					firstDone <- true
+				}()
+
+				// Wait a bit to ensure first message is processing
+				time.Sleep(100 * time.Millisecond)
+
+				// Send second message with deferred queue
+				secondCall := SessionAgentCall{
+					Prompt:          "Say 'Second message'",
+					SessionID:       session.ID,
+					MaxOutputTokens: 1000,
+					DeferredQueue:   true, // This should be queued until first completes
+				}
+
+				// This should return immediately (queued)
+				_, err = agent.Run(t.Context(), secondCall)
+				require.NoError(t, err)
+
+				// Verify second message is queued
+				queuedCount := agent.QueuedPrompts(session.ID)
+				require.Greater(t, queuedCount, 0, "Expected second message to be queued")
+
+				// Wait for first message to complete
+				select {
+				case <-firstDone:
+					// First message completed
+				case <-time.After(10 * time.Second):
+					t.Fatal("First message did not complete in time")
+				}
+
+				// Wait a bit for deferred queue processing
+				time.Sleep(500 * time.Millisecond)
+
+				// Verify all messages were processed
+				msgs, err := env.messages.List(t.Context(), session.ID)
+				require.NoError(t, err)
+				require.GreaterOrEqual(t, len(msgs), 4, "Expected at least 4 messages (2 user + 2 assistant)")
+
+				// Verify messages are in correct order
+				userPrompts := []string{}
+				for _, msg := range msgs {
+					if msg.Role == message.User {
+						for _, part := range msg.Parts {
+							if textPart, ok := part.(message.TextContent); ok {
+								userPrompts = append(userPrompts, textPart.Text)
+							}
+						}
+					}
+				}
+				require.GreaterOrEqual(t, len(userPrompts), 2, "Expected at least 2 user messages")
+				require.Contains(t, userPrompts[0], "First message", "First message should be first")
+				require.Contains(t, userPrompts[1], "Second message", "Second message should be second")
+			})
+			t.Run("immediate queue vs deferred queue", func(t *testing.T) {
+				// Check if VCR cassette exists for this test
+				cassettePath := filepath.Join("internal/agent/testdata/TestCoderAgent", pair.name, "immediate_queue_vs_deferred_queue.yaml")
+				if _, err := os.Stat(cassettePath); os.IsNotExist(err) {
+					// Skip if no cassette and no API keys (VCR will try to record but will fail without keys)
+					if os.Getenv("CRUSH_ANTHROPIC_API_KEY") == "" &&
+						os.Getenv("CRUSH_OPENAI_API_KEY") == "" &&
+						os.Getenv("CRUSH_OPENROUTER_API_KEY") == "" &&
+						os.Getenv("CRUSH_ZAI_API_KEY") == "" {
+						t.Skip("Skipping test: VCR cassette not found and no API keys available")
+					}
+				}
+				agent, env := setupAgent(t, pair)
+
+				session, err := env.sessions.Create(t.Context(), "New Session")
+				require.NoError(t, err)
+
+				// Start first message
+				firstCall := SessionAgentCall{
+					Prompt:          "Say 'First'",
+					SessionID:       session.ID,
+					MaxOutputTokens: 1000,
+					DeferredQueue:   false,
+				}
+
+				firstDone := make(chan bool, 1)
+				go func() {
+					_, err := agent.Run(t.Context(), firstCall)
+					require.NoError(t, err)
+					firstDone <- true
+				}()
+
+				// Wait a bit
+				time.Sleep(100 * time.Millisecond)
+
+				// Send immediate queue message (should interrupt)
+				immediateCall := SessionAgentCall{
+					Prompt:          "Say 'Immediate'",
+					SessionID:       session.ID,
+					MaxOutputTokens: 1000,
+					DeferredQueue:   false, // Immediate queue
+				}
+				_, err = agent.Run(t.Context(), immediateCall)
+				require.NoError(t, err)
+
+				// Send deferred queue message (should wait)
+				deferredCall := SessionAgentCall{
+					Prompt:          "Say 'Deferred'",
+					SessionID:       session.ID,
+					MaxOutputTokens: 1000,
+					DeferredQueue:   true, // Deferred queue
+				}
+				_, err = agent.Run(t.Context(), deferredCall)
+				require.NoError(t, err)
+
+				// Wait for completion
+				select {
+				case <-firstDone:
+				case <-time.After(10 * time.Second):
+					t.Fatal("First message did not complete in time")
+				}
+
+				// Wait for deferred queue processing
+				time.Sleep(1 * time.Second)
+
+				// Verify queue is empty
+				queuedCount := agent.QueuedPrompts(session.ID)
+				require.Equal(t, 0, queuedCount, "Queue should be empty after processing")
 			})
 		})
 	}

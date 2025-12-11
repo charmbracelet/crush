@@ -53,10 +53,11 @@ type Terminal struct {
 	vterm *vt.Emulator
 	cmd   *exec.Cmd
 
-	width       int
-	height      int
-	mouseMode   uv.MouseMode
-	refreshRate time.Duration
+	width         int
+	height        int
+	mouseMode     uv.MouseMode
+	cursorVisible bool
+	refreshRate   time.Duration
 
 	started bool
 	closed  bool
@@ -84,9 +85,10 @@ func New(cfg Config) *Terminal {
 	}
 
 	return &Terminal{
-		ctx:         ctx,
-		cmd:         cmd,
-		refreshRate: refreshRate,
+		ctx:           ctx,
+		cmd:           cmd,
+		refreshRate:   refreshRate,
+		cursorVisible: true, // Cursor is visible by default
 	}
 }
 
@@ -150,7 +152,7 @@ func (t *Terminal) Start() error {
 	return nil
 }
 
-// setupCallbacks configures vterm callbacks to track mouse mode.
+// setupCallbacks configures vterm callbacks to track mouse mode and cursor visibility.
 func (t *Terminal) setupCallbacks() {
 	t.vterm.SetCallbacks(vt.Callbacks{
 		EnableMode: func(mode ansi.Mode) {
@@ -168,6 +170,9 @@ func (t *Terminal) setupCallbacks() {
 			case ansi.ModeMouseNormal, ansi.ModeMouseButtonEvent, ansi.ModeMouseAnyEvent:
 				t.mouseMode = uv.MouseModeNone
 			}
+		},
+		CursorVisibility: func(visible bool) {
+			t.cursorVisible = visible
 		},
 	})
 }
@@ -263,6 +268,20 @@ func (t *Terminal) Render() string {
 	}
 
 	return t.vterm.Render()
+}
+
+// CursorPosition returns the current cursor position in the terminal.
+// Returns (-1, -1) if the terminal is not started, closed, or cursor is hidden.
+func (t *Terminal) CursorPosition() (x, y int) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if t.vterm == nil || !t.started || t.closed || !t.cursorVisible {
+		return -1, -1
+	}
+
+	pos := t.vterm.CursorPosition()
+	return pos.X, pos.Y
 }
 
 // Started returns whether the terminal has been started.

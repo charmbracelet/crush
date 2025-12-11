@@ -93,17 +93,17 @@ func createThemedConfig() string {
     defaultFgColor:
       - default
 `,
-		colorToHex(t.BorderFocus),       // Active border: purple (Charple)
-		colorToHex(t.Border),            // Inactive border: gray (Charcoal)
-		colorToHex(t.Info),              // Search border: blue (Malibu) - calmer than warning
-		colorToHex(t.FgMuted),           // Options text: muted gray (Squid) - matches help text
-		colorToHex(t.Primary),           // Selected line bg: purple (Charple) - matches TextSelected
-		colorToHex(t.BgSubtle),          // Inactive selected: subtle gray (Charcoal)
-		colorToHex(t.Success),           // Cherry-picked fg: green (Guac) - positive action
-		colorToHex(t.BgSubtle),          // Cherry-picked bg: subtle (Charcoal)
-		colorToHex(t.Info),              // Marked base fg: blue (Malibu) - distinct from cherry
-		colorToHex(t.BgSubtle),          // Marked base bg: subtle (Charcoal)
-		colorToHex(t.Error),             // Unstaged changes: red (Sriracha)
+		colorToHex(t.BorderFocus), // Active border: purple (Charple)
+		colorToHex(t.Border),      // Inactive border: gray (Charcoal)
+		colorToHex(t.Info),        // Search border: blue (Malibu) - calmer than warning
+		colorToHex(t.FgMuted),     // Options text: muted gray (Squid) - matches help text
+		colorToHex(t.Primary),     // Selected line bg: purple (Charple) - matches TextSelected
+		colorToHex(t.BgSubtle),    // Inactive selected: subtle gray (Charcoal)
+		colorToHex(t.Success),     // Cherry-picked fg: green (Guac) - positive action
+		colorToHex(t.BgSubtle),    // Cherry-picked bg: subtle (Charcoal)
+		colorToHex(t.Info),        // Marked base fg: blue (Malibu) - distinct from cherry
+		colorToHex(t.BgSubtle),    // Marked base bg: subtle (Charcoal)
+		colorToHex(t.Error),       // Unstaged changes: red (Sriracha)
 	)
 
 	f, err := os.CreateTemp("", "crush-lazygit-*.yml")

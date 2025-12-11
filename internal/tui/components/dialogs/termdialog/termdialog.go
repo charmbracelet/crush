@@ -221,6 +221,27 @@ func (d *Dialog) ID() dialogs.DialogID {
 	return d.id
 }
 
+// Cursor returns the cursor position adjusted for the dialog's screen position.
+// Returns nil if the terminal cursor is hidden or not available.
+func (d *Dialog) Cursor() *tea.Cursor {
+	x, y := d.term.CursorPosition()
+	if x < 0 || y < 0 {
+		return nil
+	}
+
+	t := styles.CurrentTheme()
+	row, col := d.Position()
+	cursor := tea.NewCursor(x, y)
+	// Adjust for dialog position: border (1) + header height
+	cursor.X += col + 1
+	cursor.Y += row + 1 + headerHeight
+	// Match the app's cursor style
+	cursor.Color = t.Secondary
+	cursor.Shape = tea.CursorBlock
+	cursor.Blink = true
+	return cursor
+}
+
 func (d *Dialog) Close() tea.Cmd {
 	_ = d.term.Close()
 

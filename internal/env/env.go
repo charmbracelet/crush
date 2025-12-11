@@ -1,6 +1,9 @@
 package env
 
-import "os"
+import (
+	"os"
+	"testing"
+)
 
 type Env interface {
 	Get(key string) string
@@ -23,6 +26,9 @@ func (o *osEnv) Env() []string {
 }
 
 func New() Env {
+	if testing.Testing() {
+		return NewFromMap(nil)
+	}
 	return &osEnv{}
 }
 

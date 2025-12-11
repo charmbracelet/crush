@@ -8,7 +8,7 @@ import (
 )
 
 func TestOsEnv_Get(t *testing.T) {
-	env := New()
+	env := &osEnv{}
 
 	// Test getting an existing environment variable
 	t.Setenv("TEST_VAR", "test_value")
@@ -22,7 +22,7 @@ func TestOsEnv_Get(t *testing.T) {
 }
 
 func TestOsEnv_Env(t *testing.T) {
-	env := New()
+	env := &osEnv{}
 
 	envVars := env.Env()
 

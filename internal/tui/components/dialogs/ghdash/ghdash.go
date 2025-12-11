@@ -61,6 +61,7 @@ func createThemedConfig() string {
       faint: "%s"
       warning: "%s"
       success: "%s"
+      error: "%s"
     background:
       selected: "%s"
     border:
@@ -70,13 +71,14 @@ func createThemedConfig() string {
 `,
 		colorToHex(t.FgBase),
 		colorToHex(t.FgMuted),
-		colorToHex(t.BgBase),
-		colorToHex(t.FgHalfMuted),
+		colorToHex(t.FgSelected),
+		colorToHex(t.FgSubtle),
 		colorToHex(t.Warning),
 		colorToHex(t.Success),
+		colorToHex(t.Error),
 		colorToHex(t.Primary),
 		colorToHex(t.BorderFocus),
-		colorToHex(t.Border),
+		colorToHex(t.FgMuted),
 		colorToHex(t.BgSubtle),
 	)
 

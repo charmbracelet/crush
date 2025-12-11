@@ -87,6 +87,7 @@ type (
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
 	OpenLazygitMsg         struct{}
+	OpenGhDashMsg          struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
@@ -450,6 +451,20 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 				return util.CmdHandler(OpenLazygitMsg{})
 			},
 		})
+	}
+
+	// Add gh-dash command if gh CLI with dash extension is installed.
+	if out, _, err := sh.Exec(c.ctx, "gh extension list"); err == nil {
+		if strings.Contains(out, "dash") {
+			commands = append(commands, Command{
+				ID:          "ghdash",
+				Title:       "Open GitHub Dashboard",
+				Description: "Open gh-dash for GitHub pull requests and issues",
+				Handler: func(cmd Command) tea.Cmd {
+					return util.CmdHandler(OpenGhDashMsg{})
+				},
+			})
+		}
 	}
 
 	return append(commands, []Command{

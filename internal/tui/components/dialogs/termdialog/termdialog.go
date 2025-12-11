@@ -149,7 +149,6 @@ func (d *Dialog) handleResize(msg tea.WindowSizeMsg) (util.Model, tea.Cmd) {
 }
 
 func (d *Dialog) handleKey(msg tea.KeyPressMsg) (util.Model, tea.Cmd) {
-	// Forward all keys to the terminal.
 	if msg.Text != "" {
 		d.term.SendText(msg.Text)
 	} else {
@@ -232,10 +231,8 @@ func (d *Dialog) Cursor() *tea.Cursor {
 	t := styles.CurrentTheme()
 	row, col := d.Position()
 	cursor := tea.NewCursor(x, y)
-	// Adjust for dialog position: border (1) + header height
 	cursor.X += col + 1
 	cursor.Y += row + 1 + headerHeight
-	// Match the app's cursor style
 	cursor.Color = t.Secondary
 	cursor.Shape = tea.CursorBlock
 	cursor.Blink = true

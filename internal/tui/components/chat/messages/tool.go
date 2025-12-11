@@ -425,7 +425,7 @@ func (m *toolCallCmp) formatResultForCopy() string {
 		return m.formatWebFetchResultForCopy()
 	case agent.AgentToolName:
 		return m.formatAgentResultForCopy()
-	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName:
+	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.SourcegraphToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", m.result.Content)
 	default:
 		return m.result.Content

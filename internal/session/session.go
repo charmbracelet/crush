@@ -3,7 +3,9 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -11,6 +13,20 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
+
+type TodoStatus string
+
+const (
+	TodoStatusPending    TodoStatus = "pending"
+	TodoStatusInProgress TodoStatus = "in_progress"
+	TodoStatusCompleted  TodoStatus = "completed"
+)
+
+type Todo struct {
+	Content    string     `json:"content"`
+	Status     TodoStatus `json:"status"`
+	ActiveForm string     `json:"active_form"`
+}
 
 type Session struct {
 	ID               string
@@ -21,6 +37,7 @@ type Session struct {
 	CompletionTokens int64
 	SummaryMessageID string
 	Cost             float64
+	Todos            []Todo
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -111,6 +128,11 @@ func (s *service) Get(ctx context.Context, id string) (Session, error) {
 }
 
 func (s *service) Save(ctx context.Context, session Session) (Session, error) {
+	todosJSON, err := marshalTodos(session.Todos)
+	if err != nil {
+		return Session{}, err
+	}
+
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
 		ID:               session.ID,
 		Title:            session.Title,
@@ -121,6 +143,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			Valid:  session.SummaryMessageID != "",
 		},
 		Cost: session.Cost,
+		Todos: sql.NullString{
+			String: todosJSON,
+			Valid:  todosJSON != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -143,6 +169,10 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 }
 
 func (s service) fromDBItem(item db.Session) Session {
+	todos, err := unmarshalTodos(item.Todos.String)
+	if err != nil {
+		slog.Error("failed to unmarshal todos", "session_id", item.ID, "error", err)
+	}
 	return Session{
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
@@ -152,9 +182,32 @@ func (s service) fromDBItem(item db.Session) Session {
 		CompletionTokens: item.CompletionTokens,
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
+		Todos:            todos,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
+}
+
+func marshalTodos(todos []Todo) (string, error) {
+	if len(todos) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(todos)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalTodos(data string) ([]Todo, error) {
+	if data == "" {
+		return []Todo{}, nil
+	}
+	var todos []Todo
+	if err := json.Unmarshal([]byte(data), &todos); err != nil {
+		return []Todo{}, err
+	}
+	return todos, nil
 }
 
 func NewService(q db.Querier) Service {

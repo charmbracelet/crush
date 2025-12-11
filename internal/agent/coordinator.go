@@ -49,6 +49,7 @@ type Coordinator interface {
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
+	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
@@ -99,7 +100,7 @@ func NewCoordinator(
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +300,7 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent) (SessionAgent, error) {
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx)
 	if err != nil {
 		return nil, err
@@ -316,6 +317,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		small,
 		largeProviderCfg.SystemPromptPrefix,
 		systemPrompt,
+		isSubAgent,
 		c.cfg.Options.DisableAutoSummarize,
 		c.permissions.SkipRequests(),
 		c.sessions,
@@ -372,6 +374,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
+		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspClients, c.permissions, c.cfg.WorkingDir()),
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
 	)
@@ -781,6 +784,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
 	return c.currentAgent.QueuedPrompts(sessionID)
+}
+
+func (c *coordinator) QueuedPromptsList(sessionID string) []string {
+	return c.currentAgent.QueuedPromptsList(sessionID)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {

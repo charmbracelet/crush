@@ -12,6 +12,13 @@ type KeyMap struct {
 	Details       key.Binding
 }
 
+type PillsKeyMap struct {
+	Left  key.Binding
+	Right key.Binding
+	Up    key.Binding
+	Down  key.Binding
+}
+
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		NewSession: key.NewBinding(
@@ -33,6 +40,27 @@ func DefaultKeyMap() KeyMap {
 		Details: key.NewBinding(
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "toggle details"),
+		),
+	}
+}
+
+func DefaultPillsKeyMap() PillsKeyMap {
+	return PillsKeyMap{
+		Left: key.NewBinding(
+			key.WithKeys("left"),
+			key.WithHelp("←/→", "section"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("right"),
+			key.WithHelp("←/→", "section"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑/k", "focus chat"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓/j", "focus pills"),
 		),
 	}
 }

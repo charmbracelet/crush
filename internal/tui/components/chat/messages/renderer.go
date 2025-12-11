@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/ansiext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/tui/components/chat/todos"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/highlight"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -197,6 +198,7 @@ func init() {
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
+	registry.register(tools.TodosToolName, func() renderer { return todosRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
 
@@ -1298,6 +1300,8 @@ func prettifyToolName(name string) string {
 		return "List"
 	case tools.SourcegraphToolName:
 		return "Sourcegraph"
+	case tools.TodosToolName:
+		return "To-Do"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:
@@ -1305,4 +1309,95 @@ func prettifyToolName(name string) string {
 	default:
 		return name
 	}
+}
+
+// -----------------------------------------------------------------------------
+//  Todos renderer
+// -----------------------------------------------------------------------------
+
+type todosRenderer struct {
+	baseRenderer
+}
+
+func (tr todosRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.TodosParams
+	var meta tools.TodosResponseMetadata
+	var headerText string
+	var body string
+
+	// Parse params for pending state (before result is available).
+	if err := tr.unmarshalParams(v.call.Input, &params); err == nil {
+		completedCount := 0
+		inProgressTask := ""
+		for _, todo := range params.Todos {
+			if todo.Status == "completed" {
+				completedCount++
+			}
+			if todo.Status == "in_progress" {
+				if todo.ActiveForm != "" {
+					inProgressTask = todo.ActiveForm
+				} else {
+					inProgressTask = todo.Content
+				}
+			}
+		}
+
+		// Default display from params (used when pending or no metadata).
+		ratio := t.S().Base.Foreground(t.BlueDark).Render(fmt.Sprintf("%d/%d", completedCount, len(params.Todos)))
+		headerText = ratio
+		if inProgressTask != "" {
+			headerText = fmt.Sprintf("%s · %s", ratio, inProgressTask)
+		}
+
+		// If we have metadata, use it for richer display.
+		if v.result.Metadata != "" {
+			if err := tr.unmarshalParams(v.result.Metadata, &meta); err == nil {
+				if meta.IsNew {
+					if meta.JustStarted != "" {
+						headerText = fmt.Sprintf("created %d todos, starting first", meta.Total)
+					} else {
+						headerText = fmt.Sprintf("created %d todos", meta.Total)
+					}
+					body = todos.FormatTodosList(meta.Todos, styles.ArrowRightIcon, t, v.textWidth())
+				} else {
+					// Build header based on what changed.
+					hasCompleted := len(meta.JustCompleted) > 0
+					hasStarted := meta.JustStarted != ""
+					allCompleted := meta.Completed == meta.Total
+
+					ratio := t.S().Base.Foreground(t.BlueDark).Render(fmt.Sprintf("%d/%d", meta.Completed, meta.Total))
+					if hasCompleted && hasStarted {
+						text := t.S().Subtle.Render(fmt.Sprintf(" · completed %d, starting next", len(meta.JustCompleted)))
+						headerText = fmt.Sprintf("%s%s", ratio, text)
+					} else if hasCompleted {
+						text := t.S().Subtle.Render(fmt.Sprintf(" · completed %d", len(meta.JustCompleted)))
+						if allCompleted {
+							text = t.S().Subtle.Render(" · completed all")
+						}
+						headerText = fmt.Sprintf("%s%s", ratio, text)
+					} else if hasStarted {
+						headerText = fmt.Sprintf("%s%s", ratio, t.S().Subtle.Render(" · starting task"))
+					} else {
+						headerText = ratio
+					}
+
+					// Build body with details.
+					if allCompleted {
+						// Show all todos when all are completed, like when created
+						body = todos.FormatTodosList(meta.Todos, styles.ArrowRightIcon, t, v.textWidth())
+					} else if meta.JustStarted != "" {
+						body = t.S().Base.Foreground(t.GreenDark).Render(styles.ArrowRightIcon+" ") +
+							t.S().Base.Foreground(t.FgBase).Render(meta.JustStarted)
+					}
+				}
+			}
+		}
+	}
+
+	args := newParamBuilder().addMain(headerText).build()
+
+	return tr.renderWithParams(v, "To-Do", args, func() string {
+		return body
+	})
 }

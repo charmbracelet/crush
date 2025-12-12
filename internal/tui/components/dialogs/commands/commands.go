@@ -75,6 +75,7 @@ type (
 	SwitchSessionsMsg      struct{}
 	NewSessionsMsg         struct{}
 	SwitchModelMsg         struct{}
+	SwitchQueueModeMsg     struct{}
 	QuitMsg                struct{}
 	OpenFilePickerMsg      struct{}
 	ToggleHelpMsg          struct{}
@@ -339,6 +340,14 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
+			},
+		},
+		{
+			ID:          "switch_queue_mode",
+			Title:       "Switch Queue Mode",
+			Description: "Switch between interrupt mode and queue mode",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchQueueModeMsg{})
 			},
 		},
 	}

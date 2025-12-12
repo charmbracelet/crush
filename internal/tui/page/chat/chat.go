@@ -584,9 +584,9 @@ func (p *chatPage) View() string {
 			// Add help hint for expanding/collapsing pills based on state.
 			var helpDesc string
 			if p.pillsExpanded {
-				helpDesc = "hide"
+				helpDesc = "close"
 			} else {
-				helpDesc = "show"
+				helpDesc = "open"
 			}
 			// Style to match help section: keys in FgMuted, description in FgSubtle
 			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")

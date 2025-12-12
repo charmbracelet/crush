@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -70,16 +69,7 @@ func (f *filterableGroupList[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		// handle movements
-		case key.Matches(msg, f.keyMap.Down),
-			key.Matches(msg, f.keyMap.Up),
-			key.Matches(msg, f.keyMap.DownOneItem),
-			key.Matches(msg, f.keyMap.UpOneItem),
-			key.Matches(msg, f.keyMap.HalfPageDown),
-			key.Matches(msg, f.keyMap.HalfPageUp),
-			key.Matches(msg, f.keyMap.PageDown),
-			key.Matches(msg, f.keyMap.PageUp),
-			key.Matches(msg, f.keyMap.End),
-			key.Matches(msg, f.keyMap.Home):
+		case isMovementKey(msg, f.keyMap):
 			u, cmd := f.groupedList.Update(msg)
 			f.groupedList = u.(*groupedList[T])
 			return f, cmd
@@ -118,44 +108,7 @@ func (f *filterableGroupList[T]) View() string {
 
 // removes bindings that are used for search
 func (f *filterableGroupList[T]) updateKeyMaps() {
-	removeLettersAndNumbers := func(bindings []string) []string {
-		var keep []string
-		for _, b := range bindings {
-			if len(b) != 1 {
-				keep = append(keep, b)
-				continue
-			}
-			if b == " " {
-				continue
-			}
-			m := alphanumericRegexGroup.MatchString(b)
-			if !m {
-				keep = append(keep, b)
-			}
-		}
-		return keep
-	}
-
-	updateBinding := func(binding key.Binding) key.Binding {
-		newKeys := removeLettersAndNumbers(binding.Keys())
-		if len(newKeys) == 0 {
-			binding.SetEnabled(false)
-			return binding
-		}
-		binding.SetKeys(newKeys...)
-		return binding
-	}
-
-	f.keyMap.Down = updateBinding(f.keyMap.Down)
-	f.keyMap.Up = updateBinding(f.keyMap.Up)
-	f.keyMap.DownOneItem = updateBinding(f.keyMap.DownOneItem)
-	f.keyMap.UpOneItem = updateBinding(f.keyMap.UpOneItem)
-	f.keyMap.HalfPageDown = updateBinding(f.keyMap.HalfPageDown)
-	f.keyMap.HalfPageUp = updateBinding(f.keyMap.HalfPageUp)
-	f.keyMap.PageDown = updateBinding(f.keyMap.PageDown)
-	f.keyMap.PageUp = updateBinding(f.keyMap.PageUp)
-	f.keyMap.End = updateBinding(f.keyMap.End)
-	f.keyMap.Home = updateBinding(f.keyMap.Home)
+	updateKeyMaps(f.keyMap, alphanumericRegexGroup)
 }
 
 func (m *filterableGroupList[T]) GetSize() (int, int) {

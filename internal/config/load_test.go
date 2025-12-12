@@ -1046,24 +1046,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		require.Error(t, err)
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
-			{
-				ID:                  "openai",
-				APIKey:              "set",
-				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
-					{
-						ID:               "large-model",
-						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
-					},
-				},
-			},
-		}
+		knownProviders := []catwalk.Provider{createTestProvider(true)}
 
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
@@ -1247,4 +1230,30 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
+}
+
+// createTestProvider creates a standard OpenAI provider for testing
+func createTestProvider(hasAPIKey bool) catwalk.Provider {
+	if hasAPIKey {
+		return catwalk.Provider{
+			ID:                  "openai",
+			APIKey:              "set",
+			DefaultLargeModelID: "large-model",
+			DefaultSmallModelID: "small-model",
+			Models: []catwalk.Model{
+				{ID: "large-model", DefaultMaxTokens: 1000},
+				{ID: "small-model", DefaultMaxTokens: 500},
+			},
+		}
+	}
+	return catwalk.Provider{
+		ID:                  "openai",
+		APIKey:              "$MISSING",
+		DefaultLargeModelID: "large-model",
+		DefaultSmallModelID: "small-model",
+		Models: []catwalk.Model{
+			{ID: "not-large-model", DefaultMaxTokens: 1000},
+			{ID: "small-model", DefaultMaxTokens: 500},
+		},
+	}
 }

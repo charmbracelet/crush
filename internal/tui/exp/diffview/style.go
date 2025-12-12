@@ -23,54 +23,80 @@ type Style struct {
 	DeleteLine  LineStyle
 }
 
-// DefaultLightStyle provides a default light theme style for the diff view.
-func DefaultLightStyle() Style {
+// colorScheme defines the colors for a theme
+type colorScheme struct {
+	dividerLineFg, dividerLineBg, dividerCodeFg, dividerCodeBg charmtone.Key
+	missingLineBg, missingCodeBg charmtone.Key
+	equalLineFg, equalLineBg, equalCodeFg, equalCodeBg charmtone.Key
+	insertLineFg charmtone.Key
+	insertLineBg, insertSymbolBg, insertCodeBg string
+	deleteLineFg charmtone.Key
+	deleteLineBg, deleteSymbolBg, deleteCodeBg string
+}
+
+// buildStyle creates a Style from the given color scheme
+func buildStyle(scheme colorScheme) Style {
 	return Style{
 		DividerLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
+				Foreground(scheme.dividerLineFg).
+				Background(scheme.dividerLineBg),
 			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Oyster).
-				Background(charmtone.Anchovy),
+				Foreground(scheme.dividerCodeFg).
+				Background(scheme.dividerCodeBg),
 		},
 		MissingLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Ash),
+				Background(scheme.missingLineBg),
 			Code: lipgloss.NewStyle().
-				Background(charmtone.Ash),
+				Background(scheme.missingCodeBg),
 		},
 		EqualLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Charcoal).
-				Background(charmtone.Ash),
+				Foreground(scheme.equalLineFg).
+				Background(scheme.equalLineBg),
 			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(charmtone.Salt),
+				Foreground(scheme.equalCodeFg).
+				Background(scheme.equalCodeBg),
 		},
 		InsertLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#c8e6c9")),
+				Foreground(scheme.insertLineFg).
+				Background(lipgloss.Color(scheme.insertLineBg)),
 			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#e8f5e9")),
+				Foreground(scheme.insertLineFg).
+				Background(lipgloss.Color(scheme.insertSymbolBg)),
 			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#e8f5e9")),
+				Foreground(charmtone.Salt).
+				Background(lipgloss.Color(scheme.insertCodeBg)),
 		},
 		DeleteLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffcdd2")),
+				Foreground(scheme.deleteLineFg).
+				Background(lipgloss.Color(scheme.deleteLineBg)),
 			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffebee")),
+				Foreground(scheme.deleteLineFg).
+				Background(lipgloss.Color(scheme.deleteSymbolBg)),
 			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#ffebee")),
+				Foreground(charmtone.Salt).
+				Background(lipgloss.Color(scheme.deleteCodeBg)),
 		},
 	}
+}
+
+// DefaultLightStyle provides a default light theme style for the diff view.
+func DefaultLightStyle() Style {
+	return buildStyle(colorScheme{
+		dividerLineFg: charmtone.Iron, dividerLineBg: charmtone.Thunder,
+		dividerCodeFg: charmtone.Oyster, dividerCodeBg: charmtone.Anchovy,
+		missingLineBg: charmtone.Ash, missingCodeBg: charmtone.Ash,
+		equalLineFg: charmtone.Charcoal, equalLineBg: charmtone.Ash,
+		equalCodeFg: charmtone.Pepper, equalCodeBg: charmtone.Salt,
+		insertLineFg: charmtone.Turtle,
+		insertLineBg: "#c8e6c9", insertSymbolBg: "#e8f5e9", insertCodeBg: "#e8f5e9",
+		deleteLineFg: charmtone.Cherry,
+		deleteLineBg: "#ffcdd2", deleteSymbolBg: "#ffebee", deleteCodeBg: "#ffebee",
+	})
 }
 
 // DefaultDarkStyle provides a default dark theme style for the diff view.

@@ -18,95 +18,14 @@ import (
 func TestList(t *testing.T) {
 	t.Parallel()
 	t.Run("should have correct positions in list that fits the items", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 5 {
-			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionForward(), WithSize(10, 20)).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, 0, l.selectedItemIdx)
-		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 5, len(l.indexMap))
-		require.Equal(t, 5, len(l.items))
-		require.Equal(t, 5, len(l.renderedItems))
-		assert.Equal(t, 5, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
-		start, end := l.viewPosition()
-		assert.Equal(t, 0, start)
-		assert.Equal(t, 4, end)
-		for i := range 5 {
-			item, ok := l.renderedItems[items[i].ID()]
-			require.True(t, ok)
-			assert.Equal(t, i, item.start)
-			assert.Equal(t, i, item.end)
-		}
-
-		golden.RequireEqual(t, []byte(l.View()))
+		testListPositions(t, true, 5, 10, 20, 0, 0, 0, 4)
 	})
 	t.Run("should have correct positions in list that fits the items backwards", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 5 {
-			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionBackward(), WithSize(10, 20)).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, 4, l.selectedItemIdx)
-		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 5, len(l.indexMap))
-		require.Equal(t, 5, len(l.items))
-		require.Equal(t, 5, len(l.renderedItems))
-		assert.Equal(t, 5, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
-		start, end := l.viewPosition()
-		assert.Equal(t, 0, start)
-		assert.Equal(t, 4, end)
-		for i := range 5 {
-			item, ok := l.renderedItems[items[i].ID()]
-			require.True(t, ok)
-			assert.Equal(t, i, item.start)
-			assert.Equal(t, i, item.end)
-		}
-
-		golden.RequireEqual(t, []byte(l.View()))
+		testListPositions(t, false, 5, 10, 20, 4, 0, 0, 4)
 	})
 
 	t.Run("should have correct positions in list that does not fits the items", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 30 {
-			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, 0, l.selectedItemIdx)
-		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, len(l.indexMap))
-		require.Equal(t, 30, len(l.items))
-		require.Equal(t, 30, len(l.renderedItems))
-		assert.Equal(t, 30, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
-		start, end := l.viewPosition()
-		assert.Equal(t, 0, start)
-		assert.Equal(t, 9, end)
-		for i := range 30 {
-			item, ok := l.renderedItems[items[i].ID()]
-			require.True(t, ok)
-			assert.Equal(t, i, item.start)
-			assert.Equal(t, i, item.end)
-		}
-
-		golden.RequireEqual(t, []byte(l.View()))
+		testListPositions(t, true, 30, 10, 10, 0, 0, 0, 9)
 	})
 	t.Run("should have correct positions in list that does not fits the items backwards", func(t *testing.T) {
 		t.Parallel()
@@ -650,4 +569,44 @@ func execCmd(m util.Model, cmd tea.Cmd) {
 		msg := cmd()
 		m, cmd = m.Update(msg)
 	}
+}
+
+// testListPositions tests list positions with given parameters
+func testListPositions(t *testing.T, forward bool, itemCount, width, height int, expectedIdx, expectedOffset, expectedStart, expectedEnd int) {
+	t.Helper()
+	t.Parallel()
+	
+	items := []Item{}
+	for i := range itemCount {
+		item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+		items = append(items, item)
+	}
+	
+	var l *list[Item]
+	if forward {
+		l = New(items, WithDirectionForward(), WithSize(width, height)).(*list[Item])
+	} else {
+		l = New(items, WithDirectionBackward(), WithSize(width, height)).(*list[Item])
+	}
+	
+	execCmd(l, l.Init())
+
+	assert.Equal(t, expectedIdx, l.selectedItemIdx)
+	assert.Equal(t, expectedOffset, l.offset)
+	require.Equal(t, itemCount, len(l.indexMap))
+	require.Equal(t, itemCount, len(l.items))
+	require.Equal(t, itemCount, len(l.renderedItems))
+	assert.Equal(t, itemCount, lipgloss.Height(l.rendered))
+	assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+	start, end := l.viewPosition()
+	assert.Equal(t, expectedStart, start)
+	assert.Equal(t, expectedEnd, end)
+	for i := range itemCount {
+		item, ok := l.renderedItems[items[i].ID()]
+		require.True(t, ok)
+		assert.Equal(t, i, item.start)
+		assert.Equal(t, i, item.end)
+	}
+
+	golden.RequireEqual(t, []byte(l.View()))
 }

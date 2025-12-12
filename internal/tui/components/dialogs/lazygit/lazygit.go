@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -19,14 +20,15 @@ const DialogID dialogs.DialogID = "lazygit"
 // NewDialog creates a new lazygit dialog. The context controls the lifetime
 // of the lazygit process - when cancelled, the process will be killed.
 func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
-	configFile := createThemedConfig()
+	themeConfig := createThemedConfig()
+	configEnv := buildConfigEnv(themeConfig)
 
 	cmd := terminal.PrepareCmd(
 		ctx,
 		"lazygit",
 		nil,
 		workingDir,
-		[]string{"LG_CONFIG_FILE=" + configFile},
+		[]string{configEnv},
 	)
 
 	return termdialog.New(termdialog.Config{
@@ -35,11 +37,33 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		LoadingMsg: "Starting lazygit...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
 		OnClose: func() {
-			if configFile != "" {
-				_ = os.Remove(configFile)
+			if themeConfig != "" {
+				_ = os.Remove(themeConfig)
 			}
 		},
 	})
+}
+
+// buildConfigEnv builds the LG_CONFIG_FILE env var, merging user's default
+// config (if it exists) with our theme override. User config comes first so
+// our theme settings take precedence.
+func buildConfigEnv(themeConfig string) string {
+	userConfig := defaultConfigPath()
+	if userConfig != "" {
+		if _, err := os.Stat(userConfig); err == nil {
+			return "LG_CONFIG_FILE=" + userConfig + "," + themeConfig
+		}
+	}
+	return "LG_CONFIG_FILE=" + themeConfig
+}
+
+// defaultConfigPath returns the default lazygit config path for the current OS.
+func defaultConfigPath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(configDir, "lazygit", "config.yml")
 }
 
 // colorToHex converts a color.Color to a hex string.
@@ -56,15 +80,9 @@ func colorToHex(c color.Color) string {
 func createThemedConfig() string {
 	t := styles.CurrentTheme()
 
-	config := fmt.Sprintf(`gui:
-  border: rounded
-  showFileTree: true
-  showRandomTip: false
-  showCommandLog: false
-  showBottomLine: true
-  showPanelJumps: false
-  nerdFontsVersion: ""
-  showFileIcons: false
+	config := fmt.Sprintf(`git:
+  autoFetch: true
+gui:
   theme:
     activeBorderColor:
       - "%s"

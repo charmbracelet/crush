@@ -65,6 +65,7 @@ type SessionAgent interface {
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
+	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
@@ -81,6 +82,7 @@ type sessionAgent struct {
 	smallModel           Model
 	systemPromptPrefix   string
 	systemPrompt         string
+	isSubAgent           bool
 	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
@@ -96,6 +98,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
+	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
 	Sessions             session.Service
@@ -111,6 +114,7 @@ func NewSessionAgent(
 		smallModel:           opts.SmallModel,
 		systemPromptPrefix:   opts.SystemPromptPrefix,
 		systemPrompt:         opts.SystemPrompt,
+		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
@@ -343,9 +347,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				finishReason = message.FinishReasonToolUse
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
-			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			sessionLock.Lock()
-			_, sessionErr := a.sessions.Save(genCtx, currentSession)
+			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
+			if getSessionErr != nil {
+				sessionLock.Unlock()
+				return getSessionErr
+			}
+			a.updateSessionUsage(a.largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
 			sessionLock.Unlock()
 			if sessionErr != nil {
 				return sessionErr
@@ -531,8 +540,18 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	summaryPromptText := "Provide a detailed summary of our conversation above."
+	if len(currentSession.Todos) > 0 {
+		summaryPromptText += "\n\n## Current Todo List\n\n"
+		for _, t := range currentSession.Todos {
+			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
+		}
+		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
+		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          "Provide a detailed summary of our conversation above.",
+		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
@@ -633,6 +652,15 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
+	if !a.isSubAgent {
+		history = append(history, fantasy.NewUserMessage(
+			fmt.Sprintf("<system_reminder>%s</system_reminder>",
+				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
+If not, please feel free to ignore. Again do not mention this message to the user.`,
+			),
+		))
+	}
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
@@ -849,6 +877,18 @@ func (a *sessionAgent) QueuedPrompts(sessionID string) int {
 		return 0
 	}
 	return len(l)
+}
+
+func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
+	l, ok := a.messageQueue.Get(sessionID)
+	if !ok {
+		return nil
+	}
+	prompts := make([]string, len(l))
+	for i, call := range l {
+		prompts[i] = call.Prompt
+	}
+	return prompts
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

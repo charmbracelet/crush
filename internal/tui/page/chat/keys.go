@@ -10,6 +10,9 @@ type KeyMap struct {
 	Cancel        key.Binding
 	Tab           key.Binding
 	Details       key.Binding
+	TogglePills   key.Binding
+	PillLeft      key.Binding
+	PillRight     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -33,6 +36,18 @@ func DefaultKeyMap() KeyMap {
 		Details: key.NewBinding(
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "toggle details"),
+		),
+		TogglePills: key.NewBinding(
+			key.WithKeys("ctrl+space"),
+			key.WithHelp("ctrl+space", "toggle tasks"),
+		),
+		PillLeft: key.NewBinding(
+			key.WithKeys("left"),
+			key.WithHelp("←/→", "switch section"),
+		),
+		PillRight: key.NewBinding(
+			key.WithKeys("right"),
+			key.WithHelp("←/→", "switch section"),
 		),
 	}
 }

@@ -1481,8 +1481,13 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 // SetSize implements List.
 func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 	oldWidth := l.width
+	oldHeight := l.height
 	l.width = width
 	l.height = height
+	// Invalidate cache if height changed
+	if oldHeight != height {
+		l.cachedViewDirty = true
+	}
 	if oldWidth != width {
 		// Get current selected item ID before reset
 		selectedID := ""

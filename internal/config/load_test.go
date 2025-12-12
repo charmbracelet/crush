@@ -961,22 +961,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 
 	t.Run("should configure the default models with a custom provider", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
-			{
-				ID:                  "openai",
-				APIKey:              "$MISSING", // will not be included in the config
-				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
-					{
-						ID:               "not-large-model",
-						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
-					},
-				},
-			},
+			createOpenaiProvider(false),
 		}
 
 		cfg := &Config{
@@ -1000,12 +985,8 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		require.NoError(t, err)
 		large, small, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
-		require.Equal(t, "model", large.Model)
-		require.Equal(t, "custom", large.Provider)
-		require.Equal(t, int64(600), large.MaxTokens)
-		require.Equal(t, "model", small.Model)
-		require.Equal(t, "custom", small.Provider)
-		require.Equal(t, int64(600), small.MaxTokens)
+		assertSelectedModel(t, large, "model", "custom", 600)
+		assertSelectedModel(t, small, "model", "custom", 600)
 	})
 
 	t.Run("should fail if no model configured", func(t *testing.T) {
@@ -1047,22 +1028,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
-			{
-				ID:                  "openai",
-				APIKey:              "set",
-				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
-					{
-						ID:               "large-model",
-						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
-					},
-				},
-			},
+			createOpenaiProvider(true),
 		}
 
 		cfg := &Config{

@@ -79,34 +79,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("should have correct positions in list that does not fits the items", func(t *testing.T) {
-		t.Parallel()
-		items := []Item{}
-		for i := range 30 {
-			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
-			items = append(items, item)
-		}
-		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
-		execCmd(l, l.Init())
-
-		// should select the last item
-		assert.Equal(t, 0, l.selectedItemIdx)
-		assert.Equal(t, 0, l.offset)
-		require.Equal(t, 30, len(l.indexMap))
-		require.Equal(t, 30, len(l.items))
-		require.Equal(t, 30, len(l.renderedItems))
-		assert.Equal(t, 30, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
-		start, end := l.viewPosition()
-		assert.Equal(t, 0, start)
-		assert.Equal(t, 9, end)
-		for i := range 30 {
-			item, ok := l.renderedItems[items[i].ID()]
-			require.True(t, ok)
-			assert.Equal(t, i, item.start)
-			assert.Equal(t, i, item.end)
-		}
-
-		golden.RequireEqual(t, []byte(l.View()))
+		runOversizedDirectionTest(t, true, 9)
 	})
 	t.Run("should have correct positions in list that does not fits the items backwards", func(t *testing.T) {
 		t.Parallel()
@@ -650,4 +623,98 @@ func execCmd(m util.Model, cmd tea.Cmd) {
 		msg := cmd()
 		m, cmd = m.Update(msg)
 	}
+}
+
+// runDirectionTest executes common test pattern for forward/backward lists
+func runDirectionTest(t *testing.T, useForward bool, expectedIdx int) {
+	t.Helper()
+	t.Parallel()
+	
+	items := []Item{}
+	for i := range 5 {
+		item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+		items = append(items, item)
+	}
+	
+	var l *list[Item]
+	if useForward {
+		l = New(items, WithDirectionForward(), WithSize(10, 20)).(*list[Item])
+	} else {
+		l = New(items, WithDirectionBackward(), WithSize(10, 20)).(*list[Item])
+	}
+	
+	execCmd(l, l.Init())
+
+	// should select correct item based on direction
+	assert.Equal(t, expectedIdx, l.selectedItemIdx)
+	assert.Equal(t, 0, l.offset)
+	require.Equal(t, 5, len(l.indexMap))
+	require.Equal(t, 5, len(l.items))
+	require.Equal(t, 5, len(l.renderedItems))
+	assert.Equal(t, 5, lipgloss.Height(l.rendered))
+	assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+	start, end := l.viewPosition()
+	assert.Equal(t, 0, start)
+	assert.Equal(t, 4, end)
+	for i := range 5 {
+		item, ok := l.renderedItems[l.items[i].ID()]
+		require.True(t, ok)
+		assert.Equal(t, i, item.start)
+		assert.Equal(t, i, item.end)
+	}
+
+	golden.RequireEqual(t, []byte(l.View()))
+}
+
+// runOversizedDirectionTest executes common test pattern for oversized lists
+func runOversizedDirectionTest(t *testing.T, useForward bool, expectedEndIdx int) {
+	t.Helper()
+	t.Parallel()
+	
+	items := []Item{}
+	for i := range 30 {
+		item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+		items = append(items, item)
+	}
+	
+	var l *list[Item]
+	if useForward {
+		l = New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
+	} else {
+		l = New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+	}
+	
+	execCmd(l, l.Init())
+
+	if useForward {
+		// forward assertions
+		assert.Equal(t, 0, l.selectedItemIdx)
+		assert.Equal(t, 0, l.offset)
+	} else {
+		// backward assertions
+		assert.Equal(t, 29, l.selectedItemIdx)
+		assert.Equal(t, 20, l.offset)
+	}
+	
+	require.Equal(t, 30, len(l.indexMap))
+	require.Equal(t, 30, len(l.items))
+	require.Equal(t, 30, len(l.renderedItems))
+	assert.Equal(t, 30, lipgloss.Height(l.rendered))
+	assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+	start, end := l.viewPosition()
+	if useForward {
+		assert.Equal(t, 0, start)
+		assert.Equal(t, expectedEndIdx, end)
+	} else {
+		assert.Equal(t, 20, start)
+		assert.Equal(t, 29, end)
+	}
+	for i := range 30 {
+		item, ok := l.renderedItems[l.items[i].ID()]
+		require.True(t, ok)
+		assert.Equal(t, i, item.start)
+		assert.Equal(t, i, item.end)
+	}
+
+	golden.RequireEqual(t, []byte(l.View()))
 }

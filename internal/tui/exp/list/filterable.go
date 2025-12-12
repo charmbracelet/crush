@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"slices"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -122,16 +121,7 @@ func (f *filterableList[T]) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		// handle movements
-		case key.Matches(msg, f.keyMap.Down),
-			key.Matches(msg, f.keyMap.Up),
-			key.Matches(msg, f.keyMap.DownOneItem),
-			key.Matches(msg, f.keyMap.UpOneItem),
-			key.Matches(msg, f.keyMap.HalfPageDown),
-			key.Matches(msg, f.keyMap.HalfPageUp),
-			key.Matches(msg, f.keyMap.PageDown),
-			key.Matches(msg, f.keyMap.PageUp),
-			key.Matches(msg, f.keyMap.End),
-			key.Matches(msg, f.keyMap.Home):
+		case IsMovementKey(msg, f.keyMap):
 			u, cmd := f.list.Update(msg)
 			f.list = u.(*list[T])
 			return f, cmd
@@ -170,44 +160,18 @@ func (f *filterableList[T]) View() string {
 
 // removes bindings that are used for search
 func (f *filterableList[T]) updateKeyMaps() {
-	removeLettersAndNumbers := func(bindings []string) []string {
-		var keep []string
-		for _, b := range bindings {
-			if len(b) != 1 {
-				keep = append(keep, b)
-				continue
-			}
-			if b == " " {
-				continue
-			}
-			m := alphanumericRegex.MatchString(b)
-			if !m {
-				keep = append(keep, b)
-			}
-		}
-		return keep
-	}
+	helper := NewKeyBindingHelper(alphanumericRegex)
 
-	updateBinding := func(binding key.Binding) key.Binding {
-		newKeys := removeLettersAndNumbers(binding.Keys())
-		if len(newKeys) == 0 {
-			binding.SetEnabled(false)
-			return binding
-		}
-		binding.SetKeys(newKeys...)
-		return binding
-	}
-
-	f.keyMap.Down = updateBinding(f.keyMap.Down)
-	f.keyMap.Up = updateBinding(f.keyMap.Up)
-	f.keyMap.DownOneItem = updateBinding(f.keyMap.DownOneItem)
-	f.keyMap.UpOneItem = updateBinding(f.keyMap.UpOneItem)
-	f.keyMap.HalfPageDown = updateBinding(f.keyMap.HalfPageDown)
-	f.keyMap.HalfPageUp = updateBinding(f.keyMap.HalfPageUp)
-	f.keyMap.PageDown = updateBinding(f.keyMap.PageDown)
-	f.keyMap.PageUp = updateBinding(f.keyMap.PageUp)
-	f.keyMap.End = updateBinding(f.keyMap.End)
-	f.keyMap.Home = updateBinding(f.keyMap.Home)
+	f.keyMap.Down = helper.UpdateBinding(f.keyMap.Down)
+	f.keyMap.Up = helper.UpdateBinding(f.keyMap.Up)
+	f.keyMap.DownOneItem = helper.UpdateBinding(f.keyMap.DownOneItem)
+	f.keyMap.UpOneItem = helper.UpdateBinding(f.keyMap.UpOneItem)
+	f.keyMap.HalfPageDown = helper.UpdateBinding(f.keyMap.HalfPageDown)
+	f.keyMap.HalfPageUp = helper.UpdateBinding(f.keyMap.HalfPageUp)
+	f.keyMap.PageDown = helper.UpdateBinding(f.keyMap.PageDown)
+	f.keyMap.PageUp = helper.UpdateBinding(f.keyMap.PageUp)
+	f.keyMap.End = helper.UpdateBinding(f.keyMap.End)
+	f.keyMap.Home = helper.UpdateBinding(f.keyMap.Home)
 }
 
 func (m *filterableList[T]) GetSize() (int, int) {

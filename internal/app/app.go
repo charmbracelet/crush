@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,13 +31,13 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
 )
 
 type App struct {
@@ -61,7 +62,7 @@ type App struct {
 	cleanupFuncs []func() error
 }
 
-// New initializes a new applcation instance.
+// New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)
@@ -129,15 +130,27 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var spinner *format.Spinner
-	if !quiet {
+	var (
+		spinner   *format.Spinner
+		stdoutTTY bool
+		stderrTTY bool
+		stdinTTY  bool
+	)
+
+	if f, ok := output.(*os.File); ok {
+		stdoutTTY = term.IsTerminal(f.Fd())
+	}
+	stderrTTY = term.IsTerminal(os.Stderr.Fd())
+	stdinTTY = term.IsTerminal(os.Stdin.Fd())
+
+	if !quiet && stderrTTY {
 		t := styles.CurrentTheme()
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
 		// unreadable in light terminals.
 		hasDarkBG := true
-		if f, ok := output.(*os.File); ok {
+		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
 			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
 		}
 		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
@@ -203,10 +216,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
-	supportsProgressBar := term.SupportsProgressBar()
 
 	defer func() {
-		if supportsProgressBar {
+		if stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
 
@@ -216,9 +228,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}()
 
 	for {
-		if supportsProgressBar {
-			// HACK: Reinitialize the terminal progress bar on every iteration so
-			// it doesn't get hidden by the terminal due to inactivity.
+		if stderrTTY {
+			// HACK: Reinitialize the terminal progress bar on every iteration
+			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
 
@@ -248,6 +260,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 				}
 
 				part := content[readBytes:]
+				// Trim leading whitespace. Sometimes the LLM includes leading
+				// formatting and intentation, which we don't want here.
+				if readBytes == 0 {
+					part = strings.TrimLeft(part, " \t")
+				}
 				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}

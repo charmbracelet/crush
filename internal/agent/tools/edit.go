@@ -89,7 +89,7 @@ func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			notifyLSPs(ctx, lspClients, params.FilePath)
 
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspClients)
+			text += getDiagnostics(params.FilePath, lspClients, workingDir)
 			response.Content = text
 			return response, nil
 		})

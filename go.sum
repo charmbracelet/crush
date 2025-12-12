@@ -1,7 +1,7 @@
 charm.land/bubbles/v2 v2.0.0-rc.1 h1:EiIFVAc3Zi/yY86td+79mPhHR7AqZ1OxF+6ztpOCRaM=
 charm.land/bubbles/v2 v2.0.0-rc.1/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
-charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212022530-7adbf082fd25 h1:qmVU/kDsds1L+caeJ2LghFyFOn/1iEx9RRbQ6YQkxb4=
-charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212022530-7adbf082fd25/go.mod h1:C1MMjbspGDebEITrYpuJd6gB42cSTqWgR4/vQPjD224=
+charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212194116-6348bd4b7475 h1:73ohAau8fvq3d54i1bQxVKhBf/vmPYDtV3JZgb+SIQk=
+charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212194116-6348bd4b7475/go.mod h1:pDM18flq3Z4njKZPA3zCvyVSSIJbMcoqlE82BdGUtL8=
 charm.land/fantasy v0.5.2 h1:4zlNsIcsyF3Jr+1onEuhHqZRzuH1LlxBle/gInS00QY=
 charm.land/fantasy v0.5.2/go.mod h1:SPOsnIlkBKnhw2Wnasv+wZ82EmCMIGesx0je3tgR6+M=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971 h1:xZFcNsJMiIDbFtWRyDmkKNk1sjojfaom4Zoe0cyH/8c=
@@ -98,8 +98,8 @@ github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930 h1:+47Z2j
 github.com/charmbracelet/glamour/v2 v2.0.0-20251106195642-800eb8175930/go.mod h1:izs11tnkYaT3DTEH2E0V/lCb18VGZ7k9HLYEGuvgXGA=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0 h1:lxHzxsHd4P7o7+5D5OcEItYkQ1xY3ovNg8Dc5ftd3rI=
 github.com/charmbracelet/log/v2 v2.0.0-20251106192421-eb64aaa963a0/go.mod h1:Q7oMtlboDPnnrYiJDXNwdWmJblOmuOnycPKczlVju6I=
-github.com/charmbracelet/ultraviolet v0.0.0-20251211195649-3a51f4048cae h1:njFQJDtNiWgKXHmYruigCG+9q5Ptq6rWW400UvG/Tpc=
-github.com/charmbracelet/ultraviolet v0.0.0-20251211195649-3a51f4048cae/go.mod h1:VWATWLRwYP06VYCEur7FsNR2B1xAo7Y+xl1PTbd1ePc=
+github.com/charmbracelet/ultraviolet v0.0.0-20251212194010-b927aa605560 h1:j3PW2hypGoPKBy3ooKzW0TFxaxhyHK3NbkLLn4KeRFc=
+github.com/charmbracelet/ultraviolet v0.0.0-20251212194010-b927aa605560/go.mod h1:VWATWLRwYP06VYCEur7FsNR2B1xAo7Y+xl1PTbd1ePc=
 github.com/charmbracelet/x/ansi v0.11.3 h1:6DcVaqWI82BBVM/atTyq6yBoRLZFBsnoDoX9GCu2YOI=
 github.com/charmbracelet/x/ansi v0.11.3/go.mod h1:yI7Zslym9tCJcedxz5+WBq+eUGMJT0bM06Fqy1/Y4dI=
 github.com/charmbracelet/x/etag v0.2.0 h1:Euj1VkheoHfTYA9y+TCwkeXF/hN8Fb9l4LqZl79pt04=

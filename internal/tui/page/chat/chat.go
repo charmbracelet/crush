@@ -581,8 +581,17 @@ func (p *chatPage) View() string {
 		if len(pills) > 0 {
 			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
 
-			// Add help hint for expanding pills.
-			helpHint := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
+			// Add help hint for expanding/collapsing pills based on state.
+			var helpDesc string
+			if p.pillsExpanded {
+				helpDesc = "hide"
+			} else {
+				helpDesc = "show"
+			}
+			// Style to match help section: keys in FgMuted, description in FgSubtle
+			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
+			helpText := t.S().Base.Foreground(t.FgSubtle).Render(helpDesc)
+			helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
 			if expandedList != "" {
@@ -1208,31 +1217,12 @@ func (p *chatPage) Help() help.KeyMap {
 			shortList = append(shortList, tabKey)
 			globalBindings = append(globalBindings, tabKey)
 
-			// Add toggle pills binding if there are pills
+			// Show left/right to switch sections when expanded and both exist
 			hasTodos := hasIncompleteTodos(p.session.Todos)
 			hasQueue := p.promptQueue > 0
-			if hasTodos || hasQueue {
-				toggleBinding := p.keyMap.TogglePills
-				if p.pillsExpanded {
-					if hasTodos {
-						toggleBinding.SetHelp("ctrl+space", "hide todos")
-					} else {
-						toggleBinding.SetHelp("ctrl+space", "hide queued")
-					}
-				} else {
-					if hasTodos {
-						toggleBinding.SetHelp("ctrl+space", "show todos")
-					} else {
-						toggleBinding.SetHelp("ctrl+space", "show queued")
-					}
-				}
-				shortList = append(shortList, toggleBinding)
-				globalBindings = append(globalBindings, toggleBinding)
-				// Show left/right to switch sections when expanded and both exist
-				if p.pillsExpanded && hasTodos && hasQueue {
-					shortList = append(shortList, p.keyMap.PillLeft)
-					globalBindings = append(globalBindings, p.keyMap.PillLeft)
-				}
+			if p.pillsExpanded && hasTodos && hasQueue {
+				shortList = append(shortList, p.keyMap.PillLeft)
+				globalBindings = append(globalBindings, p.keyMap.PillLeft)
 			}
 		}
 		commandsBinding := key.NewBinding(

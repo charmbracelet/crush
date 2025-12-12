@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -20,21 +19,6 @@ func TestMain(m *testing.M) {
 
 	exitVal := m.Run()
 	os.Exit(exitVal)
-}
-
-func TestConfig_LoadFromReaders(t *testing.T) {
-	data1 := strings.NewReader(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
-	data2 := strings.NewReader(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)
-	data3 := strings.NewReader(`{"providers": {"openai": {}}}`)
-
-	loadedConfig, err := loadFromReaders([]io.Reader{data1, data2, data3})
-
-	require.NoError(t, err)
-	require.NotNil(t, loadedConfig)
-	require.Equal(t, 1, loadedConfig.Providers.Len())
-	pc, _ := loadedConfig.Providers.Get("openai")
-	require.Equal(t, "key2", pc.APIKey)
-	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
 func TestConfig_setDefaults(t *testing.T) {

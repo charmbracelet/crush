@@ -350,13 +350,12 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
 	uv.NewStyledString(view).Draw(scr, area)
 
-	selArea := uv.Rectangle{
-		Min: uv.Pos(l.selectionStartCol, l.selectionStartLine),
-		Max: uv.Pos(l.selectionEndCol, l.selectionEndLine),
-	}
-	selArea = selArea.Canon()
-
+	selArea := l.selectionArea(false)
 	specialChars := getSpecialCharsMap()
+	selStyle := uv.Style{
+		Bg: t.TextSelection.GetBackground(),
+		Fg: t.TextSelection.GetForeground(),
+	}
 
 	isNonWhitespace := func(r rune) bool {
 		return r != ' ' && r != '\t' && r != 0 && r != '\n' && r != '\r'
@@ -371,9 +370,9 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	for y := range scr.Height() {
 		bounds := selectionBounds{startX: -1, endX: -1, inSelection: false}
 
-		if y >= selArea.Min.Y && y <= selArea.Max.Y {
+		if y >= selArea.Min.Y && y < selArea.Max.Y {
 			bounds.inSelection = true
-			if selArea.Min.Y == selArea.Max.Y {
+			if selArea.Min.Y == selArea.Max.Y-1 {
 				// Single line selection
 				bounds.startX = selArea.Min.X
 				bounds.endX = selArea.Max.X
@@ -381,7 +380,7 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				// First line of multi-line selection
 				bounds.startX = selArea.Min.X
 				bounds.endX = scr.Width()
-			} else if y == selArea.Max.Y {
+			} else if y == selArea.Max.Y-1 {
 				// Last line of multi-line selection
 				bounds.startX = 0
 				bounds.endX = selArea.Max.X
@@ -470,13 +469,9 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 					continue
 				}
 
-				// Text selection styling, which is a Lip Gloss style. We must
-				// extract the values to use in a UV style, below.
-				ts := t.TextSelection
-
 				cell = cell.Clone()
-				cell.Style.Bg = ts.GetBackground()
-				cell.Style.Fg = ts.GetForeground()
+				cell.Style.Bg = selStyle.Bg
+				cell.Style.Fg = selStyle.Fg
 				scr.SetCell(x, y, cell)
 			}
 		}
@@ -1706,11 +1701,75 @@ func (l *list[T]) HasSelection() bool {
 	return l.hasSelection()
 }
 
+func (l *list[T]) selectionArea(absolute bool) uv.Rectangle {
+	var startY int
+	if absolute {
+		startY, _ = l.viewPosition()
+	}
+	selArea := uv.Rectangle{
+		Min: uv.Pos(l.selectionStartCol, l.selectionStartLine+startY),
+		Max: uv.Pos(l.selectionEndCol, l.selectionEndLine+startY),
+	}
+	selArea = selArea.Canon()
+	selArea.Max.Y++ // make max Y exclusive
+	return selArea
+}
+
 // GetSelectedText returns the currently selected text.
 func (l *list[T]) GetSelectedText(paddingLeft int) string {
 	if !l.hasSelection() {
 		return ""
 	}
 
-	return l.selectionView(l.View(), true)
+	selArea := l.selectionArea(true)
+	if selArea.Empty() {
+		return ""
+	}
+
+	selectionHeight := selArea.Dy()
+
+	tempBuf := uv.NewScreenBuffer(l.width, selectionHeight)
+	tempBufArea := tempBuf.Bounds()
+	renderedLines := l.getLines(selArea.Min.Y, selArea.Max.Y)
+	styled := uv.NewStyledString(renderedLines)
+	styled.Draw(tempBuf, tempBufArea)
+
+	// XXX: Left padding assumes the list component is rendered with absolute
+	// positioning. The chat component has a left margin of 1 and items in the
+	// list have a border of 1 plus a padding of 1. The paddingLeft parameter
+	// assumes this total left padding of 3 and we should fix that.
+	leftBorder := paddingLeft - 1
+
+	var b strings.Builder
+	for y := tempBufArea.Min.Y; y < tempBufArea.Max.Y; y++ {
+		var pending strings.Builder
+		for x := tempBufArea.Min.X + leftBorder; x < tempBufArea.Max.X; {
+			cell := tempBuf.CellAt(x, y)
+			if cell == nil || cell.IsZero() {
+				x++
+				continue
+			}
+			if y == 0 && x < selArea.Min.X {
+				x++
+				continue
+			}
+			if y == selectionHeight-1 && x > selArea.Max.X-1 {
+				break
+			}
+			if cell.Width == 1 && cell.Content == " " {
+				pending.WriteString(cell.Content)
+				x++
+				continue
+			}
+			b.WriteString(pending.String())
+			pending.Reset()
+			b.WriteString(cell.Content)
+			x += cell.Width
+		}
+		if y < tempBufArea.Max.Y-1 {
+			b.WriteByte('\n')
+		}
+	}
+
+	return b.String()
 }

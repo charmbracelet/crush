@@ -581,6 +581,10 @@ func (p *chatPage) View() string {
 		if len(pills) > 0 {
 			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
 
+			// Add help hint for expanding pills.
+			helpHint := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
+			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
+
 			if expandedList != "" {
 				pillsArea = lipgloss.JoinVertical(
 					lipgloss.Left,

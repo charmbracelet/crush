@@ -38,8 +38,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl+d", "toggle details"),
 		),
 		TogglePills: key.NewBinding(
-			key.WithKeys("ctrl+space"),
-			key.WithHelp("ctrl+space", "toggle tasks"),
+			key.WithKeys("ctrl+space", "ctrl+t"),
+			key.WithHelp("ctrl+space/ctrl+t", "toggle tasks"),
 		),
 		PillLeft: key.NewBinding(
 			key.WithKeys("left"),

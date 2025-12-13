@@ -69,10 +69,18 @@ func RenderMCPList(opts RenderOptions) []string {
 			case mcp.StateConnected:
 				icon = t.ItemOnlineIcon
 				if count := state.Counts.Tools; count > 0 {
-					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d tools", count)))
+					label := "tools"
+					if count == 1 {
+						label = "tool"
+					}
+					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d %s", count, label)))
 				}
 				if count := state.Counts.Prompts; count > 0 {
-					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d prompts", count)))
+					label := "prompts"
+					if count == 1 {
+						label = "prompt"
+					}
+					extraContent = append(extraContent, t.S().Subtle.Render(fmt.Sprintf("%d %s", count, label)))
 				}
 			case mcp.StateError:
 				icon = t.ItemErrorIcon

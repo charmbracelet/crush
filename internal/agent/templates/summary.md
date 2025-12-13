@@ -43,6 +43,6 @@ Be specific. Don't write "implement authentication" - write:
 2. Update login handler in src/routes/user.js:45 to return token
 3. Test with: npm test -- auth.test.js
 
-**Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions.
+**Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
 
 **Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.

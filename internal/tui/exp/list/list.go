@@ -350,13 +350,12 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
 	uv.NewStyledString(view).Draw(scr, area)
 
-	selArea := uv.Rectangle{
-		Min: uv.Pos(l.selectionStartCol, l.selectionStartLine),
-		Max: uv.Pos(l.selectionEndCol, l.selectionEndLine),
-	}
-	selArea = selArea.Canon()
-
+	selArea := l.selectionArea(false)
 	specialChars := getSpecialCharsMap()
+	selStyle := uv.Style{
+		Bg: t.TextSelection.GetBackground(),
+		Fg: t.TextSelection.GetForeground(),
+	}
 
 	isNonWhitespace := func(r rune) bool {
 		return r != ' ' && r != '\t' && r != 0 && r != '\n' && r != '\r'
@@ -371,9 +370,9 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 	for y := range scr.Height() {
 		bounds := selectionBounds{startX: -1, endX: -1, inSelection: false}
 
-		if y >= selArea.Min.Y && y <= selArea.Max.Y {
+		if y >= selArea.Min.Y && y < selArea.Max.Y {
 			bounds.inSelection = true
-			if selArea.Min.Y == selArea.Max.Y {
+			if selArea.Min.Y == selArea.Max.Y-1 {
 				// Single line selection
 				bounds.startX = selArea.Min.X
 				bounds.endX = selArea.Max.X
@@ -381,7 +380,7 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 				// First line of multi-line selection
 				bounds.startX = selArea.Min.X
 				bounds.endX = scr.Width()
-			} else if y == selArea.Max.Y {
+			} else if y == selArea.Max.Y-1 {
 				// Last line of multi-line selection
 				bounds.startX = 0
 				bounds.endX = selArea.Max.X
@@ -470,13 +469,9 @@ func (l *list[T]) selectionView(view string, textOnly bool) string {
 					continue
 				}
 
-				// Text selection styling, which is a Lip Gloss style. We must
-				// extract the values to use in a UV style, below.
-				ts := t.TextSelection
-
 				cell = cell.Clone()
-				cell.Style.Bg = ts.GetBackground()
-				cell.Style.Fg = ts.GetForeground()
+				cell.Style.Bg = selStyle.Bg
+				cell.Style.Fg = selStyle.Fg
 				scr.SetCell(x, y, cell)
 			}
 		}
@@ -864,6 +859,7 @@ func (l *list[T]) selectLastItem() {
 }
 
 func (l *list[T]) firstSelectableItemAbove(inx int) int {
+	unfocusableCount := 0
 	for i := inx - 1; i >= 0; i-- {
 		if i < 0 || i >= len(l.items) {
 			continue
@@ -873,14 +869,16 @@ func (l *list[T]) firstSelectableItemAbove(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == 0 && l.wrap {
+	if unfocusableCount == inx && l.wrap {
 		return l.firstSelectableItemAbove(len(l.items))
 	}
 	return ItemNotFound
 }
 
 func (l *list[T]) firstSelectableItemBelow(inx int) int {
+	unfocusableCount := 0
 	itemsLen := len(l.items)
 	for i := inx + 1; i < itemsLen; i++ {
 		if i < 0 || i >= len(l.items) {
@@ -891,8 +889,9 @@ func (l *list[T]) firstSelectableItemBelow(inx int) int {
 		if _, ok := any(item).(layout.Focusable); ok {
 			return i
 		}
+		unfocusableCount++
 	}
-	if inx == itemsLen-1 && l.wrap {
+	if unfocusableCount == itemsLen-inx-1 && l.wrap {
 		return l.firstSelectableItemBelow(-1)
 	}
 	return ItemNotFound
@@ -1352,6 +1351,14 @@ func (l *list[T]) SelectItemAbove() tea.Cmd {
 	}
 	// Pre-allocate with expected capacity
 	cmds := make([]tea.Cmd, 0, 2)
+	if newIndex > l.selectedItemIdx && l.selectedItemIdx > 0 && l.offset > 0 {
+		// this means there is a section above and not showing on the top, move to the top
+		newIndex = l.selectedItemIdx
+		cmd := l.GoToTop()
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	if newIndex == 1 {
 		peakAboveIndex := l.firstSelectableItemAbove(newIndex)
 		if peakAboveIndex == ItemNotFound {
@@ -1383,11 +1390,15 @@ func (l *list[T]) SelectItemBelow() tea.Cmd {
 
 	newIndex := l.firstSelectableItemBelow(l.selectedItemIdx)
 	if newIndex == ItemNotFound {
-		// no item above
+		// no item below
 		return nil
 	}
 	if newIndex < 0 || newIndex >= len(l.items) {
 		return nil
+	}
+	if newIndex < l.selectedItemIdx {
+		// reset offset when wrap to the top to show the top section if it exists
+		l.offset = 0
 	}
 	l.prevSelectedItemIdx = l.selectedItemIdx
 	l.selectedItemIdx = newIndex
@@ -1465,8 +1476,13 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 // SetSize implements List.
 func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 	oldWidth := l.width
+	oldHeight := l.height
 	l.width = width
 	l.height = height
+	// Invalidate cache if height changed
+	if oldHeight != height {
+		l.cachedViewDirty = true
+	}
 	if oldWidth != width {
 		// Get current selected item ID before reset
 		selectedID := ""
@@ -1685,11 +1701,75 @@ func (l *list[T]) HasSelection() bool {
 	return l.hasSelection()
 }
 
+func (l *list[T]) selectionArea(absolute bool) uv.Rectangle {
+	var startY int
+	if absolute {
+		startY, _ = l.viewPosition()
+	}
+	selArea := uv.Rectangle{
+		Min: uv.Pos(l.selectionStartCol, l.selectionStartLine+startY),
+		Max: uv.Pos(l.selectionEndCol, l.selectionEndLine+startY),
+	}
+	selArea = selArea.Canon()
+	selArea.Max.Y++ // make max Y exclusive
+	return selArea
+}
+
 // GetSelectedText returns the currently selected text.
 func (l *list[T]) GetSelectedText(paddingLeft int) string {
 	if !l.hasSelection() {
 		return ""
 	}
 
-	return l.selectionView(l.View(), true)
+	selArea := l.selectionArea(true)
+	if selArea.Empty() {
+		return ""
+	}
+
+	selectionHeight := selArea.Dy()
+
+	tempBuf := uv.NewScreenBuffer(l.width, selectionHeight)
+	tempBufArea := tempBuf.Bounds()
+	renderedLines := l.getLines(selArea.Min.Y, selArea.Max.Y)
+	styled := uv.NewStyledString(renderedLines)
+	styled.Draw(tempBuf, tempBufArea)
+
+	// XXX: Left padding assumes the list component is rendered with absolute
+	// positioning. The chat component has a left margin of 1 and items in the
+	// list have a border of 1 plus a padding of 1. The paddingLeft parameter
+	// assumes this total left padding of 3 and we should fix that.
+	leftBorder := paddingLeft - 1
+
+	var b strings.Builder
+	for y := tempBufArea.Min.Y; y < tempBufArea.Max.Y; y++ {
+		var pending strings.Builder
+		for x := tempBufArea.Min.X + leftBorder; x < tempBufArea.Max.X; {
+			cell := tempBuf.CellAt(x, y)
+			if cell == nil || cell.IsZero() {
+				x++
+				continue
+			}
+			if y == 0 && x < selArea.Min.X {
+				x++
+				continue
+			}
+			if y == selectionHeight-1 && x > selArea.Max.X-1 {
+				break
+			}
+			if cell.Width == 1 && cell.Content == " " {
+				pending.WriteString(cell.Content)
+				x++
+				continue
+			}
+			b.WriteString(pending.String())
+			pending.Reset()
+			b.WriteString(cell.Content)
+			x += cell.Width
+		}
+		if y < tempBufArea.Max.Y-1 {
+			b.WriteByte('\n')
+		}
+	}
+
+	return b.String()
 }

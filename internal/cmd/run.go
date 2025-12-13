@@ -58,11 +58,6 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		// TODO: Make this work when redirected to something other than stdout.
-		// For example:
-		//     crush run "Do something fancy" > output.txt
-		//     echo "Do something fancy" | crush run > output.txt
-		//
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)
 	},
 }

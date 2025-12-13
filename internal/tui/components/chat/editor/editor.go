@@ -550,7 +550,10 @@ func (c *editorCmp) IsEmpty() bool {
 func normalPromptFunc(info textarea.PromptInfo) string {
 	t := styles.CurrentTheme()
 	if info.LineNumber == 0 {
-		return "  > "
+		if info.Focused {
+			return "  > "
+		}
+		return "::: "
 	}
 	if info.Focused {
 		return t.S().Base.Foreground(t.GreenDark).Render("::: ")

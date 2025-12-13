@@ -21,7 +21,7 @@ type CreateMessageParams struct {
 }
 
 type Service interface {
-	pubsub.Suscriber[Message]
+	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)

@@ -18,7 +18,7 @@ import (
 var alphanumericRegex = regexp.MustCompile(`^[a-zA-Z0-9]*$`)
 
 // updateKeyMaps removes bindings that are used for search
-func updateKeyMaps(km KeyMap, regex *regexp.Regexp) {
+func updateKeyMaps(km *KeyMap, regex *regexp.Regexp) {
 	removeLettersAndNumbers := func(bindings []string) []string {
 		var keep []string
 		for _, b := range bindings {
@@ -217,7 +217,7 @@ func isMovementKey(msg tea.KeyPressMsg, keyMap KeyMap) bool {
 
 // removes bindings that are used for search
 func (f *filterableList[T]) updateKeyMaps() {
-	updateKeyMaps(f.keyMap, alphanumericRegex)
+	updateKeyMaps(&f.keyMap, alphanumericRegex)
 }
 
 func (m *filterableList[T]) GetSize() (int, int) {

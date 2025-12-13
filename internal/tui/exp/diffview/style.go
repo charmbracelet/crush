@@ -26,12 +26,12 @@ type Style struct {
 // colorScheme defines the colors for a theme
 type colorScheme struct {
 	dividerLineFg, dividerLineBg, dividerCodeFg, dividerCodeBg charmtone.Key
-	missingLineBg, missingCodeBg charmtone.Key
-	equalLineFg, equalLineBg, equalCodeFg, equalCodeBg charmtone.Key
-	insertLineFg charmtone.Key
-	insertLineBg, insertSymbolBg, insertCodeBg string
-	deleteLineFg charmtone.Key
-	deleteLineBg, deleteSymbolBg, deleteCodeBg string
+	missingLineBg, missingCodeBg                               charmtone.Key
+	equalLineFg, equalLineBg, equalCodeFg, equalCodeBg         charmtone.Key
+	insertLineFg                                               charmtone.Key
+	insertLineBg, insertSymbolBg, insertCodeBg                 string
+	deleteLineFg                                               charmtone.Key
+	deleteLineBg, deleteSymbolBg, deleteCodeBg                 string
 }
 
 // buildStyle creates a Style from the given color scheme

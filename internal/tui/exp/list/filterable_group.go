@@ -108,7 +108,7 @@ func (f *filterableGroupList[T]) View() string {
 
 // removes bindings that are used for search
 func (f *filterableGroupList[T]) updateKeyMaps() {
-	updateKeyMaps(f.keyMap, alphanumericRegexGroup)
+	updateKeyMaps(&f.keyMap, alphanumericRegexGroup)
 }
 
 func (m *filterableGroupList[T]) GetSize() (int, int) {

@@ -575,20 +575,20 @@ func execCmd(m util.Model, cmd tea.Cmd) {
 func testListPositions(t *testing.T, forward bool, itemCount, width, height int, expectedIdx, expectedOffset, expectedStart, expectedEnd int) {
 	t.Helper()
 	t.Parallel()
-	
+
 	items := []Item{}
 	for i := range itemCount {
 		item := NewSelectableItem(fmt.Sprintf("Item %d", i))
 		items = append(items, item)
 	}
-	
+
 	var l *list[Item]
 	if forward {
 		l = New(items, WithDirectionForward(), WithSize(width, height)).(*list[Item])
 	} else {
 		l = New(items, WithDirectionBackward(), WithSize(width, height)).(*list[Item])
 	}
-	
+
 	execCmd(l, l.Init())
 
 	assert.Equal(t, expectedIdx, l.selectedItemIdx)

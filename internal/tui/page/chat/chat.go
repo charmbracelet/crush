@@ -465,14 +465,17 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if p.session.ID != "" {
 				return p, p.togglePillsExpanded()
 			}
+			return p, nil
 		case key.Matches(msg, p.keyMap.PillLeft):
 			if p.session.ID != "" && p.pillsExpanded {
 				return p, p.switchPillSection(-1)
 			}
+			return p, nil
 		case key.Matches(msg, p.keyMap.PillRight):
 			if p.session.ID != "" && p.pillsExpanded {
 				return p, p.switchPillSection(1)
 			}
+			return p, nil
 		}
 
 		switch p.focusedPane {
@@ -559,12 +562,13 @@ func (p *chatPage) View() string {
 			inProgressIcon = p.todoSpinner.View()
 		}
 
-		var pills []string
+		var todoPillStr string
+		var queuePillStr string
 		if hasIncompleteTodos {
-			pills = append(pills, todoPill(p.session.Todos, inProgressIcon, todosFocused, p.pillsExpanded, t))
+			todoPillStr = todoPill(p.session.Todos, inProgressIcon, todosFocused, p.pillsExpanded, t)
 		}
 		if hasQueue {
-			pills = append(pills, queuePill(p.promptQueue, queueFocused, p.pillsExpanded, t))
+			queuePillStr = queuePill(p.promptQueue, queueFocused, p.pillsExpanded, t)
 		}
 
 		var expandedList string
@@ -578,8 +582,27 @@ func (p *chatPage) View() string {
 		}
 
 		var pillsArea string
-		if len(pills) > 0 {
-			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
+		hasAnyPill := todoPillStr != "" || queuePillStr != ""
+		if hasAnyPill {
+			var pillsRows []string
+
+			// Add Todo pill if exists
+			if todoPillStr != "" {
+				pillsRows = append(pillsRows, todoPillStr)
+			}
+
+			// Add empty line separator if both exist
+			if todoPillStr != "" && queuePillStr != "" {
+				pillsRows = append(pillsRows, "")
+			}
+
+			// Add Queue pill if exists
+			if queuePillStr != "" {
+				pillsRows = append(pillsRows, queuePillStr)
+			}
+
+			// Join pills vertically
+			pillsContent := lipgloss.JoinVertical(lipgloss.Left, pillsRows...)
 
 			// Add help hint for expanding/collapsing pills based on state.
 			var helpDesc string
@@ -592,7 +615,9 @@ func (p *chatPage) View() string {
 			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
 			helpText := t.S().Base.Foreground(t.FgSubtle).Render(helpDesc)
 			helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
-			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
+
+			// Combine pills and help hint horizontally
+			pillsRow := lipgloss.JoinHorizontal(lipgloss.Center, pillsContent, " ", helpHint)
 
 			if expandedList != "" {
 				pillsArea = lipgloss.JoinVertical(
@@ -982,6 +1007,10 @@ func (p *chatPage) Bindings() []key.Binding {
 	bindings := []key.Binding{
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
+		p.keyMap.Details,
+		p.keyMap.TogglePills,
+		p.keyMap.PillLeft,
+		p.keyMap.PillRight,
 	}
 	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 		cancelBinding := p.keyMap.Cancel

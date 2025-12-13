@@ -464,15 +464,19 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.TogglePills):
 			if p.session.ID != "" {
 				return p, p.togglePillsExpanded()
+			} else {
+				return p, util.ReportWarn("No active session. Start a conversation to view tasks.")
 			}
 		case key.Matches(msg, p.keyMap.PillLeft):
 			if p.session.ID != "" && p.pillsExpanded {
 				return p, p.switchPillSection(-1)
 			}
+			return p, nil
 		case key.Matches(msg, p.keyMap.PillRight):
 			if p.session.ID != "" && p.pillsExpanded {
 				return p, p.switchPillSection(1)
 			}
+			return p, nil
 		}
 
 		switch p.focusedPane {
@@ -559,51 +563,65 @@ func (p *chatPage) View() string {
 			inProgressIcon = p.todoSpinner.View()
 		}
 
-		var pills []string
+		var todoPillStr string
+		var queuePillStr string
 		if hasIncompleteTodos {
-			pills = append(pills, todoPill(p.session.Todos, inProgressIcon, todosFocused, p.pillsExpanded, t))
+			todoPillStr = todoPill(p.session.Todos, inProgressIcon, todosFocused, p.pillsExpanded, t)
 		}
 		if hasQueue {
-			pills = append(pills, queuePill(p.promptQueue, queueFocused, p.pillsExpanded, t))
-		}
-
-		var expandedList string
-		if p.pillsExpanded {
-			if todosFocused && hasIncompleteTodos {
-				expandedList = todoList(p.session.Todos, inProgressIcon, t, p.width-SideBarWidth)
-			} else if queueFocused && hasQueue {
-				queueItems := p.app.AgentCoordinator.QueuedPromptsList(p.session.ID)
-				expandedList = queueList(queueItems, t)
-			}
+			queuePillStr = queuePill(p.promptQueue, queueFocused, p.pillsExpanded, t)
 		}
 
 		var pillsArea string
-		if len(pills) > 0 {
-			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
+		hasAnyPill := todoPillStr != "" || queuePillStr != ""
+		if hasAnyPill {
+			var sections []string
 
-			// Add help hint for expanding/collapsing pills based on state.
-			var helpDesc string
-			if p.pillsExpanded {
-				helpDesc = "close"
-			} else {
-				helpDesc = "open"
+			// Todo section
+			if todoPillStr != "" {
+				var todoSection []string
+				// Add Todo pill with help hint
+				var todoHelpDesc string
+				if p.pillsExpanded {
+					todoHelpDesc = "close"
+				} else {
+					todoHelpDesc = "open"
+				}
+				todoHelpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space/ctrl+t")
+				todoHelpText := t.S().Base.Foreground(t.FgSubtle).Render(todoHelpDesc)
+				todoHelpHint := lipgloss.JoinHorizontal(lipgloss.Center, todoHelpKey, " ", todoHelpText)
+				todoPillRow := lipgloss.JoinHorizontal(lipgloss.Center, todoPillStr, " ", todoHelpHint)
+				todoSection = append(todoSection, todoPillRow)
+
+				// Add expanded todo list if expanded (before queue)
+				if todosFocused && hasIncompleteTodos {
+					todoListStr := todoList(p.session.Todos, inProgressIcon, t, p.width-SideBarWidth)
+					todoSection = append(todoSection, todoListStr)
+				}
+				sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, todoSection...))
 			}
-			// Style to match help section: keys in FgMuted, description in FgSubtle
-			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
-			helpText := t.S().Base.Foreground(t.FgSubtle).Render(helpDesc)
-			helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
-			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
-			if expandedList != "" {
-				pillsArea = lipgloss.JoinVertical(
-					lipgloss.Left,
-					pillsRow,
-					expandedList,
-				)
-			} else {
-				pillsArea = pillsRow
+			// Add empty line separator if both exist (after todo list, before queue pill)
+			if todoPillStr != "" && queuePillStr != "" {
+				sections = append(sections, "")
 			}
 
+			// Queue section
+			if queuePillStr != "" {
+				var queueSection []string
+				// Add Queue pill (no help hint for queue, as it uses different shortcut)
+				queueSection = append(queueSection, queuePillStr)
+
+				// Add expanded queue list if expanded
+				if queueFocused && hasQueue {
+					queueItems := p.app.AgentCoordinator.QueuedPromptsList(p.session.ID)
+					queueListStr := queueList(queueItems, t)
+					queueSection = append(queueSection, queueListStr)
+				}
+				sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, queueSection...))
+			}
+
+			pillsArea = lipgloss.JoinVertical(lipgloss.Left, sections...)
 			style := t.S().Base.MarginTop(1).PaddingLeft(3)
 			pillsArea = style.Render(pillsArea)
 		}
@@ -882,7 +900,7 @@ func (p *chatPage) changeFocus() tea.Cmd {
 func (p *chatPage) togglePillsExpanded() tea.Cmd {
 	hasPills := hasIncompleteTodos(p.session.Todos) || p.promptQueue > 0
 	if !hasPills {
-		return nil
+		return util.ReportWarn("No task to display")
 	}
 	p.pillsExpanded = !p.pillsExpanded
 	if p.pillsExpanded {
@@ -982,6 +1000,10 @@ func (p *chatPage) Bindings() []key.Binding {
 	bindings := []key.Binding{
 		p.keyMap.NewSession,
 		p.keyMap.AddAttachment,
+		p.keyMap.Details,
+		p.keyMap.TogglePills,
+		p.keyMap.PillLeft,
+		p.keyMap.PillRight,
 	}
 	if p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy() {
 		cancelBinding := p.keyMap.Cancel

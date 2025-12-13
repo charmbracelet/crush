@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/queuemode"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/sessions"
 	"github.com/charmbracelet/crush/internal/tui/page"
@@ -254,6 +255,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model: models.NewModelDialogCmp(),
 			},
 		)
+	case commands.SwitchQueueModeMsg:
+		return a, util.CmdHandler(
+			dialogs.OpenDialogMsg{
+				Model: queuemode.NewQueueModeDialogCmp(),
+			},
+		)
 	// Compact
 	case commands.CompactMsg:
 		return a, func() tea.Msg {
@@ -291,6 +298,23 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			modelTypeName = "small"
 		}
 		return a, util.ReportInfo(fmt.Sprintf("%s model changed to %s", modelTypeName, msg.Model.Model))
+
+	// Queue Mode Switch
+	case queuemode.QueueModeSelectedMsg:
+		cfg := config.Get()
+		if cfg.Options == nil {
+			cfg.Options = &config.Options{}
+		}
+		if err := cfg.SetConfigField("options.deferred_queue", msg.DeferredQueue); err != nil {
+			return a, util.ReportError(err)
+		}
+		cfg.Options.DeferredQueue = msg.DeferredQueue
+
+		modeName := "Interrupt Mode"
+		if msg.DeferredQueue {
+			modeName = "Queue Mode"
+		}
+		return a, util.ReportInfo(fmt.Sprintf("Queue mode changed to %s", modeName))
 
 	// File Picker
 	case commands.OpenFilePickerMsg:

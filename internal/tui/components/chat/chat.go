@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -214,11 +215,18 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
-	return t.S().Base.
-		Padding(1, 1, 0, 1).
-		Width(m.width).
-		Height(m.height).
-		Render(m.listCmp.View())
+
+	view := []string{
+		t.S().Base.
+			Padding(1, 1, 0, 1).
+			Width(m.width).
+			Height(m.height).
+			Render(
+				m.listCmp.View(),
+			),
+	}
+
+	return strings.Join(view, "\n")
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {

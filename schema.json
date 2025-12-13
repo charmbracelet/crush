@@ -419,6 +419,11 @@
           "description": "Disable sending metrics",
           "default": false
         },
+        "deferred_queue": {
+          "type": "boolean",
+          "description": "Queue messages to run after task completes instead of interrupting current task",
+          "default": true
+        },
         "initialize_as": {
           "type": "string",
           "description": "Name of the context file to create/update during project initialization",

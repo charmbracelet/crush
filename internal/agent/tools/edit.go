@@ -71,19 +71,12 @@ func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)
-				if err != nil {
-					return response, err
-				}
-			}
-
-			if params.NewString == "" {
+			} else if params.NewString == "" {
 				response, err = deleteContent(editCtx, params.FilePath, params.OldString, params.ReplaceAll, call)
-				if err != nil {
-					return response, err
-				}
+			} else {
+				response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 			}
 
-			response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 			if err != nil {
 				return response, err
 			}

@@ -43,7 +43,7 @@ type Session struct {
 }
 
 type Service interface {
-	pubsub.Suscriber[Session]
+	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)

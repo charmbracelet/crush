@@ -55,6 +55,7 @@ type App struct {
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
 	events          chan tea.Msg
+	droppedMsgCh    chan tea.Msg
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
@@ -86,6 +87,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		config: cfg,
 
 		events:          make(chan tea.Msg, 100),
+		droppedMsgCh:    make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
 		tuiWG:           &sync.WaitGroup{},
 	}
@@ -286,13 +288,13 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events, app.droppedMsgCh)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events, app.droppedMsgCh)
 	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
@@ -307,6 +309,7 @@ func setupSubscriber[T any](
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
+	droppedMsgCh chan<- tea.Msg,
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
@@ -322,6 +325,11 @@ func setupSubscriber[T any](
 				case outputCh <- msg:
 				case <-time.After(2 * time.Second):
 					slog.Warn("message dropped due to slow consumer", "name", name)
+					select {
+					case droppedMsgCh <- pubsub.MessageDroppedMsg{Name: name}:
+					default:
+						slog.Warn("failed to send dropped message notification", "name", name)
+					}
 				case <-ctx.Done():
 					slog.Debug("subscription cancelled", "name", name)
 					return
@@ -383,6 +391,8 @@ func (app *App) Subscribe(program *tea.Program) {
 				slog.Debug("TUI message channel closed")
 				return
 			}
+			program.Send(msg)
+		case msg := <-app.droppedMsgCh:
 			program.Send(msg)
 		}
 	}

@@ -97,7 +97,7 @@ func (m *queueModeDialogCmp) View() string {
 		lipgloss.Left,
 		t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Queue Mode", m.width-4)),
 		"",
-		t.S().Base.PaddingLeft(1).Render(modeButtons),
+		modeButtons,
 		"",
 		t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
 	)
@@ -130,6 +130,11 @@ func (m *queueModeDialogCmp) ID() dialogs.DialogID {
 func (m *queueModeDialogCmp) modeButtons() string {
 	t := styles.CurrentTheme()
 
+	// Calculate button width to match list items exactly
+	// listWidth = width - 2 (account for border), same as session dialog
+	// This is the width passed to SetSize() for list items
+	buttonWidth := m.width - 2
+
 	buttons := []struct {
 		Text           string
 		UnderlineIndex int
@@ -147,29 +152,18 @@ func (m *queueModeDialogCmp) modeButtons() string {
 		},
 	}
 
-	// Calculate the maximum text width to determine button size
-	maxTextWidth := 0
-	for _, btn := range buttons {
-		textWidth := lipgloss.Width(btn.Text)
-		if textWidth > maxTextWidth {
-			maxTextWidth = textWidth
-		}
-	}
-	// Button width = text width + padding (2 on each side = 4 total) + left offset for selected (2 spaces)
-	buttonWidth := maxTextWidth + 4 + 2
-
-	// Render each button with fixed width, adding left offset for selected button to align text
 	var parts []string
 	for _, button := range buttons {
-		// Use Primary background for selected button (like menu items), BgSubtle for unselected
+		// Use exact same styling as list items (completionItemCmp)
+		// itemStyle with Width and Padding ensures full-width background
 		itemStyle := t.S().Base.Padding(0, 1).Width(buttonWidth)
-		textStyle := t.S().Text
+		titleStyle := t.S().Text
+		titleMatchStyle := t.S().Text.Underline(true)
 
 		if button.Selected {
+			titleStyle = t.S().TextSelected
+			titleMatchStyle = t.S().TextSelected.Underline(true)
 			itemStyle = itemStyle.Background(t.Primary)
-			textStyle = t.S().TextSelected
-		} else {
-			itemStyle = itemStyle.Background(t.BgSubtle)
 		}
 
 		// Create the button text with underlined character
@@ -179,27 +173,24 @@ func (m *queueModeDialogCmp) modeButtons() string {
 			before := text[:button.UnderlineIndex]
 			underlined := text[button.UnderlineIndex : button.UnderlineIndex+1]
 			after := text[button.UnderlineIndex+1:]
-			message = textStyle.Render(before) +
-				textStyle.Underline(true).Render(underlined) +
-				textStyle.Render(after)
+			message = titleStyle.Render(before) +
+				titleMatchStyle.Render(underlined) +
+				titleStyle.Render(after)
 		} else {
-			message = textStyle.Render(text)
+			message = titleStyle.Render(text)
 		}
 
-		// Add left offset (2 spaces) for selected button to align text with unselected button
-		// This ensures text alignment between selected and unselected buttons
-		leftOffset := ""
-		if button.Selected {
-			leftOffset = "  " // 2 spaces offset for selected button
-		}
-
-		// Render the button with padding and left offset
-		buttonContent := itemStyle.Render(leftOffset + message)
-
+		// Render exactly like list items: itemStyle.Render() with JoinHorizontal
+		// This ensures the background fills the full width
+		buttonContent := itemStyle.Render(
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				message,
+			),
+		)
 		parts = append(parts, buttonContent)
 	}
 
-	// Join vertically
-	buttonsContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return t.S().Base.Width(buttonWidth).Render(buttonsContent)
+	// Join vertically with left alignment
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -215,36 +216,14 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
 
-	// Always check current queue size in View to ensure accurate display
-	// This prevents stale queue numbers from being displayed
-	var currentQueueSize int
-	if m.app.AgentCoordinator != nil && m.session.ID != "" {
-		currentQueueSize = m.app.AgentCoordinator.QueuedPrompts(m.session.ID)
-		// Update cached value for consistency
-		m.promptQueue = currentQueueSize
-	} else {
-		currentQueueSize = m.promptQueue
-	}
-
-	height := m.height
-	if currentQueueSize > 0 {
-		height -= 4 // pill height and padding
-	}
-
 	view := []string{
 		t.S().Base.
 			Padding(1, 1, 0, 1).
 			Width(m.width).
-			Height(height).
+			Height(m.height).
 			Render(
 				m.listCmp.View(),
 			),
-	}
-
-	if currentQueueSize > 0 {
-		queuePill := queuePill(currentQueueSize, t)
-		// queuePill already includes padding, don't re-render to avoid number splitting
-		view = append(view, queuePill)
 	}
 
 	return strings.Join(view, "\n")

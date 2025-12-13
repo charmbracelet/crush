@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -147,7 +146,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, tea.Sequence(
 				tea.SetClipboard(m.claudeOAuth2.URL),
 				func() tea.Msg {
-					_ = clipboard.WriteAll(m.claudeOAuth2.URL)
+					_ = util.WriteClipboard(m.claudeOAuth2.URL)
 					return nil
 				},
 				util.ReportInfo("URL copied to clipboard"),

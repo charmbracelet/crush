@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/lazygit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
@@ -303,6 +304,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: filepicker.NewFilePickerCmp(a.app.Config().WorkingDir()),
 		})
+	// Lazygit
+	case commands.OpenLazygitMsg:
+		if a.dialog.ActiveDialogID() == lazygit.DialogID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: lazygit.NewDialog(a.app.Context(), a.app.Config().WorkingDir()),
+		})
 	// Permissions
 	case pubsub.Event[permission.PermissionNotification]:
 		item, ok := a.pages[a.currentPage]
@@ -508,7 +517,7 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: commands.NewCommandDialog(a.selectedSessionID),
+			Model: commands.NewCommandDialog(a.app.Context(), a.selectedSessionID),
 		})
 	case key.Matches(msg, a.keyMap.Models):
 		// if the app is not configured show no models

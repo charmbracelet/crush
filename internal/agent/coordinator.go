@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/askuser"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
@@ -61,6 +62,7 @@ type coordinator struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
+	askUser     askuser.Service
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
@@ -78,12 +80,14 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	askUser askuser.Service,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
 		sessions:    sessions,
 		messages:    messages,
 		permissions: permissions,
+		askUser:     askUser,
 		history:     history,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
@@ -363,6 +367,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	allTools = append(allTools,
+		tools.NewAskUserTool(c.askUser),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -537,11 +542,18 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
-	opts := []openai.Option{
-		openai.WithAPIKey(apiKey),
-		openai.WithUseResponsesAPI(),
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, rawAuth bool) (fantasy.Provider, error) {
+	var opts []openai.Option
+
+	if rawAuth && apiKey != "" {
+		// Use raw Authorization header without Bearer prefix
+		headers["Authorization"] = apiKey
+	} else {
+		opts = append(opts, openai.WithAPIKey(apiKey))
 	}
+
+	opts = append(opts, openai.WithUseResponsesAPI())
+
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openai.WithHTTPClient(httpClient))
@@ -569,11 +581,18 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, rawAuth bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
-		openaicompat.WithAPIKey(apiKey),
 	}
+
+	if rawAuth && apiKey != "" {
+		// Use raw Authorization header without Bearer prefix
+		headers["Authorization"] = apiKey
+	} else {
+		opts = append(opts, openaicompat.WithAPIKey(apiKey))
+	}
+
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
@@ -700,7 +719,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.RawAuth)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers)
 	case openrouter.Name:
@@ -720,7 +739,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.RawAuth)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

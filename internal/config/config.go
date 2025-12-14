@@ -107,6 +107,9 @@ type ProviderConfig struct {
 
 	// Extra headers to send with each request to the provider.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
+	// RawAuth disables the automatic "Bearer " prefix for api_key.
+	// When true, the api_key is sent directly in the Authorization header without modification.
+	RawAuth bool `json:"raw_auth,omitempty" jsonschema:"description=When true the api_key is sent directly in Authorization header without Bearer prefix,default=false"`
 	// Extra body
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
 
@@ -617,6 +620,7 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 func allToolNames() []string {
 	return []string{
 		"agent",
+		"ask_user",
 		"bash",
 		"job_output",
 		"job_kill",

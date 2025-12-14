@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/askuser"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -26,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/core/status"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	askuserdialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/askuser"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -330,6 +332,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case permissions.PermissionDeny:
 			a.app.Permissions.Deny(msg.Permission)
 		}
+		return a, nil
+	// AskUser dialog handling
+	case pubsub.Event[askuser.AskUserRequest]:
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: askuserdialog.NewAskUserDialogCmp(msg.Payload),
+		})
+	case askuserdialog.AskUserResponseMsg:
+		a.app.AskUser.Respond(msg.Request.ID, msg.Response)
 		return a, nil
 	case splash.OnboardingCompleteMsg:
 		item, ok := a.pages[a.currentPage]

@@ -32,3 +32,10 @@ type MouseClickable interface {
 	// It returns true if the event was handled, false otherwise.
 	HandleMouseClick(btn ansi.MouseButton, x, y int) bool
 }
+
+// FocusAware represents an item that needs to know its focus state for
+// internal rendering decisions.
+type FocusAware interface {
+	// SetFocused is called before Render to inform the item of its focus state.
+	SetFocused(focused bool)
+}

@@ -27,15 +27,16 @@ type ListItem interface {
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
 	session.Session
-	t *styles.Styles
-	m fuzzy.Match
+	t       *styles.Styles
+	m       fuzzy.Match
+	focused bool
 }
 
 var _ ListItem = &SessionItem{}
 
 // Filter returns the filterable value of the session.
 func (s *SessionItem) Filter() string {
-	return s.Session.Title
+	return s.Title
 }
 
 // ID returns the unique identifier of the session.
@@ -48,16 +49,23 @@ func (s *SessionItem) SetMatch(m fuzzy.Match) {
 	s.m = m
 }
 
+// SetFocused set the current items focus state
+func (s *SessionItem) SetFocused(focused bool) {
+	s.focused = focused
+}
+
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	age := humanize.Time(time.Unix(s.Session.UpdatedAt, 0))
-	age = s.t.Subtle.Render(age)
-	age = " " + age
-	ageLen := lipgloss.Width(age)
-	title := s.Session.Title
+	lastUpdated := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	if !s.focused {
+		lastUpdated = s.t.Subtle.Render(lastUpdated)
+	}
+	lastUpdated = " " + lastUpdated
+	ageLen := lipgloss.Width(lastUpdated)
+	title := s.Title
 	titleLen := lipgloss.Width(title)
 	title = ansi.Truncate(title, max(0, width-ageLen), "…")
-	right := lipgloss.NewStyle().AlignHorizontal(lipgloss.Right).Width(width - titleLen).Render(age)
+	right := lipgloss.NewStyle().AlignHorizontal(lipgloss.Right).Width(width - titleLen).Render(lastUpdated)
 
 	if matches := len(s.m.MatchedIndexes); matches > 0 {
 		var lastPos int

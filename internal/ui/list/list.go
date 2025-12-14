@@ -158,6 +158,12 @@ func (l *List) renderItem(idx int, process bool) renderedItem {
 		}
 	}
 
+	// Notify item of focus state if it cares.
+	isFocused := l.focused && idx == l.selectedIdx
+	if focusAware, ok := l.items[idx].(FocusAware); ok {
+		focusAware.SetFocused(isFocused)
+	}
+
 	ri, ok := l.renderedItems[idx]
 	if !ok {
 		item := l.items[idx]
@@ -413,11 +419,23 @@ func (l *List) AppendItems(items ...Item) {
 // Focus sets the focus state of the list.
 func (l *List) Focus() {
 	l.focused = true
+	// Invalidate the selected item if it's focus-aware.
+	if l.selectedIdx >= 0 && l.selectedIdx < len(l.items) {
+		if _, ok := l.items[l.selectedIdx].(FocusAware); ok {
+			l.invalidateItem(l.selectedIdx)
+		}
+	}
 }
 
 // Blur removes the focus state from the list.
 func (l *List) Blur() {
 	l.focused = false
+	// Invalidate the selected item if it's focus-aware.
+	if l.selectedIdx >= 0 && l.selectedIdx < len(l.items) {
+		if _, ok := l.items[l.selectedIdx].(FocusAware); ok {
+			l.invalidateItem(l.selectedIdx)
+		}
+	}
 }
 
 // ScrollToTop scrolls the list to the top.
@@ -497,38 +515,66 @@ func (l *List) SelectedItemInView() bool {
 
 // SetSelected sets the selected item index in the list.
 func (l *List) SetSelected(index int) {
+	oldIdx := l.selectedIdx
 	if index < 0 || index >= len(l.items) {
 		l.selectedIdx = -1
 	} else {
 		l.selectedIdx = index
+	}
+	l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
+}
+
+// invalidateFocusAwareItems invalidates the cache for items that implement
+// FocusAware when their focus state changes.
+func (l *List) invalidateFocusAwareItems(oldIdx, newIdx int) {
+	if oldIdx == newIdx {
+		return
+	}
+	if oldIdx >= 0 && oldIdx < len(l.items) {
+		if _, ok := l.items[oldIdx].(FocusAware); ok {
+			l.invalidateItem(oldIdx)
+		}
+	}
+	if newIdx >= 0 && newIdx < len(l.items) {
+		if _, ok := l.items[newIdx].(FocusAware); ok {
+			l.invalidateItem(newIdx)
+		}
 	}
 }
 
 // SelectPrev selects the previous item in the list.
 func (l *List) SelectPrev() {
 	if l.selectedIdx > 0 {
+		oldIdx := l.selectedIdx
 		l.selectedIdx--
+		l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 	}
 }
 
 // SelectNext selects the next item in the list.
 func (l *List) SelectNext() {
 	if l.selectedIdx < len(l.items)-1 {
+		oldIdx := l.selectedIdx
 		l.selectedIdx++
+		l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 	}
 }
 
 // SelectFirst selects the first item in the list.
 func (l *List) SelectFirst() {
 	if len(l.items) > 0 {
+		oldIdx := l.selectedIdx
 		l.selectedIdx = 0
+		l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 	}
 }
 
 // SelectLast selects the last item in the list.
 func (l *List) SelectLast() {
 	if len(l.items) > 0 {
+		oldIdx := l.selectedIdx
 		l.selectedIdx = len(l.items) - 1
+		l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 	}
 }
 
@@ -544,13 +590,17 @@ func (l *List) SelectedItem() Item {
 // SelectFirstInView selects the first item currently in view.
 func (l *List) SelectFirstInView() {
 	startIdx, _ := l.findVisibleItems()
+	oldIdx := l.selectedIdx
 	l.selectedIdx = startIdx
+	l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 }
 
 // SelectLastInView selects the last item currently in view.
 func (l *List) SelectLastInView() {
 	_, endIdx := l.findVisibleItems()
+	oldIdx := l.selectedIdx
 	l.selectedIdx = endIdx
+	l.invalidateFocusAwareItems(oldIdx, l.selectedIdx)
 }
 
 // HandleMouseDown handles mouse down events at the given line in the viewport.

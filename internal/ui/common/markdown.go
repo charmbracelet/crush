@@ -2,8 +2,8 @@ package common
 
 import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/glamour/v2"
-	gstyles "github.com/charmbracelet/glamour/v2/styles"
+	"charm.land/glamour/v2"
+	gstyles "charm.land/glamour/v2/styles"
 )
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with

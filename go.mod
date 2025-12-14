@@ -14,6 +14,7 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alecthomas/chroma/v2 v2.20.0
+	github.com/alpkeskin/gotoon v0.1.1
 	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1

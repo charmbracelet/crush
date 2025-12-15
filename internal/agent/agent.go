@@ -87,6 +87,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	onRetry              func(int, string, time.Duration)
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -102,6 +103,7 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	OnRetry              func(int, string, time.Duration) // statusCode, title, delay
 }
 
 func NewSessionAgent(
@@ -117,6 +119,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
+		onRetry:              opts.OnRetry,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -322,6 +325,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				"title", err.Title,
 				"delay", delay.String(),
 				"session_id", call.SessionID)
+			if a.onRetry != nil {
+				a.onRetry(err.StatusCode, err.Title, delay)
+			}
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -562,6 +568,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 				"title", err.Title,
 				"delay", delay.String(),
 				"session_id", sessionID)
+			if a.onRetry != nil {
+				a.onRetry(err.StatusCode, err.Title, delay)
+			}
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
@@ -725,6 +734,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 				"title", err.Title,
 				"delay", delay.String(),
 				"session_id", session.ID)
+			if a.onRetry != nil {
+				a.onRetry(err.StatusCode, err.Title, delay)
+			}
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages

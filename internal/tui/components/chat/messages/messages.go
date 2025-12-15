@@ -311,7 +311,7 @@ func (m *messageCmp) renderThinkingContent() string {
 		}
 	}
 	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
-	result := lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View())
+	result := lineStyle.Width(m.textWidth()).Padding(0, 1, 0, 0).Render(m.thinkingViewport.View())
 	if footer != "" {
 		result += "\n\n" + footer
 	}

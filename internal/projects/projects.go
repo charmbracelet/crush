@@ -25,9 +25,7 @@ type ProjectList struct {
 	Projects []Project `json:"projects"`
 }
 
-var (
-	mu sync.Mutex
-)
+var mu sync.Mutex
 
 // projectsFilePath returns the path to the projects.json file.
 func projectsFilePath() string {

@@ -229,12 +229,12 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 
 		if len(content) > maxAttachmentSize {
-			return m, util.ReportError(errors.New("file is too big (>5mb)"))
+			return m, util.ReportWarn("File is too big (>5mb)")
 		}
 
 		mimeType := mimeOf(content)
 		if !strings.HasPrefix(mimeType, "text/") && !strings.HasPrefix(mimeType, "image/") {
-			return m, util.ReportWarn("invalid file content type: " + mimeType)
+			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
 		attachment := message.Attachment{
 			FilePath: path,

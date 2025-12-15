@@ -32,14 +32,12 @@ const (
 	defaultWidth int = 70
 )
 
-type commandType uint
-
-func (c commandType) String() string { return []string{"System", "User", "MCP"}[c] }
+type commandType = uicmd.CommandType
 
 const (
-	SystemCommands commandType = iota
-	UserCommands
-	MCPPrompts
+	SystemCommands = uicmd.SystemCommands
+	UserCommands   = uicmd.UserCommands
+	MCPPrompts     = uicmd.MCPPrompts
 )
 
 type listModel = list.FilterableList[list.CompletionItem[Command]]

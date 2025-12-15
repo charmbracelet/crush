@@ -21,6 +21,16 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
+type CommandType uint
+
+func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
+
+const (
+	SystemCommands CommandType = iota
+	UserCommands
+	MCPPrompts
+)
+
 // Command represents a command that can be executed
 type Command struct {
 	ID          string

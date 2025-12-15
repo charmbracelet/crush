@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/uicmd"
 )
 
 const (
@@ -44,13 +45,11 @@ const (
 type listModel = list.FilterableList[list.CompletionItem[Command]]
 
 // Command represents a command that can be executed
-type Command struct {
-	ID          string
-	Title       string
-	Description string
-	Shortcut    string // Optional shortcut for the command
-	Handler     func(cmd Command) tea.Cmd
-}
+type (
+	Command                         = uicmd.Command
+	CommandRunCustomMsg             = uicmd.CommandRunCustomMsg
+	ShowMCPPromptArgumentsDialogMsg = uicmd.ShowMCPPromptArgumentsDialogMsg
+)
 
 // CommandsDialog represents the commands dialog.
 type CommandsDialog interface {
@@ -121,12 +120,12 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 }
 
 func (c *commandDialogCmp) Init() tea.Cmd {
-	commands, err := LoadCustomCommands()
+	commands, err := uicmd.LoadCustomCommands()
 	if err != nil {
 		return util.ReportError(err)
 	}
 	c.userCommands = commands
-	c.mcpPrompts.SetSlice(loadMCPPrompts())
+	c.mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
 	return c.setCommandType(c.selected)
 }
 
@@ -142,7 +141,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		// Reload MCP prompts when MCP state changes
 		if msg.Type == pubsub.UpdatedEvent {
-			c.mcpPrompts.SetSlice(loadMCPPrompts())
+			c.mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
 			// If we're currently viewing MCP prompts, refresh the list
 			if c.selected == MCPPrompts {
 				return c, c.setCommandType(MCPPrompts)

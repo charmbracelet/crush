@@ -1,4 +1,7 @@
-package commands
+// Package uicmd provides functionality to load and handle custom commands
+// from markdown files and MCP prompts.
+// TODO: Move this into internal/ui after refactoring.
+package uicmd
 
 import (
 	"cmp"
@@ -18,6 +21,31 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
 
+// Command represents a command that can be executed
+type Command struct {
+	ID          string
+	Title       string
+	Description string
+	Shortcut    string // Optional shortcut for the command
+	Handler     func(cmd Command) tea.Cmd
+}
+
+// ShowArgumentsDialogMsg is a message that is sent to show the arguments dialog.
+type ShowArgumentsDialogMsg struct {
+	CommandID   string
+	Description string
+	ArgNames    []string
+	OnSubmit    func(args map[string]string) tea.Cmd
+}
+
+// CloseArgumentsDialogMsg is a message that is sent when the arguments dialog is closed.
+type CloseArgumentsDialogMsg struct {
+	Submit    bool
+	CommandID string
+	Content   string
+	Args      map[string]string
+}
+
 const (
 	userCommandPrefix    = "user:"
 	projectCommandPrefix = "project:"
@@ -35,7 +63,10 @@ type commandSource struct {
 }
 
 func LoadCustomCommands() ([]Command, error) {
-	cfg := config.Get()
+	return LoadCustomCommandsFromConfig(config.Get())
+}
+
+func LoadCustomCommandsFromConfig(cfg *config.Config) ([]Command, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -221,7 +252,7 @@ type CommandRunCustomMsg struct {
 	Content string
 }
 
-func loadMCPPrompts() []Command {
+func LoadMCPPrompts() []Command {
 	var commands []Command
 	for mcpName, prompts := range mcp.Prompts() {
 		for _, prompt := range prompts {

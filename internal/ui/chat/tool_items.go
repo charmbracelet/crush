@@ -98,7 +98,7 @@ func (m *BashToolItem) Render(width int) string {
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 
 	// Check if this is a background job that finished
-	if m.ctx.Call.Finished {
+	if m.ctx.Call.Finished && m.ctx.HasResult() {
 		var meta tools.BashResponseMetadata
 		unmarshalParams(m.ctx.Result.Metadata, &meta)
 		if meta.Background {

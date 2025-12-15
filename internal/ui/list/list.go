@@ -375,26 +375,6 @@ func (l *List) Render() string {
 	return strings.Join(lines, "\n")
 }
 
-// PrependItems prepends items to the list.
-func (l *List) PrependItems(items ...Item) {
-	l.items = append(items, l.items...)
-
-	// Shift cache
-	newCache := make(map[int]renderedItem)
-	for idx, val := range l.renderedItems {
-		newCache[idx+len(items)] = val
-	}
-	l.renderedItems = newCache
-
-	// Keep view position relative to the content that was visible
-	l.offsetIdx += len(items)
-
-	// Update selection index if valid
-	if l.selectedIdx != -1 {
-		l.selectedIdx += len(items)
-	}
-}
-
 // SetItems sets the items in the list.
 func (l *List) SetItems(items ...Item) {
 	l.setItems(true, items...)
@@ -415,17 +395,6 @@ func (l *List) setItems(evict bool, items ...Item) {
 // AppendItems appends items to the list.
 func (l *List) AppendItems(items ...Item) {
 	l.items = append(l.items, items...)
-}
-
-// UpdateItemAt updates the item at the given index and invalidates its cache.
-// Returns true if the index was valid and the item was updated.
-func (l *List) UpdateItemAt(idx int, item Item) bool {
-	if idx < 0 || idx >= len(l.items) {
-		return false
-	}
-	l.items[idx] = item
-	l.invalidateItem(idx)
-	return true
 }
 
 // GetItemAt returns the item at the given index. Returns nil if the index is

@@ -55,16 +55,6 @@ func (f *FilterableList) AppendItems(items ...FilterableItem) {
 	f.List.SetItems(itms...)
 }
 
-// PrependItems prepends items to the list and updates the filtered items.
-func (f *FilterableList) PrependItems(items ...FilterableItem) {
-	f.items = append(items, f.items...)
-	itms := make([]Item, len(f.items))
-	for i, item := range f.items {
-		itms[i] = item
-	}
-	f.List.SetItems(itms...)
-}
-
 // SetFilter sets the filter query and updates the list items.
 func (f *FilterableList) SetFilter(q string) {
 	f.query = q

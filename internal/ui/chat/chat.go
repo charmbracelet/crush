@@ -77,12 +77,6 @@ func (m *Chat) Len() int {
 	return m.list.Len()
 }
 
-// PrependItems prepends new items to the chat list.
-func (m *Chat) PrependItems(items ...list.Item) {
-	m.list.PrependItems(items...)
-	m.list.ScrollToIndex(0)
-}
-
 // SetMessages sets the chat messages to the provided list of message items.
 func (m *Chat) SetMessages(msgs ...MessageItem) {
 	items := make([]list.Item, len(msgs))
@@ -106,18 +100,6 @@ func (m *Chat) AppendMessages(msgs ...MessageItem) {
 func (m *Chat) AppendItems(items ...list.Item) {
 	m.list.AppendItems(items...)
 	m.list.ScrollToIndex(m.list.Len() - 1)
-}
-
-// UpdateMessage updates an existing message by ID. Returns true if the message
-// was found and updated.
-func (m *Chat) UpdateMessage(id string, msg MessageItem) bool {
-	for i := 0; i < m.list.Len(); i++ {
-		item := m.list.GetItemAt(i)
-		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
-			return m.list.UpdateItemAt(i, msg)
-		}
-	}
-	return false
 }
 
 // GetMessage returns the message with the given ID. Returns nil if not found.

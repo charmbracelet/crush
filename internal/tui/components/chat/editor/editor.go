@@ -2,7 +2,9 @@ package editor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"net/http"
 	"os"
@@ -217,39 +219,29 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		path := strings.ReplaceAll(msg.Content, "\\ ", " ")
-		// try to get an image
-		path, err := filepath.Abs(strings.TrimSpace(path))
+		content, path, err := pasteToFile(msg)
+		if errors.Is(err, errNotAFile) {
+			m.textarea, cmd = m.textarea.Update(msg)
+			return m, cmd
+		}
 		if err != nil {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-		isAllowedType := false
-		for _, ext := range filepicker.AllowedTypes {
-			if strings.HasSuffix(path, ext) {
-				isAllowedType = true
-				break
-			}
-		}
-		if !isAllowedType {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
-		}
-		tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
-		if tooBig {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
+			return m, util.ReportError(err)
 		}
 
-		content, err := os.ReadFile(path)
-		if err != nil {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return m, cmd
+		if len(content) > maxAttachmentSize {
+			return m, util.ReportError(errors.New("file is too big (>5mb)"))
 		}
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
-		attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+
+		mimeType := mimeOf(content)
+		if !strings.HasPrefix(mimeType, "text/") && !strings.HasPrefix(mimeType, "image/") {
+			return m, util.ReportWarn("invalid file content type: " + mimeType)
+		}
+		attachment := message.Attachment{
+			FilePath: path,
+			FileName: filepath.Base(path),
+			MimeType: mimeType,
+			Content:  content,
+		}
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
 			Attachment: attachment,
 		})
@@ -596,4 +588,52 @@ func New(app *app.App) Editor {
 	e.textarea.Placeholder = e.readyPlaceholder
 
 	return e
+}
+
+var maxAttachmentSize = 5 * 1024 * 1024 // 5MB
+
+var errNotAFile = errors.New("not a file")
+
+func pasteToFile(msg tea.PasteMsg) ([]byte, string, error) {
+	path := strings.ReplaceAll(msg.Content, "\\", "")
+	path, err := filepath.Abs(strings.TrimSpace(path))
+	if err == nil {
+		content, path, err := filepathToFile(path)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return content, path, err
+		}
+	}
+
+	if strings.Count(msg.Content, "\n") > 2 {
+		return contentToFile([]byte(msg.Content))
+	}
+
+	return nil, "", errNotAFile
+}
+
+func contentToFile(content []byte) ([]byte, string, error) {
+	f, err := os.CreateTemp("", "paste_*.txt")
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := f.Write(content); err != nil {
+		return nil, "", err
+	}
+	if err := f.Close(); err != nil {
+		return nil, "", err
+	}
+	return content, f.Name(), nil
+}
+
+func filepathToFile(path string) ([]byte, string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	return content, path, nil
+}
+
+func mimeOf(content []byte) string {
+	mimeBufferSize := min(512, len(content))
+	return http.DetectContentType(content[:mimeBufferSize])
 }

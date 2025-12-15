@@ -229,15 +229,6 @@ func (m *Chat) UpdateItems(msg tea.Msg) tea.Cmd {
 	return m.list.UpdateItems(msg)
 }
 
-// ToolItemUpdater is implemented by tool items that support mutable updates.
-type ToolItemUpdater interface {
-	SetResult(result message.ToolResult)
-	SetCancelled()
-	UpdateCall(call message.ToolCall)
-	SetNestedCalls(calls []ToolCallContext)
-	Context() *ToolCallContext
-}
-
 // GetToolItem returns the tool item with the given ID, or nil if not found.
 func (m *Chat) GetToolItem(id string) ToolItem {
 	for i := 0; i < m.list.Len(); i++ {

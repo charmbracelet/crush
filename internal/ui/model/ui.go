@@ -387,6 +387,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 	switch m.state {
 	case uiChat:
 		switch {
+		case key.Matches(msg, m.keyMap.Chat.NewSession):
+			if m.com.App.AgentCoordinator == nil {
+				return cmds
+			}
+			if m.com.App.AgentCoordinator.IsBusy() {
+				// TODO: Show warning message once we have a message/toast system
+				return cmds
+			}
+			cmds = append(cmds, m.newSession())
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.focus == uiFocusMain {
 				m.focus = uiFocusEditor
@@ -1113,6 +1122,20 @@ func (m *UI) loadNestedToolCalls(msgID, toolCallID string) []chat.ToolCallContex
 	}
 
 	return nestedContexts
+}
+
+// newSession clears the current session and resets the UI to a fresh state.
+func (m *UI) newSession() tea.Cmd {
+	if m.session == nil || m.session.ID == "" {
+		return nil
+	}
+
+	m.session = nil
+	m.state = uiLanding
+	m.focus = uiFocusEditor
+	m.chat.SetMessages()
+	m.sessionFiles = nil
+	return m.textarea.Focus()
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

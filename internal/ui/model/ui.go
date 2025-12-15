@@ -7,12 +7,15 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -20,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
@@ -103,7 +107,7 @@ type UI struct {
 	workingPlaceholder string
 
 	// Chat components
-	chat *Chat
+	chat *chat.Chat
 
 	// onboarding state
 	onboarding struct {
@@ -130,7 +134,7 @@ func New(com *common.Common) *UI {
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	ch := NewChat(com)
+	ch := chat.NewChat(com)
 
 	ui := &UI{
 		com:      com,
@@ -201,23 +205,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionLoadedMsg:
 		m.state = uiChat
 		m.session = &msg.sess
-		// Load the last 20 messages from this session.
+		// TODO: handle error.
 		msgs, _ := m.com.App.Messages.List(context.Background(), m.session.ID)
 
-		// Build tool result map to link tool calls with their results
-		msgPtrs := make([]*message.Message, len(msgs))
-		for i := range msgs {
-			msgPtrs[i] = &msgs[i]
-		}
-		toolResultMap := BuildToolResultMap(msgPtrs)
-
-		// Add messages to chat with linked tool results
-		items := make([]MessageItem, 0, len(msgs)*2)
-		for _, msg := range msgPtrs {
-			items = append(items, GetMessageItems(m.com.Styles, msg, toolResultMap)...)
-		}
-
-		m.chat.SetMessages(items...)
+		m.chat.SetMessages(m.convertChatMessages(msgs)...)
 
 		// Notify that session loading is done to scroll to bottom. This is
 		// needed because we need to draw the chat list first before we can
@@ -407,43 +398,47 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 				m.chat.Focus()
 				m.chat.SetSelected(m.chat.Len() - 1)
 			}
-		case key.Matches(msg, m.keyMap.Chat.Up):
+		case key.Matches(msg, m.keyMap.Chat.Up) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(-1)
 			if !m.chat.SelectedItemInView() {
 				m.chat.SelectPrev()
 				m.chat.ScrollToSelected()
 			}
-		case key.Matches(msg, m.keyMap.Chat.Down):
+		case key.Matches(msg, m.keyMap.Chat.Down) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(1)
 			if !m.chat.SelectedItemInView() {
 				m.chat.SelectNext()
 				m.chat.ScrollToSelected()
 			}
-		case key.Matches(msg, m.keyMap.Chat.UpOneItem):
+		case key.Matches(msg, m.keyMap.Chat.UpOneItem) && m.focus == uiFocusMain:
 			m.chat.SelectPrev()
 			m.chat.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Chat.DownOneItem):
+		case key.Matches(msg, m.keyMap.Chat.DownOneItem) && m.focus == uiFocusMain:
 			m.chat.SelectNext()
 			m.chat.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
+		case key.Matches(msg, m.keyMap.Chat.HalfPageUp) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(-m.chat.Height() / 2)
 			m.chat.SelectFirstInView()
-		case key.Matches(msg, m.keyMap.Chat.HalfPageDown):
+		case key.Matches(msg, m.keyMap.Chat.HalfPageDown) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(m.chat.Height() / 2)
 			m.chat.SelectLastInView()
-		case key.Matches(msg, m.keyMap.Chat.PageUp):
+		case key.Matches(msg, m.keyMap.Chat.PageUp) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(-m.chat.Height())
 			m.chat.SelectFirstInView()
-		case key.Matches(msg, m.keyMap.Chat.PageDown):
+		case key.Matches(msg, m.keyMap.Chat.PageDown) && m.focus == uiFocusMain:
 			m.chat.ScrollBy(m.chat.Height())
 			m.chat.SelectLastInView()
-		case key.Matches(msg, m.keyMap.Chat.Home):
+		case key.Matches(msg, m.keyMap.Chat.Home) && m.focus == uiFocusMain:
 			m.chat.ScrollToTop()
 			m.chat.SelectFirst()
-		case key.Matches(msg, m.keyMap.Chat.End):
+		case key.Matches(msg, m.keyMap.Chat.End) && m.focus == uiFocusMain:
 			m.chat.ScrollToBottom()
 			m.chat.SelectLast()
 		default:
+			// Try to handle key press in focused item (for expansion, etc.)
+			if m.focus == uiFocusMain && m.chat.HandleKeyPress(msg) {
+				return cmds
+			}
 			handleGlobalKeys(msg)
 		}
 	default:
@@ -974,6 +969,150 @@ func (m *UI) renderSidebarLogo(width int) {
 func (m *UI) loadSessionsCmd() tea.Msg {
 	allSessions, _ := m.com.App.Sessions.List(context.TODO())
 	return sessionsLoadedMsg{sessions: allSessions}
+}
+
+// convertChatMessages converts messages to chat message items
+func (m *UI) convertChatMessages(msgs []message.Message) []chat.MessageItem {
+	items := make([]chat.MessageItem, 0)
+
+	// Build tool result map for efficient lookup.
+	toolResultMap := m.buildToolResultMap(msgs)
+
+	var lastUserMessageTime time.Time
+
+	for _, msg := range msgs {
+		switch msg.Role {
+		case message.User:
+			lastUserMessageTime = time.Unix(msg.CreatedAt, 0)
+			items = append(items, chat.NewUserMessage(msg.ID, msg.Content().Text, msg.BinaryContent(), m.com.Styles))
+		case message.Assistant:
+			// Add assistant message and its tool calls.
+			assistantItems := m.convertAssistantMessage(msg, toolResultMap)
+			items = append(items, assistantItems...)
+
+			// Add section separator if assistant finished with EndTurn.
+			if msg.FinishReason() == message.FinishReasonEndTurn {
+				modelName := m.getModelName(msg)
+				items = append(items, chat.NewSectionItem(msg, lastUserMessageTime, modelName, m.com.Styles))
+			}
+		}
+	}
+	return items
+}
+
+// getModelName returns the display name for a model, or "Unknown Model" if not found.
+func (m *UI) getModelName(msg message.Message) string {
+	model := m.com.Config().GetModel(msg.Provider, msg.Model)
+	if model == nil {
+		return "Unknown Model"
+	}
+	return model.Name
+}
+
+// buildToolResultMap creates a map of tool call ID to tool result for efficient lookup.
+func (m *UI) buildToolResultMap(messages []message.Message) map[string]message.ToolResult {
+	toolResultMap := make(map[string]message.ToolResult)
+	for _, msg := range messages {
+		for _, tr := range msg.ToolResults() {
+			toolResultMap[tr.ToolCallID] = tr
+		}
+	}
+	return toolResultMap
+}
+
+// convertAssistantMessage converts an assistant message and its tool calls to UI items.
+func (m *UI) convertAssistantMessage(msg message.Message, toolResultMap map[string]message.ToolResult) []chat.MessageItem {
+	var items []chat.MessageItem
+
+	// Add assistant text/thinking message if it has content.
+	content := strings.TrimSpace(msg.Content().Text)
+	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
+	isError := msg.FinishReason() == message.FinishReasonError
+	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
+
+	// Show assistant message if there's content, thinking, or status to display.
+	if content != "" || thinking != "" || isError || isCancelled {
+		var finish message.Finish
+		if fp := msg.FinishPart(); fp != nil {
+			finish = *fp
+		}
+
+		items = append(items, chat.NewAssistantMessage(
+			msg.ID,
+			content,
+			thinking,
+			msg.IsFinished(),
+			finish,
+			m.com.Styles,
+		))
+	}
+
+	// Add tool call items.
+	for _, tc := range msg.ToolCalls() {
+		ctx := m.buildToolCallContext(tc, msg, toolResultMap)
+
+		// Handle nested tool calls for agent/agentic_fetch.
+		if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
+			ctx.NestedCalls = m.loadNestedToolCalls(msg.ID, tc.ID)
+		}
+
+		items = append(items, chat.NewToolItem(ctx))
+	}
+
+	return items
+}
+
+// buildToolCallContext creates a ToolCallContext from a tool call and its result.
+func (m *UI) buildToolCallContext(tc message.ToolCall, msg message.Message, toolResultMap map[string]message.ToolResult) chat.ToolCallContext {
+	ctx := chat.ToolCallContext{
+		Call:      tc,
+		Styles:    m.com.Styles,
+		IsNested:  false,
+		Cancelled: msg.FinishReason() == message.FinishReasonCanceled,
+	}
+
+	// Add tool result if available.
+	if tr, ok := toolResultMap[tc.ID]; ok {
+		ctx.Result = &tr
+	}
+
+	// TODO: Add permission tracking when we have permission service.
+	// ctx.PermissionRequested = ...
+	// ctx.PermissionGranted = ...
+
+	return ctx
+}
+
+// loadNestedToolCalls loads nested tool calls for agent/agentic_fetch tools.
+func (m *UI) loadNestedToolCalls(msgID, toolCallID string) []chat.ToolCallContext {
+	agentSessionID := m.com.App.Sessions.CreateAgentToolSessionID(msgID, toolCallID)
+	nestedMsgs, err := m.com.App.Messages.List(context.Background(), agentSessionID)
+	if err != nil || len(nestedMsgs) == 0 {
+		return nil
+	}
+
+	// Build nested tool result map.
+	nestedToolResultMap := m.buildToolResultMap(nestedMsgs)
+
+	var nestedContexts []chat.ToolCallContext
+	for _, nestedMsg := range nestedMsgs {
+		for _, nestedTC := range nestedMsg.ToolCalls() {
+			ctx := chat.ToolCallContext{
+				Call:      nestedTC,
+				Styles:    m.com.Styles,
+				IsNested:  true,
+				Cancelled: nestedMsg.FinishReason() == message.FinishReasonCanceled,
+			}
+
+			if tr, ok := nestedToolResultMap[nestedTC.ID]; ok {
+				ctx.Result = &tr
+			}
+
+			nestedContexts = append(nestedContexts, ctx)
+		}
+	}
+
+	return nestedContexts
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

@@ -4,6 +4,7 @@ import (
 	"image"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -679,6 +680,24 @@ func (l *List) ClearHighlight() {
 	l.mouseDownItem = -1
 	l.mouseDragItem = -1
 	l.lastHighlighted = make(map[int]bool)
+}
+
+// HandleKeyPress handles key press events for the currently selected item.
+// Returns true if the event was handled.
+func (l *List) HandleKeyPress(msg tea.KeyPressMsg) bool {
+	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {
+		return false
+	}
+
+	if keyable, ok := l.items[l.selectedIdx].(KeyPressable); ok {
+		handled := keyable.HandleKeyPress(msg)
+		if handled {
+			l.invalidateItem(l.selectedIdx)
+		}
+		return handled
+	}
+
+	return false
 }
 
 // findItemAtY finds the item at the given viewport y coordinate.

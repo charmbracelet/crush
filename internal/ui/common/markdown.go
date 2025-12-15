@@ -1,9 +1,8 @@
 package common
 
 import (
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"charm.land/glamour/v2"
-	gstyles "charm.land/glamour/v2/styles"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
@@ -16,11 +15,11 @@ func MarkdownRenderer(t *styles.Styles, width int) *glamour.TermRenderer {
 	return r
 }
 
-// PlainMarkdownRenderer returns a glamour [glamour.TermRenderer] with no colors
-// (plain text with structure) and the given width.
-func PlainMarkdownRenderer(width int) *glamour.TermRenderer {
+// PlainMarkdownRenderer returns a glamour [glamour.TermRenderer] with muted
+// colors on a subtle background, for thinking content.
+func PlainMarkdownRenderer(t *styles.Styles, width int) *glamour.TermRenderer {
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(gstyles.ASCIIStyleConfig),
+		glamour.WithStyles(t.PlainMarkdown),
 		glamour.WithWordWrap(width),
 	)
 	return r

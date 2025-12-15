@@ -1,10 +1,28 @@
-package model
+// Package chat provides the chat UI components for displaying and managing
+// conversation messages between users and assistants.
+package chat
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
 )
+
+// maxTextWidth is the maximum width text messages can be
+const maxTextWidth = 120
+
+// Identifiable is an interface for items that can provide a unique identifier.
+type Identifiable interface {
+	ID() string
+}
+
+// MessageItem represents a [message.Message] item that can be displayed in the
+// UI and be part of a [list.List] identifiable by a unique ID.
+type MessageItem interface {
+	list.Item
+	Identifiable
+}
 
 // Chat represents the chat UI model that handles chat interactions and
 // messages.
@@ -158,4 +176,9 @@ func (m *Chat) HandleMouseUp(x, y int) {
 // HandleMouseDrag handles mouse drag events for the chat component.
 func (m *Chat) HandleMouseDrag(x, y int) {
 	m.list.HandleMouseDrag(x, y)
+}
+
+// HandleKeyPress handles key press events for the currently selected item.
+func (m *Chat) HandleKeyPress(msg tea.KeyPressMsg) bool {
+	return m.list.HandleKeyPress(msg)
 }

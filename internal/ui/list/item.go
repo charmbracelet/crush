@@ -1,6 +1,7 @@
 package list
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -38,4 +39,11 @@ type MouseClickable interface {
 type FocusAware interface {
 	// SetFocused is called before Render to inform the item of its focus state.
 	SetFocused(focused bool)
+}
+
+// KeyPressable represents an item that can handle key press events.
+type KeyPressable interface {
+	// HandleKeyPress processes a key press event.
+	// It returns true if the event was handled, false otherwise.
+	HandleKeyPress(msg tea.KeyPressMsg) bool
 }

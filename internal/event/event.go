@@ -26,8 +26,13 @@ var (
 			Set("TERM", os.Getenv("TERM")).
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
-			Set("GoVersion", runtime.Version())
+			Set("GoVersion", runtime.Version()).
+			Set("Interactive", false)
 )
+
+func SetInteractive(interactive bool) {
+	baseProps = baseProps.Set("interactive", interactive)
+}
 
 func Init() {
 	c, err := posthog.NewWithConfig(key, posthog.Config{

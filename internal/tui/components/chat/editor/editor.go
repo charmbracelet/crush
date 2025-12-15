@@ -147,14 +147,14 @@ func (m *editorCmp) send() tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
 	}
 
-	m.textarea.Reset()
 	attachments := m.attachments
 
-	m.attachments = nil
 	if value == "" {
 		return nil
 	}
 
+	m.textarea.Reset()
+	m.attachments = nil
 	// Change the placeholder when sending a new message.
 	m.randomizePlaceholders()
 

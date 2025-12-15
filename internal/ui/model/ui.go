@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/common/anim"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -122,6 +123,10 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+
+	// lastUserMessageTime tracks the timestamp of the last user message for
+	// calculating response duration.
+	lastUserMessageTime int64
 }
 
 // New creates a new instance of the [UI] model.
@@ -227,6 +232,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
 		m.mcpStates = mcp.GetStates()
+	case pubsub.Event[message.Message]:
+		cmds = append(cmds, m.handleMessageEvent(msg))
+	case anim.StepMsg:
+		// Forward animation updates to chat items.
+		cmds = append(cmds, m.chat.UpdateItems(msg))
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -708,6 +718,12 @@ func (m *UI) updateFocused(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 		case uiFocusMain:
 		case uiFocusEditor:
 			switch {
+			case key.Matches(msg, m.keyMap.Editor.SendMessage):
+				text := strings.TrimSpace(m.textarea.Value())
+				if text != "" {
+					cmds = append(cmds, m.sendMessage(text, nil))
+				}
+				return cmds
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 			}
@@ -1039,8 +1055,12 @@ func (m *UI) convertAssistantMessage(msg message.Message, toolResultMap map[stri
 	isError := msg.FinishReason() == message.FinishReasonError
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 
-	// Show assistant message if there's content, thinking, or status to display.
-	if content != "" || thinking != "" || isError || isCancelled {
+	hasToolCalls := len(msg.ToolCalls()) > 0
+	reasoning := msg.ReasoningContent()
+
+	// Show when: no tool calls yet, OR has content, OR has thinking, OR is in thinking state.
+	shouldShow := !hasToolCalls || content != "" || thinking != "" || msg.IsThinking()
+	if shouldShow || isError || isCancelled {
 		var finish message.Finish
 		if fp := msg.FinishPart(); fp != nil {
 			finish = *fp
@@ -1052,6 +1072,10 @@ func (m *UI) convertAssistantMessage(msg message.Message, toolResultMap map[stri
 			thinking,
 			msg.IsFinished(),
 			finish,
+			hasToolCalls,
+			msg.IsSummaryMessage,
+			reasoning.StartedAt,
+			reasoning.FinishedAt,
 			m.com.Styles,
 		))
 	}
@@ -1148,4 +1172,248 @@ func renderLogo(t *styles.Styles, compact bool, width int) string {
 		VersionColor: t.LogoVersionColor,
 		Width:        width,
 	})
+}
+
+// -----------------------------------------------------------------------------
+// Message Event Handling
+// -----------------------------------------------------------------------------
+
+// handleMessageEvent processes pubsub message events (created/updated/deleted).
+func (m *UI) handleMessageEvent(event pubsub.Event[message.Message]) tea.Cmd {
+	// Ignore events for other sessions.
+	if m.session == nil || event.Payload.SessionID != m.session.ID {
+		return m.handleChildSessionEvent(event)
+	}
+
+	switch event.Type {
+	case pubsub.CreatedEvent:
+		if m.chat.GetMessage(event.Payload.ID) != nil {
+			return nil // Already exists.
+		}
+		return m.handleNewMessage(event.Payload)
+	case pubsub.UpdatedEvent:
+		return m.handleUpdateMessage(event.Payload)
+	case pubsub.DeletedEvent:
+		m.chat.DeleteMessage(event.Payload.ID)
+	}
+	return nil
+}
+
+// handleChildSessionEvent handles messages from child sessions (agent tools).
+func (m *UI) handleChildSessionEvent(event pubsub.Event[message.Message]) tea.Cmd {
+	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
+		return nil
+	}
+
+	// Check if this is an agent tool session.
+	childSessionID := event.Payload.SessionID
+	parentMessageID, toolCallID, ok := m.com.App.Sessions.ParseAgentToolSessionID(childSessionID)
+	if !ok {
+		return nil
+	}
+
+	// Find and update the parent tool call with new nested calls.
+	if tool := m.chat.GetToolItem(toolCallID); tool != nil {
+		tool.SetNestedCalls(m.loadNestedToolCalls(parentMessageID, toolCallID))
+		m.chat.InvalidateItem(toolCallID)
+	}
+	return nil
+}
+
+// handleNewMessage routes new messages to appropriate handlers based on role.
+func (m *UI) handleNewMessage(msg message.Message) tea.Cmd {
+	switch msg.Role {
+	case message.User:
+		return m.handleNewUserMessage(msg)
+	case message.Assistant:
+		return m.handleNewAssistantMessage(msg)
+	case message.Tool:
+		return m.handleToolResultMessage(msg)
+	}
+	return nil
+}
+
+// handleNewUserMessage adds a new user message to the chat.
+func (m *UI) handleNewUserMessage(msg message.Message) tea.Cmd {
+	m.lastUserMessageTime = msg.CreatedAt
+	userItem := chat.NewUserMessage(msg.ID, msg.Content().Text, msg.BinaryContent(), m.com.Styles)
+	m.chat.AppendMessages(userItem)
+	m.chat.ScrollToBottom()
+	return nil
+}
+
+// handleNewAssistantMessage adds a new assistant message and its tool calls.
+func (m *UI) handleNewAssistantMessage(msg message.Message) tea.Cmd {
+	var cmds []tea.Cmd
+
+	content := strings.TrimSpace(msg.Content().Text)
+	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
+	hasToolCalls := len(msg.ToolCalls()) > 0
+
+	// Add assistant message if it has content to display.
+	if m.shouldShowAssistantMessage(msg) {
+		assistantItem := m.createAssistantItem(msg, content, thinking, hasToolCalls)
+		m.chat.AppendMessages(assistantItem)
+		cmds = append(cmds, assistantItem.InitAnimation())
+	}
+
+	// Add tool call items.
+	for _, tc := range msg.ToolCalls() {
+		ctx := m.buildToolCallContext(tc, msg, nil)
+		if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
+			ctx.NestedCalls = m.loadNestedToolCalls(msg.ID, tc.ID)
+		}
+		toolItem := chat.NewToolItem(ctx)
+		m.chat.AppendMessages(toolItem)
+		if animatable, ok := toolItem.(chat.Animatable); ok {
+			cmds = append(cmds, animatable.InitAnimation())
+		}
+	}
+
+	m.chat.ScrollToBottom()
+	return tea.Batch(cmds...)
+}
+
+// handleUpdateMessage routes update messages based on role.
+func (m *UI) handleUpdateMessage(msg message.Message) tea.Cmd {
+	switch msg.Role {
+	case message.Assistant:
+		return m.handleUpdateAssistantMessage(msg)
+	case message.Tool:
+		return m.handleToolResultMessage(msg)
+	}
+	return nil
+}
+
+// handleUpdateAssistantMessage updates existing assistant message and tool calls.
+func (m *UI) handleUpdateAssistantMessage(msg message.Message) tea.Cmd {
+	var cmds []tea.Cmd
+
+	content := strings.TrimSpace(msg.Content().Text)
+	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
+	hasToolCalls := len(msg.ToolCalls()) > 0
+	shouldShow := m.shouldShowAssistantMessage(msg)
+
+	// Update or create/delete assistant message item.
+	existingItem := m.chat.GetMessage(msg.ID)
+	if existingItem != nil {
+		if shouldShow {
+			// Update existing message.
+			if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
+				assistantItem.SetContent(content, thinking, msg.IsFinished(), msg.FinishPart(), hasToolCalls, msg.IsSummaryMessage, msg.ReasoningContent())
+				m.chat.InvalidateItem(msg.ID)
+			}
+
+			// Add section separator when assistant finishes with EndTurn.
+			if msg.FinishReason() == message.FinishReasonEndTurn {
+				modelName := m.getModelName(msg)
+				sectionItem := chat.NewSectionItem(msg, time.Unix(m.lastUserMessageTime, 0), modelName, m.com.Styles)
+				m.chat.AppendMessages(sectionItem)
+			}
+		} else if hasToolCalls && content == "" && thinking == "" {
+			// Remove if it's now just tool calls with no content.
+			m.chat.DeleteMessage(msg.ID)
+		}
+	}
+
+	// Update existing or add new tool calls.
+	for _, tc := range msg.ToolCalls() {
+		if tool := m.chat.GetToolItem(tc.ID); tool != nil {
+			// Update existing tool call.
+			tool.UpdateCall(tc)
+			if msg.FinishReason() == message.FinishReasonCanceled {
+				tool.SetCancelled()
+			}
+			if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
+				tool.SetNestedCalls(m.loadNestedToolCalls(msg.ID, tc.ID))
+			}
+			m.chat.InvalidateItem(tc.ID)
+		} else {
+			// Add new tool call.
+			ctx := m.buildToolCallContext(tc, msg, nil)
+			if tc.Name == agent.AgentToolName || tc.Name == tools.AgenticFetchToolName {
+				ctx.NestedCalls = m.loadNestedToolCalls(msg.ID, tc.ID)
+			}
+			toolItem := chat.NewToolItem(ctx)
+			m.chat.AppendMessages(toolItem)
+			if animatable, ok := toolItem.(chat.Animatable); ok {
+				cmds = append(cmds, animatable.InitAnimation())
+			}
+		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// handleToolResultMessage updates tool calls with their results.
+func (m *UI) handleToolResultMessage(msg message.Message) tea.Cmd {
+	for _, tr := range msg.ToolResults() {
+		if tool := m.chat.GetToolItem(tr.ToolCallID); tool != nil {
+			tool.SetResult(tr)
+			m.chat.InvalidateItem(tr.ToolCallID)
+		}
+	}
+	return nil
+}
+
+// shouldShowAssistantMessage returns true if the message should be displayed.
+func (m *UI) shouldShowAssistantMessage(msg message.Message) bool {
+	hasToolCalls := len(msg.ToolCalls()) > 0
+	content := strings.TrimSpace(msg.Content().Text)
+	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
+	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking()
+}
+
+// createAssistantItem creates a new assistant message item.
+func (m *UI) createAssistantItem(msg message.Message, content, thinking string, hasToolCalls bool) *chat.AssistantMessageItem {
+	var finish message.Finish
+	if fp := msg.FinishPart(); fp != nil {
+		finish = *fp
+	}
+	reasoning := msg.ReasoningContent()
+
+	return chat.NewAssistantMessage(
+		msg.ID,
+		content,
+		thinking,
+		msg.IsFinished(),
+		finish,
+		hasToolCalls,
+		msg.IsSummaryMessage,
+		reasoning.StartedAt,
+		reasoning.FinishedAt,
+		m.com.Styles,
+	)
+}
+
+// sendMessage sends a user message to the agent coordinator.
+func (m *UI) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
+	sess := m.session
+
+	// Create a new session if we don't have one.
+	if sess == nil || sess.ID == "" {
+		newSession, err := m.com.App.Sessions.Create(context.Background(), "New Session")
+		if err != nil {
+			return nil
+		}
+		sess = &newSession
+		m.session = sess
+		m.state = uiChat
+	}
+
+	// Check if the agent coordinator is available.
+	if m.com.App.AgentCoordinator == nil {
+		return nil
+	}
+
+	// Clear the textarea.
+	m.textarea.Reset()
+	m.randomizePlaceholders()
+
+	// Run the agent in a goroutine.
+	sessionID := sess.ID
+	return func() tea.Msg {
+		_, _ = m.com.App.AgentCoordinator.Run(context.Background(), sessionID, text, attachments...)
+		return nil
+	}
 }

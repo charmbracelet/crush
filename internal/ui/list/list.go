@@ -417,6 +417,64 @@ func (l *List) AppendItems(items ...Item) {
 	l.items = append(l.items, items...)
 }
 
+// UpdateItemAt updates the item at the given index and invalidates its cache.
+// Returns true if the index was valid and the item was updated.
+func (l *List) UpdateItemAt(idx int, item Item) bool {
+	if idx < 0 || idx >= len(l.items) {
+		return false
+	}
+	l.items[idx] = item
+	l.invalidateItem(idx)
+	return true
+}
+
+// GetItemAt returns the item at the given index. Returns nil if the index is
+// out of bounds.
+func (l *List) GetItemAt(idx int) Item {
+	if idx < 0 || idx >= len(l.items) {
+		return nil
+	}
+	return l.items[idx]
+}
+
+// InvalidateItemAt invalidates the render cache for the item at the given
+// index without replacing the item. Use this when you've mutated an item's
+// internal state and need to force a re-render.
+func (l *List) InvalidateItemAt(idx int) {
+	if idx >= 0 && idx < len(l.items) {
+		l.invalidateItem(idx)
+	}
+}
+
+// DeleteItemAt removes the item at the given index. Returns true if the index
+// was valid and the item was removed.
+func (l *List) DeleteItemAt(idx int) bool {
+	if idx < 0 || idx >= len(l.items) {
+		return false
+	}
+
+	// Remove from items slice.
+	l.items = append(l.items[:idx], l.items[idx+1:]...)
+
+	// Clear and rebuild cache with shifted indices.
+	newCache := make(map[int]renderedItem, len(l.renderedItems))
+	for i, val := range l.renderedItems {
+		if i < idx {
+			newCache[i] = val
+		} else if i > idx {
+			newCache[i-1] = val
+		}
+	}
+	l.renderedItems = newCache
+
+	// Adjust selection if needed.
+	if l.selectedIdx >= len(l.items) && len(l.items) > 0 {
+		l.selectedIdx = len(l.items) - 1
+	}
+
+	return true
+}
+
 // Focus sets the focus state of the list.
 func (l *List) Focus() {
 	l.focused = true
@@ -698,6 +756,31 @@ func (l *List) HandleKeyPress(msg tea.KeyPressMsg) bool {
 	}
 
 	return false
+}
+
+// UpdateItems propagates a message to all items that implement Updatable.
+// This is typically used for animation messages like anim.StepMsg.
+// Returns commands from updated items.
+func (l *List) UpdateItems(msg tea.Msg) tea.Cmd {
+	var cmds []tea.Cmd
+	for i, item := range l.items {
+		if updatable, ok := item.(Updatable); ok {
+			updated, cmd := updatable.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+				// Invalidate cache when animation updates, even if pointer is same.
+				l.invalidateItem(i)
+			}
+			if updated != item {
+				l.items[i] = updated
+				l.invalidateItem(i)
+			}
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // findItemAtY finds the item at the given viewport y coordinate.

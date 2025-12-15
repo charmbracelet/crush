@@ -6,11 +6,13 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/ui/list"
 )
 
 // NewToolItem creates the appropriate tool item for the given context.
@@ -80,24 +82,34 @@ func NewToolItem(ctx ToolCallContext) MessageItem {
 // BashToolItem renders bash command execution.
 type BashToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewBashToolItem(ctx ToolCallContext) *BashToolItem {
 	return &BashToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
+// Update implements list.Updatable.
+func (m *BashToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
 func (m *BashToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.BashParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
 	cmd := strings.ReplaceAll(params.Command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 
-	// Check if this is a background job that finished
 	if m.ctx.Call.Finished && m.ctx.HasResult() {
 		var meta tools.BashResponseMetadata
 		unmarshalParams(m.ctx.Result.Metadata, &meta)
@@ -153,17 +165,19 @@ func (m *BashToolItem) renderBackgroundJob(params tools.BashParams, meta tools.B
 // JobOutputToolItem renders job output retrieval.
 type JobOutputToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewJobOutputToolItem(ctx ToolCallContext) *JobOutputToolItem {
 	return &JobOutputToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *JobOutputToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.JobOutputParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -191,17 +205,19 @@ func (m *JobOutputToolItem) Render(width int) string {
 // JobKillToolItem renders job termination.
 type JobKillToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewJobKillToolItem(ctx ToolCallContext) *JobKillToolItem {
 	return &JobKillToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *JobKillToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.JobKillParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -263,17 +279,19 @@ func renderJobHeader(ctx *ToolCallContext, action, pid, description string, widt
 // ViewToolItem renders file viewing with syntax highlighting.
 type ViewToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewViewToolItem(ctx ToolCallContext) *ViewToolItem {
 	return &ViewToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *ViewToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.ViewParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -290,7 +308,6 @@ func (m *ViewToolItem) Render(width int) string {
 		return result
 	}
 
-	// Handle image content
 	if m.ctx.Result.Data != "" && strings.HasPrefix(m.ctx.Result.MIMEType, "image/") {
 		body := renderImageContent(m.ctx.Result.Data, m.ctx.Result.MIMEType, "", m.ctx.Styles)
 		return joinHeaderBody(header, body, m.ctx.Styles)
@@ -306,17 +323,19 @@ func (m *ViewToolItem) Render(width int) string {
 // EditToolItem renders file editing with diff visualization.
 type EditToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewEditToolItem(ctx ToolCallContext) *EditToolItem {
 	return &EditToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *EditToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.EditParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -342,17 +361,19 @@ func (m *EditToolItem) Render(width int) string {
 // MultiEditToolItem renders multiple file edits with diff visualization.
 type MultiEditToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewMultiEditToolItem(ctx ToolCallContext) *MultiEditToolItem {
 	return &MultiEditToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *MultiEditToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.MultiEditParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -376,7 +397,6 @@ func (m *MultiEditToolItem) Render(width int) string {
 
 	body := renderDiffContent(file, meta.OldContent, meta.NewContent, width-2, m.ctx.Styles, &m.toolItem)
 
-	// Add failed edits warning if any exist
 	if len(meta.EditsFailed) > 0 {
 		sty := m.ctx.Styles
 		noteTag := sty.Tool.NoteTag.Render("Note")
@@ -391,17 +411,19 @@ func (m *MultiEditToolItem) Render(width int) string {
 // WriteToolItem renders file writing with syntax-highlighted content preview.
 type WriteToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewWriteToolItem(ctx ToolCallContext) *WriteToolItem {
 	return &WriteToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *WriteToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.WriteParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -425,17 +447,19 @@ func (m *WriteToolItem) Render(width int) string {
 // GlobToolItem renders glob file pattern matching results.
 type GlobToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewGlobToolItem(ctx ToolCallContext) *GlobToolItem {
 	return &GlobToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *GlobToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.GlobParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -457,17 +481,19 @@ func (m *GlobToolItem) Render(width int) string {
 // GrepToolItem renders grep content search results.
 type GrepToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewGrepToolItem(ctx ToolCallContext) *GrepToolItem {
 	return &GrepToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *GrepToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.GrepParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -491,17 +517,19 @@ func (m *GrepToolItem) Render(width int) string {
 // LSToolItem renders directory listing results.
 type LSToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewLSToolItem(ctx ToolCallContext) *LSToolItem {
 	return &LSToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *LSToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.LSParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -522,17 +550,19 @@ func (m *LSToolItem) Render(width int) string {
 // SourcegraphToolItem renders code search results.
 type SourcegraphToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewSourcegraphToolItem(ctx ToolCallContext) *SourcegraphToolItem {
 	return &SourcegraphToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *SourcegraphToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.SourcegraphParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -559,17 +589,19 @@ func (m *SourcegraphToolItem) Render(width int) string {
 // FetchToolItem renders URL fetching with format-specific content display.
 type FetchToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewFetchToolItem(ctx ToolCallContext) *FetchToolItem {
 	return &FetchToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *FetchToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.FetchParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -585,7 +617,6 @@ func (m *FetchToolItem) Render(width int) string {
 		return result
 	}
 
-	// Use appropriate extension for syntax highlighting
 	file := "fetch.md"
 	switch params.Format {
 	case "text":
@@ -601,17 +632,19 @@ func (m *FetchToolItem) Render(width int) string {
 // AgenticFetchToolItem renders agentic URL fetching with nested tool calls.
 type AgenticFetchToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewAgenticFetchToolItem(ctx ToolCallContext) *AgenticFetchToolItem {
 	return &AgenticFetchToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *AgenticFetchToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.AgenticFetchParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -630,17 +663,19 @@ func (m *AgenticFetchToolItem) Render(width int) string {
 // WebFetchToolItem renders web page fetching.
 type WebFetchToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewWebFetchToolItem(ctx ToolCallContext) *WebFetchToolItem {
 	return &WebFetchToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *WebFetchToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.WebFetchParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -658,17 +693,19 @@ func (m *WebFetchToolItem) Render(width int) string {
 // WebSearchToolItem renders web search results.
 type WebSearchToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewWebSearchToolItem(ctx ToolCallContext) *WebSearchToolItem {
 	return &WebSearchToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *WebSearchToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.WebSearchParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -686,17 +723,19 @@ func (m *WebSearchToolItem) Render(width int) string {
 // DownloadToolItem renders file downloading.
 type DownloadToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewDownloadToolItem(ctx ToolCallContext) *DownloadToolItem {
 	return &DownloadToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *DownloadToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.DownloadParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -723,17 +762,19 @@ func (m *DownloadToolItem) Render(width int) string {
 // DiagnosticsToolItem renders project-wide diagnostic information.
 type DiagnosticsToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewDiagnosticsToolItem(ctx ToolCallContext) *DiagnosticsToolItem {
 	return &DiagnosticsToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *DiagnosticsToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	args := NewParamBuilder().Main("project").Build()
 	header := renderToolHeader(&m.ctx, "Diagnostics", width, args...)
 
@@ -748,17 +789,19 @@ func (m *DiagnosticsToolItem) Render(width int) string {
 // ReferencesToolItem renders LSP references search results.
 type ReferencesToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewReferencesToolItem(ctx ToolCallContext) *ReferencesToolItem {
 	return &ReferencesToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *ReferencesToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params tools.ReferencesParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -784,17 +827,19 @@ func (m *ReferencesToolItem) Render(width int) string {
 // TodosToolItem renders todo list management.
 type TodosToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewTodosToolItem(ctx ToolCallContext) *TodosToolItem {
 	return &TodosToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *TodosToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	sty := m.ctx.Styles
 	var params tools.TodosParams
 	var meta tools.TodosResponseMetadata
@@ -887,17 +932,19 @@ func (m *TodosToolItem) formatTodosFromMeta(meta tools.TodosResponseMetadata, wi
 // AgentToolItem renders agent task execution with nested tool calls.
 type AgentToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewAgentToolItem(ctx ToolCallContext) *AgentToolItem {
 	return &AgentToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *AgentToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	var params agent.AgentParams
 	unmarshalParams(m.ctx.Call.Input, &params)
 
@@ -942,7 +989,6 @@ func renderAgentBody(ctx *ToolCallContext, prompt, tagLabel, header string, widt
 		childTools.Enumerator(roundedEnumerator(2, tagWidth-5)).String(),
 	}
 
-	// Add pending indicator if not complete
 	if !ctx.HasResult() {
 		parts = append(parts, "", sty.Tool.StateWaiting.Render("Working..."))
 	}
@@ -978,34 +1024,36 @@ func roundedEnumerator(lPadding, lineWidth int) tree.Enumerator {
 // GenericToolItem renders unknown tool types with basic parameter display.
 type GenericToolItem struct {
 	toolItem
-	ctx ToolCallContext
 }
 
 func NewGenericToolItem(ctx ToolCallContext) *GenericToolItem {
 	return &GenericToolItem{
 		toolItem: newToolItem(ctx),
-		ctx:      ctx,
 	}
 }
 
 func (m *GenericToolItem) Render(width int) string {
+	if !m.ctx.Call.Finished && !m.ctx.Cancelled {
+		return m.renderPending()
+	}
+
 	name := prettifyToolName(m.ctx.Call.Name)
 
 	// Handle media content
 	if m.ctx.Result != nil && m.ctx.Result.Data != "" {
 		if strings.HasPrefix(m.ctx.Result.MIMEType, "image/") {
-			args := NewParamBuilder().Main(m.ctx.Call.Input).Build()
+			args := NewParamBuilder().Main(m.toolItem.ctx.Call.Input).Build()
 			header := renderToolHeader(&m.ctx, name, width, args...)
 			body := renderImageContent(m.ctx.Result.Data, m.ctx.Result.MIMEType, m.ctx.Result.Content, m.ctx.Styles)
 			return joinHeaderBody(header, body, m.ctx.Styles)
 		}
-		args := NewParamBuilder().Main(m.ctx.Call.Input).Build()
+		args := NewParamBuilder().Main(m.toolItem.ctx.Call.Input).Build()
 		header := renderToolHeader(&m.ctx, name, width, args...)
 		body := renderMediaContent(m.ctx.Result.MIMEType, m.ctx.Result.Content, m.ctx.Styles)
 		return joinHeaderBody(header, body, m.ctx.Styles)
 	}
 
-	args := NewParamBuilder().Main(m.ctx.Call.Input).Build()
+	args := NewParamBuilder().Main(m.toolItem.ctx.Call.Input).Build()
 	header := renderToolHeader(&m.ctx, name, width, args...)
 
 	if result, done := renderEarlyState(&m.ctx, header, width); done {
@@ -1097,4 +1145,184 @@ func truncateText(s string, width int) string {
 		}
 	}
 	return "…"
+}
+
+// Update implements list.Updatable.
+func (m *JobOutputToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *JobKillToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *ViewToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *EditToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *MultiEditToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *WriteToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *GlobToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *GrepToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *LSToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *SourcegraphToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *FetchToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *AgenticFetchToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *WebFetchToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *WebSearchToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *DownloadToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *DiagnosticsToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *ReferencesToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *TodosToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *AgentToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
+}
+
+// Update implements list.Updatable.
+func (m *GenericToolItem) Update(msg tea.Msg) (list.Item, tea.Cmd) {
+	cmd, changed := m.updateAnimation(msg)
+	if changed {
+		return m, cmd
+	}
+	return m, nil
 }

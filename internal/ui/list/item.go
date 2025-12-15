@@ -13,6 +13,14 @@ type Item interface {
 	Render(width int) string
 }
 
+// Updatable represents an item that can handle tea.Msg updates (e.g., for
+// animations or interactive state changes).
+type Updatable interface {
+	// Update processes a message and returns an updated item and optional
+	// command. The returned Item should be the same type as the receiver.
+	Update(tea.Msg) (Item, tea.Cmd)
+}
+
 // FocusStylable represents an item that can be styled based on focus state.
 type FocusStylable interface {
 	// FocusStyle returns the style to apply when the item is focused.

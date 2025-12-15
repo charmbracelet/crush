@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/common/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -41,7 +42,6 @@ type ToolCallContext struct {
 	IsNested            bool
 	Styles              *styles.Styles
 
-	// NestedCalls holds child tool calls for agent/agentic_fetch.
 	NestedCalls []ToolCallContext
 }
 
@@ -56,7 +56,6 @@ func (ctx *ToolCallContext) Status() ToolStatus {
 		}
 		return ToolStatusSuccess
 	}
-	// No result yet - check permission state.
 	if ctx.PermissionRequested && !ctx.PermissionGranted {
 		return ToolStatusAwaitingPermission
 	}
@@ -69,7 +68,6 @@ func (ctx *ToolCallContext) HasResult() bool {
 }
 
 // toolStyles provides common FocusStylable and HighlightStylable implementations.
-// Embed this in tool items to avoid repeating style methods.
 type toolStyles struct {
 	sty *styles.Styles
 }
@@ -90,16 +88,41 @@ func (s toolStyles) HighlightStyle() lipgloss.Style {
 type toolItem struct {
 	toolStyles
 	id           string
-	expanded     bool // Whether truncated content is expanded.
-	wasTruncated bool // Whether the last render was truncated.
+	ctx          ToolCallContext
+	expanded     bool
+	wasTruncated bool
+	spinning     bool
+	anim         *anim.Anim
 }
 
 // newToolItem creates a new toolItem with the given context.
 func newToolItem(ctx ToolCallContext) toolItem {
-	return toolItem{
+	animSize := 15
+	if ctx.IsNested {
+		animSize = 10
+	}
+
+	t := toolItem{
 		toolStyles: toolStyles{sty: ctx.Styles},
 		id:         ctx.Call.ID,
+		ctx:        ctx,
+		spinning:   shouldSpin(ctx),
+		anim: anim.New(anim.Settings{
+			Size:        animSize,
+			Label:       "Working",
+			GradColorA:  ctx.Styles.Primary,
+			GradColorB:  ctx.Styles.Secondary,
+			LabelColor:  ctx.Styles.FgBase,
+			CycleColors: true,
+		}),
 	}
+
+	return t
+}
+
+// shouldSpin returns true if the tool should show animation.
+func shouldSpin(ctx ToolCallContext) bool {
+	return !ctx.Call.Finished && !ctx.Cancelled
 }
 
 // ID implements Identifiable.
@@ -109,30 +132,98 @@ func (t *toolItem) ID() string {
 
 // HandleMouseClick implements list.MouseClickable.
 func (t *toolItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	// Only handle left clicks on truncated content.
 	if btn != ansi.MouseLeft || !t.wasTruncated {
 		return false
 	}
 
-	// Toggle expansion.
 	t.expanded = !t.expanded
 	return true
 }
 
 // HandleKeyPress implements list.KeyPressable.
 func (t *toolItem) HandleKeyPress(msg tea.KeyPressMsg) bool {
-	// Only handle space key on truncated content.
 	if !t.wasTruncated {
 		return false
 	}
 
 	if key.Matches(msg, key.NewBinding(key.WithKeys("space"))) {
-		// Toggle expansion.
 		t.expanded = !t.expanded
 		return true
 	}
 
 	return false
+}
+
+// updateAnimation handles animation updates and returns true if changed.
+func (t *toolItem) updateAnimation(msg tea.Msg) (tea.Cmd, bool) {
+	if !t.spinning || t.anim == nil {
+		return nil, false
+	}
+
+	switch msg.(type) {
+	case anim.StepMsg:
+		updatedAnim, cmd := t.anim.Update(msg)
+		t.anim = updatedAnim
+		return cmd, cmd != nil
+	}
+
+	return nil, false
+}
+
+// InitAnimation initializes and starts the animation.
+func (t *toolItem) InitAnimation() tea.Cmd {
+	t.spinning = shouldSpin(t.ctx)
+	return t.anim.Init()
+}
+
+// SetResult updates the tool call with a result.
+func (t *toolItem) SetResult(result message.ToolResult) {
+	t.ctx.Result = &result
+	t.ctx.Call.Finished = true
+	t.spinning = false
+}
+
+// SetCancelled marks the tool call as cancelled.
+func (t *toolItem) SetCancelled() {
+	t.ctx.Cancelled = true
+	t.spinning = false
+}
+
+// UpdateCall updates the tool call data.
+func (t *toolItem) UpdateCall(call message.ToolCall) {
+	t.ctx.Call = call
+	if call.Finished {
+		t.spinning = false
+	}
+}
+
+// SetNestedCalls sets the nested tool calls for agent tools.
+func (t *toolItem) SetNestedCalls(calls []ToolCallContext) {
+	t.ctx.NestedCalls = calls
+}
+
+// Context returns the current tool call context.
+func (t *toolItem) Context() *ToolCallContext {
+	return &t.ctx
+}
+
+// renderPending returns the pending state view with animation.
+func (t *toolItem) renderPending() string {
+	icon := t.sty.Tool.IconPending.Render()
+
+	var toolName string
+	if t.ctx.IsNested {
+		toolName = t.sty.Tool.NameNested.Render(prettifyToolName(t.ctx.Call.Name))
+	} else {
+		toolName = t.sty.Tool.NameNormal.Render(prettifyToolName(t.ctx.Call.Name))
+	}
+
+	var animView string
+	if t.anim != nil {
+		animView = t.anim.View()
+	}
+
+	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
 // unmarshalParams unmarshals JSON input into the target struct.

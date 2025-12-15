@@ -4,6 +4,7 @@ package chat
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -22,6 +23,20 @@ type Identifiable interface {
 type MessageItem interface {
 	list.Item
 	Identifiable
+}
+
+// Animatable is implemented by items that support animation initialization.
+type Animatable interface {
+	InitAnimation() tea.Cmd
+}
+
+// ToolItem is implemented by tool items that support mutable updates.
+type ToolItem interface {
+	SetResult(result message.ToolResult)
+	SetCancelled()
+	UpdateCall(call message.ToolCall)
+	SetNestedCalls(calls []ToolCallContext)
+	Context() *ToolCallContext
 }
 
 // Chat represents the chat UI model that handles chat interactions and
@@ -91,6 +106,31 @@ func (m *Chat) AppendMessages(msgs ...MessageItem) {
 func (m *Chat) AppendItems(items ...list.Item) {
 	m.list.AppendItems(items...)
 	m.list.ScrollToIndex(m.list.Len() - 1)
+}
+
+// UpdateMessage updates an existing message by ID. Returns true if the message
+// was found and updated.
+func (m *Chat) UpdateMessage(id string, msg MessageItem) bool {
+	for i := 0; i < m.list.Len(); i++ {
+		item := m.list.GetItemAt(i)
+		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
+			return m.list.UpdateItemAt(i, msg)
+		}
+	}
+	return false
+}
+
+// GetMessage returns the message with the given ID. Returns nil if not found.
+func (m *Chat) GetMessage(id string) MessageItem {
+	for i := 0; i < m.list.Len(); i++ {
+		item := m.list.GetItemAt(i)
+		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
+			if msg, ok := item.(MessageItem); ok {
+				return msg
+			}
+		}
+	}
+	return nil
 }
 
 // Focus sets the focus state of the chat component.
@@ -181,4 +221,55 @@ func (m *Chat) HandleMouseDrag(x, y int) {
 // HandleKeyPress handles key press events for the currently selected item.
 func (m *Chat) HandleKeyPress(msg tea.KeyPressMsg) bool {
 	return m.list.HandleKeyPress(msg)
+}
+
+// UpdateItems propagates a message to all items that support updates (e.g.,
+// for animations). Returns commands from updated items.
+func (m *Chat) UpdateItems(msg tea.Msg) tea.Cmd {
+	return m.list.UpdateItems(msg)
+}
+
+// ToolItemUpdater is implemented by tool items that support mutable updates.
+type ToolItemUpdater interface {
+	SetResult(result message.ToolResult)
+	SetCancelled()
+	UpdateCall(call message.ToolCall)
+	SetNestedCalls(calls []ToolCallContext)
+	Context() *ToolCallContext
+}
+
+// GetToolItem returns the tool item with the given ID, or nil if not found.
+func (m *Chat) GetToolItem(id string) ToolItem {
+	for i := 0; i < m.list.Len(); i++ {
+		item := m.list.GetItemAt(i)
+		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
+			if toolItem, ok := item.(ToolItem); ok {
+				return toolItem
+			}
+		}
+	}
+	return nil
+}
+
+// InvalidateItem invalidates the render cache for the item with the given ID.
+// Use after mutating an item via ToolItem methods.
+func (m *Chat) InvalidateItem(id string) {
+	for i := 0; i < m.list.Len(); i++ {
+		item := m.list.GetItemAt(i)
+		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
+			m.list.InvalidateItemAt(i)
+			return
+		}
+	}
+}
+
+// DeleteMessage removes a message by ID. Returns true if found and deleted.
+func (m *Chat) DeleteMessage(id string) bool {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		item := m.list.GetItemAt(i)
+		if identifiable, ok := item.(Identifiable); ok && identifiable.ID() == id {
+			return m.list.DeleteItemAt(i)
+		}
+	}
+	return false
 }

@@ -207,13 +207,19 @@ type Styles struct {
 			Attachment       lipgloss.Style
 			ToolCallFocused  lipgloss.Style
 			ToolCallBlurred  lipgloss.Style
-			ThinkingFooter   lipgloss.Style
 			SectionHeader    lipgloss.Style
 
 			// Section styles - for assistant response metadata
 			SectionIcon     lipgloss.Style // Model icon
 			SectionModel    lipgloss.Style // Model name
 			SectionDuration lipgloss.Style // Response duration
+
+			// Thinking section styles
+			ThinkingBox             lipgloss.Style // Background for thinking content
+			ThinkingTruncationHint  lipgloss.Style // "… (N lines hidden)" hint
+			ThinkingFooterTitle     lipgloss.Style // "Thought for" text
+			ThinkingFooterDuration  lipgloss.Style // Duration value
+			ThinkingFooterCancelled lipgloss.Style // "*Canceled*" text
 		}
 	}
 
@@ -1066,8 +1072,14 @@ func DefaultStyles() Styles {
 		BorderLeft(true).
 		BorderForeground(greenDark)
 	s.Chat.Message.ToolCallBlurred = s.Muted.PaddingLeft(2)
-	s.Chat.Message.ThinkingFooter = s.Base
 	s.Chat.Message.SectionHeader = s.Base.PaddingLeft(2)
+
+	// Thinking section styles
+	s.Chat.Message.ThinkingBox = s.Subtle.Background(bgBaseLighter)
+	s.Chat.Message.ThinkingTruncationHint = s.Muted
+	s.Chat.Message.ThinkingFooterTitle = s.Muted
+	s.Chat.Message.ThinkingFooterDuration = s.Subtle
+	s.Chat.Message.ThinkingFooterCancelled = s.Subtle
 
 	// Section metadata styles
 	s.Chat.Message.SectionIcon = s.Subtle

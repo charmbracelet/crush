@@ -160,6 +160,7 @@ func PlainMarkdownStyle() ansi.StyleConfig {
 			Bold:            boolPtr(true),
 			Color:           fgColor,
 			BackgroundColor: bgColor,
+			Format:          "{{.text}}", // Only show link text, hide URL to prevent "mailto:" prefix from showing
 		},
 		Image: ansi.StylePrimitive{
 			Underline:       boolPtr(true),

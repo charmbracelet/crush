@@ -305,8 +305,9 @@ func (t *Theme) buildStyles() *Styles {
 				Underline: boolPtr(true),
 			},
 			LinkText: ansi.StylePrimitive{
-				Color: stringPtr(charmtone.Guac.Hex()),
-				Bold:  boolPtr(true),
+				Color:  stringPtr(charmtone.Guac.Hex()),
+				Bold:   boolPtr(true),
+				Format: "{{.text}}", // Only show link text, hide URL to prevent "mailto:" prefix from showing
 			},
 			Image: ansi.StylePrimitive{
 				Color:     stringPtr(charmtone.Cheeky.Hex()),

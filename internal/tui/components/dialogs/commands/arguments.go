@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/uicmd"
 )
 
 const (
@@ -18,20 +19,10 @@ const (
 )
 
 // ShowArgumentsDialogMsg is a message that is sent to show the arguments dialog.
-type ShowArgumentsDialogMsg struct {
-	CommandID   string
-	Description string
-	ArgNames    []string
-	OnSubmit    func(args map[string]string) tea.Cmd
-}
+type ShowArgumentsDialogMsg = uicmd.ShowArgumentsDialogMsg
 
 // CloseArgumentsDialogMsg is a message that is sent when the arguments dialog is closed.
-type CloseArgumentsDialogMsg struct {
-	Submit    bool
-	CommandID string
-	Content   string
-	Args      map[string]string
-}
+type CloseArgumentsDialogMsg = uicmd.CloseArgumentsDialogMsg
 
 // CommandArgumentsDialog represents the commands dialog.
 type CommandArgumentsDialog interface {

@@ -26,8 +26,13 @@ var (
 			Set("TERM", os.Getenv("TERM")).
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
-			Set("GoVersion", runtime.Version())
+			Set("GoVersion", runtime.Version()).
+			Set("Interactive", false)
 )
+
+func SetInteractive(interactive bool) {
+	baseProps = baseProps.Set("interactive", interactive)
+}
 
 func Init() {
 	c, err := posthog.NewWithConfig(key, posthog.Config{
@@ -39,6 +44,22 @@ func Init() {
 	}
 	client = c
 	distinctId = getDistinctId()
+}
+
+func GetID() string { return distinctId }
+
+func Alias(userID string) {
+	if client == nil || distinctId == fallbackId || distinctId == "" || userID == "" {
+		return
+	}
+	if err := client.Enqueue(posthog.Alias{
+		DistinctId: distinctId,
+		Alias:      userID,
+	}); err != nil {
+		slog.Error("Failed to enqueue PostHog alias event", "error", err)
+		return
+	}
+	slog.Info("Aliased in PostHog", "machine_id", distinctId, "user_id", userID)
 }
 
 // send logs an event to PostHog with the given event name and properties.

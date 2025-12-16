@@ -101,6 +101,13 @@ tasks:
     generates:
       - schema.json
 
+  hyper:
+    desc: Update Hyper embedded provider.json
+    cmds:
+      - go generate ./internal/agent/hyper/...
+    generates:
+      - ./internal/agent/hyper/provider.json
+
   release:
     desc: Create and push a new tag following semver
     vars:

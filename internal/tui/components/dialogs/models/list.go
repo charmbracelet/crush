@@ -62,7 +62,8 @@ func (m *ModelListComponent) Init() tea.Cmd {
 		filteredProviders := []catwalk.Provider{}
 		for _, p := range providers {
 			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
-			if hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure {
+			isHyper := p.ID == "hyper"
+			if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}
@@ -204,8 +205,23 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 	}
 
+	// Move "Charm Hyper" to first position
+	// (but still after recent models and custom providers).
+	sortedProviders := make([]catwalk.Provider, len(m.providers))
+	copy(sortedProviders, m.providers)
+	slices.SortStableFunc(sortedProviders, func(a, b catwalk.Provider) int {
+		switch {
+		case a.ID == "hyper":
+			return -1
+		case b.ID == "hyper":
+			return 1
+		default:
+			return 0
+		}
+	})
+
 	// Then add the known providers from the predefined list
-	for _, provider := range m.providers {
+	for _, provider := range sortedProviders {
 		// Skip if we already added this provider as an unknown provider
 		if addedProviders[string(provider.ID)] {
 			continue

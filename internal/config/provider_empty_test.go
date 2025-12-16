@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -14,18 +15,25 @@ func (m *emptyProviderClient) GetProviders(context.Context, string) ([]catwalk.P
 	return []catwalk.Provider{}, nil
 }
 
-// TestProvider_loadProvidersEmptyResult tests that loadProviders returns an
-// error when the client returns an empty list. This ensures we don't cache
-// empty provider lists.
-func TestProvider_loadProvidersEmptyResult(t *testing.T) {
+// TestCatwalkSync_GetEmptyResultFromClient tests that when the client returns
+// an empty list, we fall back to cached providers and return an error.
+func TestCatwalkSync_GetEmptyResultFromClient(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := tmpDir + "/providers.json"
+
+	syncer := &catwalkSync{}
 	client := &emptyProviderClient{}
-	tmpPath := t.TempDir() + "/providers.json"
 
-	providers, err := loadProviders(client, "", tmpPath)
+	syncer.Init(client, path, true)
+
+	providers, err := syncer.Get(t.Context())
+	require.Error(t, err)
 	require.Contains(t, err.Error(), "empty providers list from catwalk")
-	require.Empty(t, providers)
-	require.Len(t, providers, 0)
+	require.NotEmpty(t, providers) // Should have embedded providers as fallback.
 
-	// Check that no cache file was created for empty results
-	require.NoFileExists(t, tmpPath, "Cache file should not exist for empty results")
+	// Check that no cache file was created for empty results.
+	_, statErr := os.Stat(path)
+	require.True(t, os.IsNotExist(statErr), "Cache file should not exist for empty results")
 }

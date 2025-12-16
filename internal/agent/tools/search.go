@@ -38,6 +38,10 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", BrowserUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	req.Header.Set("Referer", "https://duckduckgo.com/")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -45,8 +49,10 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search failed with status code: %d", resp.StatusCode)
+	// Accept both 200 (OK) and 202 (Accepted).
+	// DuckDuckGo may still return 202 for rate limiting or bot detection.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, fmt.Errorf("search failed with status code: %d (DuckDuckGo may be rate limiting requests)", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)

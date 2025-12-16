@@ -306,7 +306,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	// Lazygit
 	case commands.OpenLazygitMsg:
-		if a.dialog.ActiveDialogID() == lazygit.DialogID {
+		if a.dialog.ActiveDialogID() == lazygit.LazygitDialogID {
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{

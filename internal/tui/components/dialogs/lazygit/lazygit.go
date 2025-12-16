@@ -14,8 +14,8 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
-// DialogID is the unique identifier for the lazygit dialog.
-const DialogID dialogs.DialogID = "lazygit"
+// LazygitDialogID is the unique identifier for the lazygit dialog.
+const LazygitDialogID dialogs.DialogID = "lazygit"
 
 // NewDialog creates a new lazygit dialog. The context controls the lifetime
 // of the lazygit process - when cancelled, the process will be killed.
@@ -32,7 +32,7 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 	)
 
 	return termdialog.New(termdialog.Config{
-		ID:         DialogID,
+		ID:         LazygitDialogID,
 		Title:      "Lazygit",
 		LoadingMsg: "Starting lazygit...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),

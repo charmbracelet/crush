@@ -34,6 +34,7 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		Title:      "GitHub Dashboard",
 		LoadingMsg: "Starting gh-dash...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
+		QuitHint:   "q to close",
 		OnClose: func() {
 			if configFile != "" {
 				_ = os.Remove(configFile)

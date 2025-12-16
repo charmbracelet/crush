@@ -453,8 +453,8 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	// Add gh-dash command if gh CLI with dash extension is installed.
-	if out, _, err := sh.Exec(c.ctx, "gh extension list"); err == nil {
-		if strings.Contains(out, "dash") {
+	if out, err := exec.CommandContext(c.ctx, "gh", "extension", "list").Output(); err == nil {
+		if strings.Contains(string(out), "dash") {
 			commands = append(commands, Command{
 				ID:          "ghdash",
 				Title:       "Open GitHub Dashboard",

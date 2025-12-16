@@ -12,7 +12,9 @@ import (
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -24,7 +26,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, claude.`,
+Available platforms are: hyper, claude, copilot.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
@@ -36,6 +38,9 @@ crush login claude
 		"hyper",
 		"claude",
 		"anthropic",
+		"copilot",
+		"github",
+		"github-copilot",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,6 +59,8 @@ crush login claude
 			return loginHyper()
 		case "anthropic", "claude":
 			return loginClaude()
+		case "copilot", "github", "github-copilot":
+			return loginCopilot()
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -125,8 +132,13 @@ func loginHyper() error {
 }
 
 func loginClaude() error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	defer cancel()
+	ctx := getLoginContext()
+
+	cfg := config.Get()
+	if cfg.HasConfigField("providers.anthropic.oauth") {
+		fmt.Println("You are already logged in to Claude.")
+		return nil
+	}
 
 	verifier, challenge, err := claude.GetChallenge()
 	if err != nil {
@@ -161,7 +173,6 @@ func loginClaude() error {
 		return err
 	}
 
-	cfg := config.Get()
 	if err := cmp.Or(
 		cfg.SetConfigField("providers.anthropic.api_key", token.AccessToken),
 		cfg.SetConfigField("providers.anthropic.oauth", token),
@@ -172,6 +183,72 @@ func loginClaude() error {
 	fmt.Println()
 	fmt.Println("You're now authenticated with Claude Code Max!")
 	return nil
+}
+
+func loginCopilot() error {
+	ctx := getLoginContext()
+
+	cfg := config.Get()
+	if cfg.HasConfigField("providers.copilot.oauth") {
+		fmt.Println("You are already logged in to GitHub Copilot.")
+		return nil
+	}
+
+	diskToken, hasDiskToken := copilot.RefreshTokenFromDisk()
+	var token *oauth.Token
+
+	switch {
+	case hasDiskToken:
+		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
+
+		t, err := copilot.RefreshToken(ctx, diskToken)
+		if err != nil {
+			return fmt.Errorf("unable to refresh token from disk: %w", err)
+		}
+		token = t
+	default:
+		fmt.Println("Requesting device code from GitHub...")
+		dc, err := copilot.RequestDeviceCode(ctx)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println()
+		fmt.Println("Open the following URL and follow the instructions to authenticate with GitHub Copilot:")
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		fmt.Println()
+		fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+		fmt.Println()
+		fmt.Println("Waiting for authorization...")
+
+		t, err := copilot.PollForToken(ctx, dc)
+		if err != nil {
+			return err
+		}
+		token = t
+	}
+
+	if err := cmp.Or(
+		cfg.SetConfigField("providers.copilot.api_key", token.AccessToken),
+		cfg.SetConfigField("providers.copilot.oauth", token),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("You're now authenticated with GitHub Copilot!")
+	return nil
+}
+
+func getLoginContext() context.Context {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	go func() {
+		<-ctx.Done()
+		cancel()
+		os.Exit(1)
+	}()
+	return ctx
 }
 
 func waitEnter() {

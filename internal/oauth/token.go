@@ -21,3 +21,8 @@ func (t *Token) SetExpiresAt() {
 func (t *Token) IsExpired() bool {
 	return time.Now().Unix() >= (t.ExpiresAt - int64(t.ExpiresIn)/10)
 }
+
+// SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.
+func (t *Token) SetExpiresIn() {
+	t.ExpiresIn = int(time.Until(time.Unix(t.ExpiresAt, 0)).Seconds())
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,8 +19,10 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -134,6 +137,10 @@ func (pc *ProviderConfig) SetupClaudeCode() {
 		value += want
 	}
 	pc.ExtraHeaders["anthropic-beta"] = value
+}
+
+func (pc *ProviderConfig) SetupGitHubCopilot() {
+	maps.Copy(pc.ExtraHeaders, copilot.Headers())
 }
 
 type MCPType string
@@ -452,6 +459,14 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	return nil
 }
 
+func (c *Config) HasConfigField(key string) bool {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return false
+	}
+	return gjson.Get(string(data), key).Exists()
+}
+
 func (c *Config) SetConfigField(key string, value any) error {
 	// read the data
 	data, err := os.ReadFile(c.dataConfigDir)
@@ -485,23 +500,32 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	}
 
 	var newToken *oauth.Token
-	var err error
+	var refreshErr error
 	switch providerID {
 	case string(catwalk.InferenceProviderAnthropic):
-		newToken, err = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+		newToken, refreshErr = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case string(catwalk.InferenceProviderCopilot):
+		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case hyperp.Name:
-		newToken, err = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
+		newToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
-	if err != nil {
-		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
+	if refreshErr != nil {
+		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = newToken
-	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
-	providerConfig.SetupClaudeCode()
+
+	switch providerID {
+	case string(catwalk.InferenceProviderAnthropic):
+		providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
+		providerConfig.SetupClaudeCode()
+	case string(catwalk.InferenceProviderCopilot):
+		providerConfig.APIKey = newToken.AccessToken
+		providerConfig.SetupGitHubCopilot()
+	}
 
 	c.Providers.Set(providerID, providerConfig)
 

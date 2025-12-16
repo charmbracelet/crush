@@ -307,7 +307,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	// Lazygit
 	case commands.OpenLazygitMsg:
-		if a.dialog.ActiveDialogID() == lazygit.DialogID {
+		if a.dialog.ActiveDialogID() == lazygit.LazygitDialogID {
 			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
@@ -467,8 +467,9 @@ func (a *appModel) handleWindowResize(width, height int) tea.Cmd {
 		cmds = append(cmds, pageCmd)
 	}
 
-	// Update the dialogs
-	dialog, cmd := a.dialog.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	// Update the dialogs with full window dimensions so they can overlay
+	// everything including the status bar.
+	dialog, cmd := a.dialog.Update(tea.WindowSizeMsg{Width: a.wWidth, Height: a.wHeight})
 	if model, ok := dialog.(dialogs.DialogCmp); ok {
 		a.dialog = model
 	}

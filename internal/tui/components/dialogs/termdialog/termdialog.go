@@ -17,8 +17,11 @@ const (
 	// headerHeight is the height of the dialog header (title + padding).
 	headerHeight = 2
 	// fullscreenWidthBreakpoint is the width below which the dialog goes
-	// fullscreen. Matches CompactModeWidthBreakpoint in chat.go.
-	fullscreenWidthBreakpoint = 120
+	// fullscreen.
+	fullscreenWidthBreakpoint = 125
+	// fullscreenHeightBreakpoint is the height below which the dialog goes
+	// fullscreen. Lazygit degrades significantly below 40 rows.
+	fullscreenHeightBreakpoint = 40
 )
 
 // Config holds configuration for a terminal dialog.
@@ -33,6 +36,8 @@ type Config struct {
 	Term *terminal.Terminal
 	// OnClose is called when the dialog is closed (optional).
 	OnClose func()
+	// QuitHint is shown in the header (e.g., "q to close"). If empty, no hint is shown.
+	QuitHint string
 }
 
 // Dialog is a dialog that embeds a terminal application.
@@ -42,6 +47,7 @@ type Dialog struct {
 	loadingMsg string
 	term       *terminal.Terminal
 	onClose    func()
+	quitHint   string
 
 	wWidth     int
 	wHeight    int
@@ -63,6 +69,7 @@ func New(cfg Config) *Dialog {
 		loadingMsg: loadingMsg,
 		term:       cfg.Term,
 		onClose:    cfg.OnClose,
+		quitHint:   cfg.QuitHint,
 	}
 }
 
@@ -102,8 +109,8 @@ func (d *Dialog) handleResize(msg tea.WindowSizeMsg) (util.Model, tea.Cmd) {
 	d.wWidth = msg.Width
 	d.wHeight = msg.Height
 
-	// Go fullscreen when window is below compact mode breakpoint.
-	d.fullscreen = msg.Width < fullscreenWidthBreakpoint
+	// Go fullscreen when window is below size breakpoints.
+	d.fullscreen = msg.Width < fullscreenWidthBreakpoint || msg.Height < fullscreenHeightBreakpoint
 
 	var outerWidth, outerHeight int
 	if d.fullscreen {
@@ -192,7 +199,20 @@ func (d *Dialog) View() string {
 		termContent = d.loadingMsg
 	}
 
-	header := t.S().Base.Padding(0, 1, 1, 1).Render(core.Title(d.title, d.width-2))
+	// Build header with title and optional quit hint on the right.
+	var header string
+	if d.quitHint != "" {
+		hintStyle := t.S().Base.Foreground(t.Secondary)
+		hint := hintStyle.Render(d.quitHint)
+		hintWidth := lipgloss.Width(hint)
+		titleWidth := d.width - 2 - hintWidth - 1 // -1 for space between title and hint
+		title := core.Title(d.title, titleWidth)
+		headerContent := title + " " + hint
+		header = t.S().Base.Padding(0, 1, 1, 1).Render(headerContent)
+	} else {
+		header = t.S().Base.Padding(0, 1, 1, 1).Render(core.Title(d.title, d.width-2))
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Left, header, termContent)
 
 	dialogStyle := t.S().Base.

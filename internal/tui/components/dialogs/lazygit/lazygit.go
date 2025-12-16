@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -13,33 +15,60 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
-// DialogID is the unique identifier for the lazygit dialog.
-const DialogID dialogs.DialogID = "lazygit"
+// LazygitDialogID is the unique identifier for the lazygit dialog.
+const LazygitDialogID dialogs.DialogID = "lazygit"
 
 // NewDialog creates a new lazygit dialog. The context controls the lifetime
 // of the lazygit process - when cancelled, the process will be killed.
 func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
-	configFile := createThemedConfig()
+	themeConfig := createThemedConfig()
+	configEnv := buildConfigEnv(themeConfig)
 
 	cmd := terminal.PrepareCmd(
 		ctx,
 		"lazygit",
 		nil,
 		workingDir,
-		[]string{"LG_CONFIG_FILE=" + configFile},
+		[]string{configEnv},
 	)
 
 	return termdialog.New(termdialog.Config{
-		ID:         DialogID,
+		ID:         LazygitDialogID,
 		Title:      "Lazygit",
 		LoadingMsg: "Starting lazygit...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
+		QuitHint:   "q to close",
 		OnClose: func() {
-			if configFile != "" {
-				_ = os.Remove(configFile)
+			if themeConfig != "" {
+				if err := os.Remove(themeConfig); err != nil {
+					slog.Debug("failed to remove lazygit theme config", "error", err, "path", themeConfig)
+				}
 			}
 		},
 	})
+}
+
+// buildConfigEnv builds the LG_CONFIG_FILE env var, merging user's default
+// config (if it exists) with our theme override. User config comes first so
+// our theme settings take precedence.
+func buildConfigEnv(themeConfig string) string {
+	userConfig := defaultConfigPath()
+	if userConfig != "" {
+		if _, err := os.Stat(userConfig); err == nil {
+			return "LG_CONFIG_FILE=" + userConfig + "," + themeConfig
+		}
+	}
+	return "LG_CONFIG_FILE=" + themeConfig
+}
+
+// defaultConfigPath returns the default lazygit config path for the current OS.
+func defaultConfigPath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		slog.Debug("failed to get user config directory", "error", err)
+		return ""
+	}
+	return filepath.Join(configDir, "lazygit", "config.yml")
 }
 
 // colorToHex converts a color.Color to a hex string.
@@ -56,15 +85,9 @@ func colorToHex(c color.Color) string {
 func createThemedConfig() string {
 	t := styles.CurrentTheme()
 
-	config := fmt.Sprintf(`gui:
-  border: rounded
-  showFileTree: true
-  showRandomTip: false
-  showCommandLog: false
-  showBottomLine: true
-  showPanelJumps: false
-  nerdFontsVersion: ""
-  showFileIcons: false
+	config := fmt.Sprintf(`git:
+  autoFetch: true
+gui:
   theme:
     activeBorderColor:
       - "%s"
@@ -108,10 +131,15 @@ func createThemedConfig() string {
 
 	f, err := os.CreateTemp("", "crush-lazygit-*.yml")
 	if err != nil {
+		slog.Error("failed to create temporary lazygit config", "error", err)
 		return ""
 	}
 	defer f.Close()
 
-	_, _ = f.WriteString(config)
+	if _, err := f.WriteString(config); err != nil {
+		slog.Error("failed to write lazygit theme config", "error", err)
+		_ = os.Remove(f.Name()) // remove the empty file
+		return ""
+	}
 	return f.Name()
 }

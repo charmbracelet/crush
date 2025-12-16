@@ -132,6 +132,16 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
+	// Read deferred_queue setting from config
+	// Default is false (immediate queue - interrupt current task)
+	deferredQueue := false
+	if c.cfg.Options != nil {
+		deferredQueue = c.cfg.Options.DeferredQueue
+		slog.Info("DeferredQueue setting loaded", "deferred_queue", deferredQueue, "from_config", c.cfg.Options.DeferredQueue)
+	} else {
+		slog.Debug("Options is nil, using default deferredQueue=false")
+	}
+
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
@@ -144,6 +154,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			TopK:             topK,
 			FrequencyPenalty: freqPenalty,
 			PresencePenalty:  presPenalty,
+			DeferredQueue:    deferredQueue,
 		})
 	}
 	result, originalErr := run()

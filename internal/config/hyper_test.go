@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -178,11 +177,13 @@ func TestHyperSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 func TestHyperSync_GetCacheStoreError(t *testing.T) {
 	t.Parallel()
 
-	// Use invalid path to cause store error.
-	path := "/nonexistent/readonly/hyper.json"
-	if runtime.GOOS == "windows" {
-		path = "C:" + path
-	}
+	// Create a file where we want a directory, causing mkdir to fail.
+	tmpDir := t.TempDir()
+	blockingFile := tmpDir + "/blocking"
+	require.NoError(t, os.WriteFile(blockingFile, []byte("block"), 0o644))
+
+	// Try to create cache in a subdirectory under the blocking file.
+	path := blockingFile + "/subdir/hyper.json"
 
 	syncer := &hyperSync{}
 	client := &mockHyperClient{

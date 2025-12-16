@@ -465,7 +465,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if p.session.ID != "" {
 				return p, p.togglePillsExpanded()
 			} else {
-				return p, util.ReportWarn("No active session. Start a conversation to view tasks.")
+				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.PillLeft):
 			if p.session.ID != "" && p.pillsExpanded {
@@ -884,7 +884,7 @@ func (p *chatPage) changeFocus() tea.Cmd {
 func (p *chatPage) togglePillsExpanded() tea.Cmd {
 	hasPills := hasIncompleteTodos(p.session.Todos) || p.promptQueue > 0
 	if !hasPills {
-		return util.ReportWarn("No task to display")
+		return nil
 	}
 	p.pillsExpanded = !p.pillsExpanded
 	if p.pillsExpanded {

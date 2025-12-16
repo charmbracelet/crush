@@ -213,7 +213,7 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 
 	hyperResult, err := testHyperSyncer.Get(t.Context())
 	require.NoError(t, err)
-	require.Empty(t, hyperResult.Name) // Empty when no cache.
+	require.Equal(t, "Charm Hyper", hyperResult.Name) // Falls back to embedded when no models.
 }
 
 func TestCache_StoreAndGet(t *testing.T) {

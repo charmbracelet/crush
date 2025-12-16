@@ -115,9 +115,9 @@ func TestHyperSync_GetClientError(t *testing.T) {
 	syncer.Init(client, path, true)
 
 	provider, err := syncer.Get(t.Context())
-	require.NoError(t, err) // Should return zero value.
-	require.Empty(t, provider.Name)
-	require.Empty(t, provider.ID)
+	require.NoError(t, err) // Should fall back to embedded.
+	require.Equal(t, "Charm Hyper", provider.Name)
+	require.Equal(t, catwalk.InferenceProvider("hyper"), provider.ID)
 }
 
 func TestHyperSync_GetEmptyCache(t *testing.T) {
@@ -131,6 +131,9 @@ func TestHyperSync_GetEmptyCache(t *testing.T) {
 		provider: catwalk.Provider{
 			Name: "Fresh Hyper",
 			ID:   "hyper",
+			Models: []catwalk.Model{
+				{ID: "model-1", Name: "Model 1"},
+			},
 		},
 	}
 
@@ -149,6 +152,9 @@ func TestHyperSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 		provider: catwalk.Provider{
 			Name: "Hyper",
 			ID:   "hyper",
+			Models: []catwalk.Model{
+				{ID: "model-1", Name: "Model 1"},
+			},
 		},
 	}
 	path := t.TempDir() + "/hyper.json"
@@ -179,6 +185,9 @@ func TestHyperSync_GetCacheStoreError(t *testing.T) {
 		provider: catwalk.Provider{
 			Name: "Hyper",
 			ID:   "hyper",
+			Models: []catwalk.Model{
+				{ID: "model-1", Name: "Model 1"},
+			},
 		},
 	}
 

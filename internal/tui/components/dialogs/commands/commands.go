@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -66,6 +68,7 @@ type commandDialogCmp struct {
 	userCommands []Command             // User-defined commands
 	mcpPrompts   *csync.Slice[Command] // MCP prompts
 	sessionID    string                // Current session ID
+	ctx          context.Context
 }
 
 type (
@@ -80,12 +83,13 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	OpenLazygitMsg         struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
 )
 
-func NewCommandDialog(sessionID string) CommandsDialog {
+func NewCommandDialog(ctx context.Context, sessionID string) CommandsDialog {
 	keyMap := DefaultCommandsDialogKeyMap()
 	listKeyMap := list.DefaultKeyMap()
 	listKeyMap.Down.SetEnabled(false)
@@ -114,6 +118,7 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 		selected:    SystemCommands,
 		sessionID:   sessionID,
 		mcpPrompts:  csync.NewSlice[Command](),
+		ctx:         ctx,
 	}
 }
 
@@ -427,6 +432,18 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Open external editor to compose message",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(OpenExternalEditorMsg{})
+			},
+		})
+	}
+
+	// Add lazygit command if lazygit is installed.
+	if _, err := exec.LookPath("lazygit"); err == nil {
+		commands = append(commands, Command{
+			ID:          "lazygit",
+			Title:       "Open Lazygit",
+			Description: "Open lazygit for git operations",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(OpenLazygitMsg{})
 			},
 		})
 	}

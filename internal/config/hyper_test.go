@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -179,6 +180,9 @@ func TestHyperSync_GetCacheStoreError(t *testing.T) {
 
 	// Use invalid path to cause store error.
 	path := "/nonexistent/readonly/hyper.json"
+	if runtime.GOOS == "windows" {
+		path = "C:" + path
+	}
 
 	syncer := &hyperSync{}
 	client := &mockHyperClient{

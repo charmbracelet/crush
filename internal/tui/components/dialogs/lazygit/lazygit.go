@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/crush/internal/terminal"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/termdialog"
@@ -38,12 +40,13 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		LoadingMsg: "Starting lazygit...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
 		QuitHint:   "q to close",
-		OnClose: func() {
+		OnClose: func() tea.Cmd {
 			if themeConfig != "" {
 				if err := os.Remove(themeConfig); err != nil {
 					slog.Debug("failed to remove lazygit theme config", "error", err, "path", themeConfig)
 				}
 			}
+			return nil
 		},
 	})
 }

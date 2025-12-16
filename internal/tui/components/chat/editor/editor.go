@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
+	tuieditor "github.com/charmbracelet/crush/internal/tui/components/dialogs/tui_editor"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 )
@@ -96,7 +97,7 @@ type OpenEditorMsg struct {
 func (m *editorCmp) openEditor(value string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
-		// Use platform-appropriate default editor
+		// Use platform-appropriate default editor.
 		if runtime.GOOS == "windows" {
 			editor = "notepad"
 		} else {
@@ -112,6 +113,14 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
+
+	if tuieditor.IsTUIEditor(editor) {
+		return util.CmdHandler(commands.OpenEmbeddedEditorMsg{
+			FilePath: tmpfile.Name(),
+			Editor:   editor,
+		})
+	}
+
 	cmdStr := editor + " " + tmpfile.Name()
 	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
 		if err != nil {

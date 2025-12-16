@@ -101,7 +101,7 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 	t := styles.CurrentTheme()
 	lines := []string{}
 
-	// Section header 
+	// Section header
 	if opts.ShowSection {
 		sectionName := opts.SectionName
 		if sectionName == "" {
@@ -129,8 +129,8 @@ func RenderAgentFilesBlock(opts RenderOptions) string {
 			f := agentFiles[i]
 			lines = append(lines, core.Status(
 				core.StatusOpts{
-					Icon:        t.ItemOnlineIcon.String(), 
-					Title:       f,                        
+					Icon:  t.ItemOnlineIcon.String(),
+					Title: f,                  
 				},
 				opts.MaxWidth,
 			))

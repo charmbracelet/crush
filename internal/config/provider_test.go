@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -297,7 +298,7 @@ func TestCachePathFor(t *testing.T) {
 
 			result := cachePathFor("providers")
 			if tt.expected != "" {
-				require.Equal(t, tt.expected, result)
+				require.Equal(t, tt.expected, filepath.ToSlash(result))
 			} else {
 				require.Contains(t, result, "crush")
 				require.Contains(t, result, "providers.json")

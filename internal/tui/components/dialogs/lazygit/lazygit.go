@@ -37,6 +37,7 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		Title:      "Lazygit",
 		LoadingMsg: "Starting lazygit...",
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
+		QuitHint:   "q to close",
 		OnClose: func() {
 			if themeConfig != "" {
 				if err := os.Remove(themeConfig); err != nil {

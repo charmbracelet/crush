@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
@@ -440,8 +440,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	// Add lazygit command if lazygit is installed.
-	sh := shell.NewShell(nil)
-	if _, _, err := sh.Exec(c.ctx, "which lazygit"); err == nil {
+	if _, err := exec.LookPath("lazygit"); err == nil {
 		commands = append(commands, Command{
 			ID:          "lazygit",
 			Title:       "Open Lazygit",

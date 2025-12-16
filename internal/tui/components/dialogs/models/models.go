@@ -1,3 +1,4 @@
+// Package models provides the model selection dialog for the TUI.
 package models
 
 import (
@@ -11,10 +12,12 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -69,6 +72,10 @@ type modelDialogCmp struct {
 	selectedModelType config.SelectedModelType
 	isAPIKeyValid     bool
 	apiKeyValue       string
+
+	// Hyper device flow state
+	hyperDeviceFlow     *hyper.DeviceFlow
+	showHyperDeviceFlow bool
 
 	// Claude state
 	claudeAuthMethodChooser     *claude.AuthMethodChooser
@@ -127,6 +134,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		u, cmd := m.apiKeyInput.Update(msg)
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
+	case hyper.DeviceFlowCompletedMsg:
+		return m, m.saveOauthTokenAndContinue(msg.Token, true)
+	case hyper.DeviceAuthInitiatedMsg, hyper.DeviceFlowErrorMsg:
+		if m.hyperDeviceFlow != nil {
+			u, cmd := m.hyperDeviceFlow.Update(msg)
+			m.hyperDeviceFlow = u.(*hyper.DeviceFlow)
+			return m, cmd
+		}
+		return m, nil
 	case claude.ValidationCompletedMsg:
 		var cmds []tea.Cmd
 		u, cmd := m.claudeOAuth2.Update(msg)
@@ -134,7 +150,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 		if msg.State == claude.OAuthValidationStateValid {
-			cmds = append(cmds, m.saveAPIKeyAndContinue(msg.Token, false))
+			cmds = append(cmds, m.saveOauthTokenAndContinue(msg.Token, false))
 			m.keyMap.isClaudeOAuthHelpComplete = true
 		}
 
@@ -143,6 +159,11 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 	case tea.KeyPressMsg:
 		switch {
+		// Handle Hyper device flow keys
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showHyperDeviceFlow:
+			if m.hyperDeviceFlow != nil {
+				return m, m.hyperDeviceFlow.CopyCode()
+			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL:
 			return m, tea.Sequence(
 				tea.SetClipboard(m.claudeOAuth2.URL),
@@ -156,6 +177,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.claudeAuthMethodChooser.ToggleChoice()
 			return m, nil
 		case key.Matches(msg, m.keyMap.Select):
+			// If showing device flow, enter copies code and opens URL
+			if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
+				return m, m.hyperDeviceFlow.CopyCodeAndOpenURL()
+			}
 			selectedItem := m.modelList.SelectedModel()
 
 			modelType := config.SelectedModelTypeLarge
@@ -167,6 +192,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.keyMap.isClaudeAuthChoiceHelp = false
 				m.keyMap.isClaudeOAuthHelp = false
 				m.keyMap.isAPIKeyHelp = true
+				m.showHyperDeviceFlow = false
 				m.showClaudeAuthMethodChooser = false
 				m.needsAPIKey = true
 				m.selectedModel = selectedItem
@@ -194,7 +220,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, cmd2
 			}
 			if m.isAPIKeyValid {
-				return m, m.saveAPIKeyAndContinue(m.apiKeyValue, true)
+				return m, m.saveOauthTokenAndContinue(m.apiKeyValue, true)
 			}
 			if m.needsAPIKey {
 				// Handle API key submission
@@ -249,15 +275,23 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						ModelType: modelType,
 					}),
 				)
-			} else {
-				if selectedItem.Provider.ID == catwalk.InferenceProviderAnthropic {
-					m.showClaudeAuthMethodChooser = true
-					m.keyMap.isClaudeAuthChoiceHelp = true
-					return m, nil
-				}
-				askForApiKey()
-				return m, nil
 			}
+			switch selectedItem.Provider.ID {
+			case catwalk.InferenceProviderAnthropic:
+				m.showClaudeAuthMethodChooser = true
+				m.keyMap.isClaudeAuthChoiceHelp = true
+				return m, nil
+			case hyperp.Name:
+				m.showHyperDeviceFlow = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.hyperDeviceFlow = hyper.NewDeviceFlow()
+				m.hyperDeviceFlow.SetWidth(m.width - 2)
+				return m, m.hyperDeviceFlow.Init()
+			}
+			// For other providers, show API key input
+			askForApiKey()
+			return m, nil
 		case key.Matches(msg, m.keyMap.Tab):
 			switch {
 			case m.showClaudeAuthMethodChooser:
@@ -275,6 +309,14 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
 		case key.Matches(msg, m.keyMap.Close):
+			if m.showHyperDeviceFlow {
+				// Cancel device flow and go back to model selection
+				if m.hyperDeviceFlow != nil {
+					m.hyperDeviceFlow.Cancel()
+				}
+				m.showHyperDeviceFlow = false
+				m.selectedModel = nil
+			}
 			if m.showClaudeAuthMethodChooser {
 				m.claudeAuthMethodChooser.SetDefaults()
 				m.showClaudeAuthMethodChooser = false
@@ -329,7 +371,20 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case spinner.TickMsg:
-		if m.showClaudeOAuth2 {
+		u, cmd := m.apiKeyInput.Update(msg)
+		m.apiKeyInput = u.(*APIKeyInput)
+		if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
+			u, cmd = m.hyperDeviceFlow.Update(msg)
+			m.hyperDeviceFlow = u.(*hyper.DeviceFlow)
+		}
+		return m, cmd
+	default:
+		// Pass all other messages to the device flow for spinner animation
+		if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
+			u, cmd := m.hyperDeviceFlow.Update(msg)
+			m.hyperDeviceFlow = u.(*hyper.DeviceFlow)
+			return m, cmd
+		} else if m.showClaudeOAuth2 {
 			u, cmd := m.claudeOAuth2.Update(msg)
 			m.claudeOAuth2 = u.(*claude.OAuth2)
 			return m, cmd
@@ -344,6 +399,23 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 func (m *modelDialogCmp) View() string {
 	t := styles.CurrentTheme()
+
+	if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
+		// Show Hyper device flow
+		m.keyMap.isHyperDeviceFlow = true
+		deviceFlowView := m.hyperDeviceFlow.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Authenticate with Hyper", m.width-4)),
+			deviceFlowView,
+			"",
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		)
+		return m.style().Render(content)
+	}
+
+	// Reset the flags when not showing device flow
+	m.keyMap.isHyperDeviceFlow = false
 
 	switch {
 	case m.showClaudeAuthMethodChooser:
@@ -397,6 +469,9 @@ func (m *modelDialogCmp) View() string {
 }
 
 func (m *modelDialogCmp) Cursor() *tea.Cursor {
+	if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
+		return m.hyperDeviceFlow.Cursor()
+	}
 	if m.showClaudeAuthMethodChooser {
 		return nil
 	}
@@ -477,10 +552,8 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 
 func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {
 	cfg := config.Get()
-	if _, ok := cfg.Providers.Get(providerID); ok {
-		return true
-	}
-	return false
+	_, ok := cfg.Providers.Get(providerID)
+	return ok
 }
 
 func (m *modelDialogCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.Provider, error) {
@@ -497,7 +570,7 @@ func (m *modelDialogCmp) getProvider(providerID catwalk.InferenceProvider) (*cat
 	return nil, nil
 }
 
-func (m *modelDialogCmp) saveAPIKeyAndContinue(apiKey any, close bool) tea.Cmd {
+func (m *modelDialogCmp) saveOauthTokenAndContinue(apiKey any, close bool) tea.Cmd {
 	if m.selectedModel == nil {
 		return util.ReportError(fmt.Errorf("no model selected"))
 	}

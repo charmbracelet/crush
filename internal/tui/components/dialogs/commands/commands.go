@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -363,7 +364,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			selectedModel := cfg.Models[agentCfg.Model]
 
 			// Anthropic models: thinking toggle
-			if providerCfg.Type == catwalk.TypeAnthropic {
+			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"

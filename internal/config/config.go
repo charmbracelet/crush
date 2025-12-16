@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/sjson"
 )
@@ -120,7 +122,6 @@ type ProviderConfig struct {
 }
 
 func (pc *ProviderConfig) SetupClaudeCode() {
-	pc.APIKey = fmt.Sprintf("Bearer %s", pc.OAuthToken.AccessToken)
 	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
 	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
 
@@ -483,12 +484,16 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
-	// Only Anthropic provider uses OAuth for now.
-	if providerID != string(catwalk.InferenceProviderAnthropic) {
+	var newToken *oauth.Token
+	var err error
+	switch providerID {
+	case string(catwalk.InferenceProviderAnthropic):
+		newToken, err = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case hyperp.Name:
+		newToken, err = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
-
-	newToken, err := claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	if err != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
 	}
@@ -529,9 +534,11 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			return err
 		}
 		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
+			providerConfig.APIKey = fmt.Sprintf("Bearer %s", v.AccessToken)
 			providerConfig.OAuthToken = v
-			providerConfig.SetupClaudeCode()
+			if providerID == string(catwalk.InferenceProviderAnthropic) {
+				providerConfig.SetupClaudeCode()
+			}
 		}
 	}
 

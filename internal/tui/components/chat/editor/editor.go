@@ -3,6 +3,7 @@ package editor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
@@ -67,6 +69,8 @@ type editorCmp struct {
 	currentQuery          string
 	completionsStartIndex int
 	isCompletionsOpen     bool
+
+	history History
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{
@@ -88,6 +92,16 @@ const (
 	maxAttachments = 5
 	maxFileResults = 25
 )
+
+type LoadHistoryMsg struct{}
+
+type CloseHistoryMsg struct {
+	valueToSet string
+}
+
+type ScrollHistoryUp struct{}
+
+type ScrollHistoryDown struct{}
 
 type OpenEditorMsg struct {
 	Text string
@@ -169,10 +183,50 @@ func (m *editorCmp) repositionCompletions() tea.Msg {
 	return completions.RepositionCompletionsMsg{X: x, Y: y}
 }
 
+func (m *editorCmp) inHistoryMode() bool {
+	return m.history != nil
+}
+
 func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case LoadHistoryMsg:
+		if m.inHistoryMode() {
+			return m, nil
+		}
+		msgs, err := m.getUserMessagesAsText()
+		if err != nil {
+			slog.Error("failed to acquire all sessions message history", "error", err)
+			return m, nil
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		m.history = InitialiseHistory(m.textarea.Value(), msgs)
+		return m, nil
+	case CloseHistoryMsg:
+		cursorCurrentLine := m.textarea.Line()
+		cursorLineInfo := m.textarea.LineInfo()
+		m.textarea.SetValue(msg.valueToSet)
+		m.textarea.MoveToBegin()
+		for range cursorCurrentLine {
+			m.textarea.CursorDown()
+		}
+		m.textarea.SetCursorColumn(cursorLineInfo.ColumnOffset - cursorLineInfo.StartColumn)
+		m.history = nil
+	case ScrollHistoryUp:
+		if m.inHistoryMode() {
+			m.history.ScrollUp()
+			m.textarea.SetValue(m.history.Value())
+			m.textarea.MoveToBegin()
+		}
+	case ScrollHistoryDown:
+		if m.inHistoryMode() {
+			m.history.ScrollDown()
+			m.textarea.SetValue(m.history.Value())
+			m.textarea.MoveToEnd()
+		}
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -260,6 +314,25 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X
+
+		// history
+		if m.textarea.Focused() && m.inHistoryMode() {
+			switch true {
+			case key.Matches(msg, m.keyMap.Escape):
+				return m, util.CmdHandler(CloseHistoryMsg{valueToSet: m.history.ExistingValue()})
+			}
+			// if any key other than history related controls we play it safe and close
+			// the history and reset the text input field to be the current value
+			if !key.Matches(msg, m.keyMap.Previous) && !key.Matches(msg, m.keyMap.Next) && msg.Key().String() != "left" && msg.Key().String() != "right" {
+				cmds = append(cmds, util.CmdHandler(CloseHistoryMsg{
+					valueToSet: m.textarea.Value(),
+				}))
+				// we want to process whatever the key press is but only after coming out of history mode
+				cmds = append(cmds, util.CmdHandler(msg))
+				return m, tea.Sequence(cmds...)
+			}
+		}
+
 		switch {
 		// Open command palette when "/" is pressed on empty prompt
 		case msg.String() == "/" && m.IsEmpty():
@@ -277,6 +350,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.isCompletionsOpen && curIdx <= m.completionsStartIndex:
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
+
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
 			return m, nil
@@ -285,6 +359,14 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.deleteMode = false
 			m.attachments = nil
 			return m, nil
+		}
+		if m.textarea.Focused() && key.Matches(msg, m.keyMap.Previous) || key.Matches(msg, m.keyMap.Next) {
+			switch true {
+			case key.Matches(msg, m.keyMap.Previous):
+				cmds = append(cmds, m.handlePreviousKeypressSideEffect()...)
+			case key.Matches(msg, m.keyMap.Next):
+				cmds = append(cmds, m.handleNextKeypressSideEffect()...)
+			}
 		}
 		rune := msg.Code
 		if m.deleteMode && unicode.IsDigit(rune) {
@@ -305,7 +387,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return m, m.openEditor(m.textarea.Value())
 		}
-		if key.Matches(msg, DeleteKeyMaps.Escape) {
+		if key.Matches(msg, DeleteKeyMaps.Escape) && m.deleteMode {
 			m.deleteMode = false
 			return m, nil
 		}
@@ -365,6 +447,54 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *editorCmp) handlePreviousKeypressSideEffect() []tea.Cmd {
+	cmds := []tea.Cmd{}
+	lineInfo := m.textarea.LineInfo()
+
+	// NOTE(tauraamui):	Check if we're on first line (actual first line in the buffer),
+	// not visually. The line method returns the current line the cursor is on, IGNORING
+	// whether there are multiple lines due to wrapping
+	if m.textarea.Line() == 0 {
+		// NOTE(tauraamui):
+		if lineInfo.RowOffset == 0 {
+			if lineInfo.ColumnOffset == 0 {
+				if !m.inHistoryMode() {
+					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				}
+				cmds = append(cmds, util.CmdHandler(ScrollHistoryUp{}))
+				return cmds
+			}
+			m.textarea.MoveToBegin()
+		}
+	}
+
+	return cmds
+}
+
+func (m *editorCmp) handleNextKeypressSideEffect() []tea.Cmd {
+	cmds := []tea.Cmd{}
+	lineInfo := m.textarea.LineInfo()
+
+	// NOTE(tauraamui):	Check if we're on the last line (actual last line in the buffer),
+	// not visually. The line method returns the current line the cursor is on, IGNORING
+	// whether there are multiple lines due to wrapping
+	if m.textarea.Line() == m.textarea.LineCount()-1 {
+		// NOTE(tauraamui):
+		if lineInfo.RowOffset == lineInfo.Height-1 {
+			if lineInfo.ColumnOffset == lineInfo.Width-1 {
+				if !m.inHistoryMode() {
+					cmds = append(cmds, util.CmdHandler(LoadHistoryMsg{}))
+				}
+				cmds = append(cmds, util.CmdHandler(ScrollHistoryDown{}))
+				return cmds
+			}
+			m.textarea.MoveToEnd()
+		}
+	}
+
+	return cmds
 }
 
 func (m *editorCmp) setEditorPrompt() {
@@ -439,6 +569,25 @@ func (m *editorCmp) View() string {
 		),
 	)
 	return content
+}
+
+func (m *editorCmp) getUserMessagesAsText() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	allMessages, err := m.app.Messages.FullList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var userMessages []string
+	for _, msg := range allMessages {
+		if msg.Role == message.User {
+			userMessages = append(userMessages, msg.Content().Text)
+		}
+	}
+
+	return userMessages, nil
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {

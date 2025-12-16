@@ -17,6 +17,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -668,6 +669,18 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
+func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provider, error) {
+	opts := []hyper.Option{
+		hyper.WithBaseURL(baseURL),
+		hyper.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, hyper.WithHTTPClient(httpClient))
+	}
+	return hyper.New(opts...)
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -728,6 +741,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+	case hyper.Name:
+		return c.buildHyperProvider(baseURL, apiKey)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

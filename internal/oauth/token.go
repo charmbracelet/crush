@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// Token represents an OAuth2 token from Claude Code Max.
+// Token represents an OAuth2 token.
 type Token struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`

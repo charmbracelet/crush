@@ -1,3 +1,4 @@
 *.golden linguist-generated=true -text
 .github/crush-schema.json linguist-generated=true
+internal/agent/hyper/provider.json linguist-generated=true
 internal/agent/testdata/**/*.yaml -diff linguist-generated=true

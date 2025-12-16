@@ -46,6 +46,22 @@ func Init() {
 	distinctId = getDistinctId()
 }
 
+func GetID() string { return distinctId }
+
+func Alias(userID string) {
+	if client == nil || distinctId == fallbackId || distinctId == "" || userID == "" {
+		return
+	}
+	if err := client.Enqueue(posthog.Alias{
+		DistinctId: distinctId,
+		Alias:      userID,
+	}); err != nil {
+		slog.Error("Failed to enqueue PostHog alias event", "error", err)
+		return
+	}
+	slog.Info("Aliased in PostHog", "machine_id", distinctId, "user_id", userID)
+}
+
 // send logs an event to PostHog with the given event name and properties.
 func send(event string, props ...any) {
 	if client == nil {

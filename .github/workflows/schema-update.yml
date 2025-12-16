@@ -1,10 +1,11 @@
-name: Update Schema
+name: Update files
 
 on:
   push:
     branches: [main]
     paths:
       - "internal/config/**"
+      - "internal/agent/hyper/**"
 
 jobs:
   update-schema:
@@ -17,9 +18,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go run . schema > ./schema.json
+      - run: go generate ./internal/agent/hyper/...
       - uses: stefanzweifel/git-auto-commit-action@28e16e81777b558cc906c8750092100bbb34c5e3 # v5
         with:
-          commit_message: "chore: auto-update generated files"
+          commit_message: "chore: auto-update files"
           branch: main
           commit_user_name: Charm
           commit_user_email: 124303983+charmcli@users.noreply.github.com

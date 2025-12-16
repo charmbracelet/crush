@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -136,13 +137,29 @@ func (h *header) details(availWidth int) string {
 	metadata := strings.Join(parts, dot)
 	metadata = dot + metadata
 
-	// Truncate cwd if necessary, and insert it at the beginning.
-	const dirTrimLimit = 4
-	cwd := fsext.DirTrim(fsext.PrettyPath(config.Get().WorkingDir()), dirTrimLimit)
-	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
-	cwd = s.Muted.Render(cwd)
+	// Get current Git branch.
+	workingDir := config.Get().WorkingDir()
+	branch := gitutil.GetCurrentBranch(workingDir)
 
-	return cwd + metadata
+	// Build the location string with optional branch.
+	var location string
+	const dirTrimLimit = 4
+	cwd := fsext.DirTrim(fsext.PrettyPath(workingDir), dirTrimLimit)
+
+	if branch != "" {
+		// Branch icon (git branch symbol) + branch name + separator + cwd
+		const branchIcon = " "
+		branchDisplay := branchIcon + branch
+		location = branchDisplay + dot + cwd
+	} else {
+		location = cwd
+	}
+
+	// Truncate location if necessary.
+	location = ansi.Truncate(location, max(0, availWidth-lipgloss.Width(metadata)), "…")
+	location = s.Muted.Render(location)
+
+	return location + metadata
 }
 
 func (h *header) SetDetailsOpen(open bool) {

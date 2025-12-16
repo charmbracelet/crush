@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -38,7 +39,9 @@ func NewDialog(ctx context.Context, workingDir string) *termdialog.Dialog {
 		Term:       terminal.New(terminal.Config{Context: ctx, Cmd: cmd}),
 		OnClose: func() {
 			if themeConfig != "" {
-				_ = os.Remove(themeConfig)
+				if err := os.Remove(themeConfig); err != nil {
+					slog.Debug("failed to remove lazygit theme config", "error", err, "path", themeConfig)
+				}
 			}
 		},
 	})
@@ -61,6 +64,7 @@ func buildConfigEnv(themeConfig string) string {
 func defaultConfigPath() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
+		slog.Debug("failed to get user config directory", "error", err)
 		return ""
 	}
 	return filepath.Join(configDir, "lazygit", "config.yml")
@@ -126,10 +130,15 @@ gui:
 
 	f, err := os.CreateTemp("", "crush-lazygit-*.yml")
 	if err != nil {
+		slog.Error("failed to create temporary lazygit config", "error", err)
 		return ""
 	}
 	defer f.Close()
 
-	_, _ = f.WriteString(config)
+	if _, err := f.WriteString(config); err != nil {
+		slog.Error("failed to write lazygit theme config", "error", err)
+		_ = os.Remove(f.Name()) // remove the empty file
+		return ""
+	}
 	return f.Name()
 }

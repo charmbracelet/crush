@@ -72,6 +72,35 @@ func (h *highlightableMessageItem) Highlight(startLine int, startCol int, endLin
 	}
 }
 
+// cachedMessageItem caches rendered message content to avoid re-rendering.
+//
+// This should be used by any message that can store a cahced version of its render. e.x user,assistant... and so on
+//
+// THOUGHT(kujtim): we should consider if its efficient to store the render for different widths
+// the issue with that could be memory usage
+type cachedMessageItem struct {
+	// rendered is the cached rendered string
+	rendered string
+	// width and height are the dimensions of the cached render
+	width  int
+	height int
+}
+
+// getCachedRender returns the cached render if it exists for the given width.
+func (c *cachedMessageItem) getCachedRender(width int) (string, int, bool) {
+	if c.width == width && c.rendered != "" {
+		return c.rendered, c.height, true
+	}
+	return "", 0, false
+}
+
+// setCachedRender sets the cached render.
+func (c *cachedMessageItem) setCachedRender(rendered string, width, height int) {
+	c.rendered = rendered
+	c.width = width
+	c.height = height
+}
+
 // GetMessageItems extracts [MessageItem]s from a [message.Message]. It returns
 // all parts of the message as [MessageItem]s.
 //

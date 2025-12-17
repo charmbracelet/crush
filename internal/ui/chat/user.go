@@ -15,17 +15,10 @@ import (
 
 type UserMessageItem struct {
 	highlightableMessageItem
+	cachedMessageItem
 	message *message.Message
 	sty     *styles.Styles
 	focused bool
-
-	// holds the last capped width so we can determine if we can reuse the cache
-	lastCappedWidth int
-
-	// holds the rendered item, excluding the focus border
-	// this way we do not need to rerender the whole thing on focus change
-	cachedRender string
-	cachedHeight int
 }
 
 func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
@@ -51,11 +44,10 @@ func (m *UserMessageItem) Render(width int) string {
 		style = m.sty.Chat.Message.UserFocused
 	}
 
-	content := m.cachedRender
-
-	// check if we can reuse the cache
-	if cappedWidth == m.lastCappedWidth && m.cachedRender != "" {
-		return style.Render(m.renderHighlighted(content, cappedWidth, m.cachedHeight))
+	content, height, ok := m.getCachedRender(cappedWidth)
+	// cache hit
+	if ok {
+		return style.Render(m.renderHighlighted(content, cappedWidth, height))
 	}
 
 	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
@@ -72,11 +64,10 @@ func (m *UserMessageItem) Render(width int) string {
 		attachmentsStr := m.renderAttachments(cappedWidth)
 		content = strings.Join([]string{content, "", attachmentsStr}, "\n")
 	}
-	m.lastCappedWidth = cappedWidth
-	m.cachedHeight = lipgloss.Height(content)
-	m.cachedRender = content
 
-	return style.Render(m.renderHighlighted(content, cappedWidth, m.cachedHeight))
+	height = lipgloss.Height(content)
+	m.setCachedRender(content, cappedWidth, height)
+	return style.Render(m.renderHighlighted(content, cappedWidth, height))
 }
 
 // SetFocused implements MessageItem.

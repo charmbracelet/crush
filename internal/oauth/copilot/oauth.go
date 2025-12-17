@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ const (
 	accessTokenURL  = "https://github.com/login/oauth/access_token"
 	copilotTokenURL = "https://api.github.com/copilot_internal/v2/token"
 )
+
+var ErrNotAvailable = errors.New("github copilot not available")
 
 type DeviceCode struct {
 	DeviceCode      string `json:"device_code"`
@@ -166,12 +169,10 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		return nil, err
 	}
 
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, ErrNotAvailable
+	}
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("copilot not available for this account\n\n" +
-				"Please ensure you have GitHub Copilot enabled at:\n" +
-				"https://github.com/settings/copilot")
-		}
 		return nil, fmt.Errorf("copilot token request failed: %s - %s", resp.Status, string(body))
 	}
 

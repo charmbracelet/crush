@@ -33,6 +33,9 @@ crush login
 
 # Authenticate with Claude Code Max
 crush login claude
+
+# Authenticate with GitHub Copilot
+crush login copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
@@ -223,6 +226,16 @@ func loginCopilot() error {
 		fmt.Println("Waiting for authorization...")
 
 		t, err := copilot.PollForToken(ctx, dc)
+		if err == copilot.ErrNotAvailable {
+			fmt.Println()
+			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
+			fmt.Println()
+			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
+			fmt.Println()
+			fmt.Println("You may be able to request free access if elegible. For more information, see:")
+			fmt.Println()
+			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
+		}
 		if err != nil {
 			return err
 		}

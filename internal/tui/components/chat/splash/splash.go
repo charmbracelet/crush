@@ -1,6 +1,7 @@
 package splash
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -853,7 +854,7 @@ func (s *splashCmp) cwdPart() string {
 
 	// Get current Git branch.
 	workingDir := config.Get().WorkingDir()
-	branch := gitutil.GetCurrentBranch(workingDir)
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
 	cwd := home.Short(workingDir)
 
 	var location string
@@ -870,7 +871,7 @@ func (s *splashCmp) cwdPart() string {
 
 func (s *splashCmp) cwd() string {
 	workingDir := config.Get().WorkingDir()
-	branch := gitutil.GetCurrentBranch(workingDir)
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
 	cwd := home.Short(workingDir)
 
 	if branch != "" {

@@ -1,6 +1,7 @@
 package header
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -139,7 +140,7 @@ func (h *header) details(availWidth int) string {
 
 	// Get current Git branch.
 	workingDir := config.Get().WorkingDir()
-	branch := gitutil.GetCurrentBranch(workingDir)
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
 
 	// Build the location string with optional branch.
 	var location string

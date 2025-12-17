@@ -88,7 +88,7 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 		attachments[i] = m.sty.Chat.Message.Attachment.Render(fmt.Sprintf(
 			" %s %s ",
 			styles.DocumentIcon,
-			ansi.Truncate(filename, maxFilenameWidth, "..."),
+			ansi.Truncate(filename, maxFilenameWidth, "…"),
 		))
 	}
 

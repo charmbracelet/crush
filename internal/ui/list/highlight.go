@@ -31,6 +31,14 @@ func Highlight(content string, area image.Rectangle, startLine, startCol, endLin
 	styled := uv.NewStyledString(content)
 	styled.Draw(&buf, area)
 
+	// Treat -1 as "end of content"
+	if endLine < 0 {
+		endLine = height - 1
+	}
+	if endCol < 0 {
+		endCol = width
+	}
+
 	for y := startLine; y <= endLine && y < height; y++ {
 		if y >= buf.Height() {
 			break

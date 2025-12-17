@@ -37,7 +37,7 @@ var _ ListItem = &SessionItem{}
 
 // Filter returns the filterable value of the session.
 func (s *SessionItem) Filter() string {
-	return s.Session.Title
+	return s.Title
 }
 
 // ID returns the unique identifier of the session.
@@ -53,7 +53,7 @@ func (s *SessionItem) SetMatch(m fuzzy.Match) {
 
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	return renderItem(s.t, s.Session.Title, s.Session.UpdatedAt, s.focused, width, s.cache, &s.m)
+	return renderItem(s.t, s.Title, s.UpdatedAt, s.focused, width, s.cache, &s.m)
 }
 
 func renderItem(t *styles.Styles, title string, updatedAt int64, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {

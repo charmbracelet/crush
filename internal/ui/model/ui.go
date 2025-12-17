@@ -26,9 +26,9 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
@@ -203,13 +203,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, uiutil.ReportError(err))
 			break
 		}
+		m.setSessionMessages(msgs)
 
-		if cmd := m.handleMessageEvents(msgs...); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case pubsub.Event[message.Message]:
 		// TODO: Finish implementing me
-		cmds = append(cmds, m.handleMessageEvents(msg.Payload))
+		// cmds = append(cmds, m.setMessageEvents(msg.Payload))
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -337,29 +335,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *UI) handleMessageEvents(msgs ...message.Message) tea.Cmd {
+// setSessionMessages sets the messages for the current session in the chat
+func (m *UI) setSessionMessages(msgs []message.Message) {
 	// Build tool result map to link tool calls with their results
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
 		msgPtrs[i] = &msgs[i]
 	}
-	toolResultMap := BuildToolResultMap(msgPtrs)
+	toolResultMap := chat.BuildToolResultMap(msgPtrs)
 
 	// Add messages to chat with linked tool results
-	items := make([]MessageItem, 0, len(msgs)*2)
+	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
-		items = append(items, GetMessageItems(m.com.Styles, msg, toolResultMap)...)
+		items = append(items, chat.GetMessageItems(m.com.Styles, msg, toolResultMap)...)
 	}
 
-	if m.session == nil || m.session.ID == "" {
-		m.chat.SetMessages(items...)
-	} else {
-		m.chat.AppendMessages(items...)
-	}
+	m.chat.SetMessages(items...)
 	m.chat.ScrollToBottom()
 	m.chat.SelectLast()
-
-	return nil
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
@@ -1179,7 +1172,7 @@ func (m *UI) sendMessage(content string, attachments []message.Attachment) tea.C
 			return uiutil.ReportError(err)
 		}
 		session = newSession
-		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
+		cmds = append(cmds, m.loadSession(session.ID))
 	}
 	if m.com.App.AgentCoordinator == nil {
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))

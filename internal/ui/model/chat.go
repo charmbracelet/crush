@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -63,7 +64,7 @@ func (m *Chat) PrependItems(items ...list.Item) {
 }
 
 // SetMessages sets the chat messages to the provided list of message items.
-func (m *Chat) SetMessages(msgs ...MessageItem) {
+func (m *Chat) SetMessages(msgs ...chat.MessageItem) {
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
 		items[i] = msg
@@ -73,7 +74,7 @@ func (m *Chat) SetMessages(msgs ...MessageItem) {
 }
 
 // AppendMessages appends a new message item to the chat list.
-func (m *Chat) AppendMessages(msgs ...MessageItem) {
+func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
 		items[i] = msg

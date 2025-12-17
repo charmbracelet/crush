@@ -13,14 +13,13 @@ import (
 
 var projectsCmd = &cobra.Command{
 	Use:   "projects",
-	Short: "List all tracked project directories",
-	Long: `List all directories where Crush has been used.
-This includes the working directory, data directory path, and last accessed time.`,
+	Short: "List project directories",
+	Long:  "List directories where Crush project data is known to exist",
 	Example: `
 # List all projects in a table
 crush projects
 
-# Output as JSON
+# Output projects data as JSON
 crush projects --json
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {

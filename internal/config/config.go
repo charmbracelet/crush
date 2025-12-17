@@ -124,6 +124,36 @@ type ProviderConfig struct {
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
 }
 
+// ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
+func (pc *ProviderConfig) ToProvider() catwalk.Provider {
+	// Convert config provider to provider.Provider format
+	provider := catwalk.Provider{
+		Name:   pc.Name,
+		ID:     catwalk.InferenceProvider(pc.ID),
+		Models: make([]catwalk.Model, len(pc.Models)),
+	}
+
+	// Convert models
+	for i, model := range pc.Models {
+		provider.Models[i] = catwalk.Model{
+			ID:                     model.ID,
+			Name:                   model.Name,
+			CostPer1MIn:            model.CostPer1MIn,
+			CostPer1MOut:           model.CostPer1MOut,
+			CostPer1MInCached:      model.CostPer1MInCached,
+			CostPer1MOutCached:     model.CostPer1MOutCached,
+			ContextWindow:          model.ContextWindow,
+			DefaultMaxTokens:       model.DefaultMaxTokens,
+			CanReason:              model.CanReason,
+			ReasoningLevels:        model.ReasoningLevels,
+			DefaultReasoningEffort: model.DefaultReasoningEffort,
+			SupportsImages:         model.SupportsImages,
+		}
+	}
+
+	return provider
+}
+
 func (pc *ProviderConfig) SetupClaudeCode() {
 	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
 	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"

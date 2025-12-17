@@ -5,10 +5,15 @@ import (
 )
 
 type EditorKeyMap struct {
-	AddFile     key.Binding
-	SendMessage key.Binding
-	OpenEditor  key.Binding
-	Newline     key.Binding
+	AddFile        key.Binding
+	SendMessage    key.Binding
+	OpenEditor     key.Binding
+	Newline        key.Binding
+	ClearLine      key.Binding
+	PreviousPrompt key.Binding
+	NextPrompt     key.Binding
+	WordBackward   key.Binding
+	WordForward    key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -32,6 +37,26 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			// to reflect that.
 			key.WithHelp("ctrl+j", "newline"),
 		),
+		ClearLine: key.NewBinding(
+			key.WithKeys("ctrl+u"),
+			key.WithHelp("ctrl+u", "clear line"),
+		),
+		PreviousPrompt: key.NewBinding(
+			key.WithKeys("up"),
+			key.WithHelp("↑", "previous prompt"),
+		),
+		NextPrompt: key.NewBinding(
+			key.WithKeys("down"),
+			key.WithHelp("↓", "next prompt"),
+		),
+		WordBackward: key.NewBinding(
+			key.WithKeys("ctrl+left"),
+			key.WithHelp("ctrl+←", "previous word"),
+		),
+		WordForward: key.NewBinding(
+			key.WithKeys("ctrl+right"),
+			key.WithHelp("ctrl+→", "next word"),
+		),
 	}
 }
 
@@ -42,6 +67,11 @@ func (k EditorKeyMap) KeyBindings() []key.Binding {
 		k.SendMessage,
 		k.OpenEditor,
 		k.Newline,
+		k.ClearLine,
+		k.PreviousPrompt,
+		k.NextPrompt,
+		k.WordBackward,
+		k.WordForward,
 		AttachmentsKeyMaps.AttachmentDeleteMode,
 		AttachmentsKeyMaps.DeleteAllAttachments,
 		AttachmentsKeyMaps.Escape,

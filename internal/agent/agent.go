@@ -171,10 +171,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var wg sync.WaitGroup
 	// Generate title if first message.
 	if len(msgs) == 0 {
+		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
-			sessionLock.Lock()
-			a.generateTitle(ctx, &currentSession, call.Prompt)
-			sessionLock.Unlock()
+			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
 
@@ -723,7 +722,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
-func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Session, prompt string) {
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, prompt string) {
 	if prompt == "" {
 		return
 	}
@@ -768,6 +767,14 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		return
 	}
 
+	// Fetch a fresh copy of the session to avoid racing with the main
+	// goroutine that may be reading session fields.
+	session, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		slog.Error("failed to get session for title update", "error", err)
+		return
+	}
+
 	session.Title = title
 
 	var openrouterCost *float64
@@ -782,8 +789,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		}
 	}
 
-	a.updateSessionUsage(a.smallModel, session, resp.TotalUsage, openrouterCost)
-	_, saveErr := a.sessions.Save(ctx, *session)
+	a.updateSessionUsage(a.smallModel, &session, resp.TotalUsage, openrouterCost)
+	_, saveErr := a.sessions.Save(ctx, session)
 	if saveErr != nil {
 		slog.Error("failed to save session title & usage", "error", saveErr)
 		return

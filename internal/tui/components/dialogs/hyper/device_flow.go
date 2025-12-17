@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/tui/styles"
@@ -47,7 +46,6 @@ type DeviceFlowErrorMsg struct {
 type DeviceFlow struct {
 	State           DeviceFlowState
 	width           int
-	baseURL         string
 	deviceCode      string
 	userCode        string
 	verificationURL string
@@ -64,7 +62,6 @@ func NewDeviceFlow() *DeviceFlow {
 	s.Style = lipgloss.NewStyle().Foreground(styles.CurrentTheme().GreenLight)
 	return &DeviceFlow{
 		State:   DeviceFlowStateDisplay,
-		baseURL: hyperp.BaseURL(),
 		spinner: s,
 	}
 }
@@ -103,6 +100,7 @@ func (d *DeviceFlow) View() string {
 	whiteStyle := lipgloss.NewStyle().Foreground(t.White)
 	primaryStyle := lipgloss.NewStyle().Foreground(t.Primary)
 	greenStyle := lipgloss.NewStyle().Foreground(t.GreenLight)
+	linkStyle := lipgloss.NewStyle().Foreground(t.GreenDark).Underline(true)
 	errorStyle := lipgloss.NewStyle().Foreground(t.Error)
 	mutedStyle := lipgloss.NewStyle().Foreground(t.FgMuted)
 
@@ -121,7 +119,6 @@ func (d *DeviceFlow) View() string {
 			Margin(1, 1, 0, 1).
 			Width(d.width - 2).
 			Render(
-
 				whiteStyle.Render("Press ") +
 					primaryStyle.Render("enter") +
 					whiteStyle.Render(" to copy the code below and open the browser."),
@@ -140,7 +137,7 @@ func (d *DeviceFlow) View() string {
 					Render(d.userCode),
 			)
 
-		link := lipgloss.NewStyle().Hyperlink(d.verificationURL, "id=hyper-verify").Render(d.verificationURL)
+		link := linkStyle.Hyperlink(d.verificationURL, "id=hyper-verify").Render(d.verificationURL)
 		url := mutedStyle.
 			Margin(0, 1).
 			Width(d.width - 2).
@@ -165,7 +162,7 @@ func (d *DeviceFlow) View() string {
 	case DeviceFlowStateError:
 		return lipgloss.NewStyle().
 			Margin(0, 1).
-			Width(d.width).
+			Width(d.width - 2).
 			Render(errorStyle.Render("Authentication failed."))
 
 	default:
@@ -183,6 +180,9 @@ func (d *DeviceFlow) Cursor() *tea.Cursor { return nil }
 
 // CopyCodeAndOpenURL copies the user code to the clipboard and opens the URL.
 func (d *DeviceFlow) CopyCodeAndOpenURL() tea.Cmd {
+	if d.State != DeviceFlowStateDisplay {
+		return nil
+	}
 	return tea.Sequence(
 		tea.SetClipboard(d.userCode),
 		func() tea.Msg {
@@ -197,6 +197,9 @@ func (d *DeviceFlow) CopyCodeAndOpenURL() tea.Cmd {
 
 // CopyCode copies just the user code to the clipboard.
 func (d *DeviceFlow) CopyCode() tea.Cmd {
+	if d.State != DeviceFlowStateDisplay {
+		return nil
+	}
 	return tea.Sequence(
 		tea.SetClipboard(d.userCode),
 		util.ReportInfo("Code copied to clipboard"),

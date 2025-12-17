@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// UserMessageItem represents a user message in the chat UI.
 type UserMessageItem struct {
 	*highlightableMessageItem
 	*cachedMessageItem
@@ -20,6 +21,7 @@ type UserMessageItem struct {
 	focused bool
 }
 
+// NewUserMessageItem creates a new UserMessageItem.
 func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
 	return &UserMessageItem{
 		highlightableMessageItem: defaultHighlighter(sty),

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -120,7 +119,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !a.sendProgressBar {
-			a.sendProgressBar = slices.Contains(msg, "WT_SESSION")
+			a.sendProgressBar = util.IsWindowsTerminal()
 		}
 	case tea.TerminalVersionMsg:
 		if a.sendProgressBar {

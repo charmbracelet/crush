@@ -4,60 +4,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/atotto/clipboard"
+	"golang.org/x/text/encoding/unicode"
 )
-
-var (
-	isWSL     bool
-	isWSLOnce sync.Once
-)
-
-// detectWSL checks if we're running in WSL environment.
-func detectWSL() bool {
-	if runtime.GOOS != "linux" {
-		return false
-	}
-
-	// Check for WSL-specific environment variable.
-	if os.Getenv("WSL_DISTRO_NAME") != "" {
-		return true
-	}
-
-	// Check /proc/version for Microsoft/WSL indicators.
-	data, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-
-	version := strings.ToLower(string(data))
-	return strings.Contains(version, "microsoft") || strings.Contains(version, "wsl")
-}
-
-// IsWSL returns true if running in WSL environment.
-func IsWSL() bool {
-	isWSLOnce.Do(func() {
-		isWSL = detectWSL()
-	})
-	return isWSL
-}
 
 // WriteClipboard writes text to the system clipboard.
-// In WSL2, it uses PowerShell to correctly handle UTF-8 text.
+// On Windows/WSL we ensure UTF-16 content is used so the Windows clipboard
+// receives the correct encoding.
 func WriteClipboard(text string) error {
-	if IsWSL() {
+	switch {
+	case IsWindows():
+		return writeClipboardWindows(text)
+	case IsWSL():
 		return writeClipboardWSL(text)
+	default:
+		return clipboard.WriteAll(text)
+	}
+}
+
+// writeClipboardWindows ensures the text can be represented in UTF-16 before
+// delegating to the native clipboard implementation.
+func writeClipboardWindows(text string) error {
+	if _, err := encodeUTF16LE(text); err != nil {
+		return err
 	}
 	return clipboard.WriteAll(text)
 }
 
 // writeClipboardWSL writes to clipboard using PowerShell in WSL environment.
-// This correctly handles UTF-8 encoded text including CJK characters.
+// This uses UTF-16 encoded content to match the Windows clipboard expectation.
 func writeClipboardWSL(text string) error {
-	// Create a temporary file with UTF-8 content.
+	encoded, err := encodeUTF16LEWithBOM(text)
+	if err != nil {
+		return clipboard.WriteAll(text)
+	}
+
 	tmpFile, err := os.CreateTemp("", "clipboard-*.txt")
 	if err != nil {
 		// Fall back to standard clipboard.
@@ -65,8 +48,7 @@ func writeClipboardWSL(text string) error {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	// Write UTF-8 content to temp file.
-	if _, err := tmpFile.WriteString(text); err != nil {
+	if _, err := tmpFile.Write(encoded); err != nil {
 		tmpFile.Close()
 		return clipboard.WriteAll(text)
 	}
@@ -78,8 +60,8 @@ func writeClipboardWSL(text string) error {
 		return clipboard.WriteAll(text)
 	}
 
-	// Use PowerShell to read UTF-8 file and set clipboard.
-	psCmd := `Get-Content -Path '` + winPath + `' -Encoding UTF8 -Raw | Set-Clipboard`
+	// Use PowerShell to read UTF-16 file and set clipboard.
+	psCmd := `Get-Content -Path '` + winPath + `' -Encoding Unicode -Raw | Set-Clipboard`
 
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psCmd)
 	if err := cmd.Run(); err != nil {
@@ -88,6 +70,18 @@ func writeClipboardWSL(text string) error {
 	}
 
 	return nil
+}
+
+// encodeUTF16LEWithBOM encodes the provided text to UTF-16LE including BOM.
+func encodeUTF16LEWithBOM(text string) ([]byte, error) {
+	enc := unicode.UTF16(unicode.LittleEndian, unicode.UseBOM)
+	return enc.NewEncoder().Bytes([]byte(text))
+}
+
+// encodeUTF16LE encodes text to UTF-16LE without BOM.
+func encodeUTF16LE(text string) ([]byte, error) {
+	enc := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	return enc.NewEncoder().Bytes([]byte(text))
 }
 
 // wslPathToWindows converts a WSL path to Windows path.

@@ -767,16 +767,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, prom
 		return
 	}
 
-	// Fetch a fresh copy of the session to avoid racing with the main
-	// goroutine that may be reading session fields.
-	session, err := a.sessions.Get(ctx, sessionID)
-	if err != nil {
-		slog.Error("failed to get session for title update", "error", err)
-		return
-	}
-
-	session.Title = title
-
+	// Calculate usage and cost.
 	var openrouterCost *float64
 	for _, step := range resp.Steps {
 		stepCost := a.openrouterCost(step.ProviderMetadata)
@@ -789,8 +780,27 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, prom
 		}
 	}
 
-	a.updateSessionUsage(a.smallModel, &session, resp.TotalUsage, openrouterCost)
-	_, saveErr := a.sessions.Save(ctx, session)
+	modelConfig := a.smallModel.CatwalkCfg
+	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
+		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
+		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
+		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
+
+	if a.isClaudeCode() {
+		cost = 0
+	}
+
+	// Use override cost if available (e.g., from OpenRouter).
+	if openrouterCost != nil {
+		cost = *openrouterCost
+	}
+
+	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	completionTokens := resp.TotalUsage.OutputTokens + resp.TotalUsage.CacheReadTokens
+
+	// Atomically update only title and usage fields to avoid overriding other
+	// concurrent session updates.
+	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
 	if saveErr != nil {
 		slog.Error("failed to save session title & usage", "error", saveErr)
 		return

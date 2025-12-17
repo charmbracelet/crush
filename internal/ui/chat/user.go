@@ -8,14 +8,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
 
 type UserMessageItem struct {
-	highlightableMessageItem
-	cachedMessageItem
+	*highlightableMessageItem
+	*cachedMessageItem
 	message *message.Message
 	sty     *styles.Styles
 	focused bool
@@ -23,12 +22,11 @@ type UserMessageItem struct {
 
 func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
 	return &UserMessageItem{
-		highlightableMessageItem: highlightableMessageItem{
-			highlighter: list.ToHighlighter(sty.TextSelection),
-		},
-		message: message,
-		sty:     sty,
-		focused: false,
+		highlightableMessageItem: defaultHighlighter(sty),
+		cachedMessageItem:        &cachedMessageItem{},
+		message:                  message,
+		sty:                      sty,
+		focused:                  false,
 	}
 }
 

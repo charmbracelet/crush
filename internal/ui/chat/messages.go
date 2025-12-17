@@ -72,6 +72,16 @@ func (h *highlightableMessageItem) Highlight(startLine int, startCol int, endLin
 	}
 }
 
+func defaultHighlighter(sty *styles.Styles) *highlightableMessageItem {
+	return &highlightableMessageItem{
+		startLine:   -1,
+		startCol:    -1,
+		endLine:     -1,
+		endCol:      -1,
+		highlighter: list.ToHighlighter(sty.TextSelection),
+	}
+}
+
 // cachedMessageItem caches rendered message content to avoid re-rendering.
 //
 // This should be used by any message that can store a cahced version of its render. e.x user,assistant... and so on

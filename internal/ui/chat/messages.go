@@ -111,6 +111,11 @@ func (c *cachedMessageItem) setCachedRender(rendered string, width, height int) 
 	c.height = height
 }
 
+// cappedMessageWidth returns the maximum width for message content for readability.
+func cappedMessageWidth(availableWidth int) int {
+	return min(availableWidth-messageLeftPaddingTotal, maxTextWidth)
+}
+
 // GetMessageItems extracts [MessageItem]s from a [message.Message]. It returns
 // all parts of the message as [MessageItem]s.
 //

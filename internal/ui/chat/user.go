@@ -34,10 +34,7 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageIte
 
 // Render implements MessageItem.
 func (m *UserMessageItem) Render(width int) string {
-	// this is the total width that is taken up by the border + padding
-	//  we also cap the width so text is readable to the maxTextWidth(120)
-	const messageLeftPaddingTotal = 2
-	cappedWidth := min(width-messageLeftPaddingTotal, maxTextWidth)
+	cappedWidth := cappedMessageWidth(width)
 
 	style := m.sty.Chat.Message.UserBlurred
 	if m.focused {

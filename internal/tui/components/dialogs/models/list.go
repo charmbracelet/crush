@@ -63,7 +63,8 @@ func (m *ModelListComponent) Init() tea.Cmd {
 		for _, p := range providers {
 			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
 			isHyper := p.ID == "hyper"
-			if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper {
+			isCopilot := p.ID == catwalk.InferenceProviderCopilot
+			if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper || isCopilot {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}

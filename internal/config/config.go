@@ -558,10 +558,14 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			return err
 		}
 		setKeyOrToken = func() {
-			providerConfig.APIKey = fmt.Sprintf("Bearer %s", v.AccessToken)
+			providerConfig.APIKey = v.AccessToken
 			providerConfig.OAuthToken = v
-			if providerID == string(catwalk.InferenceProviderAnthropic) {
+			switch providerID {
+			case string(catwalk.InferenceProviderAnthropic):
+				providerConfig.APIKey = fmt.Sprintf("Bearer %s", v.AccessToken)
 				providerConfig.SetupClaudeCode()
+			case string(catwalk.InferenceProviderCopilot):
+				providerConfig.SetupGitHubCopilot()
 			}
 		}
 	}

@@ -694,7 +694,6 @@ func (s *splashCmp) View() string {
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth Hyper"),
-				"",
 				hyperView,
 			),
 		)
@@ -710,7 +709,6 @@ func (s *splashCmp) View() string {
 			lipgloss.JoinVertical(
 				lipgloss.Left,
 				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth GitHub Copilot"),
-				"",
 				copilotView,
 			),
 		)

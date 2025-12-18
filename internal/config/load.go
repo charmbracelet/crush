@@ -133,8 +133,6 @@ func PushPopCrushEnv() func() {
 }
 
 func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
-	c.importCopilot()
-
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
@@ -206,11 +204,6 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			prepared.SetupClaudeCode()
 		case p.ID == catwalk.InferenceProviderCopilot:
-			if config.OAuthToken != nil {
-				if token, ok := c.importCopilot(); ok {
-					prepared.OAuthToken = token
-				}
-			}
 			if config.OAuthToken != nil {
 				prepared.SetupGitHubCopilot()
 			}

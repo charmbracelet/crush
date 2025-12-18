@@ -170,7 +170,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var wg sync.WaitGroup
 	// Generate title if first message.
-	if len(msgs) == 0 {
+	if len(msgs) == 0 && !a.isMetered() {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
@@ -938,10 +938,39 @@ func (a *sessionAgent) Model() Model {
 }
 
 func (a *sessionAgent) promptPrefix() string {
+	prefix := a.systemPromptPrefix
 	if a.isClaudeCode() {
-		return "You are Claude Code, Anthropic's official CLI for Claude."
+		prefix = "You are Claude Code, Anthropic's official CLI for Claude."
 	}
-	return a.systemPromptPrefix
+
+	if a.isMetered() {
+		efficiencyPrompt := "\n\nCRITICAL: This provider has strict request limits (quota). Be extremely efficient:\n" +
+			"- ALWAYS call multiple independent tools in a single turn if possible.\n" +
+			"- Do NOT ask for permission for individual steps unless absolutely necessary.\n" +
+			"- Provide complete solutions with minimal conversational turns.\n" +
+			"- If you need to search and then read, do it in one turn if the search results are predictable."
+		prefix += efficiencyPrompt
+	}
+
+	return prefix
+}
+
+func (a *sessionAgent) isMetered() bool {
+	provider := a.largeModel.ModelCfg.Provider
+	providerID := strings.ToLower(provider)
+	if strings.Contains(providerID, "github") || strings.Contains(providerID, "copilot") {
+		return true
+	}
+
+	cfg := config.Get()
+	if pc, ok := cfg.Providers.Get(provider); ok {
+		baseURL := strings.ToLower(pc.BaseURL)
+		if strings.Contains(baseURL, "github") || strings.Contains(baseURL, "copilot") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (a *sessionAgent) isClaudeCode() bool {

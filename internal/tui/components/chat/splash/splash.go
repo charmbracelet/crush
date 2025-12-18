@@ -205,25 +205,23 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, s.keyMap.Copy):
-			if s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL {
-				return s, tea.Sequence(
-					tea.SetClipboard(s.claudeOAuth2.URL),
-					func() tea.Msg {
-						_ = clipboard.WriteAll(s.claudeOAuth2.URL)
-						return nil
-					},
-					util.ReportInfo("URL copied to clipboard"),
-				)
-			} else if s.showClaudeAuthMethodChooser {
-				u, cmd := s.claudeAuthMethodChooser.Update(msg)
-				s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
-				return s, cmd
-			} else if s.showClaudeOAuth2 {
-				u, cmd := s.claudeOAuth2.Update(msg)
-				s.claudeOAuth2 = u.(*claude.OAuth2)
-				return s, cmd
-			}
+		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL:
+			return s, tea.Sequence(
+				tea.SetClipboard(s.claudeOAuth2.URL),
+				func() tea.Msg {
+					_ = clipboard.WriteAll(s.claudeOAuth2.URL)
+					return nil
+				},
+				util.ReportInfo("URL copied to clipboard"),
+			)
+		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeAuthMethodChooser:
+			u, cmd := s.claudeAuthMethodChooser.Update(msg)
+			s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
+			return s, cmd
+		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeOAuth2:
+			u, cmd := s.claudeOAuth2.Update(msg)
+			s.claudeOAuth2 = u.(*claude.OAuth2)
+			return s, cmd
 		case key.Matches(msg, s.keyMap.Back):
 			if s.showClaudeAuthMethodChooser {
 				s.claudeAuthMethodChooser.SetDefaults()

@@ -29,21 +29,6 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
 
-// LoadReader config via io.Reader.
-func LoadReader(fd io.Reader) (*Config, error) {
-	data, err := io.ReadAll(fd)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, err
-}
-
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	configPaths := lookupConfigs(workingDir)
@@ -644,12 +629,19 @@ func loadFromReaders(readers []io.Reader) (*Config, error) {
 		return &Config{}, nil
 	}
 
-	merged, err := Merge(readers)
-	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration readers: %w", err)
+	result := newConfig()
+	for _, r := range readers {
+		bts, err := io.ReadAll(r)
+		if err != nil {
+			return nil, fmt.Errorf("could not read: %w", err)
+		}
+		config := newConfig()
+		if err := json.Unmarshal(bts, &config); err != nil {
+			return nil, err
+		}
+		*result = result.merge(*config)
 	}
-
-	return LoadReader(merged)
+	return result, nil
 }
 
 func hasVertexCredentials(env env.Env) bool {
@@ -735,4 +727,18 @@ func isInsideWorktree() bool {
 		"--is-inside-work-tree",
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
+}
+
+func newConfig() *Config {
+	return &Config{
+		Agents: map[string]Agent{},
+		MCP:    map[string]MCPConfig{},
+		LSP:    map[string]LSPConfig{},
+		Models: map[SelectedModelType]SelectedModel{},
+		Options: &Options{
+			TUI: &TUIOptions{},
+		},
+		Permissions: &Permissions{},
+		Providers:   csync.NewMap[string, ProviderConfig](),
+	}
 }

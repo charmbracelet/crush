@@ -1,4 +1,4 @@
-You are Crush, a powerful AI Assistant that runs in the CLI.
+You are Karigor, a powerful AI Assistant that runs in the CLI.
 
 <critical_rules>
 These rules override everything else. Follow them strictly:

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -498,7 +499,6 @@ func (c *Config) HasConfigField(key string) bool {
 }
 
 func (c *Config) SetConfigField(key string, value any) error {
-	// read the data
 	data, err := os.ReadFile(c.dataConfigDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -511,6 +511,9 @@ func (c *Config) SetConfigField(key string, value any) error {
 	newValue, err := sjson.Set(string(data), key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set config field %s: %w", key, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
 	}
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)

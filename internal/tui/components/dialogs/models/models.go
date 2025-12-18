@@ -307,6 +307,11 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.hyperDeviceFlow.SetWidth(m.width - 2)
 				return m, m.hyperDeviceFlow.Init()
 			case catwalk.InferenceProviderCopilot:
+				if token, ok := config.Get().ImportCopilot(); ok {
+					m.selectedModel = selectedItem
+					m.selectedModelType = modelType
+					return m, m.saveOauthTokenAndContinue(token, true)
+				}
 				m.showCopilotDeviceFlow = true
 				m.selectedModel = selectedItem
 				m.selectedModelType = modelType

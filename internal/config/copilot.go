@@ -6,11 +6,12 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 )
 
-func (c *Config) importCopilot() (*oauth.Token, bool) {
+func (c *Config) ImportCopilot() (*oauth.Token, bool) {
 	if testing.Testing() {
 		return nil, false
 	}
@@ -29,6 +30,10 @@ func (c *Config) importCopilot() (*oauth.Token, bool) {
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false
+	}
+
+	if err := c.SetProviderAPIKey(string(catwalk.InferenceProviderCopilot), token); err != nil {
+		return token, false
 	}
 
 	if err := cmp.Or(

@@ -346,6 +346,10 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						s.hyperDeviceFlow.SetWidth(min(s.width-2, 60))
 						return s, s.hyperDeviceFlow.Init()
 					case catwalk.InferenceProviderCopilot:
+						if token, ok := config.Get().ImportCopilot(); ok {
+							s.selectedModel = selectedItem
+							return s, s.saveAPIKeyAndContinue(token, true)
+						}
 						s.selectedModel = selectedItem
 						s.showCopilotDeviceFlow = true
 						s.copilotDeviceFlow = copilot.NewDeviceFlow()

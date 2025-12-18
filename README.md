@@ -232,6 +232,11 @@ $HOME/.local/share/crush/crush.json
 %LOCALAPPDATA%\crush\crush.json
 ```
 
+> [!TIP]
+> You can override the user and data config locations by setting:
+> * `CRUSH_GLOBAL_CONFIG`
+> * `CRUSH_GLOBAL_DATA`
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just

@@ -19,13 +19,11 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
-	"github.com/charmbracelet/crush/internal/tui/components/logo"
 	lspcomponent "github.com/charmbracelet/crush/internal/tui/components/lsp"
 	"github.com/charmbracelet/crush/internal/tui/components/mcp"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/crush/internal/version"
 )
 
 type Splash interface {
@@ -746,26 +744,22 @@ func (s *splashCmp) infoSection() string {
 func (s *splashCmp) logoBlock() string {
 	t := styles.CurrentTheme()
 	logoStyle := t.S().Base.Padding(0, 2).Width(s.width)
-	if s.isSmallScreen() {
-		// If the width is too small, render a smaller version of the logo
-		// NOTE: 20 is not correct because [splashCmp.height] is not the
-		// *actual* window height, instead, it is the height of the splash
-		// component and that depends on other variables like compact mode and
-		// the height of the editor.
-		return logoStyle.Render(
-			logo.SmallRender(s.width - logoStyle.GetHorizontalFrameSize()),
-		)
-	}
-	return logoStyle.Render(
-		logo.Render(version.Version, false, logo.Opts{
-			FieldColor:   t.Primary,
-			TitleColorA:  t.Secondary,
-			TitleColorB:  t.Primary,
-			CharmColor:   t.Secondary,
-			VersionColor: t.Primary,
-			Width:        s.width - logoStyle.GetHorizontalFrameSize(),
-		}),
-	)
+
+	// Nice figlet ASCII "Karigor" text using slant font
+	karigorASCII := "    __ __           _                 \n" +
+		"   / //_/___ ______(_)___ _____  _____\n" +
+		"  / ,< / __ `/ ___/ / __ `/ __ \\/ ___/\n" +
+		" / /| / /_/ / /  / / /_/ / /_/ / /    \n" +
+		"/_/ |_\\__,_/_/  /_/\\__, /\\____/_/     \n" +
+		"                  /____/              "
+
+	karigorText := t.S().Base.
+		Foreground(t.Secondary).
+		Bold(true).
+		Align(lipgloss.Center).
+		Render(karigorASCII)
+
+	return logoStyle.Render(karigorText)
 }
 
 func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {

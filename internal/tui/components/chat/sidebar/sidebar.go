@@ -27,7 +27,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/mcp"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/crush/internal/version"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -279,14 +278,17 @@ func (m *sidebarCmp) GetSize() (int, int) {
 
 func (m *sidebarCmp) logoBlock() string {
 	t := styles.CurrentTheme()
-	return logo.Render(version.Version, true, logo.Opts{
-		FieldColor:   t.Primary,
-		TitleColorA:  t.Secondary,
-		TitleColorB:  t.Primary,
-		CharmColor:   t.Secondary,
-		VersionColor: t.Primary,
-		Width:        m.width - 2,
-	})
+
+	// Simple and clean text logo for sidebar
+	logoText := t.S().Base.
+		Foreground(t.Secondary).
+		Bold(true).
+		Render("Karigor")
+
+	// Center the logo in the available width
+	padding := max(0, (m.width-lipgloss.Width(logoText))/2)
+
+	return logoText + strings.Repeat(" ", padding)
 }
 
 func (m *sidebarCmp) getMaxWidth() int {
@@ -298,11 +300,7 @@ func (m *sidebarCmp) calculateAvailableHeight() int {
 	usedHeight := 0
 
 	if !m.compactMode {
-		if m.height > LogoHeightBreakpoint {
-			usedHeight += 7 // Approximate logo height
-		} else {
-			usedHeight += 2 // Smaller logo height
-		}
+		usedHeight += 1 // Simple text logo height
 		usedHeight += 1 // Empty line after logo
 	}
 

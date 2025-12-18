@@ -356,6 +356,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
+
+	// Add default MCP servers if they don't exist in user config
+	c.addDefaultMCPServers()
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
 	}
@@ -721,4 +724,89 @@ func isInsideWorktree() bool {
 		"--is-inside-work-tree",
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
+}
+
+// addDefaultMCPServers adds default MCP servers if they don't exist in user config
+func (c *Config) addDefaultMCPServers() {
+	// Get Z_AI API key from existing provider configuration
+	zaiAPIKey := c.getZAIAPIKey()
+
+	// Define default MCP servers
+	defaultMCPServers := map[string]MCPConfig{
+		"karigor-mcp-server": {
+			Type:    MCPStdio,
+			Command: "npx",
+			Args: []string{
+				"-y",
+				"@z_ai/mcp-server",
+			},
+			Env: map[string]string{
+				"Z_AI_API_KEY": zaiAPIKey,
+				"Z_AI_MODE":    "ZAI",
+			},
+		},
+		"karigor-web-search": {
+			Type: MCPHttp,
+			URL:  "https://api.z.ai/api/mcp/web_search_prime/mcp",
+			Headers: map[string]string{
+				"Authorization": fmt.Sprintf("Bearer %s", zaiAPIKey),
+			},
+		},
+		"karigor-web-reader": {
+			Type: MCPHttp,
+			URL:  "https://api.z.ai/api/mcp/web_reader/mcp",
+			Headers: map[string]string{
+				"Authorization": fmt.Sprintf("Bearer %s", zaiAPIKey),
+			},
+		},
+		"sequential-thinking": {
+			Type:    MCPStdio,
+			Command: "npx",
+			Args: []string{
+				"@modelcontextprotocol/server-sequential-thinking",
+			},
+			Timeout: 180,
+			Env: map[string]string{
+				"MAX_THINKING_STEPS": "10",
+				"THINKING_TIMEOUT":   "180",
+			},
+		},
+	}
+
+	// Add default servers only if they don't exist in user config
+	for name, config := range defaultMCPServers {
+		if _, exists := c.MCP[name]; !exists {
+			// Only add if we have a Z_AI API key for servers that need it
+			if (name == "karigor-mcp-server" || name == "karigor-web-search" || name == "karigor-web-reader") && zaiAPIKey == "" {
+				continue
+			}
+			c.MCP[name] = config
+		}
+	}
+}
+
+// getZAIAPIKey retrieves Z_AI API key from provider configuration
+func (c *Config) getZAIAPIKey() string {
+	// Try to get API key from zai provider configuration
+	if c.Providers != nil {
+		if zaiProvider, ok := c.Providers.Get("zai"); ok && zaiProvider.APIKey != "" {
+			// Resolve the API key if it contains environment variables
+			if c.resolver != nil {
+				if resolved, err := c.resolver.ResolveValue(zaiProvider.APIKey); err == nil {
+					return resolved
+				}
+			}
+			return zaiProvider.APIKey
+		}
+	}
+
+	// Fallback to environment variables
+	envVars := []string{"KARIGOR_API_KEY", "Z_AI_API_KEY", "CRUSH_ZAI_API_KEY"}
+	for _, envVar := range envVars {
+		if key := os.Getenv(envVar); key != "" {
+			return key
+		}
+	}
+
+	return ""
 }

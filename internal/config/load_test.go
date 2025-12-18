@@ -1248,3 +1248,99 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+func TestConfig_addDefaultMCPServers(t *testing.T) {
+	t.Run("adds_sequential_thinking_without_api_key", func(t *testing.T) {
+		cfg := &Config{
+			MCP: make(map[string]MCPConfig),
+		}
+		cfg.addDefaultMCPServers()
+
+		// sequential-thinking should be added even without API key
+		st, exists := cfg.MCP["sequential-thinking"]
+		require.True(t, exists, "sequential-thinking should be added")
+		require.Equal(t, MCPStdio, st.Type)
+		require.Equal(t, "npx", st.Command)
+		require.Contains(t, st.Args, "@modelcontextprotocol/server-sequential-thinking")
+		require.Equal(t, 180, st.Timeout)
+		require.Equal(t, "10", st.Env["MAX_THINKING_STEPS"])
+		require.Equal(t, "180", st.Env["THINKING_TIMEOUT"])
+	})
+
+	t.Run("does_not_add_zai_servers_without_api_key", func(t *testing.T) {
+		cfg := &Config{
+			MCP: make(map[string]MCPConfig),
+		}
+		cfg.addDefaultMCPServers()
+
+		// Z_AI servers should not be added without API key
+		_, exists := cfg.MCP["karigor-mcp-server"]
+		require.False(t, exists, "karigor-mcp-server should not be added without API key")
+
+		_, exists = cfg.MCP["karigor-web-search"]
+		require.False(t, exists, "karigor-web-search should not be added without API key")
+
+		_, exists = cfg.MCP["karigor-web-reader"]
+		require.False(t, exists, "karigor-web-reader should not be added without API key")
+	})
+
+	t.Run("adds_all_servers_with_zai_api_key_from_provider", func(t *testing.T) {
+		providers := csync.NewMap[string, ProviderConfig]()
+		providers.Set("zai", ProviderConfig{
+			ID:     "zai",
+			APIKey: "test-api-key-123",
+		})
+
+		cfg := &Config{
+			MCP:       make(map[string]MCPConfig),
+			Providers: providers,
+		}
+		cfg.resolver = NewEnvironmentVariableResolver(env.New())
+		cfg.addDefaultMCPServers()
+
+		// All servers should be added with Z_AI API key
+		karigorServer, exists := cfg.MCP["karigor-mcp-server"]
+		require.True(t, exists, "karigor-mcp-server should be added")
+		require.Equal(t, "test-api-key-123", karigorServer.Env["Z_AI_API_KEY"])
+		require.Equal(t, "ZAI", karigorServer.Env["Z_AI_MODE"])
+
+		webSearch, exists := cfg.MCP["karigor-web-search"]
+		require.True(t, exists, "karigor-web-search should be added")
+		require.Equal(t, "Bearer test-api-key-123", webSearch.Headers["Authorization"])
+		require.Equal(t, "https://api.z.ai/api/mcp/web_search_prime/mcp", webSearch.URL)
+
+		webReader, exists := cfg.MCP["karigor-web-reader"]
+		require.True(t, exists, "karigor-web-reader should be added")
+		require.Equal(t, "Bearer test-api-key-123", webReader.Headers["Authorization"])
+		require.Equal(t, "https://api.z.ai/api/mcp/web_reader/mcp", webReader.URL)
+	})
+
+	t.Run("does_not_override_existing_mcp_configurations", func(t *testing.T) {
+		// Set up environment variable
+		t.Setenv("KARIGOR_API_KEY", "env-api-key-456")
+
+		existingMCP := map[string]MCPConfig{
+			"karigor-web-search": {
+				Type: MCPHttp,
+				URL:  "https://custom.example.com/mcp",
+				Headers: map[string]string{
+					"Authorization": "Bearer custom-key",
+				},
+			},
+		}
+
+		cfg := &Config{
+			MCP: existingMCP,
+		}
+		cfg.addDefaultMCPServers()
+
+		// Existing configuration should be preserved
+		webSearch := cfg.MCP["karigor-web-search"]
+		require.Equal(t, "https://custom.example.com/mcp", webSearch.URL)
+		require.Equal(t, "Bearer custom-key", webSearch.Headers["Authorization"])
+
+		// But other default servers should still be added
+		_, exists := cfg.MCP["sequential-thinking"]
+		require.True(t, exists, "sequential-thinking should still be added")
+	})
+}

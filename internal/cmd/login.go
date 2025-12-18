@@ -75,8 +75,7 @@ func loginHyper() error {
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	defer cancel()
+	ctx := getLoginContext()
 
 	resp, err := hyper.InitiateDeviceAuth(ctx)
 	if err != nil {

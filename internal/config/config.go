@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	appName              = "crush"
-	defaultDataDirectory = ".crush"
-	defaultInitializeAs  = "AGENTS.md"
+	appName              = "karigor"
+	defaultDataDirectory = ".karigor"
+	defaultInitializeAs  = "KARIGOR.md"
 )
 
 var defaultContextPaths = []string{
@@ -40,12 +40,12 @@ var defaultContextPaths = []string{
 	"CLAUDE.local.md",
 	"GEMINI.md",
 	"gemini.md",
-	"crush.md",
-	"crush.local.md",
-	"Crush.md",
-	"Crush.local.md",
-	"CRUSH.md",
-	"CRUSH.local.md",
+	"karigor.md",
+	"karigor.local.md",
+	"Karigor.md",
+	"Karigor.local.md",
+	"KARIGOR.md",
+	"KARIGOR.local.md",
 	"AGENTS.md",
 	"agents.md",
 	"Agents.md",

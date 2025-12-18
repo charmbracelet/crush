@@ -103,15 +103,15 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	return cfg, nil
 }
 
-func PushPopCrushEnv() func() {
+func PushPopKarigorEnv() func() {
 	found := []string{}
 	for _, ev := range os.Environ() {
-		if strings.HasPrefix(ev, "CRUSH_") {
+		if strings.HasPrefix(ev, "KARIGOR_") {
 			pair := strings.SplitN(ev, "=", 2)
 			if len(pair) != 2 {
 				continue
 			}
-			found = append(found, strings.TrimPrefix(pair[0], "CRUSH_"))
+			found = append(found, strings.TrimPrefix(pair[0], "KARIGOR_"))
 		}
 	}
 	backups := make(map[string]string)
@@ -120,7 +120,7 @@ func PushPopCrushEnv() func() {
 	}
 
 	for _, ev := range found {
-		os.Setenv(ev, os.Getenv("CRUSH_"+ev))
+		os.Setenv(ev, os.Getenv("KARIGOR_"+ev))
 	}
 
 	restore := func() {
@@ -135,7 +135,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	c.importCopilot()
 
 	knownProviderNames := make(map[string]bool)
-	restore := PushPopCrushEnv()
+	restore := PushPopKarigorEnv()
 	defer restore()
 
 	for _, p := range knownProviders {
@@ -368,7 +368,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
+	if str, ok := os.LookupEnv("KARIGOR_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
 
@@ -442,66 +442,49 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		return largeModel, smallModel, err
 	}
 
-	// Use the first provider enabled based on the known providers order
-	// if no provider found that is known use the first provider configured
-	for _, p := range knownProviders {
-		providerConfig, ok := c.Providers.Get(string(p.ID))
-		if !ok || providerConfig.Disable {
-			continue
-		}
-		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
-		if defaultLargeModel == nil {
-			err = fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+	// In Karigor, we only have one provider (ZAI) and one model (glm-4.6)
+	// Hardcode the default model selection
+	var provider *catwalk.Provider
+	if len(knownProviders) > 0 {
+		provider = &knownProviders[0]
+	} else {
+		enabledProviders := c.EnabledProviders()
+		if len(enabledProviders) == 0 {
+			err = fmt.Errorf("no providers configured, please configure at least one provider")
 			return largeModel, smallModel, err
 		}
-		largeModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultLargeModel.ID,
-			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+		// Convert ProviderConfig to catwalk.Provider for consistency
+		pc := enabledProviders[0]
+		provider = &catwalk.Provider{
+			ID:          catwalk.InferenceProvider(pc.ID),
+			Name:        pc.Name,
+			APIEndpoint: pc.BaseURL,
 		}
+	}
 
-		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
-		if defaultSmallModel == nil {
-			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			return largeModel, smallModel, err
-		}
-		smallModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultSmallModel.ID,
-			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
-		}
+	// Use glm-4.6 as the default model for both large and small tasks
+	defaultModel := c.GetModel(string(provider.ID), "glm-4.6")
+	if defaultModel == nil {
+		err = fmt.Errorf("default model glm-4.6 not found for provider %s", provider.ID)
 		return largeModel, smallModel, err
 	}
 
-	enabledProviders := c.EnabledProviders()
-	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-
-	if len(enabledProviders) == 0 {
-		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return largeModel, smallModel, err
-	}
-
-	providerConfig := enabledProviders[0]
-	if len(providerConfig.Models) == 0 {
-		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
-		return largeModel, smallModel, err
-	}
-	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+	// For Karigor, use the same model for both large and small tasks
+	// since there's only one model available
 	largeModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultLargeModel.ID,
-		MaxTokens: defaultLargeModel.DefaultMaxTokens,
+		Provider:        string(provider.ID),
+		Model:           "glm-4.6",
+		MaxTokens:       defaultModel.DefaultMaxTokens,
+		ReasoningEffort: defaultModel.DefaultReasoningEffort,
 	}
-	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+
 	smallModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultSmallModel.ID,
-		MaxTokens: defaultSmallModel.DefaultMaxTokens,
+		Provider:        string(provider.ID),
+		Model:           "glm-4.6",
+		MaxTokens:       defaultModel.DefaultMaxTokens,
+		ReasoningEffort: defaultModel.DefaultReasoningEffort,
 	}
+
 	return largeModel, smallModel, err
 }
 

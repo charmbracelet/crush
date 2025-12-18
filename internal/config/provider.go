@@ -4,21 +4,17 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
 )
@@ -137,52 +133,36 @@ var (
 // 1. if auto update is disabled, it'll return the embedded providers at the
 // time of release.
 // 2. load the cached providers
-// 3. try to get the fresh list of providers, and return either this new list,
-// the cached list, or the embedded list if all others fail.
+// getKarigorProvider returns the single hardcoded ZAI provider
+// configured as "Karigor Chintok" for the Karigor fork.
+func getKarigorProvider() catwalk.Provider {
+	return catwalk.Provider{
+		ID:          "zai",
+		Name:        "Karigor Chintok",
+		APIKey:      "$KARIGOR_API_KEY",
+		APIEndpoint: "https://api.z.ai/api/coding/paas/v4",
+		Type:        catwalk.TypeOpenAICompat,
+		Models: []catwalk.Model{
+			{
+				ID:                     "glm-4.6",
+				Name:                   "Karigor Chintok",
+				ContextWindow:          204800,
+				DefaultMaxTokens:       131072,
+				CanReason:              true,
+				ReasoningLevels:        []string{"low", "medium", "high"},
+				DefaultReasoningEffort: "medium",
+			},
+		},
+	}
+}
+
+// Providers returns all available providers.
+// In Karigor, this is hardcoded to return only ZAI.
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
-		var wg sync.WaitGroup
-		var errs []error
-		providers := csync.NewSlice[catwalk.Provider]()
-		autoupdate := !cfg.Options.DisableProviderAutoUpdate
-
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
-
-		wg.Go(func() {
-			catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
-			client := catwalk.NewWithURL(catwalkURL)
-			path := cachePathFor("providers")
-			catwalkSyncer.Init(client, path, autoupdate)
-
-			items, err := catwalkSyncer.Get(ctx)
-			if err != nil {
-				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-				errs = append(errs, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help.\n\nCause: %w", catwalkURL, providerErr)) //nolint:staticcheck
-				return
-			}
-			providers.Append(items...)
-		})
-
-		wg.Go(func() {
-			if !hyper.Enabled() {
-				return
-			}
-			path := cachePathFor("hyper")
-			hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
-
-			item, err := hyperSyncer.Get(ctx)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("Crush was unable to fetch updated information from Hyper: %w", err)) //nolint:staticcheck
-				return
-			}
-			providers.Append(item)
-		})
-
-		wg.Wait()
-
-		providerList = slices.Collect(providers.Seq())
-		providerErr = errors.Join(errs...)
+		// In Karigor, we only support the ZAI provider
+		providerList = []catwalk.Provider{getKarigorProvider()}
+		providerErr = nil
 	})
 	return providerList, providerErr
 }

@@ -12,7 +12,7 @@ import (
 var schemaCmd = &cobra.Command{
 	Use:    "schema",
 	Short:  "Generate JSON schema for configuration",
-	Long:   "Generate JSON schema for the crush configuration file",
+	Long:   "Generate JSON schema for the karigor configuration file",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reflector := new(jsonschema.Reflector)

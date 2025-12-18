@@ -174,13 +174,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch {
 		// Handle Hyper device flow keys
-		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && (m.showHyperDeviceFlow || m.showCopilotDeviceFlow):
-			if m.hyperDeviceFlow != nil {
-				return m, m.hyperDeviceFlow.CopyCode()
-			}
-			if m.copilotDeviceFlow != nil {
-				return m, m.copilotDeviceFlow.CopyCode()
-			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showHyperDeviceFlow:
+			return m, m.hyperDeviceFlow.CopyCode()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showCopilotDeviceFlow:
+			return m, m.copilotDeviceFlow.CopyCode()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL:
 			return m, tea.Sequence(
 				tea.SetClipboard(m.claudeOAuth2.URL),
@@ -337,28 +334,26 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
 		case key.Matches(msg, m.keyMap.Close):
-			if m.showHyperDeviceFlow {
+			switch {
+			case m.showHyperDeviceFlow:
 				if m.hyperDeviceFlow != nil {
 					m.hyperDeviceFlow.Cancel()
 				}
 				m.showHyperDeviceFlow = false
 				m.selectedModel = nil
-			}
-			if m.showCopilotDeviceFlow {
+			case m.showCopilotDeviceFlow:
 				if m.copilotDeviceFlow != nil {
 					m.copilotDeviceFlow.Cancel()
 				}
 				m.showCopilotDeviceFlow = false
 				m.selectedModel = nil
-			}
-			if m.showClaudeAuthMethodChooser {
+			case m.showClaudeAuthMethodChooser:
 				m.claudeAuthMethodChooser.SetDefaults()
 				m.showClaudeAuthMethodChooser = false
 				m.keyMap.isClaudeAuthChoiceHelp = false
 				m.keyMap.isClaudeOAuthHelp = false
 				return m, nil
-			}
-			if m.needsAPIKey {
+			case m.needsAPIKey:
 				if m.isAPIKeyValid {
 					return m, nil
 				}
@@ -369,37 +364,40 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.apiKeyValue = ""
 				m.apiKeyInput.Reset()
 				return m, nil
+			default:
+				return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 			}
-			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 		default:
-			if m.showClaudeAuthMethodChooser {
+			switch {
+			case m.showClaudeAuthMethodChooser:
 				u, cmd := m.claudeAuthMethodChooser.Update(msg)
 				m.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
 				return m, cmd
-			} else if m.showClaudeOAuth2 {
+			case m.showClaudeOAuth2:
 				u, cmd := m.claudeOAuth2.Update(msg)
 				m.claudeOAuth2 = u.(*claude.OAuth2)
 				return m, cmd
-			} else if m.needsAPIKey {
+			case m.needsAPIKey:
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
 				return m, cmd
-			} else {
+			default:
 				u, cmd := m.modelList.Update(msg)
 				m.modelList = u
 				return m, cmd
 			}
 		}
 	case tea.PasteMsg:
-		if m.showClaudeOAuth2 {
+		switch {
+		case m.showClaudeOAuth2:
 			u, cmd := m.claudeOAuth2.Update(msg)
 			m.claudeOAuth2 = u.(*claude.OAuth2)
 			return m, cmd
-		} else if m.needsAPIKey {
+		case m.needsAPIKey:
 			u, cmd := m.apiKeyInput.Update(msg)
 			m.apiKeyInput = u.(*APIKeyInput)
 			return m, cmd
-		} else {
+		default:
 			var cmd tea.Cmd
 			m.modelList, cmd = m.modelList.Update(msg)
 			return m, cmd

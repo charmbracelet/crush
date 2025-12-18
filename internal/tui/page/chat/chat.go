@@ -31,7 +31,9 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
@@ -335,7 +337,14 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
-	case claude.ValidationCompletedMsg, claude.AuthenticationCompleteMsg:
+	case claude.ValidationCompletedMsg,
+		claude.AuthenticationCompleteMsg,
+		hyper.DeviceFlowCompletedMsg,
+		hyper.DeviceAuthInitiatedMsg,
+		hyper.DeviceFlowErrorMsg,
+		copilot.DeviceAuthInitiatedMsg,
+		copilot.DeviceFlowErrorMsg,
+		copilot.DeviceFlowCompletedMsg:
 		if p.focusedPane == PanelTypeSplash {
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
@@ -1050,7 +1059,8 @@ func (p *chatPage) Help() help.KeyMap {
 			fullList = append(fullList, []key.Binding{v})
 		}
 	case p.isOnboarding && p.splash.IsShowingClaudeOAuth2():
-		if p.splash.IsClaudeOAuthURLState() {
+		switch {
+		case p.splash.IsClaudeOAuthURLState():
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("enter"),
@@ -1061,14 +1071,25 @@ func (p *chatPage) Help() help.KeyMap {
 					key.WithHelp("c", "copy url"),
 				),
 			)
-		} else if p.splash.IsClaudeOAuthComplete() {
+		case p.splash.IsClaudeOAuthComplete():
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("enter"),
 					key.WithHelp("enter", "continue"),
 				),
 			)
-		} else {
+		case p.splash.IsShowingHyperOAuth2() || p.splash.IsShowingCopilotOAuth2():
+			shortList = append(shortList,
+				key.NewBinding(
+					key.WithKeys("enter"),
+					key.WithHelp("enter", "copy url & open signup"),
+				),
+				key.NewBinding(
+					key.WithKeys("c"),
+					key.WithHelp("c", "copy url"),
+				),
+			)
+		default:
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("enter"),

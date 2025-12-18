@@ -193,7 +193,7 @@ func (d *Dialog) View() string {
 	t := styles.CurrentTheme()
 
 	var termContent string
-	if d.term.Started() {
+	if d.term != nil && d.term.Started() {
 		termContent = d.term.Render()
 	} else {
 		termContent = d.loadingMsg

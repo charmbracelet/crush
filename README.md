@@ -1,709 +1,455 @@
-# Karigor
+<div align="center">
 
-<p align="center">
+# 🏗️ Karigor
+
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![License](https://img.shields.io/badge/License-FSL--1.1--MIT-blue?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge)](https://github.com/yourusername/karigor/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/yourusername/karigor/release.yml?style=for-the-badge)](https://github.com/yourusername/karigor/actions)
+
 <pre>
     __ __           _
-   / //_/___ ______(_)___ _____  _____
-  / ,< / __ `/ ___/ / __ `/ __ \/ ___/
- / /| / /_/ / /  / / /_/ / /_/ / /
-/_/ |_\\__,_/_/  /_/\\__, /\____/_/
-                  /____/
+   / //_/___ ______(_)___  _____
+  / ,< / __ `/ ___/ / __ `/ ___/
+ / /| / /_/ / /  / / /_/ / /
+/_/ |_|\__,_/_/  /_/\__,_/_/
+
+    _   _           _   _
+   / \ | | ___  ___| |_(_) ___
+  / _ \| |/ _ \/ __| __| |/ __|
+ / ___ \ |  __/ (__| |_| | (__
+/_/   \_\_|\___|\___|\__|_|\___|
 </pre>
-<p align="center"><strong>Developer Preview by Faisal Kabir Galib</strong></p>
-<p align="center">Your AI-powered coding companion, now available in your terminal.<br />Tools, code, and workflows, seamlessly integrated with your LLM of choice.</p>
-<p align="center">您的 AI 编程助手，现在就在您的终端中。<br />您的工具、代码和工作流，与您选择的 LLM 模型完美集成。</p>
-</p>
 
-## Features
+### 🚀 Your AI-Powered Terminal Development Assistant
 
-- **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
-- **Flexible:** switch LLMs mid-session while preserving context
-- **Session-Based:** maintain multiple work sessions and contexts per project
-- **LSP-Enhanced:** Karigor uses LSPs for additional context, just like you do
-- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
+**Intelligent coding companion that lives in your terminal.** Streamline your development workflow with AI assistance, multi-model support, and seamless tool integration.
 
-## Installation
+</div>
 
-**Developer Preview - Build from Source**
+## ✨ Why Karigor?
 
-This is currently a developer preview. To install Karigor, build it from source:
+Karigor (কারিগর - Bengali for "Artisan") is designed to be your personal development assistant, bringing the power of multiple AI models directly to your terminal experience. Unlike other AI tools, Karigor integrates with your development environment, understands your codebase context, and provides intelligent assistance throughout your coding journey.
+
+### 🎯 Core Features
+
+- **🤖 Multi-Model Support**: Switch between GPT-4, Claude, Gemini, and custom providers mid-session
+- **🔧 Integrated Development**: Built-in file operations, git integration, and terminal commands
+- **🧠 Context-Aware**: Leverages Language Server Protocol (LSP) for deep code understanding
+- **📚 Session Management**: Maintain multiple conversation contexts per project
+- **🔌 Extensible via MCP**: Add powerful capabilities through Model Context Protocol servers
+- **⚡ Zero Configuration**: Pre-configured with intelligent MCP servers (karigor-mcp-server, karigor-web-search, karigor-web-reader)
+- **🌍 Cross-Platform**: Native support for Linux, macOS, Windows, BSD systems
+
+---
+
+## 🚀 Quick Start
+
+### Installation
+
+#### 📦 Package Managers (Recommended)
+
+<details>
+<summary><strong>🍺 macOS / Linux (Homebrew)</strong></summary>
+
+```bash
+brew install yourusername/tap/karigor
+```
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows (Scoop)</strong></summary>
+
+```bash
+scoop bucket add yourusername https://github.com/yourusername/scoop-bucket
+scoop install karigor
+```
+
+</details>
+
+<details>
+<summary><strong>🐧 Linux (Debian/Ubuntu)</strong></summary>
+
+```bash
+wget https://github.com/yourusername/karigor/releases/latest/download/karigor_Linux_x86_64.deb
+sudo dpkg -i karigor_Linux_x86_64.deb
+```
+
+</details>
+
+<details>
+<summary><strong>🐧 Linux (RedHat/Fedora)</strong></summary>
+
+```bash
+wget https://github.com/yourusername/karigor/releases/latest/download/karigor-*.rpm
+sudo rpm -i karigor-*.rpm
+```
+
+</details>
+
+<details>
+<summary><strong>🏛️ Arch Linux (AUR)</strong></summary>
+
+```bash
+yay -S karigor
+```
+
+</details>
+
+#### 🔧 Direct Download
+
+Download the latest binary from [GitHub Releases](https://github.com/yourusername/karigor/releases/latest) for your platform:
+
+```bash
+# Linux (x64)
+wget https://github.com/yourusername/karigor/releases/latest/download/karigor_Linux_x86_64.tar.gz
+tar -xzf karigor_Linux_x86_64.tar.gz
+sudo mv karigor /usr/local/bin/
+
+# macOS (Apple Silicon)
+wget https://github.com/yourusername/karigor/releases/latest/download/karigor_Darwin_arm64.tar.gz
+tar -xzf karigor_Darwin_arm64.tar.gz
+sudo mv karigor /usr/local/bin/
+```
+
+#### 🐳 Docker
+
+```bash
+docker run -it --rm -v $(pwd):/workspace ghcr.io/yourusername/karigor:latest
+```
+
+#### 🛠️ Build from Source
+
+```bash
+git clone https://github.com/yourusername/karigor.git
+cd karigor
+go build .
+./karigor --help
+```
+
+---
+
+## 🎮 Usage
+
+### First Launch
+
+```bash
+# Start Karigor with interactive TUI
+karigor
+
+# Or run a single command non-interactively
+karigor run "Explain this Go function" --file main.go
+```
+
+### Getting Started
+
+When you first run Karigor, it will:
+1. **Auto-configure** default MCP servers (karigor-mcp-server, karigor-web-search, karigor-web-reader, sequential-thinking)
+2. **Detect** your development environment and available tools
+3. **Guide** you through provider setup with your preferred AI model
+
+### Basic Workflow
+
+```bash
+# Launch Karigor
+karigor
+
+# In the TUI:
+# 1. Choose your AI provider (OpenAI, Anthropic, Google, etc.)
+# 2. Start coding with AI assistance
+# 3. Use integrated tools for file operations, git commands, web search
+# 4. Switch between different AI models as needed
+```
+
+### Configuration
+
+Karigor automatically creates configuration files:
+
+- **Global config**: `~/.config/karigor/karigor.json`
+- **Project config**: `.karigor/karigor.json`
+
+#### Basic Configuration Example
+
+```json
+{
+  "$schema": "https://karigor.dev/schema.json",
+  "models": {
+    "large": {
+      "model": "gpt-4o",
+      "provider": "openai"
+    },
+    "small": {
+      "model": "claude-3-haiku",
+      "provider": "anthropic"
+    }
+  },
+  "mcp": {
+    "karigor-mcp-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@z_ai/mcp-server"]
+    },
+    "karigor-web-search": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/web_search_prime/mcp"
+    }
+  },
+  "permissions": {
+    "allowed_tools": ["view", "edit", "bash", "grep"]
+  }
+}
+```
+
+---
+
+## 🛠️ Features Deep Dive
+
+### 🔌 Built-in MCP Servers
+
+Karigor comes pre-configured with intelligent MCP servers:
+
+#### 🧠 karigor-mcp-server
+- **Package**: `@z_ai/mcp-server`
+- **Purpose**: Advanced code analysis and generation
+- **Features**: Context-aware code suggestions, refactoring, documentation
+
+#### 🔍 karigor-web-search
+- **Purpose**: Real-time web search integration
+- **Features**: Stack Overflow search, documentation lookup, trend analysis
+
+#### 📖 karigor-web-reader
+- **Purpose**: Web content extraction and analysis
+- **Features**: Article summarization, code snippet extraction, API documentation parsing
+
+#### 🤔 sequential-thinking
+- **Package**: `@modelcontextprotocol/server-sequential-thinking`
+- **Purpose**: Complex problem decomposition
+- **Features**: Step-by-step reasoning, planning, logical breakdown
+
+### 🔧 Integrated Tools
+
+- **File Operations**: `view`, `edit`, `write`, `ls`, `glob`
+- **Search**: `grep`, `rg` (ripgrep integration)
+- **Git**: Full git workflow support
+- **Terminal**: Execute shell commands safely
+- **Web**: Fetch, read, and analyze web content
+- **LSP**: Language-aware code intelligence
+
+### 🧠 AI Provider Support
+
+#### Supported Providers
+- **OpenAI**: GPT-4, GPT-3.5, custom models
+- **Anthropic**: Claude 3 family (Opus, Sonnet, Haiku)
+- **Google**: Gemini family
+- **Custom**: Any OpenAI-compatible API endpoint
+
+#### Multi-Provider Example
+```json
+{
+  "providers": {
+    "openai": {
+      "api_key": "$OPENAI_API_KEY",
+      "base_url": "https://api.openai.com/v1"
+    },
+    "anthropic": {
+      "api_key": "$ANTHROPIC_API_KEY"
+    },
+    "custom": {
+      "api_key": "$CUSTOM_API_KEY",
+      "base_url": "https://your-custom-endpoint.com/v1",
+      "type": "openai-compat"
+    }
+  }
+}
+```
+
+---
+
+## 🎯 Use Cases
+
+### 👨‍💻 For Developers
+
+- **Code Review**: AI-powered code analysis and suggestions
+- **Documentation**: Auto-generate and maintain documentation
+- **Debugging**: Intelligent error analysis and solutions
+- **Refactoring**: Safe, context-aware code transformations
+- **Learning**: Understand complex codebases with AI explanations
+
+### 🏢 For Teams
+
+- **Onboarding**: Help new developers understand project structure
+- **Code Standards**: Ensure consistent coding practices
+- **Knowledge Sharing**: Preserve project knowledge in AI conversations
+- **Prototyping**: Quickly prototype new features with AI assistance
+
+### 🔬 For Researchers
+
+- **Experimentation**: Rapidly test and iterate on ideas
+- **Analysis**: Analyze datasets and research papers
+- **Documentation**: Generate research documentation and reports
+- **Code Generation**: Create analysis scripts and tools
+
+---
+
+## 🎨 Customization
+
+### Shell Completions
+
+Karigor provides shell completions for bash, zsh, and fish:
+
+```bash
+# Enable bash completions
+source <(karigor completion bash)
+
+# Enable zsh completions
+source <(karigor completion zsh)
+
+# Enable fish completions
+karigor completion fish | source
+```
+
+### Custom MCP Servers
+
+Add your own MCP servers to extend functionality:
+
+```json
+{
+  "mcp": {
+    "my-custom-server": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/path/to/my/mcp-server.py"],
+      "env": {
+        "CUSTOM_API_KEY": "$MY_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### Themes and Appearance
+
+Customize the TUI appearance:
+
+```json
+{
+  "options": {
+    "tui": {
+      "compact_mode": false,
+      "diff_mode": "split",
+      "completions": {
+        "max_depth": 10,
+        "max_items": 1000
+      }
+    }
+  }
+}
+```
+
+---
+
+## 🔐 Security
+
+- **Sandboxed Execution**: All operations run in controlled environments
+- **Permission System**: Fine-grained control over tool access
+- **API Key Security**: Secure storage and management of API keys
+- **Audit Logging**: Complete audit trail of all AI interactions
+- **Local Processing**: Sensitive code stays on your machine
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/karigor.git
 cd karigor
 
-# Build and install
-go build .
-./karigor --help
+# Install dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Run with debug mode
+go run . --debug
+
+# Build for development
+task build
 ```
-
-Or install directly with Go:
-
-```bash
-go install github.com/yourusername/karigor@latest
-```
-
-**Provide Feedback**
-
-For this developer preview, please report bugs and feedback to: faisalkabirgalib@gmail.com
-
-<details>
-<summary><strong>Nix (NUR)</strong></summary>
-
-Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
-
-You can also try out Crush via `nix-shell`:
-
-```bash
-# Add the NUR channel.
-nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
-nix-channel --update
-
-# Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
-```
-
-### NixOS & Home Manager Module Usage via NUR
-
-Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nur.url = "github:nix-community/NUR";
-  };
-
-  outputs = { self, nixpkgs, nur, ... }: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        nur.modules.nixos.default
-        nur.repos.charmbracelet.modules.crush
-        {
-          programs.crush = {
-            enable = true;
-            settings = {
-              providers = {
-                openai = {
-                  id = "openai";
-                  name = "OpenAI";
-                  base_url = "https://api.openai.com/v1";
-                  type = "openai";
-                  api_key = "sk-fake123456789abcdef...";
-                  models = [
-                    {
-                      id = "gpt-4";
-                      name = "GPT-4";
-                    }
-                  ];
-                };
-              };
-              lsp = {
-                go = { command = "gopls"; enabled = true; };
-                nix = { command = "nil"; enabled = true; };
-              };
-              options = {
-                context_paths = [ "/etc/nixos/configuration.nix" ];
-                tui = { compact_mode = true; };
-                debug = false;
-              };
-            };
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Debian/Ubuntu</strong></summary>
-
-```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install crush
-```
-
-</details>
-
-<details>
-<summary><strong>Fedora/RHEL</strong></summary>
-
-```bash
-echo '[charm]
-name=Charm
-baseurl=https://repo.charm.sh/yum/
-enabled=1
-gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install crush
-```
-
-</details>
-
-Or, download it:
-
-- [Packages][releases] are available in Debian and RPM formats
-- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
-
-[releases]: https://github.com/charmbracelet/crush/releases
-
-Or just install it with Go:
-
-```
-go install github.com/charmbracelet/crush@latest
-```
-
-> [!NOTE]
-> This is a developer preview of Karigor by Faisal Kabir Galib. Please report
-> bugs and feedback to faisalkabirgalib@gmail.com. Your input is valuable for
-> improving this AI-powered coding assistant.
-
-## Getting Started
-
-The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
-Karigor. You'll be prompted to enter your API key.
-
-That said, you can also set environment variables for preferred providers.
-
-| Environment Variable        | Provider                                           |
-| --------------------------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY`         | Anthropic                                          |
-| `OPENAI_API_KEY`            | OpenAI                                             |
-| `OPENROUTER_API_KEY`        | OpenRouter                                         |
-| `GEMINI_API_KEY`            | Google Gemini                                      |
-| `CEREBRAS_API_KEY`          | Cerebras                                           |
-| `HF_TOKEN`                  | Huggingface Inference                              |
-| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`              | Groq                                               |
-| `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                               |
-| `AWS_REGION`                | Amazon Bedrock (Claude)                               |
-| `AWS_PROFILE`               | Amazon Bedrock (Custom Profile)                       |
-| `AWS_BEARER_TOKEN_BEDROCK`  | Amazon Bedrock                                        |
-| `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
-
-### By the Way
-
-Is there a provider you'd like to see in Karigor? Is there an existing model that needs an update?
-
-Karigor's default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of LLM-compatible models, and you're welcome to contribute.
-
-<a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
-
-## Configuration
-
-Karigor runs great with no configuration. That said, if you do need or want to
-customize Karigor, configuration can be added either local to the project itself,
-or globally, with the following priority:
-
-1. `.karigor.json`
-2. `karigor.json`
-3. `$HOME/.config/karigor/karigor.json`
-
-Configuration itself is stored as a JSON object:
-
-```json
-{
-  "this-setting": { "this": "that" },
-  "that-setting": ["ceci", "cela"]
-}
-```
-
-As an additional note, Karigor also stores ephemeral data, such as application state, in one additional location:
-
-```bash
-# Unix
-$HOME/.local/share/karigor/karigor.json
-
-# Windows
-%LOCALAPPDATA%\karigor\karigor.json
-```
-
-### LSPs
-
-Karigor can use LSPs for additional context to help inform its decisions, just
-like you would. LSPs can be added manually like so:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "lsp": {
-    "go": {
-      "command": "gopls",
-      "env": {
-        "GOTOOLCHAIN": "go1.24.5"
-      }
-    },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"]
-    },
-    "nix": {
-      "command": "nil"
-    }
-  }
-}
-```
-
-### MCPs
-
-Karigor also supports Model Context Protocol (MCP) servers through three
-transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/mcp-server.js"],
-      "timeout": 120,
-      "disabled": false,
-      "disabled_tools": ["some-tool-name"],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    },
-    "github": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "timeout": 120,
-      "disabled": false,
-      "disabled_tools": ["create_issue", "create_pull_request"],
-      "headers": {
-        "Authorization": "Bearer $GH_PAT"
-      }
-    },
-    "streaming-service": {
-      "type": "sse",
-      "url": "https://example.com/mcp/sse",
-      "timeout": 120,
-      "disabled": false,
-      "headers": {
-        "API-Key": "$(echo $API_KEY)"
-      }
-    }
-  }
-}
-```
-
-### Ignoring Files
-
-Karigor respects `.gitignore` files by default, but you can also create a
-`.karigorigore` file to specify additional files and directories that Karigor
-should ignore. This is useful for excluding files that you want in version
-control but don't want Karigor to consider when providing context.
-
-The `.karigorigore` file uses the same syntax as `.gitignore` and can be placed
-in the root of your project or in subdirectories.
-
-### Allowing Tools
-
-By default, Karigor will ask you for permission before running tool calls. If
-you'd like, you can allow tools to be executed without prompting you for
-permissions. Use this with care.
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "permissions": {
-    "allowed_tools": [
-      "view",
-      "ls",
-      "grep",
-      "edit",
-      "mcp_context7_get-library-doc"
-    ]
-  }
-}
-```
-
-You can also skip all permission prompts entirely by running Karigor with the
-`--yolo` flag. Be very, very careful with this feature.
-
-### Disabling Built-In Tools
-
-If you'd like to prevent Karigor from using certain built-in tools entirely, you
-can disable them via the `options.disabled_tools` list. Disabled tools are
-completely hidden from the agent.
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "options": {
-    "disabled_tools": [
-      "bash",
-      "sourcegraph"
-    ]
-  }
-}
-```
-
-To disable tools from MCP servers, see the [MCP config section](#mcps).
-
-### Initialization
-
-When you initialize a project, Karigor analyzes your codebase and creates
-a context file that helps it work more effectively in future sessions.
-By default, this file is named `AGENTS.md`, but you can customize the
-name and location with the `initialize_as` option:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "options": {
-    "initialize_as": "AGENTS.md"
-  }
-}
-```
-
-This is useful if you prefer a different naming convention or want to
-place the file in a specific directory (e.g., `KARIGOR.md` or
-`docs/LLMs.md`). Karigor will fill the file with project-specific context
-like build commands, code patterns, and conventions it discovered during
-initialization.
-
-### Attribution Settings
-
-By default, Karigor adds attribution information to Git commits and pull requests
-it creates. You can customize this behavior with the `attribution` option:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "options": {
-    "attribution": {
-      "trailer_style": "co-authored-by",
-      "generated_with": true
-    }
-  }
-}
-```
-
-- `trailer_style`: Controls the attribution trailer added to commit messages
-  (default: `assisted-by`)
-	- `assisted-by`: Adds `Assisted-by: [Model Name] via Karigor <karigor@faisalkabirgalib.com>`
-	  (includes the model name)
-	- `co-authored-by`: Adds `Co-Authored-By: Karigor <karigor@faisalkabirgalib.com>`
-	- `none`: No attribution trailer
-- `generated_with`: When true (default), adds `💘 Generated with Karigor` line to
-  commit messages and PR descriptions
-
-### Custom Providers
-
-Karigor supports custom provider configurations for both OpenAI-compatible and
-Anthropic-compatible APIs.
-
-> [!NOTE]
-> Note that we support two "types" for OpenAI. Make sure to choose the right one
-> to ensure the best experience!
-> * `openai` should be used when proxying or routing requests through OpenAI.
-> * `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
-
-#### OpenAI-Compatible APIs
-
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
-API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai-compat",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### Anthropic-Compatible APIs
-
-Custom Anthropic-compatible providers follow this format:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "providers": {
-    "custom-anthropic": {
-      "type": "anthropic",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key": "$ANTHROPIC_API_KEY",
-      "extra_headers": {
-        "anthropic-version": "2023-06-01"
-      },
-      "models": [
-        {
-          "id": "claude-sonnet-4-20250514",
-          "name": "Claude Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
-```
-
-### Amazon Bedrock
-
-Karigor currently supports running Anthropic models through Bedrock, with caching disabled.
-
-- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-- Karigor also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile karigor`
-- Alternatively to `aws configure`, you can also just set `AWS_BEARER_TOKEN_BEDROCK`
-
-### Vertex AI Platform
-
-Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
-
-```bash
-gcloud auth application-default login
-```
-
-To add specific models to the configuration, configure as such:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "providers": {
-    "vertexai": {
-      "models": [
-        {
-          "id": "claude-sonnet-4@20250514",
-          "name": "VertexAI Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
-```
-
-### Local Models
-
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
-
-#### Ollama
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### LM Studio
-
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-## Logging
-
-Sometimes you need to look at logs. Luckily, Karigor logs all sorts of
-stuff. Logs are stored in `./.karigor/logs/karigor.log` relative to the project.
-
-The CLI also contains some helper commands to make perusing recent logs easier:
-
-```bash
-# Print the last 1000 lines
-karigor logs
-
-# Print the last 500 lines
-karigor logs --tail 500
-
-# Follow logs in real time
-karigor logs --follow
-```
-
-Want more logging? Run `karigor` with the `--debug` flag, or enable it in the
-config:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
-```
-
-## Provider Auto-Updates
-
-By default, Karigor automatically checks for the latest and greatest list of
-providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
-the open source LLM provider database. This means that when new providers and
-models are available, or when model metadata changes, Karigor automatically
-updates your local configuration.
-
-### Disabling automatic provider updates
-
-For those with restricted internet access, or those who prefer to work in
-air-gapped environments, this might not be want you want, and this feature can
-be disabled.
-
-To disable automatic provider updates, set `disable_provider_auto_update` into
-your `karigor.json` config:
-
-```json
-{
-  "$schema": "https://charm.land/karigor.json",
-  "options": {
-    "disable_provider_auto_update": true
-  }
-}
-```
-
-Or set the `KARIGOR_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
-
-```bash
-export KARIGOR_DISABLE_PROVIDER_AUTO_UPDATE=1
-```
-
-### Manually updating providers
-
-Manually updating providers is possible with the `karigor update-providers`
-command:
-
-```bash
-# Update providers remotely from Catwalk.
-karigor update-providers
-
-# Update providers from a custom Catwalk base URL.
-karigor update-providers https://example.com/
-
-# Update providers from a local file.
-karigor update-providers /path/to/local-providers.json
-
-# Reset providers to the embedded version, embedded at karigor at build time.
-karigor update-providers embedded
-
-# For more info:
-karigor update-providers --help
-```
-
-## Metrics
-
-Karigor records pseudonymous usage metrics (tied to a device-specific hash),
-which help inform development and support priorities. The
-metrics include solely usage metadata; prompts and responses are NEVER
-collected.
-
-Details on exactly what's collected are in the source code.
-
-You can opt out of metrics collection at any time by setting the environment
-variable by setting the following in your environment:
-
-```bash
-export KARIGOR_DISABLE_METRICS=1
-```
-
-Or by setting the following in your config:
-
-```json
-{
-  "options": {
-    "disable_metrics": true
-  }
-}
-```
-
-Karigor also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
-convention which can be enabled via `export DO_NOT_TRACK=1`.
-
-## Contributing
-
-This is a developer preview by Faisal Kabir Galib. For feedback, bug reports, and suggestions, please contact:
-
-**Email**: faisalkabirgalib@gmail.com
-
-## Get Help
-
-For this developer preview, direct feedback is invaluable:
-
-- **Email**: faisalkabirgalib@gmail.com (for bugs, feedback, and suggestions)
-- **Issues**: Report bugs and feature requests via the project repository
-
-## License
-
-[FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE.md)
 
 ---
 
+## 📊 Architecture
+
+Karigor is built with:
+- **Go**: For performance and cross-platform support
+- **Bubble Tea**: Modern terminal user interface framework
+- **MCP SDK**: Extensible protocol integration
+- **SQLite**: Local data storage for conversations
+- **Language Server Protocol**: Deep code understanding
+
 ---
 
-**Developer Preview by Faisal Kabir Galib**
+## 🆘 Support & Community
+
+### Getting Help
+- **Documentation**: [docs.karigor.dev](https://docs.karigor.dev)
+- **Issues**: [GitHub Issues](https://github.com/yourusername/karigor/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/karigor/discussions)
+
+### Feedback
+For this developer preview, please send feedback to: **faisalkabirgalib@gmail.com**
+
+### Community
+- **Discord**: [Join our Discord](https://discord.gg/karigor)
+- **Twitter**: [@karigor_dev](https://twitter.com/karigor_dev)
+
+---
+
+## 📈 Roadmap
+
+### Upcoming Features
+- [ ] **Plugin System**: Custom plugin development
+- [ ] **Team Collaboration**: Shared sessions and contexts
+- [ ] **Advanced Analytics**: Usage insights and optimization
+- [ ] **IDE Integrations**: VS Code, IntelliJ, and more
+- [ ] **Mobile Apps**: iOS and Android companions
+
+### Current Development Focus
+- [ ] Enhanced multi-modal support (images, audio)
+- [ ] Advanced debugging capabilities
+- [ ] Performance optimizations
+- [ ] Extended LSP support
+
+---
+
+## 📄 License
+
+Karigor is available under the [FSL-1.1-MIT License](LICENSE). This means it's free for personal and commercial use, with additional freedoms for the community.
+
+---
+
+## 🙏 Acknowledgments
+
+- **Charmbracelet** - For the amazing Bubble Tea framework and inspiration
+- **Model Context Protocol** - For the extensible AI integration standard
+- **OpenAI, Anthropic, Google** - For providing incredible AI capabilities
+- **Our Contributors** - For making Karigor better every day
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [Faisal Kabir Galib](https://github.com/faisalkabirgalib)**
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/karigor&type=Date)](https://star-history.com/#yourusername/karigor&Date)
+
+*If you find Karigor helpful, please ⭐ star us on GitHub!*
+
+</div>

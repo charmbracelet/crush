@@ -233,14 +233,14 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 
 		mimeType := mimeOf(content)
-		if !strings.HasPrefix(mimeType, "text/") && !strings.HasPrefix(mimeType, "image/") {
-			return m, util.ReportWarn("Invalid file content type: " + mimeType)
-		}
 		attachment := message.Attachment{
 			FilePath: path,
 			FileName: filepath.Base(path),
 			MimeType: mimeType,
 			Content:  content,
+		}
+		if !attachment.IsText() && !attachment.IsImage() {
+			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
 			Attachment: attachment,

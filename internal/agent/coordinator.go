@@ -126,7 +126,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		// filter out image attachments
 		filteredAttachments := make([]message.Attachment, 0, len(attachments))
 		for _, att := range attachments {
-			if strings.HasPrefix(att.MimeType, "text/") {
+			if att.IsText() {
 				filteredAttachments = append(filteredAttachments, att)
 			}
 		}

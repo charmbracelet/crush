@@ -171,10 +171,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var wg sync.WaitGroup
 	// Generate title if first message.
 	if len(msgs) == 0 {
+		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
-			sessionLock.Lock()
-			a.generateTitle(ctx, &currentSession, call.Prompt)
-			sessionLock.Unlock()
+			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
 
@@ -723,7 +722,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
-func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Session, prompt string) {
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, prompt string) {
 	if prompt == "" {
 		return
 	}
@@ -768,8 +767,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		return
 	}
 
-	session.Title = title
-
+	// Calculate usage and cost.
 	var openrouterCost *float64
 	for _, step := range resp.Steps {
 		stepCost := a.openrouterCost(step.ProviderMetadata)
@@ -782,8 +780,27 @@ func (a *sessionAgent) generateTitle(ctx context.Context, session *session.Sessi
 		}
 	}
 
-	a.updateSessionUsage(a.smallModel, session, resp.TotalUsage, openrouterCost)
-	_, saveErr := a.sessions.Save(ctx, *session)
+	modelConfig := a.smallModel.CatwalkCfg
+	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
+		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
+		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
+		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
+
+	if a.isClaudeCode() {
+		cost = 0
+	}
+
+	// Use override cost if available (e.g., from OpenRouter).
+	if openrouterCost != nil {
+		cost = *openrouterCost
+	}
+
+	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	completionTokens := resp.TotalUsage.OutputTokens + resp.TotalUsage.CacheReadTokens
+
+	// Atomically update only title and usage fields to avoid overriding other
+	// concurrent session updates.
+	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
 	if saveErr != nil {
 		slog.Error("failed to save session title & usage", "error", saveErr)
 		return

@@ -92,22 +92,17 @@ func (b *Broker[T]) GetSubscriberCount() int {
 
 func (b *Broker[T]) Publish(t EventType, payload T) {
 	b.mu.RLock()
+	defer b.mu.RUnlock()
+
 	select {
 	case <-b.done:
-		b.mu.RUnlock()
 		return
 	default:
 	}
 
-	subscribers := make([]chan Event[T], 0, len(b.subs))
-	for sub := range b.subs {
-		subscribers = append(subscribers, sub)
-	}
-	b.mu.RUnlock()
-
 	event := Event[T]{Type: t, Payload: payload}
 
-	for _, sub := range subscribers {
+	for sub := range b.subs {
 		select {
 		case sub <- event:
 		default:

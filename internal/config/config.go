@@ -555,6 +555,8 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.APIKey = newToken.AccessToken
 		providerConfig.SetupGitHubCopilot()
+	case hyperp.Name:
+		providerConfig.APIKey = newToken.AccessToken
 	}
 
 	c.Providers.Set(providerID, providerConfig)

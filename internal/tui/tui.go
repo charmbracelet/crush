@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/ghdash"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/lazygit"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/permissions"
@@ -311,6 +312,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: lazygit.NewDialog(a.app.Context(), a.app.Config().WorkingDir()),
+		})
+	// GhDash
+	case commands.OpenGhDashMsg:
+		if a.dialog.ActiveDialogID() == ghdash.DialogID {
+			return a, util.CmdHandler(dialogs.CloseDialogMsg{})
+		}
+		return a, util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: ghdash.NewDialog(a.app.Context(), a.app.Config().WorkingDir()),
 		})
 	// Permissions
 	case pubsub.Event[permission.PermissionNotification]:

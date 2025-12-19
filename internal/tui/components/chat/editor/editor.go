@@ -595,13 +595,9 @@ var maxAttachmentSize = 5 * 1024 * 1024 // 5MB
 var errNotAFile = errors.New("not a file")
 
 func pasteToFile(msg tea.PasteMsg) ([]byte, string, error) {
-	path := strings.ReplaceAll(msg.Content, "\\", "")
-	path, err := filepath.Abs(strings.TrimSpace(path))
-	if err == nil && fs.ValidPath(path) {
-		content, path, err := filepathToFile(path)
-		if err == nil || !errors.Is(err, fs.ErrNotExist) {
-			return content, path, err
-		}
+	content, path, err := filepathToFile(msg.Content)
+	if err == nil {
+		return content, path, err
 	}
 
 	if strings.Count(msg.Content, "\n") > 2 {
@@ -625,7 +621,11 @@ func contentToFile(content []byte) ([]byte, string, error) {
 	return content, f.Name(), nil
 }
 
-func filepathToFile(path string) ([]byte, string, error) {
+func filepathToFile(name string) ([]byte, string, error) {
+	path, err := filepath.Abs(strings.TrimSpace(strings.ReplaceAll(name, "\\", "")))
+	if err != nil {
+		return nil, "", err
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", err

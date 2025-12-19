@@ -248,9 +248,6 @@ func (m *messageCmp) renderUserMessage() string {
 		if strings.HasPrefix(attachment.MIMEType, "text/") {
 			icon = styles.TextIcon
 		}
-		if attachment.MIMEType == "crush/mention" {
-			icon = styles.MentionIcon
-		}
 		attachments[i] = lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			iconStyle(icon),

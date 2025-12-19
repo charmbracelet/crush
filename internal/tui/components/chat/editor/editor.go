@@ -205,10 +205,15 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.currentQuery = ""
 				m.completionsStartIndex = 0
 			}
+			content, err := os.ReadFile(item.Path)
+			if err != nil {
+				return m, util.ReportError(err)
+			}
 			m.attachments = append(m.attachments, message.Attachment{
 				FilePath: item.Path,
 				FileName: filepath.Base(item.Path),
-				MimeType: "crush/mention",
+				MimeType: mimeOf(content),
+				Content:  content,
 			})
 		}
 
@@ -241,7 +246,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			MimeType: mimeType,
 			Content:  content,
 		}
-		if !attachment.IsText() && !attachment.IsImage() && !attachment.IsMention() {
+		if !attachment.IsText() && !attachment.IsImage() {
 			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
@@ -474,9 +479,6 @@ func (m *editorCmp) attachmentsContent() string {
 		icon := styles.ImageIcon
 		if attachment.IsText() {
 			icon = styles.TextIcon
-		}
-		if attachment.IsMention() {
-			icon = styles.MentionIcon
 		}
 		if m.deleteMode {
 			styledAttachments = append(

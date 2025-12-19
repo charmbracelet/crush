@@ -9,6 +9,5 @@ type Attachment struct {
 	Content  []byte
 }
 
-func (a Attachment) IsText() bool    { return strings.HasPrefix(a.MimeType, "text/") }
-func (a Attachment) IsImage() bool   { return strings.HasPrefix(a.MimeType, "image/") }
-func (a Attachment) IsMention() bool { return strings.HasPrefix(a.MimeType, "crush/mention") }
+func (a Attachment) IsText() bool  { return strings.HasPrefix(a.MimeType, "text/") }
+func (a Attachment) IsImage() bool { return strings.HasPrefix(a.MimeType, "image/") }

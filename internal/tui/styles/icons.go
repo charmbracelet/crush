@@ -12,7 +12,6 @@ const (
 	LoadingIcon       string = "⟳"
 	ImageIcon         string = "■"
 	TextIcon          string = "☰"
-	MentionIcon       string = "@"
 	ModelIcon         string = "◇"
 
 	// Tool call icons

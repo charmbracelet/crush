@@ -148,8 +148,8 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				params.Limit = DefaultReadLimit
 			}
 
-			isImage, mimeType := getImageMimeType(filePath)
-			if isImage {
+			isSupportedImage, mimeType := getImageMimeType(filePath)
+			if isSupportedImage {
 				if !GetSupportsImagesFromContext(ctx) {
 					modelName := GetModelNameFromContext(ctx)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
@@ -282,10 +282,6 @@ func getImageMimeType(filePath string) (bool, string) {
 		return true, "image/png"
 	case ".gif":
 		return true, "image/gif"
-	case ".bmp":
-		return true, "image/bmp"
-	case ".svg":
-		return true, "image/svg+xml"
 	case ".webp":
 		return true, "image/webp"
 	default:

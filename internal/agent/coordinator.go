@@ -17,6 +17,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -138,6 +139,13 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+
+	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
+		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
+		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+			return nil, err
+		}
+	}
 
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
@@ -515,14 +523,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		}, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, isOauth bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
-	if strings.HasPrefix(apiKey, "Bearer ") {
+	if isOauth {
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
-
-		headers["Authorization"] = apiKey
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", apiKey)
 	} else if apiKey != "" {
 		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
@@ -540,7 +547,6 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
-
 	return anthropic.New(opts...)
 }
 
@@ -668,6 +674,18 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
+func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provider, error) {
+	opts := []hyper.Option{
+		hyper.WithBaseURL(baseURL),
+		hyper.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, hyper.WithHTTPClient(httpClient))
+	}
+	return hyper.New(opts...)
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -709,7 +727,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openai.Name:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.OAuthToken != nil)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case azure.Name:
@@ -728,6 +746,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+	case hyper.Name:
+		return c.buildHyperProvider(baseURL, apiKey)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

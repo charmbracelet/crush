@@ -84,6 +84,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionStmt, err = db.PrepareContext(ctx, updateSession); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSession: %w", err)
 	}
+	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
+	}
 	return &q, nil
 }
 
@@ -189,6 +192,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateSessionStmt: %w", cerr)
 		}
 	}
+	if q.updateSessionTitleAndUsageStmt != nil {
+		if cerr := q.updateSessionTitleAndUsageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
+		}
+	}
 	return err
 }
 
@@ -226,53 +234,55 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                          DBTX
-	tx                          *sql.Tx
-	createFileStmt              *sql.Stmt
-	createMessageStmt           *sql.Stmt
-	createSessionStmt           *sql.Stmt
-	deleteFileStmt              *sql.Stmt
-	deleteMessageStmt           *sql.Stmt
-	deleteSessionStmt           *sql.Stmt
-	deleteSessionFilesStmt      *sql.Stmt
-	deleteSessionMessagesStmt   *sql.Stmt
-	getFileStmt                 *sql.Stmt
-	getFileByPathAndSessionStmt *sql.Stmt
-	getMessageStmt              *sql.Stmt
-	getSessionByIDStmt          *sql.Stmt
-	listFilesByPathStmt         *sql.Stmt
-	listFilesBySessionStmt      *sql.Stmt
-	listLatestSessionFilesStmt  *sql.Stmt
-	listMessagesBySessionStmt   *sql.Stmt
-	listNewFilesStmt            *sql.Stmt
-	listSessionsStmt            *sql.Stmt
-	updateMessageStmt           *sql.Stmt
-	updateSessionStmt           *sql.Stmt
+	db                             DBTX
+	tx                             *sql.Tx
+	createFileStmt                 *sql.Stmt
+	createMessageStmt              *sql.Stmt
+	createSessionStmt              *sql.Stmt
+	deleteFileStmt                 *sql.Stmt
+	deleteMessageStmt              *sql.Stmt
+	deleteSessionStmt              *sql.Stmt
+	deleteSessionFilesStmt         *sql.Stmt
+	deleteSessionMessagesStmt      *sql.Stmt
+	getFileStmt                    *sql.Stmt
+	getFileByPathAndSessionStmt    *sql.Stmt
+	getMessageStmt                 *sql.Stmt
+	getSessionByIDStmt             *sql.Stmt
+	listFilesByPathStmt            *sql.Stmt
+	listFilesBySessionStmt         *sql.Stmt
+	listLatestSessionFilesStmt     *sql.Stmt
+	listMessagesBySessionStmt      *sql.Stmt
+	listNewFilesStmt               *sql.Stmt
+	listSessionsStmt               *sql.Stmt
+	updateMessageStmt              *sql.Stmt
+	updateSessionStmt              *sql.Stmt
+	updateSessionTitleAndUsageStmt *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                          tx,
-		tx:                          tx,
-		createFileStmt:              q.createFileStmt,
-		createMessageStmt:           q.createMessageStmt,
-		createSessionStmt:           q.createSessionStmt,
-		deleteFileStmt:              q.deleteFileStmt,
-		deleteMessageStmt:           q.deleteMessageStmt,
-		deleteSessionStmt:           q.deleteSessionStmt,
-		deleteSessionFilesStmt:      q.deleteSessionFilesStmt,
-		deleteSessionMessagesStmt:   q.deleteSessionMessagesStmt,
-		getFileStmt:                 q.getFileStmt,
-		getFileByPathAndSessionStmt: q.getFileByPathAndSessionStmt,
-		getMessageStmt:              q.getMessageStmt,
-		getSessionByIDStmt:          q.getSessionByIDStmt,
-		listFilesByPathStmt:         q.listFilesByPathStmt,
-		listFilesBySessionStmt:      q.listFilesBySessionStmt,
-		listLatestSessionFilesStmt:  q.listLatestSessionFilesStmt,
-		listMessagesBySessionStmt:   q.listMessagesBySessionStmt,
-		listNewFilesStmt:            q.listNewFilesStmt,
-		listSessionsStmt:            q.listSessionsStmt,
-		updateMessageStmt:           q.updateMessageStmt,
-		updateSessionStmt:           q.updateSessionStmt,
+		db:                             tx,
+		tx:                             tx,
+		createFileStmt:                 q.createFileStmt,
+		createMessageStmt:              q.createMessageStmt,
+		createSessionStmt:              q.createSessionStmt,
+		deleteFileStmt:                 q.deleteFileStmt,
+		deleteMessageStmt:              q.deleteMessageStmt,
+		deleteSessionStmt:              q.deleteSessionStmt,
+		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
+		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
+		getFileStmt:                    q.getFileStmt,
+		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
+		getMessageStmt:                 q.getMessageStmt,
+		getSessionByIDStmt:             q.getSessionByIDStmt,
+		listFilesByPathStmt:            q.listFilesByPathStmt,
+		listFilesBySessionStmt:         q.listFilesBySessionStmt,
+		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
+		listMessagesBySessionStmt:      q.listMessagesBySessionStmt,
+		listNewFilesStmt:               q.listNewFilesStmt,
+		listSessionsStmt:               q.listSessionsStmt,
+		updateMessageStmt:              q.updateMessageStmt,
+		updateSessionStmt:              q.updateSessionStmt,
+		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,
 	}
 }

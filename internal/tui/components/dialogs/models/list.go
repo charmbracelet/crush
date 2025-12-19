@@ -62,7 +62,9 @@ func (m *ModelListComponent) Init() tea.Cmd {
 		filteredProviders := []catwalk.Provider{}
 		for _, p := range providers {
 			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
-			if hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure {
+			isHyper := p.ID == "hyper"
+			isCopilot := p.ID == catwalk.InferenceProviderCopilot
+			if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper || isCopilot {
 				filteredProviders = append(filteredProviders, p)
 			}
 		}
@@ -146,29 +148,7 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		if !slices.ContainsFunc(knownProviders, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) ||
 			!slices.ContainsFunc(m.providers, func(p catwalk.Provider) bool { return p.ID == catwalk.InferenceProvider(providerID) }) {
 			// Convert config provider to provider.Provider format
-			configProvider := catwalk.Provider{
-				Name:   providerConfig.Name,
-				ID:     catwalk.InferenceProvider(providerID),
-				Models: make([]catwalk.Model, len(providerConfig.Models)),
-			}
-
-			// Convert models
-			for i, model := range providerConfig.Models {
-				configProvider.Models[i] = catwalk.Model{
-					ID:                     model.ID,
-					Name:                   model.Name,
-					CostPer1MIn:            model.CostPer1MIn,
-					CostPer1MOut:           model.CostPer1MOut,
-					CostPer1MInCached:      model.CostPer1MInCached,
-					CostPer1MOutCached:     model.CostPer1MOutCached,
-					ContextWindow:          model.ContextWindow,
-					DefaultMaxTokens:       model.DefaultMaxTokens,
-					CanReason:              model.CanReason,
-					ReasoningLevels:        model.ReasoningLevels,
-					DefaultReasoningEffort: model.DefaultReasoningEffort,
-					SupportsImages:         model.SupportsImages,
-				}
-			}
+			configProvider := providerConfig.ToProvider()
 
 			// Add this unknown provider to the list
 			name := configProvider.Name
@@ -204,8 +184,23 @@ func (m *ModelListComponent) SetModelType(modelType int) tea.Cmd {
 		}
 	}
 
+	// Move "Charm Hyper" to first position
+	// (but still after recent models and custom providers).
+	sortedProviders := make([]catwalk.Provider, len(m.providers))
+	copy(sortedProviders, m.providers)
+	slices.SortStableFunc(sortedProviders, func(a, b catwalk.Provider) int {
+		switch {
+		case a.ID == "hyper":
+			return -1
+		case b.ID == "hyper":
+			return 1
+		default:
+			return 0
+		}
+	})
+
 	// Then add the known providers from the predefined list
-	for _, provider := range m.providers {
+	for _, provider := range sortedProviders {
 		// Skip if we already added this provider as an unknown provider
 		if addedProviders[string(provider.ID)] {
 			continue

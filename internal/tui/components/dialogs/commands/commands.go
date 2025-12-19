@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -23,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/crush/internal/uicmd"
 )
 
 const (
@@ -31,26 +33,22 @@ const (
 	defaultWidth int = 70
 )
 
-type commandType uint
-
-func (c commandType) String() string { return []string{"System", "User", "MCP"}[c] }
+type commandType = uicmd.CommandType
 
 const (
-	SystemCommands commandType = iota
-	UserCommands
-	MCPPrompts
+	SystemCommands = uicmd.SystemCommands
+	UserCommands   = uicmd.UserCommands
+	MCPPrompts     = uicmd.MCPPrompts
 )
 
 type listModel = list.FilterableList[list.CompletionItem[Command]]
 
 // Command represents a command that can be executed
-type Command struct {
-	ID          string
-	Title       string
-	Description string
-	Shortcut    string // Optional shortcut for the command
-	Handler     func(cmd Command) tea.Cmd
-}
+type (
+	Command                         = uicmd.Command
+	CommandRunCustomMsg             = uicmd.CommandRunCustomMsg
+	ShowMCPPromptArgumentsDialogMsg = uicmd.ShowMCPPromptArgumentsDialogMsg
+)
 
 // CommandsDialog represents the commands dialog.
 type CommandsDialog interface {
@@ -121,12 +119,12 @@ func NewCommandDialog(sessionID string) CommandsDialog {
 }
 
 func (c *commandDialogCmp) Init() tea.Cmd {
-	commands, err := LoadCustomCommands()
+	commands, err := uicmd.LoadCustomCommands()
 	if err != nil {
 		return util.ReportError(err)
 	}
 	c.userCommands = commands
-	c.mcpPrompts.SetSlice(loadMCPPrompts())
+	c.mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
 	return c.setCommandType(c.selected)
 }
 
@@ -142,7 +140,7 @@ func (c *commandDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		// Reload MCP prompts when MCP state changes
 		if msg.Type == pubsub.UpdatedEvent {
-			c.mcpPrompts.SetSlice(loadMCPPrompts())
+			c.mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
 			// If we're currently viewing MCP prompts, refresh the list
 			if c.selected == MCPPrompts {
 				return c, c.setCommandType(MCPPrompts)
@@ -366,7 +364,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			selectedModel := cfg.Models[agentCfg.Model]
 
 			// Anthropic models: thinking toggle
-			if providerCfg.Type == catwalk.TypeAnthropic {
+			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"

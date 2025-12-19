@@ -407,6 +407,15 @@ func (m *Message) SetToolResults(tr []ToolResult) {
 	}
 }
 
+// Clone returns a deep copy of the message with an independent Parts slice.
+// This prevents race conditions when the message is modified concurrently.
+func (m *Message) Clone() Message {
+	clone := *m
+	clone.Parts = make([]ContentPart, len(m.Parts))
+	copy(clone.Parts, m.Parts)
+	return clone
+}
+
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {

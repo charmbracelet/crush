@@ -656,7 +656,7 @@ func (s *splashCmp) View() string {
 
 	switch {
 	case s.showClaudeAuthMethodChooser:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		chooserView := s.claudeAuthMethodChooser.View()
 		authMethodSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -672,7 +672,7 @@ func (s *splashCmp) View() string {
 			authMethodSelector,
 		)
 	case s.showClaudeOAuth2:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		oauth2View := s.claudeOAuth2.View()
 		oauthSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -688,7 +688,7 @@ func (s *splashCmp) View() string {
 			oauthSelector,
 		)
 	case s.showHyperDeviceFlow:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		hyperView := s.hyperDeviceFlow.View()
 		hyperSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -703,7 +703,7 @@ func (s *splashCmp) View() string {
 			hyperSelector,
 		)
 	case s.showCopilotDeviceFlow:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		copilotView := s.copilotDeviceFlow.View()
 		copilotSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -718,7 +718,7 @@ func (s *splashCmp) View() string {
 			copilotSelector,
 		)
 	case s.needsAPIKey:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		apiKeyView := t.S().Base.PaddingLeft(1).Render(s.apiKeyInput.View())
 		apiKeySelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
@@ -733,7 +733,7 @@ func (s *splashCmp) View() string {
 		)
 	case s.isOnboarding:
 		modelListView := s.modelList.View()
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,

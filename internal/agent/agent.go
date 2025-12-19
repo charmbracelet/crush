@@ -200,7 +200,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var currentAssistant *message.Message
 	var shouldSummarize bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           call.Prompt,
+		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
@@ -690,6 +690,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 	var files []fantasy.FilePart
 	for _, attachment := range attachments {
+		if attachment.IsText() {
+			continue
+		}
 		files = append(files, fantasy.FilePart{
 			Filename:  attachment.FileName,
 			Data:      attachment.Content,

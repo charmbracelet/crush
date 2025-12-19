@@ -516,14 +516,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context) (Model, Model, error
 		}, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, isOauth bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
-	if strings.HasPrefix(apiKey, "Bearer ") {
+	if isOauth {
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
-
-		headers["Authorization"] = apiKey
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", apiKey)
 	} else if apiKey != "" {
 		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
@@ -541,7 +540,6 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
-
 	return anthropic.New(opts...)
 }
 
@@ -722,7 +720,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openai.Name:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.OAuthToken != nil)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case azure.Name:

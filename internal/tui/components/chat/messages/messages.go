@@ -227,19 +227,32 @@ func (m *messageCmp) renderUserMessage() string {
 		m.toMarkdown(m.message.Content().String()),
 	}
 
-	attachmentStyles := t.S().Text.
-		MarginLeft(1).
-		Background(t.BgSubtle)
+	attachmentStyle := t.S().Base.
+		Padding(0, 1).
+		MarginRight(1).
+		Background(t.FgMuted).
+		Foreground(t.FgBase).
+		Render
+	iconStyle := t.S().Base.
+		Foreground(t.BgSubtle).
+		Background(t.Green).
+		Padding(0, 1).
+		Bold(true).
+		Render
 
 	attachments := make([]string, len(m.message.BinaryContent()))
 	for i, attachment := range m.message.BinaryContent() {
 		const maxFilenameWidth = 10
-		filename := filepath.Base(attachment.Path)
-		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
-			" %s %s ",
-			styles.DocumentIcon,
-			ansi.Truncate(filename, maxFilenameWidth, "..."),
-		))
+		filename := ansi.Truncate(filepath.Base(attachment.Path), 10, "...")
+		icon := styles.ImageIcon
+		if strings.HasPrefix(attachment.MIMEType, "text/") {
+			icon = styles.TextIcon
+		}
+		attachments[i] = lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			iconStyle(icon),
+			attachmentStyle(filename),
+		)
 	}
 
 	if len(attachments) > 0 {

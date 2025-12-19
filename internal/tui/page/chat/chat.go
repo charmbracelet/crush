@@ -613,8 +613,11 @@ func (p *chatPage) View() string {
 				pillsArea = pillsRow
 			}
 
-			style := t.S().Base.MarginTop(1).PaddingLeft(3)
-			pillsArea = style.Render(pillsArea)
+			pillsArea = t.S().Base.
+				MaxWidth(p.width).
+				MarginTop(1).
+				PaddingLeft(3).
+				Render(pillsArea)
 		}
 
 		if p.compact {

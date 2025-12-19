@@ -123,7 +123,14 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	if !model.CatwalkCfg.SupportsImages && attachments != nil {
-		attachments = nil
+		// filter out image attachments
+		filteredAttachments := make([]message.Attachment, 0, len(attachments))
+		for _, att := range attachments {
+			if att.IsText() {
+				filteredAttachments = append(filteredAttachments, att)
+			}
+		}
+		attachments = filteredAttachments
 	}
 
 	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)

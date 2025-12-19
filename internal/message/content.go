@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -435,16 +436,52 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
 }
 
+func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
+	addedAttachments := false
+	for _, content := range attachments {
+		if !content.IsText() {
+			continue
+		}
+		if !addedAttachments {
+			prompt += "\n<system_info>The files below have been attached by the user, consider them in your response</system_info>\n"
+			addedAttachments = true
+		}
+		tag := `<file>\n`
+		if content.FilePath != "" {
+			tag = fmt.Sprintf("<file path='%s'>\n", content.FilePath)
+		}
+		prompt += tag
+		prompt += "\n" + string(content.Content) + "\n</file>\n"
+	}
+	return prompt
+}
+
 func (m *Message) ToAIMessage() []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {
 	case User:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
+		var textAttachments []Attachment
+		for _, content := range m.BinaryContent() {
+			if !strings.HasPrefix(content.MIMEType, "text/") {
+				continue
+			}
+			textAttachments = append(textAttachments, Attachment{
+				FilePath: content.Path,
+				MimeType: content.MIMEType,
+				Content:  content.Data,
+			})
+		}
+		text = PromptWithTextAttachments(text, textAttachments)
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, content := range m.BinaryContent() {
+			// skip text attachements
+			if strings.HasPrefix(content.MIMEType, "text/") {
+				continue
+			}
 			parts = append(parts, fantasy.FilePart{
 				Filename:  content.Path,
 				Data:      content.Data,

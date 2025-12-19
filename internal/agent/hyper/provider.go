@@ -62,6 +62,22 @@ const (
 	defaultBaseURL = "https://console.charm.land"
 )
 
+// VSCode Copilot-compatible header names for request grouping.
+// These headers tell the backend to group multiple agent turns into a single billing unit.
+const (
+	HeaderInteractionID      = "x-interaction-id"
+	HeaderOpenAIIntent       = "openai-intent"
+	HeaderInteractionType    = "x-interaction-type"
+	HeaderCopilotIntegration = "copilot-integration-id"
+)
+
+// Context keys for passing dynamic values.
+type ctxKey string
+
+const (
+	CtxKeyInteractionID ctxKey = "crush-interaction-id"
+)
+
 // BaseURL returns the base URL, which is either $HYPER_URL or the default.
 var BaseURL = sync.OnceValue(func() string {
 	return cmp.Or(os.Getenv("HYPER_URL"), defaultBaseURL)
@@ -293,6 +309,15 @@ func (m *languageModel) doRequest(ctx context.Context, stream bool, call fantasy
 	}
 	for k, v := range m.opts.headers {
 		req.Header.Set(k, v)
+	}
+
+	// Inject VSCode Copilot-compatible headers for request grouping.
+	// These headers tell the backend to treat multiple agent turns as a single billing unit.
+	if interactionID, ok := ctx.Value(CtxKeyInteractionID).(string); ok && interactionID != "" {
+		req.Header.Set(HeaderInteractionID, interactionID)
+		req.Header.Set(HeaderOpenAIIntent, "conversation-agent")
+		req.Header.Set(HeaderInteractionType, "conversation-agent")
+		req.Header.Set(HeaderCopilotIntegration, "vscode-chat")
 	}
 
 	if m.opts.apiKey != "" {

@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/google/uuid"
 )
 
 //go:embed templates/title.md
@@ -169,7 +170,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	var wg sync.WaitGroup
-	// Generate title if first message.
+	// Generate a unique Interaction ID for Copilot request grouping.
+	// This UUID is reused for all HTTP requests within this agent task.
+	interactionID := uuid.NewString()
+
+	// Generate title if first message (skip for metered providers to save quota).
 	if len(msgs) == 0 && !a.isMetered() {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
@@ -185,6 +190,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+
+	// Inject Interaction ID for Copilot request grouping (VSCode-compatible).
+	ctx = context.WithValue(ctx, hyper.CtxKeyInteractionID, interactionID)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(call.SessionID, cancel)

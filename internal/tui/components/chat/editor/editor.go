@@ -425,18 +425,17 @@ func (m *editorCmp) View() string {
 		m.textarea.Placeholder = "Yolo mode!"
 	}
 	if len(m.attachments) == 0 {
-		content := t.S().Base.Padding(1).Render(
+		return t.S().Base.Padding(1).Render(
 			m.textarea.View(),
 		)
-		return content
 	}
-	content := t.S().Base.Padding(0, 1, 1, 1).Render(
-		lipgloss.JoinVertical(lipgloss.Top,
+	return t.S().Base.Padding(0, 1, 1, 1).Render(
+		lipgloss.JoinVertical(
+			lipgloss.Top,
 			m.attachmentsContent(),
 			m.textarea.View(),
 		),
 	)
-	return content
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
@@ -492,8 +491,7 @@ func (m *editorCmp) attachmentsContent() string {
 			attachmentStyle(filename),
 		)
 	}
-	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
-	return content
+	return lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 }
 
 func (m *editorCmp) SetPosition(x, y int) tea.Cmd {

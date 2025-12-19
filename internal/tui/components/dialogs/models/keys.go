@@ -12,8 +12,9 @@ type KeyMap struct {
 	Tab,
 	Close key.Binding
 
-	isAPIKeyHelp  bool
-	isAPIKeyValid bool
+	isAPIKeyHelp       bool
+	isAPIKeyValid      bool
+	isRestartRequired  bool
 
 	isHyperDeviceFlow    bool
 	isCopilotDeviceFlow  bool
@@ -159,6 +160,13 @@ func (k KeyMap) ShortHelp() []key.Binding {
 				key.WithHelp("enter", "submit"),
 			),
 			k.Close,
+		}
+	} else if k.isRestartRequired {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter", "esc"),
+				key.WithHelp("enter", "exit and restart"),
+			),
 		}
 	} else if k.isAPIKeyValid {
 		return []key.Binding{

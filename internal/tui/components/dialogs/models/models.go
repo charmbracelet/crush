@@ -271,8 +271,16 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						}
 						if err == nil {
 							m.isAPIKeyValid = true
-							return APIKeyStateChangeMsg{
-								State: APIKeyInputStateVerified,
+							// Check if this provider has MCP servers that need initialization
+							requiresRestart := m.providerRequiresRestart(string(m.selectedModel.Provider.ID))
+							if requiresRestart {
+								return APIKeyStateChangeMsg{
+									State: APIKeyInputStateRestartRequired,
+								}
+							} else {
+								return APIKeyStateChangeMsg{
+									State: APIKeyInputStateVerified,
+								}
 							}
 						}
 						return APIKeyStateChangeMsg{
@@ -359,8 +367,12 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.needsAPIKey {
-				if m.isAPIKeyValid {
-					return m, nil
+				if m.isAPIKeyValid || m.apiKeyInput.GetState() == APIKeyInputStateRestartRequired {
+					// Exit the application for restart
+					return m, tea.Sequence(
+						util.ReportInfo("Karigor will now exit. Please restart to complete setup."),
+						func() tea.Msg { return tea.QuitMsg{} },
+					)
 				}
 				// Go back to model selection
 				m.needsAPIKey = false
@@ -502,6 +514,13 @@ func (m *modelDialogCmp) View() string {
 		// Show API key input
 		m.keyMap.isAPIKeyHelp = true
 		m.keyMap.isAPIKeyValid = m.isAPIKeyValid
+
+		// Update help text based on state
+		if m.apiKeyInput.GetState() == APIKeyInputStateRestartRequired {
+			m.keyMap.isAPIKeyHelp = false
+			m.keyMap.isRestartRequired = true
+		}
+
 		apiKeyView := m.apiKeyInput.View()
 		apiKeyView = t.S().Base.Width(m.width - 3).Height(lipgloss.Height(apiKeyView)).PaddingLeft(1).Render(apiKeyView)
 		content := lipgloss.JoinVertical(
@@ -630,6 +649,35 @@ func (m *modelDialogCmp) getProvider(providerID catwalk.InferenceProvider) (*cat
 		}
 	}
 	return nil, nil
+}
+
+// providerRequiresRestart returns true if the provider has MCP servers that need to be initialized after API key setup
+func (m *modelDialogCmp) providerRequiresRestart(providerID string) bool {
+	cfg := config.Get()
+	if cfg == nil || cfg.MCP == nil {
+		return false
+	}
+
+	// Check for MCP servers that depend on this provider's API key
+	for name, mcpConfig := range cfg.MCP {
+		if mcpConfig.Disabled {
+			continue
+		}
+
+		// Check if this MCP server uses Z_AI API key (our default servers)
+		if name == "karigor-mcp-server" || name == "karigor-web-search" || name == "karigor-web-reader" {
+			// These servers use Z_AI API key, so check if the provider is Z_AI or has Z_AI compatible API
+			if providerID == "zai" {
+				return true
+			}
+			// Also check if the provider supports OpenAI-compatible API (Z_AI is OpenAI-compatible)
+			if provider, err := m.getProvider("zai"); err == nil && provider != nil && provider.Type == "openai-compat" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (m *modelDialogCmp) saveOauthTokenAndContinue(apiKey any, close bool) tea.Cmd {

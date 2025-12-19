@@ -19,6 +19,7 @@ const (
 	APIKeyInputStateInitial APIKeyInputState = iota
 	APIKeyInputStateVerifying
 	APIKeyInputStateVerified
+	APIKeyInputStateRestartRequired
 	APIKeyInputStateError
 )
 
@@ -131,6 +132,16 @@ func (a *APIKeyInput) updateStatePresentation() {
 		a.input.SetStyles(ts)
 		a.input.Prompt = styles.CheckIcon + " "
 		a.input.Blur()
+	case APIKeyInputStateRestartRequired:
+		titlePrefix := accentStyle.Render("✓ ") + prefixStyle.Render(a.providerName+" API Key") + accentStyle.Render(" configured successfully!")
+		instructionText := prefixStyle.Render("Please restart Karigor to apply your new settings and initialize MCP servers.")
+		a.title = lipgloss.JoinVertical(lipgloss.Left, titlePrefix, "", instructionText)
+		ts := t.S().TextInput
+		// make the blurred state be the same
+		ts.Blurred.Prompt = ts.Focused.Prompt
+		a.input.SetStyles(ts)
+		a.input.Prompt = styles.CheckIcon + " "
+		a.input.Blur()
 	case APIKeyInputStateError:
 		a.title = errorStyle.Render("Invalid ") + accentStyle.Render(a.providerName+" API Key") + errorStyle.Render(". Try again?")
 		ts := t.S().TextInput
@@ -200,4 +211,8 @@ func (a *APIKeyInput) Reset() {
 	a.input.SetValue("")
 	a.input.Focus()
 	a.updateStatePresentation()
+}
+
+func (a *APIKeyInput) GetState() APIKeyInputState {
+	return a.state
 }

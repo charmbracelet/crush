@@ -5,13 +5,13 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -57,12 +57,6 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client], worki
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 
-	absWd, err := filepath.Abs(workingDir)
-	if err != nil {
-		slog.Error("Failed to resolve working directory", "error", err)
-		return "Error: Failed to resolve working directory"
-	}
-
 	for lspName, client := range lsps.Seq2() {
 		for location, diags := range client.GetDiagnostics() {
 			path, err := location.Path()
@@ -72,12 +66,7 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client], worki
 			}
 
 			// Skip diagnostics for files outside the working directory.
-			absPath, err := filepath.Abs(path)
-			if err != nil {
-				slog.Debug("Failed to resolve diagnostic path", "path", path, "error", err)
-				continue
-			}
-			if !strings.HasPrefix(absPath, absWd) {
+			if !fsext.HasPrefix(path, workingDir) {
 				continue
 			}
 

@@ -270,7 +270,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Skip files outside the current working directory.
-	if !c.isFileInWorkingDir(filepath) {
+	if !fsext.HasPrefix(filepath, c.workingDir) {
 		return nil
 	}
 
@@ -478,19 +478,4 @@ func HasRootMarkers(dir string, rootMarkers []string) bool {
 		}
 	}
 	return false
-}
-
-// isFileInWorkingDir checks if the given file path is within the client's working directory.
-func (c *Client) isFileInWorkingDir(filePath string) bool {
-	absFilepath, err := filepath.Abs(filePath)
-	if err != nil {
-		return false
-	}
-
-	absWd, err := filepath.Abs(c.workingDir)
-	if err != nil {
-		return false
-	}
-
-	return strings.HasPrefix(absFilepath, absWd)
 }

@@ -690,7 +690,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 	var files []fantasy.FilePart
 	for _, attachment := range attachments {
-		if attachment.IsText() {
+		if attachment.IsText() || attachment.IsMention() {
 			continue
 		}
 		files = append(files, fantasy.FilePart{

@@ -652,10 +652,6 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt}}
 	var attachmentParts []message.ContentPart
 	for _, attachment := range call.Attachments {
-		if attachment.IsText() {
-			parts = append(parts, message.TextContent{Text: string(attachment.Content)})
-			continue
-		}
 		attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
 	}
 	parts = append(parts, attachmentParts...)

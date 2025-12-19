@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -444,7 +445,21 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
+		addedAttachments := false
 		for _, content := range m.BinaryContent() {
+			if !addedAttachments {
+				parts = append(parts, fantasy.TextPart{Text: "## The files below have been attached by the user"})
+				addedAttachments = true
+			}
+			if strings.HasPrefix(content.MIMEType, "text/") {
+				text := `<file>`
+				if content.Path != "" {
+					text = fmt.Sprintf("<file path='%s'", content.Path)
+				}
+				text += "\n" + string(content.Data) + "\n<\file>"
+				parts = append(parts, fantasy.TextPart{Text: text})
+				continue
+			}
 			parts = append(parts, fantasy.FilePart{
 				Filename:  content.Path,
 				Data:      content.Data,

@@ -204,7 +204,8 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			content, err := os.ReadFile(item.Path)
 			if err != nil {
-				return m, util.ReportError(err)
+				// if it fails, let the LLM handle it later.
+				return m, nil
 			}
 			m.attachments = append(m.attachments, message.Attachment{
 				FilePath: item.Path,

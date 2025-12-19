@@ -178,9 +178,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
-		if len(m.attachments) >= maxAttachments {
-			return m, util.ReportError(fmt.Errorf("cannot add more than %d attachments", maxAttachments))
-		}
 		m.attachments = append(m.attachments, msg.Attachment)
 		return m, nil
 	case completions.CompletionsOpenedMsg:

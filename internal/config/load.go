@@ -358,6 +358,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.applyLSPDefaults()
 
 	// Add the default context paths if they are not already present
+	// First add user-level context paths from home directory (with ~ expansion)
+	userContextPaths := expandUserContextPaths()
+	c.Options.ContextPaths = append(userContextPaths, c.Options.ContextPaths...)
+	// Then add project-level default context paths
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
@@ -735,4 +739,14 @@ func isInsideWorktree() bool {
 		"--is-inside-work-tree",
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
+}
+
+// expandUserContextPaths returns expanded user-level context paths from home directory.
+// Paths starting with ~ are expanded to the user's actual home directory.
+func expandUserContextPaths() []string {
+	expanded := make([]string, 0, len(defaultUserContextPaths))
+	for _, p := range defaultUserContextPaths {
+		expanded = append(expanded, home.Long(p))
+	}
+	return expanded
 }

@@ -52,6 +52,15 @@ var defaultContextPaths = []string{
 	"Agents.md",
 }
 
+// defaultUserContextPaths contains paths to user-level context files loaded from the home directory.
+// These are loaded before project-level context, allowing user preferences to be set globally.
+// Paths starting with ~ are expanded to the user's home directory.
+var defaultUserContextPaths = []string{
+	"~/.config/crush/CRUSH.md",
+	"~/.config/crush/CRUSH.local.md",
+	"~/.config/AGENTS.md",
+}
+
 type SelectedModelType string
 
 const (

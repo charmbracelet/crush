@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math/rand"
 	"net/http"
 	"os"
@@ -448,21 +447,34 @@ func (m *editorCmp) GetSize() (int, int) {
 func (m *editorCmp) attachmentsContent() string {
 	var styledAttachments []string
 	t := styles.CurrentTheme()
-	attachmentStyles := t.S().Base.
-		MarginLeft(1).
+	attachmentStyle := t.S().Base.
+		Padding(0, 1).
 		Background(t.FgMuted).
 		Foreground(t.FgBase)
+	iconStyle := t.S().Base.
+		MarginLeft(1).
+		Foreground(t.BgSubtle).
+		Background(t.Green).
+		Padding(0, 1).
+		Bold(true)
+	rmStyle := t.S().Base.
+		Padding(0, 1).
+		Bold(true).
+		Background(t.Red).
+		Foreground(t.FgBase)
 	for i, attachment := range m.attachments {
-		var filename string
+		filename := attachment.FileName
+		icon := styles.ImageIcon
+		if attachment.IsText() {
+			icon = styles.TextIcon
+		}
 		if len(attachment.FileName) > 10 {
-			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, attachment.FileName[0:7])
-		} else {
-			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, attachment.FileName)
+			filename = attachment.FileName[0:7]
 		}
+		styledAttachments = append(styledAttachments, iconStyle.Render(icon), attachmentStyle.Render(filename))
 		if m.deleteMode {
-			filename = fmt.Sprintf("%d%s", i, filename)
+			styledAttachments = append(styledAttachments, rmStyle.Render(fmt.Sprintf("%d", i)))
 		}
-		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 	return content

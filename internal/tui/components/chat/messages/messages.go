@@ -237,7 +237,7 @@ func (m *messageCmp) renderUserMessage() string {
 		filename := filepath.Base(attachment.Path)
 		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
 			" %s %s ",
-			styles.DocumentIcon,
+			styles.ImageIcon,
 			ansi.Truncate(filename, maxFilenameWidth, "..."),
 		))
 	}

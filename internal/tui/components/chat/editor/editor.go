@@ -597,7 +597,7 @@ var errNotAFile = errors.New("not a file")
 func pasteToFile(msg tea.PasteMsg) ([]byte, string, error) {
 	path := strings.ReplaceAll(msg.Content, "\\", "")
 	path, err := filepath.Abs(strings.TrimSpace(path))
-	if err == nil {
+	if err == nil && fs.ValidPath(path) {
 		content, path, err := filepathToFile(path)
 		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			return content, path, err

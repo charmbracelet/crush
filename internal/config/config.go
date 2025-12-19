@@ -550,13 +550,12 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = newToken
+	providerConfig.APIKey = newToken.AccessToken
 
 	switch providerID {
 	case string(catwalk.InferenceProviderAnthropic):
-		providerConfig.APIKey = newToken.AccessToken
 		providerConfig.SetupClaudeCode()
 	case string(catwalk.InferenceProviderCopilot):
-		providerConfig.APIKey = newToken.AccessToken
 		providerConfig.SetupGitHubCopilot()
 	}
 

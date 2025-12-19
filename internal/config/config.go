@@ -595,7 +595,6 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			providerConfig.OAuthToken = v
 			switch providerID {
 			case string(catwalk.InferenceProviderAnthropic):
-				providerConfig.APIKey = v.AccessToken
 				providerConfig.SetupClaudeCode()
 			case string(catwalk.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()

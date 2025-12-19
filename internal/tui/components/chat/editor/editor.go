@@ -86,10 +86,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 	),
 }
 
-const (
-	maxAttachments = 5
-	maxFileResults = 25
-)
+const maxFileResults = 25
 
 type OpenEditorMsg struct {
 	Text string

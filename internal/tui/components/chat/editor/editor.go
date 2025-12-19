@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/quit"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type Editor interface {
@@ -450,31 +451,41 @@ func (m *editorCmp) attachmentsContent() string {
 	attachmentStyle := t.S().Base.
 		Padding(0, 1).
 		Background(t.FgMuted).
-		Foreground(t.FgBase)
+		Foreground(t.FgBase).
+		Render
 	iconStyle := t.S().Base.
 		MarginLeft(1).
 		Foreground(t.BgSubtle).
 		Background(t.Green).
 		Padding(0, 1).
-		Bold(true)
+		Bold(true).
+		Render
 	rmStyle := t.S().Base.
+		MarginLeft(1).
 		Padding(0, 1).
 		Bold(true).
 		Background(t.Red).
-		Foreground(t.FgBase)
+		Foreground(t.FgBase).
+		Render
 	for i, attachment := range m.attachments {
-		filename := attachment.FileName
+		filename := ansi.Truncate(filepath.Base(attachment.FileName), 10, "...")
 		icon := styles.ImageIcon
 		if attachment.IsText() {
 			icon = styles.TextIcon
 		}
-		if len(attachment.FileName) > 10 {
-			filename = attachment.FileName[0:7]
-		}
-		styledAttachments = append(styledAttachments, iconStyle.Render(icon), attachmentStyle.Render(filename))
 		if m.deleteMode {
-			styledAttachments = append(styledAttachments, rmStyle.Render(fmt.Sprintf("%d", i)))
+			styledAttachments = append(
+				styledAttachments,
+				rmStyle(fmt.Sprintf("%d", i)),
+				attachmentStyle(filename),
+			)
+			continue
 		}
+		styledAttachments = append(
+			styledAttachments,
+			iconStyle(icon),
+			attachmentStyle(filename),
+		)
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 	return content

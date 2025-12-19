@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"golang.org/x/sync/errgroup"
@@ -68,6 +69,8 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	copilotTransport *CopilotHeaderTransport
+
 	readyWg errgroup.Group
 }
 
@@ -81,13 +84,14 @@ func NewCoordinator(
 	lspClients *csync.Map[string, *lsp.Client],
 ) (Coordinator, error) {
 	c := &coordinator{
-		cfg:         cfg,
-		sessions:    sessions,
-		messages:    messages,
-		permissions: permissions,
-		history:     history,
-		lspClients:  lspClients,
-		agents:      make(map[string]SessionAgent),
+		cfg:              cfg,
+		sessions:         sessions,
+		messages:         messages,
+		permissions:      permissions,
+		history:          history,
+		lspClients:       lspClients,
+		agents:           make(map[string]SessionAgent),
+		copilotTransport: NewCopilotHeaderTransport(nil),
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -133,10 +137,35 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
+	// Refresh token first if needed, before any Copilot API calls
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 			return nil, err
+		}
+	}
+
+	// Initialize Copilot auto mode session for discounted quota if this is a Copilot provider
+	if strings.Contains(strings.ToLower(providerCfg.ID), "copilot") {
+		c.copilotTransport.NewInteraction()
+
+		baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+		apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
+
+		// Merge copilot headers with session headers
+		headers := copilot.Headers()
+		for k, v := range c.copilotTransport.SessionHeaders() {
+			headers[k] = v
+		}
+
+		sessionResp, err := copilot.InitAutoModeSession(ctx, baseURL, apiKey, headers)
+		if err != nil {
+			slog.Warn("Failed to initialize Copilot auto mode session", "error", err)
+		} else {
+			slog.Info("Copilot auto mode session initialized",
+				"selectedModel", sessionResp.SelectedModel,
+				"discountedCosts", sessionResp.DiscountedCosts,
+				"availableModels", sessionResp.AvailableModels)
 		}
 	}
 
@@ -575,12 +604,15 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, httpClient *http.Client) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
+	// Use custom HTTP client if provided (for Copilot request grouping)
+	if httpClient != nil {
+		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
+	} else if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
 	}
@@ -732,13 +764,18 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
+		var httpClient *http.Client
+		// Inject Copilot transport for request grouping
+		if strings.Contains(strings.ToLower(providerCfg.ID), "copilot") {
+			httpClient = &http.Client{Transport: c.copilotTransport}
+		}
 		if providerCfg.ID == string(catwalk.InferenceProviderZAI) {
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, httpClient)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:

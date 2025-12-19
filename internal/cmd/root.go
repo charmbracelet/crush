@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,7 +100,7 @@ karigor -y
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+			return fmt.Errorf("Karigor crashed: %w\n\nIf metrics are enabled, we were notified about it. If you'd like to report it, please open an issue at https://github.com/yourusername/karigor/issues/new?template=bug.yml", err) //nolint:staticcheck
 		}
 		return nil
 	},

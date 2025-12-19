@@ -91,6 +91,10 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
+	// Add default MCP servers if they don't exist in user config
+	// This is done after providers are configured so we can access API keys
+	cfg.addDefaultMCPServers()
+
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
 		return cfg, nil
@@ -356,9 +360,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
-
-	// Add default MCP servers if they don't exist in user config
-	c.addDefaultMCPServers()
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
 	}

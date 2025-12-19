@@ -229,11 +229,11 @@ func (m *messageCmp) renderUserMessage() string {
 
 	attachmentStyle := t.S().Base.
 		Padding(0, 1).
+		MarginRight(1).
 		Background(t.FgMuted).
 		Foreground(t.FgBase).
 		Render
 	iconStyle := t.S().Base.
-		MarginLeft(1).
 		Foreground(t.BgSubtle).
 		Background(t.Green).
 		Padding(0, 1).

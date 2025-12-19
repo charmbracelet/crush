@@ -456,18 +456,17 @@ func (m *editorCmp) attachmentsContent() string {
 	t := styles.CurrentTheme()
 	attachmentStyle := t.S().Base.
 		Padding(0, 1).
+		MarginRight(1).
 		Background(t.FgMuted).
 		Foreground(t.FgBase).
 		Render
 	iconStyle := t.S().Base.
-		MarginLeft(1).
 		Foreground(t.BgSubtle).
 		Background(t.Green).
 		Padding(0, 1).
 		Bold(true).
 		Render
 	rmStyle := t.S().Base.
-		MarginLeft(1).
 		Padding(0, 1).
 		Bold(true).
 		Background(t.Red).

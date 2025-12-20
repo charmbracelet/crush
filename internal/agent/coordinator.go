@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/ratelimit"
 	"github.com/charmbracelet/crush/internal/session"
 	"golang.org/x/sync/errgroup"
 
@@ -64,6 +65,7 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
+	rateLimiter *ratelimit.Limiter
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -79,6 +81,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	rateLimiter *ratelimit.Limiter,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -87,6 +90,7 @@ func NewCoordinator(
 		permissions: permissions,
 		history:     history,
 		lspClients:  lspClients,
+		rateLimiter: rateLimiter,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -114,6 +118,18 @@ func NewCoordinator(
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Estimate input tokens (rough approximation: ~4 characters = 1 token)
+	inputTokens := len(prompt)/4 + len(prompt)/10 // Mixed approximation
+	for range attachments {
+		// Rough estimation for attachments
+		inputTokens += 500
+	}
+
+	// Check rate limit before processing the request.
+	if err := c.rateLimiter.Check(ctx, inputTokens, 0); err != nil {
+		return nil, fmt.Errorf("rate limit check failed: %w", err)
 	}
 
 	model := c.currentAgent.Model()
@@ -164,14 +180,27 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 				return nil, originalErr
 			}
 			slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
-			return run()
+			result, originalErr = run()
 		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 			slog.Info("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
 			slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
-			return run()
+			result, originalErr = run()
+		}
+	}
+
+	// Record tokens in the rate limiter only if the request was successful.
+	if originalErr == nil {
+		// Estimate output tokens from the response length
+		outputTokens := 0
+		if result != nil {
+			outputTokens = len(result.Response.Content.Text())/4 + len(result.Response.Content.Text())/10
+		}
+
+		if err := c.rateLimiter.RecordTokens(ctx, inputTokens, outputTokens); err != nil {
+			slog.Error("Failed to record tokens in rate limiter", "error", err)
 		}
 	}
 

@@ -975,6 +975,7 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 			if isCancelErr || isPermissionErr {
 				return nil
 			}
+
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  err.Error(),

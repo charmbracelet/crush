@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/ratelimit"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
@@ -45,6 +46,7 @@ type App struct {
 	Messages    message.Service
 	History     history.Service
 	Permissions permission.Service
+	RateLimiter *ratelimit.Limiter
 
 	AgentCoordinator agent.Coordinator
 
@@ -74,11 +76,15 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	// Initialize rate limiter.
+	rateLimiter := ratelimit.New(conn)
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		RateLimiter: rateLimiter,
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,
@@ -102,6 +108,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		slog.Info("Initializing MCP clients")
 		mcp.Initialize(ctx, app.Permissions, cfg)
 	}()
+
+	// Cleanup old rate limit windows periodically.
+	go app.cleanupRateLimitWindows(ctx)
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
@@ -339,6 +348,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
@@ -348,6 +358,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		app.RateLimiter,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -441,5 +452,24 @@ func (app *App) checkForUpdates(ctx context.Context) {
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),
+	}
+}
+
+// cleanupRateLimitWindows periodically cleans up old rate limit windows.
+func (app *App) cleanupRateLimitWindows(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := app.RateLimiter.CleanupOldWindows(cleanupCtx); err != nil {
+				slog.Error("Failed to cleanup old rate limit windows", "error", err)
+			}
+			cancel()
+		case <-ctx.Done():
+			return
+		}
 	}
 }

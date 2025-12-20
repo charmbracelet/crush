@@ -195,6 +195,23 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return s, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 				return SubmitAPIKeyMsg{}
 			})
+		} else if msg.State == models.APIKeyInputStateRestartRequired {
+			// For first-time setup with MCP servers, save API key and exit
+			apiKey := strings.TrimSpace(s.apiKeyInput.Value())
+			if apiKey != "" && s.selectedModel != nil {
+				// Save the API key first
+				cfg := config.Get()
+				if err := cfg.SetProviderAPIKey(string(s.selectedModel.Provider.ID), apiKey); err == nil {
+					// Also set the preferred model
+					s.setPreferredModel(*s.selectedModel)
+				}
+			}
+			return s, tea.Sequence(
+				util.ReportInfo("Karigor will now exit. Please restart to complete setup."),
+				tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return tea.QuitMsg{}
+				}),
+			)
 		}
 		return s, cmd
 	case SubmitAPIKeyMsg:
@@ -328,6 +345,13 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						}
 						if err == nil {
 							s.isAPIKeyValid = true
+							// Check if this provider has MCP servers that need initialization
+							requiresRestart := s.providerRequiresRestart(string(s.selectedModel.Provider.ID))
+							if requiresRestart {
+								return models.APIKeyStateChangeMsg{
+									State: models.APIKeyInputStateRestartRequired,
+								}
+							}
 							return models.APIKeyStateChangeMsg{
 								State: models.APIKeyInputStateVerified,
 							}
@@ -547,6 +571,35 @@ func (s *splashCmp) getProvider(providerID catwalk.InferenceProvider) (*catwalk.
 		}
 	}
 	return nil, nil
+}
+
+// providerRequiresRestart returns true if the provider has MCP servers that need to be initialized after API key setup
+func (s *splashCmp) providerRequiresRestart(providerID string) bool {
+	cfg := config.Get()
+	if cfg == nil || cfg.MCP == nil {
+		return false
+	}
+
+	// Check for MCP servers that depend on this provider's API key
+	for name, mcpConfig := range cfg.MCP {
+		if mcpConfig.Disabled {
+			continue
+		}
+
+		// Check if this MCP server uses Z_AI API key (our default servers)
+		if name == "karigor-mcp-server" || name == "karigor-web-search" || name == "karigor-web-reader" {
+			// These servers use Z_AI API key, so check if the provider is Z_AI or has Z_AI compatible API
+			if providerID == "zai" {
+				return true
+			}
+			// Also check if the provider supports OpenAI-compatible API (Z_AI is OpenAI-compatible)
+			if provider, err := s.getProvider("zai"); err == nil && provider != nil && provider.Type == "openai-compat" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (s *splashCmp) isProviderConfigured(providerID string) bool {

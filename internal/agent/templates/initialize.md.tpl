@@ -22,6 +22,8 @@ Analyze this codebase and create/update **{{.Config.Options.InitializeAs}}** to 
 - Important gotchas or non-obvious patterns
 - Any project-specific context from existing rule files
 
+**Note:** LLM agents learn and adapt to their context as they obtain it, so mentioning obvious details they would immediately pick up from reading a file or two is actively detrimental. Keep the principles of progressive disclosure in mind and focus primarily on non-obvious knowledge that saves the agent from trial-and-error discovery: gotchas, implicit conventions, commands with surprising flags, and context that isn't self-evident from the code in a single file.
+
 **Format**: Clear markdown sections. Use your judgment on structure based on what you find. Aim for completeness over brevity - include everything an agent would need to know.
 
 **Critical**: Only document what you actually observe. Never invent commands, patterns, or conventions. If you can't find something, don't include it.

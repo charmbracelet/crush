@@ -406,13 +406,20 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.splashFullScreen = true
 			return p, p.SetSize(p.width, p.height)
 		}
-		err := p.app.InitCoderAgent(context.TODO())
-		if err != nil {
-			return p, util.ReportError(err)
-		}
+		// Always update state first, even if agent initialization fails
 		p.isOnboarding = false
 		p.isProjectInit = false
 		p.focusedPane = PanelTypeEditor
+
+		err := p.app.InitCoderAgent(context.TODO())
+		if err != nil {
+			// Reload config and try again - agent config might not have been set up yet
+			config.Get().SetupAgents()
+			err = p.app.InitCoderAgent(context.TODO())
+			if err != nil {
+				return p, tea.Batch(p.SetSize(p.width, p.height), util.ReportError(err))
+			}
+		}
 		return p, p.SetSize(p.width, p.height)
 	case commands.NewSessionsMsg:
 		if p.app.AgentCoordinator.IsBusy() {

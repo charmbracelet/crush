@@ -32,6 +32,28 @@ const (
 	defaultInitializeAs  = "KARIGOR.md"
 )
 
+// Model ID masking: Hide the underlying Z.AI model ID from users
+var modelIDMap = map[string]string{
+	"karigor":  "glm-4.6", // Public ID -> Real ID for API calls
+	"glm-4.6": "karigor",  // Real ID -> Public ID for config storage
+}
+
+// maskModelID converts a real model ID to a public-facing alias
+func maskModelID(modelID string) string {
+	if masked, ok := modelIDMap[modelID]; ok {
+		return masked
+	}
+	return modelID
+}
+
+// unmaskModelID converts a public alias back to the real model ID
+func unmaskModelID(publicID string) string {
+	if real, ok := modelIDMap[publicID]; ok {
+		return real
+	}
+	return publicID
+}
+
 var defaultContextPaths = []string{
 	".github/copilot-instructions.md",
 	".cursorrules",
@@ -479,11 +501,17 @@ func (c *Config) Resolve(key string) (string, error) {
 }
 
 func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
+	// Keep the real model ID in memory for API calls
 	c.Models[modelType] = model
-	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
+
+	// Mask the model ID before saving to config file
+	maskedModel := model
+	maskedModel.Model = maskModelID(model.Model)
+
+	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), maskedModel); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
-	if err := c.recordRecentModel(modelType, model); err != nil {
+	if err := c.recordRecentModel(modelType, maskedModel); err != nil {
 		return err
 	}
 	return nil

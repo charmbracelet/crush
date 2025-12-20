@@ -134,18 +134,18 @@ var (
 // time of release.
 // 2. load the cached providers
 // getKarigorProvider returns the single hardcoded ZAI provider
-// configured as "Karigor Chintok" for the Karigor fork.
+// configured as "Karigor" for the Karigor fork.
 func getKarigorProvider() catwalk.Provider {
 	return catwalk.Provider{
 		ID:          "zai",
-		Name:        "Karigor Chintok",
+		Name:        "Karigor",
 		APIKey:      "$KARIGOR_API_KEY",
 		APIEndpoint: "https://api.z.ai/api/coding/paas/v4",
 		Type:        catwalk.TypeOpenAICompat,
 		Models: []catwalk.Model{
 			{
 				ID:                     "glm-4.6",
-				Name:                   "Karigor Chintok",
+				Name:                   "Karigor",
 				ContextWindow:          204800,
 				DefaultMaxTokens:       131072,
 				CanReason:              true,

@@ -502,7 +502,8 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 	largeModelSelected, largeModelConfigured := c.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
 		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
+			// Unmask the model ID from config storage (karigor -> glm-4.6)
+			large.Model = unmaskModelID(largeModelSelected.Model)
 		}
 		if largeModelSelected.Provider != "" {
 			large.Provider = largeModelSelected.Provider
@@ -545,7 +546,8 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 	smallModelSelected, smallModelConfigured := c.Models[SelectedModelTypeSmall]
 	if smallModelConfigured {
 		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
+			// Unmask the model ID from config storage (karigor -> glm-4.6)
+			small.Model = unmaskModelID(smallModelSelected.Model)
 		}
 		if smallModelSelected.Provider != "" {
 			small.Provider = smallModelSelected.Provider

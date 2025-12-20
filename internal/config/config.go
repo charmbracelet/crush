@@ -32,10 +32,33 @@ const (
 	defaultInitializeAs  = "KARIGOR.md"
 )
 
-// Model ID masking: Hide the underlying Z.AI model ID from users
-var modelIDMap = map[string]string{
-	"karigor":  "glm-4.6", // Public ID -> Real ID for API calls
-	"glm-4.6": "karigor",  // Real ID -> Public ID for config storage
+// Provider and Model ID masking: Hide the underlying Z.AI infrastructure from users
+var (
+	providerIDMap = map[string]string{
+		"karigor": "zai", // Public ID -> Real ID for API calls
+		"zai":     "karigor",  // Real ID -> Public ID for config storage
+	}
+
+	modelIDMap = map[string]string{
+		"karigor-chintok": "glm-4.6", // Public ID -> Real ID for API calls
+		"glm-4.6":         "karigor-chintok",  // Real ID -> Public ID for config storage
+	}
+)
+
+// maskProviderID converts a real provider ID to a public-facing alias
+func maskProviderID(providerID string) string {
+	if masked, ok := providerIDMap[providerID]; ok {
+		return masked
+	}
+	return providerID
+}
+
+// unmaskProviderID converts a public alias back to the real provider ID
+func unmaskProviderID(publicID string) string {
+	if real, ok := providerIDMap[publicID]; ok {
+		return real
+	}
+	return publicID
 }
 
 // maskModelID converts a real model ID to a public-facing alias
@@ -501,11 +524,12 @@ func (c *Config) Resolve(key string) (string, error) {
 }
 
 func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
-	// Keep the real model ID in memory for API calls
+	// Keep the real IDs in memory for API calls
 	c.Models[modelType] = model
 
-	// Mask the model ID before saving to config file
+	// Mask both provider and model IDs before saving to config file
 	maskedModel := model
+	maskedModel.Provider = maskProviderID(model.Provider)
 	maskedModel.Model = maskModelID(model.Model)
 
 	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), maskedModel); err != nil {

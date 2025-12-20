@@ -145,7 +145,7 @@ func getKarigorProvider() catwalk.Provider {
 		Models: []catwalk.Model{
 			{
 				ID:                     "glm-4.6",
-				Name:                   "Karigor",
+				Name:                   "Karigor Chintok",
 				ContextWindow:          204800,
 				DefaultMaxTokens:       131072,
 				CanReason:              true,

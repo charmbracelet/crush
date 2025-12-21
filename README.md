@@ -362,6 +362,38 @@ completely hidden from the agent.
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
 
+### Agent Skills
+
+Crush supports the [Agent Skills](https://agentskills.io) open standard for
+extending agent capabilities with reusable skill packages. Skills are folders
+containing a `SKILL.md` file with instructions that Crush can discover and
+activate on demand.
+
+Skills are discovered from:
+- `~/.config/crush/skills/` (default, can be overridden with `CRUSH_SKILLS_DIR`)
+- Additional paths configured via `options.skills_paths`
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "skills_paths": [
+      "~/.config/crush/skills",
+      "./project-skills"
+    ]
+  }
+}
+```
+
+You can get started with example skills from [anthropics/skills](https://github.com/anthropics/skills):
+
+```bash
+mkdir -p ~/.config/crush/skills
+cd ~/.config/crush/skills
+git clone https://github.com/anthropics/skills.git _temp
+mv _temp/skills/* . && rm -rf _temp
+```
+
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates

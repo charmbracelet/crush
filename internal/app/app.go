@@ -74,11 +74,14 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	// Collect allowed read paths from skills directories.
+	allowedReadPaths := cfg.Options.SkillsPaths
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools, allowedReadPaths),
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
 		globalCtx: ctx,

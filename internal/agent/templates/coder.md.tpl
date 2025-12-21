@@ -360,7 +360,15 @@ Diagnostics (lint/typecheck) included in tool output.
 - Ignore issues in files you didn't touch (unless user asks)
 </lsp>
 {{end}}
+{{- if .AvailSkillXML}}
 
+{{.AvailSkillXML}}
+
+<skills_usage>
+When a user task matches a skill's description, read the skill's SKILL.md file to get full instructions.
+Skills are activated by reading their location path. Follow the skill's instructions to complete the task.
+</skills_usage>
+{{end}}
 {{if .ContextFiles}}
 <memory>
 {{range .ContextFiles}}

@@ -499,6 +499,11 @@
           "$ref": "#/$defs/Token",
           "description": "OAuth2 token for authentication with the provider"
         },
+        "use_bearer_auth": {
+          "type": "boolean",
+          "description": "Use Bearer token authentication with Authorization header instead of provider-specific authentication headers",
+          "default": false
+        },
         "disable": {
           "type": "boolean",
           "description": "Whether this provider is disabled",

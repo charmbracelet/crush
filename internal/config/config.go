@@ -105,6 +105,8 @@ type ProviderConfig struct {
 	APIKeyTemplate string `json:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
+	// UseBearerAuth forces the use of Bearer token authentication for normal API keys (instead of provider-specific headers like X-Api-Key).
+	UseBearerAuth bool `json:"use_bearer_auth,omitempty" jsonschema:"description=Use Bearer token authentication with Authorization header instead of provider-specific authentication headers,default=false"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
 
@@ -786,7 +788,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if c.ID == "kimi-coding" {
 			testURL = baseURL + "/v1/models"
 		}
-		headers["x-api-key"] = apiKey
+		if c.OAuthToken != nil || c.UseBearerAuth {
+			headers["Authorization"] = "Bearer " + apiKey
+		} else {
+			headers["x-api-key"] = apiKey
+		}
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
@@ -795,6 +801,23 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		}
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	}
+
+	// Add OAuth beta header for Anthropic when using OAuth or bearer auth
+	if c.Type == catwalk.TypeAnthropic && (c.OAuthToken != nil || c.UseBearerAuth) {
+		const oauthBeta = "oauth-2025-04-20"
+		existingBeta := c.ExtraHeaders["anthropic-beta"]
+		if existingBeta == "" {
+			existingBeta = headers["anthropic-beta"]
+		}
+		if !strings.Contains(existingBeta, oauthBeta) {
+			if existingBeta != "" {
+				headers["anthropic-beta"] = existingBeta + "," + oauthBeta
+			} else {
+				headers["anthropic-beta"] = oauthBeta
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	client := &http.Client{}

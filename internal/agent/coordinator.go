@@ -712,11 +712,34 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
-		if v, ok := headers["anthropic-beta"]; ok {
-			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
-		} else {
-			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+	if providerCfg.Type == anthropic.Name {
+		// Ensure anthropic-version is set
+		if _, ok := headers["anthropic-version"]; !ok {
+			headers["anthropic-version"] = "2023-06-01"
+		}
+
+		// Add OAuth beta header when using OAuth or bearer auth
+		if providerCfg.OAuthToken != nil || providerCfg.UseBearerAuth {
+			const oauthBeta = "oauth-2025-04-20"
+			if v, ok := headers["anthropic-beta"]; ok {
+				if !strings.Contains(v, oauthBeta) {
+					headers["anthropic-beta"] = v + "," + oauthBeta
+				}
+			} else {
+				headers["anthropic-beta"] = oauthBeta
+			}
+		}
+
+		// Add thinking beta header when using thinking mode
+		if c.isAnthropicThinking(model) {
+			const thinkingBeta = "interleaved-thinking-2025-05-14"
+			if v, ok := headers["anthropic-beta"]; ok {
+				if !strings.Contains(v, thinkingBeta) {
+					headers["anthropic-beta"] = v + "," + thinkingBeta
+				}
+			} else {
+				headers["anthropic-beta"] = thinkingBeta
+			}
 		}
 	}
 
@@ -727,7 +750,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openai.Name:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.OAuthToken != nil)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.OAuthToken != nil || providerCfg.UseBearerAuth)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case azure.Name:

@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
       - run: go run . schema > ./schema.json
       - run: go generate ./internal/agent/hyper/...
-      - uses: stefanzweifel/git-auto-commit-action@28e16e81777b558cc906c8750092100bbb34c5e3 # v5
+      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v5
         with:
           commit_message: "chore: auto-update files"
           branch: main

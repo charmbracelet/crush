@@ -5,6 +5,7 @@ package skills
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -116,9 +117,17 @@ func Discover(paths []string) []*Skill {
 				return nil
 			}
 			seen[path] = true
-			if skill, err := Parse(path); err == nil && skill.Validate() == nil {
-				skills = append(skills, skill)
+			skill, err := Parse(path)
+			if err != nil {
+				slog.Warn("Failed to parse skill file", "path", path, "error", err)
+				return nil
 			}
+			if err := skill.Validate(); err != nil {
+				slog.Warn("Skill validation failed", "path", path, "error", err)
+				return nil
+			}
+			slog.Info("Successfully loaded skill", "name", skill.Name, "path", path)
+			skills = append(skills, skill)
 			return nil
 		})
 	}

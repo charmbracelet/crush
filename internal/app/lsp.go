@@ -38,7 +38,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	// Create LSP client.
 	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver())
 	if err != nil {
-		slog.Error("Failed to create LSP client for", name, err)
+		slog.Error("Failed to create LSP client for", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, nil, 0)
 		return
 	}

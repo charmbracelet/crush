@@ -375,13 +375,12 @@ Skills are discovered from:
 - `%LOCALAPPDATA%\crush\skills\` on Windows (default, can be overridden with `CRUSH_SKILLS_DIR`)
 - Additional paths configured via `options.skills_paths`
 
-```json
+```jsonc
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
     "skills_paths": [
-      "~/.config/crush/skills",
-      // Windows: "%LOCALAPPDATA%\\crush\\skills",
+      "~/.config/crush/skills", // Windows: "%LOCALAPPDATA%\\crush\\skills",
       "./project-skills"
     ]
   }

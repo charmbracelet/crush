@@ -97,12 +97,12 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	}
 
 	rest := content[3:]
-	idx := strings.Index(rest, "\n---")
-	if idx == -1 {
+	before, after, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return "", "", errors.New("unclosed frontmatter")
 	}
 
-	return rest[:idx], rest[idx+4:], nil
+	return before, after, nil
 }
 
 // Discover finds all valid skills in the given paths.

@@ -370,7 +370,9 @@ containing a `SKILL.md` file with instructions that Crush can discover and
 activate on demand.
 
 Skills are discovered from:
-- `~/.config/crush/skills/` (default, can be overridden with `CRUSH_SKILLS_DIR`)
+
+- `~/.config/crush/skills/` on Unix (default, can be overridden with `CRUSH_SKILLS_DIR`)
+- `%LOCALAPPDATA%\crush\skills\` on Windows (default, can be overridden with `CRUSH_SKILLS_DIR`)
 - Additional paths configured via `options.skills_paths`
 
 ```json
@@ -379,6 +381,7 @@ Skills are discovered from:
   "options": {
     "skills_paths": [
       "~/.config/crush/skills",
+      // Windows: "%LOCALAPPDATA%\\crush\\skills",
       "./project-skills"
     ]
   }
@@ -388,10 +391,19 @@ Skills are discovered from:
 You can get started with example skills from [anthropics/skills](https://github.com/anthropics/skills):
 
 ```bash
+# Unix
 mkdir -p ~/.config/crush/skills
 cd ~/.config/crush/skills
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . && rm -rf _temp
+```
+
+```powershell
+# Windows (PowerShell)
+mkdir -Force "$env:LOCALAPPDATA\crush\skills"
+cd "$env:LOCALAPPDATA\crush\skills"
+git clone https://github.com/anthropics/skills.git _temp
+mv _temp/skills/* . ; rm -r -force _temp
 ```
 
 ### Initialization

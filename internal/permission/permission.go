@@ -235,8 +235,19 @@ func (s *permissionService) isInAllowedReadPath(path string) bool {
 		return false
 	}
 
+	// Resolve symlinks.
+	absPath, err = filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return false
+	}
+
 	for _, allowed := range s.allowedReadPaths {
 		absAllowed, err := filepath.Abs(allowed)
+		if err != nil {
+			continue
+		}
+		// Also resolve symlinks in the allowed path.
+		absAllowed, err = filepath.EvalSymlinks(absAllowed)
 		if err != nil {
 			continue
 		}

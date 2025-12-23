@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,14 +20,23 @@ var (
 	initialized atomic.Bool
 )
 
+const MaxAgeDays = 30
+
 func Setup(logFile string, debug bool) {
 	initOnce.Do(func() {
+		// Create a process-specific log file name to avoid conflicts between multiple processes
+		pid := os.Getpid()
+		dir := filepath.Dir(logFile)
+		ext := filepath.Ext(logFile)
+		name := strings.TrimSuffix(filepath.Base(logFile), ext)
+		processLogFile := filepath.Join(dir, fmt.Sprintf("%s-%d%s", name, pid, ext))
+
 		logRotator := &lumberjack.Logger{
-			Filename:   logFile,
-			MaxSize:    10,    // Max size in MB
-			MaxBackups: 0,     // Number of backups
-			MaxAge:     30,    // Days
-			Compress:   false, // Enable compression
+			Filename:   processLogFile,
+			MaxSize:    10,         // Max size in MB
+			MaxBackups: 0,          // Number of backups
+			MaxAge:     MaxAgeDays, // Days
+			Compress:   false,      // Enable compression
 		}
 
 		level := slog.LevelInfo

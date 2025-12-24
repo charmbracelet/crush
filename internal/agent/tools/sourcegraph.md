@@ -1,55 +1,50 @@
-Search code across public repositories using Sourcegraph's GraphQL API.
+Search public repositories on Sourcegraph. Use for finding examples in open source code.
 
-<usage>
-- Provide search query using Sourcegraph syntax
-- Optional result count (default: 10, max: 20)
-- Optional timeout for request
-</usage>
+<when_to_use>
+Use Sourcegraph when:
+- Looking for usage examples of a library/API
+- Finding how others solved similar problems
+- Searching open source codebases for patterns
+- Need code examples from well-known projects
 
-<basic_syntax>
-- "fmt.Println" - exact matches
-- "file:.go fmt.Println" - limit to Go files
-- "repo:^github\.com/golang/go$ fmt.Println" - specific repos
-- "lang:go fmt.Println" - limit to Go code
-- "fmt.Println AND log.Fatal" - combined terms
-- "fmt\.(Print|Printf|Println)" - regex patterns
-- "\"exact phrase\"" - exact phrase matching
-- "-file:test" or "-repo:forks" - exclude matches
-</basic_syntax>
+Do NOT use Sourcegraph when:
+- Searching the current project → use `grep` or `agent`
+- Need private/local code → use local tools
+</when_to_use>
 
-<key_filters>
-Repository: repo:name, repo:^exact$, repo:org/repo@branch, -repo:exclude, fork:yes, archived:yes, visibility:public
-File: file:\.js$, file:internal/, -file:test, file:has.content(text)
-Content: content:"exact", -content:"unwanted", case:yes
-Type: type:symbol, type:file, type:path, type:diff, type:commit
-Time: after:"1 month ago", before:"2023-01-01", author:name, message:"fix"
-Result: select:repo, select:file, select:content, count:100, timeout:30s
-</key_filters>
+<parameters>
+- query: Sourcegraph search query (required)
+- count: Number of results (default: 10, max: 20)
+</parameters>
+
+<query_syntax>
+Basic: `"fmt.Println"` - exact match
+File filter: `file:.go fmt.Println` - only Go files
+Repo filter: `repo:kubernetes/kubernetes pod` - specific repo
+Language: `lang:typescript useState` - by language
+Exclude: `-file:test -repo:forks` - exclude patterns
+Regex: `"fmt\.(Print|Printf)"` - pattern matching
+</query_syntax>
 
 <examples>
-- "file:.go context.WithTimeout" - Go code using context.WithTimeout
-- "lang:typescript useState type:symbol" - TypeScript React useState hooks
-- "repo:^github\.com/kubernetes/kubernetes$ pod list type:file" - Kubernetes pod files
-- "file:Dockerfile (alpine OR ubuntu) -content:alpine:latest" - Dockerfiles with base images
+Find Go error handling patterns:
+```
+query: "file:.go errors.Wrap lang:go"
+```
+
+Find React hook usage:
+```
+query: "lang:typescript useEffect cleanup return"
+```
+
+Find in specific repo:
+```
+query: "repo:^github.com/golang/go$ context.WithTimeout"
+```
 </examples>
 
-<boolean_operators>
-- "term1 AND term2" - both terms
-- "term1 OR term2" - either term
-- "term1 NOT term2" - term1 but not term2
-- "term1 and (term2 or term3)" - grouping with parentheses
-</boolean_operators>
-
-<limitations>
-- Only searches public repositories
-- Rate limits may apply
-- Complex queries take longer
+<limits>
+- Public repositories only
 - Max 20 results per query
-</limitations>
-
-<tips>
-- Use specific file extensions to narrow results
-- Add repo: filters for targeted searches
-- Use type:symbol for function/method definitions
-- Use type:file to find relevant files
-</tips>
+- Rate limits may apply
+</limits>

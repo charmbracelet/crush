@@ -1,24 +1,25 @@
-Get diagnostics for file and/or project.
+Get linter errors and warnings from LSP. Check files after editing.
 
-<usage>
-- Provide file path to get diagnostics for that file
-- Leave path empty to get diagnostics for entire project
-- Results displayed in structured format with severity levels
-</usage>
+<when_to_use>
+Use after substantive edits to check for errors you may have introduced. Fix errors if the fix is clear.
 
-<features>
-- Displays errors, warnings, and hints
-- Groups diagnostics by severity
-- Provides detailed information about each diagnostic
-</features>
+Skip for files you didn't change - those errors aren't your responsibility.
+</when_to_use>
 
-<limitations>
-- Results limited to diagnostics provided by LSP clients
-- May not cover all possible code issues
-- Does not provide suggestions for fixing issues
-</limitations>
+<parameters>
+- file_path: Specific file to check (optional)
+- Leave empty to get project-wide diagnostics
+</parameters>
 
-<tips>
-- Use with other tools for comprehensive code review
-- Combine with LSP client for real-time diagnostics
-</tips>
+<output>
+- Errors, warnings, and hints grouped by severity
+- File paths and line numbers for each issue
+- Diagnostic messages from the language server
+</output>
+
+<guidelines>
+- Check files you edited before finishing
+- Fix errors you introduced
+- Ignore pre-existing errors in untouched files
+- Use with `edit` to fix issues at specific locations
+</guidelines>

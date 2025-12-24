@@ -1,49 +1,41 @@
-Fast content search tool that finds files containing specific text/patterns, returning matching paths sorted by modification time (newest first).
+Search file contents for text or patterns. Use this instead of shell `grep`.
 
-<usage>
-- Provide regex pattern to search within file contents
-- Set literal_text=true for exact text with special characters (recommended for non-regex users)
-- Optional starting directory (defaults to current working directory)
-- Optional include pattern to filter which files to search
-- Results sorted with most recently modified files first
-</usage>
+<when_to_use>
+Use Grep when:
+- Searching for text/patterns across files
+- Finding where a function or variable is used
+- Locating error messages, log strings, or comments
 
-<regex_syntax>
-When literal_text=false (supports standard regex):
+Do NOT use Grep when:
+- Finding files by name → use `glob`
+- Semantic symbol lookup → use `lsp_references` (more accurate)
+- Need to understand code flow → use `agent`
+- Reading a known file → use `view`
+</when_to_use>
 
-- 'function' searches for literal text "function"
-- 'log\..\*Error' finds text starting with "log." and ending with "Error"
-- 'import\s+.\*\s+from' finds import statements in JavaScript/TypeScript
-</regex_syntax>
+<parameters>
+- pattern: Regex pattern (or literal text with literal_text=true)
+- path: Directory to search (default: current directory)
+- include: File pattern filter, e.g., "*.go", "*.{ts,tsx}"
+- literal_text: Set true for exact text with special chars (dots, parens)
+</parameters>
 
-<include_patterns>
-- '\*.js' - Only search JavaScript files
-- '\*.{ts,tsx}' - Only search TypeScript files
-- '\*.go' - Only search Go files
-</include_patterns>
+<pattern_tips>
+- Simple text: `"handleLogin"` finds literal matches
+- Regex: `"log\..*Error"` finds log.SomethingError
+- Use `literal_text=true` for text with special chars: `"user.name"` with literal_text finds "user.name" exactly
+</pattern_tips>
 
-<limitations>
-- Results limited to 100 files (newest first)
-- Performance depends on number of files searched
-- Very large binary files may be skipped
-- Hidden files (starting with '.') skipped
-</limitations>
+<output>
+- Returns matching file paths sorted by modification time (newest first)
+- Limited to 100 files - if results show "at least N matches", refine your query
+- Respects .gitignore and .crushignore
+</output>
 
-<ignore_support>
-- Respects .gitignore patterns to skip ignored files/directories
-- Respects .crushignore patterns for additional ignore rules
-- Both ignore files auto-detected in search root directory
-</ignore_support>
+<examples>
+Good: `pattern: "func.*Config", include: "*.go"` → Find Go functions with Config in name
 
-<cross_platform>
-- Uses ripgrep (rg) if available for better performance
-- Falls back to Go implementation if ripgrep unavailable
-- File paths normalized automatically for compatibility
-</cross_platform>
+Good: `pattern: "TODO", path: "src/"` → Find TODOs in src directory
 
-<tips>
-- For faster searches: use Glob to find relevant files first, then Grep
-- For iterative exploration requiring multiple searches, consider Agent tool
-- Check if results truncated and refine search pattern if needed
-- Use literal_text=true for exact text with special characters (dots, parentheses, etc.)
-</tips>
+Bad: `pattern: "*.go"` → This searches content, not filenames. Use `glob` for filenames.
+</examples>

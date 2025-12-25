@@ -430,11 +430,11 @@ Crush sends desktop notifications when a tool call requires permission and when
 the agent finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
-```json
+```jsonc
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "disable_notifications": true // default
+    "disable_notifications": false // default
   }
 }
 ```

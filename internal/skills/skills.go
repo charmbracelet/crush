@@ -21,7 +21,7 @@ const (
 	MaxCompatibilityLength = 500
 )
 
-var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
@@ -46,9 +46,9 @@ func (s *Skill) Validate() error {
 			errs = append(errs, fmt.Errorf("name exceeds %d characters", MaxNameLength))
 		}
 		if !namePattern.MatchString(s.Name) {
-			errs = append(errs, errors.New("name must be lowercase alphanumeric with hyphens, no leading/trailing/consecutive hyphens"))
+			errs = append(errs, errors.New("name must be alphanumeric with hyphens, no leading/trailing/consecutive hyphens"))
 		}
-		if s.Path != "" && filepath.Base(s.Path) != s.Name {
+		if s.Path != "" && !strings.EqualFold(filepath.Base(s.Path), s.Name) {
 			errs = append(errs, fmt.Errorf("name %q must match directory %q", s.Name, filepath.Base(s.Path)))
 		}
 	}

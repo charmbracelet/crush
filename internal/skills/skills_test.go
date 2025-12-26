@@ -136,16 +136,15 @@ func TestSkillValidate(t *testing.T) {
 			errMsg:  "exceeds",
 		},
 		{
-			name:    "invalid name - uppercase",
-			skill:   Skill{Name: "MySkill", Description: "Some description."},
-			wantErr: true,
-			errMsg:  "lowercase",
+			name:    "valid name - mixed case",
+			skill:   Skill{Name: "MySkill", Description: "Some description.", Path: "/skills/MySkill"},
+			wantErr: false,
 		},
 		{
 			name:    "invalid name - starts with hyphen",
 			skill:   Skill{Name: "-my-skill", Description: "Some description."},
 			wantErr: true,
-			errMsg:  "lowercase",
+			errMsg:  "alphanumeric with hyphens",
 		},
 		{
 			name:    "name doesn't match directory",

@@ -367,8 +367,10 @@ Diagnostics (lint/typecheck) included in tool output.
 <skills_usage>
 When a user task matches a skill's description, read the skill's SKILL.md file to get full instructions.
 Skills are activated by reading their location path. Follow the skill's instructions to complete the task.
+If a skill mentions scripts, references, or assets, they are placed in the same folder as the skill itself (e.g., scripts/, references/, assets/ subdirectories within the skill's folder).
 </skills_usage>
 {{end}}
+
 {{if .ContextFiles}}
 <memory>
 {{range .ContextFiles}}

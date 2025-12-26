@@ -329,6 +329,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
+	if c.Options.SkillsPaths == nil {
+		c.Options.SkillsPaths = []string{}
+	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {

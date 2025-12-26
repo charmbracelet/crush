@@ -54,7 +54,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service := NewPermissionService("/tmp", false, tt.allowedTools, nil)
+			service := NewPermissionService("/tmp", false, tt.allowedTools)
 
 			// Create a channel to capture the permission request
 			// Since we're testing the allowlist logic, we need to simulate the request
@@ -79,7 +79,7 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
-	service := NewPermissionService("/tmp", true, []string{}, nil)
+	service := NewPermissionService("/tmp", true, []string{})
 
 	result := service.Request(CreatePermissionRequest{
 		SessionID:   "test-session",
@@ -94,39 +94,9 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	}
 }
 
-func TestPermissionService_AllowedReadPaths(t *testing.T) {
-	skillsDir := t.TempDir()
-
-	service := NewPermissionService("/workdir", false, []string{}, []string{skillsDir})
-
-	// Read from allowed skills directory should be auto-approved.
-	result := service.Request(CreatePermissionRequest{
-		SessionID:   "test-session",
-		ToolName:    "view",
-		Action:      "read",
-		Description: "Read skill file",
-		Path:        skillsDir + "/my-skill/SKILL.md",
-	})
-
-	if !result {
-		t.Error("expected permission to be granted for file in allowed read path")
-	}
-
-	// Read from outside allowed paths should NOT be auto-approved (requires manual grant).
-	// We can't easily test the denial case without mocking the UI, but we can verify
-	// the isInAllowedReadPath logic directly.
-	ps := service.(*permissionService)
-	if ps.isInAllowedReadPath("/etc/passwd") {
-		t.Error("expected /etc/passwd to not be in allowed read paths")
-	}
-	if !ps.isInAllowedReadPath(skillsDir + "/nested/deep/file.md") {
-		t.Error("expected nested file in skills dir to be allowed")
-	}
-}
-
 func TestPermissionService_SequentialProperties(t *testing.T) {
 	t.Run("Sequential permission requests with persistent grants", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{}, nil)
+		service := NewPermissionService("/tmp", false, []string{})
 
 		req1 := CreatePermissionRequest{
 			SessionID:   "session1",
@@ -170,7 +140,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.True(t, result2, "Second request should be auto-approved")
 	})
 	t.Run("Sequential requests with temporary grants", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{}, nil)
+		service := NewPermissionService("/tmp", false, []string{})
 
 		req := CreatePermissionRequest{
 			SessionID:   "session2",
@@ -210,7 +180,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.False(t, result2, "Second request should be denied")
 	})
 	t.Run("Concurrent requests with different outcomes", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{}, nil)
+		service := NewPermissionService("/tmp", false, []string{})
 
 		events := service.Subscribe(t.Context())
 

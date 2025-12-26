@@ -34,7 +34,6 @@ compatibility: Requires python 3.8+, pdfplumber, pdfrw libraries
 metadata:
   author: example-org
   version: "1.0"
-allowed-tools: Bash(python:*) Read Write
 ---
 
 # PDF Processing
@@ -47,7 +46,6 @@ Use this skill when the user needs to work with PDF files.
 			wantLicense: "Apache-2.0",
 			wantCompat:  "Requires python 3.8+, pdfplumber, pdfrw libraries",
 			wantMeta:    map[string]string{"author": "example-org", "version": "1.0"},
-			wantTools:   "Bash(python:*) Read Write",
 			wantInstr:   "# PDF Processing\n\n## When to use this skill\nUse this skill when the user needs to work with PDF files.",
 		},
 		{
@@ -92,7 +90,6 @@ Instructions here.
 			require.Equal(t, tt.wantDesc, skill.Description)
 			require.Equal(t, tt.wantLicense, skill.License)
 			require.Equal(t, tt.wantCompat, skill.Compatibility)
-			require.Equal(t, tt.wantTools, skill.AllowedTools)
 
 			if tt.wantMeta != nil {
 				require.Equal(t, tt.wantMeta, skill.Metadata)

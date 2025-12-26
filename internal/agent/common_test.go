@@ -115,7 +115,7 @@ func testEnv(t *testing.T) fakeEnv {
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 
-	permissions := permission.NewPermissionService(workingDir, true, []string{}, nil)
+	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
@@ -177,6 +177,10 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		TrailerStyle:  "co-authored-by",
 		GeneratedWith: true,
 	}
+
+	// Clear skills paths to ensure test reproducibility - user's skills
+	// would be included in prompt and break VCR cassette matching.
+	cfg.Options.SkillsPaths = []string{}
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)
 	if err != nil {

@@ -30,7 +30,6 @@ type Skill struct {
 	License       string            `yaml:"license,omitempty" json:"license,omitempty"`
 	Compatibility string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
 	Metadata      map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	AllowedTools  string            `yaml:"allowed-tools,omitempty" json:"allowed_tools,omitempty"`
 	Instructions  string            `yaml:"-" json:"instructions"`
 	Path          string            `yaml:"-" json:"path"`
 	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
@@ -93,11 +92,11 @@ func Parse(path string) (*Skill, error) {
 
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
-	if !strings.HasPrefix(content, "---") {
+	if !strings.HasPrefix(content, "---\n") {
 		return "", "", errors.New("no YAML frontmatter found")
 	}
 
-	rest := content[3:]
+	rest := strings.TrimPrefix(content, "---\n")
 	before, after, ok := strings.Cut(rest, "\n---")
 	if !ok {
 		return "", "", errors.New("unclosed frontmatter")
@@ -113,7 +112,10 @@ func Discover(paths []string) []*Skill {
 
 	for _, base := range paths {
 		filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || d.Name() != SkillFileName || seen[path] {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || d.Name() != SkillFileName || seen[path] {
 				return nil
 			}
 			seen[path] = true

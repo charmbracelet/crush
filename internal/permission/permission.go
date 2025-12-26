@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -67,7 +66,6 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
 	allowedTools          []string
-	allowedReadPaths      []string
 
 	// used to make sure we only process one request at a time
 	requestMu     sync.Mutex
@@ -139,11 +137,6 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
-		return true
-	}
-
-	// Check if this is a read action and the path is in an allowed read path.
-	if opts.Action == "read" && s.isInAllowedReadPath(opts.Path) {
 		return true
 	}
 
@@ -227,45 +220,7 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip
 }
 
-// isInAllowedReadPath checks if the given path is within any of the allowed
-// read paths (e.g., skills directories).
-func (s *permissionService) isInAllowedReadPath(path string) bool {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-
-	// Resolve symlinks.
-	absPath, err = filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return false
-	}
-
-	for _, allowed := range s.allowedReadPaths {
-		absAllowed, err := filepath.Abs(allowed)
-		if err != nil {
-			continue
-		}
-		// Also resolve symlinks in the allowed path.
-		absAllowed, err = filepath.EvalSymlinks(absAllowed)
-		if err != nil {
-			continue
-		}
-		// Check if path is under the allowed directory.
-		rel, err := filepath.Rel(absAllowed, absPath)
-		if err != nil {
-			continue
-		}
-		// If the relative path doesn't start with "..", it's under the allowed dir.
-		if !strings.HasPrefix(rel, "..") {
-			return true
-		}
-	}
-	return false
-}
-
-// NewPermissionService creates a new permission service.
-func NewPermissionService(workingDir string, skip bool, allowedTools []string, allowedReadPaths []string) Service {
+func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -274,7 +229,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string, a
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
 		allowedTools:        allowedTools,
-		allowedReadPaths:    allowedReadPaths,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 }

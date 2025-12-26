@@ -92,6 +92,8 @@ func Parse(path string) (*Skill, error) {
 
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
+	// Normalize line endings to \n for consistent parsing.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return "", "", errors.New("no YAML frontmatter found")
 	}

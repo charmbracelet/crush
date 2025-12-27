@@ -127,18 +127,18 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		return true
 	}
 
+	// Check if the tool/action combination is in the allowlist
+	commandKey := opts.ToolName + ":" + opts.Action
+	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+		return true
+	}
+
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
-
-	// Check if the tool/action combination is in the allowlist
-	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
-		return true
-	}
 
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := s.autoApproveSessions[opts.SessionID]
@@ -171,15 +171,6 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		Action:      opts.Action,
 		Params:      opts.Params,
 	}
-
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
 
 	s.sessionPermissionsMu.RLock()
 	for _, p := range s.sessionPermissions {

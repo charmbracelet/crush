@@ -7,6 +7,7 @@ import (
 type KeyMap struct {
 	Select,
 	Next,
+	Edit,
 	Previous,
 	Choose,
 	Tab,
@@ -35,6 +36,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("down", "ctrl+n"),
 			key.WithHelp("↓", "next item"),
 		),
+		Edit: key.NewBinding(
+			key.WithKeys("ctrl+e"),
+			key.WithHelp("ctrl+e", "edit key"),
+		),
 		Previous: key.NewBinding(
 			key.WithKeys("up", "ctrl+p"),
 			key.WithHelp("↑", "previous item"),
@@ -60,6 +65,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Select,
 		k.Next,
 		k.Previous,
+		k.Edit,
 		k.Tab,
 		k.Close,
 	}
@@ -171,6 +177,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.WithHelp("↑↓", "choose"),
 		),
 		k.Tab,
+		k.Edit,
 		k.Select,
 		k.Close,
 	}

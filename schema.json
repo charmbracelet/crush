@@ -367,6 +367,17 @@
           "type": "array",
           "description": "Paths to files containing context information for the AI"
         },
+        "skills_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/.config/crush/skills",
+              "./skills"
+            ]
+          },
+          "type": "array",
+          "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"

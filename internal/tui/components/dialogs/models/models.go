@@ -199,6 +199,9 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, m.copilotDeviceFlow.CopyCodeAndOpenURL()
 			}
 			selectedItem := m.modelList.SelectedModel()
+			if selectedItem == nil {
+				return m, nil
+			}
 
 			modelType := config.SelectedModelTypeLarge
 			if m.modelList.GetModelType() == SmallModelType {

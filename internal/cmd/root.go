@@ -22,6 +22,8 @@ import (
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/tui"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -88,9 +90,9 @@ crush -y
 
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
-		ui := tui.New(app)
+		com := common.DefaultCommon(app)
+		ui := ui.New(com)
 		ui.QueryVersion = shouldQueryTerminalVersion(env)
-
 		program := tea.NewProgram(
 			ui,
 			tea.WithEnvironment(env),

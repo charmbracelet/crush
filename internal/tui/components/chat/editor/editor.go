@@ -189,11 +189,17 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		if item, ok := msg.Value.(FileCompletionItem); ok {
 			word := m.textarea.Word()
-			// If the selected item is a file, insert its path into the textarea
+			// If the selected item is a file, insert its path into the textarea.
 			value := m.textarea.Value()
-			value = value[:m.completionsStartIndex] + // Remove the current query
-				item.Path + // Insert the file path
-				value[m.completionsStartIndex+len(word):] // Append the rest of the value
+
+			// Convert byte indices to grapheme indices.
+			_, graphemeEnd := ansi.ByteToGraphemeRange(value, m.completionsStartIndex+len(word), m.completionsStartIndex+len(word))
+
+			// Rebuild with the file path inserted.
+			value = value[:m.completionsStartIndex] + // remove the current query
+				item.Path + // insert the file path
+				ansi.Cut(value, graphemeEnd, ansi.StringWidth(value)) // append the rest of the value
+
 			// XXX: This will always move the cursor to the end of the textarea.
 			m.textarea.SetValue(value)
 			m.textarea.MoveToEnd()
@@ -339,7 +345,9 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				if strings.HasPrefix(word, "@") {
 					// XXX: wont' work if editing in the middle of the field.
 					m.completionsStartIndex = strings.LastIndex(m.textarea.Value(), word)
-					m.currentQuery = word[1:]
+					// Convert byte index to grapheme index for proper Unicode handling
+					_, graphemeEnd := ansi.ByteToGraphemeRange(word, 1, 1)
+					m.currentQuery = ansi.Cut(word, graphemeEnd, ansi.StringWidth(word))
 					x, y := m.completionsPosition()
 					x -= len(m.currentQuery)
 					m.isCompletionsOpen = true

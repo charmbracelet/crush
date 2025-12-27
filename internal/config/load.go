@@ -19,6 +19,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/iflow"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -91,6 +92,13 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
+
+	// Debug: Log which providers are configured
+	configuredProviders := []string{}
+	for p := range cfg.Providers.Seq() {
+		configuredProviders = append(configuredProviders, p.ID)
+	}
+	slog.Info("Configured providers", "count", len(configuredProviders), "providers", configuredProviders)
 
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
@@ -256,6 +264,8 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
 					c.Providers.Del(string(p.ID))
+				} else {
+					slog.Debug("Skipping provider due to missing API key (not configured)", "provider", p.ID, "apiKeyTemplate", p.APIKey)
 				}
 				continue
 			}
@@ -278,7 +288,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if providerConfig.Type == "" {
 			providerConfig.Type = catwalk.TypeOpenAICompat
 		}
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name && providerConfig.Type != catwalk.Type(iflow.Name) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
 			continue

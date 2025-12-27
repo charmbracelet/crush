@@ -1,30 +1,43 @@
-Creates or updates files in filesystem for saving/modifying text content.
+Create new files or completely rewrite existing files.
 
-<usage>
-- Provide file path to write
-- Include content to write to file
-- Tool creates necessary parent directories automatically
-</usage>
+<when_to_use>
+Use Write when:
+- Creating new files
+- Complete file rewrite (>50% changes)
+- Generating new code from scratch
+- Replacing entire file contents
 
-<features>
-- Creates new files or overwrites existing ones
-- Auto-creates parent directories if missing
-- Checks if file modified since last read for safety
-- Avoids unnecessary writes when content unchanged
-</features>
+Do NOT use Write when:
+- Making targeted edits → use `edit`
+- Multiple surgical changes → use `multiedit`
+- File exists and only needs small changes → use `edit`
+</when_to_use>
 
-<limitations>
-- Read file before writing to avoid conflicts
-- Cannot append (rewrites entire file)
-</limitations>
+<parameters>
+- file_path: Path to write (required)
+- content: Complete file content (required)
+</parameters>
 
-<cross_platform>
-- Use forward slashes (/) for compatibility
-</cross_platform>
+<behavior>
+- Creates parent directories automatically
+- Overwrites existing files
+- Checks if file modified since last read (safety check)
+- Skips write if content unchanged
+</behavior>
 
-<tips>
-- Use View tool first to examine existing files before modifying
-- Use LS tool to verify location when creating new files
-- Combine with Glob/Grep to find and modify multiple files
-- Include descriptive comments when changing existing code
-</tips>
+<guidelines>
+- Use `view` first to check if file exists
+- Use `ls` to verify target directory
+- Use absolute paths when possible
+- Match existing code style in the project
+</guidelines>
+
+<examples>
+Good: Creating a new test file
+```
+file_path: "/project/src/utils_test.go"
+content: "package utils\n\nimport \"testing\"\n\nfunc TestHelper(t *testing.T) {\n    // test code\n}"
+```
+
+Bad: Using write for a small change to existing file → Use `edit` instead
+</examples>

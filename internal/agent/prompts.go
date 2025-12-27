@@ -17,20 +17,14 @@ var taskPromptTmpl []byte
 //go:embed templates/initialize.md.tpl
 var initializePromptTmpl []byte
 
-func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
-	systemPrompt, err := prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
-	if err != nil {
-		return nil, err
-	}
-	return systemPrompt, nil
+func coderPrompt(modelName string, opts ...prompt.Option) (*prompt.Prompt, error) {
+	family := DetectModelFamily(modelName)
+	opts = append(opts, prompt.WithModelFamily(string(family)))
+	return prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
 }
 
 func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
-	systemPrompt, err := prompt.NewPrompt("task", string(taskPromptTmpl), opts...)
-	if err != nil {
-		return nil, err
-	}
-	return systemPrompt, nil
+	return prompt.NewPrompt("task", string(taskPromptTmpl), opts...)
 }
 
 func InitializePrompt(cfg config.Config) (string, error) {

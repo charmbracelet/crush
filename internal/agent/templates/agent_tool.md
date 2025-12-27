@@ -1,15 +1,49 @@
-Launch a new agent that has access to the following tools: GlobTool, GrepTool, LS, View. When you are searching for a keyword or file and are not confident that you will find the right match on the first try, use the Agent tool to perform the search for you.
+Launch a sub-agent to perform complex searches across the codebase. The agent has access to Glob, Grep, LS, and View tools.
 
-<usage>
-- If you are searching for a keyword like "config" or "logger", or for questions like "which file does X?", the Agent tool is strongly recommended
-- If you want to read a specific file path, use the View or GlobTool tool instead of the Agent tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the GlobTool tool instead, to find the match more quickly
-</usage>
+<when_to_use>
+Use Agent when:
+- Searching for a concept and unsure where to look ("where is authentication handled?")
+- Need to explore multiple files to answer a question
+- Looking for patterns across the codebase
+- Question requires iterative searching (find X, then look for Y in those files)
 
-<usage_notes>
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
-3. Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
-4. The agent's outputs should generally be trusted
-5. IMPORTANT: The agent can not use Bash, Replace, Edit, so can not modify files. If you want to use these tools, use them directly instead of going through the agent.
-</usage_notes>
+Do NOT use Agent when:
+- You know the file path → use `view` directly
+- Searching for exact text → use `grep` directly
+- Finding files by name → use `glob` directly
+- Looking up symbol references → use `lsp_references`
+</when_to_use>
+
+<how_it_works>
+- Agent runs autonomously with its own tool calls
+- Returns a single final message with findings
+- Cannot modify files (read-only tools only)
+- Stateless: each invocation starts fresh
+- Results not visible to user until you summarize them
+</how_it_works>
+
+<prompt_guidelines>
+Write detailed prompts—the agent works independently:
+- Be specific about what to find and what to return
+- Include context about the codebase if relevant
+- Specify the format you want for the response
+- Ask for file paths and line numbers in results
+</prompt_guidelines>
+
+<examples>
+Good: "Find where user sessions are created and validated. Return the file paths, function names, and a brief description of the flow."
+
+Good: "Search for all usages of the Config struct. List each file and how it uses Config."
+
+Bad: "Find the config" → Too vague, doesn't specify what to return.
+
+Bad: "Look in src/auth.go for the login function" → Just use `view` directly.
+</examples>
+
+<parallel_execution>
+Launch multiple agents concurrently when you have independent questions:
+```
+[agent: "Where is database connection handled?"]
+[agent: "Where are API routes defined?"]
+```
+</parallel_execution>

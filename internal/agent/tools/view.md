@@ -1,38 +1,40 @@
-Reads and displays file contents with line numbers for examining code, logs, or text data.
+Read file contents. Use this instead of `cat`, `head`, or `tail` commands. **Only works on files, not directories.**
 
-<usage>
-- Provide file path to read
-- Optional offset: start reading from specific line (0-based)
-- Optional limit: control lines read (default 2000)
-- Don't use for directories (use LS tool instead)
-- Supports image files (PNG, JPEG, GIF, BMP, SVG, WebP)
-</usage>
+<when_to_use>
+Use View when:
+- Reading any file before editing
+- Examining code, configs, logs, or data files
+- Checking file contents after changes
+- Viewing images (PNG, JPEG, GIF, WebP supported)
 
-<features>
-- Displays contents with line numbers
-- Can read from any file position using offset
-- Handles large files by limiting lines read
-- Auto-truncates very long lines for display
-- Suggests similar filenames when file not found
-- Renders image files directly in terminal
-</features>
+Do NOT use View when:
+- **Listing directory contents → use `ls`** (View fails on directories)
+- Finding files by name → use `glob`
+- Searching file contents → use `grep`
+</when_to_use>
 
-<limitations>
+<parameters>
+- file_path: Path to file (required)
+- offset: Start line, 0-based (optional, for large files)
+- limit: Number of lines (default 2000)
+</parameters>
+
+<output>
+- Lines prefixed with "L123:" line numbers
+- Treat "Lxxx:" as metadata, not actual code
+- Long lines (>2000 chars) truncated
+- Binary files show error (except images)
+</output>
+
+<limits>
 - Max file size: 5MB
-- Default limit: 2000 lines
-- Lines >2000 chars truncated
-- Binary files (except images) cannot be displayed
-</limitations>
-
-<cross_platform>
-- Handles Windows (CRLF) and Unix (LF) line endings
-- Works with forward slashes (/) and backslashes (\)
-- Auto-detects text encoding for common formats
-</cross_platform>
+- Default: 2000 lines
+- Hidden files readable
+</limits>
 
 <tips>
-- Use with Glob to find files first
-- For code exploration: Grep to find relevant files, then View to examine
-- For large files: use offset parameter for specific sections
-- View tool automatically detects and renders image files
+- Always view before editing to get exact whitespace
+- For large files, use offset to read specific sections
+- Use with grep: find files first, then view relevant ones
+- Suggests similar filenames if file not found
 </tips>

@@ -1,18 +1,20 @@
-Terminates a background shell process.
+Stop a background shell process.
 
 <usage>
-- Provide the shell ID returned from a background bash execution
-- Cancels the running process and cleans up resources
+- Provide shell_id from a background bash execution
+- Immediately terminates the process (SIGTERM)
+- Shell ID becomes invalid after killing
 </usage>
 
-<features>
-- Stop long-running background processes
-- Clean up completed background shells
-- Immediately terminates the process
-</features>
+<when_to_use>
+- Stop servers or watchers you started
+- Clean up processes no longer needed
+- Cancel long-running commands
+</when_to_use>
 
-<tips>
-- Use this when you need to stop a background process
-- The process is terminated immediately (similar to SIGTERM)
-- After killing, the shell ID becomes invalid
-</tips>
+<example>
+```
+shell_id: "abc123"
+```
+→ Stops the background process.
+</example>

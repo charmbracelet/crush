@@ -96,12 +96,7 @@ func NewCoordinator(
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
-		return nil, err
-	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+	agent, err := c.buildCoderAgent(ctx, agentCfg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +344,20 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	return result, nil
+}
+
+func (c *coordinator) buildCoderAgent(ctx context.Context, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+	largeModelCfg, ok := c.cfg.Models[config.SelectedModelTypeLarge]
+	if !ok {
+		return nil, errors.New("large model not selected")
+	}
+
+	promptInstance, err := coderPrompt(largeModelCfg.Model, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return nil, err
+	}
+
+	return c.buildAgent(ctx, promptInstance, agent, isSubAgent)
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {

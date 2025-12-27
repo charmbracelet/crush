@@ -11,6 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -24,7 +25,7 @@ const DiagnosticsToolName = "lsp_diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription []byte
 
-func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client], workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
 		string(diagnosticsDescription),
@@ -33,7 +34,7 @@ func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agen
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
 			notifyLSPs(ctx, lspClients, params.FilePath)
-			output := getDiagnostics(params.FilePath, lspClients)
+			output := getDiagnostics(params.FilePath, lspClients, workingDir)
 			return fantasy.NewTextResponse(output), nil
 		})
 }
@@ -52,7 +53,7 @@ func notifyLSPs(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filep
 	}
 }
 
-func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) string {
+func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client], workingDir string) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 
@@ -63,6 +64,12 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) strin
 				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
 				continue
 			}
+
+			// Skip diagnostics for files outside the working directory.
+			if !fsext.HasPrefix(path, workingDir) {
+				continue
+			}
+
 			isCurrentFile := path == filePath
 			for _, diag := range diags {
 				formattedDiag := formatDiagnostic(path, diag, lspName)

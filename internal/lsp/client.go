@@ -42,6 +42,9 @@ type Client struct {
 
 	// Server state
 	serverState atomic.Value
+
+	// Working directory
+	workingDir string
 }
 
 // New creates a new LSP client using the powernap implementation.
@@ -92,6 +95,7 @@ func New(ctx context.Context, name string, config config.LSPConfig, resolver con
 		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      config,
+		workingDir:  workDir,
 	}
 
 	// Initialize server state
@@ -262,6 +266,11 @@ func (c *Client) HandlesFile(path string) bool {
 // OpenFile opens a file in the LSP server.
 func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	if !c.HandlesFile(filepath) {
+		return nil
+	}
+
+	// Skip files outside the current working directory.
+	if !fsext.HasPrefix(filepath, c.workingDir) {
 		return nil
 	}
 

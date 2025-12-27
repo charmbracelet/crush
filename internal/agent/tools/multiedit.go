@@ -101,7 +101,7 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 
 			// Wait for LSP diagnostics and add them to the response
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspClients)
+			text += getDiagnostics(params.FilePath, lspClients, workingDir)
 			response.Content = text
 			return response, nil
 		})

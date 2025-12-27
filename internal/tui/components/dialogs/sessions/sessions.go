@@ -17,6 +17,11 @@ import (
 
 const SessionsDialogID dialogs.DialogID = "sessions"
 
+// RefreshSessionsListMsg is sent to refresh the sessions list with updated data.
+type RefreshSessionsListMsg struct {
+	Sessions []session.Session
+}
+
 // SessionDialog interface for the session switching dialog
 type SessionDialog interface {
 	dialogs.DialogModel
@@ -83,6 +88,38 @@ func (s *sessionDialogCmp) Init() tea.Cmd {
 
 func (s *sessionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case RefreshSessionsListMsg:
+		items := make([]list.CompletionItem[session.Session], len(msg.Sessions))
+		if len(msg.Sessions) > 0 {
+			for i, session := range msg.Sessions {
+				items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
+			}
+		}
+		s.sessionsList = list.NewFilterableList(
+			items,
+			list.WithFilterPlaceholder("Enter a session name"),
+			list.WithFilterInputStyle(styles.CurrentTheme().S().Base.PaddingLeft(1).PaddingBottom(1)),
+			list.WithFilterListOptions(
+				list.WithKeyMap(func() list.KeyMap {
+					listKeyMap := list.DefaultKeyMap()
+					listKeyMap.Down.SetEnabled(false)
+					listKeyMap.Up.SetEnabled(false)
+					listKeyMap.DownOneItem = s.keyMap.Next
+					listKeyMap.UpOneItem = s.keyMap.Previous
+					return listKeyMap
+				}()),
+				list.WithWrapNavigation(),
+			),
+		)
+		s.sessionsList.SetInputWidth(s.listWidth() - 2)
+		var cmds []tea.Cmd
+		cmds = append(cmds, s.sessionsList.Init())
+		cmds = append(cmds, s.sessionsList.Focus())
+		cmds = append(cmds, s.sessionsList.SetSize(s.listWidth(), s.listHeight()))
+		if s.selectedSessionID != "" {
+			cmds = append(cmds, s.sessionsList.SetSelected(s.selectedSessionID))
+		}
+		return s, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
 		var cmds []tea.Cmd
 		s.wWidth = msg.Width
@@ -107,6 +144,14 @@ func (s *sessionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						chat.SessionSelectedMsg(selected.Value()),
 					),
 				)
+			}
+		case key.Matches(msg, s.keyMap.Delete):
+			selectedItem := s.sessionsList.SelectedItem()
+			if selectedItem != nil {
+				selected := *selectedItem
+				return s, util.CmdHandler(dialogs.OpenDialogMsg{
+					Model: NewDeleteSessionDialog(selected.Value().ID, selected.Value().Title),
+				})
 			}
 		case key.Matches(msg, s.keyMap.Close):
 			return s, util.CmdHandler(dialogs.CloseDialogMsg{})

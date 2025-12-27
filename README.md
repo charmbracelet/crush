@@ -308,6 +308,25 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
+### Themes
+
+Crush supports custom themes for the TUI interface. You can switch themes at runtime using `Ctrl+T` or configure a default theme in your config file:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "theme": "catppuccin-frappe"
+    }
+  }
+}
+```
+
+Available themes:
+- `charmtone` (default)
+- `catppuccin-frappe`
+
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a

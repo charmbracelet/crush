@@ -329,6 +329,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
+	if c.Options.SkillsPaths == nil {
+		c.Options.SkillsPaths = []string{}
+	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
@@ -361,6 +364,12 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
+
+	// Add the default skills directory if not already present.
+	defaultSkillsDir := GlobalSkillsDir()
+	if !slices.Contains(c.Options.SkillsPaths, defaultSkillsDir) {
+		c.Options.SkillsPaths = append([]string{defaultSkillsDir}, c.Options.SkillsPaths...)
+	}
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
@@ -735,4 +744,26 @@ func isInsideWorktree() bool {
 		"--is-inside-work-tree",
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
+}
+
+// GlobalSkillsDir returns the default directory for Agent Skills.
+// Skills in this directory are auto-discovered and their files can be read
+// without permission prompts.
+func GlobalSkillsDir() string {
+	if crushSkills := os.Getenv("CRUSH_SKILLS_DIR"); crushSkills != "" {
+		return crushSkills
+	}
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		return filepath.Join(xdgConfigHome, appName, "skills")
+	}
+
+	if runtime.GOOS == "windows" {
+		localAppData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		return filepath.Join(localAppData, appName, "skills")
+	}
+
+	return filepath.Join(home.Dir(), ".config", appName, "skills")
 }

@@ -192,8 +192,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
-	history, files := a.preparePrompt(msgs, call.Attachments...)
-
+	history, files := a.preparePrompt(currentSession, msgs, call.Attachments...)
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
@@ -535,7 +534,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs)
+	aiMsgs, _ := a.preparePrompt(currentSession, msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
@@ -665,9 +664,29 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(sess session.Session, msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
+
+	hasTodoToolCalls := false
+	todosClearedAfterCancel := false
 	if !a.isSubAgent {
+		for _, m := range msgs {
+			for _, tc := range m.ToolCalls() {
+				if tc.Name == "todos" {
+					hasTodoToolCalls = true
+					break
+				}
+			}
+			if hasTodoToolCalls {
+				break
+			}
+		}
+		// Todos were cleared after cancel if there are todo tool calls but session.Todos is empty
+		todosClearedAfterCancel = hasTodoToolCalls && len(sess.Todos) == 0
+	}
+
+	// Add initial reminder only if todos were NOT cleared (normal case)
+	if !a.isSubAgent && !todosClearedAfterCancel {
 		history = append(history, fantasy.NewUserMessage(
 			fmt.Sprintf("<system_reminder>%s</system_reminder>",
 				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
@@ -676,6 +695,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
+
+	// Add all historical messages
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
@@ -686,6 +707,25 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		history = append(history, m.ToAIMessage()...)
+	}
+
+	// Add strong warning at END if todos were cleared after cancel
+	// This ensures the AI sees it right before processing the new request
+	if !a.isSubAgent && todosClearedAfterCancel {
+		history = append(history, fantasy.NewUserMessage(
+
+			fmt.Sprintf("<system_reminder>%s</system_reminder>",
+				`CRITICAL INSTRUCTION: The user has CANCELED the previous task. ALL previous todos have been CLEARED and are now INVALID.
+
+You MUST:
+1. STOP any work related to the previous task
+2. IGNORE all todos from the message history above - they are OBSOLETE
+3. Treat the user's next message as a COMPLETELY NEW request
+4. Do NOT continue, resume, or reference any previous task
+
+The previous todo list NO LONGER EXISTS. Start fresh with the user's new request.`,
+			),
+		))
 	}
 
 	var files []fantasy.FilePart
@@ -862,6 +902,21 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Info("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
+	}
+
+	// Clear todos from the session to prevent interference with new tasks.
+	ctx := context.Background()
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		slog.Warn("Failed to get session for clearing todos", "session_id", sessionID, "error", err)
+		return
+	}
+	if len(currentSession.Todos) > 0 {
+		slog.Info("Clearing todos from cancelled session", "session_id", sessionID, "todo_count", len(currentSession.Todos))
+		currentSession.Todos = nil
+		if _, err := a.sessions.Save(ctx, currentSession); err != nil {
+			slog.Warn("Failed to save session after clearing todos", "session_id", sessionID, "error", err)
+		}
 	}
 }
 

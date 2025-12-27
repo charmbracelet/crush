@@ -324,8 +324,12 @@ func (s *LineScanner) Err() error {
 	return s.scanner.Err()
 }
 
-// isInSkillsPath checks if the file we are viewing is in any of the skill paths
-// we need this because we want to remove read limits for these files.
+// isInSkillsPath checks if filePath is within any of the configured skills
+// directories. Returns true for files that can be read without permission
+// prompts and without size limits.
+//
+// Note that symlinks are resolved to prevent path traversal attacks via
+// symbolic links.
 func isInSkillsPath(filePath string, skillsPaths []string) bool {
 	if len(skillsPaths) == 0 {
 		return false
@@ -336,13 +340,23 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 		return false
 	}
 
+	evalFilePath, err := filepath.EvalSymlinks(absFilePath)
+	if err != nil {
+		return false
+	}
+
 	for _, skillsPath := range skillsPaths {
 		absSkillsPath, err := filepath.Abs(skillsPath)
 		if err != nil {
 			continue
 		}
 
-		relPath, err := filepath.Rel(absSkillsPath, absFilePath)
+		evalSkillsPath, err := filepath.EvalSymlinks(absSkillsPath)
+		if err != nil {
+			continue
+		}
+
+		relPath, err := filepath.Rel(evalSkillsPath, evalFilePath)
 		if err == nil && !strings.HasPrefix(relPath, "..") {
 			return true
 		}

@@ -1,6 +1,7 @@
 package splash
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
@@ -971,11 +973,34 @@ func (s *splashCmp) getMaxInfoWidth() int {
 func (s *splashCmp) cwdPart() string {
 	t := styles.CurrentTheme()
 	maxWidth := s.getMaxInfoWidth()
-	return t.S().Muted.Width(maxWidth).Render(s.cwd())
+
+	// Get current Git branch.
+	workingDir := config.Get().WorkingDir()
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
+	cwd := home.Short(workingDir)
+
+	var location string
+	if branch != "" {
+		// Branch icon + branch name + separator + cwd
+		const branchIcon = " "
+		location = branchIcon + branch + " • " + cwd
+	} else {
+		location = cwd
+	}
+
+	return t.S().Muted.Width(maxWidth).Render(location)
 }
 
 func (s *splashCmp) cwd() string {
-	return home.Short(config.Get().WorkingDir())
+	workingDir := config.Get().WorkingDir()
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
+	cwd := home.Short(workingDir)
+
+	if branch != "" {
+		const branchIcon = " "
+		return branchIcon + branch + " • " + cwd
+	}
+	return cwd
 }
 
 func LSPList(maxWidth int) []string {

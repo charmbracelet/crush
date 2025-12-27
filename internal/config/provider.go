@@ -210,6 +210,28 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		if !iflowFound {
 			providerList = append(providerList, getIFlowProvider())
 		}
+		xiaomiFound := false
+		for i, p := range providerList {
+			if p.ID == InferenceProviderXiaomi {
+				xiaomiFound = true
+				for _, bm := range getXiaomiModels() {
+					modelFound := false
+					for _, m := range p.Models {
+						if m.ID == bm.ID {
+							modelFound = true
+							break
+						}
+					}
+					if !modelFound {
+						providerList[i].Models = append(providerList[i].Models, bm)
+					}
+				}
+				break
+			}
+		}
+		if !xiaomiFound {
+			providerList = append(providerList, getXiaomiProvider())
+		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr

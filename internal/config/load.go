@@ -329,6 +329,16 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.ContextPaths == nil {
 		c.Options.ContextPaths = []string{}
 	}
+	if c.Options.MemoryPaths == nil {
+		crushConfigDir := filepath.Dir(GlobalConfig())
+		c.Options.MemoryPaths = []string{
+			filepath.Join(crushConfigDir, "CRUSH.md"),
+			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
+		}
+	}
+	slices.Sort(c.Options.MemoryPaths)
+	c.Options.MemoryPaths = slices.Compact(c.Options.MemoryPaths)
+
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {

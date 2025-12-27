@@ -16,12 +16,14 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/iflow"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -763,6 +765,7 @@ func (c *Config) Resolver() VariableResolver {
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	testURL := ""
 	headers := make(map[string]string)
+	headers["User-Agent"] = "crush/" + version.Version
 	apiKey, _ := resolver.ResolveValue(c.APIKey)
 	switch c.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
@@ -794,6 +797,14 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://generativelanguage.googleapis.com"
 		}
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	case catwalk.Type(iflow.Name):
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://apis.iflow.cn/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + apiKey
+		headers["User-Agent"] = "iFlow-Cli"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

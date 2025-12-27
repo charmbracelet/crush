@@ -68,20 +68,21 @@ func TestProviders_IFlowMerge(t *testing.T) {
 		}
 
 		require.True(t, found, "iFlow provider should be found")
-		
+
 		// Check that models were merged
-		// Should have the existing model + the 3 built-in models
-		require.Len(t, iflow.Models, 4)
-		
+		// Should have the existing model + the 4 built-in models
+		require.Len(t, iflow.Models, 5)
+
 		modelIDs := make(map[string]bool)
 		for _, m := range iflow.Models {
 			modelIDs[m.ID] = true
 		}
-		
+
 		require.True(t, modelIDs["existing-model"])
+		require.True(t, modelIDs["minimax-m2.1"])
+		require.True(t, modelIDs["deepseek-v3.2"])
 		require.True(t, modelIDs["glm-4.7"])
-		require.True(t, modelIDs["deepseek-v3.1-terminus"])
-		require.True(t, modelIDs["qwen3-coder"])
+		require.True(t, modelIDs["kimi-k2-thinking"])
 	})
 
 	t.Run("should add iflow provider if not exists in catwalk", func(t *testing.T) {
@@ -122,7 +123,20 @@ func TestProviders_IFlowMerge(t *testing.T) {
 			}
 		}
 
-		require.True(t, found, "iFlow provider should be added")
-		require.Len(t, iflow.Models, 3, "Should have 3 built-in models")
+		// Check that iflow provider was added
+		require.True(t, found, "iFlow provider should be found")
+
+		// Should have the 4 built-in models
+		require.Len(t, iflow.Models, 4)
+
+		modelIDs := make(map[string]bool)
+		for _, m := range iflow.Models {
+			modelIDs[m.ID] = true
+		}
+
+		require.True(t, modelIDs["minimax-m2.1"])
+		require.True(t, modelIDs["deepseek-v3.2"])
+		require.True(t, modelIDs["glm-4.7"])
+		require.True(t, modelIDs["kimi-k2-thinking"])
 	})
 }

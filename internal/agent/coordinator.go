@@ -38,6 +38,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"github.com/charmbracelet/crush/internal/agent/iflow"
+	"github.com/charmbracelet/crush/internal/agent/xiaomi"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -702,6 +703,20 @@ func (c *coordinator) buildIFlowProvider(baseURL, apiKey string, headers map[str
 	return iflow.New(opts...)
 }
 
+func (c *coordinator) buildXiaomiProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+	opts := []xiaomi.Option{
+		xiaomi.WithBaseURL(baseURL),
+		xiaomi.WithAPIKey(apiKey),
+		xiaomi.WithHeaders(headers),
+		xiaomi.WithExtraBody(extraBody),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, xiaomi.WithHTTPClient(httpClient))
+	}
+	return xiaomi.New(opts...)
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -764,6 +779,16 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
 	case iflow.Name:
 		return c.buildIFlowProvider(baseURL, apiKey, headers)
+	case xiaomi.Name:
+		if model.Think {
+			if providerCfg.ExtraBody == nil {
+				providerCfg.ExtraBody = map[string]any{}
+			}
+			providerCfg.ExtraBody["thinking"] = map[string]any{
+				"type": "enabled",
+			}
+		}
+		return c.buildXiaomiProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:

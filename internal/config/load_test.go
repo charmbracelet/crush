@@ -1271,7 +1271,7 @@ func TestConfig_IFlowDefaultProvider(t *testing.T) {
 				hasIFlow = true
 				require.Equal(t, "iFlow", p.Name)
 				require.Equal(t, "https://apis.iflow.cn/v1", p.APIEndpoint)
-				require.Len(t, p.Models, 3)
+				require.Len(t, p.Models, 4)
 				break
 			}
 		}
@@ -1292,10 +1292,10 @@ func TestConfig_IFlowDefaultProvider(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "glm-4.7", large.Model)
 		require.Equal(t, "iflow", large.Provider)
-		require.Equal(t, int64(8192), large.MaxTokens)
+		require.Equal(t, int64(128000), large.MaxTokens)
 		require.Equal(t, "glm-4.7", small.Model)
 		require.Equal(t, "iflow", small.Provider)
-		require.Equal(t, int64(8192), small.MaxTokens)
+		require.Equal(t, int64(128000), small.MaxTokens)
 	})
 
 	t.Run("should not auto-configure iflow without API key", func(t *testing.T) {

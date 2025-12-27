@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/iflow"
+	"github.com/charmbracelet/crush/internal/agent/xiaomi"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -805,6 +806,13 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		testURL = baseURL + "/models"
 		headers["Authorization"] = "Bearer " + apiKey
 		headers["User-Agent"] = "iFlow-Cli"
+	case catwalk.Type(xiaomi.Name):
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		if baseURL == "" {
+			baseURL = "https://api.xiaomimimo.com/v1"
+		}
+		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + apiKey
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

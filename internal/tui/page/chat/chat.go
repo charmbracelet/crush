@@ -961,7 +961,10 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	session := p.session
 	var cmds []tea.Cmd
 	if p.session.ID == "" {
-		newSession, err := p.app.Sessions.Create(context.Background(), "New Session")
+		// XXX: The second argument here is the session name, which we leave
+		// blank as it will be auto-generated. Ideally, we remove the need for
+		// that argument entirely.
+		newSession, err := p.app.Sessions.Create(context.Background(), "")
 		if err != nil {
 			return util.ReportError(err)
 		}

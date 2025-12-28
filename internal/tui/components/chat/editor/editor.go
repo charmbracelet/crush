@@ -31,7 +31,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/lipgloss/v2"
 	clipboard "golang.design/x/clipboard"
 )
 

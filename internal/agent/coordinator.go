@@ -703,12 +703,12 @@ func (c *coordinator) buildIFlowProvider(baseURL, apiKey string, headers map[str
 	return iflow.New(opts...)
 }
 
-func (c *coordinator) buildXiaomiProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+func (c *coordinator) buildXiaomiProvider(baseURL, apiKey string, headers map[string]string, thinking bool) (fantasy.Provider, error) {
 	opts := []xiaomi.Option{
 		xiaomi.WithBaseURL(baseURL),
 		xiaomi.WithAPIKey(apiKey),
 		xiaomi.WithHeaders(headers),
-		xiaomi.WithExtraBody(extraBody),
+		xiaomi.WithThinking(thinking),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -780,15 +780,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case iflow.Name:
 		return c.buildIFlowProvider(baseURL, apiKey, headers)
 	case xiaomi.Name:
-		if model.Think {
-			if providerCfg.ExtraBody == nil {
-				providerCfg.ExtraBody = map[string]any{}
-			}
-			providerCfg.ExtraBody["thinking"] = map[string]any{
-				"type": "enabled",
-			}
-		}
-		return c.buildXiaomiProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+		return c.buildXiaomiProvider(baseURL, apiKey, headers, model.Think)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:

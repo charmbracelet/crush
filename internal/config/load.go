@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	iflowp "charm.land/fantasy/providers/iflow"
+	xiaomip "charm.land/fantasy/providers/xiaomi"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -288,7 +289,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if providerConfig.Type == "" {
 			providerConfig.Type = catwalk.TypeOpenAICompat
 		}
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name && providerConfig.Type != catwalk.Type(iflowp.Name) {
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name && providerConfig.Type != catwalk.Type(iflowp.Name) && providerConfig.Type != catwalk.Type(xiaomip.Name) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
 			continue

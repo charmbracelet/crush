@@ -16,7 +16,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/agent/iflow"
+	iflowp "charm.land/fantasy/providers/iflow"
 	xiaomip "charm.land/fantasy/providers/xiaomi"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
@@ -798,7 +798,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			baseURL = "https://generativelanguage.googleapis.com"
 		}
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
-	case catwalk.Type(iflow.Name):
+	case catwalk.Type(iflowp.Name):
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		if baseURL == "" {
 			baseURL = "https://apis.iflow.cn/v1"

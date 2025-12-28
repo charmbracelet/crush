@@ -186,30 +186,6 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		wg.Wait()
 
 		providerList = slices.Collect(providers.Seq())
-		// Add built-in iFlow provider to the list or merge its models
-		var iflowFound bool
-		for i, p := range providerList {
-			if p.ID == InferenceProviderIFlow {
-				iflowFound = true
-				builtInModels := getIFlowModels()
-				for _, bm := range builtInModels {
-					var modelFound bool
-					for _, m := range p.Models {
-						if m.ID == bm.ID {
-							modelFound = true
-							break
-						}
-					}
-					if !modelFound {
-						providerList[i].Models = append(providerList[i].Models, bm)
-					}
-				}
-				break
-			}
-		}
-		if !iflowFound {
-			providerList = append(providerList, getIFlowProvider())
-		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr

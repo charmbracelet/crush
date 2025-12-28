@@ -1267,7 +1267,7 @@ func TestConfig_IFlowDefaultProvider(t *testing.T) {
 		// Verify iflow is in the providers list
 		hasIFlow := false
 		for _, p := range allProviders {
-			if p.ID == InferenceProviderIFlow {
+			if p.ID == "iflow" {
 				hasIFlow = true
 				require.Equal(t, "iFlow", p.Name)
 				require.Equal(t, "https://apis.iflow.cn/v1", p.APIEndpoint)
@@ -1312,7 +1312,7 @@ func TestConfig_IFlowDefaultProvider(t *testing.T) {
 		// Verify iflow is in the providers list
 		hasIFlow := false
 		for _, p := range allProviders {
-			if p.ID == InferenceProviderIFlow {
+			if p.ID == "iflow" {
 				hasIFlow = true
 				break
 			}

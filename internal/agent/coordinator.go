@@ -38,7 +38,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/xiaomi"
-	"github.com/charmbracelet/crush/internal/agent/iflow"
+	"charm.land/fantasy/providers/iflow"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )

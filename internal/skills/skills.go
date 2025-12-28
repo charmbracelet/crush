@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
+	"github.com/charlievieth/fastwalk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -110,17 +112,32 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 // Discover finds all valid skills in the given paths.
 func Discover(paths []string) []*Skill {
 	var skills []*Skill
+	var mu sync.Mutex
 	seen := make(map[string]bool)
 
 	for _, base := range paths {
-		filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		// We use fastwalk with Follow: true instead of filepath.WalkDir because
+		// WalkDir doesn't follow symlinked directories at any depth—only entry
+		// points. This ensures skills in symlinked subdirectories are discovered.
+		// fastwalk is concurrent, so we protect shared state (seen, skills) with mu.
+		conf := fastwalk.Config{
+			Follow:  true,
+			ToSlash: fastwalk.DefaultToSlash(),
+		}
+		fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
-			if d.IsDir() || d.Name() != SkillFileName || seen[path] {
+			if d.IsDir() || d.Name() != SkillFileName {
+				return nil
+			}
+			mu.Lock()
+			if seen[path] {
+				mu.Unlock()
 				return nil
 			}
 			seen[path] = true
+			mu.Unlock()
 			skill, err := Parse(path)
 			if err != nil {
 				slog.Warn("Failed to parse skill file", "path", path, "error", err)
@@ -131,7 +148,9 @@ func Discover(paths []string) []*Skill {
 				return nil
 			}
 			slog.Info("Successfully loaded skill", "name", skill.Name, "path", path)
+			mu.Lock()
 			skills = append(skills, skill)
+			mu.Unlock()
 			return nil
 		})
 	}

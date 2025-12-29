@@ -16,6 +16,9 @@ const (
 	MaxBackgroundJobs = 50
 	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
 	CompletedJobRetentionMinutes = 8 * 60
+	// KillTimeout is how long to wait for a background shell to terminate before giving up.
+	// This prevents indefinite hanging on Windows where child processes may not terminate properly.
+	KillTimeout = 5 * time.Second
 )
 
 // BackgroundShell represents a shell running in the background.
@@ -121,7 +124,14 @@ func (m *BackgroundShellManager) Kill(id string) error {
 	}
 
 	shell.cancel()
-	<-shell.done
+
+	// Wait with timeout to prevent hanging on Windows where child processes may not terminate properly when context is cancelled.
+	select {
+	case <-shell.done:
+	case <-time.After(KillTimeout):
+		// Process didn't terminate in time, but we've already removed it from the manager and cancelled the context.
+		// The process will eventually be cleaned up by the OS.
+	}
 	return nil
 }
 
@@ -171,7 +181,11 @@ func (m *BackgroundShellManager) KillAll() {
 
 	for _, shell := range shells {
 		shell.cancel()
-		<-shell.done
+		// Wait with timeout to prevent hanging on Windows
+		select {
+		case <-shell.done:
+		case <-time.After(KillTimeout):
+		}
 	}
 }
 

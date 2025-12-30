@@ -1,0 +1,58 @@
+package copilot
+
+import (
+	"bytes"
+	"io"
+	"log/slog"
+	"net/http"
+
+	"github.com/charmbracelet/crush/internal/log"
+)
+
+// NewClient creates a new HTTP client with a custom transport that adds the
+// X-Initiator header based on message history in the request body.
+func NewClient(debug bool) *http.Client {
+	return &http.Client{
+		Transport: &initiatorTransport{debug: debug},
+	}
+}
+
+type initiatorTransport struct {
+	debug bool
+}
+
+func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone request to avoid modifying the original.
+	req = req.Clone(req.Context())
+
+	// Read the original body into bytes so we can examine it.
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		return t.roundTrip(req)
+	}
+	defer req.Body.Close()
+
+	// Restore the original body using the preserved bytes.
+	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	// Check for assistant messages using string search to avoid full JSON
+	// unmarshalling overhead.
+	initiator := "user"
+	if bytes.Contains(bodyBytes, []byte(`"role":"assistant"`)) ||
+		bytes.Contains(bodyBytes, []byte(`"role": "assistant"`)) {
+		initiator = "agent"
+		slog.Debug("Setting X-Initiator header to agent (found assistant messages in history)")
+	} else {
+		slog.Debug("Setting X-Initiator header to user (no assistant messages)")
+	}
+	req.Header.Set("X-Initiator", initiator)
+
+	return t.roundTrip(req)
+}
+
+func (t *initiatorTransport) roundTrip(req *http.Request) (*http.Response, error) {
+	if t.debug {
+		return log.NewHTTPClient().Transport.RoundTrip(req)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}

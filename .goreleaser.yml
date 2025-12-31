@@ -152,7 +152,14 @@ aurs:
     conflicts:
       - crush
     package: |-
-      cd "${srcdir}/crush_${pkgver}_Linux_${CARCH}"
+      case "$CARCH" in
+        aarch64)
+          cd "${srcdir}/crush_${pkgver}_Linux_arm64"
+          ;;
+        *)
+          cd "${srcdir}/crush_${pkgver}_Linux_${CARCH}"
+          ;;
+      esac
       # bin
       install -Dm755 "./crush" "${pkgdir}/usr/bin/crush"
       # license

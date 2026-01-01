@@ -150,6 +150,21 @@ func (m *editorCmp) send() tea.Cmd {
 		return nil
 	}
 
+	// Terminal mode: detect ! prefix for direct command execution
+	if strings.HasPrefix(value, "!") {
+		command := strings.TrimPrefix(value, "!")
+		command = strings.TrimSpace(command)
+		if command == "" {
+			return util.ReportWarn("Please enter a command after !")
+		}
+		m.textarea.Reset()
+		m.attachments = nil
+		m.randomizePlaceholders()
+		return util.CmdHandler(chat.TerminalExecMsg{
+			Command: command,
+		})
+	}
+
 	m.textarea.Reset()
 	m.attachments = nil
 	// Change the placeholder when sending a new message.

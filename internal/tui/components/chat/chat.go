@@ -26,6 +26,22 @@ type SendMsg struct {
 	Attachments []message.Attachment
 }
 
+// TerminalExecMsg represents a user request to execute a terminal command directly.
+// Commands prefixed with ! in the editor trigger this message.
+type TerminalExecMsg struct {
+	Command string // The command to execute (without the ! prefix)
+}
+
+// TerminalOutputMsg represents the result of a terminal command execution.
+type TerminalOutputMsg struct {
+	Command  string        // The executed command
+	Stdout   string        // Standard output
+	Stderr   string        // Standard error
+	ExitCode int           // Exit code (0 = success)
+	Duration time.Duration // Execution duration
+	Error    error         // Execution error, if any
+}
+
 type SessionSelectedMsg = session.Session
 
 type SessionClearedMsg struct{}
@@ -192,6 +208,19 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case SessionClearedMsg:
 		m.session = session.Session{}
 		cmds = append(cmds, m.listCmp.SetItems([]list.Item{}))
+		return m, tea.Batch(cmds...)
+
+	case TerminalOutputMsg:
+		// Add terminal output to the chat list
+		outputCmp := messages.NewTerminalOutputCmp(messages.TerminalOutputData{
+			Command:  msg.Command,
+			Stdout:   msg.Stdout,
+			Stderr:   msg.Stderr,
+			ExitCode: msg.ExitCode,
+			Duration: msg.Duration,
+			Error:    msg.Error,
+		})
+		cmds = append(cmds, m.listCmp.AppendItem(outputCmp))
 		return m, tea.Batch(cmds...)
 
 	case pubsub.Event[message.Message]:

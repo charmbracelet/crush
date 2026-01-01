@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -18,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/editor"
@@ -269,6 +271,13 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, cmd
 	case chat.SendMsg:
 		return p, p.sendMessage(msg.Text, msg.Attachments)
+	case chat.TerminalExecMsg:
+		return p, p.executeTerminalCommand(msg.Command)
+	case chat.TerminalOutputMsg:
+		// Forward to the chat component for display
+		u, cmd := p.chat.Update(msg)
+		p.chat = u.(chat.MessageListCmp)
+		return p, cmd
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
 	case splash.SubmitAPIKeyMsg:
@@ -988,6 +997,103 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+// interactiveCommands is a list of commands that require terminal interaction
+// and should not be executed in terminal mode to avoid hanging.
+var interactiveCommands = []string{
+	// TUI/interactive programs
+	"vim", "nvim", "vi", "nano", "emacs", "less", "more", "top", "htop",
+	"tmux", "screen", "ssh", "ftp", "sftp", "telnet",
+	// Programs that may start interactive TUIs
+	"python", "python3", "node", "irb", "ghci", "lua",
+	// This application itself
+	"crush",
+}
+
+// isInteractiveCommand checks if the command might start an interactive program.
+func isInteractiveCommand(command string) bool {
+	// Extract the first word (command name)
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(parts[0])
+
+	// Check against known interactive commands
+	for _, ic := range interactiveCommands {
+		if cmd == ic {
+			return true
+		}
+	}
+
+	// Special case: "go run" without specific flags that make it non-interactive
+	if cmd == "go" && len(parts) > 1 && parts[1] == "run" {
+		return true
+	}
+
+	return false
+}
+
+// executeTerminalCommand executes a shell command directly without AI involvement.
+// It creates a shell instance and runs the command, returning the output as a TerminalOutputMsg.
+func (p *chatPage) executeTerminalCommand(command string) tea.Cmd {
+	// Check for interactive commands that would hang
+	if isInteractiveCommand(command) {
+		return util.ReportWarn("This command may require terminal interaction and cannot be run in terminal mode: " + strings.Fields(command)[0])
+	}
+
+	var cmds []tea.Cmd
+
+	// Create a session if one doesn't exist (similar to sendMessage)
+	if p.session.ID == "" {
+		newSession, err := p.app.Sessions.Create(context.Background(), "Terminal Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		// Use Sequence to ensure session is set before terminal output is added
+		cmds = append(cmds, util.CmdHandler(newSession))
+	}
+
+	cmds = append(cmds, p.chat.GoToBottom())
+
+	// Execute the command and return TerminalOutputMsg
+	execCmd := func() tea.Msg {
+		startTime := time.Now()
+
+		// Get working directory from app config or use current directory
+		workingDir := config.Get().WorkingDir()
+		if workingDir == "" {
+			workingDir = "."
+		}
+
+		// Create a new shell instance for command execution
+		sh := shell.NewShell(&shell.Options{
+			WorkingDir: workingDir,
+		})
+
+		// Execute the command
+		stdout, stderr, execErr := sh.Exec(context.Background(), command)
+
+		// Determine exit code
+		exitCode := 0
+		if execErr != nil {
+			exitCode = shell.ExitCode(execErr)
+		}
+
+		return chat.TerminalOutputMsg{
+			Command:  command,
+			Stdout:   stdout,
+			Stderr:   stderr,
+			ExitCode: exitCode,
+			Duration: time.Since(startTime),
+			Error:    execErr,
+		}
+	}
+	cmds = append(cmds, execCmd)
+
+	// Use Sequence to ensure session is established before terminal output is added
+	return tea.Sequence(cmds...)
 }
 
 func (p *chatPage) Bindings() []key.Binding {

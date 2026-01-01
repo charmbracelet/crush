@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -706,9 +705,10 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel) (fantasy.Provider, error) {
-	headers := maps.Clone(providerCfg.ExtraHeaders)
-	if headers == nil {
-		headers = make(map[string]string)
+	headers := make(map[string]string)
+	for k, v := range providerCfg.ExtraHeaders {
+		resolvedValue, _ := c.cfg.Resolve(v)
+		headers[k] = resolvedValue
 	}
 
 	// handle special headers for anthropic

@@ -17,6 +17,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	nativeclipboard "github.com/aymanbagabas/go-nativeclipboard"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
@@ -31,7 +32,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
-	clipboard "golang.design/x/clipboard"
 )
 
 type Editor interface {
@@ -132,12 +132,6 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 }
 
 func (m *editorCmp) Init() tea.Cmd {
-	// Initialize the clipboard package for cross-platform access
-	err := clipboard.Init()
-	if err != nil {
-		// If clipboard initialization fails, report the error but continue
-		return util.ReportError(err)
-	}
 	return nil
 }
 
@@ -320,12 +314,13 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		// Handle image paste from clipboard
 		if key.Matches(msg, m.keyMap.PasteImage) {
-			imageData := clipboard.Read(clipboard.FmtImage)
+			imageData, err := nativeclipboard.Image.Read()
 
-			if len(imageData) == 0 {
+			if err != nil || len(imageData) == 0 {
 				// If no image data found, try to get text data (could be file path)
-				textData := clipboard.Read(clipboard.FmtText)
-				if len(textData) == 0 {
+				var textData []byte
+				textData, err = nativeclipboard.Text.Read()
+				if err != nil || len(textData) == 0 {
 					// If clipboard is empty, show a warning
 					return m, util.ReportWarn("No data found in clipboard. Note: Some terminals may not support reading image data from clipboard directly.")
 				}
@@ -334,7 +329,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				textStr := string(textData)
 				// First, try to interpret as a file path (existing functionality)
 				path := strings.ReplaceAll(textStr, "\\ ", " ")
-				path, err := filepath.Abs(strings.TrimSpace(path))
+				path, err = filepath.Abs(strings.TrimSpace(path))
 				if err == nil {
 					isAllowedType := false
 					for _, ext := range filepicker.AllowedTypes {

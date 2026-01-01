@@ -1,52 +1,12 @@
 name: lint
-
 on:
   push:
   pull_request:
 
 jobs:
   lint:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      GO111MODULE: "on"
-      GH_PAT: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
-    steps:
-      # By default, the GitHub Action on Windows uses `core.autocrlf=true`.
-      # LF is converted to CRLF, this produces reports from formatters (gofmt/gofumpt/etc.).
-      - run: "git config --global core.autocrlf input"
-        if: matrix.os == 'windows-latest'
-
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install X11 development headers (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev xorg-dev
-
-      - run: |
-          git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmbracelet".insteadOf "https://github.com/charmbracelet"
-          git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmcli".insteadOf "https://github.com/charmcli"
-        if: env.GH_PAT != null
-
-      - name: Install Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: ./go.mod
-          cache: true
-
-      - name: Tidy Go modules
-        run: go mod tidy
-
-      - name: Check for changes
-        run: git diff --exit-code
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          args: --config=.golangci.yml --timeout=10m ./...
-          version: v2.4
+    uses: charmbracelet/meta/.github/workflows/lint.yml@main
+    with:
+      golangci_path: .golangci.yml
+      golangci_version: v2.4
+      timeout: 10m

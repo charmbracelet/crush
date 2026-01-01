@@ -1,64 +1,11 @@
 name: build
-
 on: [push, pull_request]
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      GO111MODULE: "on"
-      GH_PAT: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install X11 development headers (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev xorg-dev
-
-      - run: |
-          git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmbracelet".insteadOf "https://github.com/charmbracelet"
-          git config --global url."https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/charmcli".insteadOf "https://github.com/charmcli"
-        if: env.GH_PAT != null
-
-      - name: Install Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: ./go.mod
-          cache: true
-
-      - name: Tidy Go modules
-        run: go mod tidy
-
-      - name: Check for changes
-        run: git diff --exit-code
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test ./...
-
-  dependabot:
-    needs: [build]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    if: ${{ github.actor == 'dependabot[bot]' && github.event_name == 'pull_request'}}
-    steps:
-      - id: metadata
-        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - run: |
-          gh pr review --approve "$PR_URL"
-          gh pr merge --squash --auto "$PR_URL"
-        env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: charmbracelet/meta/.github/workflows/build.yml@main
+    with:
+      go-version: ""
+      go-version-file: ./go.mod
+    secrets:
+      gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"

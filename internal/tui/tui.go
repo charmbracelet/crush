@@ -239,6 +239,21 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.selectedSessionID = msg.ID
 	case cmpChat.SessionClearedMsg:
 		a.selectedSessionID = ""
+	case sessions.DeleteSessionMsg:
+		err := a.app.Sessions.Delete(context.Background(), msg.SessionID)
+		if err != nil {
+			return a, util.ReportError(err)
+		}
+		// If the deleted session was the currently selected one, clear it
+		if a.selectedSessionID == msg.SessionID {
+			a.selectedSessionID = ""
+		}
+		// Close the delete dialog and refresh the sessions dialog if it's open
+		allSessions, _ := a.app.Sessions.List(context.Background())
+		return a, tea.Sequence(
+			util.CmdHandler(dialogs.CloseDialogMsg{}),
+			func() tea.Msg { return sessions.RefreshSessionsListMsg{Sessions: allSessions} },
+		)
 	// Commands
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {

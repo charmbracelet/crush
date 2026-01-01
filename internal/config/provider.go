@@ -150,10 +150,12 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		defer cancel()
 
 		wg.Go(func() {
-			catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
-			client := catwalk.NewWithURL(catwalkURL)
-			path := cachePathFor("providers")
-			catwalkSyncer.Init(client, path, autoupdate)
+			if !catwalkSyncer.init.Load() {
+				catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
+				client := catwalk.NewWithURL(catwalkURL)
+				path := cachePathFor("providers")
+				catwalkSyncer.Init(client, path, autoupdate)
+			}
 
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
@@ -168,8 +170,10 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			if !hyper.Enabled() {
 				return
 			}
-			path := cachePathFor("hyper")
-			hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
+			if !hyperSyncer.init.Load() {
+				path := cachePathFor("hyper")
+				hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
+			}
 
 			item, err := hyperSyncer.Get(ctx)
 			if err != nil {

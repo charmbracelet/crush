@@ -37,6 +37,8 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	"charm.land/fantasy/providers/xiaomi"
+	"charm.land/fantasy/providers/iflow"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -686,6 +688,35 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 	return hyper.New(opts...)
 }
 
+func (c *coordinator) buildIFlowProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+	opts := []iflow.Option{
+		iflow.WithBaseURL(baseURL),
+		iflow.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, iflow.WithHTTPClient(httpClient))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, iflow.WithHeaders(headers))
+	}
+	return iflow.New(opts...)
+}
+
+func (c *coordinator) buildXiaomiProvider(baseURL, apiKey string, headers map[string]string, thinking bool) (fantasy.Provider, error) {
+	opts := []xiaomi.Option{
+		xiaomi.WithBaseURL(baseURL),
+		xiaomi.WithAPIKey(apiKey),
+		xiaomi.WithHeaders(headers),
+		xiaomi.WithThinking(thinking),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, xiaomi.WithHTTPClient(httpClient))
+	}
+	return xiaomi.New(opts...)
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -746,6 +777,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody)
+	case iflow.Name:
+		return c.buildIFlowProvider(baseURL, apiKey, headers)
+	case xiaomi.Name:
+		return c.buildXiaomiProvider(baseURL, apiKey, headers, model.Think)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:

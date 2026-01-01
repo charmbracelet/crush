@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,7 +29,7 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Read the original body into bytes so we can examine it.
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
-		return t.roundTrip(req)
+		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 	defer req.Body.Close()
 

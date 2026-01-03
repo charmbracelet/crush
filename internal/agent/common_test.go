@@ -108,6 +108,10 @@ func testEnv(t *testing.T) fakeEnv {
 	err := os.MkdirAll(workingDir, 0o755)
 	require.NoError(t, err)
 
+	// Isolate config for tests
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(workingDir, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(workingDir, ".local/share"))
+
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
 

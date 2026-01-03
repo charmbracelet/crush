@@ -25,12 +25,18 @@ type initiatorTransport struct {
 }
 
 func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	const (
+		xInitiatorHeader = "X-Initiator"
+		userInitiator    = "user"
+		agentInitiator   = "agent"
+	)
+
 	if req == nil {
 		return nil, fmt.Errorf("HTTP request is nil")
 	}
 	if req.Body == http.NoBody {
 		// No body to inspect; default to user.
-		req.Header.Set("X-Initiator", "user")
+		req.Header.Set(xInitiatorHeader, userInitiator)
 		slog.Debug("Setting X-Initiator header to user (no request body)")
 		return t.roundTrip(req)
 	}
@@ -50,15 +56,15 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	// Check for assistant messages using regex to handle whitespace
 	// variations in the JSON while avoiding full unmarshalling overhead.
-	initiator := "user"
+	initiator := userInitiator
 	assistantRolePattern := regexp.MustCompile(`"role"\s*:\s*"assistant"`)
 	if assistantRolePattern.Match(bodyBytes) {
-		initiator = "agent"
 		slog.Debug("Setting X-Initiator header to agent (found assistant messages in history)")
+		initiator = agentInitiator
 	} else {
 		slog.Debug("Setting X-Initiator header to user (no assistant messages)")
 	}
-	req.Header.Set("X-Initiator", initiator)
+	req.Header.Set(xInitiatorHeader, initiator)
 
 	return t.roundTrip(req)
 }

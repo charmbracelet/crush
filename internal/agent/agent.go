@@ -1112,7 +1112,7 @@ func (a *sessionAgent) isClaudeCode() bool {
 // convertToToolResult converts a fantasy tool result to a message tool result.
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
-		ToolCallID: result.ToolCallID,
+		ToolCallID: message.ToolCallID(result.ToolCallID),
 		Name:       result.ToolName,
 		Metadata:   result.ClientMetadata,
 	}

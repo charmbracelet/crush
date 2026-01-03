@@ -23,6 +23,16 @@ type initiatorTransport struct {
 }
 
 func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, fmt.Errorf("HTTP request is nil")
+	}
+	if req.Body == http.NoBody {
+		// No body to inspect; default to user.
+		req.Header.Set("X-Initiator", "user")
+		slog.Debug("Setting X-Initiator header to user (no request body)")
+		return t.roundTrip(req)
+	}
+
 	// Clone request to avoid modifying the original.
 	req = req.Clone(req.Context())
 

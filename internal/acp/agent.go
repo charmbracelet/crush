@@ -16,7 +16,8 @@ type Agent struct {
 
 // Compile-time interface checks.
 var (
-	_ acp.Agent = (*Agent)(nil)
+	_ acp.Agent             = (*Agent)(nil)
+	_ acp.AgentExperimental = (*Agent)(nil)
 )
 
 // NewAgent creates a new ACP agent backed by a Crush app instance.
@@ -73,6 +74,12 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 func (a *Agent) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	slog.Debug("ACP SetSessionMode", "mode_id", params.ModeId)
 	return acp.SetSessionModeResponse{}, nil
+}
+
+// SetSessionModel handles model switching (stub - model selection not yet wired).
+func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
+	slog.Debug("ACP SetSessionModel", "session_id", params.SessionId, "model_id", params.ModelId)
+	return acp.SetSessionModelResponse{}, nil
 }
 
 // Prompt handles a prompt request by running the agent.

@@ -2,14 +2,17 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/coder/acp-go-sdk"
 )
 
@@ -185,12 +188,23 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	}
 
 	// Run the agent.
-	_, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt)
+	result, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt)
 	if err != nil {
-		if ctx.Err() != nil {
+		// Permission denial is a normal user choice, not an error.
+		if errors.Is(err, permission.ErrorPermissionDenied) {
+			return acp.PromptResponse{StopReason: acp.StopReasonRefusal}, nil
+		}
+		// Context cancellation means the user cancelled the request.
+		if errors.Is(err, context.Canceled) {
 			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 		}
-		return acp.PromptResponse{}, err
+		// Other errors are actual errors.
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, err
+	}
+
+	// Map the agent's finish reason to an ACP stop reason.
+	if result != nil && result.Response.FinishReason == fantasy.FinishReasonLength {
+		return acp.PromptResponse{StopReason: acp.StopReasonMaxTokens}, nil
 	}
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil

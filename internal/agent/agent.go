@@ -778,12 +778,31 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		if err == nil {
 			slog.Info("generated title with large model")
 		} else {
-			// Welp, the large model didn't work either.
+			// Welp, the large model didn't work either. Use the default
+			// session name and return.
 			slog.Error("error generating title with large model", "err", err)
+			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
+			if saveErr != nil {
+				slog.Error("failed to save session title and usage", "error", saveErr)
+			}
+			return
 		}
 	}
 
-	title := strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
+	if resp == nil {
+		// Actually, we didn't get a response so we can't. Use the default
+		// session name and return.
+		slog.Error("response is nil; can't generate title")
+		saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
+		if saveErr != nil {
+			slog.Error("failed to save session title and usage", "error", saveErr)
+		}
+		return
+	}
+
+	// Clean up title.
+	var title string
+	title = strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
 	slog.Info("generated title", "title", title)
 
 	// Remove thinking tags if present.
@@ -808,10 +827,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		}
 	}
 
-	if model == nil {
-		slog.Error("no model available for cost calculation")
-		return
-	}
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +

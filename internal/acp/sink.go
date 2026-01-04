@@ -110,16 +110,27 @@ func (s *Sink) HandlePermission(req permission.PermissionRequest, permissions pe
 
 	slog.Debug("ACP permission request", "tool", req.ToolName, "action", req.Action)
 
+	// Build the tool call for the permission request.
+	toolCall := acp.RequestPermissionToolCall{
+		ToolCallId: acp.ToolCallId(req.ToolCallID),
+		Title:      acp.Ptr(req.Description),
+		Kind:       acp.Ptr(acp.ToolKindEdit),
+		Status:     acp.Ptr(acp.ToolCallStatusPending),
+		Locations:  []acp.ToolCallLocation{{Path: req.Path}},
+		RawInput:   req.Params,
+	}
+
+	// For edit tools, include diff content so the client can show the proposed
+	// changes.
+	if meta := extractEditParams(req.Params); meta != nil && meta.FilePath != "" {
+		toolCall.Content = []acp.ToolCallContent{
+			acp.ToolDiffContent(meta.FilePath, meta.NewContent, meta.OldContent),
+		}
+	}
+
 	resp, err := s.conn.RequestPermission(s.ctx, acp.RequestPermissionRequest{
 		SessionId: acp.SessionId(s.sessionID),
-		ToolCall: acp.RequestPermissionToolCall{
-			ToolCallId: acp.ToolCallId(req.ToolCallID),
-			Title:      acp.Ptr(req.Description),
-			Kind:       acp.Ptr(acp.ToolKindEdit),
-			Status:     acp.Ptr(acp.ToolCallStatusPending),
-			Locations:  []acp.ToolCallLocation{{Path: req.Path}},
-			RawInput:   req.Params,
-		},
+		ToolCall:  toolCall,
 		Options: []acp.PermissionOption{
 			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: "allow"},
 			{Kind: acp.PermissionOptionKindAllowAlways, Name: "Allow always", OptionId: "allow_always"},
@@ -147,6 +158,33 @@ func (s *Sink) HandlePermission(req permission.PermissionRequest, permissions pe
 			permissions.Deny(req)
 		}
 	}
+}
+
+// editParams holds fields needed for diff content in permission requests.
+type editParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+}
+
+// extractEditParams attempts to extract edit parameters from permission params.
+func extractEditParams(params any) *editParams {
+	if params == nil {
+		return nil
+	}
+
+	// Try JSON round-trip to extract fields.
+	data, err := json.Marshal(params)
+	if err != nil {
+		return nil
+	}
+
+	var ep editParams
+	if err := json.Unmarshal(data, &ep); err != nil {
+		return nil
+	}
+
+	return &ep
 }
 
 // translatePart converts a message part to an ACP session update.
@@ -288,18 +326,37 @@ func toolKind(name string) acp.ToolKind {
 	}
 }
 
+// diffMetadata holds fields common to edit tool response metadata.
+type diffMetadata struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+}
+
 func (s *Sink) translateToolResult(tr message.ToolResult) *acp.SessionUpdate {
 	status := acp.ToolCallStatusCompleted
 	if tr.IsError {
 		status = acp.ToolCallStatusFailed
 	}
 
+	// For edit tools with metadata, emit diff content.
+	content := []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(tr.Content))}
+	if !tr.IsError && tr.Metadata != "" {
+		switch tr.Name {
+		case "edit", "multiedit", "write":
+			var meta diffMetadata
+			if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil && meta.FilePath != "" {
+				content = []acp.ToolCallContent{
+					acp.ToolDiffContent(meta.FilePath, meta.NewContent, meta.OldContent),
+				}
+			}
+		}
+	}
+
 	update := acp.UpdateToolCall(
 		acp.ToolCallId(tr.ToolCallID),
 		acp.WithUpdateStatus(status),
-		acp.WithUpdateContent([]acp.ToolCallContent{
-			acp.ToolContent(acp.TextBlock(tr.Content)),
-		}),
+		acp.WithUpdateContent(content),
 	)
 	return &update
 }

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -187,6 +189,13 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 
+	// Check for slash commands before sending to the agent.
+	if strings.HasPrefix(prompt, "/") {
+		if resp, handled := a.handleCommand(ctx, string(params.SessionId), prompt); handled {
+			return resp, nil
+		}
+	}
+
 	// Run the agent.
 	result, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt)
 	if err != nil {
@@ -215,6 +224,164 @@ func (a *Agent) Cancel(ctx context.Context, params acp.CancelNotification) error
 	slog.Info("ACP Cancel", "session_id", params.SessionId)
 	a.app.AgentCoordinator.Cancel(string(params.SessionId))
 	return nil
+}
+
+// handleCommand checks if the prompt is a slash command and handles it.
+// Returns the response and true if handled, otherwise returns an empty
+// response and false.
+func (a *Agent) handleCommand(ctx context.Context, sessionID, prompt string) (acp.PromptResponse, bool) {
+	// Parse command name and args: "/command arg1 arg2".
+	parts := strings.Fields(prompt)
+	if len(parts) == 0 {
+		return acp.PromptResponse{}, false
+	}
+
+	cmd := strings.TrimPrefix(parts[0], "/")
+	args := parts[1:]
+
+	var response string
+	var err error
+
+	switch cmd {
+	case "toggle_yolo":
+		response = a.cmdToggleYolo()
+	case "toggle_thinking":
+		response, err = a.cmdToggleThinking(ctx)
+	case "set_reasoning_effort":
+		response, err = a.cmdSetReasoningEffort(ctx, args)
+	case "summarize":
+		response, err = a.cmdSummarize(ctx, sessionID)
+	default:
+		// Not a recognized command; pass through to agent.
+		return acp.PromptResponse{}, false
+	}
+
+	if err != nil {
+		response = fmt.Sprintf("Error: %v", err)
+	}
+
+	// Send the response as an agent text message.
+	a.sendCommandResponse(ctx, sessionID, response)
+
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, true
+}
+
+// sendCommandResponse sends a text response for a command to the ACP client.
+func (a *Agent) sendCommandResponse(ctx context.Context, sessionID, text string) {
+	update := acp.UpdateAgentMessageText(text)
+	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: acp.SessionId(sessionID),
+		Update:    update,
+	}); err != nil {
+		slog.Error("Failed to send command response", "error", err)
+	}
+}
+
+// cmdToggleYolo toggles auto-approve mode for tool calls.
+func (a *Agent) cmdToggleYolo() string {
+	current := a.app.Permissions.SkipRequests()
+	a.app.Permissions.SetSkipRequests(!current)
+	if !current {
+		return "YOLO mode enabled: tool calls will be auto-approved."
+	}
+	return "YOLO mode disabled: tool calls will require approval."
+}
+
+// cmdToggleThinking toggles thinking mode for Anthropic/Hyper reasoning models.
+func (a *Agent) cmdToggleThinking(ctx context.Context) (string, error) {
+	cfg := config.Get()
+	agentCfg := cfg.Agents[config.AgentCoder]
+
+	// Validate that the current model supports thinking toggle.
+	providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+	model := cfg.GetModelByType(agentCfg.Model)
+	if providerCfg == nil || model == nil {
+		return "", fmt.Errorf("could not determine current model configuration")
+	}
+
+	if !model.CanReason {
+		return "", fmt.Errorf("current model does not support reasoning")
+	}
+
+	// Thinking toggle is only for Anthropic/Hyper models.
+	if providerCfg.Type != catwalk.TypeAnthropic && providerCfg.Type != catwalk.Type(hyper.Name) {
+		return "", fmt.Errorf("toggle_thinking is only supported for Anthropic models; use /set_reasoning_effort for other providers")
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.Think = !currentModel.Think
+
+	if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+		return "", fmt.Errorf("failed to update model config: %w", err)
+	}
+
+	// Apply the change to the agent.
+	if err := a.app.UpdateAgentModel(ctx); err != nil {
+		return "", fmt.Errorf("failed to apply model change: %w", err)
+	}
+
+	if currentModel.Think {
+		return "Extended thinking enabled.", nil
+	}
+	return "Extended thinking disabled.", nil
+}
+
+// cmdSummarize triggers session summarization.
+func (a *Agent) cmdSummarize(ctx context.Context, sessionID string) (string, error) {
+	if err := a.app.AgentCoordinator.Summarize(ctx, sessionID); err != nil {
+		return "", fmt.Errorf("summarization failed: %w", err)
+	}
+	return "Session summarized successfully.", nil
+}
+
+// cmdSetReasoningEffort sets the reasoning effort level for OpenAI-style models.
+func (a *Agent) cmdSetReasoningEffort(ctx context.Context, args []string) (string, error) {
+	cfg := config.Get()
+	agentCfg := cfg.Agents[config.AgentCoder]
+	model := cfg.GetModelByType(agentCfg.Model)
+
+	if model == nil || len(model.ReasoningLevels) == 0 {
+		return "", fmt.Errorf("current model does not support reasoning effort levels")
+	}
+
+	if len(args) == 0 {
+		currentModel := cfg.Models[agentCfg.Model]
+		current := currentModel.ReasoningEffort
+		if current == "" {
+			current = "default"
+		}
+		return fmt.Sprintf("Current reasoning effort: %s\nAvailable levels: %s",
+			current, strings.Join(model.ReasoningLevels, ", ")), nil
+	}
+
+	effort := strings.ToLower(args[0])
+
+	// Validate the effort level.
+	valid := false
+	for _, level := range model.ReasoningLevels {
+		if strings.EqualFold(level, effort) {
+			effort = level // Use the canonical casing.
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return "", fmt.Errorf("invalid reasoning effort %q; valid levels: %s",
+			effort, strings.Join(model.ReasoningLevels, ", "))
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.ReasoningEffort = effort
+
+	if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+		return "", fmt.Errorf("failed to update model config: %w", err)
+	}
+
+	if err := a.app.UpdateAgentModel(ctx); err != nil {
+		return "", fmt.Errorf("failed to apply model change: %w", err)
+	}
+
+	return fmt.Sprintf("Reasoning effort set to %q.", effort), nil
 }
 
 // replayMessage sends a historical message to the client via session updates.

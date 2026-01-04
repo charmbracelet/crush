@@ -352,6 +352,13 @@ func (s *Sink) translateToolResult(tr message.ToolResult) *acp.SessionUpdate {
 					acp.ToolDiffContent(meta.FilePath, meta.NewContent, meta.OldContent),
 				}
 			}
+		case "view":
+			var meta struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil && meta.FilePath != "" {
+				locations = []acp.ToolCallLocation{{Path: meta.FilePath}}
+			}
 		case "ls":
 			var meta struct {
 				Path string `json:"path"`

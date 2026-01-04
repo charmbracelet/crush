@@ -14,6 +14,7 @@ import (
 // session updates.
 type Sink struct {
 	ctx       context.Context
+	cancel    context.CancelFunc
 	conn      *acp.AgentSideConnection
 	sessionID string
 
@@ -24,13 +25,55 @@ type Sink struct {
 
 // NewSink creates a new event sink for the given session.
 func NewSink(ctx context.Context, conn *acp.AgentSideConnection, sessionID string) *Sink {
+	sinkCtx, cancel := context.WithCancel(ctx)
 	return &Sink{
-		ctx:              ctx,
+		ctx:              sinkCtx,
+		cancel:           cancel,
 		conn:             conn,
 		sessionID:        sessionID,
 		textOffsets:      make(map[string]int),
 		reasoningOffsets: make(map[string]int),
 	}
+}
+
+// Start subscribes to messages and permissions, forwarding events to ACP.
+func (s *Sink) Start(messages message.Service, permissions permission.Service) {
+	// Subscribe to message events.
+	go func() {
+		msgCh := messages.Subscribe(s.ctx)
+		for {
+			select {
+			case event, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				s.HandleMessage(event)
+			case <-s.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Subscribe to permission events.
+	go func() {
+		permCh := permissions.Subscribe(s.ctx)
+		for {
+			select {
+			case event, ok := <-permCh:
+				if !ok {
+					return
+				}
+				s.HandlePermission(event.Payload, permissions)
+			case <-s.ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// Stop cancels the sink's subscriptions.
+func (s *Sink) Stop() {
+	s.cancel()
 }
 
 // HandleMessage translates a Crush message event to ACP session updates.

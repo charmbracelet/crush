@@ -5,13 +5,15 @@ import (
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/coder/acp-go-sdk"
 )
 
 // Agent implements the acp.Agent interface to handle ACP protocol methods.
 type Agent struct {
-	app  *app.App
-	conn *acp.AgentSideConnection
+	app   *app.App
+	conn  *acp.AgentSideConnection
+	sinks *csync.Map[string, *Sink]
 }
 
 // Compile-time interface checks.
@@ -22,7 +24,10 @@ var (
 
 // NewAgent creates a new ACP agent backed by a Crush app instance.
 func NewAgent(app *app.App) *Agent {
-	return &Agent{app: app}
+	return &Agent{
+		app:   app,
+		sinks: csync.NewMap[string, *Sink](),
+	}
 }
 
 // SetAgentConnection stores the connection for sending notifications.
@@ -64,6 +69,11 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	if err != nil {
 		return acp.NewSessionResponse{}, err
 	}
+
+	// Create and start the event sink to stream updates to this session.
+	sink := NewSink(ctx, a.conn, sess.ID)
+	sink.Start(a.app.Messages, a.app.Permissions)
+	a.sinks.Set(sess.ID, sink)
 
 	return acp.NewSessionResponse{
 		SessionId: acp.SessionId(sess.ID),

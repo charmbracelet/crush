@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/message"
@@ -216,11 +217,20 @@ func (s *Sink) translateReasoning(msgID string, reasoning message.ReasoningConte
 
 func (s *Sink) translateToolCall(tc message.ToolCall) *acp.SessionUpdate {
 	if !tc.Finished {
-		update := acp.StartToolCall(
-			acp.ToolCallId(tc.ID),
-			tc.Name,
+		opts := []acp.ToolCallStartOpt{
 			acp.WithStartStatus(acp.ToolCallStatusPending),
-		)
+			acp.WithStartKind(toolKind(tc.Name)),
+		}
+
+		// Parse input to extract path and raw input.
+		if input := parseToolInput(tc.Input); input != nil {
+			if input.Path != "" {
+				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: input.Path}}))
+			}
+			opts = append(opts, acp.WithStartRawInput(input.Raw))
+		}
+
+		update := acp.StartToolCall(acp.ToolCallId(tc.ID), tc.Name, opts...)
 		return &update
 	}
 
@@ -229,6 +239,53 @@ func (s *Sink) translateToolCall(tc message.ToolCall) *acp.SessionUpdate {
 		acp.WithUpdateStatus(acp.ToolCallStatusInProgress),
 	)
 	return &update
+}
+
+// toolInput holds parsed tool call input.
+type toolInput struct {
+	Path string
+	Raw  map[string]any
+}
+
+// parseToolInput extracts path and raw input from JSON tool input.
+func parseToolInput(input string) *toolInput {
+	if input == "" {
+		return nil
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(input), &raw); err != nil {
+		return nil
+	}
+
+	ti := &toolInput{Raw: raw}
+
+	// Extract path from common field names.
+	if path, ok := raw["file_path"].(string); ok {
+		ti.Path = path
+	} else if path, ok := raw["path"].(string); ok {
+		ti.Path = path
+	}
+
+	return ti
+}
+
+// toolKind maps Crush tool names to ACP tool kinds.
+func toolKind(name string) acp.ToolKind {
+	switch name {
+	case "view", "ls", "job_output", "lsp_diagnostics":
+		return acp.ToolKindRead
+	case "edit", "multiedit", "write":
+		return acp.ToolKindEdit
+	case "bash", "job_kill":
+		return acp.ToolKindExecute
+	case "grep", "glob", "lsp_references", "sourcegraph", "web_search":
+		return acp.ToolKindSearch
+	case "fetch", "agentic_fetch", "web_fetch", "download":
+		return acp.ToolKindFetch
+	default:
+		return acp.ToolKindOther
+	}
 }
 
 func (s *Sink) translateToolResult(tr message.ToolResult) *acp.SessionUpdate {

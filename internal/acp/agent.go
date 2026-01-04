@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/coder/acp-go-sdk"
 )
 
@@ -19,6 +20,7 @@ type Agent struct {
 // Compile-time interface checks.
 var (
 	_ acp.Agent             = (*Agent)(nil)
+	_ acp.AgentLoader       = (*Agent)(nil)
 	_ acp.AgentExperimental = (*Agent)(nil)
 )
 
@@ -41,7 +43,7 @@ func (a *Agent) Initialize(ctx context.Context, params acp.InitializeRequest) (a
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession: false,
+			LoadSession: true,
 			McpCapabilities: acp.McpCapabilities{
 				Http: false,
 				Sse:  false,
@@ -80,6 +82,37 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	return acp.NewSessionResponse{
 		SessionId: acp.SessionId(sess.ID),
 	}, nil
+}
+
+// LoadSession loads an existing session to resume a previous conversation.
+func (a *Agent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	sessionID := string(params.SessionId)
+	slog.Info("ACP LoadSession", "session_id", sessionID)
+
+	// Verify the session exists.
+	session, err := a.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+
+	// Create and start the event sink for future updates.
+	sink := NewSink(context.Background(), a.conn, session.ID)
+	sink.Start(a.app.Messages, a.app.Permissions, a.app.Sessions)
+	a.sinks.Set(session.ID, sink)
+
+	// Load and replay historical messages to the client.
+	messages, err := a.app.Messages.List(ctx, sessionID)
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+
+	for _, msg := range messages {
+		if err := a.replayMessage(ctx, sessionID, msg); err != nil {
+			slog.Error("Failed to replay message", "message_id", msg.ID, "error", err)
+		}
+	}
+
+	return acp.LoadSessionResponse{}, nil
 }
 
 // SetSessionMode handles mode switching (stub - Crush doesn't have modes yet).
@@ -127,4 +160,83 @@ func (a *Agent) Cancel(ctx context.Context, params acp.CancelNotification) error
 	slog.Info("ACP Cancel", "session_id", params.SessionId)
 	a.app.AgentCoordinator.Cancel(string(params.SessionId))
 	return nil
+}
+
+// replayMessage sends a historical message to the client via session updates.
+func (a *Agent) replayMessage(ctx context.Context, sessionID string, msg message.Message) error {
+	for _, part := range msg.Parts {
+		update := a.translateHistoryPart(msg.Role, part)
+		if update == nil {
+			continue
+		}
+
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: acp.SessionId(sessionID),
+			Update:    *update,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// translateHistoryPart converts a message part to an ACP session update for
+// history replay. Unlike streaming updates, this sends full content rather
+// than deltas.
+func (a *Agent) translateHistoryPart(role message.MessageRole, part message.ContentPart) *acp.SessionUpdate {
+	switch p := part.(type) {
+	case message.TextContent:
+		if p.Text == "" {
+			return nil
+		}
+		var update acp.SessionUpdate
+		if role == message.User {
+			update = acp.UpdateUserMessageText(p.Text)
+		} else {
+			update = acp.UpdateAgentMessageText(p.Text)
+		}
+		return &update
+
+	case message.ReasoningContent:
+		if p.Thinking == "" {
+			return nil
+		}
+		update := acp.UpdateAgentThoughtText(p.Thinking)
+		return &update
+
+	case message.ToolCall:
+		// For history replay, send the tool call as completed with full input.
+		opts := []acp.ToolCallStartOpt{
+			acp.WithStartStatus(acp.ToolCallStatusCompleted),
+			acp.WithStartKind(toolKind(p.Name)),
+		}
+		if input := parseToolInput(p.Input); input != nil {
+			if input.Path != "" {
+				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: input.Path}}))
+			}
+			opts = append(opts, acp.WithStartRawInput(input.Raw))
+		}
+		title := p.Name
+		if input := parseToolInput(p.Input); input != nil && input.Title != "" {
+			title = input.Title
+		}
+		update := acp.StartToolCall(acp.ToolCallId(p.ID), title, opts...)
+		return &update
+
+	case message.ToolResult:
+		status := acp.ToolCallStatusCompleted
+		if p.IsError {
+			status = acp.ToolCallStatusFailed
+		}
+		content := []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(p.Content))}
+		update := acp.UpdateToolCall(
+			acp.ToolCallId(p.ToolCallID),
+			acp.WithUpdateStatus(status),
+			acp.WithUpdateContent(content),
+		)
+		return &update
+
+	default:
+		return nil
+	}
 }

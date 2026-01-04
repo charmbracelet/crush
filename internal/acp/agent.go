@@ -74,7 +74,7 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	// Use a background context since the sink needs to outlive the NewSession
 	// request.
 	sink := NewSink(context.Background(), a.conn, sess.ID)
-	sink.Start(a.app.Messages, a.app.Permissions)
+	sink.Start(a.app.Messages, a.app.Permissions, a.app.Sessions)
 	a.sinks.Set(sess.ID, sink)
 
 	return acp.NewSessionResponse{

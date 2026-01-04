@@ -341,6 +341,8 @@ func (s *Sink) translateToolResult(tr message.ToolResult) *acp.SessionUpdate {
 
 	// For edit tools with metadata, emit diff content.
 	content := []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(tr.Content))}
+	var locations []acp.ToolCallLocation
+
 	if !tr.IsError && tr.Metadata != "" {
 		switch tr.Name {
 		case "edit", "multiedit", "write":
@@ -350,13 +352,24 @@ func (s *Sink) translateToolResult(tr message.ToolResult) *acp.SessionUpdate {
 					acp.ToolDiffContent(meta.FilePath, meta.NewContent, meta.OldContent),
 				}
 			}
+		case "ls":
+			var meta struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil && meta.Path != "" {
+				locations = []acp.ToolCallLocation{{Path: meta.Path}}
+			}
 		}
 	}
 
-	update := acp.UpdateToolCall(
-		acp.ToolCallId(tr.ToolCallID),
+	opts := []acp.ToolCallUpdateOpt{
 		acp.WithUpdateStatus(status),
 		acp.WithUpdateContent(content),
-	)
+	}
+	if len(locations) > 0 {
+		opts = append(opts, acp.WithUpdateLocations(locations))
+	}
+
+	update := acp.UpdateToolCall(acp.ToolCallId(tr.ToolCallID), opts...)
 	return &update
 }

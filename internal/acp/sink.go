@@ -3,8 +3,10 @@ package acp
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/coder/acp-go-sdk"
 )
@@ -84,6 +86,25 @@ func (s *Sink) Start(messages message.Service, permissions permission.Service, s
 			}
 		}
 	}()
+
+	// Subscribe to MCP events to refresh commands when prompts change.
+	go func() {
+		mcpCh := mcp.SubscribeEvents(s.ctx)
+		for {
+			select {
+			case event, ok := <-mcpCh:
+				if !ok {
+					return
+				}
+				s.HandleMCPEvent(pubsub.Event[mcp.Event](event))
+			case <-s.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Publish initial commands.
+	s.PublishCommands()
 }
 
 // Stop cancels the sink's subscriptions.

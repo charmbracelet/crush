@@ -71,7 +71,9 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	}
 
 	// Create and start the event sink to stream updates to this session.
-	sink := NewSink(ctx, a.conn, sess.ID)
+	// Use a background context since the sink needs to outlive the NewSession
+	// request.
+	sink := NewSink(context.Background(), a.conn, sess.ID)
 	sink.Start(a.app.Messages, a.app.Permissions)
 	a.sinks.Set(sess.ID, sink)
 

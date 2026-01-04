@@ -260,29 +260,45 @@ func (s *Sink) translateToolCall(tc message.ToolCall) *acp.SessionUpdate {
 			acp.WithStartKind(toolKind(tc.Name)),
 		}
 
-		// Parse input to extract path and raw input.
+		// Parse input to extract path, title, and raw input.
+		title := tc.Name
 		if input := parseToolInput(tc.Input); input != nil {
 			if input.Path != "" {
 				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: input.Path}}))
 			}
+			if input.Title != "" {
+				title = input.Title
+			}
 			opts = append(opts, acp.WithStartRawInput(input.Raw))
 		}
 
-		update := acp.StartToolCall(acp.ToolCallId(tc.ID), tc.Name, opts...)
+		update := acp.StartToolCall(acp.ToolCallId(tc.ID), title, opts...)
 		return &update
 	}
 
-	update := acp.UpdateToolCall(
-		acp.ToolCallId(tc.ID),
+	// Tool finished streaming - update with title and input now available.
+	opts := []acp.ToolCallUpdateOpt{
 		acp.WithUpdateStatus(acp.ToolCallStatusInProgress),
-	)
+	}
+	if input := parseToolInput(tc.Input); input != nil {
+		if input.Title != "" {
+			opts = append(opts, acp.WithUpdateTitle(input.Title))
+		}
+		if input.Path != "" {
+			opts = append(opts, acp.WithUpdateLocations([]acp.ToolCallLocation{{Path: input.Path}}))
+		}
+		opts = append(opts, acp.WithUpdateRawInput(input.Raw))
+	}
+
+	update := acp.UpdateToolCall(acp.ToolCallId(tc.ID), opts...)
 	return &update
 }
 
 // toolInput holds parsed tool call input.
 type toolInput struct {
-	Path string
-	Raw  map[string]any
+	Path  string
+	Title string
+	Raw   map[string]any
 }
 
 // parseToolInput extracts path and raw input from JSON tool input.
@@ -303,6 +319,11 @@ func parseToolInput(input string) *toolInput {
 		ti.Path = path
 	} else if path, ok := raw["path"].(string); ok {
 		ti.Path = path
+	}
+
+	// Extract title/description for display.
+	if desc, ok := raw["description"].(string); ok {
+		ti.Title = desc
 	}
 
 	return ti

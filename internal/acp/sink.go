@@ -175,6 +175,12 @@ func (s *Sink) translatePart(msgID string, role message.MessageRole, part messag
 }
 
 func (s *Sink) translateText(msgID string, role message.MessageRole, text message.TextContent) *acp.SessionUpdate {
+	// Skip user messages - the client already knows what it sent via the
+	// prompt request.
+	if role != message.Assistant {
+		return nil
+	}
+
 	offset := s.textOffsets[msgID]
 	if len(text.Text) <= offset {
 		return nil
@@ -187,16 +193,8 @@ func (s *Sink) translateText(msgID string, role message.MessageRole, text messag
 		return nil
 	}
 
-	switch role {
-	case message.Assistant:
-		update := acp.UpdateAgentMessageText(delta)
-		return &update
-	case message.User:
-		update := acp.UpdateUserMessageText(delta)
-		return &update
-	default:
-		return nil
-	}
+	update := acp.UpdateAgentMessageText(delta)
+	return &update
 }
 
 func (s *Sink) translateReasoning(msgID string, reasoning message.ReasoningContent) *acp.SessionUpdate {

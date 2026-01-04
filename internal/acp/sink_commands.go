@@ -3,6 +3,8 @@ package acp
 import (
 	"log/slog"
 
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -10,10 +12,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
-const (
-	systemCommandPrefix = "system:"
-	mcpCommandPrefix    = "mcp:"
-)
+const mcpCommandPrefix = "mcp:"
 
 // HandleMCPEvent processes MCP events and republishes commands when prompts
 // change.
@@ -54,37 +53,58 @@ func (s *Sink) PublishCommands() {
 }
 
 // builtinCommands returns ACP-compatible built-in commands.
+// Commands are dynamically generated based on current model capabilities.
 func (s *Sink) builtinCommands() []acp.AvailableCommand {
-	return []acp.AvailableCommand{
+	commands := []acp.AvailableCommand{
 		{
-			Name:        systemCommandPrefix + "new_session",
-			Description: "Start a new session",
-		},
-		{
-			Name:        systemCommandPrefix + "switch_session",
-			Description: "Switch to a different session",
-		},
-		{
-			Name:        systemCommandPrefix + "switch_model",
-			Description: "Switch to a different model",
-		},
-		{
-			Name:        systemCommandPrefix + "summarize",
+			Name:        "summarize",
 			Description: "Summarize the current session and create a new one with the summary",
 		},
 		{
-			Name:        systemCommandPrefix + "toggle_thinking",
-			Description: "Toggle model thinking for reasoning-capable models",
-		},
-		{
-			Name:        systemCommandPrefix + "toggle_yolo",
+			Name:        "toggle_yolo",
 			Description: "Toggle yolo mode (auto-approve tool calls)",
 		},
-		{
-			Name:        systemCommandPrefix + "help",
-			Description: "Show available commands and shortcuts",
-		},
 	}
+
+	// Add reasoning commands based on current model capabilities.
+	cfg := config.Get()
+	if cfg == nil {
+		return commands
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return commands
+	}
+
+	providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+	model := cfg.GetModelByType(agentCfg.Model)
+	if providerCfg == nil || model == nil || !model.CanReason {
+		return commands
+	}
+
+	// Anthropic/Hyper models: thinking toggle.
+	if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
+		commands = append(commands, acp.AvailableCommand{
+			Name:        "toggle_thinking",
+			Description: "Toggle extended thinking for reasoning-capable models",
+		})
+	}
+
+	// OpenAI-style models: reasoning effort selection.
+	if len(model.ReasoningLevels) > 0 {
+		commands = append(commands, acp.AvailableCommand{
+			Name:        "set_reasoning_effort",
+			Description: "Set reasoning effort level (low, medium, high)",
+			Input: &acp.AvailableCommandInput{
+				UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
+					Hint: "low | medium | high",
+				},
+			},
+		})
+	}
+
+	return commands
 }
 
 // translateCommands converts uicmd.Command slice to acp.AvailableCommand

@@ -807,7 +807,8 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		req.Header.Set(k, v)
 	}
 	for k, v := range c.ExtraHeaders {
-		req.Header.Set(k, v)
+		resolvedValue, _ := resolver.ResolveValue(v)
+		req.Header.Set(k, resolvedValue)
 	}
 	b, err := client.Do(req)
 	if err != nil {

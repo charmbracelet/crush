@@ -31,7 +31,7 @@ var (
 )
 
 func SetInteractive(interactive bool) {
-	baseProps = baseProps.Set("interactive", interactive)
+	baseProps = baseProps.Set("Interactive", interactive)
 }
 
 func Init() {

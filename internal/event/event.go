@@ -27,11 +27,11 @@ var (
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version()).
-			Set("Interactive", false)
+			Set("NonInteractive", false)
 )
 
-func SetInteractive(interactive bool) {
-	baseProps = baseProps.Set("Interactive", interactive)
+func SetNonInteractive(nonInteractive bool) {
+	baseProps = baseProps.Set("NonInteractive", nonInteractive)
 }
 
 func Init() {

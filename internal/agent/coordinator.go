@@ -466,7 +466,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
 
-	smallProvider, err := c.buildProvider(smallProviderCfg, largeModelCfg, isSubAgent)
+	smallProvider, err := c.buildProvider(smallProviderCfg, largeModelCfg, true)
 	if err != nil {
 		return Model{}, Model{}, err
 	}

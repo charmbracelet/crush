@@ -43,9 +43,12 @@ type writeTool struct {
 }
 
 type WriteResponseMetadata struct {
-	Diff      string `json:"diff"`
-	Additions int    `json:"additions"`
-	Removals  int    `json:"removals"`
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+	Diff       string `json:"diff"`
+	Additions  int    `json:"additions"`
+	Removals   int    `json:"removals"`
 }
 
 const WriteToolName = "write"
@@ -166,9 +169,12 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 			result += getDiagnostics(filePath, lspClients)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
-					Diff:      diff,
-					Additions: additions,
-					Removals:  removals,
+					FilePath:   filePath,
+					OldContent: oldContent,
+					NewContent: params.Content,
+					Diff:       diff,
+					Additions:  additions,
+					Removals:   removals,
 				},
 			), nil
 		})

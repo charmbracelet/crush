@@ -184,6 +184,13 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		for k, v := range headers {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				continue
+			}
+			headers[k] = resolved
+		}
 		prepared := ProviderConfig{
 			ID:                 string(p.ID),
 			Name:               p.Name,

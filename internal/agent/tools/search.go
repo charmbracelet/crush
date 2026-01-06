@@ -7,7 +7,9 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/html"
@@ -145,10 +147,8 @@ func parseLiteSearchResults(htmlContent string, maxResults int) ([]SearchResult,
 func hasClass(n *html.Node, class string) bool {
 	for _, attr := range n.Attr {
 		if attr.Key == "class" {
-			for _, c := range strings.Fields(attr.Val) {
-				if c == class {
-					return true
-				}
+			if slices.Contains(strings.Fields(attr.Val), class) {
+				return true
 			}
 		}
 	}
@@ -200,7 +200,20 @@ func formatSearchResults(results []SearchResult) string {
 	return sb.String()
 }
 
-// AddSearchDelay adds a small random delay between consecutive searches.
-func AddSearchDelay() {
-	time.Sleep(time.Duration(500+rand.IntN(1500)) * time.Millisecond)
+var (
+	lastSearchMu   sync.Mutex
+	lastSearchTime time.Time
+)
+
+// maybeDelaySearch adds a random delay if the last search was recent.
+func maybeDelaySearch() {
+	lastSearchMu.Lock()
+	defer lastSearchMu.Unlock()
+
+	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
+	elapsed := time.Since(lastSearchTime)
+	if elapsed < minGap {
+		time.Sleep(minGap - elapsed)
+	}
+	lastSearchTime = time.Now()
 }

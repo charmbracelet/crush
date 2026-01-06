@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
@@ -18,7 +17,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
@@ -46,18 +44,6 @@ type Splash interface {
 
 	// IsAPIKeyValid returns whether the API key is valid
 	IsAPIKeyValid() bool
-
-	// IsShowingClaudeAuthMethodChooser returns whether showing Claude auth method chooser
-	IsShowingClaudeAuthMethodChooser() bool
-
-	// IsShowingClaudeOAuth2 returns whether showing Claude OAuth2 flow
-	IsShowingClaudeOAuth2() bool
-
-	// IsClaudeOAuthURLState returns whether in OAuth URL state
-	IsClaudeOAuthURLState() bool
-
-	// IsClaudeOAuthComplete returns whether Claude OAuth flow is complete
-	IsClaudeOAuthComplete() bool
 
 	// IsShowingClaudeOAuth2 returns whether showing Hyper OAuth2 flow
 	IsShowingHyperOAuth2() bool
@@ -103,12 +89,6 @@ type splashCmp struct {
 	// Copilot device flow state
 	copilotDeviceFlow     *copilot.DeviceFlow
 	showCopilotDeviceFlow bool
-
-	// Claude state
-	claudeAuthMethodChooser     *claude.AuthMethodChooser
-	claudeOAuth2                *claude.OAuth2
-	showClaudeAuthMethodChooser bool
-	showClaudeOAuth2            bool
 }
 
 func New() Splash {
@@ -134,9 +114,6 @@ func New() Splash {
 		modelList:    modelList,
 		apiKeyInput:  apiKeyInput,
 		selectedNo:   false,
-
-		claudeAuthMethodChooser: claude.NewAuthMethodChooser(),
-		claudeOAuth2:            claude.NewOAuth2(),
 	}
 }
 
@@ -158,8 +135,6 @@ func (s *splashCmp) Init() tea.Cmd {
 	return tea.Batch(
 		s.modelList.Init(),
 		s.apiKeyInput.Init(),
-		s.claudeAuthMethodChooser.Init(),
-		s.claudeOAuth2.Init(),
 	)
 }
 
@@ -176,7 +151,6 @@ func (s *splashCmp) SetSize(width int, height int) tea.Cmd {
 	s.listHeight = s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2) - s.logoGap() - 2
 	listWidth := min(60, width)
 	s.apiKeyInput.SetWidth(width - 2)
-	s.claudeAuthMethodChooser.SetWidth(min(width-2, 60))
 	return s.modelList.SetSize(listWidth, s.listHeight)
 }
 
@@ -185,24 +159,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return s, s.SetSize(msg.Width, msg.Height)
-	case claude.ValidationCompletedMsg:
-		var cmds []tea.Cmd
-		u, cmd := s.claudeOAuth2.Update(msg)
-		s.claudeOAuth2 = u.(*claude.OAuth2)
-		cmds = append(cmds, cmd)
-
-		if msg.State == claude.OAuthValidationStateValid {
-			cmds = append(
-				cmds,
-				s.saveAPIKeyAndContinue(msg.Token, false),
-				func() tea.Msg {
-					time.Sleep(5 * time.Second)
-					return claude.AuthenticationCompleteMsg{}
-				},
-			)
-		}
-
-		return s, tea.Batch(cmds...)
 	case hyper.DeviceFlowCompletedMsg:
 		s.showHyperDeviceFlow = false
 		return s, s.saveAPIKeyAndContinue(msg.Token, true)
@@ -223,10 +179,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case copilot.DeviceFlowCompletedMsg:
 		s.showCopilotDeviceFlow = false
 		return s, s.saveAPIKeyAndContinue(msg.Token, true)
-	case claude.AuthenticationCompleteMsg:
-		s.showClaudeAuthMethodChooser = false
-		s.showClaudeOAuth2 = false
-		return s, util.CmdHandler(OnboardingCompleteMsg{})
 	case models.APIKeyStateChangeMsg:
 		u, cmd := s.apiKeyInput.Update(msg)
 		s.apiKeyInput = u.(*models.APIKeyInput)
@@ -246,34 +198,8 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return s, s.hyperDeviceFlow.CopyCode()
 		case key.Matches(msg, s.keyMap.Copy) && s.showCopilotDeviceFlow:
 			return s, s.copilotDeviceFlow.CopyCode()
-		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL:
-			return s, tea.Sequence(
-				tea.SetClipboard(s.claudeOAuth2.URL),
-				func() tea.Msg {
-					_ = clipboard.WriteAll(s.claudeOAuth2.URL)
-					return nil
-				},
-				util.ReportInfo("URL copied to clipboard"),
-			)
-		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeAuthMethodChooser:
-			u, cmd := s.claudeAuthMethodChooser.Update(msg)
-			s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
-			return s, cmd
-		case key.Matches(msg, s.keyMap.Copy) && s.showClaudeOAuth2:
-			u, cmd := s.claudeOAuth2.Update(msg)
-			s.claudeOAuth2 = u.(*claude.OAuth2)
-			return s, cmd
 		case key.Matches(msg, s.keyMap.Back):
 			switch {
-			case s.showClaudeAuthMethodChooser:
-				s.claudeAuthMethodChooser.SetDefaults()
-				s.showClaudeAuthMethodChooser = false
-				return s, nil
-			case s.showClaudeOAuth2:
-				s.claudeOAuth2.SetDefaults()
-				s.showClaudeOAuth2 = false
-				s.showClaudeAuthMethodChooser = true
-				return s, nil
 			case s.showHyperDeviceFlow:
 				s.hyperDeviceFlow = nil
 				s.showHyperDeviceFlow = false
@@ -285,9 +211,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			case s.isAPIKeyValid:
 				return s, nil
 			case s.needsAPIKey:
-				if s.selectedModel.Provider.ID == catwalk.InferenceProviderAnthropic {
-					s.showClaudeAuthMethodChooser = true
-				}
 				s.needsAPIKey = false
 				s.selectedModel = nil
 				s.isAPIKeyValid = false
@@ -297,28 +220,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, s.keyMap.Select):
 			switch {
-			case s.showClaudeAuthMethodChooser:
-				selectedItem := s.modelList.SelectedModel()
-				if selectedItem == nil {
-					return s, nil
-				}
-
-				switch s.claudeAuthMethodChooser.State {
-				case claude.AuthMethodAPIKey:
-					s.showClaudeAuthMethodChooser = false
-					s.needsAPIKey = true
-					s.selectedModel = selectedItem
-					s.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
-				case claude.AuthMethodOAuth2:
-					s.selectedModel = selectedItem
-					s.showClaudeAuthMethodChooser = false
-					s.showClaudeOAuth2 = true
-				}
-				return s, nil
-			case s.showClaudeOAuth2:
-				m2, cmd2 := s.claudeOAuth2.ValidationConfirm()
-				s.claudeOAuth2 = m2.(*claude.OAuth2)
-				return s, cmd2
 			case s.showHyperDeviceFlow:
 				return s, s.hyperDeviceFlow.CopyCodeAndOpenURL()
 			case s.showCopilotDeviceFlow:
@@ -336,9 +237,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					return s, tea.Batch(cmd, util.CmdHandler(OnboardingCompleteMsg{}))
 				} else {
 					switch selectedItem.Provider.ID {
-					case catwalk.InferenceProviderAnthropic:
-						s.showClaudeAuthMethodChooser = true
-						return s, nil
 					case hyperp.Name:
 						s.selectedModel = selectedItem
 						s.showHyperDeviceFlow = true
@@ -407,10 +305,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return s, s.initializeProject()
 			}
 		case key.Matches(msg, s.keyMap.Tab, s.keyMap.LeftRight):
-			if s.showClaudeAuthMethodChooser {
-				s.claudeAuthMethodChooser.ToggleChoice()
-				return s, nil
-			}
 			if s.needsAPIKey {
 				u, cmd := s.apiKeyInput.Update(msg)
 				s.apiKeyInput = u.(*models.APIKeyInput)
@@ -452,14 +346,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		default:
 			switch {
-			case s.showClaudeAuthMethodChooser:
-				u, cmd := s.claudeAuthMethodChooser.Update(msg)
-				s.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
-				return s, cmd
-			case s.showClaudeOAuth2:
-				u, cmd := s.claudeOAuth2.Update(msg)
-				s.claudeOAuth2 = u.(*claude.OAuth2)
-				return s, cmd
 			case s.showHyperDeviceFlow:
 				u, cmd := s.hyperDeviceFlow.Update(msg)
 				s.hyperDeviceFlow = u.(*hyper.DeviceFlow)
@@ -480,10 +366,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 	case tea.PasteMsg:
 		switch {
-		case s.showClaudeOAuth2:
-			u, cmd := s.claudeOAuth2.Update(msg)
-			s.claudeOAuth2 = u.(*claude.OAuth2)
-			return s, cmd
 		case s.showHyperDeviceFlow:
 			u, cmd := s.hyperDeviceFlow.Update(msg)
 			s.hyperDeviceFlow = u.(*hyper.DeviceFlow)
@@ -503,10 +385,6 @@ func (s *splashCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 	case spinner.TickMsg:
 		switch {
-		case s.showClaudeOAuth2:
-			u, cmd := s.claudeOAuth2.Update(msg)
-			s.claudeOAuth2 = u.(*claude.OAuth2)
-			return s, cmd
 		case s.showHyperDeviceFlow:
 			u, cmd := s.hyperDeviceFlow.Update(msg)
 			s.hyperDeviceFlow = u.(*hyper.DeviceFlow)
@@ -655,38 +533,6 @@ func (s *splashCmp) View() string {
 	var content string
 
 	switch {
-	case s.showClaudeAuthMethodChooser:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
-		chooserView := s.claudeAuthMethodChooser.View()
-		authMethodSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
-			lipgloss.JoinVertical(
-				lipgloss.Left,
-				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth Anthropic"),
-				"",
-				chooserView,
-			),
-		)
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			s.logoRendered,
-			authMethodSelector,
-		)
-	case s.showClaudeOAuth2:
-		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
-		oauth2View := s.claudeOAuth2.View()
-		oauthSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
-			lipgloss.JoinVertical(
-				lipgloss.Left,
-				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Let's Auth Anthropic"),
-				"",
-				oauth2View,
-			),
-		)
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			s.logoRendered,
-			oauthSelector,
-		)
 	case s.showHyperDeviceFlow:
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - SplashScreenPaddingY
 		hyperView := s.hyperDeviceFlow.View()
@@ -816,14 +662,6 @@ func (s *splashCmp) View() string {
 
 func (s *splashCmp) Cursor() *tea.Cursor {
 	switch {
-	case s.showClaudeAuthMethodChooser:
-		return nil
-	case s.showClaudeOAuth2:
-		if cursor := s.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
-			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
-			return s.moveCursor(cursor)
-		}
-		return nil
 	case s.needsAPIKey:
 		cursor := s.apiKeyInput.Cursor()
 		if cursor != nil {
@@ -894,16 +732,10 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	}
 	// Calculate the correct Y offset based on current state
 	logoHeight := lipgloss.Height(s.logoRendered)
-	if s.needsAPIKey || s.showClaudeOAuth2 {
-		var view string
-		if s.needsAPIKey {
-			view = s.apiKeyInput.View()
-		} else {
-			view = s.claudeOAuth2.View()
-		}
+	if s.needsAPIKey {
 		infoSectionHeight := lipgloss.Height(s.infoSection())
 		baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
-		remainingHeight := s.height - baseOffset - lipgloss.Height(view) - SplashScreenPaddingY
+		remainingHeight := s.height - baseOffset - lipgloss.Height(s.apiKeyInput.View()) - SplashScreenPaddingY
 		offset := baseOffset + remainingHeight
 		cursor.Y += offset
 		cursor.X += 1
@@ -926,20 +758,6 @@ func (s *splashCmp) logoGap() int {
 // Bindings implements SplashPage.
 func (s *splashCmp) Bindings() []key.Binding {
 	switch {
-	case s.showClaudeAuthMethodChooser:
-		return []key.Binding{
-			s.keyMap.Select,
-			s.keyMap.Tab,
-			s.keyMap.Back,
-		}
-	case s.showClaudeOAuth2:
-		bindings := []key.Binding{
-			s.keyMap.Select,
-		}
-		if s.claudeOAuth2.State == claude.OAuthStateURL {
-			bindings = append(bindings, s.keyMap.Copy)
-		}
-		return bindings
 	case s.needsAPIKey:
 		return []key.Binding{
 			s.keyMap.Select,
@@ -1045,22 +863,6 @@ func (s *splashCmp) IsShowingAPIKey() bool {
 
 func (s *splashCmp) IsAPIKeyValid() bool {
 	return s.isAPIKeyValid
-}
-
-func (s *splashCmp) IsShowingClaudeAuthMethodChooser() bool {
-	return s.showClaudeAuthMethodChooser
-}
-
-func (s *splashCmp) IsShowingClaudeOAuth2() bool {
-	return s.showClaudeOAuth2
-}
-
-func (s *splashCmp) IsClaudeOAuthURLState() bool {
-	return s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateURL
-}
-
-func (s *splashCmp) IsClaudeOAuthComplete() bool {
-	return s.showClaudeOAuth2 && s.claudeOAuth2.State == claude.OAuthStateCode && s.claudeOAuth2.ValidationState == claude.OAuthValidationStateValid
 }
 
 func (s *splashCmp) IsShowingHyperOAuth2() bool {

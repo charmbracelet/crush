@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
@@ -153,21 +152,6 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	}
 
 	return provider
-}
-
-func (pc *ProviderConfig) SetupClaudeCode() {
-	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
-
-	value := pc.ExtraHeaders["anthropic-beta"]
-	const want = "oauth-2025-04-20"
-	if !strings.Contains(value, want) {
-		if value != "" {
-			value += ","
-		}
-		value += want
-	}
-	pc.ExtraHeaders["anthropic-beta"] = value
 }
 
 func (pc *ProviderConfig) SetupGitHubCopilot() {
@@ -522,6 +506,25 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
+func (c *Config) RemoveConfigField(key string) error {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	newValue, err := sjson.Delete(string(data), key)
+	if err != nil {
+		return fmt.Errorf("failed to delete config field %s: %w", key, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
+	}
+	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
+}
+
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	providerConfig, exists := c.Providers.Get(providerID)
@@ -536,8 +539,6 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	var newToken *oauth.Token
 	var refreshErr error
 	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		newToken, refreshErr = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case string(catwalk.InferenceProviderCopilot):
 		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case hyperp.Name:
@@ -554,8 +555,6 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	providerConfig.APIKey = newToken.AccessToken
 
 	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		providerConfig.SetupClaudeCode()
 	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.SetupGitHubCopilot()
 	}
@@ -594,8 +593,6 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			providerConfig.APIKey = v.AccessToken
 			providerConfig.OAuthToken = v
 			switch providerID {
-			case string(catwalk.InferenceProviderAnthropic):
-				providerConfig.SetupClaudeCode()
 			case string(catwalk.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()
 			}

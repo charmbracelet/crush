@@ -107,6 +107,9 @@ type ProviderConfig struct {
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
+	// Disables tool calling for this provider. This is useful for providers like Ollama
+	// that may have issues with streaming when tools are enabled.
+	DisableTools bool `json:"disable_tools,omitempty" jsonschema:"description=Disable tool calling for this provider. Useful for providers like Ollama that may have streaming issues with tools enabled,default=false"`
 
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`

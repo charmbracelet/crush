@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -206,8 +207,8 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	recordFileWrite(params.FilePath)
-	recordFileRead(params.FilePath)
+	filetracker.RecordWrite(params.FilePath)
+	filetracker.RecordRead(params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -244,13 +245,13 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	// Check if file was read before editing
-	if getLastReadTime(params.FilePath).IsZero() {
+	if filetracker.LastReadTime(params.FilePath).IsZero() {
 		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	// Check if file was modified since last read
 	modTime := fileInfo.ModTime()
-	lastRead := getLastReadTime(params.FilePath)
+	lastRead := filetracker.LastReadTime(params.FilePath)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
@@ -362,8 +363,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	recordFileWrite(params.FilePath)
-	recordFileRead(params.FilePath)
+	filetracker.RecordWrite(params.FilePath)
+	filetracker.RecordRead(params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {

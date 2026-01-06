@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -72,7 +73,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				}
 
 				modTime := fileInfo.ModTime()
-				lastRead := getLastReadTime(filePath)
+				lastRead := filetracker.LastReadTime(filePath)
 				if modTime.After(lastRead) {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
 						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
@@ -156,8 +157,8 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				slog.Error("Error creating file history version", "error", err)
 			}
 
-			recordFileWrite(filePath)
-			recordFileRead(filePath)
+			filetracker.RecordWrite(filePath)
+			filetracker.RecordRead(filePath)
 
 			notifyLSPs(ctx, lspClients, params.FilePath)
 

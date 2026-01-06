@@ -59,7 +59,7 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		event.SetInteractive(true)
+		event.SetNonInteractive(true)
 		event.AppInitialized()
 
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)

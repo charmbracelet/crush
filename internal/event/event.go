@@ -15,6 +15,8 @@ import (
 const (
 	endpoint = "https://data.charm.land"
 	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
+
+	nonInteractiveEvenName = "NonInteractive"
 )
 
 var (
@@ -27,11 +29,11 @@ var (
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version()).
-			Set("Interactive", false)
+			Set(nonInteractiveEvenName, false)
 )
 
-func SetInteractive(interactive bool) {
-	baseProps = baseProps.Set("Interactive", interactive)
+func SetNonInteractive(nonInteractive bool) {
+	baseProps = baseProps.Set(nonInteractiveEvenName, nonInteractive)
 }
 
 func Init() {

@@ -320,6 +320,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			continue
 		}
 
+		for k, v := range providerConfig.ExtraHeaders {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				continue
+			}
+			providerConfig.ExtraHeaders[k] = resolved
+		}
+
 		c.Providers.Set(id, providerConfig)
 	}
 	return nil

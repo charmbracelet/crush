@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -119,7 +120,7 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	_ = NewMultiEditTool(lspClients, permissions, files, tmpDir)
 
 	// Simulate reading the file first.
-	recordFileRead(testFile)
+	filetracker.RecordRead(testFile)
 
 	// Manually test the sequential application logic.
 	currentContent := content

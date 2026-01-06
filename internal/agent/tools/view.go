@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -194,7 +195,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			}
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspClients)
-			recordFileRead(filePath)
+			filetracker.RecordRead(filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),
 				ViewResponseMetadata{

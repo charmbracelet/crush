@@ -25,22 +25,13 @@ type ClosedMsg struct{}
 // FilesLoadedMsg is sent when files have been loaded for completions.
 type FilesLoadedMsg struct {
 	Files []string
-	X, Y  int
 }
 
 // Completions represents the completions popup component.
 type Completions struct {
-	// Window dimensions
-	wWidth  int
-	wHeight int
-
 	// Popup dimensions
 	width  int
 	height int
-
-	// Position
-	x, xorig int
-	y        int
 
 	// State
 	open  bool
@@ -72,12 +63,6 @@ func New(normalStyle, selectedStyle, matchStyle lipgloss.Style) *Completions {
 	}
 }
 
-// SetWindowSize sets the window dimensions for position adjustment.
-func (c *Completions) SetWindowSize(width, height int) {
-	c.wWidth = width
-	c.wHeight = height
-}
-
 // IsOpen returns whether the completions popup is open.
 func (c *Completions) IsOpen() bool {
 	return c.open
@@ -88,21 +73,10 @@ func (c *Completions) Query() string {
 	return c.query
 }
 
-// Position returns the X and Y position of the completions popup (above cursor).
-func (c *Completions) Position() (int, int) {
-	return c.x, c.y - c.Height()
-}
-
-// Width returns the width of the completions popup.
-func (c *Completions) Width() int {
-	return c.width
-}
-
-// Height returns the height of the completions popup.
-func (c *Completions) Height() int {
-	// Return actual visible item count, capped at max height.
+// Size returns the visible size of the popup.
+func (c *Completions) Size() (width, height int) {
 	visible := len(c.list.VisibleItems())
-	return min(visible, c.height)
+	return c.width, min(visible, c.height)
 }
 
 // KeyMap returns the key bindings.
@@ -111,16 +85,16 @@ func (c *Completions) KeyMap() KeyMap {
 }
 
 // OpenWithFiles opens the completions with file items from the filesystem.
-func (c *Completions) OpenWithFiles(x, y, depth, limit int) tea.Cmd {
+func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
 	return func() tea.Msg {
 		files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
 		slices.Sort(files)
-		return FilesLoadedMsg{Files: files, X: x, Y: y}
+		return FilesLoadedMsg{Files: files}
 	}
 }
 
 // SetFiles sets the file items on the completions popup.
-func (c *Completions) SetFiles(files []string, x, y int) {
+func (c *Completions) SetFiles(files []string) {
 	items := make([]list.FilterableItem, 0, len(files))
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
@@ -136,16 +110,12 @@ func (c *Completions) SetFiles(files []string, x, y int) {
 
 	c.open = true
 	c.query = ""
-	c.x, c.xorig = x, x
-	c.y = y
 	c.list.SetItems(items...)
 	c.list.SetFilter("") // Clear any previous filter.
 	c.list.Focus()
 
 	// Calculate width based on longest item.
 	c.width = c.calculateWidth(items)
-	c.adjustPosition()
-
 	c.height = max(min(maxCompletionsHeight, len(items)), 1)
 	c.list.SetSize(c.width, c.height)
 	c.list.SetSelected(0)
@@ -160,7 +130,7 @@ func (c *Completions) Close() tea.Cmd {
 }
 
 // Filter filters the completions with the given query.
-func (c *Completions) Filter(query string, x, y int) {
+func (c *Completions) Filter(query string) {
 	if !c.open {
 		return
 	}
@@ -170,10 +140,7 @@ func (c *Completions) Filter(query string, x, y int) {
 	}
 
 	c.query = query
-	c.xorig = x
-	c.x, c.y = x, y
 	c.list.SetFilter(query)
-	c.adjustPosition()
 
 	items := c.list.VisibleItems()
 	c.height = max(min(maxCompletionsHeight, len(items)), 1)
@@ -298,14 +265,4 @@ func (c *Completions) calculateWidth(items []list.FilterableItem) int {
 		width = max(width, itemWidth)
 	}
 	return max(width, 20)
-}
-
-// adjustPosition adjusts the popup position to fit within the window.
-func (c *Completions) adjustPosition() {
-	if c.x+c.width >= c.wWidth {
-		c.x = c.wWidth - c.width - 1
-	}
-	if c.x < 0 {
-		c.x = c.xorig
-	}
 }

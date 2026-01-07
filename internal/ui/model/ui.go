@@ -105,10 +105,11 @@ type UI struct {
 	workingPlaceholder string
 
 	// Completions state
-	completions           *completions.Completions
-	completionsOpen       bool
-	completionsStartIndex int
-	completionsQuery      string
+	completions              *completions.Completions
+	completionsOpen          bool
+	completionsStartIndex    int
+	completionsQuery         string
+	completionsPositionStart image.Point // x,y where user typed '@'
 
 	// Chat components
 	chat *Chat
@@ -261,7 +262,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
-		m.completions.SetWindowSize(msg.Width, msg.Height)
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -362,7 +362,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completions.FilesLoadedMsg:
 		// Handle async file loading for completions.
 		if m.completionsOpen {
-			m.completions.SetFiles(msg.Files, msg.X, msg.Y)
+			m.completions.SetFiles(msg.Files)
 		}
 	case completions.ClosedMsg:
 		m.completionsOpen = false
@@ -880,9 +880,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsOpen = true
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
+						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						x, y := m.completionsPosition()
-						cmds = append(cmds, m.completions.OpenWithFiles(x, y, depth, limit))
+						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
 					}
 				}
 
@@ -907,9 +907,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						word := m.textareaWord()
 						if strings.HasPrefix(word, "@") {
 							m.completionsQuery = word[1:]
-							x, y := m.completionsPosition()
-							x -= len(m.completionsQuery)
-							m.completions.Filter(m.completionsQuery, x, y)
+							m.completions.Filter(m.completionsQuery)
 							if !m.completions.HasItems() {
 								m.closeCompletions()
 							}
@@ -1070,19 +1068,20 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw completions popup if open
 	if m.completionsOpen && m.completions.HasItems() {
-		x, y := m.completions.Position()
-		h := m.completions.Height()
+		w, h := m.completions.Size()
+		x := m.completionsPositionStart.X
+		y := m.completionsPositionStart.Y - h
 
-		// Ensure popup doesn't extend into the editor area.
-		maxBottom := m.layout.editor.Min.Y
-		if y+h > maxBottom {
-			y = maxBottom - h
+		screenW := area.Dx()
+		if x+w > screenW {
+			x = screenW - w
 		}
+		x = max(0, x)
 
 		completionsView := uv.NewStyledString(m.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{
 			Min: image.Pt(x, y),
-			Max: image.Pt(x+m.completions.Width(), y+h),
+			Max: image.Pt(x+w, y+h),
 		})
 	}
 
@@ -1636,13 +1635,19 @@ func (m *UI) insertFileCompletion(path string) {
 }
 
 // completionsPosition returns the X and Y position for the completions popup.
-func (m *UI) completionsPosition() (int, int) {
+func (m *UI) completionsPosition() image.Point {
 	cur := m.textarea.Cursor()
 	if cur == nil {
-		return m.layout.editor.Min.X, m.layout.editor.Min.Y + 1
+		return image.Point{
+			X: m.layout.editor.Min.X,
+			Y: m.layout.editor.Min.Y,
+		}
 	}
 	// Add 2 to Y to position popup closer to cursor (it renders above).
-	return cur.X + m.layout.editor.Min.X, m.layout.editor.Min.Y + cur.Y + 2
+	return image.Point{
+		X: cur.X + m.layout.editor.Min.X,
+		Y: m.layout.editor.Min.Y + cur.Y,
+	}
 }
 
 // textareaWord returns the current word at the cursor position.

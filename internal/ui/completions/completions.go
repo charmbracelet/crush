@@ -9,9 +9,16 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/ordered"
 )
 
-const maxCompletionsHeight = 10
+const (
+	minHeight = 1
+	maxHeight = 10
+	minWidth  = 10
+	maxWidth  = 100
+)
 
 // SelectionMsg is sent when a completion is selected.
 type SelectionMsg struct {
@@ -96,6 +103,7 @@ func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
 // SetFiles sets the file items on the completions popup.
 func (c *Completions) SetFiles(files []string) {
 	items := make([]list.FilterableItem, 0, len(files))
+	width := 0
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
 		item := NewCompletionItem(
@@ -105,6 +113,8 @@ func (c *Completions) SetFiles(files []string) {
 			c.selectedStyle,
 			c.matchStyle,
 		)
+
+		width = max(width, ansi.StringWidth(file))
 		items = append(items, item)
 	}
 
@@ -114,9 +124,8 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SetFilter("") // Clear any previous filter.
 	c.list.Focus()
 
-	// Calculate width based on longest item.
-	c.width = c.calculateWidth(items)
-	c.height = max(min(maxCompletionsHeight, len(items)), 1)
+	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
 	c.list.SetSelected(0)
 }
@@ -143,7 +152,12 @@ func (c *Completions) Filter(query string) {
 	c.list.SetFilter(query)
 
 	items := c.list.VisibleItems()
-	c.height = max(min(maxCompletionsHeight, len(items)), 1)
+	width := 0
+	for _, item := range items {
+		width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+	}
+	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
 	c.list.SetSelected(0)
 	c.list.ScrollToSelected()
@@ -254,15 +268,4 @@ func (c *Completions) Render() string {
 	}
 
 	return c.list.Render()
-}
-
-// calculateWidth calculates the width based on items.
-func (c *Completions) calculateWidth(items []list.FilterableItem) int {
-	var width int
-	count := min(len(items), 10)
-	for i := len(items) - 1; i >= 0 && i >= len(items)-count; i-- {
-		itemWidth := lipgloss.Width(items[i].(*CompletionItem).Text()) + 2
-		width = max(width, itemWidth)
-	}
-	return max(width, 20)
 }

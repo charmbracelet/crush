@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -103,6 +104,12 @@ type UI struct {
 	readyPlaceholder   string
 	workingPlaceholder string
 
+	// Completions state
+	completions           *completions.Completions
+	completionsOpen       bool
+	completionsStartIndex int
+	completionsQuery      string
+
 	// Chat components
 	chat *Chat
 
@@ -133,14 +140,23 @@ func New(com *common.Common) *UI {
 
 	ch := NewChat(com)
 
+	// Completions component
+	comp := completions.New(
+		com.Styles.Completions.Normal,
+		com.Styles.Completions.Selected,
+		com.Styles.Completions.Match,
+		com.Styles.Completions.Bg,
+	)
+
 	ui := &UI{
-		com:      com,
-		dialog:   dialog.NewOverlay(),
-		keyMap:   DefaultKeyMap(),
-		focus:    uiFocusNone,
-		state:    uiConfigure,
-		textarea: ta,
-		chat:     ch,
+		com:         com,
+		dialog:      dialog.NewOverlay(),
+		keyMap:      DefaultKeyMap(),
+		focus:       uiFocusNone,
+		state:       uiConfigure,
+		textarea:    ta,
+		chat:        ch,
+		completions: comp,
 	}
 
 	status := NewStatus(com, ui)
@@ -246,6 +262,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
+		m.completions.SetWindowSize(msg.Width, msg.Height)
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -335,6 +352,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case completions.SelectionMsg:
+		// Handle file completion selection.
+		if item, ok := msg.Value.(completions.FileCompletionValue); ok {
+			m.insertFileCompletion(item.Path)
+		}
+		if !msg.Insert {
+			m.closeCompletions()
+		}
+	case completions.FilesLoadedMsg:
+		// Handle async file loading for completions.
+		if m.completionsOpen {
+			m.completions.SetFiles(msg.Files, msg.X, msg.Y)
+		}
+	case completions.ClosedMsg:
+		m.completionsOpen = false
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -775,6 +807,23 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding, uiChatCompact:
 		switch m.focus {
 		case uiFocusEditor:
+			// Handle completions if open.
+			if m.completionsOpen {
+				if cmd := m.completions.Update(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+					return tea.Batch(cmds...)
+				}
+				// If completions handled the key, don't pass to textarea.
+				if key.Matches(msg, m.completions.KeyMap().Up,
+					m.completions.KeyMap().Down,
+					m.completions.KeyMap().Select,
+					m.completions.KeyMap().Cancel,
+					m.completions.KeyMap().UpInsert,
+					m.completions.KeyMap().DownInsert) {
+					return tea.Batch(cmds...)
+				}
+			}
+
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
@@ -823,15 +872,62 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
+				m.closeCompletions()
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
 					break
 				}
 
+				// Check for @ trigger before passing to textarea.
+				curValue := m.textarea.Value()
+				curIdx := len(curValue)
+
+				// Trigger completions on @.
+				if msg.String() == "@" && !m.completionsOpen {
+					// Only show if beginning of prompt or after whitespace.
+					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
+						m.completionsOpen = true
+						m.completionsQuery = ""
+						m.completionsStartIndex = curIdx
+						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+						x, y := m.completionsPosition()
+						cmds = append(cmds, m.completions.OpenWithFiles(x, y, depth, limit))
+					}
+				}
+
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+
+				// After updating textarea, check if we need to filter completions.
+				// Skip filtering on the initial @ keystroke since items are loading async.
+				if m.completionsOpen && msg.String() != "@" {
+					newValue := m.textarea.Value()
+					newIdx := len(newValue)
+
+					// Close completions if cursor moved before start.
+					if newIdx <= m.completionsStartIndex {
+						m.closeCompletions()
+					} else if msg.String() == "space" || newValue == "" {
+						// Close on space or empty.
+						m.closeCompletions()
+					} else {
+						// Extract current word and filter.
+						word := m.textareaWord()
+						if strings.HasPrefix(word, "@") {
+							m.completionsQuery = word[1:]
+							x, y := m.completionsPosition()
+							x -= len(m.completionsQuery)
+							m.completions.Filter(m.completionsQuery, x, y)
+							if !m.completions.HasItems() {
+								m.closeCompletions()
+							}
+						} else if m.completionsOpen {
+							m.closeCompletions()
+						}
+					}
+				}
 			}
 		case uiFocusMain:
 			switch {
@@ -981,6 +1077,24 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Add status and help layer
 	m.status.Draw(scr, layout.status)
+
+	// Draw completions popup if open
+	if m.completionsOpen && m.completions.HasItems() {
+		x, y := m.completions.Position()
+		h := m.completions.Height()
+
+		// Ensure popup doesn't extend into the editor area.
+		maxBottom := m.layout.editor.Min.Y
+		if y+h > maxBottom {
+			y = maxBottom - h
+		}
+
+		completionsView := uv.NewStyledString(m.completions.Render())
+		completionsView.Draw(scr, image.Rectangle{
+			Min: image.Pt(x, y),
+			Max: image.Pt(x+m.completions.Width(), y+h),
+		})
+	}
 
 	// Debugging rendering (visually see when the tui rerenders)
 	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
@@ -1484,6 +1598,77 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.EditorPromptYoloDotsFocused.Render()
 	}
 	return t.EditorPromptYoloDotsBlurred.Render()
+}
+
+// closeCompletions closes the completions popup and resets state.
+func (m *UI) closeCompletions() {
+	m.completionsOpen = false
+	m.completionsQuery = ""
+	m.completionsStartIndex = 0
+	m.completions.Close()
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) {
+	value := m.textarea.Value()
+	word := m.textareaWord()
+
+	// Find the @ and query to replace.
+	if m.completionsStartIndex > len(value) {
+		return
+	}
+
+	// Build the new value: everything before @, the path, everything after query.
+	endIdx := m.completionsStartIndex + len(word)
+	if endIdx > len(value) {
+		endIdx = len(value)
+	}
+
+	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	m.textarea.SetValue(newValue)
+	// XXX: This will always move the cursor to the end of the textarea.
+	m.textarea.MoveToEnd()
+
+	// Add file as attachment.
+	content, err := os.ReadFile(path)
+	if err != nil {
+		// If it fails, let the LLM handle it later.
+		return
+	}
+
+	m.attachments = append(m.attachments, message.Attachment{
+		FilePath: path,
+		FileName: filepath.Base(path),
+		MimeType: mimeOf(content),
+		Content:  content,
+	})
+}
+
+// completionsPosition returns the X and Y position for the completions popup.
+func (m *UI) completionsPosition() (int, int) {
+	cur := m.textarea.Cursor()
+	if cur == nil {
+		return m.layout.editor.Min.X, m.layout.editor.Min.Y + 1
+	}
+	// Add 2 to Y to position popup closer to cursor (it renders above).
+	return cur.X + m.layout.editor.Min.X, m.layout.editor.Min.Y + cur.Y + 2
+}
+
+// textareaWord returns the current word at the cursor position.
+func (m *UI) textareaWord() string {
+	return m.textarea.Word()
+}
+
+// isWhitespace returns true if the byte is a whitespace character.
+func isWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// mimeOf detects the MIME type of the given content.
+func mimeOf(content []byte) string {
+	mimeBufferSize := min(512, len(content))
+	return http.DetectContentType(content[:mimeBufferSize])
 }
 
 var readyPlaceholders = [...]string{

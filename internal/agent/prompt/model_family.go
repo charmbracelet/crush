@@ -1,4 +1,4 @@
-package agent
+package prompt
 
 import "strings"
 

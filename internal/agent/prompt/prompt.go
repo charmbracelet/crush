@@ -24,13 +24,13 @@ type Prompt struct {
 	now         func() time.Time
 	platform    string
 	workingDir  string
-	modelFamily string
+	modelFamily ModelFamily
 }
 
 type PromptDat struct {
 	Provider      string
 	Model         string
-	ModelFamily   string
+	ModelFamily   ModelFamily
 	Config        config.Config
 	WorkingDir    string
 	IsGitRepo     bool
@@ -66,7 +66,7 @@ func WithWorkingDir(workingDir string) Option {
 	}
 }
 
-func WithModelFamily(modelFamily string) Option {
+func WithModelFamily(modelFamily ModelFamily) Option {
 	return func(p *Prompt) {
 		p.modelFamily = modelFamily
 	}

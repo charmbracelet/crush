@@ -18,8 +18,7 @@ var taskPromptTmpl []byte
 var initializePromptTmpl []byte
 
 func coderPrompt(modelName string, opts ...prompt.Option) (*prompt.Prompt, error) {
-	family := DetectModelFamily(modelName)
-	opts = append(opts, prompt.WithModelFamily(string(family)))
+	opts = append(opts, prompt.WithModelFamily(prompt.DetectModelFamily(modelName)))
 	return prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
 }
 

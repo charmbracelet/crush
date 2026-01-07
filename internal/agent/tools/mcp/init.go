@@ -188,12 +188,12 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			updateTools(name, tools)
+			toolCount := updateTools(name, tools)
 			updatePrompts(name, prompts)
 			sessions.Set(name, session)
 
 			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   len(tools),
+				Tools:   toolCount,
 				Prompts: len(prompts),
 			})
 		}(name, m)

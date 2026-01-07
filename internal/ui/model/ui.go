@@ -809,17 +809,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusEditor:
 			// Handle completions if open.
 			if m.completionsOpen {
-				if cmd := m.completions.Update(msg); cmd != nil {
+				if cmd, ok := m.completions.Update(msg); ok {
 					cmds = append(cmds, cmd)
-					return tea.Batch(cmds...)
-				}
-				// If completions handled the key, don't pass to textarea.
-				if key.Matches(msg, m.completions.KeyMap().Up,
-					m.completions.KeyMap().Down,
-					m.completions.KeyMap().Select,
-					m.completions.KeyMap().Cancel,
-					m.completions.KeyMap().UpInsert,
-					m.completions.KeyMap().DownInsert) {
 					return tea.Batch(cmds...)
 				}
 			}

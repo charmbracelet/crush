@@ -80,8 +80,8 @@ func (c *Completions) SetWindowSize(width, height int) {
 	c.wHeight = height
 }
 
-// Open returns whether the completions popup is open.
-func (c *Completions) Open() bool {
+// IsOpen returns whether the completions popup is open.
+func (c *Completions) IsOpen() bool {
 	return c.open
 }
 
@@ -190,36 +190,36 @@ func (c *Completions) HasItems() bool {
 }
 
 // Update handles key events for the completions.
-func (c *Completions) Update(msg tea.KeyPressMsg) tea.Cmd {
+func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if !c.open {
-		return nil
+		return nil, false
 	}
 
 	switch {
 	case key.Matches(msg, c.keyMap.Up):
 		c.selectPrev()
-		return nil
+		return nil, true
 
 	case key.Matches(msg, c.keyMap.Down):
 		c.selectNext()
-		return nil
+		return nil, true
 
 	case key.Matches(msg, c.keyMap.UpInsert):
 		c.selectPrev()
-		return c.selectCurrent(true)
+		return c.selectCurrent(true), true
 
 	case key.Matches(msg, c.keyMap.DownInsert):
 		c.selectNext()
-		return c.selectCurrent(true)
+		return c.selectCurrent(true), true
 
 	case key.Matches(msg, c.keyMap.Select):
-		return c.selectCurrent(false)
+		return c.selectCurrent(false), true
 
 	case key.Matches(msg, c.keyMap.Cancel):
-		return c.Close()
+		return c.Close(), true
 	}
 
-	return nil
+	return nil, false
 }
 
 // selectPrev selects the previous item with circular navigation.

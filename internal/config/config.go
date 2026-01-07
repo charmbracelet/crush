@@ -526,6 +526,8 @@ func (c *Config) RemoveConfigField(key string) error {
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
+// It uses file locking to prevent race conditions when multiple instances
+// try to refresh the token simultaneously.
 func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	providerConfig, exists := c.Providers.Get(providerID)
 	if !exists {
@@ -536,6 +538,39 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
+	// Acquire file lock to prevent concurrent token refresh.
+	// This is important when multiple crush instances are running (e.g., in tmux).
+	lockPath := filepath.Join(os.TempDir(), fmt.Sprintf("crush-oauth-%s.lock", providerID))
+	unlock, err := c.acquireOAuthLock(lockPath)
+	if err != nil {
+		// Log the error but continue with refresh attempt.
+		// It's better to try refreshing than to fail completely.
+		slog.Warn("Failed to acquire OAuth lock, proceeding without lock", "provider", providerID, "error", err)
+	} else {
+		defer unlock()
+	}
+
+	// After acquiring the lock, re-read the token from disk.
+	// Another instance might have already refreshed it.
+	freshToken, err := c.readFreshOAuthTokenFromDisk(providerID)
+	if err != nil {
+		slog.Debug("Could not read fresh token from disk", "provider", providerID, "error", err)
+	} else if freshToken != nil && !freshToken.IsExpired() {
+		// Another instance has already refreshed the token, use it.
+		slog.Info("Using token refreshed by another instance", "provider", providerID)
+		providerConfig.OAuthToken = freshToken
+		providerConfig.APIKey = freshToken.AccessToken
+
+		switch providerID {
+		case string(catwalk.InferenceProviderCopilot):
+			providerConfig.SetupGitHubCopilot()
+		}
+
+		c.Providers.Set(providerID, providerConfig)
+		return nil
+	}
+
+	// Proceed with token refresh.
 	var newToken *oauth.Token
 	var refreshErr error
 	switch providerID {
@@ -567,6 +602,80 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
+
+	return nil
+}
+
+// acquireOAuthLock acquires an exclusive file lock for OAuth token refresh.
+// Returns an unlock function that should be deferred, or an error if the lock
+// could not be acquired within the timeout.
+func (c *Config) acquireOAuthLock(lockPath string) (unlock func(), err error) {
+	const lockTimeout = 30 * time.Second
+	const retryInterval = 100 * time.Millisecond
+
+	deadline := time.Now().Add(lockTimeout)
+
+	for {
+		// Try to create the lock file exclusively.
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			// Successfully acquired the lock.
+			f.Close()
+			return func() {
+				if removeErr := os.Remove(lockPath); removeErr != nil {
+					slog.Debug("Failed to remove lock file", "path", lockPath, "error", removeErr)
+				}
+			}, nil
+		}
+
+		// Check if we've exceeded the timeout.
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timeout waiting for OAuth lock: %w", err)
+		}
+
+		// Wait before retrying.
+		time.Sleep(retryInterval)
+	}
+}
+
+// readFreshOAuthTokenFromDisk reads the OAuth token for the given provider
+// directly from the config file on disk. This is used to check if another
+// instance has already refreshed the token.
+func (c *Config) readFreshOAuthTokenFromDisk(providerID string) (*oauth.Token, error) {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Read the oauth token from the config file using gjson.
+	oauthPath := fmt.Sprintf("providers.%s.oauth", providerID)
+	result := gjson.Get(string(data), oauthPath)
+	if !result.Exists() {
+		return nil, fmt.Errorf("oauth token not found in config")
+	}
+
+	// Parse the token.
+	var token oauth.Token
+	if err := parseJSONToken(result.Raw, &token); err != nil {
+		return nil, fmt.Errorf("failed to parse oauth token: %w", err)
+	}
+
+	// Calculate ExpiresIn if ExpiresAt is set.
+	if token.ExpiresAt > 0 {
+		token.SetExpiresIn()
+	}
+
+	return &token, nil
+}
+
+// parseJSONToken parses a JSON string into an oauth.Token.
+func parseJSONToken(jsonStr string, token *oauth.Token) error {
+	result := gjson.Parse(jsonStr)
+
+	token.AccessToken = result.Get("access_token").String()
+	token.RefreshToken = result.Get("refresh_token").String()
+	token.ExpiresIn = int(result.Get("expires_in").Int())
+	token.ExpiresAt = result.Get("expires_at").Int()
 
 	return nil
 }

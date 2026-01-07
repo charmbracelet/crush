@@ -29,7 +29,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
@@ -337,9 +336,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
-	case claude.ValidationCompletedMsg,
-		claude.AuthenticationCompleteMsg,
-		hyper.DeviceFlowCompletedMsg,
+	case hyper.DeviceFlowCompletedMsg,
 		hyper.DeviceAuthInitiatedMsg,
 		hyper.DeviceFlowErrorMsg,
 		copilot.DeviceAuthInitiatedMsg,
@@ -1037,53 +1034,8 @@ func (p *chatPage) Help() help.KeyMap {
 	var shortList []key.Binding
 	var fullList [][]key.Binding
 	switch {
-	case p.isOnboarding && p.splash.IsShowingClaudeAuthMethodChooser():
-		shortList = append(shortList,
-			// Choose auth method
-			key.NewBinding(
-				key.WithKeys("left", "right", "tab"),
-				key.WithHelp("←→/tab", "choose"),
-			),
-			// Accept selection
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "accept"),
-			),
-			// Go back
-			key.NewBinding(
-				key.WithKeys("esc", "alt+esc"),
-				key.WithHelp("esc", "back"),
-			),
-			// Quit
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
-		)
-		// keep them the same
-		for _, v := range shortList {
-			fullList = append(fullList, []key.Binding{v})
-		}
-	case p.isOnboarding && p.splash.IsShowingClaudeOAuth2():
+	case p.isOnboarding:
 		switch {
-		case p.splash.IsClaudeOAuthURLState():
-			shortList = append(shortList,
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "open"),
-				),
-				key.NewBinding(
-					key.WithKeys("c"),
-					key.WithHelp("c", "copy url"),
-				),
-			)
-		case p.splash.IsClaudeOAuthComplete():
-			shortList = append(shortList,
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "continue"),
-				),
-			)
 		case p.splash.IsShowingHyperOAuth2() || p.splash.IsShowingCopilotOAuth2():
 			shortList = append(shortList,
 				key.NewBinding(

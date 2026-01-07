@@ -202,11 +202,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
-			prepared.SetupClaudeCode()
-		case p.ID == catwalk.InferenceProviderCopilot:
-			if config.OAuthToken != nil {
-				prepared.SetupGitHubCopilot()
-			}
+			// Claude Code subscription is not supported anymore. Remove to show onboarding.
+			c.RemoveConfigField("providers.anthropic")
+			c.Providers.Del(string(p.ID))
+			continue
+		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
+			prepared.SetupGitHubCopilot()
 		}
 
 		switch p.ID {

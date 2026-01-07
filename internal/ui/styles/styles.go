@@ -43,6 +43,9 @@ const (
 	TodoCompletedIcon  string = "✓"
 	TodoPendingIcon    string = "•"
 	TodoInProgressIcon string = "→"
+
+	ImageIcon = "■"
+	TextIcon  = "≡"
 )
 
 const (
@@ -336,6 +339,14 @@ type Styles struct {
 		Normal  lipgloss.Style
 		Focused lipgloss.Style
 		Match   lipgloss.Style
+	}
+
+	// Attachments styles
+	Attachments struct {
+		Normal   lipgloss.Style
+		Image    lipgloss.Style
+		Text     lipgloss.Style
+		Deleting lipgloss.Style
 	}
 }
 
@@ -1171,6 +1182,13 @@ func DefaultStyles() Styles {
 	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
 	s.Completions.Focused = base.Background(primary).Foreground(white)
 	s.Completions.Match = base.Underline(true)
+
+	// Attachments styles
+	iconBase := base.Foreground(bgSubtle).Background(green).Padding(0, 1)
+	s.Attachments.Image = iconBase.SetString(ImageIcon)
+	s.Attachments.Text = iconBase.SetString(TextIcon)
+	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
+	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
 
 	return s
 }

@@ -56,11 +56,10 @@ type Completions struct {
 	normalStyle   lipgloss.Style
 	selectedStyle lipgloss.Style
 	matchStyle    lipgloss.Style
-	bgStyle       lipgloss.Style
 }
 
 // New creates a new completions component.
-func New(normalStyle, selectedStyle, matchStyle, bgStyle lipgloss.Style) *Completions {
+func New(normalStyle, selectedStyle, matchStyle lipgloss.Style) *Completions {
 	l := list.NewFilterableList()
 	l.SetGap(0)
 
@@ -70,7 +69,6 @@ func New(normalStyle, selectedStyle, matchStyle, bgStyle lipgloss.Style) *Comple
 		normalStyle:   normalStyle,
 		selectedStyle: selectedStyle,
 		matchStyle:    matchStyle,
-		bgStyle:       bgStyle,
 	}
 }
 

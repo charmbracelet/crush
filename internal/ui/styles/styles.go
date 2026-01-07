@@ -336,7 +336,6 @@ type Styles struct {
 		Normal   lipgloss.Style
 		Selected lipgloss.Style
 		Match    lipgloss.Style
-		Bg       lipgloss.Style
 	}
 }
 
@@ -1172,7 +1171,6 @@ func DefaultStyles() Styles {
 	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
 	s.Completions.Selected = base.Background(primary).Foreground(white)
 	s.Completions.Match = base.Foreground(secondary).Bold(true)
-	s.Completions.Bg = base.Background(bgSubtle)
 
 	return s
 }

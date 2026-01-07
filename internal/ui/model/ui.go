@@ -145,7 +145,6 @@ func New(com *common.Common) *UI {
 		com.Styles.Completions.Normal,
 		com.Styles.Completions.Selected,
 		com.Styles.Completions.Match,
-		com.Styles.Completions.Bg,
 	)
 
 	ui := &UI{

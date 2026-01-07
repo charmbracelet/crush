@@ -36,6 +36,9 @@ yay -S crush-bin
 
 # Nix
 nix run github:numtide/nix-ai-tools#crush
+
+# FreeBSD
+pkg install crush
 ```
 
 Windows users:
@@ -52,9 +55,9 @@ scoop install crush
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
 
-Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
+Crush is available via the offical Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
 
-You can also try out Crush via `nix-shell`:
+You can also try out Crush via the NUR with `nix-shell`:
 
 ```bash
 # Add the NUR channel.

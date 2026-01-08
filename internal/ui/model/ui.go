@@ -1387,6 +1387,9 @@ func (m *UI) generateLayout(w, h int) layout {
 
 	// Add app margins
 	appRect, helpRect := uv.SplitVertical(area, uv.Fixed(area.Dy()-helpHeight))
+	appRect.Min.Y += 1
+	appRect.Max.Y -= 1
+	helpRect.Min.Y -= 1
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 

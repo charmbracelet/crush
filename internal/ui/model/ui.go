@@ -369,21 +369,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-	case completions.SelectionMsg:
-		// Handle file completion selection.
-		if item, ok := msg.Value.(completions.FileCompletionValue); ok {
-			cmds = append(cmds, m.insertFileCompletion(item.Path))
-		}
-		if !msg.Insert {
-			cmds = append(cmds, m.closeCompletions)
-		}
-	case completions.FilesLoadedMsg:
-		// Handle async file loading for completions.
-		if m.completionsOpen {
-			m.completions.SetFiles(msg.Files)
-		}
-	case completions.ClosedMsg:
-		m.completionsOpen = false
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -830,8 +815,19 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusEditor:
 			// Handle completions if open.
 			if m.completionsOpen {
-				if cmd, ok := m.completions.Update(msg); ok {
-					cmds = append(cmds, cmd)
+				if msg, ok := m.completions.Update(msg); ok {
+					switch msg := msg.(type) {
+					case completions.SelectionMsg:
+						// Handle file completion selection.
+						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
+							cmds = append(cmds, m.insertFileCompletion(item.Path))
+						}
+						if !msg.Insert {
+							m.closeCompletions()
+						}
+					case completions.ClosedMsg:
+						m.completionsOpen = false
+					}
 					return tea.Batch(cmds...)
 				}
 			}
@@ -843,9 +839,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
-				if strings.HasSuffix(value, "\\") {
+				if before, ok := strings.CutSuffix(value, "\\"); ok {
 					// If the last character is a backslash, remove it and add a newline.
-					m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
+					m.textarea.SetValue(before)
 					break
 				}
 
@@ -888,7 +884,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
-				cmds = append(cmds, m.closeCompletions)
+				m.closeCompletions()
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -908,7 +904,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+						m.completions.OpenWithFiles(depth, limit)
 					}
 				}
 
@@ -924,10 +920,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 					// Close completions if cursor moved before start.
 					if newIdx <= m.completionsStartIndex {
-						cmds = append(cmds, m.closeCompletions)
+						m.closeCompletions()
 					} else if msg.String() == "space" {
 						// Close on space.
-						cmds = append(cmds, m.closeCompletions)
+						m.closeCompletions()
 					} else {
 						// Extract current word and filter.
 						word := m.textareaWord()
@@ -935,7 +931,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 							m.completionsQuery = word[1:]
 							m.completions.Filter(m.completionsQuery)
 						} else if m.completionsOpen {
-							cmds = append(cmds, m.closeCompletions)
+							m.closeCompletions()
 						}
 					}
 				}
@@ -1632,11 +1628,11 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 }
 
 // closeCompletions closes the completions popup and resets state.
-func (m *UI) closeCompletions() tea.Msg {
+func (m *UI) closeCompletions() {
 	m.completionsOpen = false
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
-	return m.completions.Close()
+	m.completions.Close()
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,

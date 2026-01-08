@@ -140,7 +140,9 @@ func (s *Session) Update(msg tea.Msg) tea.Msg {
 			s.list.SetFilter(value)
 			s.list.ScrollToTop()
 			s.list.SetSelected(0)
-			return cmd
+			if cmd != nil {
+				return cmd()
+			}
 		}
 	}
 	return nil

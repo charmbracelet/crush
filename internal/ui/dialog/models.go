@@ -222,7 +222,9 @@ func (m *Models) Update(msg tea.Msg) tea.Msg {
 			value := m.input.Value()
 			m.list.SetFilter(value)
 			m.list.ScrollToSelected()
-			return cmd
+			if cmd != nil {
+				return cmd()
+			}
 		}
 	}
 	return nil

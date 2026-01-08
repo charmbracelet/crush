@@ -29,11 +29,6 @@ type SelectionMsg struct {
 // ClosedMsg is sent when the completions are closed.
 type ClosedMsg struct{}
 
-// FilesLoadedMsg is sent when files have been loaded for completions.
-type FilesLoadedMsg struct {
-	Files []string
-}
-
 // Completions represents the completions popup component.
 type Completions struct {
 	// Popup dimensions
@@ -93,12 +88,10 @@ func (c *Completions) KeyMap() KeyMap {
 }
 
 // OpenWithFiles opens the completions with file items from the filesystem.
-func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
-	return func() tea.Msg {
-		files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
-		slices.Sort(files)
-		return FilesLoadedMsg{Files: files}
-	}
+func (c *Completions) OpenWithFiles(depth, limit int) {
+	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+	slices.Sort(files)
+	c.SetFiles(files)
 }
 
 // SetFiles sets the file items on the completions popup.
@@ -133,11 +126,8 @@ func (c *Completions) SetFiles(files []string) {
 }
 
 // Close closes the completions popup.
-func (c *Completions) Close() tea.Cmd {
+func (c *Completions) Close() {
 	c.open = false
-	return func() tea.Msg {
-		return ClosedMsg{}
-	}
 }
 
 // Filter filters the completions with the given query.
@@ -171,7 +161,7 @@ func (c *Completions) HasItems() bool {
 }
 
 // Update handles key events for the completions.
-func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 	if !c.open {
 		return nil, false
 	}
@@ -197,7 +187,8 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return c.selectCurrent(false), true
 
 	case key.Matches(msg, c.keyMap.Cancel):
-		return c.Close(), true
+		c.Close()
+		return ClosedMsg{}, true
 	}
 
 	return nil, false
@@ -228,7 +219,7 @@ func (c *Completions) selectNext() {
 }
 
 // selectCurrent returns a command with the currently selected item.
-func (c *Completions) selectCurrent(insert bool) tea.Cmd {
+func (c *Completions) selectCurrent(insert bool) tea.Msg {
 	items := c.list.VisibleItems()
 	if len(items) == 0 {
 		return nil
@@ -248,11 +239,9 @@ func (c *Completions) selectCurrent(insert bool) tea.Cmd {
 		c.open = false
 	}
 
-	return func() tea.Msg {
-		return SelectionMsg{
-			Value:  item.Value(),
-			Insert: insert,
-		}
+	return SelectionMsg{
+		Value:  item.Value(),
+		Insert: insert,
 	}
 }
 

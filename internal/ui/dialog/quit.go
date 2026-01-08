@@ -90,6 +90,11 @@ func (q *Quit) Update(msg tea.Msg) tea.Msg {
 	return nil
 }
 
+// SetWindowSize implements [Dialog]. Quit dialog has fixed size.
+func (q *Quit) SetWindowSize(width, height int) {
+	// Fixed size dialog, no resize needed.
+}
+
 // View implements [Dialog].
 func (q *Quit) View() string {
 	const question = "Are you sure you want to quit?"

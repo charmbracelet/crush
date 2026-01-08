@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -64,6 +65,8 @@ type openEditorMsg struct {
 	Text string
 }
 
+type cancelTimerExpiredMsg struct{}
+
 // UI represents the main user interface model.
 type UI struct {
 	com          *common.Common
@@ -83,6 +86,9 @@ type UI struct {
 
 	dialog *dialog.Overlay
 	status *Status
+
+	// isCanceling tracks whether the user has pressed escape once to cancel.
+	isCanceling bool
 
 	// header is the last cached header logo
 	header string
@@ -236,6 +242,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case pubsub.Event[permission.PermissionRequest]:
+		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case pubsub.Event[permission.PermissionNotification]:
+		m.handlePermissionNotification(msg.Payload)
+	case cancelTimerExpiredMsg:
+		m.isCanceling = false
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -304,6 +318,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.HandleMouseUp(x, y)
 		}
 	case tea.MouseWheelMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+
+		// Otherwise handle mouse wheel for chat.
 		switch m.state {
 		case uiChat:
 			switch msg.Button {
@@ -761,9 +782,29 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
 			cmds = append(cmds, uiutil.ReportInfo(modelMsg))
 			m.dialog.CloseDialog(dialog.ModelsID)
+		case dialog.PermissionResponseMsg:
+			m.dialog.CloseDialog(dialog.PermissionsID)
+			switch msg.Action {
+			case dialog.PermissionAllow:
+				m.com.App.Permissions.Grant(msg.Permission)
+			case dialog.PermissionAllowForSession:
+				m.com.App.Permissions.GrantPersistent(msg.Permission)
+			case dialog.PermissionDeny:
+				m.com.App.Permissions.Deny(msg.Permission)
+			}
 		}
 
 		return tea.Batch(cmds...)
+	}
+
+	// Handle cancel key when agent is busy.
+	if key.Matches(msg, m.keyMap.Chat.Cancel) {
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			if cmd := m.cancel(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
 	}
 
 	switch m.state {
@@ -1076,6 +1117,23 @@ func (m *UI) ShortHelp() []key.Binding {
 	case uiInitialize:
 		binds = append(binds, k.Quit)
 	case uiChat:
+		// Show cancel binding if agent is busy.
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cancelBinding := k.Chat.Cancel
+			if m.isCanceling {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc", "alt+esc"),
+					key.WithHelp("esc", "press again to cancel"),
+				)
+			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc", "alt+esc"),
+					key.WithHelp("esc", "clear queue"),
+				)
+			}
+			binds = append(binds, cancelBinding)
+		}
+
 		if m.focus == uiFocusEditor {
 			tab.SetHelp("tab", "focus chat")
 		} else {
@@ -1141,6 +1199,23 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Quit,
 			})
 	case uiChat:
+		// Show cancel binding if agent is busy.
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cancelBinding := k.Chat.Cancel
+			if m.isCanceling {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc", "alt+esc"),
+					key.WithHelp("esc", "press again to cancel"),
+				)
+			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
+				cancelBinding = key.NewBinding(
+					key.WithKeys("esc", "alt+esc"),
+					key.WithHelp("esc", "clear queue"),
+				)
+			}
+			binds = append(binds, []key.Binding{cancelBinding})
+		}
+
 		mainBinds := []key.Binding{}
 		tab := k.Tab
 		if m.focus == uiFocusEditor {
@@ -1246,6 +1321,9 @@ func (m *UI) updateSize() {
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.textarea.SetHeight(m.layout.editor.Dy())
+
+	// Resize active dialogs.
+	m.dialog.ResizeAll(m.width, m.height)
 
 	// Handle different app states
 	switch m.state {
@@ -1561,6 +1639,46 @@ func (m *UI) sendMessage(content string, attachments []message.Attachment) tea.C
 	return tea.Batch(cmds...)
 }
 
+const cancelTimerDuration = 2 * time.Second
+
+// cancelTimerCmd creates a command that expires the cancel timer.
+func cancelTimerCmd() tea.Cmd {
+	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
+		return cancelTimerExpiredMsg{}
+	})
+}
+
+// cancel handles the cancel key press. The first press sets isCanceling to true
+// and starts a timer. The second press (before the timer expires) actually
+// cancels the agent.
+func (m *UI) cancel() tea.Cmd {
+	if m.session == nil || m.session.ID == "" {
+		return nil
+	}
+
+	coordinator := m.com.App.AgentCoordinator
+	if coordinator == nil {
+		return nil
+	}
+
+	if m.isCanceling {
+		// Second escape press - actually cancel the agent.
+		m.isCanceling = false
+		coordinator.Cancel(m.session.ID)
+		return nil
+	}
+
+	// Check if there are queued prompts - if so, clear the queue.
+	if coordinator.QueuedPrompts(m.session.ID) > 0 {
+		coordinator.ClearQueue(m.session.ID)
+		return nil
+	}
+
+	// First escape press - set canceling state and start timer.
+	m.isCanceling = true
+	return cancelTimerCmd()
+}
+
 // openQuitDialog opens the quit confirmation dialog.
 func (m *UI) openQuitDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.QuitID) {
@@ -1587,7 +1705,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	modelsDialog.SetSize(min(60, m.width-8), 30)
+	modelsDialog.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(modelsDialog)
 
 	return nil
@@ -1611,8 +1729,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	// TODO: Get. Rid. Of. Magic numbers!
-	commands.SetSize(min(120, m.width-8), 30)
+	commands.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(commands)
 
 	return nil
@@ -1638,11 +1755,44 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	// TODO: Get. Rid. Of. Magic numbers!
-	dialog.SetSize(min(120, m.width-8), 30)
+	dialog.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(dialog)
 
 	return nil
+}
+
+// openPermissionsDialog opens the permissions dialog for a permission request.
+func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
+	// Close any existing permissions dialog first.
+	m.dialog.CloseDialog(dialog.PermissionsID)
+
+	// Get diff mode from config.
+	var opts []dialog.PermissionsOption
+	if diffMode := m.com.Config().Options.TUI.DiffMode; diffMode != "" {
+		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
+	}
+
+	permDialog := dialog.NewPermissions(m.com, perm, opts...)
+	permDialog.SetWindowSize(m.width, m.height)
+
+	m.dialog.OpenDialog(permDialog)
+	return nil
+}
+
+// handlePermissionNotification updates tool items when permission state changes.
+func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
+	toolItem := m.chat.MessageItem(notification.ToolCallID)
+	if toolItem == nil {
+		return
+	}
+
+	if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
+		if notification.Granted {
+			permItem.SetStatus(chat.ToolStatusRunning)
+		} else {
+			permItem.SetStatus(chat.ToolStatusAwaitingPermission)
+		}
+	}
 }
 
 // newSession clears the current session state and prepares for a new session.

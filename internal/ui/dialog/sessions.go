@@ -79,8 +79,11 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	return s, nil
 }
 
-// SetSize sets the size of the dialog.
-func (s *Session) SetSize(width, height int) {
+// SetWindowSize implements [Dialog].
+func (s *Session) SetWindowSize(windowWidth, windowHeight int) {
+	width := min(120, windowWidth-8)
+	height := 30
+
 	t := s.com.Styles
 	s.width = width
 	s.height = height

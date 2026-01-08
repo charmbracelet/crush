@@ -109,8 +109,11 @@ func NewCommands(com *common.Common, sessionID string) (*Commands, error) {
 	return c, nil
 }
 
-// SetSize sets the size of the dialog.
-func (c *Commands) SetSize(width, height int) {
+// SetWindowSize implements [Dialog].
+func (c *Commands) SetWindowSize(windowWidth, windowHeight int) {
+	width := min(120, windowWidth-8)
+	height := 30
+
 	t := c.com.Styles
 	c.width = width
 	c.height = height
@@ -406,7 +409,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 		cfg := c.com.Config()
 		agentCfg := cfg.Agents[config.AgentCoder]
 		model := cfg.GetModelByType(agentCfg.Model)
-		if model.SupportsImages {
+		if model != nil && model.SupportsImages {
 			commands = append(commands, uicmd.Command{
 				ID:          "file_picker",
 				Title:       "Open File Picker",

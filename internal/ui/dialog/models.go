@@ -147,8 +147,11 @@ func NewModels(com *common.Common) (*Models, error) {
 	return m, nil
 }
 
-// SetSize sets the size of the dialog.
-func (m *Models) SetSize(width, height int) {
+// SetWindowSize implements [Dialog].
+func (m *Models) SetWindowSize(windowWidth, windowHeight int) {
+	width := min(120, windowWidth-8)
+	height := 30
+
 	t := m.com.Styles
 	m.width = width
 	m.height = height

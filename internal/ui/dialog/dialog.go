@@ -19,6 +19,9 @@ type Dialog interface {
 	ID() string
 	Update(msg tea.Msg) tea.Msg
 	View() string
+	// SetWindowSize updates the dialog's size based on the terminal window size.
+	// Dialogs decide their own dimensions internally based on their content needs.
+	SetWindowSize(width, height int)
 }
 
 // Overlay manages multiple dialogs as an overlay.
@@ -114,6 +117,13 @@ func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	}
 
 	return dialog.Update(msg)
+}
+
+// ResizeAll updates the window size for all active dialogs.
+func (d *Overlay) ResizeAll(width, height int) {
+	for _, dialog := range d.dialogs {
+		dialog.SetWindowSize(width, height)
+	}
 }
 
 // CenterPosition calculates the centered position for the dialog.

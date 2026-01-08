@@ -165,22 +165,14 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	result, originalErr := run()
 
 	if c.isUnauthorized(originalErr) {
-		switch {
-		case providerCfg.OAuthToken != nil:
-			slog.Info("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-			if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
-				return nil, originalErr
-			}
-			slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
-			return run()
-		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
-			slog.Info("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
-			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
-				return nil, originalErr
-			}
-			slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
-			return run()
+		// Try to refresh credentials: OAuth tokens or dynamic API keys
+		slog.Info("Received 401. Attempting to refresh credentials and retrying", "provider", providerCfg.ID)
+		if err := c.refreshCredentials(ctx, providerCfg); err != nil {
+			slog.Error("Failed to refresh credentials after 401 error", "provider", providerCfg.ID, "error", err)
+			return nil, originalErr
 		}
+		slog.Info("Retrying request with refreshed credentials", "provider", providerCfg.ID)
+		return run()
 	}
 
 	return result, originalErr
@@ -834,6 +826,47 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+}
+
+func (c *coordinator) refreshCredentials(ctx context.Context, providerCfg config.ProviderConfig) error {
+	// Check if we have OAuth tokens to refresh
+	hasOAuthToken := providerCfg.OAuthToken != nil
+	if !hasOAuthToken && len(providerCfg.Credentials) > 0 {
+		for _, cred := range providerCfg.Credentials {
+			if cred.OAuthToken != nil {
+				hasOAuthToken = true
+				break
+			}
+		}
+	}
+
+	if hasOAuthToken {
+		// Try to refresh OAuth token
+		if err := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); err != nil {
+			// OAuth refresh failed, but try API key template as fallback
+			if strings.Contains(providerCfg.APIKeyTemplate, "$") {
+				slog.Info("OAuth refresh failed, trying API key template refresh", "provider", providerCfg.ID)
+				return c.refreshApiKeyTemplate(ctx, providerCfg)
+			}
+			return err
+		}
+		// Reload provider config after OAuth refresh
+		if refreshedCfg, ok := c.cfg.Providers.Get(providerCfg.ID); ok {
+			providerCfg = refreshedCfg
+		}
+		if err := c.UpdateModels(ctx); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// If no OAuth token, try to refresh API key template
+	if strings.Contains(providerCfg.APIKeyTemplate, "$") {
+		return c.refreshApiKeyTemplate(ctx, providerCfg)
+	}
+
+	// No refreshable credentials
+	return fmt.Errorf("unable to refresh credentials for provider %s: no OAuth token or dynamic API key", providerCfg.ID)
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {

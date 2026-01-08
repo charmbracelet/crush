@@ -34,6 +34,9 @@ type Client struct {
 	client *powernap.Client
 	name   string
 
+	// Working directory this LSP is scoped to.
+	workDir string
+
 	// File types this LSP server handles (e.g., .go, .rs, .py)
 	fileTypes []string
 
@@ -133,6 +136,7 @@ func (c *Client) createPowernapClient() error {
 	}
 
 	rootURI := string(protocol.URIFromPath(workDir))
+	c.workDir = workDir
 
 	command, err := c.resolver.ResolveValue(c.config.Command)
 	if err != nil {
@@ -305,9 +309,22 @@ type OpenFileInfo struct {
 	URI     protocol.DocumentURI
 }
 
-// HandlesFile checks if this LSP client handles the given file based on its extension.
+// HandlesFile checks if this LSP client handles the given file based on its
+// extension and whether it's within the working directory.
 func (c *Client) HandlesFile(path string) bool {
-	// If no file types are specified, handle all files (backward compatibility)
+	// Check if file is within working directory.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		slog.Debug("cannot resolve path", "name", c.name, "file", path, "error", err)
+		return false
+	}
+	relPath, err := filepath.Rel(c.workDir, absPath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		slog.Debug("file outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
+		return false
+	}
+
+	// If no file types are specified, handle all files (backward compatibility).
 	if len(c.fileTypes) == 0 {
 		return true
 	}

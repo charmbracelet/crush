@@ -107,7 +107,28 @@ func (a appModel) Init() tea.Cmd {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
 
+	// Handle initial prompt if set.
+	// We use a delayed command to ensure the TUI is fully initialized before sending.
+	if a.app.HasInitialPrompt() {
+		cmds = append(cmds, a.sendInitialPrompt())
+	}
+
 	return tea.Batch(cmds...)
+}
+
+// InitialPromptMsg is sent when an initial prompt should be processed.
+type InitialPromptMsg struct {
+	Prompt string
+}
+
+// sendInitialPrompt creates a command that sends the initial prompt after a short delay.
+// This ensures the TUI is fully rendered before the prompt is processed.
+func (a *appModel) sendInitialPrompt() tea.Cmd {
+	prompt := a.app.InitialPrompt()
+	a.app.ClearInitialPrompt()
+	return func() tea.Msg {
+		return InitialPromptMsg{Prompt: prompt}
+	}
 }
 
 // Update handles incoming messages and updates the application state.
@@ -117,6 +138,20 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.isConfigured = config.HasInitialDataConfig()
 
 	switch msg := msg.(type) {
+	case InitialPromptMsg:
+		// Handle initial prompt by forwarding to the chat page as a SendMsg.
+		// Only process if the app is configured and the prompt is not empty.
+		if a.isConfigured && msg.Prompt != "" {
+			item, ok := a.pages[a.currentPage]
+			if ok {
+				// Forward the initial prompt as a SendMsg to the chat page
+				sendMsg := cmpChat.SendMsg{Text: msg.Prompt}
+				updated, pageCmd := item.Update(sendMsg)
+				a.pages[a.currentPage] = updated
+				return a, pageCmd
+			}
+		}
+		return a, nil
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !a.sendProgressBar {

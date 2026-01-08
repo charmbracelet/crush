@@ -40,7 +40,7 @@ type TodosToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "To-Do", opts.Anim)
 	}
 
@@ -119,7 +119,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	toolParams := []string{headerText}
-	header := toolHeader(sty, opts.Status(), "To-Do", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "To-Do", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}

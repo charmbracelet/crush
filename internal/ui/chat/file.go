@@ -38,7 +38,7 @@ type ViewToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "View", opts.Anim)
 	}
 
@@ -56,7 +56,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status(), "View", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "View", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -118,7 +118,7 @@ type WriteToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Write", opts.Anim)
 	}
 
@@ -128,7 +128,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status(), "Write", cappedWidth, opts.Compact, file)
+	header := toolHeader(sty, opts.Status, "Write", cappedWidth, opts.Compact, file)
 	if opts.Compact {
 		return header
 	}
@@ -173,7 +173,7 @@ type EditToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Edit tool uses full width for diffs.
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Edit", opts.Anim)
 	}
 
@@ -183,7 +183,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status(), "Edit", width, opts.Compact, file)
+	header := toolHeader(sty, opts.Status, "Edit", width, opts.Compact, file)
 	if opts.Compact {
 		return header
 	}
@@ -236,7 +236,7 @@ type MultiEditToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// MultiEdit tool uses full width for diffs.
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Multi-Edit", opts.Anim)
 	}
 
@@ -251,7 +251,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
 	}
 
-	header := toolHeader(sty, opts.Status(), "Multi-Edit", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Multi-Edit", width, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -304,7 +304,7 @@ type DownloadToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Download", opts.Anim)
 	}
 
@@ -321,7 +321,7 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status(), "Download", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Download", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}

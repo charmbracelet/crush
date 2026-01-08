@@ -35,7 +35,7 @@ type FetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Fetch", opts.Anim)
 	}
 
@@ -52,7 +52,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status(), "Fetch", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Fetch", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -110,7 +110,7 @@ type WebFetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Fetch", opts.Anim)
 	}
 
@@ -120,7 +120,7 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 	}
 
 	toolParams := []string{params.URL}
-	header := toolHeader(sty, opts.Status(), "Fetch", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Fetch", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -164,7 +164,7 @@ type WebSearchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
 		return pendingTool(sty, "Search", opts.Anim)
 	}
 
@@ -174,7 +174,7 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	toolParams := []string{params.Query}
-	header := toolHeader(sty, opts.Status(), "Search", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Search", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}

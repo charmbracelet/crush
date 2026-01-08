@@ -47,14 +47,14 @@ func NewAgentToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return state.Result == nil && !state.Canceled
+		return state.Result == nil && state.Status != ToolStatusCanceled
 	}
 	return t
 }
 
 // Animate progresses the message animation if it should be spinning.
 func (a *AgentToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if a.result != nil || a.canceled {
+	if a.result != nil || a.Status() == ToolStatusCanceled {
 		return nil
 	}
 	if msg.ID == a.ID() {
@@ -100,7 +100,7 @@ type AgentToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled && len(r.agent.nestedTools) == 0 {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled && len(r.agent.nestedTools) == 0 {
 		return pendingTool(sty, "Agent", opts.Anim)
 	}
 
@@ -110,7 +110,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := toolHeader(sty, opts.Status(), "Agent", cappedWidth, opts.Compact)
+	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts.Compact)
 	if opts.Compact {
 		return header
 	}
@@ -149,7 +149,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
 
 	// Show animation if still running.
-	if opts.Result == nil && !opts.Canceled {
+	if opts.Result == nil && opts.Status != ToolStatusCanceled {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
@@ -191,7 +191,7 @@ func NewAgenticFetchToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: t}, canceled)
 	// For the agentic fetch tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return state.Result == nil && !state.Canceled
+		return state.Result == nil && state.Status != ToolStatusCanceled
 	}
 	return t
 }
@@ -231,7 +231,7 @@ type agenticFetchParams struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.Canceled && len(r.fetch.nestedTools) == 0 {
+	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled && len(r.fetch.nestedTools) == 0 {
 		return pendingTool(sty, "Agentic Fetch", opts.Anim)
 	}
 
@@ -247,7 +247,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
-	header := toolHeader(sty, opts.Status(), "Agentic Fetch", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -286,7 +286,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, promptTagWidth-5)).String())
 
 	// Show animation if still running.
-	if opts.Result == nil && !opts.Canceled {
+	if opts.Result == nil && opts.Status != ToolStatusCanceled {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 

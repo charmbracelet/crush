@@ -2,6 +2,7 @@ package dialog
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -25,6 +26,7 @@ type ActionSelectSession struct {
 
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
+	Provider  catwalk.Provider
 	Model     config.SelectedModel
 	ModelType config.SelectedModelType
 }
@@ -43,6 +45,13 @@ type (
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
+	}
+)
+
+// Messages for API key input dialog.
+type (
+	ActionChangeAPIKeyState struct {
+		State APIKeyInputState
 	}
 )
 

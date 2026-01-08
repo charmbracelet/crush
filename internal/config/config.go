@@ -63,6 +63,14 @@ const (
 	AgentTask  string = "task"
 )
 
+type ProviderCredential struct {
+	Name       string       `json:"name,omitempty" jsonschema:"description=Unique identifier for this credential,example=work"`
+	APIKey     string       `json:"api_key,omitempty" jsonschema:"description=API key for this credential,example=$OPENAI_API_KEY"`
+	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for this credential"`
+	Default    bool         `json:"default,omitempty" jsonschema:"description=Whether this is the default credential for the provider,default=false"`
+	CreatedAt  int64        `json:"created_at,omitempty" jsonschema:"description=Unix timestamp when this credential was created"`
+}
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -70,6 +78,8 @@ type SelectedModel struct {
 	// The model provider, same as the key/id used in the providers config.
 	// Required.
 	Provider string `json:"provider" jsonschema:"required,description=The model provider ID that matches a key in the providers config,example=openai"`
+	// The credential name to use for this provider. If not specified, the default credential is used.
+	Credential string `json:"credential,omitempty" jsonschema:"description=Credential name to use for this provider,example=work"`
 
 	// Only used by models that use the openai provider and need this set.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
@@ -98,11 +108,13 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,enum=openai,enum=openai-compat,enum=anthropic,enum=gemini,enum=azure,enum=vertexai,default=openai"`
-	// The provider's API key.
+	// Multiple credentials for this provider. If empty, legacy api_key/oauth fields are used.
+	Credentials []ProviderCredential `json:"credentials,omitempty" jsonschema:"description=Multiple credentials for this provider"`
+	// The provider's API key (legacy field, migrated to credentials if empty).
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).
 	APIKeyTemplate string `json:"-"`
-	// OAuthToken for providers that use OAuth2 authentication.
+	// OAuthToken for providers that use OAuth2 authentication (legacy field, migrated to credentials if empty).
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.
 	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
@@ -152,6 +164,52 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	}
 
 	return provider
+}
+
+func (pc *ProviderConfig) MigrateCredentials() {
+	if len(pc.Credentials) > 0 {
+		return
+	}
+	if pc.APIKey == "" && pc.OAuthToken == nil {
+		return
+	}
+
+	cred := ProviderCredential{
+		Name:       "default",
+		APIKey:     pc.APIKey,
+		OAuthToken: pc.OAuthToken,
+		Default:    true,
+		CreatedAt:  time.Now().Unix(),
+	}
+	pc.Credentials = []ProviderCredential{cred}
+}
+
+func (pc *ProviderConfig) ResolveCredential(credentialName string, resolver VariableResolver) (apiKey string, oauthToken *oauth.Token, err error) {
+	if credentialName != "" {
+		for _, cred := range pc.Credentials {
+			if cred.Name == credentialName {
+				if cred.OAuthToken != nil {
+					return "", cred.OAuthToken, nil
+				}
+				resolved, _ := resolver.ResolveValue(cred.APIKey)
+				return resolved, nil, nil
+			}
+		}
+		return "", nil, fmt.Errorf("credential %s not found for provider %s", credentialName, pc.ID)
+	}
+
+	for _, cred := range pc.Credentials {
+		if cred.Default {
+			if cred.OAuthToken != nil {
+				return "", cred.OAuthToken, nil
+			}
+			resolved, _ := resolver.ResolveValue(cred.APIKey)
+			return resolved, nil, nil
+		}
+	}
+
+	resolved, _ := resolver.ResolveValue(pc.APIKey)
+	return resolved, pc.OAuthToken, nil
 }
 
 func (pc *ProviderConfig) SetupGitHubCopilot() {

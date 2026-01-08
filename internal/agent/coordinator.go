@@ -715,7 +715,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		headers = make(map[string]string)
 	}
 
-	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
@@ -724,7 +723,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
+	apiKey, oauthToken, _ := providerCfg.ResolveCredential(model.Credential, c.cfg.Resolver())
+	if oauthToken != nil {
+		apiKey = oauthToken.AccessToken
+	}
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.Type {

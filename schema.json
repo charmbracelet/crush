@@ -462,6 +462,39 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "ProviderCredential": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for this credential",
+          "examples": [
+            "work"
+          ]
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key for this credential",
+          "examples": [
+            "$OPENAI_API_KEY"
+          ]
+        },
+        "oauth": {
+          "$ref": "#/$defs/Token",
+          "description": "OAuth2 token for this credential"
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether this is the default credential for the provider",
+          "default": false
+        },
+        "created_at": {
+          "type": "integer",
+          "description": "Unix timestamp when this credential was created"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ProviderConfig": {
       "properties": {
         "id": {
@@ -498,6 +531,13 @@
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"
+        },
+        "credentials": {
+          "items": {
+            "$ref": "#/$defs/ProviderCredential"
+          },
+          "type": "array",
+          "description": "Multiple credentials for this provider"
         },
         "api_key": {
           "type": "string",
@@ -559,6 +599,13 @@
           "description": "The model provider ID that matches a key in the providers config",
           "examples": [
             "openai"
+          ]
+        },
+        "credential": {
+          "type": "string",
+          "description": "Credential name to use for this provider",
+          "examples": [
+            "work"
           ]
         },
         "reasoning_effort": {

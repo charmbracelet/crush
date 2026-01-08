@@ -27,13 +27,16 @@ type APIKeyStateChangeMsg struct {
 }
 
 type APIKeyInput struct {
-	input        textinput.Model
-	width        int
-	spinner      spinner.Model
-	providerName string
-	state        APIKeyInputState
-	title        string
-	showTitle    bool
+	input              textinput.Model
+	credentialNameInput textinput.Model
+	width              int
+	spinner            spinner.Model
+	providerName       string
+	state              APIKeyInputState
+	title              string
+	showTitle          bool
+	showCredentialName bool
+	focusedField       int // 0 = API key, 1 = credential name
 }
 
 func NewAPIKeyInput() *APIKeyInput {
@@ -46,15 +49,24 @@ func NewAPIKeyInput() *APIKeyInput {
 	ti.SetStyles(t.S().TextInput)
 	ti.Focus()
 
+	credentialNameInput := textinput.New()
+	credentialNameInput.Placeholder = "default"
+	credentialNameInput.SetVirtualCursor(false)
+	credentialNameInput.Prompt = "> "
+	credentialNameInput.SetStyles(t.S().TextInput)
+
 	return &APIKeyInput{
-		input: ti,
-		state: APIKeyInputStateInitial,
+		input:               ti,
+		credentialNameInput: credentialNameInput,
+		state:               APIKeyInputStateInitial,
 		spinner: spinner.New(
 			spinner.WithSpinner(spinner.Dot),
 			spinner.WithStyle(t.S().Base.Foreground(t.Green)),
 		),
-		providerName: "Provider",
-		showTitle:    true,
+		providerName:       "Provider",
+		showTitle:          true,
+		showCredentialName: true,
+		focusedField:       0,
 	}
 }
 
@@ -94,10 +106,27 @@ func (a *APIKeyInput) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		a.updateStatePresentation()
 		return a, cmd
+	case tea.KeyMsg:
+		// Tab to switch between fields
+		if msg.String() == "tab" {
+			a.focusedField = 1 - a.focusedField
+			if a.focusedField == 0 {
+				a.input.Focus()
+				a.credentialNameInput.Blur()
+			} else {
+				a.input.Blur()
+				a.credentialNameInput.Focus()
+			}
+			return a, nil
+		}
 	}
 
 	var cmd tea.Cmd
-	a.input, cmd = a.input.Update(msg)
+	if a.focusedField == 0 {
+		a.input, cmd = a.input.Update(msg)
+	} else {
+		a.credentialNameInput, cmd = a.credentialNameInput.Update(msg)
+	}
 	return a, cmd
 }
 
@@ -144,28 +173,64 @@ func (a *APIKeyInput) updateStatePresentation() {
 func (a *APIKeyInput) View() string {
 	inputView := a.input.View()
 
-	dataPath := config.GlobalConfigData()
-	dataPath = home.Short(dataPath)
-	helpText := styles.CurrentTheme().S().Muted.
-		Render(fmt.Sprintf("This will be written to the global configuration: %s", dataPath))
-
+	t := styles.CurrentTheme()
 	var content string
-	if a.showTitle && a.title != "" {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			a.title,
-			"",
-			inputView,
-			"",
-			helpText,
-		)
+
+	if a.showCredentialName && a.state == APIKeyInputStateInitial {
+		credentialNameView := a.credentialNameInput.View()
+		credentialLabel := t.S().Subtle.Render("Credential name (optional)")
+
+		dataPath := config.GlobalConfigData()
+		dataPath = home.Short(dataPath)
+		helpText := styles.CurrentTheme().S().Muted.
+			Render(fmt.Sprintf("This will be written to the global configuration: %s", dataPath))
+
+		if a.showTitle && a.title != "" {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				a.title,
+				"",
+				inputView,
+				"",
+				credentialLabel,
+				credentialNameView,
+				"",
+				helpText,
+			)
+		} else {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				inputView,
+				"",
+				credentialLabel,
+				credentialNameView,
+				"",
+				helpText,
+			)
+		}
 	} else {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			inputView,
-			"",
-			helpText,
-		)
+		dataPath := config.GlobalConfigData()
+		dataPath = home.Short(dataPath)
+		helpText := styles.CurrentTheme().S().Muted.
+			Render(fmt.Sprintf("This will be written to the global configuration: %s", dataPath))
+
+		if a.showTitle && a.title != "" {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				a.title,
+				"",
+				inputView,
+				"",
+				helpText,
+			)
+		} else {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				inputView,
+				"",
+				helpText,
+			)
+		}
 	}
 
 	return content
@@ -183,6 +248,14 @@ func (a *APIKeyInput) Value() string {
 	return a.input.Value()
 }
 
+func (a *APIKeyInput) CredentialName() string {
+	name := a.credentialNameInput.Value()
+	if name == "" {
+		return "default"
+	}
+	return name
+}
+
 func (a *APIKeyInput) Tick() tea.Cmd {
 	if a.state == APIKeyInputStateVerifying {
 		return a.spinner.Tick
@@ -198,6 +271,8 @@ func (a *APIKeyInput) SetWidth(width int) {
 func (a *APIKeyInput) Reset() {
 	a.state = APIKeyInputStateInitial
 	a.input.SetValue("")
+	a.credentialNameInput.SetValue("")
 	a.input.Focus()
+	a.focusedField = 0
 	a.updateStatePresentation()
 }

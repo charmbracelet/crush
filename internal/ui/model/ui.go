@@ -1924,6 +1924,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			if err != nil {
 				return uiutil.ReportError(err)
 			}
+			if int64(len(content)) > maxAttachmentSize {
+				return uiutil.ReportWarn("Paste is too big (>5mb)")
+			}
 			mimeBufferSize := min(512, len(content))
 			mimeType := http.DetectContentType(content[:mimeBufferSize])
 			fileName := filepath.Base(path)

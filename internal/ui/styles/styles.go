@@ -333,9 +333,9 @@ type Styles struct {
 
 	// Completions popup styles
 	Completions struct {
-		Normal   lipgloss.Style
-		Selected lipgloss.Style
-		Match    lipgloss.Style
+		Normal  lipgloss.Style
+		Focused lipgloss.Style
+		Match   lipgloss.Style
 	}
 }
 
@@ -1169,8 +1169,8 @@ func DefaultStyles() Styles {
 
 	// Completions styles
 	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
-	s.Completions.Selected = base.Background(primary).Foreground(white)
-	s.Completions.Match = base.Foreground(secondary).Bold(true)
+	s.Completions.Focused = base.Background(primary).Foreground(white)
+	s.Completions.Match = base.Underline(true)
 
 	return s
 }

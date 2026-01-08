@@ -15,25 +15,26 @@ type FileCompletionValue struct {
 
 // CompletionItem represents an item in the completions list.
 type CompletionItem struct {
-	text     string
-	value    any
-	match    fuzzy.Match
-	selected bool
+	text    string
+	value   any
+	match   fuzzy.Match
+	focused bool
+	cache   map[int]string
 
 	// Styles
-	normalStyle   lipgloss.Style
-	selectedStyle lipgloss.Style
-	matchStyle    lipgloss.Style
+	normalStyle  lipgloss.Style
+	focusedStyle lipgloss.Style
+	matchStyle   lipgloss.Style
 }
 
 // NewCompletionItem creates a new completion item.
-func NewCompletionItem(text string, value any, normalStyle, selectedStyle, matchStyle lipgloss.Style) *CompletionItem {
+func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchStyle lipgloss.Style) *CompletionItem {
 	return &CompletionItem{
-		text:          text,
-		value:         value,
-		normalStyle:   normalStyle,
-		selectedStyle: selectedStyle,
-		matchStyle:    matchStyle,
+		text:         text,
+		value:        value,
+		normalStyle:  normalStyle,
+		focusedStyle: focusedStyle,
+		matchStyle:   matchStyle,
 	}
 }
 
@@ -54,47 +55,79 @@ func (c *CompletionItem) Filter() string {
 
 // SetMatch implements [list.MatchSettable].
 func (c *CompletionItem) SetMatch(m fuzzy.Match) {
+	c.cache = nil
 	c.match = m
 }
 
 // SetFocused implements [list.Focusable].
 func (c *CompletionItem) SetFocused(focused bool) {
-	c.selected = focused
+	if c.focused != focused {
+		c.cache = nil
+	}
+	c.focused = focused
 }
 
 // Render implements [list.Item].
 func (c *CompletionItem) Render(width int) string {
-	innerWidth := width - 2 // Account for padding
-	text := c.text
+	return renderItem(
+		c.normalStyle,
+		c.focusedStyle,
+		c.matchStyle,
+		c.text,
+		c.focused,
+		width,
+		c.cache,
+		&c.match,
+	)
+}
 
+func renderItem(
+	normalStyle, focusedStyle, matchStyle lipgloss.Style,
+	text string,
+	focused bool,
+	width int,
+	cache map[int]string,
+	match *fuzzy.Match,
+) string {
+	if cache == nil {
+		cache = make(map[int]string)
+	}
+
+	cached, ok := cache[width]
+	if ok {
+		return cached
+	}
+
+	innerWidth := width - 2 // Account for padding
 	// Truncate if needed.
 	if ansi.StringWidth(text) > innerWidth {
 		text = ansi.Truncate(text, innerWidth, "…")
 	}
 
 	// Select base style.
-	style := c.normalStyle
-	matchStyle := c.matchStyle.Background(style.GetBackground())
-	if c.selected {
-		style = c.selectedStyle
-		matchStyle = c.matchStyle.Background(style.GetBackground())
+	style := normalStyle
+	matchStyle = matchStyle.Background(style.GetBackground())
+	if focused {
+		style = focusedStyle
+		matchStyle = matchStyle.Background(style.GetBackground())
 	}
 
 	// Render full-width text with background.
-	rendered := style.Padding(0, 1).Width(width).Render(text)
+	content := style.Padding(0, 1).Width(width).Render(text)
 
 	// Apply match highlighting using StyleRanges.
-	if len(c.match.MatchedIndexes) > 0 {
+	if len(match.MatchedIndexes) > 0 {
 		var ranges []lipgloss.Range
-		for _, rng := range matchedRanges(c.match.MatchedIndexes) {
+		for _, rng := range matchedRanges(match.MatchedIndexes) {
 			start, stop := bytePosToVisibleCharPos(text, rng)
 			// Offset by 1 for the padding space.
 			ranges = append(ranges, lipgloss.NewRange(start+1, stop+2, matchStyle))
 		}
-		rendered = lipgloss.StyleRanges(rendered, ranges...)
+		content = lipgloss.StyleRanges(content, ranges...)
 	}
 
-	return rendered
+	cache[width] = content
+	return content
 }
 
 // matchedRanges converts a list of match indexes into contiguous ranges.

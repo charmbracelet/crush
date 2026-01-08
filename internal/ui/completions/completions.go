@@ -51,22 +51,22 @@ type Completions struct {
 	list *list.FilterableList
 
 	// Styling
-	normalStyle   lipgloss.Style
-	selectedStyle lipgloss.Style
-	matchStyle    lipgloss.Style
+	normalStyle  lipgloss.Style
+	focusedStyle lipgloss.Style
+	matchStyle   lipgloss.Style
 }
 
 // New creates a new completions component.
-func New(normalStyle, selectedStyle, matchStyle lipgloss.Style) *Completions {
+func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
 	l := list.NewFilterableList()
 	l.SetGap(0)
 
 	return &Completions{
-		keyMap:        DefaultKeyMap(),
-		list:          l,
-		normalStyle:   normalStyle,
-		selectedStyle: selectedStyle,
-		matchStyle:    matchStyle,
+		keyMap:       DefaultKeyMap(),
+		list:         l,
+		normalStyle:  normalStyle,
+		focusedStyle: focusedStyle,
+		matchStyle:   matchStyle,
 	}
 }
 
@@ -110,7 +110,7 @@ func (c *Completions) SetFiles(files []string) {
 			file,
 			FileCompletionValue{Path: file},
 			c.normalStyle,
-			c.selectedStyle,
+			c.focusedStyle,
 			c.matchStyle,
 		)
 

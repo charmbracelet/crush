@@ -144,7 +144,7 @@ func New(com *common.Common) *UI {
 	// Completions component
 	comp := completions.New(
 		com.Styles.Completions.Normal,
-		com.Styles.Completions.Selected,
+		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
 	)
 

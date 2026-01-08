@@ -44,6 +44,9 @@ import (
 // Max file size set to 5M.
 const maxAttachmentSize = int64(5 * 1024 * 1024)
 
+// Allowed image formats.
+var allowedImageTypes = []string{".jpg", ".jpeg", ".png"}
+
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
 
@@ -1919,10 +1922,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 
 	// Check if file has an allowed image extension.
-	allowedTypes := []string{".jpg", ".jpeg", ".png"}
 	isAllowedType := false
 	lowerPath := strings.ToLower(path)
-	for _, ext := range allowedTypes {
+	for _, ext := range allowedImageTypes {
 		if strings.HasSuffix(lowerPath, ext) {
 			isAllowedType = true
 			break

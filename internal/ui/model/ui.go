@@ -1641,7 +1641,6 @@ func (m *UI) completionsPosition() image.Point {
 			Y: m.layout.editor.Min.Y,
 		}
 	}
-	// Add 2 to Y to position popup closer to cursor (it renders above).
 	return image.Point{
 		X: cur.X + m.layout.editor.Min.X,
 		Y: m.layout.editor.Min.Y + cur.Y,

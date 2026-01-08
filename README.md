@@ -68,8 +68,13 @@ Or per-command with `NIXPKGS_ALLOW_UNFREE=1 nix run ... --impure`.
 ### Install Imperatively
 
 ```bash
+# Latest (nightly)
 nix run github:charmbracelet/crush
 nix profile install github:charmbracelet/crush
+
+# Specific release
+nix run github:charmbracelet/crush/v0.31.0
+nix profile install github:charmbracelet/crush/v0.31.0
 ```
 
 ### Flake
@@ -79,8 +84,8 @@ nix profile install github:charmbracelet/crush
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     crush = {
-      url = "github:charmbracelet/crush";
-      inputs.nixpkgs.follows = "nixpkgs"; # recommended
+      url = "github:charmbracelet/crush"; # or /v0.31.0 for a specific release
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 

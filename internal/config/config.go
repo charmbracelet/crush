@@ -192,6 +192,7 @@ func (pc *ProviderConfig) ResolveCredential(credentialName string, resolver Vari
 					return "", cred.OAuthToken, nil
 				}
 				resolved, _ := resolver.ResolveValue(cred.APIKey)
+				pc.APIKeyTemplate = cred.APIKey // Store template for re-resolution on 401
 				return resolved, nil, nil
 			}
 		}
@@ -204,11 +205,13 @@ func (pc *ProviderConfig) ResolveCredential(credentialName string, resolver Vari
 				return "", cred.OAuthToken, nil
 			}
 			resolved, _ := resolver.ResolveValue(cred.APIKey)
+			pc.APIKeyTemplate = cred.APIKey // Store template for re-resolution on 401
 			return resolved, nil, nil
 		}
 	}
 
 	resolved, _ := resolver.ResolveValue(pc.APIKey)
+	pc.APIKeyTemplate = pc.APIKey // Store template for re-resolution on 401
 	return resolved, pc.OAuthToken, nil
 }
 

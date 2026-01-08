@@ -662,6 +662,13 @@ func filepathToFile(name string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if fileInfo.Size() > int64(maxAttachmentSize) {
+		return nil, "", errNotAFile
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", err

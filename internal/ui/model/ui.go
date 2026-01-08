@@ -1932,15 +1932,16 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		// Check file size (max 5MB).
 		const maxAttachmentSize = int64(5 * 1024 * 1024)
 		fileInfo, err := os.Stat(path)
-		if err != nil || fileInfo.Size() > maxAttachmentSize {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return cmd()
+		if err != nil {
+			return uiutil.ReportError(err)
+		}
+		if fileInfo.Size() > maxAttachmentSize {
+			return uiutil.ReportWarn("File is too big (>5mb)")
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			m.textarea, cmd = m.textarea.Update(msg)
-			return cmd()
+			return uiutil.ReportError(err)
 		}
 
 		mimeBufferSize := min(512, len(content))

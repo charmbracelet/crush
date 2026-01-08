@@ -154,10 +154,12 @@ func New(com *common.Common) *UI {
 
 	// Attachments component
 	attachments := attachments.New(
-		com.Styles.Attachments.Normal,
-		com.Styles.Attachments.Deleting,
-		com.Styles.Attachments.Image,
-		com.Styles.Attachments.Text,
+		attachments.NewRenderer(
+			com.Styles.Attachments.Normal,
+			com.Styles.Attachments.Deleting,
+			com.Styles.Attachments.Image,
+			com.Styles.Attachments.Text,
+		),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
 			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
@@ -1054,7 +1056,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.renderEditorView())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 		editor.Draw(scr, layout.editor)
 
 	case uiChat:
@@ -1064,7 +1066,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		header.Draw(scr, layout.header)
 		m.drawSidebar(scr, layout.sidebar)
 
-		editor := uv.NewStyledString(m.renderEditorView())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx() - layout.sidebar.Dx()))
 		editor.Draw(scr, layout.editor)
 
 	case uiChatCompact:
@@ -1078,7 +1080,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		main := uv.NewStyledString(mainView)
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.renderEditorView())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 		editor.Draw(scr, layout.editor)
 	}
 
@@ -1736,13 +1738,13 @@ func (m *UI) randomizePlaceholders() {
 }
 
 // renderEditorView renders the editor view with attachments if any.
-func (m *UI) renderEditorView() string {
+func (m *UI) renderEditorView(width int) string {
 	if len(m.attachments.List()) == 0 {
 		return m.textarea.View()
 	}
 	return lipgloss.JoinVertical(
 		lipgloss.Top,
-		m.attachments.Render(),
+		m.attachments.Render(width),
 		m.textarea.View(),
 	)
 }

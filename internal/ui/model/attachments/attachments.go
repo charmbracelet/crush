@@ -2,8 +2,10 @@ package attachments
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -20,21 +22,18 @@ type Keymap struct {
 	Escape key.Binding
 }
 
-func New(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style, keyMap Keymap) *Attachments {
+func New(renderer *Renderer, keyMap Keymap) *Attachments {
 	return &Attachments{
-		keyMap:        keyMap,
-		normalStyle:   normalStyle,
-		textStyle:     textStyle,
-		imageStyle:    imageStyle,
-		deletingStyle: deletingStyle,
+		keyMap:   keyMap,
+		renderer: renderer,
 	}
 }
 
 type Attachments struct {
-	normalStyle, textStyle, imageStyle, deletingStyle lipgloss.Style
-	keyMap                                            Keymap
-	list                                              []message.Attachment
-	deleting                                          bool
+	renderer *Renderer
+	keyMap   Keymap
+	list     []message.Attachment
+	deleting bool
 }
 
 func (m *Attachments) List() []message.Attachment { return m.list }
@@ -75,37 +74,62 @@ func (m *Attachments) Update(msg tea.Msg) bool {
 	return false
 }
 
-func (m *Attachments) Render() string {
+func (m *Attachments) Render(width int) string {
+	return m.renderer.Render(m.list, m.deleting, width)
+}
+
+func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) *Renderer {
+	return &Renderer{
+		normalStyle:   normalStyle,
+		textStyle:     textStyle,
+		imageStyle:    imageStyle,
+		deletingStyle: deletingStyle,
+	}
+}
+
+type Renderer struct {
+	normalStyle, textStyle, imageStyle, deletingStyle lipgloss.Style
+}
+
+func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width int) string {
 	var chips []string
 
-	for i, att := range m.list {
+	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)))
+	fits := int(math.Floor(float64(width)/float64(maxItemWidth))) - 1
+
+	for i, att := range attachments {
 		filename := filepath.Base(att.FileName)
 		// Truncate if needed.
 		if ansi.StringWidth(filename) > maxFilename {
 			filename = ansi.Truncate(filename, maxFilename, "…")
 		}
 
-		if m.deleting {
+		if deleting {
 			chips = append(
 				chips,
-				m.deletingStyle.Render(fmt.Sprintf("%d", i)),
-				m.normalStyle.Render(filename),
+				r.deletingStyle.Render(fmt.Sprintf("%d", i)),
+				r.normalStyle.Render(filename),
 			)
 		} else {
 			chips = append(
 				chips,
-				m.icon(att).String(),
-				m.normalStyle.Render(filename),
+				r.icon(att).String(),
+				r.normalStyle.Render(filename),
 			)
+		}
+
+		if i == fits && len(attachments) > i {
+			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", len(attachments)-fits)))
+			break
 		}
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, chips...)
 }
 
-func (m *Attachments) icon(a message.Attachment) lipgloss.Style {
+func (r *Renderer) icon(a message.Attachment) lipgloss.Style {
 	if a.IsImage() {
-		return m.imageStyle
+		return r.imageStyle
 	}
-	return m.textStyle
+	return r.textStyle
 }

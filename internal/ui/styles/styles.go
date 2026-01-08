@@ -16,15 +16,14 @@ import (
 )
 
 const (
-	CheckIcon    string = "✓"
-	ErrorIcon    string = "×"
-	WarningIcon  string = "⚠"
-	InfoIcon     string = "ⓘ"
-	HintIcon     string = "∵"
-	SpinnerIcon  string = "..."
-	LoadingIcon  string = "⟳"
-	DocumentIcon string = "🖼"
-	ModelIcon    string = "◇"
+	CheckIcon   string = "✓"
+	ErrorIcon   string = "×"
+	WarningIcon string = "⚠"
+	InfoIcon    string = "ⓘ"
+	HintIcon    string = "∵"
+	SpinnerIcon string = "..."
+	LoadingIcon string = "⟳"
+	ModelIcon   string = "◇"
 
 	ArrowRightIcon string = "→"
 
@@ -211,7 +210,6 @@ type Styles struct {
 			ErrorTag         lipgloss.Style
 			ErrorTitle       lipgloss.Style
 			ErrorDetails     lipgloss.Style
-			Attachment       lipgloss.Style
 			ToolCallFocused  lipgloss.Style
 			ToolCallCompact  lipgloss.Style
 			ToolCallBlurred  lipgloss.Style
@@ -1130,7 +1128,6 @@ func DefaultStyles() Styles {
 	s.Chat.Message.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
 
 	// Message item styles
-	s.Chat.Message.Attachment = lipgloss.NewStyle().MarginLeft(1).Background(bgSubtle)
 	s.Chat.Message.ToolCallFocused = s.Muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).

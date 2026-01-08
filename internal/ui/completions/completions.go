@@ -60,6 +60,7 @@ type Completions struct {
 func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
 	l := list.NewFilterableList()
 	l.SetGap(0)
+	l.SetReverse(true)
 
 	return &Completions{
 		keyMap:       DefaultKeyMap(),
@@ -127,7 +128,8 @@ func (c *Completions) SetFiles(files []string) {
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
-	c.list.SetSelected(0)
+	c.list.SelectFirst()
+	c.list.ScrollToSelected()
 }
 
 // Close closes the completions popup.
@@ -159,7 +161,7 @@ func (c *Completions) Filter(query string) {
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
-	c.list.SetSelected(0)
+	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 }
 
@@ -208,8 +210,7 @@ func (c *Completions) selectPrev() {
 		return
 	}
 	if !c.list.SelectPrev() {
-		// Wrap to last item.
-		c.list.SelectLast()
+		c.list.WrapToEnd()
 	}
 	c.list.ScrollToSelected()
 }
@@ -221,8 +222,7 @@ func (c *Completions) selectNext() {
 		return
 	}
 	if !c.list.SelectNext() {
-		// Wrap to first item.
-		c.list.SelectFirst()
+		c.list.WrapToStart()
 	}
 	c.list.ScrollToSelected()
 }

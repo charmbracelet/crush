@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -1920,19 +1922,16 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// If pasted text has more than 2 newlines, treat it as a file attachment.
 	if strings.Count(msg.Content, "\n") > 2 {
 		return func() tea.Msg {
-			content, path, err := pasteContentToFile([]byte(msg.Content))
-			if err != nil {
-				return uiutil.ReportError(err)
-			}
+			content := []byte(msg.Content)
 			if int64(len(content)) > maxAttachmentSize {
 				return uiutil.ReportWarn("Paste is too big (>5mb)")
 			}
+			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
 			mimeType := http.DetectContentType(content[:mimeBufferSize])
-			fileName := filepath.Base(path)
 			return message.Attachment{
-				FilePath: path,
-				FileName: fileName,
+				FileName: name,
+				FilePath: name,
 				MimeType: mimeType,
 				Content:  content,
 			}
@@ -1988,20 +1987,21 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 }
 
-// pasteContentToFile writes pasted content to a temp file and returns its
-// content and path.
-func pasteContentToFile(content []byte) ([]byte, string, error) {
-	f, err := os.CreateTemp("", "paste_*.txt")
-	if err != nil {
-		return nil, "", err
+var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
+
+func (m *UI) pasteIdx() int {
+	result := 0
+	for _, at := range m.attachments.List() {
+		found := pasteRE.FindStringSubmatch(at.FileName)
+		if len(found) == 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(found[1])
+		if err == nil {
+			result = max(result, idx)
+		}
 	}
-	if _, err := f.Write(content); err != nil {
-		return nil, "", err
-	}
-	if err := f.Close(); err != nil {
-		return nil, "", err
-	}
-	return content, f.Name(), nil
+	return result + 1
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

@@ -908,9 +908,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						if strings.HasPrefix(word, "@") {
 							m.completionsQuery = word[1:]
 							m.completions.Filter(m.completionsQuery)
-							if !m.completions.HasItems() {
-								m.closeCompletions()
-							}
 						} else if m.completionsOpen {
 							m.closeCompletions()
 						}
@@ -1077,6 +1074,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 			x = screenW - w
 		}
 		x = max(0, x)
+		y = max(0, y)
 
 		completionsView := uv.NewStyledString(m.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{

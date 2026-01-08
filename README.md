@@ -34,8 +34,8 @@ npm install -g @charmland/crush
 # Arch Linux (btw)
 yay -S crush-bin
 
-# Nix
-nix run github:numtide/nix-ai-tools#crush
+# Nix (flake)
+nix run github:charmbracelet/crush
 
 # FreeBSD
 pkg install crush
@@ -53,42 +53,59 @@ scoop install crush
 ```
 
 <details>
-<summary><strong>Nix (NUR)</strong></summary>
+<summary><strong>Nix</strong></summary>
 
-Crush is available via the offical Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
+Crush includes a flake with packages, NixOS and Home Manager modules, and a development shell.
 
-You can also try out Crush via the NUR with `nix-shell`:
+Crush is licensed under FSL-1.1-MIT, which Nix considers "unfree". You'll need to allow it:
 
 ```bash
-# Add the NUR channel.
-nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
-nix-channel --update
+# For nix run/build/develop
+export NIXPKGS_ALLOW_UNFREE=1
+nix run github:charmbracelet/crush --impure
 
-# Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
+# Or in your NixOS/Home Manager config
+{ nixpkgs.config.allowUnfree = true; }
 ```
 
-### NixOS & Home Manager Module Usage via NUR
+### Install Imperatively
 
-Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+```bash
+# Run directly
+NIXPKGS_ALLOW_UNFREE=1 nix run github:charmbracelet/crush --impure
+
+# Install to profile
+NIXPKGS_ALLOW_UNFREE=1 nix profile install github:charmbracelet/crush --impure
+```
+
+### Flake
 
 ```nix
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nur.url = "github:nix-community/NUR";
+    crush.url = "github:charmbracelet/crush";
   };
 
-  outputs = { self, nixpkgs, nur, ... }: {
+  outputs = { nixpkgs, crush, ... }: {
+    # NixOS
     nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        nur.modules.nixos.default
-        nur.repos.charmbracelet.modules.crush
+        crush.nixosModules.default
+        { programs.crush.enable = true; }
+      ];
+    };
+
+    # Home Manager (standalone or as NixOS/nix-darwin module)
+    homeConfigurations.your-username = home-manager.lib.homeManagerConfiguration {
+      # ...
+      modules = [
+        crush.homeManagerModules.default
         {
           programs.crush = {
             enable = true;
+            # Optional: declarative config written to ~/.config/crush/config.yaml
             settings = {
               providers = {
                 openai = {
@@ -96,23 +113,13 @@ You can use these modules directly in your flake by importing them from NUR. Sin
                   name = "OpenAI";
                   base_url = "https://api.openai.com/v1";
                   type = "openai";
-                  api_key = "sk-fake123456789abcdef...";
-                  models = [
-                    {
-                      id = "gpt-4";
-                      name = "GPT-4";
-                    }
-                  ];
+                  api_key = "sk-...";
+                  models = [{ id = "gpt-4"; name = "GPT-4"; }];
                 };
               };
               lsp = {
                 go = { command = "gopls"; enabled = true; };
                 nix = { command = "nil"; enabled = true; };
-              };
-              options = {
-                context_paths = [ "/etc/nixos/configuration.nix" ];
-                tui = { compact_mode = true; };
-                debug = false;
               };
             };
           };
@@ -120,6 +127,43 @@ You can use these modules directly in your flake by importing them from NUR. Sin
       ];
     };
   };
+}
+```
+
+You can also use the overlay to add Crush to your pkgs:
+
+```nix
+{ nixpkgs.overlays = [ crush.overlays.default ]; }
+# Then use pkgs.crush anywhere
+```
+
+### Development
+
+```bash
+# Enter a dev shell with Go tooling
+nix develop github:charmbracelet/crush
+```
+
+### NUR (non-flake)
+
+If you don't use flakes, Crush is also available via the official Charm [NUR](https://github.com/nix-community/NUR).
+
+**Imperative:**
+
+```bash
+nix-shell -p '(import (builtins.fetchTarball "https://github.com/nix-community/NUR/archive/master.tar.gz") { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
+```
+
+**Declarative (configuration.nix):**
+
+```nix
+{ pkgs, ... }:
+let
+  nur = import (builtins.fetchTarball "https://github.com/nix-community/NUR/archive/master.tar.gz") {
+    inherit pkgs;
+  };
+in {
+  environment.systemPackages = [ nur.repos.charmbracelet.crush ];
 }
 ```
 

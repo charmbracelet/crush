@@ -57,25 +57,19 @@ scoop install crush
 
 Crush includes a flake with packages, NixOS and Home Manager modules, and a development shell.
 
-Crush is licensed under FSL-1.1-MIT, which Nix considers "unfree". You'll need to allow it:
+Crush is licensed under FSL-1.1-MIT, which Nix considers "unfree". You'll need to allow it in your config:
 
-```bash
-# For nix run/build/develop
-export NIXPKGS_ALLOW_UNFREE=1
-nix run github:charmbracelet/crush --impure
-
-# Or in your NixOS/Home Manager config
+```nix
 { nixpkgs.config.allowUnfree = true; }
 ```
+
+Or per-command with `NIXPKGS_ALLOW_UNFREE=1 nix run ... --impure`.
 
 ### Install Imperatively
 
 ```bash
-# Run directly
-NIXPKGS_ALLOW_UNFREE=1 nix run github:charmbracelet/crush --impure
-
-# Install to profile
-NIXPKGS_ALLOW_UNFREE=1 nix profile install github:charmbracelet/crush --impure
+nix run github:charmbracelet/crush
+nix profile install github:charmbracelet/crush
 ```
 
 ### Flake

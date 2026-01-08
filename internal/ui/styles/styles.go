@@ -1181,9 +1181,9 @@ func DefaultStyles() Styles {
 	s.Completions.Match = base.Underline(true)
 
 	// Attachments styles
-	iconBase := base.Foreground(bgSubtle).Background(green).Padding(0, 1)
-	s.Attachments.Image = iconBase.SetString(ImageIcon)
-	s.Attachments.Text = iconBase.SetString(TextIcon)
+	attachmentIconStyle := base.Foreground(bgSubtle).Background(green).Padding(0, 1)
+	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
+	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
 	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
 

@@ -111,7 +111,7 @@
 
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.system}.default;
+              default = mkCrush pkgs;
               description = "The Crush package to use";
             };
           };
@@ -137,7 +137,7 @@
 
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.system}.default;
+              default = mkCrush pkgs;
               description = "The Crush package to use";
             };
 

@@ -78,7 +78,10 @@ nix profile install github:charmbracelet/crush
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    crush.url = "github:charmbracelet/crush";
+    crush = {
+      url = "github:charmbracelet/crush";
+      inputs.nixpkgs.follows = "nixpkgs"; # recommended
+    };
   };
 
   outputs = { nixpkgs, crush, ... }: {

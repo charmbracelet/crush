@@ -43,7 +43,7 @@
 
           buildFlags = [ "-trimpath" ];
 
-          # Tests require network access to external APIs
+          # VCR cassettes have hardcoded paths that don't match the Nix sandbox
           doCheck = false;
 
           nativeBuildInputs = [ pkgs.installShellFiles ];

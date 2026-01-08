@@ -291,12 +291,6 @@ func (p *Permissions) hasDiffView() bool {
 	return false
 }
 
-// HasDiffView returns true if the permission request is for a tool that
-// shows a diff view (Edit, Write, MultiEdit).
-func (p *Permissions) HasDiffView() bool {
-	return p.hasDiffView()
-}
-
 func (p *Permissions) isSplitMode() bool {
 	if p.diffSplitMode != nil {
 		return *p.diffSplitMode

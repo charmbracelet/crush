@@ -144,15 +144,15 @@
             settings = lib.mkOption {
               type = lib.types.attrs;
               default = { };
-              description = "Configuration written to ~/.config/crush/config.yaml";
+              description = "Configuration written to ~/.config/crush/crush.json";
             };
           };
 
           config = lib.mkIf cfg.enable {
             home.packages = [ cfg.package ];
 
-            xdg.configFile."crush/config.yaml" = lib.mkIf (cfg.settings != { }) {
-              source = (pkgs.formats.yaml { }).generate "crush-config" cfg.settings;
+            xdg.configFile."crush/crush.json" = lib.mkIf (cfg.settings != { }) {
+              source = (pkgs.formats.json { }).generate "crush-config" cfg.settings;
             };
           };
         };

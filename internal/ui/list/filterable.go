@@ -69,7 +69,7 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 func (f *FilterableList) SetFilter(q string) {
 	f.query = q
 	f.List.SetItems(f.VisibleItems()...)
-	f.List.ScrollToTop()
+	f.ScrollToTop()
 }
 
 // FilterableItemsSource is a type that implements [fuzzy.Source] for filtering

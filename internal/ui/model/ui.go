@@ -899,8 +899,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					// Close completions if cursor moved before start.
 					if newIdx <= m.completionsStartIndex {
 						m.closeCompletions()
-					} else if msg.String() == "space" || newValue == "" {
-						// Close on space or empty.
+					} else if msg.String() == "space" {
+						// Close on space.
 						m.closeCompletions()
 					} else {
 						// Extract current word and filter.

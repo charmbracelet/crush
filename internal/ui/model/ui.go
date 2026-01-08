@@ -41,6 +41,9 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 )
 
+// Max file size set to 5M.
+const maxAttachmentSize = int64(5 * 1024 * 1024)
+
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
 
@@ -408,6 +411,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// at this point this can only handle [message.Attachment] message, and we
+	// should return all cmds anyway.
 	_ = m.attachments.Update(msg)
 	return m, tea.Batch(cmds...)
 }
@@ -1929,8 +1934,6 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		// Check file size (max 5MB).
-		const maxAttachmentSize = int64(5 * 1024 * 1024)
 		fileInfo, err := os.Stat(path)
 		if err != nil {
 			return uiutil.ReportError(err)

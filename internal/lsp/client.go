@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,7 @@ type Client struct {
 	// Cached diagnostic counts to avoid map copy on every UI render.
 	diagCountsCache   DiagnosticCounts
 	diagCountsVersion uint64
+	diagCountsMu      sync.Mutex
 
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
@@ -369,6 +371,10 @@ func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic
 // Uses the VersionedMap version to avoid recomputing on every call.
 func (c *Client) GetDiagnosticCounts() DiagnosticCounts {
 	currentVersion := c.diagnostics.Version()
+
+	c.diagCountsMu.Lock()
+	defer c.diagCountsMu.Unlock()
+
 	if currentVersion == c.diagCountsVersion {
 		return c.diagCountsCache
 	}

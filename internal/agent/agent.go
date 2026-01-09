@@ -561,15 +561,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := "Provide a detailed summary of our conversation above."
-	if len(currentSession.Todos) > 0 {
-		summaryPromptText += "\n\n## Current Todo List\n\n"
-		for _, t := range currentSession.Todos {
-			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
-		}
-		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
-		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
-	}
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1100,4 +1092,19 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// buildSummaryPrompt constructs the prompt text for session summarization.
+func buildSummaryPrompt(todos []session.Todo) string {
+	var sb strings.Builder
+	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if len(todos) > 0 {
+		sb.WriteString("\n\n## Current Todo List\n\n")
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	}
+	return sb.String()
 }

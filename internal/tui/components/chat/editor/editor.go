@@ -71,8 +71,6 @@ type editorCmp struct {
 	completionsStartIndex int
 	isCompletionsOpen     bool
 
-	// Paste index counter for naming paste attachments.
-	pasteCounter int
 }
 
 var DeleteKeyMaps = DeleteAttachmentKeyMaps{

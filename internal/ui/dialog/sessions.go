@@ -27,6 +27,7 @@ type Session struct {
 		Select   key.Binding
 		Next     key.Binding
 		Previous key.Binding
+		UpDown   key.Binding
 		Close    key.Binding
 	}
 }
@@ -73,6 +74,10 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.keyMap.Previous = key.NewBinding(
 		key.WithKeys("up", "ctrl+p"),
 		key.WithHelp("↑", "previous item"),
+	)
+	s.keyMap.UpDown = key.NewBinding(
+		key.WithKeys("up", "down"),
+		key.WithHelp("↑↓", "choose"),
 	)
 	s.keyMap.Close = CloseKey
 
@@ -167,12 +172,8 @@ func (s *Session) View() string {
 
 // ShortHelp implements [help.KeyMap].
 func (s *Session) ShortHelp() []key.Binding {
-	updown := key.NewBinding(
-		key.WithKeys("down", "up"),
-		key.WithHelp("↑↓", "choose"),
-	)
 	return []key.Binding{
-		updown,
+		s.keyMap.UpDown,
 		s.keyMap.Select,
 		s.keyMap.Close,
 	}

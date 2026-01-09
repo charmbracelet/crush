@@ -145,7 +145,13 @@ func (m *editorCmp) send() tea.Cmd {
 		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
 	}
 
-	attachments := m.attachments
+	// Filter out attachments whose filenames were removed from the textarea
+	var attachments []message.Attachment
+	for _, att := range m.attachments {
+		if strings.Contains(value, att.FileName) {
+			attachments = append(attachments, att)
+		}
+	}
 
 	if value == "" {
 		return nil
@@ -336,6 +342,18 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
+
+	// Sync attachments: remove any whose filename was deleted from the textarea
+	if len(m.attachments) > 0 {
+		value := m.textarea.Value()
+		var filtered []message.Attachment
+		for _, att := range m.attachments {
+			if strings.Contains(value, att.FileName) {
+				filtered = append(filtered, att)
+			}
+		}
+		m.attachments = filtered
+	}
 
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)

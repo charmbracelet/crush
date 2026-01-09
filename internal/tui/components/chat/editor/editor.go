@@ -146,7 +146,7 @@ func (m *editorCmp) send() tea.Cmd {
 
 	attachments := m.attachments
 
-	if value == "" {
+	if value == "" && len(attachments) == 0 {
 		return nil
 	}
 

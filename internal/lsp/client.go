@@ -350,7 +350,7 @@ func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnos
 
 // GetDiagnostics returns all diagnostics for all files.
 func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
-	return maps.Collect(c.diagnostics.Seq2())
+	return c.diagnostics.Copy()
 }
 
 // OpenFileOnDemand opens a file only if it's not already open.

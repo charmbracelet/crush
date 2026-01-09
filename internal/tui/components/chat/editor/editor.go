@@ -251,7 +251,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				MimeType: mimeType,
 				Content:  content,
 			}
-			m.textarea.InsertString(attachment.FileName)
 			return m, util.CmdHandler(filepicker.FilePickedMsg{
 				Attachment: attachment,
 			})
@@ -279,7 +278,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if !attachment.IsText() && !attachment.IsImage() {
 			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
-		m.textarea.InsertString(attachment.FileName)
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
 			Attachment: attachment,
 		})

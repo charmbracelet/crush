@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/editor"
 )
 
 // Max file size set to 5M.
@@ -1562,16 +1562,6 @@ type layout struct {
 }
 
 func (m *UI) openEditor(value string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		// Use platform-appropriate default editor
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-		} else {
-			editor = "nvim"
-		}
-	}
-
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return uiutil.ReportError(err)
@@ -1580,8 +1570,17 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return uiutil.ReportError(err)
 	}
-	cmdStr := editor + " " + tmpfile.Name()
-	return uiutil.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	cmd, err := editor.Command(
+		"crush",
+		tmpfile.Name(),
+		editor.EndOfLine(),
+		editor.LineNumber(m.textarea.Line()+1),
+		editor.AtPosition(m.textarea.Line()+1, m.textarea.Column()+1),
+	)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return uiutil.ReportError(err)
 		}

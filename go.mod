@@ -3,7 +3,7 @@ module github.com/charmbracelet/crush
 go 1.25.5
 
 require (
-	charm.land/bubbles/v2 v2.0.0-rc.1
+	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e
 	charm.land/fantasy v0.6.0
 	charm.land/glamour/v2 v2.0.0-20251110203732-69649f93d3b1
@@ -181,5 +181,3 @@ require (
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.6-0.20251110073552-01de4eb40290 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
-
-replace charm.land/bubbles/v2 => ../bubbles

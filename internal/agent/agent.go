@@ -134,7 +134,7 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-	if call.Prompt == "" {
+	if call.Prompt == "" && !hasTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
 	if call.SessionID == "" {
@@ -1100,4 +1100,13 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+func hasTextAttachment(attachments []message.Attachment) bool {
+	for _, a := range attachments {
+		if a.IsText() {
+			return true
+		}
+	}
+	return false
 }

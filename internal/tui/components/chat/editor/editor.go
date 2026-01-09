@@ -146,7 +146,7 @@ func (m *editorCmp) send() tea.Cmd {
 
 	attachments := m.attachments
 
-	if value == "" {
+	if value == "" && !hasTextAttachment(attachments) {
 		return nil
 	}
 
@@ -671,4 +671,13 @@ func filepathToFile(name string) ([]byte, string, error) {
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
 	return http.DetectContentType(content[:mimeBufferSize])
+}
+
+func hasTextAttachment(attachments []message.Attachment) bool {
+	for _, a := range attachments {
+		if a.IsText() {
+			return true
+		}
+	}
+	return false
 }

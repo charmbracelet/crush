@@ -38,7 +38,7 @@ type ViewToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "View", opts.Anim)
 	}
 
@@ -118,7 +118,7 @@ type WriteToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Write", opts.Anim)
 	}
 
@@ -173,7 +173,7 @@ type EditToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Edit tool uses full width for diffs.
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Edit", opts.Anim)
 	}
 
@@ -236,7 +236,7 @@ type MultiEditToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// MultiEdit tool uses full width for diffs.
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Multi-Edit", opts.Anim)
 	}
 
@@ -304,7 +304,7 @@ type DownloadToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Download", opts.Anim)
 	}
 
@@ -330,7 +330,7 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 

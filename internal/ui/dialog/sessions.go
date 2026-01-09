@@ -86,18 +86,24 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 
 // SetWindowSize implements [Dialog].
 func (s *Session) SetWindowSize(windowWidth, windowHeight int) {
-	width := min(120, windowWidth-8)
-	height := 30
+	width := min(defaultDialogMaxWidth, windowWidth-fullscreenMargin)
+	height := min(defaultDialogHeight, windowHeight-fullscreenMargin)
 
 	t := s.com.Styles
 	s.width = width
 	s.height = height
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
-	s.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	var promptPadding int
+	if s.input.Focused() {
+		promptPadding = t.TextInput.Focused.Prompt.GetHorizontalFrameSize()
+	} else {
+		promptPadding = t.TextInput.Blurred.Prompt.GetHorizontalFrameSize()
+	}
+	s.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - promptPadding)
 	s.list.SetSize(innerWidth, height-heightOffset)
 	s.help.SetWidth(width)
 

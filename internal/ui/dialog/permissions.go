@@ -28,6 +28,28 @@ const (
 	PermissionDeny            PermissionAction = "deny"
 )
 
+// Permissions dialog sizing constants.
+const (
+	// diffMaxWidth is the maximum width for diff views.
+	diffMaxWidth = 180
+	// diffSizeRatio is the size ratio for diff views relative to window.
+	diffSizeRatio = 0.8
+	// simpleMaxWidth is the maximum width for simple content dialogs.
+	simpleMaxWidth = 100
+	// simpleSizeRatio is the size ratio for simple content dialogs.
+	simpleSizeRatio = 0.6
+	// simpleHeightRatio is the height ratio for simple content dialogs.
+	simpleHeightRatio = 0.5
+	// splitModeMinWidth is the minimum width to enable split diff mode.
+	splitModeMinWidth = 140
+	// layoutSpacingLines is the number of empty lines used for layout spacing.
+	layoutSpacingLines = 4
+	// minWindowWidth is the minimum window width before forcing fullscreen.
+	minWindowWidth = 60
+	// minWindowHeight is the minimum window height before forcing fullscreen.
+	minWindowHeight = 20
+)
+
 // PermissionResponseMsg is sent when the user responds to a permission request.
 type PermissionResponseMsg struct {
 	Permission permission.PermissionRequest
@@ -172,27 +194,30 @@ func (p *Permissions) SetWindowSize(windowWidth, windowHeight int) {
 	p.windowWidth = windowWidth
 	p.windowHeight = windowHeight
 
+	// Force fullscreen when window is too small.
+	forceFullscreen := windowWidth <= minWindowWidth || windowHeight <= minWindowHeight
+
 	// Calculate dialog dimensions based on fullscreen state and content type.
 	var width, height int
-	if p.fullscreen && p.hasDiffView() {
+	if forceFullscreen || (p.fullscreen && p.hasDiffView()) {
 		// Use nearly full window for fullscreen.
-		width = windowWidth - 2
-		height = windowHeight
+		width = windowWidth - fullscreenMargin
+		height = windowHeight - fullscreenMargin
 	} else if p.hasDiffView() {
 		// Wide for side-by-side diffs, capped for readability.
-		width = min(int(float64(windowWidth)*0.8), 180)
-		height = int(float64(windowHeight) * 0.8)
+		width = min(int(float64(windowWidth)*diffSizeRatio), diffMaxWidth)
+		height = int(float64(windowHeight) * diffSizeRatio)
 	} else {
 		// Narrower for simple content like commands/URLs.
-		width = min(int(float64(windowWidth)*0.6), 100)
-		height = int(float64(windowHeight) * 0.5)
+		width = min(int(float64(windowWidth)*simpleSizeRatio), simpleMaxWidth)
+		height = int(float64(windowHeight) * simpleHeightRatio)
 	}
 
 	p.width = width
 	p.maxHeight = height
 
 	// Default to split mode when dialog is wide enough.
-	p.defaultDiffSplitMode = width >= 140
+	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
 	// Update viewport width.
 	p.viewport.SetWidth(p.calculateContentWidth())
@@ -221,6 +246,7 @@ func (p *Permissions) Update(msg tea.Msg) tea.Msg {
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
 			p.selectedOption = (p.selectedOption + 1) % 3
 		case key.Matches(msg, p.keyMap.Left):
+			// Add 2 instead of subtracting 1 to avoid negative modulo.
 			p.selectedOption = (p.selectedOption + 2) % 3
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
@@ -312,7 +338,7 @@ func (p *Permissions) View() string {
 	headerHeight := lipgloss.Height(header)
 	buttonsHeight := lipgloss.Height(buttons)
 	helpHeight := lipgloss.Height(helpView)
-	frameHeight := dialogStyle.GetVerticalFrameSize() + 4 // spacing
+	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
 	availableHeight := p.maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
 
 	content := p.renderContent(contentWidth, availableHeight)

@@ -35,7 +35,7 @@ type FetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Fetch", opts.Anim)
 	}
 
@@ -61,7 +61,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 
@@ -110,7 +110,7 @@ type WebFetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Fetch", opts.Anim)
 	}
 
@@ -129,7 +129,7 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 
@@ -164,7 +164,7 @@ type WebSearchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Search", opts.Anim)
 	}
 
@@ -183,7 +183,7 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 

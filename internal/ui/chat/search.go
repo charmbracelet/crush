@@ -36,7 +36,7 @@ type GlobToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Glob", opts.Anim)
 	}
 
@@ -95,7 +95,7 @@ type GrepToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Grep", opts.Anim)
 	}
 
@@ -124,7 +124,7 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 
@@ -160,7 +160,7 @@ type LSToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "List", opts.Anim)
 	}
 
@@ -184,7 +184,7 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 
@@ -220,7 +220,7 @@ type SourcegraphToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled {
+	if opts.IsPending() {
 		return pendingTool(sty, "Sourcegraph", opts.Anim)
 	}
 
@@ -246,7 +246,7 @@ func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if opts.HasEmptyResult() {
 		return header
 	}
 

@@ -853,7 +853,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
-			if cmd := m.cancel(); cmd != nil {
+			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return tea.Batch(cmds...)
@@ -1263,15 +1263,9 @@ func (m *UI) ShortHelp() []key.Binding {
 		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding = key.NewBinding(
-					key.WithKeys("esc", "alt+esc"),
-					key.WithHelp("esc", "press again to cancel"),
-				)
+				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
-				cancelBinding = key.NewBinding(
-					key.WithKeys("esc", "alt+esc"),
-					key.WithHelp("esc", "clear queue"),
-				)
+				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
@@ -1345,15 +1339,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding = key.NewBinding(
-					key.WithKeys("esc", "alt+esc"),
-					key.WithHelp("esc", "press again to cancel"),
-				)
+				cancelBinding.SetHelp("esc", "press again to cancel")
 			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
-				cancelBinding = key.NewBinding(
-					key.WithKeys("esc", "alt+esc"),
-					key.WithHelp("esc", "clear queue"),
-				)
+				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -1476,7 +1464,7 @@ func (m *UI) updateSize() {
 	m.textarea.SetHeight(m.layout.editor.Dy())
 
 	// Resize active dialogs.
-	m.dialog.ResizeAll(m.width, m.height)
+	m.dialog.SetWindowSize(m.width, m.height)
 
 	// Handle different app states
 	switch m.state {
@@ -1898,10 +1886,10 @@ func cancelTimerCmd() tea.Cmd {
 	})
 }
 
-// cancel handles the cancel key press. The first press sets isCanceling to true
+// cancelAgent handles the cancel key press. The first press sets isCanceling to true
 // and starts a timer. The second press (before the timer expires) actually
 // cancels the agent.
-func (m *UI) cancel() tea.Cmd {
+func (m *UI) cancelAgent() tea.Cmd {
 	if m.session == nil || m.session.ID == "" {
 		return nil
 	}

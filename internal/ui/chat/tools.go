@@ -82,6 +82,17 @@ type ToolRenderOpts struct {
 	Status          ToolStatus
 }
 
+// IsPending returns true if the tool call is still pending (not finished and
+// not canceled).
+func (o *ToolRenderOpts) IsPending() bool {
+	return !o.ToolCall.Finished && o.Status != ToolStatusCanceled
+}
+
+// HasEmptyResult returns true if the result is nil or has empty content.
+func (o *ToolRenderOpts) HasEmptyResult() bool {
+	return o.Result == nil || o.Result.Content == ""
+}
+
 // ToolRenderer represents an interface for rendering tool calls.
 type ToolRenderer interface {
 	RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string

@@ -149,18 +149,25 @@ func NewModels(com *common.Common) (*Models, error) {
 
 // SetWindowSize implements [Dialog].
 func (m *Models) SetWindowSize(windowWidth, windowHeight int) {
-	width := min(120, windowWidth-8)
-	height := 30
+	width := min(defaultDialogMaxWidth, windowWidth-fullscreenMargin)
+	height := min(defaultDialogHeight, windowHeight-fullscreenMargin)
 
 	t := m.com.Styles
 	m.width = width
 	m.height = height
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
-	m.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+
+	var promptPadding int
+	if m.input.Focused() {
+		promptPadding = t.TextInput.Focused.Prompt.GetHorizontalFrameSize()
+	} else {
+		promptPadding = t.TextInput.Blurred.Prompt.GetHorizontalFrameSize()
+	}
+	m.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - promptPadding)
 	m.list.SetSize(innerWidth, height-heightOffset)
 	m.help.SetWidth(width)
 }

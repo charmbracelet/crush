@@ -722,10 +722,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Open dialog message
 	case dialog.ActionOpenDialog:
+		m.dialog.CloseDialog(dialog.CommandsID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.dialog.CloseDialog(dialog.CommandsID)
 
 	// Command dialog messages
 	case dialog.ActionToggleYoloMode:

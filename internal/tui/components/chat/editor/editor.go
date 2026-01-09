@@ -1,14 +1,12 @@
 package editor
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"unicode"
@@ -32,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/editor"
 )
 
 type Editor interface {
@@ -94,16 +93,6 @@ type OpenEditorMsg struct {
 }
 
 func (m *editorCmp) openEditor(value string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		// Use platform-appropriate default editor
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-		} else {
-			editor = "nvim"
-		}
-	}
-
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return util.ReportError(err)
@@ -112,8 +101,18 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
-	cmdStr := editor + " " + tmpfile.Name()
-	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	cmd, err := editor.Command(
+		"crush",
+		tmpfile.Name(),
+		editor.AtPosition(
+			m.textarea.Line()+1,
+			m.textarea.Column()+1,
+		),
+	)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return util.ReportError(err)
 		}

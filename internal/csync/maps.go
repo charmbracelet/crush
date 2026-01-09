@@ -96,12 +96,16 @@ func (m *Map[K, V]) Take(key K) (V, bool) {
 	return v, ok
 }
 
+// Copy returns a copy of the inner map.
+func (m *Map[K, V]) Copy() map[K]V {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return maps.Clone(m.inner)
+}
+
 // Seq2 returns an iter.Seq2 that yields key-value pairs from the map.
 func (m *Map[K, V]) Seq2() iter.Seq2[K, V] {
-	dst := make(map[K]V)
-	m.mu.RLock()
-	maps.Copy(dst, m.inner)
-	m.mu.RUnlock()
+	dst := m.Copy()
 	return func(yield func(K, V) bool) {
 		for k, v := range dst {
 			if !yield(k, v) {

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"maps"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -49,7 +48,7 @@ func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
 
 // GetLSPStates returns the current state of all LSP clients
 func GetLSPStates() map[string]LSPClientInfo {
-	return maps.Collect(lspStates.Seq2())
+	return lspStates.Copy()
 }
 
 // GetLSPState returns the state of a specific LSP client

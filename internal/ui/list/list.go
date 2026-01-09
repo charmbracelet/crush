@@ -17,6 +17,9 @@ type List struct {
 	// Gap between items (0 or less means no gap)
 	gap int
 
+	// show list in reverse order
+	reverse bool
+
 	// Focus and selection state
 	focused     bool
 	selectedIdx int // The current selected index -1 means no selection
@@ -61,6 +64,11 @@ func (l *List) SetSize(width, height int) {
 // SetGap sets the gap between items.
 func (l *List) SetGap(gap int) {
 	l.gap = gap
+}
+
+// SetReverse shows the list in reverse order.
+func (l *List) SetReverse(reverse bool) {
+	l.reverse = reverse
 }
 
 // Width returns the width of the list viewport.
@@ -124,6 +132,10 @@ func (l *List) ScrollToIndex(index int) {
 func (l *List) ScrollBy(lines int) {
 	if len(l.items) == 0 || lines == 0 {
 		return
+	}
+
+	if l.reverse {
+		lines = -lines
 	}
 
 	if lines > 0 {
@@ -267,6 +279,13 @@ func (l *List) Render() string {
 
 	if len(lines) > l.height {
 		lines = lines[:l.height]
+	}
+
+	if l.reverse {
+		// Reverse the lines so the list renders bottom-to-top.
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
 	}
 
 	return strings.Join(lines, "\n")
@@ -440,12 +459,21 @@ func (l *List) IsSelectedLast() bool {
 	return l.selectedIdx == len(l.items)-1
 }
 
-// SelectPrev selects the previous item in the list.
+// SelectPrev selects the visually previous item (moves toward visual top).
 // It returns whether the selection changed.
 func (l *List) SelectPrev() bool {
-	if l.selectedIdx > 0 {
-		l.selectedIdx--
-		return true
+	if l.reverse {
+		// In reverse, visual up = higher index
+		if l.selectedIdx < len(l.items)-1 {
+			l.selectedIdx++
+			return true
+		}
+	} else {
+		// Normal: visual up = lower index
+		if l.selectedIdx > 0 {
+			l.selectedIdx--
+			return true
+		}
 	}
 	return false
 }
@@ -453,9 +481,18 @@ func (l *List) SelectPrev() bool {
 // SelectNext selects the next item in the list.
 // It returns whether the selection changed.
 func (l *List) SelectNext() bool {
-	if l.selectedIdx < len(l.items)-1 {
-		l.selectedIdx++
-		return true
+	if l.reverse {
+		// In reverse, visual down = lower index
+		if l.selectedIdx > 0 {
+			l.selectedIdx--
+			return true
+		}
+	} else {
+		// Normal: visual down = higher index
+		if l.selectedIdx < len(l.items)-1 {
+			l.selectedIdx++
+			return true
+		}
 	}
 	return false
 }
@@ -463,21 +500,49 @@ func (l *List) SelectNext() bool {
 // SelectFirst selects the first item in the list.
 // It returns whether the selection changed.
 func (l *List) SelectFirst() bool {
-	if len(l.items) > 0 {
-		l.selectedIdx = 0
-		return true
+	if len(l.items) == 0 {
+		return false
 	}
-	return false
+	l.selectedIdx = 0
+	return true
 }
 
-// SelectLast selects the last item in the list.
+// SelectLast selects the last item in the list (highest index).
 // It returns whether the selection changed.
 func (l *List) SelectLast() bool {
-	if len(l.items) > 0 {
-		l.selectedIdx = len(l.items) - 1
-		return true
+	if len(l.items) == 0 {
+		return false
 	}
-	return false
+	l.selectedIdx = len(l.items) - 1
+	return true
+}
+
+// WrapToStart wraps selection to the visual start (for circular navigation).
+// In normal mode, this is index 0. In reverse mode, this is the highest index.
+func (l *List) WrapToStart() bool {
+	if len(l.items) == 0 {
+		return false
+	}
+	if l.reverse {
+		l.selectedIdx = len(l.items) - 1
+	} else {
+		l.selectedIdx = 0
+	}
+	return true
+}
+
+// WrapToEnd wraps selection to the visual end (for circular navigation).
+// In normal mode, this is the highest index. In reverse mode, this is index 0.
+func (l *List) WrapToEnd() bool {
+	if len(l.items) == 0 {
+		return false
+	}
+	if l.reverse {
+		l.selectedIdx = 0
+	} else {
+		l.selectedIdx = len(l.items) - 1
+	}
+	return true
 }
 
 // SelectedItem returns the currently selected item. It may be nil if no item

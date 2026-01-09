@@ -16,15 +16,14 @@ import (
 )
 
 const (
-	CheckIcon    string = "✓"
-	ErrorIcon    string = "×"
-	WarningIcon  string = "⚠"
-	InfoIcon     string = "ⓘ"
-	HintIcon     string = "∵"
-	SpinnerIcon  string = "..."
-	LoadingIcon  string = "⟳"
-	DocumentIcon string = "🖼"
-	ModelIcon    string = "◇"
+	CheckIcon   string = "✓"
+	ErrorIcon   string = "×"
+	WarningIcon string = "⚠"
+	InfoIcon    string = "ⓘ"
+	HintIcon    string = "∵"
+	SpinnerIcon string = "..."
+	LoadingIcon string = "⟳"
+	ModelIcon   string = "◇"
 
 	ArrowRightIcon string = "→"
 
@@ -43,6 +42,9 @@ const (
 	TodoCompletedIcon  string = "✓"
 	TodoPendingIcon    string = "•"
 	TodoInProgressIcon string = "→"
+
+	ImageIcon string = "■"
+	TextIcon  string = "≡"
 )
 
 const (
@@ -208,7 +210,6 @@ type Styles struct {
 			ErrorTag         lipgloss.Style
 			ErrorTitle       lipgloss.Style
 			ErrorDetails     lipgloss.Style
-			Attachment       lipgloss.Style
 			ToolCallFocused  lipgloss.Style
 			ToolCallCompact  lipgloss.Style
 			ToolCallBlurred  lipgloss.Style
@@ -332,6 +333,21 @@ type Styles struct {
 		InfoMessage    lipgloss.Style
 		UpdateMessage  lipgloss.Style
 		SuccessMessage lipgloss.Style
+	}
+
+	// Completions popup styles
+	Completions struct {
+		Normal  lipgloss.Style
+		Focused lipgloss.Style
+		Match   lipgloss.Style
+	}
+
+	// Attachments styles
+	Attachments struct {
+		Normal   lipgloss.Style
+		Image    lipgloss.Style
+		Text     lipgloss.Style
+		Deleting lipgloss.Style
 	}
 }
 
@@ -1115,7 +1131,6 @@ func DefaultStyles() Styles {
 	s.Chat.Message.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
 
 	// Message item styles
-	s.Chat.Message.Attachment = lipgloss.NewStyle().MarginLeft(1).Background(bgSubtle)
 	s.Chat.Message.ToolCallFocused = s.Muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
@@ -1163,6 +1178,18 @@ func DefaultStyles() Styles {
 	s.Status.UpdateMessage = s.Status.SuccessMessage
 	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(bgOverlay).Background(warning)
 	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(white).Background(redDark)
+
+	// Completions styles
+	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
+	s.Completions.Focused = base.Background(primary).Foreground(white)
+	s.Completions.Match = base.Underline(true)
+
+	// Attachments styles
+	attachmentIconStyle := base.Foreground(bgSubtle).Background(green).Padding(0, 1)
+	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
+	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
+	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
+	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
 
 	return s
 }

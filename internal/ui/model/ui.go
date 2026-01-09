@@ -22,15 +22,17 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
 	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -39,6 +41,12 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
 )
+
+// Max file size set to 5M.
+const maxAttachmentSize = int64(5 * 1024 * 1024)
+
+// Allowed image formats.
+var allowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
@@ -104,10 +112,18 @@ type UI struct {
 	// Editor components
 	textarea textarea.Model
 
-	attachments []message.Attachment // TODO: Implement attachments
+	// Attachment list
+	attachments *attachments.Attachments
 
 	readyPlaceholder   string
 	workingPlaceholder string
+
+	// Completions state
+	completions              *completions.Completions
+	completionsOpen          bool
+	completionsStartIndex    int
+	completionsQuery         string
+	completionsPositionStart image.Point // x,y where user typed '@'
 
 	// Chat components
 	chat *Chat
@@ -139,14 +155,40 @@ func New(com *common.Common) *UI {
 
 	ch := NewChat(com)
 
+	keyMap := DefaultKeyMap()
+
+	// Completions component
+	comp := completions.New(
+		com.Styles.Completions.Normal,
+		com.Styles.Completions.Focused,
+		com.Styles.Completions.Match,
+	)
+
+	// Attachments component
+	attachments := attachments.New(
+		attachments.NewRenderer(
+			com.Styles.Attachments.Normal,
+			com.Styles.Attachments.Deleting,
+			com.Styles.Attachments.Image,
+			com.Styles.Attachments.Text,
+		),
+		attachments.Keymap{
+			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
+			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
+			Escape:     keyMap.Editor.Escape,
+		},
+	)
+
 	ui := &UI{
-		com:      com,
-		dialog:   dialog.NewOverlay(),
-		keyMap:   DefaultKeyMap(),
-		focus:    uiFocusNone,
-		state:    uiConfigure,
-		textarea: ta,
-		chat:     ch,
+		com:         com,
+		dialog:      dialog.NewOverlay(),
+		keyMap:      keyMap,
+		focus:       uiFocusNone,
+		state:       uiConfigure,
+		textarea:    ta,
+		chat:        ch,
+		completions: comp,
+		attachments: attachments,
 	}
 
 	status := NewStatus(com, ui)
@@ -376,6 +418,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case uiutil.ClearStatusMsg:
 		m.status.ClearInfoMsg()
+	case completions.FilesLoadedMsg:
+		// Handle async file loading for completions.
+		if m.completionsOpen {
+			m.completions.SetFiles(msg.Files)
+		}
 	}
 
 	// This logic gets triggered on any message type, but should it?
@@ -393,6 +440,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// at this point this can only handle [message.Attachment] message, and we
+	// should return all cmds anyway.
+	_ = m.attachments.Update(msg)
 	return m, tea.Batch(cmds...)
 }
 
@@ -707,6 +757,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		// Generic dialog messages
 		case dialog.CloseMsg:
 			m.dialog.CloseFrontDialog()
+			if m.focus == uiFocusEditor {
+				cmds = append(cmds, m.textarea.Focus())
+			}
 
 		// Session dialog messages
 		case dialog.SessionSelectedMsg:
@@ -816,12 +869,35 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding, uiChatCompact:
 		switch m.focus {
 		case uiFocusEditor:
+			// Handle completions if open.
+			if m.completionsOpen {
+				if msg, ok := m.completions.Update(msg); ok {
+					switch msg := msg.(type) {
+					case completions.SelectionMsg:
+						// Handle file completion selection.
+						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
+							cmds = append(cmds, m.insertFileCompletion(item.Path))
+						}
+						if !msg.Insert {
+							m.closeCompletions()
+						}
+					case completions.ClosedMsg:
+						m.completionsOpen = false
+					}
+					return tea.Batch(cmds...)
+				}
+			}
+
+			if ok := m.attachments.Update(msg); ok {
+				return tea.Batch(cmds...)
+			}
+
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
-				if strings.HasSuffix(value, "\\") {
+				if before, ok := strings.CutSuffix(value, "\\"); ok {
 					// If the last character is a backslash, remove it and add a newline.
-					m.textarea.SetValue(strings.TrimSuffix(value, "\\"))
+					m.textarea.SetValue(before)
 					break
 				}
 
@@ -833,8 +909,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
-				attachments := m.attachments
-				m.attachments = nil
+				attachments := m.attachments.List()
+				m.attachments.Reset()
 				if len(value) == 0 {
 					return nil
 				}
@@ -864,15 +940,57 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
+				m.closeCompletions()
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
 					break
 				}
 
+				// Check for @ trigger before passing to textarea.
+				curValue := m.textarea.Value()
+				curIdx := len(curValue)
+
+				// Trigger completions on @.
+				if msg.String() == "@" && !m.completionsOpen {
+					// Only show if beginning of prompt or after whitespace.
+					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
+						m.completionsOpen = true
+						m.completionsQuery = ""
+						m.completionsStartIndex = curIdx
+						m.completionsPositionStart = m.completionsPosition()
+						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+					}
+				}
+
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+
+				// After updating textarea, check if we need to filter completions.
+				// Skip filtering on the initial @ keystroke since items are loading async.
+				if m.completionsOpen && msg.String() != "@" {
+					newValue := m.textarea.Value()
+					newIdx := len(newValue)
+
+					// Close completions if cursor moved before start.
+					if newIdx <= m.completionsStartIndex {
+						m.closeCompletions()
+					} else if msg.String() == "space" {
+						// Close on space.
+						m.closeCompletions()
+					} else {
+						// Extract current word and filter.
+						word := m.textareaWord()
+						if strings.HasPrefix(word, "@") {
+							m.completionsQuery = word[1:]
+							m.completions.Filter(m.completionsQuery)
+						} else if m.completionsOpen {
+							m.closeCompletions()
+						}
+					}
+				}
 			}
 		case uiFocusMain:
 			switch {
@@ -992,7 +1110,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.textarea.View())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 		editor.Draw(scr, layout.editor)
 
 	case uiChat:
@@ -1002,7 +1120,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		header.Draw(scr, layout.header)
 		m.drawSidebar(scr, layout.sidebar)
 
-		editor := uv.NewStyledString(m.textarea.View())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx() - layout.sidebar.Dx()))
 		editor.Draw(scr, layout.editor)
 
 	case uiChatCompact:
@@ -1016,12 +1134,32 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		main := uv.NewStyledString(mainView)
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.textarea.View())
+		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 		editor.Draw(scr, layout.editor)
 	}
 
 	// Add status and help layer
 	m.status.Draw(scr, layout.status)
+
+	// Draw completions popup if open
+	if m.completionsOpen && m.completions.HasItems() {
+		w, h := m.completions.Size()
+		x := m.completionsPositionStart.X
+		y := m.completionsPositionStart.Y - h
+
+		screenW := area.Dx()
+		if x+w > screenW {
+			x = screenW - w
+		}
+		x = max(0, x)
+		y = max(0, y)
+
+		completionsView := uv.NewStyledString(m.completions.Render())
+		completionsView.Draw(scr, image.Rectangle{
+			Min: image.Pt(x, y),
+			Max: image.Pt(x+w, y+h),
+		})
+	}
 
 	// Debugging rendering (visually see when the tui rerenders)
 	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
@@ -1067,6 +1205,10 @@ func (m *UI) Cursor() *tea.Cursor {
 			cur := m.textarea.Cursor()
 			cur.X++ // Adjust for app margins
 			cur.Y += m.layout.editor.Min.Y
+			// Offset for attachment row if present.
+			if len(m.attachments.List()) > 0 {
+				cur.Y++
+			}
 			return cur
 		}
 	}
@@ -1185,7 +1327,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	k := &m.keyMap
 	help := k.Help
 	help.SetHelp("ctrl+g", "less")
-	hasAttachments := false // TODO: implement attachments
+	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.session != nil && m.session.ID != ""
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
@@ -1290,6 +1432,17 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Editor.MentionFile,
 					k.Editor.OpenEditor,
 				},
+			)
+			if hasAttachments {
+				binds = append(binds,
+					[]key.Binding{
+						k.Editor.AttachmentDeleteMode,
+						k.Editor.DeleteAllAttachments,
+						k.Editor.Escape,
+					},
+				)
+			}
+			binds = append(binds,
 				[]key.Binding{
 					help,
 				},
@@ -1567,6 +1720,91 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 	return t.EditorPromptYoloDotsBlurred.Render()
 }
 
+// closeCompletions closes the completions popup and resets state.
+func (m *UI) closeCompletions() {
+	m.completionsOpen = false
+	m.completionsQuery = ""
+	m.completionsStartIndex = 0
+	m.completions.Close()
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	value := m.textarea.Value()
+	word := m.textareaWord()
+
+	// Find the @ and query to replace.
+	if m.completionsStartIndex > len(value) {
+		return nil
+	}
+
+	// Build the new value: everything before @, the path, everything after query.
+	endIdx := min(m.completionsStartIndex+len(word), len(value))
+
+	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	m.textarea.SetValue(newValue)
+	m.textarea.MoveToEnd()
+	m.textarea.InsertRune(' ')
+
+	return func() tea.Msg {
+		absPath, _ := filepath.Abs(path)
+		// Skip attachment if file was already read and hasn't been modified.
+		lastRead := filetracker.LastReadTime(absPath)
+		if !lastRead.IsZero() {
+			if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
+				return nil
+			}
+		}
+
+		// Add file as attachment.
+		content, err := os.ReadFile(path)
+		if err != nil {
+			// If it fails, let the LLM handle it later.
+			return nil
+		}
+		filetracker.RecordRead(absPath)
+
+		return message.Attachment{
+			FilePath: path,
+			FileName: filepath.Base(path),
+			MimeType: mimeOf(content),
+			Content:  content,
+		}
+	}
+}
+
+// completionsPosition returns the X and Y position for the completions popup.
+func (m *UI) completionsPosition() image.Point {
+	cur := m.textarea.Cursor()
+	if cur == nil {
+		return image.Point{
+			X: m.layout.editor.Min.X,
+			Y: m.layout.editor.Min.Y,
+		}
+	}
+	return image.Point{
+		X: cur.X + m.layout.editor.Min.X,
+		Y: m.layout.editor.Min.Y + cur.Y,
+	}
+}
+
+// textareaWord returns the current word at the cursor position.
+func (m *UI) textareaWord() string {
+	return m.textarea.Word()
+}
+
+// isWhitespace returns true if the byte is a whitespace character.
+func isWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// mimeOf detects the MIME type of the given content.
+func mimeOf(content []byte) string {
+	mimeBufferSize := min(512, len(content))
+	return http.DetectContentType(content[:mimeBufferSize])
+}
+
 var readyPlaceholders = [...]string{
 	"Ready!",
 	"Ready...",
@@ -1588,6 +1826,18 @@ var workingPlaceholders = [...]string{
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
+// renderEditorView renders the editor view with attachments if any.
+func (m *UI) renderEditorView(width int) string {
+	if len(m.attachments.List()) == 0 {
+		return m.textarea.View()
+	}
+	return lipgloss.JoinVertical(
+		lipgloss.Top,
+		m.attachments.Render(width),
+		m.textarea.View(),
+	)
 }
 
 // renderHeader renders and caches the header logo at the specified width.
@@ -1819,15 +2069,18 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 
 	var cmd tea.Cmd
 	path := strings.ReplaceAll(msg.Content, "\\ ", " ")
-	// try to get an image
+	// Try to get an image.
 	path, err := filepath.Abs(strings.TrimSpace(path))
 	if err != nil {
 		m.textarea, cmd = m.textarea.Update(msg)
 		return cmd
 	}
+
+	// Check if file has an allowed image extension.
 	isAllowedType := false
-	for _, ext := range filepicker.AllowedTypes {
-		if strings.HasSuffix(path, ext) {
+	lowerPath := strings.ToLower(path)
+	for _, ext := range allowedImageTypes {
+		if strings.HasSuffix(lowerPath, ext) {
 			isAllowedType = true
 			break
 		}
@@ -1836,24 +2089,31 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		m.textarea, cmd = m.textarea.Update(msg)
 		return cmd
 	}
-	tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
-	if tooBig {
-		m.textarea, cmd = m.textarea.Update(msg)
-		return cmd
-	}
 
-	content, err := os.ReadFile(path)
-	if err != nil {
-		m.textarea, cmd = m.textarea.Update(msg)
-		return cmd
+	return func() tea.Msg {
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			return uiutil.ReportError(err)
+		}
+		if fileInfo.Size() > maxAttachmentSize {
+			return uiutil.ReportWarn("File is too big (>5mb)")
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return uiutil.ReportError(err)
+		}
+
+		mimeBufferSize := min(512, len(content))
+		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		fileName := filepath.Base(path)
+		return message.Attachment{
+			FilePath: path,
+			FileName: fileName,
+			MimeType: mimeType,
+			Content:  content,
+		}
 	}
-	mimeBufferSize := min(512, len(content))
-	mimeType := http.DetectContentType(content[:mimeBufferSize])
-	fileName := filepath.Base(path)
-	attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
-	return uiutil.CmdHandler(filepicker.FilePickedMsg{
-		Attachment: attachment,
-	})
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

@@ -1,15 +1,13 @@
 package chat
 
 import (
-	"fmt"
-	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // UserMessageItem represents a user message in the chat UI.
@@ -18,16 +16,18 @@ type UserMessageItem struct {
 	*cachedMessageItem
 	*focusableMessageItem
 
-	message *message.Message
-	sty     *styles.Styles
+	attachments *attachments.Renderer
+	message     *message.Message
+	sty         *styles.Styles
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
-func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachments *attachments.Renderer) MessageItem {
 	return &UserMessageItem{
 		highlightableMessageItem: defaultHighlighter(sty),
 		cachedMessageItem:        &cachedMessageItem{},
 		focusableMessageItem:     &focusableMessageItem{},
+		attachments:              attachments,
 		message:                  message,
 		sty:                      sty,
 	}
@@ -73,46 +73,14 @@ func (m *UserMessageItem) ID() string {
 	return m.message.ID
 }
 
-// renderAttachments renders attachments with wrapping if they exceed the width.
-// TODO: change the styles here so they match the new design
+// renderAttachments renders attachments.
 func (m *UserMessageItem) renderAttachments(width int) string {
-	const maxFilenameWidth = 10
-
-	attachments := make([]string, len(m.message.BinaryContent()))
-	for i, attachment := range m.message.BinaryContent() {
-		filename := filepath.Base(attachment.Path)
-		attachments[i] = m.sty.Chat.Message.Attachment.Render(fmt.Sprintf(
-			" %s %s ",
-			styles.DocumentIcon,
-			ansi.Truncate(filename, maxFilenameWidth, "…"),
-		))
+	var attachments []message.Attachment
+	for _, at := range m.message.BinaryContent() {
+		attachments = append(attachments, message.Attachment{
+			FileName: at.Path,
+			MimeType: at.MIMEType,
+		})
 	}
-
-	// Wrap attachments into lines that fit within the width.
-	var lines []string
-	var currentLine []string
-	currentWidth := 0
-
-	for _, att := range attachments {
-		attWidth := lipgloss.Width(att)
-		sepWidth := 1
-		if len(currentLine) == 0 {
-			sepWidth = 0
-		}
-
-		if currentWidth+sepWidth+attWidth > width && len(currentLine) > 0 {
-			lines = append(lines, strings.Join(currentLine, " "))
-			currentLine = []string{att}
-			currentWidth = attWidth
-		} else {
-			currentLine = append(currentLine, att)
-			currentWidth += sepWidth + attWidth
-		}
-	}
-
-	if len(currentLine) > 0 {
-		lines = append(lines, strings.Join(currentLine, " "))
-	}
-
-	return strings.Join(lines, "\n")
+	return m.attachments.Render(attachments, false, width)
 }

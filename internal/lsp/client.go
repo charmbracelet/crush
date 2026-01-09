@@ -21,6 +21,14 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/transport"
 )
 
+// DiagnosticCounts holds the count of diagnostics by severity.
+type DiagnosticCounts struct {
+	Error       int
+	Warning     int
+	Information int
+	Hint        int
+}
+
 type Client struct {
 	client *powernap.Client
 	name   string
@@ -36,6 +44,10 @@ type Client struct {
 
 	// Diagnostic cache
 	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
+
+	// Cached diagnostic counts to avoid map copy on every UI render.
+	diagCountsCache   DiagnosticCounts
+	diagCountsVersion uint64
 
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
@@ -351,6 +363,36 @@ func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnos
 // GetDiagnostics returns all diagnostics for all files.
 func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic {
 	return c.diagnostics.Copy()
+}
+
+// GetDiagnosticCounts returns cached diagnostic counts by severity.
+// Uses the VersionedMap version to avoid recomputing on every call.
+func (c *Client) GetDiagnosticCounts() DiagnosticCounts {
+	currentVersion := c.diagnostics.Version()
+	if currentVersion == c.diagCountsVersion {
+		return c.diagCountsCache
+	}
+
+	// Recompute counts.
+	counts := DiagnosticCounts{}
+	for _, diags := range c.diagnostics.Seq2() {
+		for _, diag := range diags {
+			switch diag.Severity {
+			case protocol.SeverityError:
+				counts.Error++
+			case protocol.SeverityWarning:
+				counts.Warning++
+			case protocol.SeverityInformation:
+				counts.Information++
+			case protocol.SeverityHint:
+				counts.Hint++
+			}
+		}
+	}
+
+	c.diagCountsCache = counts
+	c.diagCountsVersion = currentVersion
+	return counts
 }
 
 // OpenFileOnDemand opens a file only if it's not already open.

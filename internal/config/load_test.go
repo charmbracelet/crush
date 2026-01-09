@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
@@ -22,12 +21,12 @@ func TestMain(m *testing.M) {
 	os.Exit(exitVal)
 }
 
-func TestConfig_LoadFromReaders(t *testing.T) {
-	data1 := strings.NewReader(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
-	data2 := strings.NewReader(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)
-	data3 := strings.NewReader(`{"providers": {"openai": {}}}`)
+func TestConfig_LoadFromBytes(t *testing.T) {
+	data1 := []byte(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
+	data2 := []byte(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)
+	data3 := []byte(`{"providers": {"openai": {}}}`)
 
-	loadedConfig, err := loadFromReaders([]io.Reader{data1, data2, data3})
+	loadedConfig, err := loadFromBytes([][]byte{data1, data2, data3})
 
 	require.NoError(t, err)
 	require.NotNil(t, loadedConfig)

@@ -1573,9 +1573,10 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	cmd, err := editor.Command(
 		"crush",
 		tmpfile.Name(),
-		editor.EndOfLine(),
-		editor.LineNumber(m.textarea.Line()+1),
-		editor.AtPosition(m.textarea.Line()+1, m.textarea.Column()+1),
+		editor.AtPosition(
+			m.textarea.Line()+1,
+			m.textarea.Column()+1,
+		),
 	)
 	if err != nil {
 		return uiutil.ReportError(err)

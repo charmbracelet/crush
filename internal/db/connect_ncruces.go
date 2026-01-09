@@ -20,6 +20,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 		"PRAGMA cache_size = -8000;",
 		"PRAGMA synchronous = NORMAL;",
 		"PRAGMA secure_delete = ON;",
+		"PRAGMA busy_timeout = 5000;",
 	}
 
 	db, err := driver.Open(dbPath, func(c *sqlite3.Conn) error {

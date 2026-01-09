@@ -74,7 +74,7 @@ func renderItem(t *styles.Styles, title string, info string, focused bool, width
 	}
 
 	var infoText string
-	var infoLen int
+	var infoWidth int
 	lineWidth := width
 	if len(info) > 0 {
 		infoText = fmt.Sprintf(" %s ", info)
@@ -84,12 +84,12 @@ func renderItem(t *styles.Styles, title string, info string, focused bool, width
 			infoText = t.Subtle.Render(infoText)
 		}
 
-		infoLen = lipgloss.Width(infoText)
+		infoWidth = lipgloss.Width(infoText)
 	}
 
-	title = ansi.Truncate(title, max(0, lineWidth), "")
-	titleLen := lipgloss.Width(title)
-	gap := strings.Repeat(" ", max(0, lineWidth-titleLen-infoLen))
+	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "")
+	titleWidth := lipgloss.Width(title)
+	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
 	content := title
 	if matches := len(m.MatchedIndexes); matches > 0 {
 		var lastPos int

@@ -736,19 +736,23 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 		switch msg := msg.(type) {
 		// Generic dialog messages
-		case dialog.CloseMsg:
+		case dialog.ActionClose:
 			m.dialog.CloseFrontDialog()
 			if m.focus == uiFocusEditor {
 				cmds = append(cmds, m.textarea.Focus())
 			}
+		case dialog.ActionCmd:
+			if msg.Cmd != nil {
+				cmds = append(cmds, msg.Cmd)
+			}
 
 		// Session dialog messages
-		case dialog.SessionSelectedMsg:
+		case dialog.ActionSelectSession:
 			m.dialog.CloseDialog(dialog.SessionsID)
 			cmds = append(cmds, m.loadSession(msg.Session.ID))
 
 		// Open dialog message
-		case dialog.OpenDialogMsg:
+		case dialog.ActionOpenDialog:
 			switch msg.DialogID {
 			case dialog.SessionsID:
 				if cmd := m.openSessionsDialog(); cmd != nil {
@@ -766,19 +770,19 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			m.dialog.CloseDialog(dialog.CommandsID)
 
 		// Command dialog messages
-		case dialog.ToggleYoloModeMsg:
+		case dialog.ActionToggleYoloMode:
 			yolo := !m.com.App.Permissions.SkipRequests()
 			m.com.App.Permissions.SetSkipRequests(yolo)
 			m.setEditorPrompt(yolo)
 			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.NewSessionsMsg:
+		case dialog.ActionNewSession:
 			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 				break
 			}
 			m.newSession()
 			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.CompactMsg:
+		case dialog.ActionSummarize:
 			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
 				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
 				break
@@ -787,12 +791,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if err != nil {
 				cmds = append(cmds, uiutil.ReportError(err))
 			}
-		case dialog.ToggleHelpMsg:
+		case dialog.ActionToggleHelp:
 			m.status.ToggleHelp()
 			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.QuitMsg:
+		case dialog.ActionQuit:
 			cmds = append(cmds, tea.Quit)
-		case dialog.ModelSelectedMsg:
+		case dialog.ActionSelectModel:
 			if m.com.App.AgentCoordinator.IsBusy() {
 				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
 				break
@@ -1035,7 +1039,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // Draw implements [uv.Drawable] and draws the UI model.
-func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
+func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
 	if m.layout != layout {
@@ -1132,36 +1136,20 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		})
 	}
 
-	// This needs to come last to overlay on top of everything
+	// This needs to come last to overlay on top of everything. We always pass
+	// the full screen bounds because the dialogs will position themselves
+	// accordingly.
 	if m.dialog.HasDialogs() {
-		m.dialog.Draw(scr, area)
+		return m.dialog.Draw(scr, scr.Bounds())
 	}
-}
 
-// Cursor returns the cursor position and properties for the UI model. It
-// returns nil if the cursor should not be shown.
-func (m *UI) Cursor() *tea.Cursor {
-	if m.layout.editor.Dy() <= 0 {
-		// Don't show cursor if editor is not visible
-		return nil
-	}
-	if m.dialog.HasDialogs() {
-		if front := m.dialog.DialogLast(); front != nil {
-			c, ok := front.(uiutil.Cursor)
-			if ok {
-				cur := c.Cursor()
-				if cur != nil {
-					pos := m.dialog.CenterPosition(m.layout.area, front.ID())
-					cur.X += pos.Min.X
-					cur.Y += pos.Min.Y
-					return cur
-				}
-			}
-		}
-		return nil
-	}
 	switch m.focus {
 	case uiFocusEditor:
+		if m.layout.editor.Dy() <= 0 {
+			// Don't show cursor if editor is not visible
+			return nil
+		}
+
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
 			cur.X++ // Adjust for app margins
@@ -1181,11 +1169,10 @@ func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 	v.BackgroundColor = m.com.Styles.Background
-	v.Cursor = m.Cursor()
 	v.MouseMode = tea.MouseModeCellMotion
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
-	m.Draw(canvas, canvas.Bounds())
+	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
 	contentLines := strings.Split(content, "\n")
@@ -1839,7 +1826,6 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	modelsDialog.SetSize(min(60, m.width-8), 30)
 	m.dialog.OpenDialog(modelsDialog)
 
 	return nil
@@ -1863,8 +1849,6 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	// TODO: Get. Rid. Of. Magic numbers!
-	commands.SetSize(min(120, m.width-8), 30)
 	m.dialog.OpenDialog(commands)
 
 	return nil
@@ -1890,8 +1874,6 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	// TODO: Get. Rid. Of. Magic numbers!
-	dialog.SetSize(min(120, m.width-8), 30)
 	m.dialog.OpenDialog(dialog)
 
 	return nil

@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // SessionsID is the identifier for the session selector dialog.
@@ -16,7 +18,6 @@ const SessionsID = "session"
 
 // Session is a session selector dialog.
 type Session struct {
-	width, height      int
 	com                *common.Common
 	help               help.Model
 	list               *list.FilterableList
@@ -84,37 +85,18 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	return s, nil
 }
 
-// SetSize sets the size of the dialog.
-func (s *Session) SetSize(width, height int) {
-	t := s.com.Styles
-	s.width = width
-	s.height = height
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-	s.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
-	s.list.SetSize(innerWidth, height-heightOffset)
-	s.help.SetWidth(width)
-
-	// Now that we know the height we can select the selected session and scroll to it.
-	s.list.SetSelected(s.selectedSessionInx)
-	s.list.ScrollToSelected()
-}
-
 // ID implements Dialog.
 func (s *Session) ID() string {
 	return SessionsID
 }
 
-// Update implements Dialog.
-func (s *Session) Update(msg tea.Msg) tea.Msg {
+// HandleMsg implements Dialog.
+func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, s.keyMap.Close):
-			return CloseMsg{}
+			return ActionClose{}
 		case key.Matches(msg, s.keyMap.Previous):
 			s.list.Focus()
 			if s.list.IsSelectedFirst() {
@@ -136,7 +118,7 @@ func (s *Session) Update(msg tea.Msg) tea.Msg {
 		case key.Matches(msg, s.keyMap.Select):
 			if item := s.list.SelectedItem(); item != nil {
 				sessionItem := item.(*SessionItem)
-				return SessionSelectedMsg{sessionItem.Session}
+				return ActionSelectSession{sessionItem.Session}
 			}
 		default:
 			var cmd tea.Cmd
@@ -145,9 +127,7 @@ func (s *Session) Update(msg tea.Msg) tea.Msg {
 			s.list.SetFilter(value)
 			s.list.ScrollToTop()
 			s.list.SetSelected(0)
-			if cmd != nil {
-				return cmd()
-			}
+			return ActionCmd{cmd}
 		}
 	}
 	return nil
@@ -158,16 +138,38 @@ func (s *Session) Cursor() *tea.Cursor {
 	return InputCursor(s.com.Styles, s.input.Cursor())
 }
 
-// View implements [Dialog].
-func (s *Session) View() string {
+// Draw implements [Dialog].
+func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	t := s.com.Styles
+	width := max(0, min(120, area.Dx()))
+	height := max(0, min(30, area.Dy()))
+	// TODO: Why do we need this 2?
+	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		// TODO: Why do we need this 2?
+		t.Dialog.View.GetVerticalFrameSize() + 2
+	s.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	s.list.SetSize(innerWidth, height-heightOffset)
+	s.help.SetWidth(innerWidth)
+
+	// Now that we know the height we can select the selected session and scroll to it.
+	s.list.SetSelected(s.selectedSessionInx)
+	s.list.ScrollToSelected()
 	titleStyle := s.com.Styles.Dialog.Title
-	dialogStyle := s.com.Styles.Dialog.View.Width(s.width)
+	dialogStyle := s.com.Styles.Dialog.View.Width(width)
 	header := common.DialogTitle(s.com.Styles, "Switch Session",
-		max(0, s.width-dialogStyle.GetHorizontalFrameSize()-
+		max(0, width-dialogStyle.GetHorizontalFrameSize()-
 			titleStyle.GetHorizontalFrameSize()))
 
-	return HeaderInputListHelpView(s.com.Styles, s.width, s.list.Height(), header,
-		s.input.View(), s.list.Render(), s.help.View(s))
+	helpView := ansi.Truncate(s.help.View(s), innerWidth, "")
+	view := HeaderInputListHelpView(s.com.Styles, width, s.list.Height(), header,
+		s.input.View(), s.list.Render(), helpView)
+
+	cur := s.Cursor()
+	DrawCenterCursor(scr, area, view, cur)
+	return cur
 }
 
 // ShortHelp implements [help.KeyMap].

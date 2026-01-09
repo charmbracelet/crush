@@ -5,6 +5,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // QuitID is the identifier for the quit dialog.
@@ -24,6 +25,8 @@ type Quit struct {
 		Quit key.Binding
 	}
 }
+
+var _ Dialog = (*Quit)(nil)
 
 // NewQuit creates a new quit confirmation dialog.
 func NewQuit(com *common.Common) *Quit {
@@ -64,34 +67,34 @@ func (*Quit) ID() string {
 	return QuitID
 }
 
-// Update implements [Model].
-func (q *Quit) Update(msg tea.Msg) tea.Msg {
+// HandleMsg implements [Model].
+func (q *Quit) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, q.keyMap.Quit):
-			return QuitMsg{}
+			return ActionQuit{}
 		case key.Matches(msg, q.keyMap.Close):
-			return CloseMsg{}
+			return ActionClose{}
 		case key.Matches(msg, q.keyMap.LeftRight, q.keyMap.Tab):
 			q.selectedNo = !q.selectedNo
 		case key.Matches(msg, q.keyMap.EnterSpace):
 			if !q.selectedNo {
-				return QuitMsg{}
+				return ActionQuit{}
 			}
-			return CloseMsg{}
+			return ActionClose{}
 		case key.Matches(msg, q.keyMap.Yes):
-			return QuitMsg{}
+			return ActionQuit{}
 		case key.Matches(msg, q.keyMap.No, q.keyMap.Close):
-			return CloseMsg{}
+			return ActionClose{}
 		}
 	}
 
 	return nil
 }
 
-// View implements [Dialog].
-func (q *Quit) View() string {
+// Draw implements [Dialog].
+func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	const question = "Are you sure you want to quit?"
 	baseStyle := q.com.Styles.Base
 	buttonOpts := []common.ButtonOpts{
@@ -108,7 +111,9 @@ func (q *Quit) View() string {
 		),
 	)
 
-	return q.com.Styles.BorderFocus.Render(content)
+	view := q.com.Styles.BorderFocus.Render(content)
+	DrawCenter(scr, area, view)
+	return nil
 }
 
 // ShortHelp implements [help.KeyMap].

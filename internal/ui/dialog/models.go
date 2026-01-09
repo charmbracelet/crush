@@ -15,6 +15,8 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/uiutil"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -75,8 +77,6 @@ type Models struct {
 
 	modelType ModelType
 	providers []catwalk.Provider
-
-	width, height int
 
 	keyMap struct {
 		Tab      key.Binding
@@ -147,33 +147,18 @@ func NewModels(com *common.Common) (*Models, error) {
 	return m, nil
 }
 
-// SetSize sets the size of the dialog.
-func (m *Models) SetSize(width, height int) {
-	t := m.com.Styles
-	m.width = width
-	m.height = height
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-	m.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
-	m.list.SetSize(innerWidth, height-heightOffset)
-	m.help.SetWidth(width)
-}
-
 // ID implements Dialog.
 func (m *Models) ID() string {
 	return ModelsID
 }
 
-// Update implements Dialog.
-func (m *Models) Update(msg tea.Msg) tea.Msg {
+// HandleMsg implements Dialog.
+func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
-			return CloseMsg{}
+			return ActionClose{}
 		case key.Matches(msg, m.keyMap.Previous):
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
@@ -203,7 +188,7 @@ func (m *Models) Update(msg tea.Msg) tea.Msg {
 				break
 			}
 
-			return ModelSelectedMsg{
+			return ActionSelectModel{
 				Model:     modelItem.SelectedModel(),
 				ModelType: modelItem.SelectedModelType(),
 			}
@@ -222,9 +207,7 @@ func (m *Models) Update(msg tea.Msg) tea.Msg {
 			value := m.input.Value()
 			m.list.SetFilter(value)
 			m.list.ScrollToSelected()
-			if cmd != nil {
-				return cmd()
-			}
+			return ActionCmd{cmd}
 		}
 	}
 	return nil
@@ -255,9 +238,22 @@ func (m *Models) modelTypeRadioView() string {
 		smallRadio, textStyle.Render(ModelTypeSmall.String()))
 }
 
-// View implements Dialog.
-func (m *Models) View() string {
+// Draw implements [Dialog].
+func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
+	width := max(0, min(60, area.Dx()))
+	height := max(0, min(30, area.Dy()))
+	// TODO: Why do we need this 2?
+	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + 1 + // (1) title content
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + 1 + // (1) input content
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		// TODO: Why do we need this 2?
+		t.Dialog.View.GetVerticalFrameSize() + 2
+	m.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	m.list.SetSize(innerWidth, height-heightOffset)
+	m.help.SetWidth(innerWidth)
+
 	titleStyle := t.Dialog.Title
 	dialogStyle := t.Dialog.View
 
@@ -266,10 +262,15 @@ func (m *Models) View() string {
 	headerOffset := lipgloss.Width(radios) + titleStyle.GetHorizontalFrameSize() +
 		dialogStyle.GetHorizontalFrameSize()
 
-	header := common.DialogTitle(t, "Switch Model", m.width-headerOffset) + radios
+	header := common.DialogTitle(t, "Switch Model", width-headerOffset) + radios
 
-	return HeaderInputListHelpView(t, m.width, m.list.Height(), header,
-		m.input.View(), m.list.Render(), m.help.View(m))
+	helpView := ansi.Truncate(m.help.View(m), innerWidth, "")
+	view := HeaderInputListHelpView(t, width, m.list.Height(), header,
+		m.input.View(), m.list.Render(), helpView)
+
+	cur := m.Cursor()
+	DrawCenterCursor(scr, area, view, cur)
+	return cur
 }
 
 // ShortHelp returns the short help view.

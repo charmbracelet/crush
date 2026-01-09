@@ -20,6 +20,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	params.Add("_pragma", "cache_size(-8000)")
 	params.Add("_pragma", "synchronous(NORMAL)")
 	params.Add("_pragma", "secure_delete(on)")
+	params.Add("_pragma", "busy_timeout(5000)")
 
 	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
 	db, err := sql.Open("sqlite", dsn)

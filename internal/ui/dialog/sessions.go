@@ -57,6 +57,8 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.help = help
 	s.list = list.NewFilterableList(sessionItems(com.Styles, sessions...)...)
 	s.list.Focus()
+	s.list.SetSelected(s.selectedSessionInx)
+	s.list.ScrollToSelected()
 
 	s.input = textinput.New()
 	s.input.SetVirtualCursor(false)
@@ -154,9 +156,6 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.list.SetSize(innerWidth, height-heightOffset)
 	s.help.SetWidth(innerWidth)
 
-	// Now that we know the height we can select the selected session and scroll to it.
-	s.list.SetSelected(s.selectedSessionInx)
-	s.list.ScrollToSelected()
 	titleStyle := s.com.Styles.Dialog.Title
 	dialogStyle := s.com.Styles.Dialog.View.Width(width)
 	header := common.DialogTitle(s.com.Styles, "Switch Session",

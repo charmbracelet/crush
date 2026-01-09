@@ -404,6 +404,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.completionsOpen {
 			m.completions.SetFiles(msg.Files)
 		}
+	default:
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	// This logic gets triggered on any message type, but should it?
@@ -690,6 +696,93 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	return tea.Batch(cmds...)
 }
 
+func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
+	var cmds []tea.Cmd
+	action := m.dialog.Update(msg)
+	if action == nil {
+		return tea.Batch(cmds...)
+	}
+
+	switch msg := action.(type) {
+	// Generic dialog messages
+	case dialog.ActionClose:
+		m.dialog.CloseFrontDialog()
+		if m.focus == uiFocusEditor {
+			cmds = append(cmds, m.textarea.Focus())
+		}
+	case dialog.ActionCmd:
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+
+	// Session dialog messages
+	case dialog.ActionSelectSession:
+		m.dialog.CloseDialog(dialog.SessionsID)
+		cmds = append(cmds, m.loadSession(msg.Session.ID))
+
+	// Open dialog message
+	case dialog.ActionOpenDialog:
+		if cmd := m.openDialog(msg.DialogID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+
+	// Command dialog messages
+	case dialog.ActionToggleYoloMode:
+		yolo := !m.com.App.Permissions.SkipRequests()
+		m.com.App.Permissions.SetSkipRequests(yolo)
+		m.setEditorPrompt(yolo)
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionNewSession:
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+			break
+		}
+		m.newSession()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSummarize:
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			break
+		}
+		err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+		if err != nil {
+			cmds = append(cmds, uiutil.ReportError(err))
+		}
+	case dialog.ActionToggleHelp:
+		m.status.ToggleHelp()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionQuit:
+		cmds = append(cmds, tea.Quit)
+	case dialog.ActionSelectModel:
+		if m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+
+		// TODO: Validate model API and authentication here?
+
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			break
+		}
+
+		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+			cmds = append(cmds, uiutil.ReportError(err))
+		}
+
+		// XXX: Should this be in a separate goroutine?
+		go m.com.App.UpdateAgentModel(context.TODO())
+
+		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+		cmds = append(cmds, uiutil.ReportInfo(modelMsg))
+		m.dialog.CloseDialog(dialog.ModelsID)
+	}
+
+	return tea.Batch(cmds...)
+}
+
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -729,100 +822,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Route all messages to dialog if one is open.
 	if m.dialog.HasDialogs() {
-		msg := m.dialog.Update(msg)
-		if msg == nil {
-			return tea.Batch(cmds...)
-		}
-
-		switch msg := msg.(type) {
-		// Generic dialog messages
-		case dialog.ActionClose:
-			m.dialog.CloseFrontDialog()
-			if m.focus == uiFocusEditor {
-				cmds = append(cmds, m.textarea.Focus())
-			}
-		case dialog.ActionCmd:
-			if msg.Cmd != nil {
-				cmds = append(cmds, msg.Cmd)
-			}
-
-		// Session dialog messages
-		case dialog.ActionSelectSession:
-			m.dialog.CloseDialog(dialog.SessionsID)
-			cmds = append(cmds, m.loadSession(msg.Session.ID))
-
-		// Open dialog message
-		case dialog.ActionOpenDialog:
-			switch msg.DialogID {
-			case dialog.SessionsID:
-				if cmd := m.openSessionsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			case dialog.ModelsID:
-				if cmd := m.openModelsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			default:
-				// Unknown dialog
-				break
-			}
-
-			m.dialog.CloseDialog(dialog.CommandsID)
-
-		// Command dialog messages
-		case dialog.ActionToggleYoloMode:
-			yolo := !m.com.App.Permissions.SkipRequests()
-			m.com.App.Permissions.SetSkipRequests(yolo)
-			m.setEditorPrompt(yolo)
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.ActionNewSession:
-			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
-				break
-			}
-			m.newSession()
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.ActionSummarize:
-			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
-				break
-			}
-			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
-			if err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
-			}
-		case dialog.ActionToggleHelp:
-			m.status.ToggleHelp()
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.ActionQuit:
-			cmds = append(cmds, tea.Quit)
-		case dialog.ActionSelectModel:
-			if m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-				break
-			}
-
-			// TODO: Validate model API and authentication here?
-
-			cfg := m.com.Config()
-			if cfg == nil {
-				cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
-				break
-			}
-
-			if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
-			}
-
-			// XXX: Should this be in a separate goroutine?
-			go m.com.App.UpdateAgentModel(context.TODO())
-
-			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-			cmds = append(cmds, uiutil.ReportInfo(modelMsg))
-			m.dialog.CloseDialog(dialog.ModelsID)
-		}
-
-		return tea.Batch(cmds...)
+		return m.handleDialogMsg(msg)
 	}
 
 	switch m.state {
@@ -1800,6 +1800,33 @@ func (m *UI) sendMessage(content string, attachments []message.Attachment) tea.C
 	return tea.Batch(cmds...)
 }
 
+// openDialog opens a dialog by its ID.
+func (m *UI) openDialog(id string) tea.Cmd {
+	var cmds []tea.Cmd
+	switch id {
+	case dialog.SessionsID:
+		if cmd := m.openSessionsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ModelsID:
+		if cmd := m.openModelsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.CommandsID:
+		if cmd := m.openCommandsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.QuitID:
+		if cmd := m.openQuitDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	default:
+		// Unknown dialog
+		break
+	}
+	return tea.Batch(cmds...)
+}
+
 // openQuitDialog opens the quit confirmation dialog.
 func (m *UI) openQuitDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.QuitID) {
@@ -1897,6 +1924,10 @@ func (m *UI) newSession() {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
+	if m.dialog.HasDialogs() {
+		return m.handleDialogMsg(msg)
+	}
+
 	if m.focus != uiFocusEditor {
 		return nil
 	}

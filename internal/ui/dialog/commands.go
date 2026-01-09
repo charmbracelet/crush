@@ -153,7 +153,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					// TODO: Please unravel this mess later and the Command
 					// Handler design.
 					if cmd := item.Cmd.Handler(item.Cmd); cmd != nil { // Huh??
-						return ActionCmd{cmd}
+						return cmd()
 					}
 				}
 			}

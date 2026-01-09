@@ -60,7 +60,11 @@ func (m *UserMessageItem) Render(width int) string {
 
 	if len(m.message.BinaryContent()) > 0 {
 		attachmentsStr := m.renderAttachments(cappedWidth)
-		content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+		if content == "" {
+			content = attachmentsStr
+		} else {
+			content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+		}
 	}
 
 	height = lipgloss.Height(content)

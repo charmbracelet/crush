@@ -872,7 +872,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.attachments.List()
 				m.attachments.Reset()
-				if len(value) == 0 {
+				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
 

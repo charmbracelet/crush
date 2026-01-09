@@ -397,10 +397,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return p, tea.Batch(cmds...)
 
 	case commands.CommandRunCustomMsg:
-		if p.app.AgentCoordinator.IsBusy() {
-			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
-		}
-
 		cmd := p.sendMessage(msg.Content, nil)
 		if cmd != nil {
 			return p, cmd
@@ -421,9 +417,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.focusedPane = PanelTypeEditor
 		return p, p.SetSize(p.width, p.height)
 	case commands.NewSessionsMsg:
-		if p.app.AgentCoordinator.IsBusy() {
-			return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
-		}
 		return p, p.newSession()
 	case tea.KeyPressMsg:
 		switch {
@@ -431,9 +424,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			// if we have no agent do nothing
 			if p.app.AgentCoordinator == nil {
 				return p, nil
-			}
-			if p.app.AgentCoordinator.IsBusy() {
-				return p, util.ReportWarn("Agent is busy, please wait before starting a new session...")
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):

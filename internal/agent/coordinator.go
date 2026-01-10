@@ -340,6 +340,14 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.messages,
 		nil,
 	})
+
+	// If DisableTools is set on the provider, skip building tools entirely.
+	// This is useful for providers like Ollama that may have streaming issues with tools enabled.
+	if largeProviderCfg.DisableTools {
+		slog.Info("Tools disabled for provider", "provider", largeProviderCfg.ID)
+		return result, nil
+	}
+
 	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {

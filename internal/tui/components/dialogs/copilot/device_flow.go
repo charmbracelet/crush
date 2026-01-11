@@ -174,7 +174,7 @@ func (d *DeviceFlow) View() string {
 		freeMessage := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(d.width - 2).
-			Render("You may be able to request free access if elegible. For more information, see:")
+			Render("You may be able to request free access if eligible. For more information, see:")
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
 			message,

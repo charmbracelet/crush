@@ -55,7 +55,7 @@ scoop install crush
 <details>
 <summary><strong>Nix (NUR)</strong></summary>
 
-Crush is available via the offical Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
+Crush is available via the official Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
 
 You can also try out Crush via the NUR with `nix-shell`:
 

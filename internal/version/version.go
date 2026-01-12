@@ -1,6 +1,12 @@
 package version
 
-import "runtime/debug"
+import (
+	"context"
+	"os/exec"
+	"runtime/debug"
+	"strings"
+	"time"
+)
 
 // Build-time parameters set via -ldflags
 
@@ -16,6 +22,7 @@ func init() {
 		return
 	}
 
+	// Try to get more detailed version info if we are in a dev version.
 	if Version == "devel" || Version == "dev" {
 		var revision string
 		var modified bool
@@ -39,8 +46,40 @@ func init() {
 		}
 	}
 
-	mainVersion := info.Main.Version
-	if mainVersion != "" && mainVersion != "(devel)" {
-		Version = mainVersion
+	// If we still have a generic version, try to use the one from build info.
+	if Version == "devel" || Version == "dev" {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			Version = info.Main.Version
+		}
 	}
+
+	// Finally, fallback to git command if we are still on a generic version.
+	if Version == "devel" || Version == "dev" {
+		if gitVersion := getVersionFromGit(); gitVersion != "" {
+			Version = gitVersion
+		}
+	}
+}
+
+func getVersionFromGit() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	revision := strings.TrimSpace(string(out))
+	if revision == "" {
+		return ""
+	}
+
+	res := "dev-" + revision
+	cmd = exec.CommandContext(ctx, "git", "diff", "--quiet")
+	if err := cmd.Run(); err != nil {
+		// git diff --quiet returns exit code 1 if there are changes
+		res += " (dirty)"
+	}
+	return res
 }

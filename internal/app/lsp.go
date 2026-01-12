@@ -3,41 +3,87 @@ package app
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
+	slog.Info("LSP clients initialization started in background")
+
+	manager := powernapconfig.NewManager()
+	manager.LoadDefaults()
+
+	var userConfiguredLSPs []string
 	for name, clientConfig := range app.config.LSP {
 		if clientConfig.Disabled {
 			slog.Info("Skipping disabled LSP client", "name", name)
+			manager.RemoveServer(name)
 			continue
 		}
-		go app.createAndStartLSPClient(ctx, name, clientConfig)
+		userConfiguredLSPs = append(userConfiguredLSPs, name)
+		manager.AddServer(name, &powernapconfig.ServerConfig{
+			Command:     clientConfig.Command,
+			Args:        clientConfig.Args,
+			Environment: clientConfig.Env,
+			FileTypes:   clientConfig.FileTypes,
+			RootMarkers: clientConfig.RootMarkers,
+			InitOptions: clientConfig.InitOptions,
+			Settings:    clientConfig.Options,
+		})
 	}
-	slog.Info("LSP clients initialization started in background")
+
+	go func() {
+		servers := manager.GetServers()
+
+		filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
+
+		for _, name := range userConfiguredLSPs {
+			if _, ok := filtered[name]; ok {
+				filtered[name] = servers[name]
+			}
+		}
+		for name, server := range filtered {
+			go app.createAndStartLSPClient(
+				ctx, name,
+				toOurConfig(server),
+				slices.Contains(userConfiguredLSPs, name),
+			)
+		}
+	}()
 }
 
-// createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
-func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
+func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
+	return config.LSPConfig{
+		Command:     in.Command,
+		Args:        in.Args,
+		Env:         in.Environment,
+		FileTypes:   in.FileTypes,
+		RootMarkers: in.RootMarkers,
+		InitOptions: in.InitOptions,
+		Options:     in.Settings,
+	}
+}
+
+// createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher.
+func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig, userConfigured bool) {
 	slog.Debug("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
-	// Check if any root markers exist in the working directory (config now has defaults)
-	if !lsp.HasRootMarkers(app.config.WorkingDir(), config.RootMarkers) {
-		slog.Debug("Skipping LSP client: no root markers found", "name", name, "rootMarkers", config.RootMarkers)
-		updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
-		return
-	}
-
-	// Update state to starting
+	// Update state to starting.
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
 	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver())
 	if err != nil {
+		if !userConfigured {
+			slog.Debug("Default LSP config disabled due to error", "name", name, "error", err)
+			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
+			return
+		}
 		slog.Error("Failed to create LSP client for", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, nil, 0)
 		return

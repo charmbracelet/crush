@@ -28,7 +28,7 @@ func TestListDirectory(t *testing.T) {
 	}
 
 	t.Run("no limit", func(t *testing.T) {
-		files, truncated, err := ListDirectory(tmp, nil, -1, -1)
+		files, truncated, err := ListDirectory(t.Context(), tmp, nil, -1, -1)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Len(t, files, 4)
@@ -40,7 +40,7 @@ func TestListDirectory(t *testing.T) {
 		}, relPaths(t, files, tmp))
 	})
 	t.Run("limit", func(t *testing.T) {
-		files, truncated, err := ListDirectory(tmp, nil, -1, 2)
+		files, truncated, err := ListDirectory(t.Context(), tmp, nil, -1, 2)
 		require.NoError(t, err)
 		require.True(t, truncated)
 		require.Len(t, files, 2)

@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -76,7 +77,7 @@ func (w *FastGlobWalker) ShouldSkip(path string) bool {
 	return w.directoryLister.shouldIgnore(path, nil)
 }
 
-func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
+func GlobWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -88,7 +89,19 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortFilesFirst,
 	}
+
+	const maxScannedFiles = 10000
+	var scannedFiles int
 	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		scannedFiles++
+		if scannedFiles > maxScannedFiles {
+			return fmt.Errorf("search space too large (over %d files scanned). Use a more specific path", maxScannedFiles)
+		}
+
 		if err != nil {
 			return nil // Skip files we can't access
 		}

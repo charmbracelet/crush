@@ -44,6 +44,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 
 		for _, name := range userConfiguredLSPs {
 			if _, ok := filtered[name]; ok {
+			if _, ok := filtered[name]; !ok {
 				filtered[name] = servers[name]
 			}
 		}

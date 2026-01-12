@@ -102,6 +102,9 @@ func zAIBuilder(model string) builderFunc {
 }
 
 func testEnv(t *testing.T) fakeEnv {
+	// Use a fixed path for VCR cassette compatibility. The cassettes contain
+	// this path in recorded HTTP request bodies. Using t.TempDir() would
+	// generate different paths each run, breaking VCR playback.
 	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
 	os.RemoveAll(workingDir)
 

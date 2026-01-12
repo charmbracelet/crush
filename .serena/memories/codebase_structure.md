@@ -1,0 +1,15 @@
+# Codebase Structure
+- `main.go`: Entry point
+- `internal/cmd/`: CLI commands (cobra)
+- `internal/app/`: Application wiring and lifecycle
+- `internal/agent/`: AI agent orchestration and tools
+- `internal/config/`: Configuration and providers
+- `internal/tui/`: Terminal UI (bubbletea components)
+- `internal/db/`: SQLite database (sqlc-generated) and migrations
+- `internal/message/`: Message handling
+- `internal/session/`: Session management
+- `internal/permission/`: Permission system
+- `internal/lsp/`: Language Server Protocol client
+- `internal/shell/`: Shell execution
+- `scripts/`: Utility scripts
+- `. serena/`: Serena-specific data

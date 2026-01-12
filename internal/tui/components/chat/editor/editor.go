@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
@@ -142,7 +143,13 @@ func (m *editorCmp) send() tea.Cmd {
 	switch value {
 	case "exit", "quit":
 		m.textarea.Reset()
-		return util.CmdHandler(dialogs.OpenDialogMsg{Model: quit.NewQuitDialog()})
+		tuiOpts := config.Get().TUIOptions()
+		if !tuiOpts.ShouldConfirmQuit() {
+			return tea.Quit
+		}
+		return util.CmdHandler(dialogs.OpenDialogMsg{
+			Model: quit.NewQuitDialog(tuiOpts.IsQuitDefaultYes()),
+		})
 	}
 
 	attachments := m.attachments

@@ -28,9 +28,9 @@ type quitDialogCmp struct {
 }
 
 // NewQuitDialog creates a new quit confirmation dialog.
-func NewQuitDialog() QuitDialog {
+func NewQuitDialog(defaultYes bool) QuitDialog {
 	return &quitDialogCmp{
-		selectedNo: true, // Default to "No" for safety
+		selectedNo: !defaultYes,
 		keymap:     DefaultKeymap(),
 	}
 }

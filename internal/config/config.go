@@ -194,6 +194,8 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ConfirmQuit *bool  `json:"confirm_quit,omitempty" jsonschema:"description=Whether to show a confirmation dialog when quitting,default=true"`
+	QuitDefaultYes bool `json:"quit_default_yes,omitempty" jsonschema:"description=Whether 'Yes' should be the default selection in the quit dialog,default=false"`
 	// Here we can add themes later or any TUI related options
 	//
 
@@ -208,6 +210,20 @@ type Completions struct {
 
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
+}
+
+func (t *TUIOptions) ShouldConfirmQuit() bool {
+	if t == nil {
+		return true
+	}
+	return ptrValOr(t.ConfirmQuit, true)
+}
+
+func (t *TUIOptions) IsQuitDefaultYes() bool {
+	if t == nil {
+		return false
+	}
+	return t.QuitDefaultYes
 }
 
 type Permissions struct {
@@ -386,6 +402,13 @@ type Config struct {
 
 func (c *Config) WorkingDir() string {
 	return c.workingDir
+}
+
+func (c *Config) TUIOptions() *TUIOptions {
+	if c == nil || c.Options == nil {
+		return nil
+	}
+	return c.Options.TUI
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {

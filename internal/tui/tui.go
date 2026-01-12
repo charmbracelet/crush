@@ -264,8 +264,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return nil
 		}
 	case commands.QuitMsg:
+		tuiOpts := config.Get().TUIOptions()
+		if !tuiOpts.ShouldConfirmQuit() {
+			return a, tea.Quit
+		}
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: quit.NewQuitDialog(),
+			Model: quit.NewQuitDialog(tuiOpts.IsQuitDefaultYes()),
 		})
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
@@ -467,8 +471,12 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		if a.dialog.ActiveDialogID() == quit.QuitDialogID {
 			return tea.Quit
 		}
+		tuiOpts := config.Get().TUIOptions()
+		if !tuiOpts.ShouldConfirmQuit() {
+			return tea.Quit
+		}
 		return util.CmdHandler(dialogs.OpenDialogMsg{
-			Model: quit.NewQuitDialog(),
+			Model: quit.NewQuitDialog(tuiOpts.IsQuitDefaultYes()),
 		})
 	}
 

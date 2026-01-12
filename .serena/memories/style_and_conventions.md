@@ -1,0 +1,12 @@
+# Code Style and Conventions
+- **Formatting**: Use `gofumpt`. `task fmt` runs `gofumpt -w .`
+- **Imports**: Group stdlib, external, and internal packages. Use `goimports`.
+- **Naming**: 
+  - Exported: `PascalCase`
+  - Unexported: `camelCase`
+  - JSON tags: `snake_case`
+- **Error Handling**: Return errors explicitly, wrap with `fmt.Errorf`.
+- **Context**: Pass `context.Context` as the first parameter.
+- **Commits**: Use semantic commits (`fix:`, `feat:`, `chore:`, etc.).
+- **Comments**: Start with a capital letter and end with a period. Wrap at 78 columns.
+- **Permissions**: Use octal notation for file permissions (e.g., `0o755`).

@@ -405,12 +405,15 @@ func (app *App) Shutdown() {
 	})
 
 	// Shutdown all LSP clients.
+	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+	defer cancel()
 	for name, client := range app.LSPClients.Seq2() {
 		wg.Go(func() {
-			shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-			defer cancel()
-			if err := client.Close(shutdownCtx); err != nil {
-				slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
+			if err := client.Close(shutdownCtx); err != nil &&
+				!errors.Is(err, io.EOF) &&
+				!errors.Is(err, context.Canceled) &&
+				err.Error() != "signal: killed" {
+				slog.Warn("Failed to shutdown LSP client", "name", name, "error", err)
 			}
 		})
 	}

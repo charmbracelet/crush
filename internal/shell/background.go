@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -163,15 +164,26 @@ func (m *BackgroundShellManager) Cleanup() int {
 
 // KillAll terminates all background shells.
 func (m *BackgroundShellManager) KillAll() {
-	shells := make([]*BackgroundShell, 0, m.shells.Len())
-	for shell := range m.shells.Seq() {
-		shells = append(shells, shell)
-	}
+	shells := slices.Collect(m.shells.Seq())
 	m.shells.Reset(map[string]*BackgroundShell{})
+	done := make(chan struct{}, 1)
+	go func() {
+		var wg sync.WaitGroup
+		for _, shell := range shells {
+			wg.Go(func() {
+				shell.cancel()
+				<-shell.done
+			})
+		}
+		wg.Wait()
+		done <- struct{}{}
+	}()
 
-	for _, shell := range shells {
-		shell.cancel()
-		<-shell.done
+	select {
+	case <-done:
+		return
+	case <-time.After(time.Second * 5):
+		return
 	}
 }
 

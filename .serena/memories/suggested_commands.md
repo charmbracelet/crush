@@ -1,0 +1,13 @@
+# Suggested Commands
+- **Build**: `task build` (or `go build .`)
+- **Run**: `task run` (or `go run .`)
+- **Test**: `task test` (runs all tests)
+- **Single Test**: `go test ./internal/pkg -run TestName`
+- **Update Golden Files**: `go test ./... -update`
+- **Lint**: `task lint`
+- **Lint & Fix**: `task lint:fix`
+- **Format**: `task fmt`
+- **Development**: `task dev` (runs with profiling)
+- **Install**: `task install`
+- **Update Providers**: `crush update-providers`
+- **Logs**: `crush logs --tail 100`

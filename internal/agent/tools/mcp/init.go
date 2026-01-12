@@ -29,6 +29,7 @@ var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
+	initDone = make(chan struct{})
 )
 
 // State represents the current state of an MCP client
@@ -197,6 +198,17 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}(name, m)
 	}
 	wg.Wait()
+	close(initDone)
+}
+
+// Wait blocks until all configured MCP clients have finished their initial connection attempt.
+func Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-initDone:
+		return nil
+	}
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {
@@ -339,7 +351,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 
 func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
 	switch m.Type {
-	case config.MCPStdio:
+	case config.MCPStdio, "":
 		command, err := resolver.ResolveValue(m.Command)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mcp command: %w", err)

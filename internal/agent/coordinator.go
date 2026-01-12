@@ -14,12 +14,14 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
@@ -108,7 +110,28 @@ func NewCoordinator(
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	go c.listenToMCPEvents(ctx)
+
 	return c, nil
+}
+
+func (c *coordinator) listenToMCPEvents(ctx context.Context) {
+	events := mcp.SubscribeEvents(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-events:
+			if ev.Payload.Type == mcp.EventStateChanged && ev.Payload.State == mcp.StateConnected ||
+				ev.Payload.Type == mcp.EventToolsListChanged {
+				slog.Debug("MCP state changed, updating models and tools", "mcp", ev.Payload.Name)
+				if err := c.UpdateModels(ctx); err != nil {
+					slog.Error("Failed to update models and tools after MCP event", "error", err)
+				}
+			}
+		}
+	}
 }
 
 // Run implements Coordinator.
@@ -346,6 +369,14 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
+		// Wait for MCPs to initialize if any are configured.
+		// We use a timeout to ensure we don't block forever.
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if err := mcp.Wait(waitCtx); err != nil {
+			slog.Warn("MCP initialization wait finished with error or timeout", "error", err)
+		}
+
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {
 			return err

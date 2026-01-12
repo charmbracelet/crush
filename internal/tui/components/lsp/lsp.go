@@ -41,9 +41,6 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 	lsps := slices.SortedFunc(maps.Values(app.GetLSPStates()), func(a, b app.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
-	lsps = slices.DeleteFunc(lsps, func(info app.LSPClientInfo) bool {
-		return info.State == lsp.StateDisabled
-	})
 	if len(lsps) == 0 {
 		lspList = append(lspList, t.S().Base.Foreground(t.Border).Render("None"))
 		return lspList

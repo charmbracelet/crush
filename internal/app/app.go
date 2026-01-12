@@ -93,7 +93,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	app.setupEvents()
 
 	// Initialize LSP clients in the background.
-	app.initLSPClients(ctx)
+	go app.initLSPClients(ctx)
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)

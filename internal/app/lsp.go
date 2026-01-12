@@ -13,7 +13,7 @@ import (
 
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
-	slog.Info("LSP clients initialization started in background")
+	slog.Info("LSP clients initialization started")
 
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
@@ -37,25 +37,21 @@ func (app *App) initLSPClients(ctx context.Context) {
 		})
 	}
 
-	go func() {
-		servers := manager.GetServers()
+	servers := manager.GetServers()
+	filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
 
-		filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
-
-		for _, name := range userConfiguredLSPs {
-			if _, ok := filtered[name]; ok {
-			if _, ok := filtered[name]; !ok {
-				filtered[name] = servers[name]
-			}
+	for _, name := range userConfiguredLSPs {
+		if _, ok := filtered[name]; !ok {
+			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
 		}
-		for name, server := range filtered {
-			go app.createAndStartLSPClient(
-				ctx, name,
-				toOurConfig(server),
-				slices.Contains(userConfiguredLSPs, name),
-			)
-		}
-	}()
+	}
+	for name, server := range filtered {
+		go app.createAndStartLSPClient(
+			ctx, name,
+			toOurConfig(server),
+			slices.Contains(userConfiguredLSPs, name),
+		)
+	}
 }
 
 func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {

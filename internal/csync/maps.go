@@ -33,8 +33,8 @@ func NewLazyMap[K comparable, V any](load func() map[K]V) *Map[K, V] {
 	m := &Map[K, V]{}
 	m.mu.Lock()
 	go func() {
+		defer m.mu.Unlock()
 		m.inner = load()
-		m.mu.Unlock()
 	}()
 	return m
 }

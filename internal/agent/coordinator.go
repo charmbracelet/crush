@@ -118,6 +118,19 @@ func NewCoordinator(
 
 func (c *coordinator) listenToMCPEvents(ctx context.Context) {
 	events := mcp.SubscribeEvents(ctx)
+
+	// Check for MCPs that connected before we subscribed.
+	// This handles the race where mcp.Initialize completes before we start listening.
+	for _, state := range mcp.GetStates() {
+		if state.State == mcp.StateConnected {
+			slog.Debug("MCP already connected, updating models and tools", "mcp", state.Name)
+			if err := c.UpdateModels(ctx); err != nil {
+				slog.Error("Failed to update models and tools for already-connected MCP", "error", err)
+			}
+			break // Only need to update once, all MCPs are included
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():

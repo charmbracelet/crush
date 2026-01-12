@@ -30,7 +30,7 @@
           # 1. Set to empty string: vendorHash = "";
           # 2. Run: nix build 2>&1 | grep 'got:'
           # 3. Update with the hash from the error message
-          vendorHash = "sha256-R3Qb6n5+uoETclY2W0R3LWXkdlTHhVDqJqJHNIiEl4o=";
+          vendorHash = "sha256-iHaFP2XoRPO+ttiJG6rY5ycJJlUKgpX+oWeWZBFBs/I=";
 
           env = {
             CGO_ENABLED = "0";

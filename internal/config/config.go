@@ -806,21 +806,21 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	b, err := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
+	defer resp.Body.Close()
 	if c.ID == string(catwalk.InferenceProviderZAI) {
-		if b.StatusCode == http.StatusUnauthorized {
-			// for z.ai just check if the http response is not 401
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode == http.StatusUnauthorized {
+			// For z.ai just check if the http response is not 401.
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	} else {
-		if b.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	}
-	_ = b.Body.Close()
 	return nil
 }
 

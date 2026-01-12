@@ -86,6 +86,7 @@ type Model struct {
 }
 
 type sessionAgent struct {
+	mu                   sync.RWMutex
 	largeModel           Model
 	smallModel           Model
 	systemPromptPrefix   string
@@ -152,15 +153,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, nil
 	}
 
-	if len(a.tools) > 0 {
+	a.mu.RLock()
+	toolsList := a.tools
+	largeModel := a.largeModel
+	systemPrompt := a.systemPrompt
+	a.mu.RUnlock()
+
+	if len(toolsList) > 0 {
 		// Add Anthropic caching to the last tool.
-		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
+		toolsList[len(toolsList)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
 	agent := fantasy.NewAgent(
-		a.largeModel.Model,
-		fantasy.WithSystemPrompt(a.systemPrompt),
-		fantasy.WithTools(a.tools...),
+		largeModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(toolsList...),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -964,15 +971,21 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.largeModel = large
 	a.smallModel = small
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.tools = tools
 }
 
 func (a *sessionAgent) Model() Model {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.largeModel
 }
 

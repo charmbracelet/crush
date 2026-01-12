@@ -392,12 +392,15 @@ func (app *App) Subscribe(program *tea.Program) {
 func (app *App) Shutdown() {
 	start := time.Now()
 	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
-	var wg sync.WaitGroup
+
+	// First, cancel all agents and wait for them to finish. This must complete
+	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
-		wg.Go(func() {
-			app.AgentCoordinator.CancelAll()
-		})
+		app.AgentCoordinator.CancelAll()
 	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
 
 	// Kill all background shells.
 	wg.Go(func() {

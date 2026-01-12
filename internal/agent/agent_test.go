@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -616,6 +618,40 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundGlobResult, "Expected to find glob tool result")
 				require.True(t, foundLSResult, "Expected to find ls tool result")
 			})
+		})
+	}
+}
+
+func makeTestTodos(n int) []session.Todo {
+	todos := make([]session.Todo, n)
+	for i := range n {
+		todos[i] = session.Todo{
+			Status:  session.TodoStatusPending,
+			Content: fmt.Sprintf("Task %d: Implement feature with some description that makes it realistic", i),
+		}
+	}
+	return todos
+}
+
+func BenchmarkBuildSummaryPrompt(b *testing.B) {
+	cases := []struct {
+		name     string
+		numTodos int
+	}{
+		{"0todos", 0},
+		{"5todos", 5},
+		{"10todos", 10},
+		{"50todos", 50},
+	}
+
+	for _, tc := range cases {
+		todos := makeTestTodos(tc.numTodos)
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				_ = buildSummaryPrompt(todos)
+			}
 		})
 	}
 }

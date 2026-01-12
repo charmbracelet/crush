@@ -2,8 +2,6 @@ charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66 h1:2BdJynsAW+8rv
 charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e h1:tXwTmgGpwZT7ParKF5xbEQBVjM2e1uKhKi/GpfU3mYQ=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e/go.mod h1:pDM18flq3Z4njKZPA3zCvyVSSIJbMcoqlE82BdGUtL8=
-charm.land/fantasy v0.6.0 h1:0PZfZ/w6c70UdlumGGFW6s9zTV6f4xAV/bXo6vGuZsc=
-charm.land/fantasy v0.6.0/go.mod h1:hUyklhBbCtnVeMAWGXHbMD4A+5B8dHbYHGZDfOYpzzw=
 charm.land/glamour/v2 v2.0.0-20251110203732-69649f93d3b1 h1:9q4+yyU7105T3OrOx0csMyKnw89yMSijJ+rVld/Z2ek=
 charm.land/glamour/v2 v2.0.0-20251110203732-69649f93d3b1/go.mod h1:J3kVhY6oHXZq5f+8vC3hmDO95fEvbqj3z7xDwxrfzU8=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971 h1:xZFcNsJMiIDbFtWRyDmkKNk1sjojfaom4Zoe0cyH/8c=
@@ -43,6 +41,8 @@ github.com/alecthomas/chroma/v2 v2.21.1 h1:FaSDrp6N+3pphkNKU6HPCiYLgm8dbe5UXIXco
 github.com/alecthomas/chroma/v2 v2.21.1/go.mod h1:NqVhfBR0lte5Ouh3DcthuUCTUpDC9cxBOfyMbMQPs3o=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
+github.com/andreasdotorg/fantasy v0.6.1-0.20260112194427-697875eb04dd h1:HbJ0Iz8RYKCCBCdCNJnIdyh0UwAbjv+vHWIWfq+K0LU=
+github.com/andreasdotorg/fantasy v0.6.1-0.20260112194427-697875eb04dd/go.mod h1:Ifj41bNnIXJ1aF6sLKcS9y3MzWbDnObmcHrCaaHfpZ0=
 github.com/andybalholm/cascadia v1.3.2/go.mod h1:7gtRlve5FxPPgIgX36uWBX58OdBsSS6lUvCFb+h7KvU=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
 github.com/andybalholm/cascadia v1.3.3/go.mod h1:xNd9bqTn98Ln4DwST8/nG+H0yuB8Hmgu1YHNnWw0GeA=

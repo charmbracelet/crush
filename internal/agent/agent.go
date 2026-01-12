@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
@@ -182,12 +184,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
-	var wg sync.WaitGroup
+	var wg errgroup.Group
 	// Generate title if first message.
 	if len(msgs) == 0 {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
-		wg.Go(func() {
+		wg.Go(func() error {
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
+			return nil
 		})
 	}
 
@@ -462,7 +465,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Role:  message.Tool,
 				Parts: missingToolResults,
 			})
-			})
 			if createErr != nil {
 				return nil, createErr
 			}
@@ -501,9 +503,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		_ = wg.Wait()
 		return nil, err
 	}
-	wg.Wait()
+	_ = wg.Wait()
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)

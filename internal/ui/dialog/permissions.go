@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // PermissionsID is the identifier for the permissions dialog.
@@ -50,20 +51,12 @@ const (
 	minWindowHeight = 20
 )
 
-// PermissionResponseMsg is sent when the user responds to a permission request.
-type PermissionResponseMsg struct {
-	Permission permission.PermissionRequest
-	Action     PermissionAction
-}
-
 // Permissions represents a dialog for permission requests.
 type Permissions struct {
-	com           *common.Common
-	width, height int
-	maxHeight     int
-	windowWidth   int // Terminal window dimensions.
-	windowHeight  int
-	fullscreen    bool // true when dialog is fullscreen
+	com          *common.Common
+	windowWidth  int // Terminal window dimensions.
+	windowHeight int
+	fullscreen   bool // true when dialog is fullscreen
 
 	permission     permission.PermissionRequest
 	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
@@ -73,9 +66,10 @@ type Permissions struct {
 
 	// Diff view state.
 	diffSplitMode        *bool // nil means use default based on width
-	defaultDiffSplitMode bool  // true for split when width >= 140
-	diffXOffset          int
-	diffYOffset          int
+	defaultDiffSplitMode bool  // default split mode based on width
+
+	diffXOffset int
+	diffYOffset int
 
 	help   help.Model
 	keyMap permissionsKeyMap
@@ -189,45 +183,11 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	return p
 }
 
-// SetWindowSize implements [Dialog].
-func (p *Permissions) SetWindowSize(windowWidth, windowHeight int) {
-	p.windowWidth = windowWidth
-	p.windowHeight = windowHeight
-
-	// Force fullscreen when window is too small.
-	forceFullscreen := windowWidth <= minWindowWidth || windowHeight <= minWindowHeight
-
-	// Calculate dialog dimensions based on fullscreen state and content type.
-	var width, height int
-	if forceFullscreen || (p.fullscreen && p.hasDiffView()) {
-		// Use nearly full window for fullscreen.
-		width = windowWidth - fullscreenMargin
-		height = windowHeight - fullscreenMargin
-	} else if p.hasDiffView() {
-		// Wide for side-by-side diffs, capped for readability.
-		width = min(int(float64(windowWidth)*diffSizeRatio), diffMaxWidth)
-		height = int(float64(windowHeight) * diffSizeRatio)
-	} else {
-		// Narrower for simple content like commands/URLs.
-		width = min(int(float64(windowWidth)*simpleSizeRatio), simpleMaxWidth)
-		height = int(float64(windowHeight) * simpleHeightRatio)
-	}
-
-	p.width = width
-	p.maxHeight = height
-
-	// Default to split mode when dialog is wide enough.
-	p.defaultDiffSplitMode = width >= splitModeMinWidth
-
-	// Update viewport width.
-	p.viewport.SetWidth(p.calculateContentWidth())
-}
-
 // Calculate usable content width (dialog border + horizontal padding).
-func (p *Permissions) calculateContentWidth() int {
+func (p *Permissions) calculateContentWidth(width int) int {
 	t := p.com.Styles
 	const dialogHorizontalPadding = 2
-	return p.width - t.Dialog.View.GetHorizontalFrameSize() - dialogHorizontalPadding
+	return width - t.Dialog.View.GetHorizontalFrameSize() - dialogHorizontalPadding
 }
 
 // ID implements [Dialog].
@@ -236,7 +196,7 @@ func (*Permissions) ID() string {
 }
 
 // Update implements [Dialog].
-func (p *Permissions) Update(msg tea.Msg) tea.Msg {
+func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
@@ -264,7 +224,6 @@ func (p *Permissions) Update(msg tea.Msg) tea.Msg {
 		case key.Matches(msg, p.keyMap.ToggleFullscreen):
 			if p.hasDiffView() {
 				p.fullscreen = !p.fullscreen
-				p.SetWindowSize(p.windowWidth, p.windowHeight)
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			p.diffYOffset++
@@ -303,7 +262,7 @@ func (p *Permissions) selectCurrentOption() tea.Msg {
 }
 
 func (p *Permissions) respond(action PermissionAction) tea.Msg {
-	return PermissionResponseMsg{
+	return ActionPermissionResponse{
 		Permission: p.permission,
 		Action:     action,
 	}
@@ -324,12 +283,31 @@ func (p *Permissions) isSplitMode() bool {
 	return p.defaultDiffSplitMode
 }
 
-// View implements [Dialog].
-func (p *Permissions) View() string {
+// Draw implements [Dialog].
+func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := p.com.Styles
-	dialogStyle := t.Dialog.View.Width(p.width).Padding(0, 1)
+	// Force fullscreen when window is too small.
+	forceFullscreen := area.Dx() <= minWindowWidth || area.Dy() <= minWindowHeight
 
-	contentWidth := p.calculateContentWidth()
+	// Calculate dialog dimensions based on fullscreen state and content type.
+	var width, height int
+	if forceFullscreen || (p.fullscreen && p.hasDiffView()) {
+		// Use nearly full window for fullscreen.
+		width = area.Dx()
+		height = area.Dy()
+	} else if p.hasDiffView() {
+		// Wide for side-by-side diffs, capped for readability.
+		width = min(int(float64(area.Dx())*diffSizeRatio), diffMaxWidth)
+		height = int(float64(area.Dy()) * diffSizeRatio)
+	} else {
+		// Narrower for simple content like commands/URLs.
+		width = min(int(float64(area.Dx())*simpleSizeRatio), simpleMaxWidth)
+		height = int(float64(area.Dy()) * simpleHeightRatio)
+	}
+
+	dialogStyle := t.Dialog.View.Width(width).Padding(0, 1)
+
+	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
 	buttons := p.renderButtons(contentWidth)
 	helpView := p.help.View(p)
@@ -339,7 +317,10 @@ func (p *Permissions) View() string {
 	buttonsHeight := lipgloss.Height(buttons)
 	helpHeight := lipgloss.Height(helpView)
 	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
-	availableHeight := p.maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
+	availableHeight := height - headerHeight - buttonsHeight - helpHeight - frameHeight
+
+	p.defaultDiffSplitMode = width >= splitModeMinWidth
+	p.viewport.SetWidth(p.calculateContentWidth(width))
 
 	content := p.renderContent(contentWidth, availableHeight)
 
@@ -350,7 +331,8 @@ func (p *Permissions) View() string {
 	parts = append(parts, "", buttons, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return dialogStyle.Render(innerContent)
+	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
+	return nil
 }
 
 func (p *Permissions) renderHeader(contentWidth int) string {

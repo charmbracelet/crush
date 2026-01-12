@@ -29,19 +29,12 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 		if !ok {
 			continue
 		}
+		counts := client.GetDiagnosticCounts()
 		lspErrs := map[protocol.DiagnosticSeverity]int{
-			protocol.SeverityError:       0,
-			protocol.SeverityWarning:     0,
-			protocol.SeverityHint:        0,
-			protocol.SeverityInformation: 0,
-		}
-
-		for _, diagnostics := range client.GetDiagnostics() {
-			for _, diagnostic := range diagnostics {
-				if severity, ok := lspErrs[diagnostic.Severity]; ok {
-					lspErrs[diagnostic.Severity] = severity + 1
-				}
-			}
+			protocol.SeverityError:       counts.Error,
+			protocol.SeverityWarning:     counts.Warning,
+			protocol.SeverityHint:        counts.Hint,
+			protocol.SeverityInformation: counts.Information,
 		}
 
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})

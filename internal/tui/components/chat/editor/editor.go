@@ -1,15 +1,14 @@
 package editor
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/editor"
 )
 
 type Editor interface {
@@ -94,16 +94,6 @@ type OpenEditorMsg struct {
 }
 
 func (m *editorCmp) openEditor(value string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		// Use platform-appropriate default editor
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-		} else {
-			editor = "nvim"
-		}
-	}
-
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return util.ReportError(err)
@@ -112,8 +102,18 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
-	cmdStr := editor + " " + tmpfile.Name()
-	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	cmd, err := editor.Command(
+		"crush",
+		tmpfile.Name(),
+		editor.AtPosition(
+			m.textarea.Line()+1,
+			m.textarea.Column()+1,
+		),
+	)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -147,7 +147,7 @@ func (m *editorCmp) send() tea.Cmd {
 
 	attachments := m.attachments
 
-	if value == "" {
+	if value == "" && !message.ContainsTextAttachment(attachments) {
 		return nil
 	}
 
@@ -234,13 +234,31 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		content, path, err := pasteToFile(msg)
-		if errors.Is(err, errNotAFile) {
+		// If pasted text has more than 2 newlines, treat it as a file attachment.
+		if strings.Count(msg.Content, "\n") > 2 {
+			content := []byte(msg.Content)
+			if len(content) > maxAttachmentSize {
+				return m, util.ReportWarn("Paste is too big (>5mb)")
+			}
+			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
+			mimeType := mimeOf(content)
+			attachment := message.Attachment{
+				FileName: name,
+				FilePath: name,
+				MimeType: mimeType,
+				Content:  content,
+			}
+			return m, util.CmdHandler(filepicker.FilePickedMsg{
+				Attachment: attachment,
+			})
+		}
+
+		// Try to parse as a file path.
+		content, path, err := filepathToFile(msg.Content)
+		if err != nil {
+			// Not a file path, just update the textarea normally.
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd
-		}
-		if err != nil {
-			return m, util.ReportError(err)
 		}
 
 		if len(content) > maxAttachmentSize {
@@ -257,7 +275,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if !attachment.IsText() && !attachment.IsImage() {
 			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
-		m.textarea.InsertString(attachment.FileName)
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
 			Attachment: attachment,
 		})
@@ -628,33 +645,21 @@ func New(app *app.App) Editor {
 
 var maxAttachmentSize = 5 * 1024 * 1024 // 5MB
 
-var errNotAFile = errors.New("not a file")
+var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
 
-func pasteToFile(msg tea.PasteMsg) ([]byte, string, error) {
-	content, path, err := filepathToFile(msg.Content)
-	if err == nil {
-		return content, path, err
+func (m *editorCmp) pasteIdx() int {
+	result := 0
+	for _, at := range m.attachments {
+		found := pasteRE.FindStringSubmatch(at.FileName)
+		if len(found) == 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(found[1])
+		if err == nil {
+			result = max(result, idx)
+		}
 	}
-
-	if strings.Count(msg.Content, "\n") > 2 {
-		return contentToFile([]byte(msg.Content))
-	}
-
-	return nil, "", errNotAFile
-}
-
-func contentToFile(content []byte) ([]byte, string, error) {
-	f, err := os.CreateTemp("", "paste_*.txt")
-	if err != nil {
-		return nil, "", err
-	}
-	if _, err := f.Write(content); err != nil {
-		return nil, "", err
-	}
-	if err := f.Close(); err != nil {
-		return nil, "", err
-	}
-	return content, f.Name(), nil
+	return result + 1
 }
 
 func filepathToFile(name string) ([]byte, string, error) {

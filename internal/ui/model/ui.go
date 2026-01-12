@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/editor"
 )
 
 // Max file size set to 5M.
@@ -423,6 +425,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.completionsOpen {
 			m.completions.SetFiles(msg.Files)
 		}
+	default:
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	// This logic gets triggered on any message type, but should it?
@@ -709,6 +717,104 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	return tea.Batch(cmds...)
 }
 
+func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
+	var cmds []tea.Cmd
+	action := m.dialog.Update(msg)
+	if action == nil {
+		return tea.Batch(cmds...)
+	}
+
+	switch msg := action.(type) {
+	// Generic dialog messages
+	case dialog.ActionClose:
+		m.dialog.CloseFrontDialog()
+		if m.focus == uiFocusEditor {
+			cmds = append(cmds, m.textarea.Focus())
+		}
+	case dialog.ActionCmd:
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+
+	// Session dialog messages
+	case dialog.ActionSelectSession:
+		m.dialog.CloseDialog(dialog.SessionsID)
+		cmds = append(cmds, m.loadSession(msg.Session.ID))
+
+	// Open dialog message
+	case dialog.ActionOpenDialog:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openDialog(msg.DialogID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
+	// Command dialog messages
+	case dialog.ActionToggleYoloMode:
+		yolo := !m.com.App.Permissions.SkipRequests()
+		m.com.App.Permissions.SetSkipRequests(yolo)
+		m.setEditorPrompt(yolo)
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionNewSession:
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+			break
+		}
+		m.newSession()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSummarize:
+		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			break
+		}
+		err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+		if err != nil {
+			cmds = append(cmds, uiutil.ReportError(err))
+		}
+	case dialog.ActionToggleHelp:
+		m.status.ToggleHelp()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionQuit:
+		cmds = append(cmds, tea.Quit)
+	case dialog.ActionSelectModel:
+		if m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+
+		// TODO: Validate model API and authentication here?
+
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			break
+		}
+
+		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+			cmds = append(cmds, uiutil.ReportError(err))
+		}
+
+		// XXX: Should this be in a separate goroutine?
+		go m.com.App.UpdateAgentModel(context.TODO())
+
+		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+		cmds = append(cmds, uiutil.ReportInfo(modelMsg))
+		m.dialog.CloseDialog(dialog.ModelsID)
+		// TODO CHANGE
+	case dialog.ActionPermissionResponse:
+		m.dialog.CloseDialog(dialog.PermissionsID)
+		switch msg.Action {
+		case dialog.PermissionAllow:
+			m.com.App.Permissions.Grant(msg.Permission)
+		case dialog.PermissionAllowForSession:
+			m.com.App.Permissions.GrantPersistent(msg.Permission)
+		case dialog.PermissionDeny:
+			m.com.App.Permissions.Deny(msg.Permission)
+		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -748,106 +854,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Route all messages to dialog if one is open.
 	if m.dialog.HasDialogs() {
-		msg := m.dialog.Update(msg)
-		if msg == nil {
-			return tea.Batch(cmds...)
-		}
-
-		switch msg := msg.(type) {
-		// Generic dialog messages
-		case dialog.CloseMsg:
-			m.dialog.CloseFrontDialog()
-			if m.focus == uiFocusEditor {
-				cmds = append(cmds, m.textarea.Focus())
-			}
-
-		// Session dialog messages
-		case dialog.SessionSelectedMsg:
-			m.dialog.CloseDialog(dialog.SessionsID)
-			cmds = append(cmds, m.loadSession(msg.Session.ID))
-
-		// Open dialog message
-		case dialog.OpenDialogMsg:
-			switch msg.DialogID {
-			case dialog.SessionsID:
-				if cmd := m.openSessionsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			case dialog.ModelsID:
-				if cmd := m.openModelsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			default:
-				// Unknown dialog
-				break
-			}
-
-			m.dialog.CloseDialog(dialog.CommandsID)
-
-		// Command dialog messages
-		case dialog.ToggleYoloModeMsg:
-			yolo := !m.com.App.Permissions.SkipRequests()
-			m.com.App.Permissions.SetSkipRequests(yolo)
-			m.setEditorPrompt(yolo)
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.NewSessionsMsg:
-			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
-				break
-			}
-			m.newSession()
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.CompactMsg:
-			if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
-				break
-			}
-			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
-			if err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
-			}
-		case dialog.ToggleHelpMsg:
-			m.status.ToggleHelp()
-			m.dialog.CloseDialog(dialog.CommandsID)
-		case dialog.QuitMsg:
-			cmds = append(cmds, tea.Quit)
-		case dialog.ModelSelectedMsg:
-			if m.com.App.AgentCoordinator.IsBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-				break
-			}
-
-			// TODO: Validate model API and authentication here?
-
-			cfg := m.com.Config()
-			if cfg == nil {
-				cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
-				break
-			}
-
-			if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
-			}
-
-			// XXX: Should this be in a separate goroutine?
-			go m.com.App.UpdateAgentModel(context.TODO())
-
-			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-			cmds = append(cmds, uiutil.ReportInfo(modelMsg))
-			m.dialog.CloseDialog(dialog.ModelsID)
-		case dialog.PermissionResponseMsg:
-			m.dialog.CloseDialog(dialog.PermissionsID)
-			switch msg.Action {
-			case dialog.PermissionAllow:
-				m.com.App.Permissions.Grant(msg.Permission)
-			case dialog.PermissionAllowForSession:
-				m.com.App.Permissions.GrantPersistent(msg.Permission)
-			case dialog.PermissionDeny:
-				m.com.App.Permissions.Deny(msg.Permission)
-			}
-		}
-
-		return tea.Batch(cmds...)
+		return m.handleDialogMsg(msg)
 	}
 
 	// Handle cancel key when agent is busy.
@@ -911,7 +918,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.attachments.List()
 				m.attachments.Reset()
-				if len(value) == 0 {
+				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
 
@@ -1074,7 +1081,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // Draw implements [uv.Drawable] and draws the UI model.
-func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
+func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
 	if m.layout != layout {
@@ -1171,36 +1178,20 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) {
 		})
 	}
 
-	// This needs to come last to overlay on top of everything
+	// This needs to come last to overlay on top of everything. We always pass
+	// the full screen bounds because the dialogs will position themselves
+	// accordingly.
 	if m.dialog.HasDialogs() {
-		m.dialog.Draw(scr, area)
+		return m.dialog.Draw(scr, scr.Bounds())
 	}
-}
 
-// Cursor returns the cursor position and properties for the UI model. It
-// returns nil if the cursor should not be shown.
-func (m *UI) Cursor() *tea.Cursor {
-	if m.layout.editor.Dy() <= 0 {
-		// Don't show cursor if editor is not visible
-		return nil
-	}
-	if m.dialog.HasDialogs() {
-		if front := m.dialog.DialogLast(); front != nil {
-			c, ok := front.(uiutil.Cursor)
-			if ok {
-				cur := c.Cursor()
-				if cur != nil {
-					pos := m.dialog.CenterPosition(m.layout.area, front.ID())
-					cur.X += pos.Min.X
-					cur.Y += pos.Min.Y
-					return cur
-				}
-			}
-		}
-		return nil
-	}
 	switch m.focus {
 	case uiFocusEditor:
+		if m.layout.editor.Dy() <= 0 {
+			// Don't show cursor if editor is not visible
+			return nil
+		}
+
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
 			cur.X++ // Adjust for app margins
@@ -1220,11 +1211,10 @@ func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 	v.BackgroundColor = m.com.Styles.Background
-	v.Cursor = m.Cursor()
 	v.MouseMode = tea.MouseModeCellMotion
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
-	m.Draw(canvas, canvas.Bounds())
+	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
 	contentLines := strings.Split(content, "\n")
@@ -1463,9 +1453,6 @@ func (m *UI) updateSize() {
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.textarea.SetHeight(m.layout.editor.Dy())
 
-	// Resize active dialogs.
-	m.dialog.SetWindowSize(m.width, m.height)
-
 	// Handle different app states
 	switch m.state {
 	case uiConfigure, uiInitialize, uiLanding:
@@ -1628,16 +1615,6 @@ type layout struct {
 }
 
 func (m *UI) openEditor(value string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		// Use platform-appropriate default editor
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-		} else {
-			editor = "nvim"
-		}
-	}
-
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return uiutil.ReportError(err)
@@ -1646,8 +1623,18 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return uiutil.ReportError(err)
 	}
-	cmdStr := editor + " " + tmpfile.Name()
-	return uiutil.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	cmd, err := editor.Command(
+		"crush",
+		tmpfile.Name(),
+		editor.AtPosition(
+			m.textarea.Line()+1,
+			m.textarea.Column()+1,
+		),
+	)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return uiutil.ReportError(err)
 		}
@@ -1917,6 +1904,33 @@ func (m *UI) cancelAgent() tea.Cmd {
 	return cancelTimerCmd()
 }
 
+// openDialog opens a dialog by its ID.
+func (m *UI) openDialog(id string) tea.Cmd {
+	var cmds []tea.Cmd
+	switch id {
+	case dialog.SessionsID:
+		if cmd := m.openSessionsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ModelsID:
+		if cmd := m.openModelsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.CommandsID:
+		if cmd := m.openCommandsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.QuitID:
+		if cmd := m.openQuitDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	default:
+		// Unknown dialog
+		break
+	}
+	return tea.Batch(cmds...)
+}
+
 // openQuitDialog opens the quit confirmation dialog.
 func (m *UI) openQuitDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.QuitID) {
@@ -1943,7 +1957,6 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	modelsDialog.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(modelsDialog)
 
 	return nil
@@ -1967,7 +1980,6 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	commands.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(commands)
 
 	return nil
@@ -1993,7 +2005,6 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	dialog.SetWindowSize(m.width, m.height)
 	m.dialog.OpenDialog(dialog)
 
 	return nil
@@ -2011,8 +2022,6 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	}
 
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
-	permDialog.SetWindowSize(m.width, m.height)
-
 	m.dialog.OpenDialog(permDialog)
 	return nil
 }
@@ -2051,8 +2060,31 @@ func (m *UI) newSession() {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
+	if m.dialog.HasDialogs() {
+		return m.handleDialogMsg(msg)
+	}
+
 	if m.focus != uiFocusEditor {
 		return nil
+	}
+
+	// If pasted text has more than 2 newlines, treat it as a file attachment.
+	if strings.Count(msg.Content, "\n") > 2 {
+		return func() tea.Msg {
+			content := []byte(msg.Content)
+			if int64(len(content)) > maxAttachmentSize {
+				return uiutil.ReportWarn("Paste is too big (>5mb)")
+			}
+			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
+			mimeBufferSize := min(512, len(content))
+			mimeType := http.DetectContentType(content[:mimeBufferSize])
+			return message.Attachment{
+				FileName: name,
+				FilePath: name,
+				MimeType: mimeType,
+				Content:  content,
+			}
+		}
 	}
 
 	var cmd tea.Cmd
@@ -2102,6 +2134,23 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
+
+func (m *UI) pasteIdx() int {
+	result := 0
+	for _, at := range m.attachments.List() {
+		found := pasteRE.FindStringSubmatch(at.FileName)
+		if len(found) == 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(found[1])
+		if err == nil {
+			result = max(result, idx)
+		}
+	}
+	return result + 1
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

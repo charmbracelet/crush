@@ -10,8 +10,6 @@ import (
 
 // Dialog sizing constants.
 const (
-	// fullscreenMargin is the margin around the dialog in fullscreen mode.
-	fullscreenMargin = 2
 	// defaultDialogMaxWidth is the maximum width for standard dialogs.
 	defaultDialogMaxWidth = 120
 	// defaultDialogHeight is the default height for standard dialogs.
@@ -28,14 +26,19 @@ var CloseKey = key.NewBinding(
 	key.WithHelp("esc", "exit"),
 )
 
+// Action represents an action taken in a dialog after handling a message.
+type Action interface{}
+
 // Dialog is a component that can be displayed on top of the UI.
 type Dialog interface {
+	// ID returns the unique identifier of the dialog.
 	ID() string
-	Update(msg tea.Msg) tea.Msg
-	View() string
-	// SetWindowSize updates the dialog's size based on the terminal window size.
-	// Dialogs decide their own dimensions internally based on their content needs.
-	SetWindowSize(width, height int)
+	// HandleMsg processes a message and returns an action. An [Action] can be
+	// anything and the caller is responsible for handling it appropriately.
+	HandleMsg(msg tea.Msg) Action
+	// Draw draws the dialog onto the provided screen within the specified area
+	// and returns the desired cursor position on the screen.
+	Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor
 }
 
 // Overlay manages multiple dialogs as an overlay.
@@ -130,40 +133,34 @@ func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 		return nil
 	}
 
-	return dialog.Update(msg)
+	return dialog.HandleMsg(msg)
 }
 
-// SetWindowSize updates the window size for all active dialogs.
-func (d *Overlay) SetWindowSize(width, height int) {
-	for _, dialog := range d.dialogs {
-		dialog.SetWindowSize(width, height)
+// DrawCenterCursor draws the given string view centered in the screen area and
+// adjusts the cursor position accordingly.
+func DrawCenterCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
+	width, height := lipgloss.Size(view)
+	center := common.CenterRect(area, width, height)
+	if cur != nil {
+		cur.X += center.Min.X
+		cur.Y += center.Min.Y
 	}
+
+	uv.NewStyledString(view).Draw(scr, center)
 }
 
-// CenterPosition calculates the centered position for the dialog.
-func (d *Overlay) CenterPosition(area uv.Rectangle, dialogID string) uv.Rectangle {
-	dialog := d.Dialog(dialogID)
-	if dialog == nil {
-		return uv.Rectangle{}
-	}
-	return d.centerPositionView(area, dialog.View())
-}
-
-func (d *Overlay) centerPositionView(area uv.Rectangle, view string) uv.Rectangle {
-	viewWidth := lipgloss.Width(view)
-	viewHeight := lipgloss.Height(view)
-	return common.CenterRect(area, viewWidth, viewHeight)
+// DrawCenter draws the given string view centered in the screen area.
+func DrawCenter(scr uv.Screen, area uv.Rectangle, view string) {
+	DrawCenterCursor(scr, area, view, nil)
 }
 
 // Draw renders the overlay and its dialogs.
-func (d *Overlay) Draw(scr uv.Screen, area uv.Rectangle) {
+func (d *Overlay) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	var cur *tea.Cursor
 	for _, dialog := range d.dialogs {
-		view := dialog.View()
-		center := d.centerPositionView(area, view)
-		if area.Overlaps(center) {
-			uv.NewStyledString(view).Draw(scr, center)
-		}
+		cur = dialog.Draw(scr, area)
 	}
+	return cur
 }
 
 // removeDialog removes a dialog from the stack.

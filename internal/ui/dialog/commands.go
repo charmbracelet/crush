@@ -21,6 +21,8 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/uicmd"
 	"github.com/charmbracelet/crush/internal/uiutil"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -43,10 +45,11 @@ type Commands struct {
 	userCmds   []uicmd.Command
 	mcpPrompts *csync.Slice[uicmd.Command]
 
-	help          help.Model
-	input         textinput.Model
-	list          *list.FilterableList
-	width, height int
+	help  help.Model
+	input textinput.Model
+	list  *list.FilterableList
+
+	width int
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -114,43 +117,18 @@ func NewCommands(com *common.Common, sessionID string) (*Commands, error) {
 	return c, nil
 }
 
-// SetWindowSize implements [Dialog].
-func (c *Commands) SetWindowSize(windowWidth, windowHeight int) {
-	width := min(defaultDialogMaxWidth, windowWidth-fullscreenMargin)
-	height := min(defaultDialogHeight, windowHeight-fullscreenMargin)
-
-	t := c.com.Styles
-	c.width = width
-	c.height = height
-	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	var promptPadding int
-	if c.input.Focused() {
-		promptPadding = t.TextInput.Focused.Prompt.GetHorizontalFrameSize()
-	} else {
-		promptPadding = t.TextInput.Blurred.Prompt.GetHorizontalFrameSize()
-	}
-	c.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - promptPadding)
-	c.list.SetSize(innerWidth, height-heightOffset)
-	c.help.SetWidth(width)
-}
-
 // ID implements Dialog.
 func (c *Commands) ID() string {
 	return CommandsID
 }
 
-// Update implements Dialog.
-func (c *Commands) Update(msg tea.Msg) tea.Msg {
+// HandleMsg implements Dialog.
+func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Close):
-			return CloseMsg{}
+			return ActionClose{}
 		case key.Matches(msg, c.keyMap.Previous):
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {
@@ -191,9 +169,7 @@ func (c *Commands) Update(msg tea.Msg) tea.Msg {
 			c.list.SetFilter(value)
 			c.list.ScrollToTop()
 			c.list.SetSelected(0)
-			if cmd != nil {
-				return cmd()
-			}
+			return ActionCmd{cmd}
 		}
 	}
 	return nil
@@ -241,16 +217,34 @@ func commandsRadioView(sty *styles.Styles, selected uicmd.CommandType, hasUserCm
 	return strings.Join(parts, " ")
 }
 
-// View implements [Dialog].
-func (c *Commands) View() string {
+// Draw implements [Dialog].
+func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
+	height := max(0, min(defaultDialogHeight, area.Dy()))
+	c.width = width
+	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		t.Dialog.View.GetVerticalFrameSize()
+
+	c.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	c.list.SetSize(innerWidth, height-heightOffset)
+	c.help.SetWidth(innerWidth)
+
 	radio := commandsRadioView(t, c.selected, len(c.userCmds) > 0, c.mcpPrompts.Len() > 0)
 	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(c.width)
+	dialogStyle := t.Dialog.View.Width(width)
 	headerOffset := lipgloss.Width(radio) + titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	header := common.DialogTitle(t, "Commands", c.width-headerOffset) + radio
-	return HeaderInputListHelpView(t, c.width, c.list.Height(), header,
-		c.input.View(), c.list.Render(), c.help.View(c))
+	helpView := ansi.Truncate(c.help.View(c), innerWidth, "")
+	header := common.DialogTitle(t, "Commands", width-headerOffset) + radio
+	view := HeaderInputListHelpView(t, width, c.list.Height(), header,
+		c.input.View(), c.list.Render(), helpView)
+
+	cur := c.Cursor()
+	DrawCenterCursor(scr, area, view, cur)
+	return cur
 }
 
 // ShortHelp implements [help.KeyMap].
@@ -328,7 +322,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Description: "start a new session",
 			Shortcut:    "ctrl+n",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(NewSessionsMsg{})
+				return uiutil.CmdHandler(ActionNewSession{})
 			},
 		},
 		{
@@ -337,7 +331,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Description: "Switch to a different session",
 			Shortcut:    "ctrl+s",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(OpenDialogMsg{SessionsID})
+				return uiutil.CmdHandler(ActionOpenDialog{SessionsID})
 			},
 		},
 		{
@@ -347,7 +341,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			// FIXME: The shortcut might get updated if enhanced keyboard is supported.
 			Shortcut: "ctrl+l",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(OpenDialogMsg{ModelsID})
+				return uiutil.CmdHandler(ActionOpenDialog{ModelsID})
 			},
 		},
 	}
@@ -359,7 +353,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Title:       "Summarize Session",
 			Description: "Summarize the current session and create a new one with the summary",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(CompactMsg{
+				return uiutil.CmdHandler(ActionSummarize{
 					SessionID: c.sessionID,
 				})
 			},
@@ -385,7 +379,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 					Title:       status + " Thinking Mode",
 					Description: "Toggle model thinking for reasoning-capable models",
 					Handler: func(cmd uicmd.Command) tea.Cmd {
-						return uiutil.CmdHandler(ToggleThinkingMsg{})
+						return uiutil.CmdHandler(ActionToggleThinking{})
 					},
 				})
 			}
@@ -397,7 +391,9 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 					Title:       "Select Reasoning Effort",
 					Description: "Choose reasoning effort level (low/medium/high)",
 					Handler: func(cmd uicmd.Command) tea.Cmd {
-						return uiutil.CmdHandler(OpenReasoningDialogMsg{})
+						return uiutil.CmdHandler(ActionOpenDialog{
+							// TODO: Pass reasoning dialog id
+						})
 					},
 				})
 			}
@@ -411,7 +407,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Title:       "Toggle Sidebar",
 			Description: "Toggle between compact and normal layout",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ToggleCompactModeMsg{})
+				return uiutil.CmdHandler(ActionToggleCompactMode{})
 			},
 		})
 	}
@@ -426,7 +422,9 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 				Shortcut:    "ctrl+f",
 				Description: "Open file picker",
 				Handler: func(cmd uicmd.Command) tea.Cmd {
-					return uiutil.CmdHandler(OpenFilePickerMsg{})
+					return uiutil.CmdHandler(ActionOpenDialog{
+						// TODO: Pass file picker dialog id
+					})
 				},
 			})
 		}
@@ -441,7 +439,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Shortcut:    "ctrl+o",
 			Description: "Open external editor to compose message",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(OpenExternalEditorMsg{})
+				return uiutil.CmdHandler(ActionExternalEditor{})
 			},
 		})
 	}
@@ -452,7 +450,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Title:       "Toggle Yolo Mode",
 			Description: "Toggle yolo mode",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ToggleYoloModeMsg{})
+				return uiutil.CmdHandler(ActionToggleYoloMode{})
 			},
 		},
 		{
@@ -461,7 +459,7 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 			Shortcut:    "ctrl+g",
 			Description: "Toggle help",
 			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ToggleHelpMsg{})
+				return uiutil.CmdHandler(ActionToggleHelp{})
 			},
 		},
 		{

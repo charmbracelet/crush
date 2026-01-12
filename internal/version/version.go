@@ -15,6 +15,30 @@ func init() {
 	if !ok {
 		return
 	}
+
+	if Version == "devel" || Version == "dev" {
+		var revision string
+		var modified bool
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				revision = setting.Value
+			case "vcs.modified":
+				modified = setting.Value == "true"
+			}
+		}
+
+		if revision != "" {
+			if len(revision) > 7 {
+				revision = revision[:7]
+			}
+			Version = "dev-" + revision
+			if modified {
+				Version += " (dirty)"
+			}
+		}
+	}
+
 	mainVersion := info.Main.Version
 	if mainVersion != "" && mainVersion != "(devel)" {
 		Version = mainVersion

@@ -15,7 +15,9 @@
         go = pkgs.go_1_25;
 
         # Version from git
-        version = self.shortRev or self.dirtyShortRev or "dev";
+        version = if self ? shortRev then "dev-${self.shortRev}"
+                  else if self ? dirtyShortRev then "dev-${self.dirtyShortRev} (dirty)"
+                  else "dev";
 
         # Build the crush binary
         crush = pkgs.buildGoModule.override { inherit go; } {

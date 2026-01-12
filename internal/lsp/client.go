@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -257,7 +256,7 @@ func (c *Client) HandlesFile(path string) bool {
 		return true
 	}
 
-	kind := lsp.DetectLanguage(path)
+	kind := powernap.DetectLanguage(path)
 	name := strings.ToLower(filepath.Base(path))
 	for _, filetype := range c.fileTypes {
 		suffix := strings.ToLower(filetype)

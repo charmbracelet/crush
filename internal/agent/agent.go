@@ -679,6 +679,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
+
+	var currentToolMessage *fantasy.Message
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
@@ -688,7 +690,29 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
-		history = append(history, m.ToAIMessage()...)
+
+		aiMsgs := m.ToAIMessage()
+		for _, aiMsg := range aiMsgs {
+			if aiMsg.Role == fantasy.MessageRoleTool {
+				if currentToolMessage == nil {
+					currentToolMessage = &fantasy.Message{
+						Role:    aiMsg.Role,
+						Content: append([]fantasy.MessagePart(nil), aiMsg.Content...),
+					}
+				} else {
+					currentToolMessage.Content = append(currentToolMessage.Content, aiMsg.Content...)
+				}
+			} else {
+				if currentToolMessage != nil {
+					history = append(history, *currentToolMessage)
+					currentToolMessage = nil
+				}
+				history = append(history, aiMsg)
+			}
+		}
+	}
+	if currentToolMessage != nil {
+		history = append(history, *currentToolMessage)
 	}
 
 	var files []fantasy.FilePart

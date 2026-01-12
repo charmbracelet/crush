@@ -29,6 +29,7 @@ var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
+	initOnce sync.Once
 	initDone = make(chan struct{})
 )
 
@@ -198,16 +199,17 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}(name, m)
 	}
 	wg.Wait()
-	close(initDone)
+	initOnce.Do(func() { close(initDone) })
 }
 
-// Wait blocks until all configured MCP clients have finished their initial connection attempt.
-func Wait(ctx context.Context) error {
+// WaitForInit blocks until MCP initialization is complete.
+// If Initialize was never called, this returns immediately.
+func WaitForInit(ctx context.Context) error {
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
 	case <-initDone:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

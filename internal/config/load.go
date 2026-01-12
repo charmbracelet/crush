@@ -122,6 +122,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	restore := PushPopCrushEnv()
 	defer restore()
 
+	// When disable_default_providers is enabled, skip all default/embedded
+	// providers entirely. Users must fully specify any providers they want.
+	// We skip to the custom provider validation loop which handles all
+	// user-configured providers uniformly.
+	if c.Options.DisableDefaultProviders {
+		knownProviders = nil
+	}
+
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -360,6 +368,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
+		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
 	if c.Options.Attribution == nil {

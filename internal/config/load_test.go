@@ -1094,6 +1094,217 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 }
 
+func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
+	t.Run("when enabled, ignores all default providers and requires full specification", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:          "openai",
+				APIKey:      "$OPENAI_API_KEY",
+				APIEndpoint: "https://api.openai.com/v1",
+				Models: []catwalk.Model{{
+					ID: "gpt-4",
+				}},
+			},
+		}
+
+		// User references openai but doesn't fully specify it (no base_url, no
+		// models). This should be rejected because disable_default_providers
+		// treats all providers as custom.
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: true,
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					APIKey: "$OPENAI_API_KEY",
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{
+			"OPENAI_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		// openai should NOT be present because it lacks base_url and models.
+		require.Equal(t, 0, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("openai")
+		require.False(t, exists, "openai should not be present without full specification")
+	})
+
+	t.Run("when enabled, fully specified providers work", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:          "openai",
+				APIKey:      "$OPENAI_API_KEY",
+				APIEndpoint: "https://api.openai.com/v1",
+				Models: []catwalk.Model{{
+					ID: "gpt-4",
+				}},
+			},
+		}
+
+		// User fully specifies their provider.
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: true,
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"my-llm": {
+					APIKey:  "$MY_API_KEY",
+					BaseURL: "https://my-llm.example.com/v1",
+					Models: []catwalk.Model{{
+						ID: "my-model",
+					}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{
+			"MY_API_KEY":     "test-key",
+			"OPENAI_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		// Only fully specified provider should be present.
+		require.Equal(t, 1, cfg.Providers.Len())
+		provider, exists := cfg.Providers.Get("my-llm")
+		require.True(t, exists, "my-llm should be present")
+		require.Equal(t, "https://my-llm.example.com/v1", provider.BaseURL)
+		require.Len(t, provider.Models, 1)
+
+		// Default openai should NOT be present.
+		_, exists = cfg.Providers.Get("openai")
+		require.False(t, exists, "openai should not be present")
+	})
+
+	t.Run("when disabled, includes all known providers with valid credentials", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:          "openai",
+				APIKey:      "$OPENAI_API_KEY",
+				APIEndpoint: "https://api.openai.com/v1",
+				Models: []catwalk.Model{{
+					ID: "gpt-4",
+				}},
+			},
+			{
+				ID:          "anthropic",
+				APIKey:      "$ANTHROPIC_API_KEY",
+				APIEndpoint: "https://api.anthropic.com/v1",
+				Models: []catwalk.Model{{
+					ID: "claude-3",
+				}},
+			},
+		}
+
+		// User only configures openai, both API keys are available, but option
+		// is disabled.
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: false,
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					APIKey: "$OPENAI_API_KEY",
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{
+			"OPENAI_API_KEY":    "test-key",
+			"ANTHROPIC_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		// Both providers should be present.
+		require.Equal(t, 2, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("openai")
+		require.True(t, exists, "openai should be present")
+		_, exists = cfg.Providers.Get("anthropic")
+		require.True(t, exists, "anthropic should be present")
+	})
+
+	t.Run("when enabled, provider missing models is rejected", func(t *testing.T) {
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: true,
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"my-llm": {
+					APIKey:  "test-key",
+					BaseURL: "https://my-llm.example.com/v1",
+					Models:  []catwalk.Model{}, // No models.
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		// Provider should be rejected for missing models.
+		require.Equal(t, 0, cfg.Providers.Len())
+	})
+
+	t.Run("when enabled, provider missing base_url is rejected", func(t *testing.T) {
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: true,
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"my-llm": {
+					APIKey: "test-key",
+					Models: []catwalk.Model{{ID: "model"}},
+					// No BaseURL.
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		// Provider should be rejected for missing base_url.
+		require.Equal(t, 0, cfg.Providers.Len())
+	})
+}
+
+func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
+	t.Run("sets option from environment variable", func(t *testing.T) {
+		t.Setenv("CRUSH_DISABLE_DEFAULT_PROVIDERS", "true")
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+
+		require.True(t, cfg.Options.DisableDefaultProviders)
+	})
+
+	t.Run("does not override when env var is not set", func(t *testing.T) {
+		cfg := &Config{
+			Options: &Options{
+				DisableDefaultProviders: true,
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+
+		require.True(t, cfg.Options.DisableDefaultProviders)
+	})
+}
+
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("should override defaults", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{

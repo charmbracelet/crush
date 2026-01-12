@@ -68,6 +68,7 @@ type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
+	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -457,9 +458,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			})
 		}
 		if len(missingToolResults) > 0 {
-			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+			_, createErr = a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role:  message.Tool,
 				Parts: missingToolResults,
+			})
 			})
 			if createErr != nil {
 				return nil, createErr
@@ -910,14 +912,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Cancel regular requests.
-	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+	// Cancel regular requests. Don't use Take() here - we need the entry to
+	// remain in activeRequests so IsBusy() returns true until the goroutine
+	// fully completes (including error handling that may access the DB).
+	// The defer in processRequest will clean up the entry.
+	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -1001,6 +1006,10 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.tools = tools
+}
+
+func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
+	a.systemPrompt = systemPrompt
 }
 
 func (a *sessionAgent) Model() Model {

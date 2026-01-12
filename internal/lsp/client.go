@@ -516,6 +516,9 @@ func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig)
 	}
 	normalized := make(map[string]serverPatterns, len(servers))
 	for name, server := range servers {
+		if len(server.RootMarkers) == 0 {
+			continue
+		}
 		patterns := make([]string, len(server.RootMarkers))
 		for i, p := range server.RootMarkers {
 			patterns[i] = filepath.ToSlash(p)

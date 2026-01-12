@@ -17,6 +17,7 @@
         # Version from git
         version = if self ? shortRev then "dev-${self.shortRev}"
                   else if self ? dirtyShortRev then "dev-${self.dirtyShortRev} (dirty)"
+                  else if self ? lastModifiedDate then "dev-${self.lastModifiedDate}"
                   else "dev";
 
         # Build the crush binary

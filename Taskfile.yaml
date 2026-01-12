@@ -4,7 +4,7 @@ version: "3"
 
 vars:
   VERSION:
-    sh: git describe --long 2>/dev/null || echo ""
+    sh: (git describe --tags --exact-match 2>/dev/null) || (echo "dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)$(git diff --quiet 2>/dev/null || echo ' (dirty)')")
 
 env:
   CGO_ENABLED: 0

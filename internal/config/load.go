@@ -187,6 +187,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
 				continue
 			}
 			headers[k] = resolved
@@ -323,6 +324,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
 				continue
 			}
 			providerConfig.ExtraHeaders[k] = resolved

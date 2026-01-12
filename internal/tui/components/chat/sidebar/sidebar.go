@@ -480,8 +480,6 @@ func (m *sidebarCmp) filesBlock() string {
 func (m *sidebarCmp) lspBlock() string {
 	// Limit the number of LSPs shown
 	_, maxLSPs, _ := m.getDynamicLimits()
-	lspConfigs := config.Get().LSP.Sorted()
-	maxLSPs = min(len(lspConfigs), maxLSPs)
 
 	return lspcomponent.RenderLSPBlock(m.lspClients, lspcomponent.RenderOptions{
 		MaxWidth:    m.getMaxWidth(),

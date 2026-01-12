@@ -192,10 +192,10 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	ConfirmQuit *bool  `json:"confirm_quit,omitempty" jsonschema:"description=Whether to show a confirmation dialog when quitting,default=true"`
-	QuitDefaultYes bool `json:"quit_default_yes,omitempty" jsonschema:"description=Whether 'Yes' should be the default selection in the quit dialog,default=false"`
+	CompactMode    bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode       string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ConfirmQuit    *bool  `json:"confirm_quit,omitempty" jsonschema:"description=Whether to show a confirmation dialog when quitting,default=true"`
+	QuitDefaultYes bool   `json:"quit_default_yes,omitempty" jsonschema:"description=Whether 'Yes' should be the default selection in the quit dialog,default=false"`
 	// Here we can add themes later or any TUI related options
 	//
 

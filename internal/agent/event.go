@@ -7,13 +7,13 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 )
 
-func (a sessionAgent) eventPromptSent(sessionID string) {
+func (a *sessionAgent) eventPromptSent(sessionID string) {
 	event.PromptSent(
 		a.eventCommon(sessionID, a.largeModel)...,
 	)
 }
 
-func (a sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {
+func (a *sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {
 	event.PromptResponded(
 		append(
 			a.eventCommon(sessionID, a.largeModel),
@@ -23,7 +23,7 @@ func (a sessionAgent) eventPromptResponded(sessionID string, duration time.Durat
 	)
 }
 
-func (a sessionAgent) eventTokensUsed(sessionID string, model Model, usage fantasy.Usage, cost float64) {
+func (a *sessionAgent) eventTokensUsed(sessionID string, model Model, usage fantasy.Usage, cost float64) {
 	event.TokensUsed(
 		append(
 			a.eventCommon(sessionID, model),
@@ -37,7 +37,7 @@ func (a sessionAgent) eventTokensUsed(sessionID string, model Model, usage fanta
 	)
 }
 
-func (a sessionAgent) eventCommon(sessionID string, model Model) []any {
+func (a *sessionAgent) eventCommon(sessionID string, model Model) []any {
 	m := model.ModelCfg
 
 	return []any{

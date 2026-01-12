@@ -291,7 +291,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(DetectLanguageID(uri)), 1, string(content)); err != nil {
+	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
 		return err
 	}
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -25,24 +24,10 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/qjebbs/go-jsons"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
-
-// LoadReader config via io.Reader.
-func LoadReader(fd io.Reader) (*Config, error) {
-	data, err := io.ReadAll(fd)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, err
-}
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
@@ -632,35 +617,39 @@ func lookupConfigs(cwd string) []string {
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {
-	var configs []io.Reader
+	var configs [][]byte
 
 	for _, path := range configPaths {
-		fd, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
-		defer fd.Close()
-
-		configs = append(configs, fd)
+		if len(data) == 0 {
+			continue
+		}
+		configs = append(configs, data)
 	}
 
-	return loadFromReaders(configs)
+	return loadFromBytes(configs)
 }
 
-func loadFromReaders(readers []io.Reader) (*Config, error) {
-	if len(readers) == 0 {
+func loadFromBytes(configs [][]byte) (*Config, error) {
+	if len(configs) == 0 {
 		return &Config{}, nil
 	}
 
-	merged, err := Merge(readers)
+	data, err := jsons.Merge(configs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration readers: %w", err)
+		return nil, err
 	}
-
-	return LoadReader(merged)
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 func hasVertexCredentials(env env.Env) bool {

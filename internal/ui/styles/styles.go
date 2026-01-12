@@ -45,6 +45,9 @@ const (
 
 	ImageIcon string = "■"
 	TextIcon  string = "≡"
+
+	ScrollbarThumb string = "┃"
+	ScrollbarTrack string = "│"
 )
 
 const (
@@ -314,6 +317,10 @@ type Styles struct {
 
 		// ContentPanel is used for content blocks with subtle background.
 		ContentPanel lipgloss.Style
+
+		// Scrollbar styles for scrollable content.
+		ScrollbarThumb lipgloss.Style
+		ScrollbarTrack lipgloss.Style
 
 		Commands struct{}
 	}
@@ -1166,6 +1173,8 @@ func DefaultStyles() Styles {
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(bgSubtle).Foreground(fgBase).Padding(1, 2)
+	s.Dialog.ScrollbarThumb = base.Foreground(secondary)
+	s.Dialog.ScrollbarTrack = base.Foreground(border)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

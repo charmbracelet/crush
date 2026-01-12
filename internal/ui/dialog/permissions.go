@@ -399,18 +399,28 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	var content string
+	var scrollbar string
 	if p.hasDiffView() {
 		// Diff views handle their own scrolling via diffXOffset/diffYOffset.
+		// No scrollbar for diff views.
 		content = p.getOrRenderContent(contentWidth, availableHeight)
 	} else {
 		// Non-diff content uses the viewport for scrolling.
-		p.viewport.SetWidth(contentWidth)
+		p.viewport.SetWidth(contentWidth - 1) // -1 for scrollbar
 		p.viewport.SetHeight(availableHeight)
 		if p.contentDirty {
-			p.viewport.SetContent(p.renderContent(contentWidth, availableHeight))
+			p.viewport.SetContent(p.renderContent(contentWidth-1, availableHeight))
 			p.contentDirty = false
 		}
 		content = p.viewport.View()
+		if p.canScroll() {
+			scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
+		}
+	}
+
+	// Join content with scrollbar if present.
+	if scrollbar != "" {
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
 	}
 
 	parts := []string{header}

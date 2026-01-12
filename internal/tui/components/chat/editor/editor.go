@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -609,7 +610,7 @@ func (m *editorCmp) SetPosition(x, y int) tea.Cmd {
 func (m *editorCmp) startCompletions() tea.Msg {
 	ls := m.app.Config().Options.TUI.Completions
 	depth, limit := ls.Limits()
-	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+	files, _, _ := fsext.ListDirectory(context.Background(), ".", nil, depth, limit)
 	slices.Sort(files)
 	completionItems := make([]completions.Completion, 0, len(files))
 	for _, file := range files {

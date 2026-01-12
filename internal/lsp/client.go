@@ -501,13 +501,13 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 // HasRootMarkers checks if any of the specified root marker patterns exist in the given directory.
 // Uses glob patterns to match files, allowing for more flexible matching.
-func HasRootMarkers(dir string, rootMarkers []string) bool {
+func HasRootMarkers(ctx context.Context, dir string, rootMarkers []string) bool {
 	if len(rootMarkers) == 0 {
 		return true
 	}
 	for _, pattern := range rootMarkers {
 		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.GlobWithDoubleStar(pattern, dir, 1)
+		matches, _, err := fsext.GlobWithDoubleStar(ctx, pattern, dir, 1)
 		if err == nil && len(matches) > 0 {
 			return true
 		}

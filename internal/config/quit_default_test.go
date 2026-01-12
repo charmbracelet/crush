@@ -6,7 +6,32 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/qjebbs/go-jsons"
 )
+
+func LoadReader(r io.Reader) (*Config, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return loadFromBytes([][]byte{data})
+}
+
+func Merge(readers []io.Reader) (io.Reader, error) {
+	var configs [][]byte
+	for _, r := range readers {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		configs = append(configs, data)
+	}
+	merged, err := jsons.Merge(configs)
+	if err != nil {
+		return nil, err
+	}
+	return strings.NewReader(string(merged)), nil
+}
 
 func TestTUIOptions(t *testing.T) {
 	t.Run("quit_default_yes", func(t *testing.T) {

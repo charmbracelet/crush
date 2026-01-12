@@ -1,7 +1,9 @@
 package fsext
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -206,7 +208,7 @@ func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
 }
 
 // ListDirectory lists files and directories in the specified path,
-func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
+func ListDirectory(ctx context.Context, initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
@@ -219,7 +221,18 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 		MaxDepth: depth,
 	}
 
+	const maxScannedFiles = 10000
+	var scannedFiles int
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		scannedFiles++
+		if scannedFiles > maxScannedFiles {
+			return fmt.Errorf("search space too large (over %d files scanned). Use a more specific path", maxScannedFiles)
+		}
+
 		if err != nil {
 			return nil // Skip files we don't have permission to access
 		}

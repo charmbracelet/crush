@@ -24,7 +24,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("test content"), 0o644))
 		}
 
-		matches, truncated, err := GlobWithDoubleStar("**/main.go", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "**/main.go", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -47,7 +47,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0o644))
 		require.NoError(t, os.WriteFile(pkgFile, []byte("test"), 0o644))
 
-		matches, truncated, err := GlobWithDoubleStar("pkg", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "pkg", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -66,7 +66,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.MkdirAll(dir, 0o755))
 		}
 
-		matches, truncated, err := GlobWithDoubleStar("**/pkg", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "**/pkg", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -95,7 +95,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("package main"), 0o644))
 		}
 
-		matches, truncated, err := GlobWithDoubleStar("pkg/**", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "pkg/**", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -124,7 +124,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
 		}
 
-		matches, truncated, err := GlobWithDoubleStar("**/*.txt", testDir, 5)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "**/*.txt", testDir, 5)
 		require.NoError(t, err)
 		require.True(t, truncated, "Expected truncation with limit")
 		require.Len(t, matches, 5, "Expected exactly 5 matches with limit")
@@ -143,7 +143,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 			require.NoError(t, os.WriteFile(file, []byte("test"), 0o644))
 		}
 
-		matches, truncated, err := GlobWithDoubleStar("a/b/c/file1.txt", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "a/b/c/file1.txt", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -171,7 +171,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, os.Chtimes(file2, m2, m2))
 		require.NoError(t, os.Chtimes(file3, m3, m3))
 
-		matches, truncated, err := GlobWithDoubleStar("*.txt", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "*.txt", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 
@@ -181,7 +181,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	t.Run("handles empty directory", func(t *testing.T) {
 		testDir := t.TempDir()
 
-		matches, truncated, err := GlobWithDoubleStar("**", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "**", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		// Even empty directories should return the directory itself
@@ -191,7 +191,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 	t.Run("handles non-existent search path", func(t *testing.T) {
 		nonExistentDir := filepath.Join(t.TempDir(), "does", "not", "exist")
 
-		matches, truncated, err := GlobWithDoubleStar("**", nonExistentDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "**", nonExistentDir, 0)
 		require.Error(t, err, "Should return error for non-existent search path")
 		require.False(t, truncated)
 		require.Empty(t, matches)
@@ -219,17 +219,17 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		ignoredFileInDir := filepath.Join(testDir, "backup", "old.txt")
 		require.NoError(t, os.WriteFile(ignoredFileInDir, []byte("old content"), 0o644))
 
-		matches, truncated, err := GlobWithDoubleStar("*.tmp", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "*.tmp", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Empty(t, matches, "Expected no matches for '*.tmp' pattern (should be ignored)")
 
-		matches, truncated, err = GlobWithDoubleStar("backup", testDir, 0)
+		matches, truncated, err = GlobWithDoubleStar(t.Context(), "backup", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Empty(t, matches, "Expected no matches for 'backup' pattern (should be ignored)")
 
-		matches, truncated, err = GlobWithDoubleStar("*.txt", testDir, 0)
+		matches, truncated, err = GlobWithDoubleStar(t.Context(), "*.txt", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Equal(t, []string{goodFile}, matches)
@@ -257,7 +257,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, os.Chtimes(middleDir, tMiddle, tMiddle))
 		require.NoError(t, os.Chtimes(oldestFile, tNewest, tNewest))
 
-		matches, truncated, err := GlobWithDoubleStar("*.rs", testDir, 0)
+		matches, truncated, err := GlobWithDoubleStar(t.Context(), "*.rs", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
 		require.Len(t, matches, 3)

@@ -26,7 +26,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	slog.Debug("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
 	// Check if any root markers exist in the working directory (config now has defaults)
-	if !lsp.HasRootMarkers(app.config.WorkingDir(), config.RootMarkers) {
+	if !lsp.HasRootMarkers(ctx, app.config.WorkingDir(), config.RootMarkers) {
 		slog.Debug("Skipping LSP client: no root markers found", "name", name, "rootMarkers", config.RootMarkers)
 		updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
 		return

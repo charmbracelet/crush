@@ -58,7 +58,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/mod v0.32.0
-	golang.org/x/net v0.48.0
+	golang.org/x/net v0.49.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.33.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -169,12 +169,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
-	golang.org/x/crypto v0.46.0 // indirect
+	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/image v0.27.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
 	google.golang.org/genai v1.40.0 // indirect

@@ -153,10 +153,6 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 
 // Close closes the LSP client.
 func (c *Client) Close(ctx context.Context) error {
-	// Try to close all open files first
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	c.CloseAllFiles(ctx)
 
 	// Shutdown and exit the client

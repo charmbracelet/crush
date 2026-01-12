@@ -421,6 +421,11 @@
           "description": "Disable providers auto-update",
           "default": false
         },
+        "disable_default_providers": {
+          "type": "boolean",
+          "description": "Ignore all default/embedded providers. When enabled",
+          "default": false
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"

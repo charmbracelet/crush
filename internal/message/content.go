@@ -437,23 +437,27 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 }
 
 func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
+	var sb strings.Builder
+	sb.WriteString(prompt)
 	addedAttachments := false
 	for _, content := range attachments {
 		if !content.IsText() {
 			continue
 		}
 		if !addedAttachments {
-			prompt += "\n<system_info>The files below have been attached by the user, consider them in your response</system_info>\n"
+			sb.WriteString("\n<system_info>The files below have been attached by the user, consider them in your response</system_info>\n")
 			addedAttachments = true
 		}
-		tag := `<file>\n`
 		if content.FilePath != "" {
-			tag = fmt.Sprintf("<file path='%s'>\n", content.FilePath)
+			fmt.Fprintf(&sb, "<file path='%s'>\n", content.FilePath)
+		} else {
+			sb.WriteString("<file>\n")
 		}
-		prompt += tag
-		prompt += "\n" + string(content.Content) + "\n</file>\n"
+		sb.WriteString("\n")
+		sb.Write(content.Content)
+		sb.WriteString("\n</file>\n")
 	}
-	return prompt
+	return sb.String()
 }
 
 func (m *Message) ToAIMessage() []fantasy.Message {

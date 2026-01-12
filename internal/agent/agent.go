@@ -68,6 +68,7 @@ type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
+	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -444,7 +445,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Content:    content,
 				IsError:    true,
 			}
-			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+			_, createErr = a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
@@ -561,15 +562,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := "Provide a detailed summary of our conversation above."
-	if len(currentSession.Todos) > 0 {
-		summaryPromptText += "\n\n## Current Todo List\n\n"
-		for _, t := range currentSession.Todos {
-			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
-		}
-		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
-		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
-	}
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -883,14 +876,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Cancel regular requests.
-	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+	// Cancel regular requests. Don't use Take() here - we need the entry to
+	// remain in activeRequests so IsBusy() returns true until the goroutine
+	// fully completes (including error handling that may access the DB).
+	// The defer in processRequest will clean up the entry.
+	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -970,6 +966,10 @@ func (a *sessionAgent) SetModels(large Model, small Model) {
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.tools = tools
+}
+
+func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
+	a.systemPrompt = systemPrompt
 }
 
 func (a *sessionAgent) Model() Model {
@@ -1100,4 +1100,19 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// buildSummaryPrompt constructs the prompt text for session summarization.
+func buildSummaryPrompt(todos []session.Todo) string {
+	var sb strings.Builder
+	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if len(todos) > 0 {
+		sb.WriteString("\n\n## Current Todo List\n\n")
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	}
+	return sb.String()
 }

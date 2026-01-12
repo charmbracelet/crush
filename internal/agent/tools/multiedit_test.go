@@ -19,8 +19,8 @@ type mockPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 }
 
-func (m *mockPermissionService) Request(req permission.CreatePermissionRequest) bool {
-	return true
+func (m *mockPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	return true, nil
 }
 
 func (m *mockPermissionService) Grant(req permission.PermissionRequest) {}

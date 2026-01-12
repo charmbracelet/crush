@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
@@ -81,14 +82,16 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 func TestPermissionService_SkipMode(t *testing.T) {
 	service := NewPermissionService("/tmp", true, []string{})
 
-	result := service.Request(CreatePermissionRequest{
+	result, err := service.Request(t.Context(), CreatePermissionRequest{
 		SessionID:   "test-session",
 		ToolName:    "bash",
 		Action:      "execute",
 		Description: "test command",
 		Path:        "/tmp",
 	})
-
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if !result {
 		t.Error("expected permission to be granted in skip mode")
 	}
@@ -115,7 +118,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			result1 = service.Request(req1)
+			result1, _ = service.Request(t.Context(), req1)
 		}()
 
 		var permissionReq PermissionRequest
@@ -136,7 +139,8 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			Params:      map[string]string{"file": "test.txt"},
 			Path:        "/tmp/test.txt",
 		}
-		result2 := service.Request(req2)
+		result2, err := service.Request(t.Context(), req2)
+		require.NoError(t, err)
 		assert.True(t, result2, "Second request should be auto-approved")
 	})
 	t.Run("Sequential requests with temporary grants", func(t *testing.T) {
@@ -156,7 +160,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		var wg sync.WaitGroup
 
 		wg.Go(func() {
-			result1 = service.Request(req)
+			result1, _ = service.Request(t.Context(), req)
 		})
 
 		var permissionReq PermissionRequest
@@ -170,7 +174,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		var result2 bool
 
 		wg.Go(func() {
-			result2 = service.Request(req)
+			result2, _ = service.Request(t.Context(), req)
 		})
 
 		event = <-events
@@ -215,7 +219,8 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			wg.Add(1)
 			go func(index int, request CreatePermissionRequest) {
 				defer wg.Done()
-				results = append(results, service.Request(request))
+				result, _ := service.Request(t.Context(), request)
+				results = append(results, result)
 			}(i, req)
 		}
 
@@ -241,7 +246,8 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		assert.Equal(t, 2, grantedCount, "Should have 2 granted and 1 denied")
 		secondReq := requests[1]
 		secondReq.Description = "Repeat of second request"
-		result := service.Request(secondReq)
+		result, err := service.Request(t.Context(), secondReq)
+		require.NoError(t, err)
 		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
 	})
 }

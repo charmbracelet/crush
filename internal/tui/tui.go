@@ -160,11 +160,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
-			return a, a.handleStateChanged(context.Background())
+			return a, nil
 		case mcp.EventPromptsListChanged:
 			return a, handleMCPPromptsEvent(context.Background(), msg.Payload.Name)
 		case mcp.EventToolsListChanged:
-			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
+			return a, nil
 		}
 
 	// Completions messages
@@ -665,10 +665,7 @@ func (a *appModel) View() tea.View {
 }
 
 func (a *appModel) handleStateChanged(ctx context.Context) tea.Cmd {
-	return func() tea.Msg {
-		a.app.UpdateAgentModel(ctx)
-		return nil
-	}
+	return nil
 }
 
 func handleMCPPromptsEvent(ctx context.Context, name string) tea.Cmd {

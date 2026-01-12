@@ -411,6 +411,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if createErr != nil {
 			return nil, createErr
 		}
+		// Collect all missing tool results first, then create a single message
+		// with all of them. Some providers (e.g. Gemini) require all tool
+		// responses to be in a single message.
+		var missingToolResults []message.ContentPart
 		for _, tc := range toolCalls {
 			if !tc.Finished {
 				tc.Finished = true
@@ -445,17 +449,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			} else if isPermissionErr {
 				content = "User denied permission"
 			}
-			toolResult := message.ToolResult{
+			missingToolResults = append(missingToolResults, message.ToolResult{
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
 				Content:    content,
 				IsError:    true,
-			}
+			})
+		}
+		if len(missingToolResults) > 0 {
 			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
+				Role:  message.Tool,
+				Parts: missingToolResults,
 			})
 			if createErr != nil {
 				return nil, createErr

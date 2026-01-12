@@ -74,7 +74,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		}
 
 		// If we have metadata, use it for richer display.
-		if opts.Result != nil && opts.Result.Metadata != "" {
+		if opts.HasResult() && opts.Result.Metadata != "" {
 			if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 				if meta.IsNew {
 					if meta.JustStarted != "" {

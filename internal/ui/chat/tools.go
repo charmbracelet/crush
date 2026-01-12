@@ -59,6 +59,16 @@ type SpinningState struct {
 	Status   ToolStatus
 }
 
+// IsCanceled returns true if the tool status is canceled.
+func (s *SpinningState) IsCanceled() bool {
+	return s.Status == ToolStatusCanceled
+}
+
+// HasResult returns true if the result is not nil.
+func (s *SpinningState) HasResult() bool {
+	return s.Result != nil
+}
+
 // SpinningFunc is a function type for custom spinning logic.
 // Returns true if the tool should show the spinning animation.
 type SpinningFunc func(state SpinningState) bool
@@ -85,7 +95,17 @@ type ToolRenderOpts struct {
 // IsPending returns true if the tool call is still pending (not finished and
 // not canceled).
 func (o *ToolRenderOpts) IsPending() bool {
-	return !o.ToolCall.Finished && o.Status != ToolStatusCanceled
+	return !o.ToolCall.Finished && !o.IsCanceled()
+}
+
+// IsCanceled returns true if the tool status is canceled.
+func (o *ToolRenderOpts) IsCanceled() bool {
+	return o.Status == ToolStatusCanceled
+}
+
+// HasResult returns true if the result is not nil.
+func (o *ToolRenderOpts) HasResult() bool {
+	return o.Result != nil
 }
 
 // HasEmptyResult returns true if the result is nil or has empty content.

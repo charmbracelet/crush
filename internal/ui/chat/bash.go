@@ -51,7 +51,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	// Check if this is a background job.
 	var meta tools.BashResponseMetadata
-	if opts.Result != nil {
+	if opts.HasResult() {
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
 
@@ -78,7 +78,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil {
+	if !opts.HasResult() {
 		return header
 	}
 
@@ -132,7 +132,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	var description string
-	if opts.Result != nil && opts.Result.Metadata != "" {
+	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobOutputResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 			description = cmp.Or(meta.Description, meta.Command)
@@ -140,7 +140,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	content := ""
-	if opts.Result != nil {
+	if opts.HasResult() {
 		content = opts.Result.Content
 	}
 	return renderJobTool(sty, opts, cappedWidth, "Output", params.ShellID, description, content)
@@ -183,7 +183,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	}
 
 	var description string
-	if opts.Result != nil && opts.Result.Metadata != "" {
+	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobKillResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 			description = cmp.Or(meta.Description, meta.Command)
@@ -191,7 +191,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	}
 
 	content := ""
-	if opts.Result != nil {
+	if opts.HasResult() {
 		content = opts.Result.Content
 	}
 	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content)

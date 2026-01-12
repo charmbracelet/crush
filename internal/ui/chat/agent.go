@@ -47,7 +47,7 @@ func NewAgentToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return state.Result == nil && state.Status != ToolStatusCanceled
+		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
 }
@@ -100,7 +100,7 @@ type AgentToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled && len(r.agent.nestedTools) == 0 {
+	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
 		return pendingTool(sty, "Agent", opts.Anim)
 	}
 
@@ -149,14 +149,14 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
 
 	// Show animation if still running.
-	if opts.Result == nil && opts.Status != ToolStatusCanceled {
+	if !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	// Add body content when completed.
-	if opts.Result != nil && opts.Result.Content != "" {
+	if opts.HasResult() && opts.Result.Content != "" {
 		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)
 	}
@@ -191,7 +191,7 @@ func NewAgenticFetchToolMessageItem(
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: t}, canceled)
 	// For the agentic fetch tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
-		return state.Result == nil && state.Status != ToolStatusCanceled
+		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
 }
@@ -231,7 +231,7 @@ type agenticFetchParams struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && opts.Status != ToolStatusCanceled && len(r.fetch.nestedTools) == 0 {
+	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.fetch.nestedTools) == 0 {
 		return pendingTool(sty, "Agentic Fetch", opts.Anim)
 	}
 
@@ -286,14 +286,14 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, promptTagWidth-5)).String())
 
 	// Show animation if still running.
-	if opts.Result == nil && opts.Status != ToolStatusCanceled {
+	if !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	// Add body content when completed.
-	if opts.Result != nil && opts.Result.Content != "" {
+	if opts.HasResult() && opts.Result.Content != "" {
 		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)
 	}

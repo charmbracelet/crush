@@ -61,7 +61,8 @@ type Permissions struct {
 	permission     permission.PermissionRequest
 	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
 
-	// Content viewport for scrollable content.
+	// Content viewport for scrollable non-diff content (bash commands, URLs, etc.).
+	// Diff views use their own internal scrolling via diffXOffset/diffYOffset.
 	viewport viewport.Model
 
 	// Diff view state.
@@ -70,6 +71,12 @@ type Permissions struct {
 
 	diffXOffset int
 	diffYOffset int
+
+	// Content caching.
+	cachedContent string
+	contentDirty  bool
+	lastWidth     int
+	lastHeight    int
 
 	help   help.Model
 	keyMap permissionsKeyMap
@@ -90,6 +97,8 @@ type permissionsKeyMap struct {
 	ScrollDown       key.Binding
 	ScrollLeft       key.Binding
 	ScrollRight      key.Binding
+	Choose           key.Binding
+	Scroll           key.Binding
 }
 
 func defaultPermissionsKeyMap() permissionsKeyMap {
@@ -147,6 +156,14 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithKeys("shift+right", "L"),
 			key.WithHelp("shift+→", "scroll right"),
 		),
+		Choose: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←/→", "choose"),
+		),
+		Scroll: key.NewBinding(
+			key.WithKeys("shift+left", "shift+down", "shift+up", "shift+right"),
+			key.WithHelp("shift+←↓↑→", "scroll"),
+		),
 	}
 }
 
@@ -167,13 +184,30 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 	h := help.New()
 	h.Styles = com.Styles.DialogHelpStyles()
 
+	km := defaultPermissionsKeyMap()
+
+	// Configure viewport with matching keybindings.
+	vp := viewport.New()
+	vp.KeyMap = viewport.KeyMap{
+		Up:    km.ScrollUp,
+		Down:  km.ScrollDown,
+		Left:  km.ScrollLeft,
+		Right: km.ScrollRight,
+		// Disable other viewport keys to avoid conflicts with dialog shortcuts.
+		PageUp:       key.NewBinding(key.WithDisabled()),
+		PageDown:     key.NewBinding(key.WithDisabled()),
+		HalfPageUp:   key.NewBinding(key.WithDisabled()),
+		HalfPageDown: key.NewBinding(key.WithDisabled()),
+	}
+
 	p := &Permissions{
 		com:            com,
 		permission:     perm,
 		selectedOption: 0,
-		viewport:       viewport.New(),
+		viewport:       vp,
 		help:           h,
-		keyMap:         defaultPermissionsKeyMap(),
+		keyMap:         km,
+		contentDirty:   true, // Mark as dirty initially
 	}
 
 	for _, opt := range opts {
@@ -220,30 +254,66 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			if p.hasDiffView() {
 				newMode := !p.isSplitMode()
 				p.diffSplitMode = &newMode
+				p.contentDirty = true
 			}
 		case key.Matches(msg, p.keyMap.ToggleFullscreen):
 			if p.hasDiffView() {
 				p.fullscreen = !p.fullscreen
+				p.contentDirty = true
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
-			p.diffYOffset++
+			if p.hasDiffView() {
+				p.diffYOffset++
+				p.contentDirty = true
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		case key.Matches(msg, p.keyMap.ScrollUp):
-			p.diffYOffset = max(0, p.diffYOffset-1)
+			if p.hasDiffView() {
+				p.diffYOffset = max(0, p.diffYOffset-1)
+				p.contentDirty = true
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		case key.Matches(msg, p.keyMap.ScrollLeft):
-			p.diffXOffset = max(0, p.diffXOffset-5)
+			if p.hasDiffView() {
+				p.diffXOffset = max(0, p.diffXOffset-5)
+				p.contentDirty = true
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
-			p.diffXOffset += 5
+			if p.hasDiffView() {
+				p.diffXOffset += 5
+				p.contentDirty = true
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		}
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelDown:
-			p.diffYOffset++
-		case tea.MouseWheelUp:
-			p.diffYOffset = max(0, p.diffYOffset-1)
-		case tea.MouseWheelLeft:
-			p.diffXOffset = max(0, p.diffXOffset-5)
-		case tea.MouseWheelRight:
-			p.diffXOffset += 5
+		if p.hasDiffView() {
+			switch msg.Button {
+			case tea.MouseWheelDown:
+				p.diffYOffset++
+				p.contentDirty = true
+			case tea.MouseWheelUp:
+				p.diffYOffset = max(0, p.diffYOffset-1)
+				p.contentDirty = true
+			case tea.MouseWheelLeft:
+				p.diffXOffset = max(0, p.diffXOffset-5)
+				p.contentDirty = true
+			case tea.MouseWheelRight:
+				p.diffXOffset += 5
+				p.contentDirty = true
+			}
+		} else {
+			// For non-diff content, delegate scrolling to the viewport.
+			p.viewport, _ = p.viewport.Update(msg)
+		}
+	default:
+		// Pass unhandled keys to viewport for non-diff content scrolling.
+		if !p.hasDiffView() {
+			p.viewport, _ = p.viewport.Update(msg)
 		}
 	}
 
@@ -320,9 +390,28 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	availableHeight := height - headerHeight - buttonsHeight - helpHeight - frameHeight
 
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
-	p.viewport.SetWidth(p.calculateContentWidth(width))
 
-	content := p.renderContent(contentWidth, availableHeight)
+	// Mark content as dirty if size changed.
+	if contentWidth != p.lastWidth || availableHeight != p.lastHeight {
+		p.contentDirty = true
+		p.lastWidth = contentWidth
+		p.lastHeight = availableHeight
+	}
+
+	var content string
+	if p.hasDiffView() {
+		// Diff views handle their own scrolling via diffXOffset/diffYOffset.
+		content = p.getOrRenderContent(contentWidth, availableHeight)
+	} else {
+		// Non-diff content uses the viewport for scrolling.
+		p.viewport.SetWidth(contentWidth)
+		p.viewport.SetHeight(availableHeight)
+		if p.contentDirty {
+			p.viewport.SetContent(p.renderContent(contentWidth, availableHeight))
+			p.contentDirty = false
+		}
+		content = p.viewport.View()
+	}
 
 	parts := []string{header}
 	if content != "" {
@@ -391,6 +480,22 @@ func (p *Permissions) renderKeyValue(key, value string, width int) string {
 	valueStr := valueStyle.Width(width - lipgloss.Width(keyStr) - 1).Render(" " + value)
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, keyStr, valueStr)
+}
+
+func (p *Permissions) getOrRenderContent(width, height int) string {
+	// Return cached content if available and not dirty.
+	if !p.contentDirty && p.cachedContent != "" {
+		return p.cachedContent
+	}
+
+	// Generate new content.
+	content := p.renderContent(width, height)
+
+	// Cache the result.
+	p.cachedContent = content
+	p.contentDirty = false
+
+	return content
 }
 
 func (p *Permissions) renderContent(width, height int) string {
@@ -465,11 +570,13 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 	} else {
 		formatter = formatter.Unified()
 	}
-	// in full screen we want it to take the full space
+	result := formatter.String()
+
+	// In full screen we want it to take the full space.
 	if p.fullscreen {
-		return lipgloss.NewStyle().Width(contentWidth).Height(contentHeight).Render(formatter.String())
+		return lipgloss.NewStyle().Width(contentWidth).Height(contentHeight).Render(result)
 	}
-	return formatter.String()
+	return result
 }
 
 func (p *Permissions) renderDownloadContent(contentWidth int) string {
@@ -601,22 +708,31 @@ func (p *Permissions) renderButtons(contentWidth int) string {
 		Render(content)
 }
 
+func (p *Permissions) canScroll() bool {
+	if p.hasDiffView() {
+		// Diff views can always scroll.
+		return true
+	}
+	// For non-diff content, check if viewport has scrollable content.
+	return !p.viewport.AtTop() || !p.viewport.AtBottom()
+}
+
 // ShortHelp implements [help.KeyMap].
 func (p *Permissions) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
-		key.NewBinding(key.WithKeys("←/→"), key.WithHelp("←/→", "choose")),
+		p.keyMap.Choose,
 		p.keyMap.Select,
 		p.keyMap.Close,
+	}
+
+	if p.canScroll() {
+		bindings = append(bindings, p.keyMap.Scroll)
 	}
 
 	if p.hasDiffView() {
 		bindings = append(bindings,
 			p.keyMap.ToggleDiffMode,
 			p.keyMap.ToggleFullscreen,
-			key.NewBinding(
-				key.WithKeys("shift+←↓↑→"),
-				key.WithHelp("shift+←↓↑→", "scroll"),
-			),
 		)
 	}
 

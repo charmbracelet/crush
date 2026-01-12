@@ -59,7 +59,7 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil || opts.Result.Content == "" {
+	if !opts.HasResult() || opts.Result.Content == "" {
 		return header
 	}
 

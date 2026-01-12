@@ -65,7 +65,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil {
+	if !opts.HasResult() {
 		return header
 	}
 
@@ -192,7 +192,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil {
+	if !opts.HasResult() {
 		return header
 	}
 
@@ -260,7 +260,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.Result == nil {
+	if !opts.HasResult() {
 		return header
 	}
 

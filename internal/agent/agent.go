@@ -87,12 +87,14 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel           Model
-	smallModel           Model
-	systemPromptPrefix   string
-	systemPrompt         string
+	largeModel         Model
+	smallModel         Model
+	systemPromptPrefix string
+	systemPrompt       string
+	tools              []fantasy.AgentTool
+	mu                 sync.RWMutex
+
 	isSubAgent           bool
-	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -153,15 +155,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, nil
 	}
 
-	if len(a.tools) > 0 {
+	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
+	a.mu.RLock()
+	agentTools := a.tools
+	largeModel := a.largeModel
+	systemPrompt := a.systemPrompt
+	a.mu.RUnlock()
+
+	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
-		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
+		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
 	agent := fantasy.NewAgent(
-		a.largeModel.Model,
-		fantasy.WithSystemPrompt(a.systemPrompt),
-		fantasy.WithTools(a.tools...),
+		largeModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -529,6 +538,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return ErrSessionBusy
 	}
 
+	// Copy mutable fields under lock to avoid races with SetModels.
+	a.mu.RLock()
+	largeModel := a.largeModel
+	systemPromptPrefix := a.systemPromptPrefix
+	a.mu.RUnlock()
+
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -549,13 +564,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := fantasy.NewAgent(a.largeModel.Model,
+	agent := fantasy.NewAgent(largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            a.largeModel.Model.Model(),
-		Provider:         a.largeModel.Model.Provider(),
+		Model:            largeModel.Model.Model(),
+		Provider:         largeModel.Model.Provider(),
 		IsSummaryMessage: true,
 	})
 	if err != nil {
@@ -570,8 +585,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
-			if a.systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			if systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
 			return callContext, prepared, nil
 		},
@@ -622,7 +637,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(a.largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -730,9 +745,16 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 
+	// Copy mutable fields under lock to avoid races with SetModels.
+	a.mu.RLock()
+	smallModel := a.smallModel
+	largeModel := a.largeModel
+	systemPromptPrefix := a.systemPromptPrefix
+	a.mu.RUnlock()
+
 	var maxOutputTokens int64 = 40
-	if a.smallModel.CatwalkCfg.CanReason {
-		maxOutputTokens = a.smallModel.CatwalkCfg.DefaultMaxTokens
+	if smallModel.CatwalkCfg.CanReason {
+		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
 	}
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
@@ -746,9 +768,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
-			if a.systemPromptPrefix != "" {
+			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{
-					fantasy.NewSystemMessage(a.systemPromptPrefix),
+					fantasy.NewSystemMessage(systemPromptPrefix),
 				}, prepared.Messages...)
 			}
 			return callCtx, prepared, nil
@@ -756,7 +778,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	// Use the small model to generate the title.
-	model := &a.smallModel
+	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
@@ -765,7 +787,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	} else {
 		// It didn't work. Let's try with the big model.
 		slog.Error("error generating title with small model; trying big model", "err", err)
-		model = &a.largeModel
+		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
@@ -960,19 +982,27 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.largeModel = large
 	a.smallModel = small
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.tools = tools
 }
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.systemPrompt = systemPrompt
 }
 
 func (a *sessionAgent) Model() Model {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.largeModel
 }
 

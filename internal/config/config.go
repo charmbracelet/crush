@@ -741,7 +741,12 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(AllToolNames(), c.Options.DisabledTools)
+	allTools := AllToolNames()
+	for name := range c.Subagents {
+		allTools = append(allTools, name)
+	}
+
+	allowedTools := resolveAllowedTools(allTools, c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {
@@ -769,6 +774,7 @@ func (c *Config) SetupAgents() {
 
 func (c *Config) SetupSubagents() {
 	userDir := filepath.Join(home.Dir(), ".config", appName, "agents")
+	crushDir := filepath.Join(home.Dir(), ".crush", "agents")
 	projectDir := filepath.Join(c.workingDir, ".crush", "agents")
 
 	loader := subagent.NewLoader(userDir, projectDir, c.Options.SubagentsJSON)
@@ -776,6 +782,13 @@ func (c *Config) SetupSubagents() {
 	if err != nil {
 		slog.Error("failed to load subagents", "error", err)
 		return
+	}
+
+	// Also load from ~/.crush/agents
+	crushLoader := subagent.NewLoader(crushDir, "", "")
+	crushSubs, err := crushLoader.Load()
+	if err == nil {
+		maps.Copy(subs, crushSubs)
 	}
 	c.Subagents = subs
 }

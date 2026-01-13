@@ -3,6 +3,7 @@ package subagent
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,9 +36,7 @@ func (l *Loader) Load() (map[string]*Subagent, error) {
 	if l.userDir != "" {
 		userSubagents, err := l.loadFromDir(l.userDir, SubagentSourceUser)
 		if err == nil {
-			for name, sub := range userSubagents {
-				subagents[name] = sub
-			}
+			maps.Copy(subagents, userSubagents)
 		}
 	}
 
@@ -45,9 +44,7 @@ func (l *Loader) Load() (map[string]*Subagent, error) {
 	if l.projectDir != "" {
 		projectSubagents, err := l.loadFromDir(l.projectDir, SubagentSourceProject)
 		if err == nil {
-			for name, sub := range projectSubagents {
-				subagents[name] = sub
-			}
+			maps.Copy(subagents, projectSubagents)
 		}
 	}
 
@@ -55,9 +52,7 @@ func (l *Loader) Load() (map[string]*Subagent, error) {
 	if l.cliAgents != "" {
 		cliSubagents, err := l.loadFromCLI(l.cliAgents)
 		if err == nil {
-			for name, sub := range cliSubagents {
-				subagents[name] = sub
-			}
+			maps.Copy(subagents, cliSubagents)
 		}
 	}
 

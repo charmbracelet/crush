@@ -128,9 +128,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
 
@@ -147,6 +144,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	if autoApprove {
 		return true, nil
 	}
+
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: opts.ToolCallID,
+	})
 
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path

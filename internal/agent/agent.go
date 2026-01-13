@@ -40,7 +40,14 @@ import (
 	"github.com/charmbracelet/crush/internal/stringext"
 )
 
-const defaultSessionName = "Untitled Session"
+const (
+	defaultSessionName = "Untitled Session"
+
+	// Constants for auto-summarization thresholds
+	largeContextWindowThreshold = 200_000
+	largeContextWindowBuffer    = 20_000
+	smallContextWindowRatio     = 0.2
+)
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -376,10 +383,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64
-				if cw > 200_000 {
-					threshold = 20_000
+				if cw > largeContextWindowThreshold {
+					threshold = largeContextWindowBuffer
 				} else {
-					threshold = int64(float64(cw) * 0.2)
+					threshold = int64(float64(cw) * smallContextWindowRatio)
 				}
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true

@@ -59,6 +59,11 @@ func (c *CommandItem) Action() Action {
 	return c.action
 }
 
+// Shortcut returns the shortcut associated with the command item.
+func (c *CommandItem) Shortcut() string {
+	return c.shortcut
+}
+
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
 	return renderItem(c.t, c.title, c.shortcut, c.focused, width, c.cache, &c.m)

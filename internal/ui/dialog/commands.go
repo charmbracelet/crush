@@ -98,7 +98,7 @@ func NewCommands(com *common.Common, sessionID string, customCommands []commands
 		key.WithHelp("↑/↓", "choose"),
 	)
 	c.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
+		key.WithKeys("down"),
 		key.WithHelp("↓", "next item"),
 	)
 	c.keyMap.Previous = key.NewBinding(
@@ -171,6 +171,13 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			}
 		default:
 			var cmd tea.Cmd
+			for _, item := range c.list.VisibleItems() {
+				if item, ok := item.(*CommandItem); ok && item != nil {
+					if msg.String() == item.Shortcut() {
+						return item.Action()
+					}
+				}
+			}
 			c.input, cmd = c.input.Update(msg)
 			value := c.input.Value()
 			c.list.SetFilter(value)

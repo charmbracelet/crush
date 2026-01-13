@@ -50,7 +50,7 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - go test ./... {{.CLI_ARGS}}
+      - go test -race -failfast ./... {{.CLI_ARGS}}
 
   test:record:
     desc: Run tests and record all VCR cassettes again

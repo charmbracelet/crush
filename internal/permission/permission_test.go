@@ -189,7 +189,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		events := service.Subscribe(t.Context())
 
 		var wg sync.WaitGroup
-		results := make([]bool, 0)
+		results := make([]bool, 3)
 
 		requests := []CreatePermissionRequest{
 			{
@@ -220,7 +220,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			go func(index int, request CreatePermissionRequest) {
 				defer wg.Done()
 				result, _ := service.Request(t.Context(), request)
-				results = append(results, result)
+				results[index] = result
 			}(i, req)
 		}
 
